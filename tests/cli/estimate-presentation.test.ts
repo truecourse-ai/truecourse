@@ -50,10 +50,9 @@ function estimate(subject: string): LlmEstimate {
     costSource: 'bundled',
     stages: [
       {
-        // The scan's stages are SESSION KINDS now (plan 02 step 7), all on one model.
-        stage: 'spec-scan.curate-doc',
-        label: 'Curating docs',
-        model: 'opus',
+        stage: 'relevance',
+        label: 'Filtering docs',
+        model: 'claude-haiku-4-5',
         calls: 80,
         estimatedTokens: 1_200_000,
         estimatedCostUsd: 3.1,
@@ -151,7 +150,7 @@ afterEach(() => {
 });
 
 /** Drive the estimate phase + gate the way the real curate does, then the run. */
-function curateDriver(approved: boolean, extra: { pendingQuestions?: unknown[] } = {}) {
+function curateDriver(approved: boolean) {
   return (async (_root: string, opts: Driven) => {
     opts.onEstimatePhase?.start();
     opts.onEstimatePhase?.done('80 docs');
@@ -163,9 +162,6 @@ function curateDriver(approved: boolean, extra: { pendingQuestions?: unknown[] }
     opts.tracker?.done('tag', '80/80 docs');
     return {
       noChanges: false,
-      // §3.7: every scan result carries these; the CLI summary must surface them.
-      pendingQuestions: extra.pendingQuestions ?? [],
-      scanFindings: [],
       curate: {
         corpus: { areas: [] },
         decisions: {},
@@ -219,32 +215,6 @@ describe('spec scan — estimate presentation', () => {
     expect(stdout).toContain('Scan will make ~80 LLM calls over 80 docs');
     expect(stdout).toContain('Scan cancelled.');
     expect(stderr).toBe('');
-  });
-
-  // The scope orchestrator is interactive but a CLI run never blocks on it, so an
-  // unanswered question must be LOUD in the summary or it silently becomes a
-  // default (plan 02 step 6 / §3.7).
-  it('surfaces an unanswered scope question in the summary, with the dashboard link', async () => {
-    vi.mocked(curateInProcess).mockImplementation(
-      curateDriver(true, {
-        pendingQuestions: [
-          {
-            id: 'q1',
-            header: 'Scan scope',
-            question: 'Is `docs/` product documentation or the company handbook?',
-            options: [],
-            multiSelect: false,
-          },
-        ],
-      }),
-    );
-
-    const { stdout, exit } = await capture(() => runSpecScan({ cwd: repo, yes: true }));
-
-    expect(exit).toBeUndefined();
-    expect(stdout).toContain('1 scan question went unanswered');
-    expect(stdout).toContain('Scan scope: Is `docs/` product documentation');
-    expect(stdout).toContain('?tab=activity');
   });
 });
 

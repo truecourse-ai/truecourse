@@ -234,34 +234,8 @@ specCmd
   .option("-y, --yes", "Skip the pre-flight LLM cost-estimate confirmation")
   .addOption(llmTransportOption())
   .option("--io <dir>", "Mailbox dir for --llm-transport agent (request/response files)")
-  // Single-step mode: run one of the scan's four session steps in isolation.
-  // Prior steps replay from their stored artifacts (a missing one fails loud),
-  // later steps never start; only --only-overlap writes corpus.json.
-  .option("--only-orchestrate", "Run only the scan-scope step (writes scope verdicts to decisions.json; corpus.json untouched)")
-  .option("--only-curate", "Run only the doc-curation step (scope replayed from stored verdicts; corpus.json untouched)")
-  .option("--only-settle", "Run only the area-settling step (curation replayed from cache; corpus.json untouched)")
-  .option("--only-overlap", "Run only the overlap step (earlier steps replayed from cache) and write corpus.json")
   .action(async (options) => {
-    const only = (
-      [
-        ["orchestrate", options.onlyOrchestrate],
-        ["curate", options.onlyCurate],
-        ["settle", options.onlySettle],
-        ["overlap", options.onlyOverlap],
-      ] as const
-    )
-      .filter(([, picked]) => !!picked)
-      .map(([step]) => step);
-    if (only.length > 1) {
-      console.error("error: the --only-<step> flags are mutually exclusive — pick one");
-      process.exit(1);
-    }
-    await runSpecScan({
-      yes: !!options.yes,
-      llm: options.llmTransport,
-      io: options.io,
-      ...(only[0] ? { only: only[0] } : {}),
-    });
+    await runSpecScan({ yes: !!options.yes, llm: options.llmTransport, io: options.io });
   });
 
 specCmd

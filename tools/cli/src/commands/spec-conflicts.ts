@@ -25,10 +25,9 @@ import * as p from '@clack/prompts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { readCorpus, readCorpusDecisions } from '@truecourse/spec-consolidator';
-import type { CuratedCorpus, ConflictResolution, DecisionsFile } from '@truecourse/spec-consolidator';
+import type { CuratedCorpus, ConflictResolution } from '@truecourse/spec-consolidator';
 import {
   buildCorpusConflicts,
-  dormantResolutionForPair,
   orphanedConflictResolutions,
   parseHeadings,
   normalizeQuote,
@@ -68,10 +67,9 @@ function loadCorpusOrExit(repoRoot: string, opts: RunSpecConflictsOptions): Cura
 /** How a conflict is resolved, for the list/show rendering. */
 function resolvedLabel(c: CorpusConflict): string {
   if (c.resolution) {
-    const auto = c.resolution.resolvedBy === 'auto' ? 'auto-applied: ' : '';
-    if (c.resolution.verdict === 'dismissed') return `${auto}dismissed (not a real conflict)`;
+    if (c.resolution.verdict === 'dismissed') return 'dismissed (not a real conflict)';
     const winner = c.resolution.verdict === 'a' ? c.resolution.docA : c.resolution.docB;
-    return `${auto}${base(winner)} is right (loser’s claim suppressed at generate)`;
+    return `${base(winner)} is right (loser’s claim suppressed at generate)`;
   }
   if (c.excludedRef) return `${base(c.excludedRef)} excluded`;
   return 'resolved';
@@ -86,8 +84,6 @@ interface ReviewRecommendation {
   action: 'pick-a' | 'pick-b' | 'fix-doc' | 'dismiss';
   rationale: string;
   fix?: string;
-  /** The judge's grade; `high` actionable recommendations were auto-applied at scan. */
-  confidence?: 'low' | 'medium' | 'high';
 }
 interface OverlapReviewLike {
   explanation: string;
@@ -285,30 +281,8 @@ function recActionLabel(action: ReviewRecommendation['action'], c: CorpusConflic
 // JSON shapes
 // ---------------------------------------------------------------------------
 
-/**
- * A stored verdict for this pair that no longer matches the flagged dispute
- * (the overlap session re-excerpts quotes on every scan) — surfaced as a
- * reapply hint on open conflicts, never auto-honored.
- */
-function dormantOf(decisions: DecisionsFile, c: CorpusConflict): ConflictResolution | undefined {
-  if (c.resolved) return undefined;
-  return dormantResolutionForPair(decisions, c.a, c.b, c.sections) as ConflictResolution | undefined;
-}
-
-/** One-line human rendering of a dormant verdict + how to reapply it. */
-function dormantHintLine(d: ConflictResolution, n: number): string {
-  const label =
-    d.verdict === 'dismissed' ? 'dismissed' : `${base(d.verdict === 'a' ? d.docA : d.docB)} is right`;
-  const reapply =
-    d.verdict === 'dismissed'
-      ? `resolve ${n} --dismiss`
-      : `resolve ${n} --right ${d.verdict === 'a' ? d.docA : d.docB}`;
-  return `   previous verdict for this pair (quotes drifted): ${label}${d.note ? ` — ${d.note}` : ''}   · reapply: ${reapply}`;
-}
-
-function listJson(corpus: CuratedCorpus, decisions: DecisionsFile, c: CorpusConflict, index: number): Record<string, unknown> {
+function listJson(corpus: CuratedCorpus, c: CorpusConflict, index: number): Record<string, unknown> {
   const review = reviewForConflict(corpus, c);
-  const dormant = dormantOf(decisions, c);
   return {
     index,
     area: c.area,
@@ -317,16 +291,15 @@ function listJson(corpus: CuratedCorpus, decisions: DecisionsFile, c: CorpusConf
     note: c.note,
     resolved: c.resolved,
     resolution: c.resolution ?? null,
-    ...(dormant ? { dormant } : {}),
     ...(review ? { explanation: review.explanation, recommendation: review.recommendation } : {}),
     sections: c.sections ?? [],
   };
 }
 
-function showJson(repoRoot: string, corpus: CuratedCorpus, decisions: DecisionsFile, c: CorpusConflict, index: number): Record<string, unknown> {
+function showJson(repoRoot: string, corpus: CuratedCorpus, c: CorpusConflict, index: number): Record<string, unknown> {
   const secOf = (doc: string): OverlapSectionPtr | undefined => (c.sections ?? []).find((s) => s.doc === doc);
   return {
-    ...listJson(corpus, decisions, c, index),
+    ...listJson(corpus, c, index),
     excerpts: [resolveExcerpt(repoRoot, c.a, secOf(c.a)), resolveExcerpt(repoRoot, c.b, secOf(c.b))],
   };
 }
@@ -342,7 +315,7 @@ export async function runSpecConflictsList(opts: RunSpecConflictsOptions = {}): 
   const conflicts = buildCorpusConflicts(corpus, decisions);
 
   if (opts.json) {
-    emitJson(conflicts.map((c, i) => listJson(corpus, decisions, c, i + 1)));
+    emitJson(conflicts.map((c, i) => listJson(corpus, c, i + 1)));
     return;
   }
 
@@ -357,13 +330,8 @@ export async function runSpecConflictsList(opts: RunSpecConflictsOptions = {}): 
       p.log.step(`${n}. ${c.area}  ·  ${base(c.a)}  ↔  ${base(c.b)}  — resolved: ${resolvedLabel(c)}`);
     } else {
       p.log.warn(`${n}. ${c.area}  ·  ${base(c.a)}  ↔  ${base(c.b)}${c.note ? `   · ${c.note}` : ''}`);
-      const dormant = dormantOf(decisions, c);
-      if (dormant) p.log.message(dormantHintLine(dormant, n));
       const rec = reviewForConflict(corpus, c);
-      if (rec) {
-        const conf = rec.recommendation.confidence ? ` (${rec.recommendation.confidence} confidence)` : '';
-        p.log.message(`   recommended: ${recActionLabel(rec.recommendation.action, c)}${conf} — ${rec.recommendation.rationale}`);
-      }
+      if (rec) p.log.message(`   recommended: ${recActionLabel(rec.recommendation.action, c)} — ${rec.recommendation.rationale}`);
       p.log.message(`   inspect: truecourse spec conflicts show ${n}   ·   pick a side: resolve ${n} --right ${c.a}   (or --right ${c.b}, --dismiss)`);
     }
   });
@@ -385,13 +353,11 @@ export async function runSpecConflictsList(opts: RunSpecConflictsOptions = {}): 
 // ---------------------------------------------------------------------------
 
 /** Render one conflict: header, review explanation (if any), both disputed passages, recommendation. */
-function renderConflictShow(repoRoot: string, corpus: CuratedCorpus, decisions: DecisionsFile, c: CorpusConflict, n: number): void {
+function renderConflictShow(repoRoot: string, corpus: CuratedCorpus, c: CorpusConflict, n: number): void {
   const review = reviewForConflict(corpus, c);
   const header = `${n}. ${c.area}  ·  ${base(c.a)}  ↔  ${base(c.b)}${c.note ? `   · ${c.note}` : ''}`;
   if (c.resolved) p.log.step(`${header}  — resolved: ${resolvedLabel(c)}`);
   else p.log.warn(header);
-  const dormant = dormantOf(decisions, c);
-  if (dormant) p.log.message(dormantHintLine(dormant, n));
 
   if (review) {
     p.log.message('');
@@ -403,10 +369,9 @@ function renderConflictShow(repoRoot: string, corpus: CuratedCorpus, decisions: 
   p.log.message('');
   printExcerpt(resolveExcerpt(repoRoot, c.b, secOf(c.b)));
   if (review) {
-    const conf = review.recommendation.confidence ? ` (${review.recommendation.confidence} confidence)` : '';
     p.log.message('');
     p.log.message(
-      `  Recommendation: ${recActionLabel(review.recommendation.action, c)}${conf} — ${review.recommendation.rationale}`,
+      `  Recommendation: ${recActionLabel(review.recommendation.action, c)} — ${review.recommendation.rationale}`,
     );
     if (review.recommendation.fix) p.log.message(`  Fix: ${review.recommendation.fix}`);
   }
@@ -426,11 +391,11 @@ export async function runSpecConflictsShow(target: string, opts: RunSpecConflict
     }
     const c = conflicts[idx];
     if (opts.json) {
-      emitJson(showJson(repoRoot, corpus, decisions, c, idx + 1));
+      emitJson(showJson(repoRoot, corpus, c, idx + 1));
       return;
     }
     p.intro('Overlap');
-    renderConflictShow(repoRoot, corpus, decisions, c, idx + 1);
+    renderConflictShow(repoRoot, corpus, c, idx + 1);
     p.outro('resolve with `spec conflicts resolve <n> --right <docPath>` (pick a side) or `--dismiss`.');
     return;
   }
@@ -443,14 +408,14 @@ export async function runSpecConflictsShow(target: string, opts: RunSpecConflict
     .filter(({ c }) => c.areas.includes(target) || c.area === target);
 
   if (opts.json) {
-    emitJson(inArea.map(({ c, n }) => showJson(repoRoot, corpus, decisions, c, n)));
+    emitJson(inArea.map(({ c, n }) => showJson(repoRoot, corpus, c, n)));
     return;
   }
   p.intro(`Overlaps in ${target}`);
   if (inArea.length === 0) p.log.step('(no overlaps in this area)');
   inArea.forEach(({ c, n }, i) => {
     if (i > 0) p.log.message('');
-    renderConflictShow(repoRoot, corpus, decisions, c, n);
+    renderConflictShow(repoRoot, corpus, c, n);
   });
   p.outro('resolve with `spec conflicts resolve <n|area> --right <docPath>` (pick a side) or `--dismiss`.');
 }

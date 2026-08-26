@@ -17,7 +17,7 @@ vi.mock('../../tools/cli/src/lib/claude-preflight.js', async (importOriginal) =>
 });
 
 /**
- * The spec scan runs AGENT SESSIONS now (plan 02), and `runSpecScan` has no
+ * The spec scan runs AGENT SESSIONS now, and `runSpecScan` has no
  * driver seam of its own — so the session driver the run resolves is mocked at
  * the module the built core imports it from, and each case scripts it. Anything
  * that reaches it without a script fails loudly rather than calling a provider.
@@ -179,8 +179,8 @@ describe('spec scan — every curation session failed', () => {
 
     expect(exitCode).toBe(1);
     expect(out).toContain('Scan aborted');
-    // The stage is named by its human label, off the session kind.
-    expect(out).toContain('doc curation');
+    // The failed kind is named raw: the CLI's stage-label map predates session kinds.
+    expect(out).toContain('spec-scan.curate-doc');
     expect(out).toContain("Missing 'reason'");
     expect(out).toContain('unchanged');
     expect(out).not.toContain('Done.');
@@ -212,8 +212,8 @@ describe('spec scan — one curation session failed', () => {
     const { out, exitCode } = await capture(() => runSpecScan({ cwd: r, yes: true }));
 
     expect(exitCode).toBeNull();
-    expect(out).toContain('Scan sessions failed');
-    expect(out).toContain('doc curation: 1 of 3 sessions failed — affected docs kept by default');
+    expect(out).toContain('LLM calls failed');
+    expect(out).toContain('spec-scan.curate-doc: 1 of 3 calls failed — affected items skipped');
     expect(out).toContain('first failure: the provider failed (provider): claude API error (api 429): usage limit reached');
     // The close never reads as an unqualified success.
     expect(out).toContain('INCOMPLETE');
@@ -269,7 +269,7 @@ describe('guard generate — every extraction call failed', () => {
 });
 
 describe('guard generate — every fidelity review was lost', () => {
-  // The end-to-end round trip of the adjudication carve-out (plan item 88): the
+  // The end-to-end round trip of the adjudication carve-out: the
   // command SUCCEEDS, the corpus lands, and the stored report — the file `guard
   // status` and the dashboard read back — says the tests carry no review. Before
   // the carve-out this run aborted at the very last stage and threw away every
@@ -469,7 +469,7 @@ describe('guard status — an llm-failed report', () => {
 
 /**
  * The unadjudicated surfaces. A generate whose fidelity or triage stage lost every
- * call no longer aborts — it ships the corpus (plan item 88). The terminal is what
+ * call no longer aborts — it ships the corpus. The terminal is what
  * keeps that honest: both the closing summary and `guard status` must say the
  * tests carry no verdict, or an unreviewed corpus reads as a reviewed one.
  */

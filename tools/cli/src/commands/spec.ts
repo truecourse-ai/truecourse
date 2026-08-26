@@ -14,22 +14,19 @@
 
 import * as p from "@clack/prompts";
 import { readCorpus, readCorpusDecisions } from "@truecourse/spec-consolidator";
-import { buildCorpusConflicts, dormantResolutionForPair, openConflicts, orphanedConflictResolutions } from "@truecourse/shared";
+import { buildCorpusConflicts, openConflicts, orphanedConflictResolutions } from "@truecourse/shared";
 import { LlmStageFailureError, type StageTransportTally } from "@truecourse/shared/llm";
 import { StepTracker } from "@truecourse/core/progress";
 import {
   curateInProcess,
   CURATE_STEPS,
   EstimateDeclined,
-  ScanStepNotReadyError,
-  type ScanStep,
 } from "@truecourse/core/commands/spec-in-process";
 import { registerProject } from "@truecourse/core/config/registry";
 import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
 import { preflightLlmOrExit } from "../lib/claude-preflight.js";
 import { estimateSpinnerPhase, promptLlmEstimate } from "./llm-prompt.js";
 import { requireGitRepo } from "./git-guard.js";
-import { activityUrl, printWatchLive, resolveDashboardUrl } from "./helpers.js";
 
 export interface RunSpecOptions {
   cwd?: string;
@@ -41,12 +38,6 @@ export interface RunSpecOptions {
   yes?: boolean;
   /** Emit raw JSON to stdout with zero clack/TUI decoration (`status` only). */
   json?: boolean;
-  /**
-   * Single-step mode (`--only-<step>`): run one scan step's sessions in
-   * isolation — prior steps replay from their stored artifacts (a missing one
-   * aborts loudly), later steps never start. Only `overlap` writes corpus.json.
-   */
-  only?: ScanStep;
 }
 
 const repoRoot = (opts: RunSpecOptions = {}): string => opts.cwd ?? process.cwd();
@@ -67,17 +58,11 @@ function withTracker(stepDefs: readonly { key: string; label: string }[]) {
 
 export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   const root = repoRoot(opts);
-  p.intro(opts.only ? `Spec scan — ${SCAN_STEP_LABEL[opts.only]} only` : "Spec scan");
+  p.intro("Spec scan");
   await requireGitRepo(root);
   // Scan is the first command in the spec/contract pipeline — register the repo
-  // so the corpus it produces is visible in the dashboard's project list. The
-  // entry's slug is also the dashboard deep link the question line points at.
-  const project = await registerProject(root);
-  const dashboardUrl = await resolveDashboardUrl();
-  // Filled by onRunStarted below; question lines deep-link to the exact run
-  // once it exists, and to the Activity tab before that.
-  let scanRunId: string | undefined;
-  const activityLink = (): string => activityUrl(dashboardUrl, project.slug, scanRunId);
+  // so the corpus it produces is visible in the dashboard's project list.
+  await registerProject(root);
   // The relevance + area-tag stages shell out to `claude`; an expired login would
   // fail every doc. Probe once up front — or, in API mode, validate the provider
   // config instead (the `agent` transport answers via the mailbox: neither applies).
@@ -86,53 +71,19 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   const autoApprove = !!opts.yes || opts.llm === "agent";
   // The estimate resolves its own spinner line before the panel prints; the
   // checklist below only starts once the run does, so it paints exactly once.
-  // Single-step runs get a checklist of only the steps that will open.
-  const stepDefs =
-    opts.only === "orchestrate"
-      ? CURATE_STEPS.filter((s) => s.key === "discover")
-      : opts.only === "curate" || opts.only === "settle"
-        ? CURATE_STEPS.filter((s) => s.key === "discover" || s.key === "tag")
-        : CURATE_STEPS;
-  const { renderer, tracker } = withTracker(stepDefs);
-  const { curate, noChanges, pendingQuestions, scanFindings, stoppedAfter, sessionsRunDir } = await curateInProcess(root, {
+  const { renderer, tracker } = withTracker(CURATE_STEPS);
+  const { curate, noChanges } = await curateInProcess(root, {
     tracker,
     source: "cli",
     llm: opts.llm,
     io: opts.io,
-    ...(opts.only ? { only: opts.only } : {}),
     onEstimatePhase: estimateSpinnerPhase(),
     onLlmEstimate: (est) => promptLlmEstimate(est, { autoApprove, nouns: { verb: "Scan" } }),
-    // The run record exists (post-confirm, pre-sessions): print the §3.6
-    // "watch live" deep link to the exact run, unconditionally.
-    onRunStarted: (info) => {
-      scanRunId = info.runId;
-      printWatchLive(dashboardUrl, project.slug, info.runId);
-    },
-    // A scan session asked a question (§3.7 — the interactive scope
-    // orchestrator). The CLI never blocks on it: print the dashboard deep link
-    // where it can be answered; unanswered it lands in pendingQuestions below.
-    onQuestion: (_workItem, question) => {
-      p.log.warn(`Scan question: ${question.header} — ${question.question}`);
-      p.log.message(`  Answer it in the dashboard: ${activityLink()}`);
-    },
   }).catch((e: unknown) => {
     renderer.dispose();
     if (e instanceof EstimateDeclined) {
       p.cancel("Scan cancelled.");
       process.exit(0);
-    }
-    // A single-step run found a PRIOR step's cache missing entries: running them
-    // here would blur the step isolation (and mask cache-key drift), so it stops.
-    if (e instanceof ScanStepNotReadyError) {
-      const n = e.missing.length;
-      p.log.error(
-        `Step not ready — ${n} item${n === 1 ? "" : "s"} missing from the ${SCAN_STEP_LABEL[e.step]} step's cache:`,
-      );
-      for (const m of e.missing.slice(0, 10)) p.log.message(`  • ${m}`);
-      if (n > 10) p.log.message(`  … (+${n - 10} more)`);
-      p.log.step(`Run \`truecourse spec scan --only-${e.step}\` first, then re-run this step.`);
-      p.outro("Aborted.");
-      process.exit(1);
     }
     // A stage lost EVERY LLM call: the corpus its fail-open defaults would have
     // produced (all docs kept, no areas) is not a result, so the scan wrote nothing.
@@ -149,22 +100,7 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   });
   renderer.dispose();
   if (noChanges) {
-    if (opts.only) {
-      p.log.success(`Nothing to run — the ${SCAN_STEP_LABEL[opts.only]} step is already settled (its inputs are unchanged).`);
-      // The cache replay still computed the step's result — show it, or a warm
-      // re-run reveals nothing (inspecting the result is a step run's point).
-      const s = curate.stats;
-      if (opts.only === "orchestrate") {
-        const verdicts = curate.decisions.scopeVerdicts ?? [];
-        p.log.step(`verdicts    ${verdicts.length} scope verdict${verdicts.length === 1 ? "" : "s"} (.truecourse/specs/decisions.json)`);
-      } else {
-        p.log.step(`docs        ${s.docsScanned} scanned · ${s.docsKept} kept`);
-        if (opts.only !== "curate") p.log.step(`areas       ${s.areaCount}`);
-        if (opts.only === "overlap") p.log.step(`overlaps    ${s.overlapFlags}`);
-      }
-    } else {
-      p.log.success("Nothing changed — no new or updated docs since the last scan; corpus is up to date.");
-    }
+    p.log.success("Nothing changed — no new or updated docs since the last scan; corpus is up to date.");
     p.outro("Done.");
     return;
   }
@@ -172,78 +108,30 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   if (s.scopeGlobs.length > 0) {
     p.log.step(`scope       ${s.scopeGlobs.join(", ")} (config)`);
   }
-  if (stoppedAfter === "orchestrate") {
-    // The step's artifact is decisions.json — show what it now holds.
-    const verdicts = curate.decisions.scopeVerdicts ?? [];
-    const instructions = curate.decisions.instructions ?? [];
-    p.log.step(
-      `verdicts    ${verdicts.length} scope verdict${verdicts.length === 1 ? "" : "s"} · ${instructions.length} instruction${instructions.length === 1 ? "" : "s"} (.truecourse/specs/decisions.json)`,
-    );
-    for (const v of verdicts.slice(0, 20)) {
-      p.log.message(`  • ${v.verdict === "exclude" ? "exclude" : "keep   "} ${v.path}${v.resolvedBy === "user" ? " (user)" : ""}`);
-    }
-    if (verdicts.length > 20) p.log.message(`  … (+${verdicts.length - 20} more)`);
-  } else {
-    // Third-party is broken out of the drop count: an undifferentiated "N dropped"
-    // is what hid a repo's entire API reference vanishing as "vendor" material.
-    // `restored` is the regression detector — it should read 0.
-    const thirdParty =
-      s.thirdPartyDropped > 0
-        ? ` (${s.thirdPartyDropped} third-party, ${s.thirdPartyRestored} restored)`
-        : "";
-    p.log.step(
-      `docs        ${s.docsScanned} scanned · ${s.docsKept} kept · ${s.skippedDocs.length} dropped${thirdParty}`,
-    );
-    // A failed classification is kept by fail-open — never silently: a broken
-    // transport once failed 100% of calls and the corpus looked merely permissive.
-    if (s.classifyFailed > 0) {
-      p.log.warn(
-        `${s.classifyFailed} doc${s.classifyFailed === 1 ? "" : "s"} failed classification — kept by default. ` +
-          `All ${s.classifyFailed} failing means the LLM transport is broken, not that the docs are relevant.`,
-      );
-    }
-    if (stoppedAfter !== "curate") p.log.step(`areas       ${s.areaCount}`);
-    if (!stoppedAfter) p.log.step(`overlaps    ${s.overlapFlags}`);
-  }
-  // The stats cross a package boundary; an older engine may not carry the field.
-  const autoResolved = s.autoResolvedConflicts ?? [];
-  if (autoResolved.length > 0) {
-    const n = autoResolved.length;
-    p.log.step(`auto-resolved ${n} conflict${n === 1 ? "" : "s"} (high-confidence recommendation — undo via \`spec conflicts\`):`);
-    for (const r of autoResolved) {
-      const label =
-        r.verdict === "dismissed" ? "dismissed" : `${(r.verdict === "a" ? r.a : r.b).split("/").pop()} is right`;
-      p.log.message(`  • ${r.area}:  ${r.a}  ↔  ${r.b}  — ${label}`);
-    }
-  }
-  printLlmFailures(s.llmFailures);
-  // Questions the interactive orchestrator left unanswered — the run never
-  // blocks on them, so LOUD surfacing here is the contract (§3.7).
-  if (pendingQuestions.length > 0) {
+  // Third-party is broken out of the drop count: an undifferentiated "N dropped"
+  // is what hid a repo's entire API reference vanishing as "vendor" material.
+  // `restored` is the regression detector — it should read 0.
+  const thirdParty =
+    s.thirdPartyDropped > 0
+      ? ` (${s.thirdPartyDropped} third-party, ${s.thirdPartyRestored} restored)`
+      : "";
+  p.log.step(
+    `docs        ${s.docsScanned} scanned · ${s.docsKept} kept · ${s.skippedDocs.length} dropped${thirdParty}`,
+  );
+  // A failed classification is kept by fail-open — never silently: a broken
+  // transport once failed 100% of calls and the corpus looked merely permissive.
+  if (s.classifyFailed > 0) {
     p.log.warn(
-      `${pendingQuestions.length} scan question${pendingQuestions.length === 1 ? "" : "s"} went unanswered — the scan proceeded on defaults:`,
+      `${s.classifyFailed} doc${s.classifyFailed === 1 ? "" : "s"} failed classification — kept by default. ` +
+        `All ${s.classifyFailed} failing means the LLM transport is broken, not that the docs are relevant.`,
     );
-    for (const q of pendingQuestions) p.log.message(`  • ${q.header}: ${q.question}`);
-    p.log.message(`  Answer them in the dashboard (${activityLink()}), then re-run \`truecourse spec scan\`.`);
   }
-  if (scanFindings.length > 0) {
-    p.log.step(`Scan findings (from the scope orchestrator):`);
-    for (const f of scanFindings) p.log.message(`  • ${f}`);
-  }
+  p.log.step(`areas       ${s.areaCount}`);
+  p.log.step(`overlaps    ${s.overlapFlags}`);
+  printLlmFailures(s.llmFailures);
   if (s.outOfScopeManualIncludes.length > 0) {
     p.log.warn("Manual includes outside spec.include (never discovered — widen the scope to pick them up):");
     for (const inc of s.outOfScopeManualIncludes) p.log.message(`  • ${inc}`);
-  }
-  // Single-step mode: name where the transcripts landed (the inspection loop's
-  // whole point), and — before the corpus write — which step comes next.
-  if (opts.only) {
-    p.log.step(`sessions    ${sessionsRunDir}`);
-  }
-  if (stoppedAfter) {
-    p.outro(
-      `Stopped after ${SCAN_STEP_LABEL[stoppedAfter]} — corpus.json untouched. Next: \`truecourse spec scan --only-${SCAN_STEP_NEXT[stoppedAfter]}\`.`,
-    );
-    return;
   }
   // Open conflicts via the SAME resolved-derivation the gate uses (a flagged
   // overlap already verdicted/dismissed/excluded is not open). Point at guard
@@ -253,10 +141,7 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
     p.log.message("");
     p.log.message("Open overlaps (two docs may disagree — pick a side or dismiss with `spec conflicts resolve`):");
     for (const o of open.slice(0, 10)) {
-      // A dormant verdict = this pair was resolved before and re-flagged with
-      // drifted quotes — one `spec conflicts resolve` reapplies it.
-      const dormant = dormantResolutionForPair(curate.decisions, o.a, o.b, o.sections);
-      p.log.message(`  • ${o.area}:  ${o.a}  ↔  ${o.b}${dormant ? "   (has a previous verdict — see `spec conflicts list`)" : ""}`);
+      p.log.message(`  • ${o.area}:  ${o.a}  ↔  ${o.b}`);
     }
     if (open.length > 10) {
       p.log.message(`  … (+${open.length - 10} more)`);
@@ -272,7 +157,7 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
   const lost = s.llmFailures.reduce((n, f) => n + f.failures, 0);
   if (lost > 0) {
     p.outro(
-      `Corpus written to .truecourse/specs/corpus.json — INCOMPLETE: ${lost} session${lost === 1 ? "" : "s"} failed; re-run to fill the gaps.${conflictTail}`,
+      `Corpus written to .truecourse/specs/corpus.json — INCOMPLETE: ${lost} LLM call${lost === 1 ? "" : "s"} failed; re-run to fill the gaps.${conflictTail}`,
     );
     return;
   }
@@ -291,9 +176,9 @@ export async function runSpecScan(opts: RunSpecOptions = {}): Promise<void> {
  */
 function printLlmFailures(failures: readonly StageTransportTally[]): void {
   if (failures.length === 0) return;
-  p.log.warn("Scan sessions failed — the results above are incomplete:");
+  p.log.warn("LLM calls failed — the results above are incomplete:");
   for (const f of failures) {
-    p.log.message(`  • ${stageLabel(f.stage)}: ${f.failures} of ${f.attempts} sessions failed — ${SCAN_STAGE_EFFECT[f.stage] ?? "affected items skipped"}`);
+    p.log.message(`  • ${stageLabel(f.stage)}: ${f.failures} of ${f.attempts} calls failed — ${SCAN_STAGE_EFFECT[f.stage] ?? "affected items skipped"}`);
     if (f.firstError) p.log.message(`    first failure: ${f.firstError}`);
   }
 }
@@ -304,36 +189,20 @@ function stageLabel(stage: string): string {
 }
 
 const SCAN_STAGE_LABEL: Record<string, string> = {
-  // Session kinds (the scan runs agent sessions — plan 02).
-  "spec-scan.orchestrate": "scan scope",
-  "spec-scan.curate-doc": "doc curation",
-  "spec-scan.settle-areas": "area settling",
-  "spec-scan.overlap": "overlap",
+  "spec.relevance": "relevance",
+  "spec.areaTag": "area tags",
+  "spec.vocab": "vocabulary",
+  "spec.overlap": "overlap",
+  "spec.verifyOverlap": "overlap verify",
 };
 
-/** Human name of each `--only-<step>` scan step, for prose lines. */
-const SCAN_STEP_LABEL: Record<ScanStep, string> = {
-  orchestrate: "scope orchestration",
-  curate: "doc curation",
-  settle: "area settling",
-  overlap: "overlap",
-};
-
-/** The step to suggest after a stopped single-step run. `overlap` never stops
- *  (it completes the scan), so its row is unreachable. */
-const SCAN_STEP_NEXT: Record<ScanStep, ScanStep> = {
-  orchestrate: "curate",
-  curate: "settle",
-  settle: "overlap",
-  overlap: "overlap",
-};
-
-/** What each kind's per-item fail-open default did to the sessions it lost. */
+/** What each stage's per-item fail-open default did to the calls it lost. */
 const SCAN_STAGE_EFFECT: Record<string, string> = {
-  "spec-scan.orchestrate": "stored scope verdicts kept — no new subtree decisions",
-  "spec-scan.curate-doc": "affected docs kept by default, untagged (they join no area)",
-  "spec-scan.settle-areas": "area labels kept as-is (no merges/subdivisions)",
-  "spec-scan.overlap": "affected clusters left unflagged (docs land in notReached, their pairs in uncheckedPairs)",
+  "spec.relevance": "affected docs kept by default",
+  "spec.areaTag": "affected docs left untagged (they join no area)",
+  "spec.vocab": "area names left un-normalized",
+  "spec.overlap": "affected doc pairs left unflagged",
+  "spec.verifyOverlap": "affected flags kept as conflicts",
 };
 
 
