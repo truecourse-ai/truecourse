@@ -7108,3 +7108,45 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     ZERO bare paths.** Tests: `tests/analyzer/openapi-route-metas.test.ts`
     (new), `tests/analyzer/route-registrations.test.ts`,
     `tests/interface-mapper/api-tree.test.ts`.
+
+131. **Scan scope cannot look inside a registered source, so a repo that
+    publishes its own docs scans them TWICE (documenso, 2026-08-25).** STATUS:
+    OPEN. The bare-repo lineage-3 run registered `docs.documenso.com` (143
+    pages) on a repo whose `apps/docs/content/docs/` holds the same 142 docs.
+    The scope session KEPT the source — "no source content was sampled
+    directly, so it is kept under the when-unsure rule" — and the corpus went
+    to 292 docs, settle-areas to 174 clusters, and the overlap stage to a
+    projected **~122M tokens** (~700K per cluster, measured over 11) against
+    32M for the same repo scanned once. An earlier run on the same repo
+    EXCLUDED the same source ("the published mirror of the in-repository
+    apps/docs documentation"), so today the verdict is a coin flip: the
+    exclude was the model inferring from a page-count coincidence, which its
+    own instructions forbid ("never exclude a subtree you did not look into").
+    Cause, in `packages/core/src/services/spec-scan/orchestrate.ts`:
+    `renderUniverseTree` prints repo docs as a full path tree but a source as
+    ONE line — `docs.documenso.com · Documentation (143 pages)`. `doc_outline`
+    resolves source snapshots fine (they are in `universe.byPath` under the
+    sources ref prefix), but the session is never shown a ref it could pass,
+    and the transcript confirms it never tried one. The surface makes the
+    look-first rule unfollowable, and "WHEN UNSURE, KEEP" then forces the
+    expensive answer.
+    The docs really are the same docs: 141 of 143 fetched pages sit at the
+    same logical path as an in-repo doc, differing only in serialization (the
+    `.mdx` endpoint returns rendered markdown with heading anchors; the repo
+    copy carries YAML frontmatter and fumadocs `import` lines). Zero pairs are
+    byte-identical, so no byte-level dedupe would have caught it.
+    Fix, in rough order of strength:
+    - Render a source's pages as a path tree under its id, so `doc_outline`
+      has refs to sample and the look-first rule becomes followable.
+    - Better: hand the session the comparison outright — a deterministic
+      near-duplicate pass (logical-path overlap + normalized-body similarity)
+      run before the session, reported as "141 of 143 pages match an in-repo
+      doc at the same path", so the mirror verdict rests on measurement rather
+      than sampling luck.
+    - Decide which copy WINS when both exist. The fetched copy may be the
+      better extract input (real `##` markers, no JSX imports) — cheaper is
+      not automatically righter, and the plan should say which.
+    Interim: the bench removed the source (`spec source remove`) and scans the
+    repo copy alone. Related: [129] (the `.mdx` twin fetch that made the
+    source fetchable at all).
+
