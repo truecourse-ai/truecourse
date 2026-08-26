@@ -292,40 +292,83 @@ export function mergeScopeOutcome(
 /** Cap on rendered directories — context is the budget. */
 const MAX_TREE_DIRS = 300
 
+/** Cap on filenames listed per directory — big flat dirs summarize their tail. */
+const MAX_DIR_FILES = 10
+
 function docsWord(n: number): string {
   return `${n} doc${n === 1 ? '' : 's'}`
 }
 
-/** The universe tree: every repo-doc directory with rolled-up counts, full
- *  paths (verdict paths are copied from these lines), then the sources. */
+function fileList(names: string[]): string {
+  const sorted = [...names].sort()
+  const shown = sorted.slice(0, MAX_DIR_FILES)
+  const rest = sorted.length - shown.length
+  return shown.join(', ') + (rest > 0 ? `, … +${rest} more` : '')
+}
+
+/** The universe tree: every repo-doc directory with rolled-up counts and its
+ *  direct filenames (so `doc_outline` refs — dir + filename — never need
+ *  guessing), full paths (verdict paths are copied from these lines), then
+ *  the sources. */
 export function renderUniverseTree(scope: ScanScopeUniverse): string {
-  const direct = new Map<string, number>()
+  const direct = new Map<string, string[]>()
   for (const doc of scope.repoDocs) {
-    const dir = doc.path.includes('/') ? doc.path.slice(0, doc.path.lastIndexOf('/')) : '.'
-    direct.set(dir, (direct.get(dir) ?? 0) + 1)
+    const slash = doc.path.lastIndexOf('/')
+    const dir = slash === -1 ? '.' : doc.path.slice(0, slash)
+    const name = slash === -1 ? doc.path : doc.path.slice(slash + 1)
+    const names = direct.get(dir)
+    if (names) names.push(name)
+    else direct.set(dir, [name])
   }
   const total = new Map<string, number>()
-  for (const [dir, n] of direct) {
+  for (const [dir, names] of direct) {
     if (dir === '.') continue
     const parts = dir.split('/')
     for (let i = 1; i <= parts.length; i += 1) {
       const prefix = parts.slice(0, i).join('/')
-      total.set(prefix, (total.get(prefix) ?? 0) + n)
+      total.set(prefix, (total.get(prefix) ?? 0) + names.length)
     }
   }
 
   const lines: string[] = [`Repo docs (${docsWord(scope.repoDocs.length)}):`]
-  const rootCount = direct.get('.') ?? 0
-  if (rootCount > 0) lines.push(`  .  (${docsWord(rootCount)} at the repo root)`)
-  const dirs = [...total.keys()].sort()
-  for (const dir of dirs.slice(0, MAX_TREE_DIRS)) {
-    const depth = dir.split('/').length - 1
-    const own = direct.get(dir) ?? 0
-    const sum = total.get(dir) ?? 0
-    const ownTail = own > 0 && own !== sum ? `, ${own} direct` : ''
-    lines.push(`  ${'  '.repeat(depth)}${dir}/  (${docsWord(sum)}${ownTail})`)
+  const rootNames = direct.get('.') ?? []
+  if (rootNames.length > 0) {
+    lines.push(`  .  (${docsWord(rootNames.length)} at the repo root)  ·  ${fileList(rootNames)}`)
   }
-  if (dirs.length > MAX_TREE_DIRS) lines.push(`  … ${dirs.length - MAX_TREE_DIRS} more directories`)
+  const dirs = [...total.keys()].sort()
+  // Over the cap, elide the DEEPEST directories first — an alphabetical slice
+  // starves late-sorting TOP-LEVEL subtrees entirely (they never render, so
+  // the session can neither sample nor verdict them without guessing).
+  let shown = dirs
+  if (dirs.length > MAX_TREE_DIRS) {
+    const depthOf = (dir: string) => dir.split('/').length
+    const atDepth = new Map<number, number>()
+    for (const dir of dirs) atDepth.set(depthOf(dir), (atDepth.get(depthOf(dir)) ?? 0) + 1)
+    let maxDepth = 0
+    let running = 0
+    for (const depth of [...atDepth.keys()].sort((a, b) => a - b)) {
+      running += atDepth.get(depth) ?? 0
+      if (running > MAX_TREE_DIRS) break
+      maxDepth = depth
+    }
+    shown =
+      maxDepth === 0
+        ? dirs.filter((d) => depthOf(d) === 1).slice(0, MAX_TREE_DIRS)
+        : dirs.filter((d) => depthOf(d) <= maxDepth)
+  }
+  for (const dir of shown) {
+    const depth = dir.split('/').length - 1
+    const own = direct.get(dir)
+    const sum = total.get(dir) ?? 0
+    const ownTail = own && own.length !== sum ? `, ${own.length} direct` : ''
+    const files = own ? `  ·  ${fileList(own)}` : ''
+    lines.push(`  ${'  '.repeat(depth)}${dir}/  (${docsWord(sum)}${ownTail})${files}`)
+  }
+  if (shown.length < dirs.length) {
+    lines.push(
+      `  … ${dirs.length - shown.length} deeper directories elided — their docs count into the parents above; a \`doc_outline\` miss under one lists what is really there.`,
+    )
+  }
 
   if (scope.sources.length > 0) {
     lines.push('', `Registered documentation sources (verdict by source id):`)
@@ -363,7 +406,7 @@ Verbatim observations worth a human's eyes that fit no verdict — an apparently
 
 # Tools
 
-- \`list_universe\` — the universe tree again (directories with doc counts, sources with page counts).
+- \`list_universe\` — the universe tree again (directories with doc counts and their direct filenames, sources with page counts).
 - \`doc_outline\` — one doc's heading outline, to sample what a directory actually holds. Sample a few representative docs before excluding anything; never exclude a subtree you did not look into.
 
 The outcome is one object: { "scopeVerdicts": [...], "instructions": [...], "findings": [...] }.`
@@ -372,7 +415,7 @@ function listUniverseTool(scope: ScanScopeUniverse): SessionTool {
   return defineSessionTool({
     name: 'list_universe',
     description:
-      'The doc universe as a tree: every directory with its doc count, and the registered documentation sources with page counts.',
+      'The doc universe as a tree: every directory with its doc count and direct doc filenames, and the registered documentation sources with page counts.',
     kind: 'list-scan-universe',
     readOnly: true,
     destructive: false,
@@ -385,6 +428,34 @@ function listUniverseTool(scope: ScanScopeUniverse): SessionTool {
       return { content: renderUniverseTree(scope) }
     },
   })
+}
+
+/** Cap on real refs listed back on a `doc_outline` miss. */
+const MAX_MISS_REFS = 8
+
+/**
+ * What a missed `doc_outline` ref should have been: the exact doc under a
+ * casing slip, else the real docs under the longest existing directory prefix
+ * of the guess (matched case-insensitively) — so one miss hands back real
+ * refs instead of inviting another guess.
+ */
+export function describeDocMiss(universe: ScanDocUniverse, ref: string): string {
+  const lowerRef = ref.toLowerCase()
+  const paths = universe.ordered.map((d) => d.path)
+  const caseFix = paths.find((p) => p.toLowerCase() === lowerRef)
+  if (caseFix) return `No doc \`${ref}\` in the universe — did you mean \`${caseFix}\`?`
+
+  const parts = ref.split('/').slice(0, -1)
+  for (let i = parts.length; i > 0; i -= 1) {
+    const prefix = `${parts.slice(0, i).join('/').toLowerCase()}/`
+    const under = paths.filter((p) => p.toLowerCase().startsWith(prefix)).sort()
+    if (under.length === 0) continue
+    const shown = under.slice(0, MAX_MISS_REFS)
+    const rest = under.length - shown.length
+    const dir = shown[0].slice(0, prefix.length)
+    return `No doc \`${ref}\` in the universe. Docs under \`${dir}\`: ${shown.join(', ')}${rest > 0 ? `, … +${rest} more` : ''}.`
+  }
+  return `No doc \`${ref}\` in the universe — refs are full repo-relative paths; \`list_universe\` lists each directory's docs.`
 }
 
 function docOutlineTool(scope: ScanScopeUniverse): SessionTool {
@@ -405,10 +476,7 @@ function docOutlineTool(scope: ScanScopeUniverse): SessionTool {
     async execute(args) {
       const doc = scope.universe.byPath.get(args.ref)
       if (!doc) {
-        return {
-          content: `No doc \`${args.ref}\` in the universe — refs are full repo-relative paths; \`list_universe\` shows the directories.`,
-          isError: true,
-        }
+        return { content: describeDocMiss(scope.universe, args.ref), isError: true }
       }
       const outline = headingOutline(docBody(doc))
       return {
