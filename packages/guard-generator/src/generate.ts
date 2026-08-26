@@ -1369,6 +1369,15 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // catalog detected: a mapped-but-unrunnable surface is honest coverage
   // accounting ("realizable on web — awaiting the web driver"), not silence.
   const surfaces = accountedSurfaces(recipe, catalogs)
+  /** One flow's match outcome, folded back in flow order (item 134). */
+  interface FlowMatchResult {
+    work?: FlowWork
+    errors: GuardGenerateError[]
+    matchCalls: number
+    matchCallErrors: number
+    firstMatchError: string | undefined
+  }
+
   const works: FlowWork[] = []
   const matchPairs = liveFlows.length * surfaces.filter((s) => matchable(s, recipe, catalogs)).length
   let matchDone = 0
@@ -1379,17 +1388,28 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   let firstMatchError: string | undefined
   if (matchPairs > 0) options.onMatchProgress?.(0, matchPairs)
 
-  for (const flow of liveFlows) {
+  /**
+   * ONE flow's realization: the surface gates, the (paid) match calls, and the
+   * settle bookkeeping. Pure with respect to the run — every shared counter is
+   * accumulated LOCALLY and folded back in FLOW order below, so running these
+   * concurrently cannot reorder a gap, an error, or the works list (item 134).
+   */
+  const processFlow = async (flow: GuardFlow): Promise<FlowMatchResult> => {
+    const localErrors: GuardGenerateError[] = []
+    let localMatchCalls = 0
+    let localMatchCallErrors = 0
+    let localFirstMatchError: string | undefined
+
     const primary = primarySection(flow, sectionByKey)
     if (!primary) {
       // Every milestone's section vanished between synthesis and here (a concurrent
       // edit): nothing can bind, so the flow is skipped with a stated reason.
-      errors.push({
+      localErrors.push({
         doc: flow.milestones[0].doc,
         anchor: flow.milestones[0].anchor,
         message: `flow "${flow.id}" binds no live section — re-run generate after re-scanning the corpus`,
       })
-      continue
+      return { errors: localErrors, matchCalls: localMatchCalls, matchCallErrors: localMatchCallErrors, firstMatchError: localFirstMatchError }
     }
     const sections = new Map<number, SectionInput>()
     for (const m of flow.milestones) {
@@ -1454,7 +1474,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           continue
         }
       }
-      matchCalls++
+      localMatchCalls++
       const outcome = await limit(() => matchFlow(repoRoot, flow, surfaceCatalog, matchRunner))
       options.onMatchProgress?.(++matchDone, matchPairs)
       if (outcome.kind === 'plan') {
@@ -1487,9 +1507,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       } else if (outcome.kind === 'unrealizable') {
         gaps.push({ surface, kind: 'unrealizable', reason: outcome.reason })
       } else {
-        matchCallErrors++
-        firstMatchError ??= outcome.reason
-        errors.push({ doc: primary.doc, anchor: primary.anchor, message: `matching (${surface}) ${outcome.reason}` })
+        localMatchCallErrors++
+        localFirstMatchError ??= outcome.reason
+        localErrors.push({ doc: primary.doc, anchor: primary.anchor, message: `matching (${surface}) ${outcome.reason}` })
       }
     }
 
@@ -1515,19 +1535,40 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         if (plans.has(gap.surface) && !gaps.some((g) => sameGap(g, gap))) gaps.push(gap)
       }
     }
-    works.push({
-      flow,
-      primary,
-      sections,
-      sectionKeys,
-      plans,
-      serverBySurface,
-      gaps,
-      inputsHash,
-      prior,
-      changed,
-    })
+    return {
+      work: {
+        flow,
+        primary,
+        sections,
+        sectionKeys,
+        plans,
+        serverBySurface,
+        gaps,
+        inputsHash,
+        prior,
+        changed,
+      },
+      errors: localErrors,
+      matchCalls: localMatchCalls,
+      matchCallErrors: localMatchCallErrors,
+      firstMatchError: localFirstMatchError,
+    }
   }
+
+  // Every flow's body starts at once; the LIMITER throttles the paid match calls
+  // inside them (item 134 — `await limit(fn)` in a sequential loop only ever held
+  // one call, so `concurrency` could not move this stage). The flow bodies must NOT
+  // take a slot themselves: they await the very limiter they would be holding, and
+  // `concurrency` flows would deadlock waiting for a slot none of them can release.
+  const flowResults = await Promise.all(liveFlows.map((flow) => processFlow(flow)))
+  for (const result of flowResults) {
+    errors.push(...result.errors)
+    matchCalls += result.matchCalls
+    matchCallErrors += result.matchCallErrors
+    firstMatchError ??= result.firstMatchError
+    if (result.work) works.push(result.work)
+  }
+
 
   // Matching decides which interfaces each flow's scenario walks: with no plan the
   // flow authors nothing, and persist below DELETES its prior scenario files before

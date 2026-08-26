@@ -7303,3 +7303,38 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     6 failed (all pre-existing; a seventh, `run-anomaly`, is the known
     real-subprocess flake under full-suite load and passes 16/16 alone).
 
+134. **The match stage's concurrency limiter was inert — every generate matched
+    ONE flow×surface at a time (documenso, 2026-08-26).** STATUS: BUILT.
+    Matching is an LLM CALL per (flow, surface) carrying the WHOLE surface
+    catalog (`buildContext` maps every interface to a digest — 291 api
+    interfaces on documenso, ~24K tokens per call), so it is the slowest
+    non-session stage in generate. It was dispatched as
+
+        for (const flow of liveFlows)
+          for (const surface of surfaces)
+            const outcome = await limit(() => matchFlow(...))
+
+    and **awaiting inside the loop means the limiter never holds two calls**:
+    `pLimit` only parallelizes work handed to it together. Measured on
+    documenso's 556 pairs: **~2 pairs/minute at concurrency 4 AND at 12** —
+    ~30s per call, strictly serial, over four hours for the stage. The bench
+    restarted a live run at conc 12 on the assumption the flag would help; it
+    changed nothing, which is what exposed the cause.
+    FIX: each flow's body is already self-contained (`plans`, `gaps`,
+    `serverBySurface` are per-flow locals), so the body moved into
+    `processFlow(flow)` — accumulating errors and the match counters LOCALLY —
+    and the flows now run through `Promise.all`, with the limiter left where it
+    belongs: around the paid call inside. Results fold back in FLOW order, so
+    gaps, errors and the works list read identically to the serial run.
+    **The flow bodies must NOT take a limiter slot themselves** — the first cut
+    wrapped them in `limit()` and deadlocked instantly (N flows holding all N
+    slots, each awaiting a slot for its own match call that nothing can
+    release); the concurrency test caught it as a hang.
+    Tests (`tests/guard-generator/generate.test.ts`): a probe matcher that
+    records in-flight calls proves several are held at once, and a
+    same-input/different-concurrency pair proves `coverageGaps` and `errors` are
+    identical at concurrency 1 and 8 — ordering is the property at risk, and it
+    is pinned. Both drive the MATCH stage only (the worker seam ends every flow
+    `blocked`), so the case stays a second rather than a birth-validation crawl.
+    Suite: 12,515 passed, 6 failed (all pre-existing). Related: [125] (the world
+    invariant that made conc 4 the habit — matching touches no world).

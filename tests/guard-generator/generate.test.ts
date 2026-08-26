@@ -7,6 +7,7 @@ import {
   birthValidate,
   type BirthCandidate,
   type FlowWorkerTask,
+  type MatchRunner,
 } from '@truecourse/guard-generator'
 import { autoResolutionKey, type GuardFlow, type Interface } from '@truecourse/shared'
 import {
@@ -1812,6 +1813,71 @@ describe('generateGuards — grounded authoring', () => {
       [2, 2],
     ])
   }, 60_000)
+})
+
+describe('generateGuards — matching runs concurrently (item 134)', () => {
+  /**
+   * Matching is an LLM CALL per (flow, surface) that carries the whole surface
+   * catalog, so it is the slowest deterministic-looking stage in generate. It was
+   * dispatched as `await limit(() => matchFlow(...))` INSIDE the flow loop, which
+   * awaits each call before starting the next — the limiter never had two calls to
+   * hold, so `concurrency` could not affect it. On documenso that was 556 pairs at
+   * ~30s each, serial: over four hours, unchanged whether the run asked for 4 or 12.
+   */
+  const docsFor = (n: number): Record<string, string> =>
+    Object.fromEntries(
+      Array.from({ length: n }, (_, i) => [`docs/d${i}.md`, `## sec${i}\n\`relkit --version\` exits 0.\n`]),
+    )
+
+  /** A matcher that records how many calls are in flight at once. */
+  function concurrencyProbe(): { runner: MatchRunner; peak: () => number } {
+    let inFlight = 0
+    let peak = 0
+    const runner: MatchRunner = async ({ milestones, interfaces }) => {
+      inFlight += 1
+      peak = Math.max(peak, inFlight)
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      inFlight -= 1
+      return { plan: milestones.map((m) => ({ interfaceId: interfaces[0].id, milestone: m.order })) }
+    }
+    return { runner, peak: () => peak }
+  }
+
+  /** Matching is the stage under test, so nothing authors — birth-validating six
+   *  flows through real subprocesses would time the case out and prove nothing. */
+  async function runWith(concurrency: number, probe?: ReturnType<typeof concurrencyProbe>) {
+    const r = repo()
+    writeRecipe(r)
+    const docs = docsFor(6)
+    writeCorpus(r, Object.keys(docs).map((ref) => ({ ref })))
+    for (const [ref, body] of Object.entries(docs)) writeDoc(r, ref, body)
+    return runGenerate({
+      repoRoot: r,
+      concurrency,
+      extractSession: extractSessionBy({}),
+      // Ends every flow `blocked`, so nothing authors and no birth subprocess runs —
+      // matching is the stage under test and stays the only real work.
+      flowWorkerSession: submitWorkerSessions(() => ({ blocked: [{ order: 1, capability: 'db' }] })),
+      ...(probe ? { matchRunner: probe.runner } : {}),
+    })
+  }
+
+  it('holds several match calls in flight at once', async () => {
+    const probe = concurrencyProbe()
+    await runWith(4, probe)
+
+    expect(probe.peak()).toBeGreaterThan(1)
+  }, 90_000)
+
+  it('settles the same flows in the same order whatever the concurrency', async () => {
+    const serial = await runWith(1)
+    const parallel = await runWith(8)
+
+    // Order is the property at risk: the flows are folded back in FLOW order, never
+    // in completion order, so a parallel run reads identically to a serial one.
+    expect(parallel.coverageGaps).toEqual(serial.coverageGaps)
+    expect(parallel.errors).toEqual(serial.errors)
+  }, 120_000)
 })
 
 describe('generateGuards — the per-flow pipeline', () => {
