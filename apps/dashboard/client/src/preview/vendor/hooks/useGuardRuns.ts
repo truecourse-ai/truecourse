@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/hooks/useGuardRuns.ts; delete with the preview.
 /**
  * Loads the guard drifts view's run data: the last run (`guard/latest`), the run
  * history (`guard/history`), and, when the user picks an older run from the

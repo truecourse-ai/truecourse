@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/hooks/useGuardInterfaces.ts; delete with the preview.
 /**
  * The Interfaces-tab catalog (`guard/interfaces`). Read-only: the catalog is
  * derived by the engine, not from this tab. Hoisted at page level so the catalog

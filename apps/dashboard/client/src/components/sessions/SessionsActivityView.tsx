@@ -1,5 +1,5 @@
 /**
- * The Activity surface (AGENTIC_PIPELINE_PLAN §3.6–§3.9) on the real sessions
+ * The Activity surface on the real sessions
  * store, in two levels:
  *
  *   1. the runs index — every agentic run of the repository as one flat table

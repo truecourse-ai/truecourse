@@ -1,9 +1,6 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's packages/shared/src/guard/extract-outcome.ts; delete with the preview.
 /**
  * THE CLAIM-EXTRACTION SESSION OUTCOME, what one `guard-generate.extract`
- * agent session returns for ONE spec document (SPEC_GUARD_PLAN item's session
- * carve-out of the per-view extract one-shots).
+ * agent session returns for ONE spec document.
  *
  * Shape-wise it is the one-shot `DocExtractionSchema` (claims + untestable
  * notes) grown with the structured `needs` field the strapi reference corpus

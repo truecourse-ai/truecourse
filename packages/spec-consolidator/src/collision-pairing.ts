@@ -1,6 +1,6 @@
 /**
  * COLLISION PAIRING — the deterministic candidate net the overlap sessions
- * check (SPEC_GUARD_PLAN item 119). It replaces the LLM's own retrieval (an
+ * check. It replaces the LLM's own retrieval (an
  * area tour over heading outlines, whose recall collapsed as areas grew — the
  * 2026-08-21 documenso field run reached ~25% of a 62-doc area's docs) with
  * pure string work: a disagreement definitionally requires both docs to NAME
@@ -325,8 +325,8 @@ export function assignPairArea(
 
 /**
  * Connected components of one area's pairs, over doc refs — each component is
- * one session's worth of work (SPEC_GUARD_PLAN item 119: shard by collision
- * cluster, never by area). Components are ordered by their best pair's rank in
+ * one session's worth of work (shard by collision cluster, never by area).
+ * Components are ordered by their best pair's rank in
  * `pairs` (which is score-ranked), so cluster 0 is the hottest; within a
  * component pairs keep their given order.
  */

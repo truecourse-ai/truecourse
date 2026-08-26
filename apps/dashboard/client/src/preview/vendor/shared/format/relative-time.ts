@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's packages/shared/src/format/relative-time.ts; delete with the preview.
 /**
  * Human "time ago" formatting, shared by the OSS dashboard client and the EE
  * client, previously copy-pasted (as `timeAgo` / `formatRelativeTime`) across

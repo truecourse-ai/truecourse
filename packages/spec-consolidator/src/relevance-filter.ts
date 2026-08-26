@@ -2,8 +2,8 @@
  * Doc relevance — the DETERMINISTIC spine of the old LLM relevance filter, plus
  * the vocabulary the curate-doc SESSION now judges with.
  *
- * The per-doc LLM classify itself retired with the spec-scan sessions (plan 02
- * step 3): one `spec-scan.curate-doc` session per doc (in `@truecourse/core`'s
+ * The per-doc LLM classify itself retired with the spec-scan sessions: one
+ * `spec-scan.curate-doc` session per doc (in `@truecourse/core`'s
  * `services/spec-scan/`) replaces the relevance + area-tag one-shots. What
  * stays here is everything that was never an LLM call:
  *
@@ -16,7 +16,7 @@
  *
  * The old `consolidator/relevance` cache is neither written NOR read any more:
  * the pre-flight estimate probes the session cache (`consolidator/curate-doc`)
- * with the run's own key builders (plan 02 step 7). The old entries' files
+ * with the run's own key builders. The old entries' files
  * remain on disk, inert.
  */
 

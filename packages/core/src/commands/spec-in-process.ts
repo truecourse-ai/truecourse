@@ -288,7 +288,7 @@ export function readGeneratedSummary(repoRoot: string): GeneratedSummary | null 
 // ---------------------------------------------------------------------------
 // Corpus path driver — shared by the CLI (`spec scan`) and the dashboard
 // routes. `curateInProcess` builds corpus.json via the SESSION-based scan run
-// (`services/spec-scan/run.ts`, plan 02 steps 3–5): one `spec-scan.curate-doc`
+// (`services/spec-scan/run.ts`): one `spec-scan.curate-doc`
 // session per doc, at most one `spec-scan.settle-areas` session, one
 // `spec-scan.overlap` session per area. The four CURATE_STEPS keys are kept so
 // both surfaces' progress UIs render unchanged.
@@ -299,7 +299,7 @@ export interface SpecCurateInProcessResult {
   /** True when the scan made zero LLM calls — every doc was unchanged (cached). */
   noChanges: boolean;
   /**
-   * Questions the interactive scope orchestrator left unanswered (§3.7). A
+   * Questions the interactive scope orchestrator left unanswered. A
    * non-interactive run never blocks on them; the CLI/dashboard summary must
    * surface them LOUDLY.
    */
@@ -386,7 +386,7 @@ export interface CurateInProcessOptions {
   disableScopeOrchestration?: boolean;
   /**
    * A `question-asked` event from a scan session (the interactive scope
-   * orchestrator — §3.7), as it happens. The CLI prints the dashboard deep
+   * orchestrator), as it happens. The CLI prints the dashboard deep
    * link; nothing ever blocks on it — an unanswered question lands in the
    * result's `pendingQuestions`.
    */
@@ -446,7 +446,7 @@ export async function curateInProcess(
     }
   }
 
-  // The sessions run + transcript store (§3.9): `sessions/spec-scan/<runId>/`.
+  // The sessions run + transcript store: `sessions/spec-scan/<runId>/`.
   // Created after the estimate gate, so a declined scan leaves no run record.
   const gitRef = await resolveCommitSha(repoRoot);
   const run = createSessionRun(repoRoot, { command: 'spec-scan', gitRef });

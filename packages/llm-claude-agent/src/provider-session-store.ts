@@ -1,6 +1,6 @@
 /**
  * File-backed implementation of the SDK's `sessionStore` mirror adapter
- * (§3.3: provider session state lives in OUR store). Pointed at a directory
+ * (provider session state lives in OUR store). Pointed at a directory
  * inside the run's sessions store (`<runDir>/provider/`), it keeps the
  * provider-native transcript a parked session resumes from — immune to the
  * harness's own `cleanupPeriodDays`, a machine move, or a wiped harness home.

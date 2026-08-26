@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/components/spec/SpecProgressPopup.tsx; delete with the preview.
 /**
  * Spec progress popup. Same visual pattern as the Analyze progress
  * popup, bottom-center, list of checkable steps streamed in via the

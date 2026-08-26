@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's packages/shared/src/guard/excerpts.ts; delete with the preview.
 /**
  * The RAW program-output excerpt pair that rides on a guard failure, a birth
  * finding, and the birth-retry prompt (Fix 1): head-truncated stdout/stderr of the

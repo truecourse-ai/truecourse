@@ -1,6 +1,6 @@
 /**
- * THE AREA SETTLING SESSION — `spec-scan.settle-areas`, at most one per corpus
- * (plan 02 step 4). Three things carry the design: the deterministic GATE that
+ * THE AREA SETTLING SESSION — `spec-scan.settle-areas`, at most one per corpus.
+ * Three things carry the design: the deterministic GATE that
  * spends zero sessions on an already-settled vocabulary, the VALIDATOR that
  * refuses an incomplete settlement (in-session and again in the fold), and the
  * fold that turns a settlement into the grouper's vocab map.

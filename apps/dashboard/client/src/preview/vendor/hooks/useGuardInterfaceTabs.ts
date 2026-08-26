@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/hooks/useGuardInterfaceTabs.ts; delete with the preview.
 /**
  * The Interfaces tab's main-pane tab set, the shared {@link useGuardTabs} reducer
  * bound to `?interface=<interfaceId>` (single-click previews, double-click pins), so

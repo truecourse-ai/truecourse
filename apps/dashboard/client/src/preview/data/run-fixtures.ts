@@ -1,8 +1,6 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * The fake runs (./repos.ts, ./other-repos.ts) folded into the EXACT payload
- * shapes the agentic branch's RUN surfaces consume, so the Runs tab renders the
+ * shapes the vendored RUN surfaces consume, so the Runs tab renders the
  * vendored `GuardDriftsView` / `GuardRunSummary` / `GuardDriftList` / `GuardDriftDetail`
  * / `GuardTestView` unchanged:
  *

@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's packages/shared/src/guard/needs-setup.ts; delete with the preview.
 /**
  * NEEDS SETUP, the ACTIONABLE half of `blocked-on`.
  *

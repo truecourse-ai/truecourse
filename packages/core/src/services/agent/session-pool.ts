@@ -2,9 +2,9 @@
  * THE SESSION POOL — the generic mechanics of running one agent session per
  * work item, `concurrency` at a time, with a strictly serial fold.
  *
- * Extracted from the interface-authoring run (SPEC_GUARD_PLAN item 104), which
+ * Extracted from the interface-authoring run, which
  * remains its first consumer; the planning and the fold stay with each caller,
- * the pool owns only what every session-per-item command shares (§3.9):
+ * the pool owns only what every session-per-item command shares:
  *
  * - a `pLimit` over the work, so sessions run in parallel while the FOLD runs
  *   one at a time — a session's result is validated against (and written into)

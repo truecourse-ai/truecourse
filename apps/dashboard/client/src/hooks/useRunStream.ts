@@ -7,7 +7,7 @@
  * Deliberately NOT routed through `useSocket`'s handler map — transcripts are a
  * high-frequency stream, and this hook lets only the Activity view re-render.
  * The subscribe happens on mount, BEFORE the caller's REST snapshot read
- * resolves (§3.9's subscribe-then-snapshot ordering); overlap between the two
+ * resolves (subscribe-then-snapshot ordering); overlap between the two
  * is deduped by `seq` where the streams merge (transcript-model's fold input).
  */
 

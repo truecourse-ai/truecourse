@@ -1,6 +1,5 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
 /**
- * UI MOCK: one session's transcript rendered as a conversation (plan §3.7):
+ * UI MOCK: one session's transcript rendered as a conversation:
  * chat bubbles for replies and user messages, compact expandable rows for tool
  * calls, and interactive CARDS for the structured events (scope proposal,
  * pending question, outcome). Every card action serializes to a user message,

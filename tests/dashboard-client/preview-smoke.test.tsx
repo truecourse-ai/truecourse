@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * The one-product preview renders, at every address it offers.
  *
@@ -9,8 +7,8 @@
  * names one heading only that route produces (the Activity tab has no heading
  * of its own, so it names the run its surface opens on instead).
  *
- * The repo tabs are compositions of the CURRENT dashboard's components, copied
- * under `src/preview/vendor` from `origin/sm/agentic-pipeline-plan`, so every
+ * The repo tabs are compositions of the CURRENT dashboard's components,
+ * vendored under `src/preview/vendor`, so every
  * tab case names something one of THOSE draws, never a heading the preview
  * writes itself, and every one of them is async: the rows arrive through the
  * preview fetch shim.
@@ -96,8 +94,8 @@ describe('one-product preview', () => {
     expect((await screen.findAllByText('Refunding a partially captured order')).length).toBeGreaterThan(0);
   });
 
-  // The five guard tabs render the vendored components (the agentic branch's, the
-  // current dashboard design) over the preview fetch shim, so each one's rows
+  // The five guard tabs render the vendored components (the current dashboard
+  // design) over the preview fetch shim, so each one's rows
   // arrive async. Each case names one thing only that tab's component draws.
 
   it('opens a test as its own page from the tests table', async () => {

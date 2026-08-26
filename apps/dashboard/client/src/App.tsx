@@ -98,8 +98,7 @@ function AppRoutes() {
           )
         }
       />
-      {/* PREVIEW (UI mock, fake data): the one-product dashboard preview, see
-          docs/ONE_PRODUCT_PLAN.md §3.5. Delete with src/preview/ when it lands. */}
+      {/* The one-product dashboard, mounted at /preview until it replaces the legacy routes. */}
       <Route
         path="/preview/*"
         element={

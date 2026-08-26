@@ -1,6 +1,5 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
 /**
- * UI MOCK: the Activity surface of AGENTIC_PIPELINE_PLAN §3.6–§3.9, on mock
+ * UI MOCK: the Activity surface, on mock
  * data only (see ./mock.ts). A flat table of every agent session of this
  * repository, each row named by the command that ran it (spec scan, guard
  * setup, guard generate), with Kind and Status filters; a row opens the session

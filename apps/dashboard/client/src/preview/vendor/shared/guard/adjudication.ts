@@ -1,8 +1,6 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's packages/shared/src/guard/adjudication.ts; delete with the preview.
 /**
  * RUN ADJUDICATION, the verdict `truecourse guard adjudicate` attaches to one
- * failing scenario of a guard run (plan 05, steps 21–23). The corpus runs'
+ * failing scenario of a guard run. The corpus runs'
  * largest recurring hand cost was reading every failure's transcript before
  * classifying it; the adjudication session does that read and ends with THIS
  * shape, and the deterministic pre-pass produces the same shape without a
@@ -12,7 +10,7 @@
  * The verdict CLASSES, and what each routes to (see the fold in
  * `@truecourse/core`'s guard-adjudicate service):
  *  - `expected-red`    , the failure IS the committed red the flow worker
- *                         declared (`expectedReds`, plan 04 §17): the doc and
+ *                         declared (`expectedReds`): the doc and
  *                         the code disagree exactly as predicted. Recorded;
  *                         nothing to do until one of them moves.
  *  - `drift`           , the doc and the code disagree in a way nothing
@@ -53,7 +51,7 @@ export const GuardAdjudicationClassSchema = z.enum([
 export type GuardAdjudicationClass = z.infer<typeof GuardAdjudicationClassSchema>
 
 /**
- * The control experiment's record on a `bug` verdict (plan 05 step 22): what
+ * The control experiment's record on a `bug` verdict: what
  * the independent control child concluded, why, and which control run the
  * conclusion came from. `transcriptRef` is the ENGINE-minted reference the
  * `verify_bug` tool named on dispatch, the fold refuses a fresh outcome whose

@@ -1,6 +1,6 @@
 /**
- * THE DOC CURATION SESSION — `spec-scan.curate-doc`, one per doc (plan 02
- * step 3). What is under test is the RUN around the session: which docs reach
+ * THE DOC CURATION SESSION — `spec-scan.curate-doc`, one per doc. What is
+ * under test is the RUN around the session: which docs reach
  * a session at all, what the deterministic backstops do to a verdict after it
  * lands, how a failure falls open, and when a systemic loss aborts the write.
  *

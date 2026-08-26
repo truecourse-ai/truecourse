@@ -1,6 +1,6 @@
 /**
- * Cross-doc vocabulary reconciliation, AFTER the move to sessions (plan 02
- * step 4). `normalizeVocabulary` — the one-shot stage this file was named for —
+ * Cross-doc vocabulary reconciliation, AFTER the move to sessions.
+ * `normalizeVocabulary` — the one-shot stage this file was named for —
  * is retired; its judgment now belongs to the `spec-scan.settle-areas` session
  * (`tests/core/spec-scan-settle.test.ts` carries the gate, the validator, the
  * to-core collapse and the cache).

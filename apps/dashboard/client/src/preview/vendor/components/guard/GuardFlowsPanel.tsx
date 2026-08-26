@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/components/guard/GuardFlowsPanel.tsx; delete with the preview.
 /**
  * THE guard inventory, the ONE list. A flow and the test that realizes it are one
  * entity, so there is one list of them and one detail behind it (no second Tests

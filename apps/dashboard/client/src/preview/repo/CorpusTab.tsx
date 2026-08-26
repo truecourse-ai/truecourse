@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * Corpus: the version row (the baseline or a pull request's version, see
  * ./CoverageVersions.tsx), then a flat table of the corpus: every kept document

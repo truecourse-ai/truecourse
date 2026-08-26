@@ -1,8 +1,6 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * The fake dependency catalog (./orders-api.catalog.ts, ./other-repos.ts) folded
- * into the EXACT payload shape the agentic branch's DEPENDENCIES pane consumes,
+ * into the EXACT payload shape the vendored DEPENDENCIES pane consumes,
  * so the Dependencies tab renders the vendored `GuardDependenciesPane` /
  * `GuardDependencyDetail` unchanged.
  *

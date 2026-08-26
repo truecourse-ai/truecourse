@@ -3,10 +3,9 @@
  * module's machinery are gone:
  *
  * - the LLM pair-matrix runner (`flagOverlaps` + the window matrix) retired
- *   when the `spec-scan.overlap` SESSION (plan 02 step 5, in `@truecourse/core`'s
- *   `services/spec-scan/overlap.ts`) took over flag-and-adjudicate in one pass;
+ *   when the `spec-scan.overlap` SESSION took over flag-and-adjudicate in one pass;
  * - the heading-widened doc net (`hasConcernHeading` / `widenedOverlapDocs`)
- *   retired with SPEC_GUARD_PLAN item 119 — the deterministic collision
+ *   retired — the deterministic collision
  *   pairing (`collision-pairing.ts`) applies the same canonical-heading fold at
  *   SECTION level across the whole kept corpus, which subsumes doc-level
  *   widening entirely.

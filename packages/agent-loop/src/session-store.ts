@@ -1,5 +1,5 @@
 /**
- * The sessions store record shapes (AGENTIC_PIPELINE_PLAN §3.9):
+ * The sessions store record shapes:
  * `.truecourse/sessions/<command>/<runId>/run.json` plus one transcript
  * jsonl per session. Types live here so the OSS file store (core), the EE
  * table store, and the dashboard client all speak one shape; the store
@@ -17,7 +17,7 @@ export const SessionCommandSchema = z.enum([
   'spec-scan',
   'guard-setup',
   'guard-generate',
-  // Interface authoring (SPEC_GUARD_PLAN item 104) — the web tasks no
+  // Interface authoring — the web tasks no
   // derivation produces. Its own command because its runs are its own: they
   // are re-run per place, independently of any generate.
   'guard-interfaces',
@@ -39,7 +39,7 @@ export const SessionIndexEntrySchema = z.object({
   workItem: z.string(),
   status: SessionStatusSchema,
   providerSessionId: z.string().optional(),
-  /** Driver-owned resume pointer (§3.3) — opaque to everything else. */
+  /** Driver-owned resume pointer — opaque to everything else. */
   resumeCursor: z.unknown().optional(),
   spent: BudgetSpentSchema,
 });
@@ -70,7 +70,7 @@ export const RunRecordSchema = z.object({
   /** The run-level phase checklist (see {@link RunProgressStepSchema}). */
   progress: z.array(RunProgressStepSchema).optional(),
   /** The run process's pid — the OSS reconciliation sweep's liveness probe
-   *  (§3.9: nothing stays `running` on a dead process's memory). EE's
+   *  (nothing stays `running` on a dead process's memory). EE's
    *  table store tracks liveness its own way and may omit it. */
   pid: z.number().int().optional(),
   /** The live session API while the process runs — a URL plus auth token,
@@ -98,7 +98,7 @@ export type RunRecord = z.infer<typeof RunRecordSchema>;
 /**
  * What the policy shell needs from a store — file-backed in OSS (core),
  * table-backed in EE. Implementations must boot with the reconciliation
- * sweep of §3.9: a run left `running` by a dead process is marked
+ * sweep: a run left `running` by a dead process is marked
  * interrupted, and nothing stays `running` or `waiting` on the strength of
  * a dead process's memory.
  */

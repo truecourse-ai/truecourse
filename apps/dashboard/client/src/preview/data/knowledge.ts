@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * The WORKSPACE corpus (Knowledge): spec documents that came from connected
  * tools (Confluence pages, Jira epics), shared by every repository, in the exact

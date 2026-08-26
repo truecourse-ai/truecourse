@@ -1,6 +1,6 @@
 /**
- * The session definition — what a workstream registers per session type
- * (AGENTIC_PIPELINE_PLAN §3.2/§3.3): prompt, tools, outcome schema, and the
+ * The session definition — what a workstream registers per session type:
+ * prompt, tools, outcome schema, and the
  * three numbers (turn budget, maxResumes, token ceiling). Consumed by the
  * policy shell (`runAgentLoop`) and realized by a `SessionDriver`.
  */
@@ -21,7 +21,7 @@ export interface ToolContext {
   workItem: string;
   signal: AbortSignal;
   /**
-   * Run a child session as a tool (§3.7's orchestrator pattern). Depth 1
+   * Run a child session as a tool (orchestrator pattern). Depth 1
    * only: a child calling this is a structured error the parent sees as a
    * tool result. A child's failure returns as a failed outcome, never a
    * thrown error.
@@ -69,7 +69,7 @@ export function defineSessionTool<TSchema extends z.ZodTypeAny>(tool: {
 }
 
 /**
- * The three numbers each session type sets (§3.3): the per-grant turn
+ * The three numbers each session type sets: the per-grant turn
  * budget, the automatic resume count (effective hard limit =
  * `(maxResumes + 1) × turns`), and the token ceiling the shell enforces
  * between turns.
@@ -88,7 +88,7 @@ export interface SessionDef<TOutcome = unknown> {
   /** A session cannot end without an outcome this schema accepts. */
   outcomeSchema: z.ZodType<TOutcome>;
   budget: SessionBudget;
-  /** May wait on user input (§3.7). Non-interactive runs never block. */
+  /** May wait on user input. Non-interactive runs never block. */
   interactive?: boolean;
   /**
    * A structural demand that `tool` was called before the outcome is accepted
@@ -132,7 +132,7 @@ export type SessionOutcome<TOutcome = unknown> =
   | {
       status: 'completed';
       output: TOutcome;
-      /** Questions policy could not settle (§3.7) — reported loudly. */
+      /** Questions policy could not settle — reported loudly. */
       pendingQuestions: readonly UserInputQuestion[];
       spent: BudgetSpent;
     }

@@ -1,6 +1,6 @@
 /**
- * THE OVERLAP SESSION — `spec-scan.overlap`, one per COLLISION CLUSTER
- * (plan 02 step 5; re-shaped by SPEC_GUARD_PLAN item 119). It replaces
+ * THE OVERLAP SESSION — `spec-scan.overlap`, one per COLLISION CLUSTER.
+ * It replaces
  * TWO one-shots — the recall-biased pair-matrix detector and the strict
  * verify judge — with sessions that read the disputed sections themselves
  * and both flag AND adjudicate each disagreement.
@@ -69,7 +69,7 @@ export const OVERLAP_SESSION_KIND = 'spec-scan.overlap'
 export const OVERLAP_SESSION_CACHE_NAME = 'consolidator/overlap-cluster'
 
 /**
- * The three numbers (§3.3). Fifteen turns of BATCHED section reads covers a
+ * The three numbers. Fifteen turns of BATCHED section reads covers a
  * cluster's checklist; TWO resume grants because a hot cluster legitimately
  * needs the tour — resume, never divide the cluster. The prompt states these
  * numbers to the session (2026-08-21, the documenso field run: a session that

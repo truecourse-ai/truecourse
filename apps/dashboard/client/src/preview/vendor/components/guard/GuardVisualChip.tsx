@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/components/guard/GuardVisualChip.tsx; delete with the preview.
 /**
  * WHAT THE SCREENSHOT LOOKED LIKE, a vision model's reading of the picture a
  * failing web step left behind, worn beside the failure as a chip:

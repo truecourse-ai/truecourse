@@ -72,8 +72,8 @@ import {
  * local git repository over a `file://` URL, so the suite never touches the
  * network while still exercising the actual `git clone` path.
  *
- * Connecting also starts the repository's ONBOARDING SCAN in the background
- * (§4.3). The scan entry is stubbed here — the point is the wiring: that it runs
+ * Connecting also starts the repository's ONBOARDING SCAN in the background.
+ * The scan entry is stubbed here — the point is the wiring: that it runs
  * on the clone, that the 201 does not wait for it, that a failure stays out of
  * the response, and that two scans of one repository never overlap.
  */
@@ -307,7 +307,7 @@ describe('POST /api/repos/connect', () => {
 });
 
 // ---------------------------------------------------------------------------
-// The onboarding scan (docs/ONE_PRODUCT_PLAN.md §4.3)
+// The onboarding scan
 // ---------------------------------------------------------------------------
 
 interface Deferred {

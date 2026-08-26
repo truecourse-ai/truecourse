@@ -1,6 +1,6 @@
 /**
- * The session-driver contract — the provider seam of the agentic pipeline
- * (AGENTIC_PIPELINE_PLAN §3.3, decisions 2026-08-17). A driver owns the
+ * The session-driver contract — the provider seam of the agentic pipeline.
+ * A driver owns the
  * MECHANICS of running one session against one backend; the policy shell
  * (`runAgentLoop`) owns the SEMANTICS: budgets, ceilings, resume grants,
  * the malformed policy, sequence stamping, and sub-session depth.
@@ -34,7 +34,7 @@ export interface DriverCapabilities {
   resumeAtMessage: boolean;
 }
 
-/** How a session continues (§3.3: resume is a fresh budget grant). */
+/** How a session continues (resume is a fresh budget grant). */
 export interface SessionResume {
   /** Opaque, owned and interpreted only by the driver; persisted in the
    *  session index. The SDK driver stores its provider session pointer
@@ -46,7 +46,7 @@ export interface SessionResume {
 }
 
 /**
- * A prompt prefix several sessions SHARE (SPEC_GUARD_PLAN item 8): messages
+ * A prompt prefix several sessions SHARE: messages
  * that lead the conversation identically for every session of a cluster, and
  * the name that cluster caches under.
  *
@@ -72,7 +72,7 @@ export interface SessionRunInput {
   resume?: SessionResume;
   /** Drivers emit event BODIES as they happen; the shell stamps seq + ts
    *  and persists. Full content, never summaries. A driver may attach the
-   *  raw escape hatch (§3.9) — its native wire payload — which the shell
+   *  raw escape hatch — its native wire payload — which the shell
    *  carries onto the persisted envelope. */
   onEvent(event: SessionEventBody & { raw?: RawPayload }): void;
   signal: AbortSignal;

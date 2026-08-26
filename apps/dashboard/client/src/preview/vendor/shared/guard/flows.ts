@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's packages/shared/src/guard/flows.ts; delete with the preview.
 /**
  * Guard FLOWS, the spec-side generation unit (WHAT to test), stored in
  * `.truecourse/scenarios/flows.json` (committable, next to `manifest.json`).
@@ -180,7 +178,7 @@ export function guardNoFlowClaimGapKind(reason: string): GuardCoverageGapKind {
   return 'untestable'
 }
 
-// --- The flow-worker session outcome (plan 04 step 17) ----------------------
+// --- The flow-worker session outcome ----------------------
 
 /**
  * One PREDICTED red step of a submitted scenario, the flow worker's own verdict
@@ -216,7 +214,7 @@ const FLOW_WORKER_PAYLOAD_FIELDS = {
 } as const satisfies Record<string, readonly string[]>
 
 /**
- * The `guard-generate.flow-worker` session's outcome (plan 04 step 17) -
+ * The `guard-generate.flow-worker` session's outcome -
  * exhaustive: a worker cannot end without one of these four kinds.
  *
  * ONE object discriminated by `kind`, carrying exactly the payload fields that

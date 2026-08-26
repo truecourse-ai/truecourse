@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * The workspace-level fake data: who is signed in, the two workspaces the
  * switcher offers, the members and plan of the active one, the provider

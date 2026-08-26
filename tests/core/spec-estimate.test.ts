@@ -189,7 +189,7 @@ describe('priceForModel / formatCostUsd', () => {
 
 
 // ---------------------------------------------------------------------------
-// The SCAN estimate models SESSIONS (plan 02 step 7)
+// The SCAN estimate models SESSIONS
 //
 // The headline contract is AGREEMENT: the estimate probes the run's own cache
 // names with the run's own exported key builders, so a warmed repo estimates to
@@ -408,7 +408,7 @@ describe('estimateScanTokens — sessions, not calls', () => {
     expect(overlap.calls % 8).toBe(0);
   });
 
-  // -- one model (§3.4) ------------------------------------------------------
+  // -- one model ------------------------------------------------------
 
   it('runs every scan stage on ONE model — the claude-code tier by default', async () => {
     writeDocs({ 'docs/auth.md': AUTH, 'docs/session.md': SESSION_DOC });

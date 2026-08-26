@@ -1,5 +1,5 @@
 /**
- * The relevance filter AFTER the move to sessions (plan 02 step 3):
+ * The relevance filter AFTER the move to sessions:
  * `filterByRelevance` — the one-shot stage, its runner seam, its progress
  * callback and its per-doc cache — is retired. The judgment now belongs to the
  * `spec-scan.curate-doc` session, and the pieces that decided what to do with a

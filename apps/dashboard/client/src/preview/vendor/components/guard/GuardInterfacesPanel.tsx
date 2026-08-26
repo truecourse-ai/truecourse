@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/components/guard/GuardInterfacesPanel.tsx; delete with the preview.
 /**
  * The Interfaces tab's LEFT PANEL, the code-derived catalog, grouped by surface
  * (a driver-registry id) and, inside a surface, by FAMILY (the catalog's `group`:

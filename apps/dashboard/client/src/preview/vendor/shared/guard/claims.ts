@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's packages/shared/src/guard/claims.ts; delete with the preview.
 /**
  * Guard CLAIMS, the unit of meaning and of coverage, stored in
  * `.truecourse/scenarios/claims.json` (committable, next to `flows.json`).

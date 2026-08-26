@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's packages/shared/src/guard/step-actuals.ts; delete with the preview.
 /**
  * The ACTUAL half of a step: what one step of one scenario really did in one run.
  * Its counterpart is the AUTHORED half ({@link GuardScenarioStepView}, what the step

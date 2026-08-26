@@ -115,7 +115,7 @@ describe('DecisionsFileSchema (corpus curation intent)', () => {
     expect(parsed.conflictResolutions[0].verdict).toBe('b');
   });
 
-  // v2 (plan 02 step 6) added the scan orchestrator's scope verdicts + standing
+  // v2 added the scan orchestrator's scope verdicts + standing
   // instructions. BOTH versions parse — a v1 file simply has neither and gets the
   // defaults — while every writer stamps 2. Any OTHER version literal is still a
   // deliberate bump nobody has made, so it must fail loud.

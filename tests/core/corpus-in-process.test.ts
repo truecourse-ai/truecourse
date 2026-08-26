@@ -1,7 +1,6 @@
 /**
  * The corpus-path driver behind `spec scan`: `curateInProcess` writes
- * corpus.json over a SCRIPTED SessionDriver (plan 02 — the per-stage runner
- * seams are gone; the scan is sessions now), proving the wiring end-to-end,
+ * corpus.json over a SCRIPTED SessionDriver, proving the wiring end-to-end,
  * including the pre-flight estimate phase that sits in front of it.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';

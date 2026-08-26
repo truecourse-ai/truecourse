@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * Settings as a hub: members and SSO, provider connections, the LLM, the
  * connectors, and the plan. The sub-tab is in the URL, so a settings page is a

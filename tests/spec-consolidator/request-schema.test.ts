@@ -167,7 +167,7 @@ describe('spec-scan.orchestrate', () => {
     expect(props(ScanScopeOutcomeSchema)).toEqual(['findings', 'instructions', 'scopeVerdicts']);
     expect(def.outcomeSchema).toBe(ScanScopeOutcomeSchema);
     expect(def.tools.map((t) => t.name).sort()).toEqual(['doc_outline', 'list_universe']);
-    // §3.7: the scope session may wait on user input; nothing ever blocks on it.
+    // The scope session may wait on user input; nothing ever blocks on it.
     expect(def.interactive).toBe(true);
   });
 

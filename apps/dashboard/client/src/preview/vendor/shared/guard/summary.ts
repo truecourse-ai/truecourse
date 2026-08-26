@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's packages/shared/src/guard/summary.ts; delete with the preview.
 /**
  * Pure, LLM-free composition for the guard read surfaces (`guard status`,
  * `guard drifts`, the dashboard). ONE copy, imported by core, the CLI, and the

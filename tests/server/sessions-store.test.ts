@@ -1,5 +1,5 @@
 /**
- * The OSS file sessions store (AGENTIC_PIPELINE_PLAN §3.9):
+ * The OSS file sessions store:
  * `.truecourse/sessions/<command>/<runId>/run.json` + one transcript jsonl per
  * session, the boot reconciliation sweep, and truncated-final-line tolerance.
  */

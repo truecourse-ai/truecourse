@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/lib/guard-status.ts; delete with the preview.
 /**
  * COLOUR for a guard section-coverage status, the single source the doc coverage
  * surface, the totals strip, and the section detail all read so a status always

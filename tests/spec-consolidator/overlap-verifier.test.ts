@@ -1,5 +1,5 @@
 /**
- * The SECTION MACHINERY of the retired overlap verifier (plan 02 step 5).
+ * The SECTION MACHINERY of the retired overlap verifier.
  *
  * The precision one-shot itself is gone — `verifyFlaggedOverlaps` /
  * `buildVerifyOverlapUserPrompt` and the per-flag verdict cache went with it,

@@ -1,5 +1,5 @@
 /**
- * The SCAN RUN end to end (plan 02 steps 3–5): discover → curate-doc sessions →
+ * The SCAN RUN end to end: discover → curate-doc sessions →
  * settle-areas → group → overlap sessions → assemble + persist corpus.json.
  * `curate()` — the one-shot orchestration this file was written against — is
  * retired; the run now lives in `packages/core/src/services/spec-scan/run.ts`

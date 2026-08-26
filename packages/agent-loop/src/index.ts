@@ -1,5 +1,5 @@
 /**
- * The agent loop of the agentic pipeline (AGENTIC_PIPELINE_PLAN §3):
+ * The agent loop of the agentic pipeline:
  * ONE package defines the loop — the session contract (transcript events,
  * session definitions, the driver seam, the sessions-store shapes) and the
  * policy shell `runAgentLoop` — and one package per backend implements it

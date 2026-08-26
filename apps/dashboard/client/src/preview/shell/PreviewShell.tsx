@@ -1,9 +1,7 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * The one-product shell: the sidebar the whole dashboard hangs off.
  *
- * Top to bottom, in the order §3.5 fixes: the workspace switcher, then
+ * Top to bottom: the workspace switcher, then
  * Repositories, Notifications (with the unread badge) and Settings, then Admin
  * on its own, separated, because the signed-in user is an operator, then the
  * user menu. Pull requests is NOT here: it lives inside a repository, and the
@@ -36,7 +34,7 @@ import { PREVIEW_BASE } from './base';
 
 export { PREVIEW_BASE };
 
-/** The brand wordmark face, the one place the UI uses the logo's font (the agentic branch's `.brand-wordmark`). */
+/** The brand wordmark face, the one place the UI uses the logo's font (`.brand-wordmark`). */
 const WORDMARK = { fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace", letterSpacing: '0.01em' } as const;
 
 const NAV: { to: string; label: string; icon: LucideIcon }[] = [

@@ -1,5 +1,5 @@
 /**
- * THE SCAN ORCHESTRATOR SESSION — `spec-scan.orchestrate` (plan 02 step 6),
+ * THE SCAN ORCHESTRATOR SESSION — `spec-scan.orchestrate`,
  * plus the decisions schema v2 it writes into.
  *
  * The rules under test:

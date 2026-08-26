@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * A job announces itself ONCE, as a toast carrying a link to its session in the
  * repository's Activity tab. Nothing in the toast moves: no steps, no counter,

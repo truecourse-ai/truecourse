@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/components/guard/GuardNeedsSetupCta.tsx; delete with the preview.
 /**
  * The needs-setup CALL TO ACTION, the one element that separates this state from
  * the grey "nobody can test this" wall: it says which third party is missing and

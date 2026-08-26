@@ -1,8 +1,6 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * One test, as its own page (`/tests/:flowId`): the breadcrumb back to Tests,
- * then the test workspace the agentic branch renders for a flow (`GuardFlowsPane`
+ * then the vendored test workspace for a flow (`GuardFlowsPane`
  * over fake data), pinned to this one flow. A scenario or finding the workspace
  * opens rides the same URL tabs it always did.
  */

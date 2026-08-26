@@ -1,6 +1,6 @@
 /**
- * THE SCAN ORCHESTRATOR SESSION — `spec-scan.orchestrate`, at most one per scan
- * (plan 02 step 6). It settles the SCAN SCOPE before any per-doc session
+ * THE SCAN ORCHESTRATOR SESSION — `spec-scan.orchestrate`, at most one per scan.
+ * It settles the SCAN SCOPE before any per-doc session
  * spends: which subtrees of the doc universe (directory prefixes of repo docs,
  * registered llms.txt sources) are spec-source territory, and which standing
  * `instructions` bind every downstream scan session.
@@ -49,7 +49,7 @@ export const SPEC_SCAN_ORCHESTRATE_SESSION_KIND = 'spec-scan.orchestrate'
 export const ORCHESTRATE_WORK_ITEM = 'scan-scope'
 
 /**
- * The three numbers (§3.3). Twenty turns covers a tour of a large universe's
+ * The three numbers. Twenty turns covers a tour of a large universe's
  * outlines with room to sample; one resume grant because a monorepo's doc
  * sprawl legitimately needs the second pass. Interactive, so a question the
  * user never answers still ends within budget (the loop never blocks).
@@ -283,7 +283,7 @@ export function mergeScopeOutcome(
 // Rendering — the tree the briefing and `list_universe` share.
 // ---------------------------------------------------------------------------
 
-/** Cap on rendered directories — context is the budget (§3.3). */
+/** Cap on rendered directories — context is the budget. */
 const MAX_TREE_DIRS = 300
 
 function docsWord(n: number): string {
@@ -413,7 +413,7 @@ export function orchestrateSessionDef(scope: ScanScopeUniverse): SessionDef<Scan
     tools: [listUniverseTool(scope), docOutlineTool(scope)],
     outcomeSchema: ScanScopeOutcomeSchema,
     budget: ORCHESTRATE_BUDGET,
-    // §3.7: the session may wait on user input where a surface can carry it;
+    // The session may wait on user input where a surface can carry it;
     // non-interactive runs never block — unanswered questions land on the
     // outcome as pendingQuestions and the run surfaces them loudly.
     interactive: true,

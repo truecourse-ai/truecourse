@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * acme/orders-api: the interface catalog (cli and api derived, web authored),
  * each surface's preparation recipe, the llms.txt documentation sites, and the

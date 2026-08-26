@@ -1,6 +1,6 @@
 /**
- * THE AREA SETTLING SESSION — `spec-scan.settle-areas`, AT MOST ONE per corpus
- * (plan 02 step 4). It replaces the vocab-normalizer one-shot with more
+ * THE AREA SETTLING SESSION — `spec-scan.settle-areas`, AT MOST ONE per corpus.
+ * It replaces the vocab-normalizer one-shot with more
  * authority: besides merging drifted labels it may COLLAPSE a product to core
  * (the one merge the old sanitize forbade — legal here, on this path only,
  * because the session justifies every non-core product or collapses it) and
@@ -39,7 +39,7 @@ export const SETTLE_AREAS_CACHE_NAME = 'consolidator/settle-areas'
 export const SUBDIVISION_DOC_THRESHOLD = 40
 
 /**
- * The three numbers (§3.3): the settlement is a read-a-few-samples-and-decide
+ * The three numbers: the settlement is a read-a-few-samples-and-decide
  * job. The briefing carries the WHOLE label→docs map, so no turn is spent
  * enumerating it — eight turns is a handful of doc reads, `check_settlement`
  * and the outcome, and one resume grant covers a vocabulary that genuinely
@@ -502,7 +502,7 @@ function briefedDocsPerLabel(vocab: AreaVocabView): number {
 /**
  * The briefing carries the LABEL→DOCS MAP itself (not just doc counts): the
  * data this session certainly needs rides the briefing, not a tool — the same
- * philosophy as interface authoring's state registry (plan item 106). A
+ * philosophy as interface authoring's state registry. A
  * session that has to fetch the map spends its whole budget fetching it.
  */
 export function settleAreasBriefing(

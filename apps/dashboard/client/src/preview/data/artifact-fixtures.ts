@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * The RAW half of every artifact-backed entity: the slice of the JSON store file
  * that holds it, pretty-printed, which is what the detail panes show when the

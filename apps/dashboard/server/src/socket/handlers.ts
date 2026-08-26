@@ -80,7 +80,7 @@ export function setupHandlers(io: SocketServer): void {
       }
     });
 
-    // Live tail of one agent-sessions run (§3.6). The client joins BEFORE its
+    // Live tail of one agent-sessions run. The client joins BEFORE its
     // REST snapshot read and dedups by seq, so the tail's from-now-on offsets
     // lose nothing. Payload: { repoId, command, runId }.
     socket.on(

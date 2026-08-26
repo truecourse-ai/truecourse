@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/components/guard/GuardDependenciesPane.tsx; delete with the preview.
 /**
  * The DEPENDENCIES tab, every class of starting state the program under test
  * needs, and what this machine provides for each.

@@ -1,5 +1,5 @@
 /**
- * The driver CONFORMANCE SUITE (AGENTIC_PIPELINE_PLAN §3.3): both session
+ * The driver CONFORMANCE SUITE: both session
  * drivers — api (per-turn generateText loop) and Agent SDK (streaming-input
  * subprocess) — run through ONE spec via `runAgentLoop`, which is what keeps
  * two mechanical drivers one semantic loop. Each fixture translates the

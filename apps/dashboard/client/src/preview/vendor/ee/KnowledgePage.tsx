@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's ee/packages/client/src/KnowledgePage.tsx with imports retargeted; delete with the preview.
 /**
  * Workspace Knowledge , the enterprise console surface for the cross-repo spec
  * corpus derived from connected tools (Confluence / Jira / …) via Sync + Process.

@@ -417,7 +417,7 @@ describe('runAgentLoop completion', () => {
   it('one turn with several re-asked calls counts as ONE malformed turn', async () => {
     // A model may emit two parallel tool calls that both fail their schemas:
     // that is one malformed TURN, not two — the session gets its second
-    // chance (§3.3 counts consecutive malformed turns).
+    // chance (the shell counts consecutive malformed turns).
     const { driver } = fakeDriver(async ({ emit, interrupted }) => {
       await emit({ type: 'assistant-turn', toolCall: { name: 'a', args: 1 }, usage: usage(10) });
       await emit({ type: 're-ask', invalid: '1', reason: 'bad args for a' });
@@ -587,7 +587,7 @@ describe('runAgentLoop tool wrapping', () => {
       // Valid args reach execute with the shell's ToolContext.
       const ok = await tool.execute({ value: 'hi' }, dummyToolCtx());
       expect(ok).toEqual({ content: 'docs/a.md:hi' });
-      // Schema-failing args are §3.3-malformed: the wrapper throws for the
+      // Schema-failing args are malformed: the wrapper throws for the
       // driver's re-ask mechanics; the tool body never runs.
       await expect(tool.execute({ value: 7 }, dummyToolCtx())).rejects.toBeInstanceOf(
         SessionToolArgsError,
@@ -609,7 +609,7 @@ describe('runAgentLoop tool wrapping', () => {
 });
 
 // ---------------------------------------------------------------------------
-// sub-sessions (§3.7 dispatch, §3.3 depth 1)
+// sub-sessions (dispatch, depth 1)
 // ---------------------------------------------------------------------------
 
 describe('runAgentLoop sub-sessions', () => {
@@ -660,8 +660,8 @@ describe('runAgentLoop sub-sessions', () => {
     expect(childEvents[0]).toMatchObject({ type: 'session-start', kind: 'spec-scan.overlap' });
     expect(childEvents.at(-1)).toMatchObject({ type: 'outcome', value: { verdict: 'child-done' } });
     expect(index.get('child-1')?.status).toBe('completed');
-    // Parent transcript carries full linkage on BOTH child events (§3.9:
-    // stream folding must be order-robust).
+    // Parent transcript carries full linkage on BOTH child events (stream
+    // folding must be order-robust).
     const linkage = { sessionId: 'child-1', kind: 'spec-scan.overlap', workItem: 'docs/a.md' };
     const childRefs = persistence.readEvents('parent').filter((e) => e.type === 'child-session');
     expect(childRefs).toHaveLength(2);

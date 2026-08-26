@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/components/guard/GuardRecipeDetail.tsx; delete with the preview.
 /**
  * The RECIPE as a destination, the preparation a SURFACE runs on, opened from
  * that surface's recipe row at the top of the Interfaces catalog.

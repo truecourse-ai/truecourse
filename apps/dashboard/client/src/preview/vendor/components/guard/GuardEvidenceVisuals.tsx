@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/components/guard/GuardEvidenceVisuals.tsx; delete with the preview.
 /**
  * The VISUAL half of an evidence bundle, split by what each piece is evidence OF:
  *

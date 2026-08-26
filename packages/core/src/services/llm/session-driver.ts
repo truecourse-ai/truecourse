@@ -1,11 +1,11 @@
 /**
  * THE SESSION DRIVER THE CONFIGURED TRANSPORT SELECTS — the injection point
- * agent sessions have that one-shot calls have in `install-transport.ts`
- * (AGENTIC_PIPELINE_PLAN §3.1): `claude-code` mode runs the Agent SDK driver
+ * agent sessions have that one-shot calls have in `install-transport.ts`:
+ * `claude-code` mode runs the Agent SDK driver
  * (one `claude` subprocess per session, the user's own harness login), `api`
  * mode runs our per-turn loop against the configured provider.
  *
- * ONE MODEL EVERYWHERE (§3.4): every session of every workstream runs on the
+ * ONE MODEL EVERYWHERE: every session of every workstream runs on the
  * same capable model — Opus in claude-code mode, the configured flagship in api
  * mode. There is deliberately no per-session model knob to turn: the multi-model
  * cost split is retired, and a session type that ever earns an exception gets it
@@ -27,7 +27,7 @@ import { effectiveLlmMode, readApiLlmConfig } from '../../config/global-config.j
 import type { LlmTransportFlag, LlmTransportMode } from '../../config/global-config.js';
 import { buildProviderConfig, priceCall } from './install-transport.js';
 
-/** The model claude-code mode runs every session on (§3.4). */
+/** The model claude-code mode runs every session on. */
 export const SESSION_MODEL_CLAUDE_CODE = 'opus';
 
 export interface ConfiguredSessionDriver {
@@ -48,7 +48,7 @@ export interface SessionDriverOptions {
   /** Working directory for the claude-code subprocess (the repo). */
   cwd?: string;
   /**
-   * Where the SDK driver mirrors provider session state (§3.3) — pass the run's
+   * Where the SDK driver mirrors provider session state — pass the run's
    * `<runDir>/provider`, so a parked session's context outlives the harness's
    * own retention window. Omitted, the SDK keeps it wherever it keeps it.
    */

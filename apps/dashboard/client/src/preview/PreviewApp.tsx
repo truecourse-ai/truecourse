@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * The preview's root: the shell, the routes, and the job toasts that announce
  * a started job with a link to its Activity session.

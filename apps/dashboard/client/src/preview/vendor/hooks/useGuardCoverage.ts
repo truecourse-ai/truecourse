@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/hooks/useGuardCoverage.ts; delete with the preview.
 /**
  * Per-doc guard coverage join, the section list + statuses the coverage surface
  * paints over the doc. Keyed on the selected doc and gated on `enabled` so it

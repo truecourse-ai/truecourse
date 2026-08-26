@@ -86,7 +86,7 @@ describe('mergeDecisions — empty overlay is a no-op', () => {
   });
 });
 
-// Decisions v2 (plan 02 step 6): the overlay wins per SCOPE PATH — normalized,
+// Decisions v2: the overlay wins per SCOPE PATH — normalized,
 // so `docs/` and `docs` are one row — and instructions union, base order kept.
 // The merge always stamps version 2, whatever the inputs still carry.
 describe('mergeDecisions — scope verdicts and instructions (v2)', () => {

@@ -1,6 +1,6 @@
 /**
- * `runAgentLoop` — the POLICY SHELL of the agentic pipeline
- * (AGENTIC_PIPELINE_PLAN §3.3, driver architecture 2026-08-17). The only
+ * `runAgentLoop` — the POLICY SHELL of the agentic pipeline.
+ * The only
  * entry workstreams call: it owns the SEMANTICS — budget counting, token
  * ceilings with pre-emptive interrupt, automatic resume grants, the narrowed
  * malformed policy, envelope stamping (seq + ts), sub-session depth, and
@@ -30,7 +30,7 @@ import type { SessionPersistence } from './session-store.js';
 
 /**
  * Thrown by the shell's tool wrapper when a tool call's arguments fail the
- * tool's input schema — one of §3.3's narrowed malformed cases. Drivers
+ * tool's input schema — one of the narrowed malformed cases. Drivers
  * catch it and run their re-ask mechanics (the invalid args quoted back);
  * it is never an observation the model quietly ingests as a tool result.
  */
@@ -61,7 +61,7 @@ export interface AgentLoopInput<TOutcome> {
   /** Minted by the run orchestrator; one transcript per session id. */
   sessionId: string;
   /**
-   * Continue a parked/failed prior session (§3.3: a fresh budget grant over
+   * Continue a parked/failed prior session (a fresh budget grant over
    * an opaque cursor). The shell reads the prior transcript from
    * persistence; this session gets a fresh transcript starting at
    * `session-start { resumeOf }`.
@@ -90,7 +90,7 @@ export function runAgentLoop<TOutcome>(input: AgentLoopInput<TOutcome>): AgentLo
  * documenso field run: 12 of 26 overlap sessions read to the wall and lost
  * everything — silent grants give a session no way to pace itself, and a
  * budget-exhausted failure that discards 45 turns of reading is not the "real
- * result" §3.3 promised). Two mechanics, both shell-owned:
+ * result" promised). Two mechanics, both shell-owned:
  *
  * - Every automatic resume grant is ANNOUNCED to the session as a steered user
  *   message naming the grant, the fresh turn count, and — on the last grant —
@@ -125,7 +125,7 @@ export function wrapUpMessage(preconditionTool?: string): string {
   ].join(' ');
 }
 
-/** `depth` is the sub-session depth: 0 = top-level, 1 = child (§3.3's max). */
+/** `depth` is the sub-session depth: 0 = top-level, 1 = child (the max). */
 function startSession<TOutcome>(
   input: AgentLoopInput<TOutcome>,
   depth: number,
@@ -184,7 +184,7 @@ function startSession<TOutcome>(
   };
 
   // Budget = assistant messages, counted by the SHELL from its own events
-  // (§3.3: the driver's own turn numbers are never read). Enforcement is
+  // (the driver's own turn numbers are never read). Enforcement is
   // interrupt() at the turn boundary; ceilings may overshoot by one turn,
   // which stays recorded.
   let turnsThisGrant = 0;
@@ -193,7 +193,7 @@ function startSession<TOutcome>(
   // the last grant's budget bound. `undefined` until the demand is issued.
   let wrapUpTurnsLeft: number | undefined;
 
-  // The narrowed malformed policy (§3.3): text turns are LEGAL and never
+  // The narrowed malformed policy: text turns are LEGAL and never
   // re-asked; a re-ask marks its TURN malformed (several re-asked calls in
   // one turn are still one malformed turn), and two CONSECUTIVE malformed
   // turns end the session. Any turn without a re-ask breaks the streak.
@@ -235,7 +235,7 @@ function startSession<TOutcome>(
         currentTurnMalformed = false;
         // Context is a LEVEL: this turn's envelope approximates occupancy.
         // Crossing the ceiling pre-empts the provider wall — compaction
-        // never runs, and no resume grant softens it (§3.3).
+        // never runs, and no resume grant softens it.
         if (totalTokens(body.usage) >= def.budget.tokenCeiling) {
           interruptCause = 'context';
           requestInterrupt();
@@ -251,7 +251,7 @@ function startSession<TOutcome>(
           } else if (wrapUpTurnsLeft === undefined) {
             // The last budget bound: demand the outcome instead of killing the
             // session — the window is what turns budget-exhausted from a total
-            // loss into §3.3's "real result".
+            // loss into the promised "real result".
             wrapUpTurnsLeft = WRAP_UP_TURNS;
             steerSession(wrapUpMessage(def.outcomePrecondition?.tool));
           } else if (--wrapUpTurnsLeft <= 0) {
@@ -336,7 +336,7 @@ function startSession<TOutcome>(
     const toolCtx: ToolContext = {
       workItem,
       signal: controller.signal,
-      // Orchestrator → worker is the only topology (§3.3 depth 1). A child
+      // Orchestrator → worker is the only topology (depth 1). A child
       // dispatching its own child gets a structured failure the parent sees
       // as a tool result — never a grandchild session, never a throw.
       async dispatchChild<TChild>(childDef: SessionDef<TChild>, childMessages: readonly string[]) {
@@ -422,7 +422,7 @@ function startSession<TOutcome>(
     };
 
     // A cross-process resume hands the driver the PRIOR session's persisted
-    // transcript (audit truth) plus its opaque cursor (§3.3).
+    // transcript (audit truth) plus its opaque cursor.
     const priorEvents = input.resume ? persistence.readEvents(input.resume.of) : [];
     // A precondition satisfied in the resumed-from session stays satisfied:
     // the tool ran, and this session carries that transcript as its history.
@@ -442,7 +442,7 @@ function startSession<TOutcome>(
 
     // TRANSIENT failures get exactly one retry, resuming over the transcript
     // so far; the failure is recorded honestly first. BLOCKED failures park
-    // — hammering a blocked dependency is forbidden (§3.3).
+    // — hammering a blocked dependency is forbidden.
     if (
       result.kind === 'failure' &&
       result.failure.retryability === 'transient' &&
@@ -484,7 +484,7 @@ function startSession<TOutcome>(
     }
 
     // -----------------------------------------------------------------------
-    // finalize: the outcome requirement (§3.2) — a session cannot end
+    // finalize: the outcome requirement — a session cannot end
     // without a structured outcome its schema accepts
     // -----------------------------------------------------------------------
     if (result.kind === 'outcome') {

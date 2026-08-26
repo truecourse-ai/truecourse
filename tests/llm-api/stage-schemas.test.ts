@@ -29,7 +29,7 @@ vi.mock('../../packages/llm-api/src/model.js', () => ({ buildModel: buildModelMo
 import { createApiTransport } from '../../packages/llm-api/src/index';
 
 // --- spec scan ---------------------------------------------------------------
-// The five spec stages are AGENT SESSIONS now (plan 02): they build no
+// The five spec stages are AGENT SESSIONS now: they build no
 // `LlmRequest`, so they contribute nothing to the request sweep below. Their
 // outcome schemas ride the session driver's toolset instead, and are checked
 // object-rooted in their own describe at the end of this file.
@@ -454,7 +454,7 @@ describe('every real stage schema is enforced or explicitly opted out', () => {
   });
 
   it('collects a schema from every stage', () => {
-    // 22 since the five spec stages became agent sessions (plan 02) — they build
+    // 22 since the five spec stages became agent sessions — they build
     // no LlmRequest at all. A NEW schema-bearing call site still has to raise it.
     expect(collected.length).toBeGreaterThanOrEqual(22);
     // Each collected call site contributed exactly one request.

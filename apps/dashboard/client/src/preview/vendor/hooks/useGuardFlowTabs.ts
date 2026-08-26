@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/hooks/useGuardFlowTabs.ts; delete with the preview.
 /**
  * The Flows tab's main-pane tab set, one {@link useGuardTabs} reducer bound to
  * `?flow=<flowId>` (Manual pseudo-flow ids ride as-is).

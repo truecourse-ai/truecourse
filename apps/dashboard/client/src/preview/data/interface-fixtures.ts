@@ -1,8 +1,6 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * The fake interface catalog (./orders-api.catalog.ts, ./other-repos.ts) folded
- * into the EXACT payload shape the agentic branch's INTERFACES surfaces consume,
+ * into the EXACT payload shape the vendored INTERFACES surfaces consume,
  * so the Interfaces tab renders the vendored `GuardInterfacesPanel` /
  * `GuardInterfacesPane` / `GuardInterfaceDiagram` unchanged over fake data.
  *

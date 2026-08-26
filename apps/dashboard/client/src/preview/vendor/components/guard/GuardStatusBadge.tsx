@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/components/guard/GuardStatusBadge.tsx; delete with the preview.
 /**
  * The guard status pills. Both read the ONE status vocabulary
  * (`lib/guard-flow-status.ts`) and the ONE colour table (`lib/guard-status.ts`),

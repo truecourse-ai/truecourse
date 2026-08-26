@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/components/guard/GuardFlowsPane.tsx; delete with the preview.
 /**
  * THE guard MAIN PANE, the shared GuardTabStrip (any opened flow, addressable as
  * `?flow=`) over the merged flow detail: the flow's header and milestones, and

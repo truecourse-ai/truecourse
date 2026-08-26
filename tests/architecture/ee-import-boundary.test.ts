@@ -74,8 +74,8 @@ const STATIC_CLOUD_SDK_IMPORT =
   /(?:^|\n)\s*import\b[^\n]*\bfrom\s*['"](?:@aws-sdk\/[^'"]+|@azure\/[^'"]+)['"]|(?:^|\n)\s*import\s*['"](?:@aws-sdk\/[^'"]+|@azure\/[^'"]+)['"]|require\(\s*['"](?:@aws-sdk\/[^'"]+|@azure\/[^'"]+)['"]/;
 
 // The Claude Agent SDK wrapper has exactly ONE sanctioned home in OSS:
-// `packages/llm-claude-agent`, the claude-code session driver (AGENTIC_
-// PIPELINE_PLAN §3.3). Everything else runs sessions through the
+// `packages/llm-claude-agent`, the claude-code session driver. Everything
+// else runs sessions through the
 // `SessionDriver` seam in `@truecourse/shared/llm`. Any mention of the
 // package specifier counts — the sanctioned home itself loads it through a
 // lazy, assembled-specifier import (it is an optional peer).

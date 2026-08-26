@@ -35,7 +35,7 @@ import { processWorkspaceKnowledge } from '../../ee/packages/server/src/knowledg
 import { docPathOf, outcome, stubDriver, type StubScript } from '../core/spec-scan-session-stub';
 
 /**
- * The workspace corpus sync runs the SCAN SESSIONS (plan 02). Called directly it
+ * The workspace corpus sync runs the SCAN SESSIONS. Called directly it
  * takes a `driver` seam; reached through `processWorkspaceKnowledge` it does
  * not, so the driver the run resolves is mocked at the module the built core
  * imports it from. Anything reaching it without a script fails loudly.

@@ -1,6 +1,6 @@
 /**
- * The DETERMINISTIC pre-filter (plan 02 step 3 keeps it verbatim, in front of
- * the pool): archived / agent-instruction files, changelogs, template dirs and
+ * The DETERMINISTIC pre-filter: archived / agent-instruction files,
+ * changelogs, template dirs and
  * near-duplicate copies are dropped before any session is spent, and manual
  * includes bypass it. Only the entry point moved — the retired
  * `filterByRelevance` wrapped it; the scan run now calls `prefilterDocs` (for

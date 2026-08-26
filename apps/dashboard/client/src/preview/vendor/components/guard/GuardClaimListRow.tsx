@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/components/guard/GuardClaimListRow.tsx; delete with the preview.
 /**
  * THE claim row's CONTENT, what one claim looks like in a list, wherever that
  * list is (today: the claims a doc section states, read from the section's own

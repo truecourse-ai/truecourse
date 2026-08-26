@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/lib/spec-web-source.ts; delete with the preview.
 /**
  * Display mapping for WEB-SOURCE spec docs, pages snapshotted from a registered
  * llms.txt site by `truecourse spec source add`.

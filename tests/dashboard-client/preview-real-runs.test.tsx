@@ -1,6 +1,3 @@
-// PREVIEW: the real seam. Delete with the preview when the one-product
-// dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * The runs of a REAL (URL-connected) repository, streaming into the shell.
  *

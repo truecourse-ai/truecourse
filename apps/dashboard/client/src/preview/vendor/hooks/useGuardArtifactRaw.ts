@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/hooks/useGuardArtifactRaw.ts; delete with the preview.
 /**
  * The stored artifact behind ONE guard entity, the raw half of the two readings
  * every artifact-backed detail offers.

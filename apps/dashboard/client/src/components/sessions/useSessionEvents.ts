@@ -4,7 +4,7 @@
  * Lives beside the Activity components rather than in `hooks/` because it is
  * the sessions surface's own plumbing: the REST snapshot off the sessions
  * route, deduped against the socket-pushed events `useRunStream` already
- * accumulates for the run (§3.9's subscribe-then-snapshot ordering).
+ * accumulates for the run (subscribe-then-snapshot ordering).
  *
  * `enabled` is what keeps a collapsed session line from fetching — a run with
  * a hundred curate sessions reads none of them until one is opened. A

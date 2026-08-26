@@ -1,5 +1,5 @@
 /**
- * The api session driver (AGENTIC_PIPELINE_PLAN §3.3): our own per-turn loop
+ * The api session driver: our own per-turn loop
  * on `generateText` — tools without `execute`, one step per turn, full-history
  * resend, cache breakpoints, per-turn fallback retry, and the malformed
  * mapping. The REAL `generateText` runs against a scripted LanguageModelV3

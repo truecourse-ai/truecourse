@@ -1,8 +1,8 @@
 /**
- * The Agent SDK SESSION DRIVER (AGENTIC_PIPELINE_PLAN §3.3, decisions
- * 2026-08-17): the claude-code mode of the agentic pipeline. One streaming-
- * input `query()` per session — ONE live subprocess (the user's installed
- * `claude` binary, their own harness login) serving every turn — with the
+ * The Agent SDK SESSION DRIVER: the claude-code mode of the agentic
+ * pipeline. One streaming-input `query()` per session — ONE live subprocess
+ * (the user's installed `claude` binary, their own harness login) serving
+ * every turn — with the
  * session's tools as in-process SDK MCP handlers and the structured outcome
  * via the SDK's native `outputFormat: {type: 'json_schema'}`.
  *
@@ -15,7 +15,7 @@
  *   the `assistant-turn` events this driver emits.
  * - A success result MISSING `structured_output` is a malformed failure.
  *
- * ISOLATION IS INVARIANT (§3.3): the options block below is hardcoded and no
+ * ISOLATION IS INVARIANT: the options block below is hardcoded and no
  * session type may weaken it — a session that needs the harness's own tools
  * is a plan amendment, not a configuration knob.
  */
@@ -58,7 +58,7 @@ export const SESSION_MCP_SERVER_NAME = 'session';
 const RESUME_NUDGE =
   'Continue from where you stopped. When you have reached the final result, produce the structured outcome.';
 
-/** The opaque resume cursor this driver owns (§3.3). */
+/** The opaque resume cursor this driver owns. */
 interface ClaudeAgentCursor {
   providerSessionId: string;
   /** Optional resume-at point inside the conversation (chain uuid). */
@@ -72,7 +72,7 @@ export interface ClaudeAgentDriverOptions {
   fallbackModel?: string;
   cwd?: string;
   /**
-   * Provider session state mirror (§3.3: provider state lives in OUR store,
+   * Provider session state mirror (provider state lives in OUR store,
    * immune to the harness's retention window). Wired into the SDK's
    * `sessionStore` adapter; typically `providerSessionStore(<runDir>/provider)`.
    */
@@ -247,7 +247,7 @@ async function runClaudeAgentSession(
   });
 
   const options: SdkQueryOptions = {
-    // -- §3.3 isolation invariants, hardcoded ------------------------------
+    // -- isolation invariants, hardcoded ------------------------------
     tools: [], // no built-in tools
     disallowedTools: ['ToolSearch'], // deferred tool loading steals the first turn (spike)
     settingSources: [],
@@ -256,7 +256,7 @@ async function runClaudeAgentSession(
     // dropping it breaks credential lookup (keychain, PATH).
     env: { ...process.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
     strictMcpConfig: true,
-    settings: { autoCompactEnabled: false }, // compaction never runs (§3.3)
+    settings: { autoCompactEnabled: false }, // compaction never runs
     // ----------------------------------------------------------------------
     mcpServers: { [SESSION_MCP_SERVER_NAME]: server as never },
     permissionMode: 'dontAsk',
@@ -406,7 +406,7 @@ async function runClaudeAgentSession(
         }
         default:
           if (!IGNORED_MESSAGE_TYPES.has(message.type)) {
-            // A new SDK message type degrades loudly, never silently (§3.3).
+            // A new SDK message type degrades loudly, never silently.
             console.warn(`[llm-claude-agent] unhandled SDK message type: ${message.type}`);
           }
           break;
@@ -469,7 +469,7 @@ function failure(f: SessionFailure, resumeCursor?: unknown): DriverResult {
 
 /**
  * Feature-detect what this driver depends on, from the first init message —
- * never version sniffing (§3.3 distribution). A missing/failed in-process
+ * never version sniffing. A missing/failed in-process
  * MCP server means no session tool can run: blocked, loudly.
  */
 function preflight(init: SdkSystemMessage, def: SessionDef): SessionFailure | undefined {

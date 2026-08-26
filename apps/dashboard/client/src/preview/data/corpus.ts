@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * The spec corpus beside the coverage: the documents the scan kept, grouped by
  * area, each with the sections that state claims, and the open conflicts
@@ -269,7 +267,7 @@ export function conflictsForRepo(slug: string): SpecConflict[] {
 }
 
 // ---------------------------------------------------------------------------
-// Coverage VERSIONS (ONE_PRODUCT_PLAN §3.5, the agentic plan's §3.8): every scan
+// Coverage VERSIONS: every scan
 // writes a version parented on the one before; a pull request that edits spec
 // documents gets its own version parented on the baseline, and a run names the
 // version it executed. A version carries its CHANGES against its parent; the

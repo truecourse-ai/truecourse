@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's packages/shared/src/spec/overlap-resolution.ts; delete with the preview.
 /**
  * The SINGLE derivation of "is a within-area overlap resolved?", ONE copy,
  * imported by core (the guard-generate gate), the CLI (`spec conflicts` /

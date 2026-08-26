@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * Admin, for operators: every workspace on this deployment. A left menu like
  * every other page (Jobs, Traces), each a table with search and chip filters.

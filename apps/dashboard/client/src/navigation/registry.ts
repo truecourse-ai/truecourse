@@ -188,10 +188,6 @@ export const SECTIONS: SectionDescriptor[] = [
       // panel. Shares BL Drift's Runs idiom (ClipboardList) — the two live in
       // different sections, so a shared icon never crowds one rail.
       { id: 'guarddrifts', label: 'Runs', icon: ClipboardList, noPanel: true },
-      // Every agentic run (scan, setup, generate, interfaces, adjudicate) with
-      // its sessions and their live transcripts — AGENTIC_PIPELINE_PLAN
-      // §3.6–§3.9. Reads the repo's sessions store; no panel, the view is its
-      // own three columns.
       { id: 'activity', label: 'Activity', icon: Activity, noPanel: true },
     ],
   },

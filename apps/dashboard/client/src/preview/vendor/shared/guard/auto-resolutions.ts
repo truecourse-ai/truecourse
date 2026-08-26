@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's packages/shared/src/guard/auto-resolutions.ts; delete with the preview.
 /**
  * The durable across-run guard ledger, `guard/auto-resolutions.json`, two
  * records in one gitignored file, both keyed by the FLOW×SURFACE identity
@@ -32,10 +30,10 @@ import { GuardDriverIdSchema } from './drivers'
 
 /** What drove an auto-resolution: a HIGH-confidence `generation-defect` triage
  *  verdict, a HIGH-confidence fidelity flag (the self-heal discard),, on the
- *  session path (plan 04 step 17), a flow-worker session ending `retired` (the
+ *  session path, a flow-worker session ending `retired` (the
  *  worker itself judged its attempts defective and gave the flow up this run),
- *  or an `authoring-defect` verdict from `guard adjudicate` (plan 05 step 23:
- *  a post-run adjudication blamed the scenario, so the flow taints and the
+ *  or an `authoring-defect` verdict from `guard adjudicate` (a post-run
+ *  adjudication blamed the scenario, so the flow taints and the
  *  same escalate-after-{@link DEFAULT_AUTO_RESOLVE_ESCALATE_AFTER} budget
  *  applies before it becomes a human task). */
 export const GuardAutoResolutionSourceSchema = z.enum(['triage', 'fidelity', 'worker', 'adjudicate'])

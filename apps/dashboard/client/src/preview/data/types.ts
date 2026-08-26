@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * The shapes the preview renders from. They are NOT the wire types of the real
  * product: they are the smallest honest description of what each screen shows,

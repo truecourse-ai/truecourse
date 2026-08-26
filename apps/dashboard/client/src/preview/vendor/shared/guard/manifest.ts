@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's packages/shared/src/guard/manifest.ts; delete with the preview.
 /**
  * `scenarios/manifest.json`, the binding record for the committed scenarios, the
  * guard analogue of `contracts/manifest.json`. It is keyed by FLOW (v2): each

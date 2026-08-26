@@ -4,13 +4,13 @@
  * the shared {@link estimateStageTokens}, so the calculation lives in one place
  * and the CLI + dashboard render identical numbers.
  *
- * Deterministic, no LLM, no transport. SCAN models SESSIONS (plan 02 step 7):
+ * Deterministic, no LLM, no transport. SCAN models SESSIONS:
  * per session kind the estimate counts cache-MISSING work items by probing the
  * SAME caches with the SAME exported key builders the run uses (instructions
  * fingerprint included), then turns items into calls with per-kind expected
  * turn counts — `minCalls` = items (one turn each), `maxCalls` = items ×
  * (maxResumes+1) × turns (the budget ceiling), expected = items ×
- * EXPECTED_TURNS. One model runs every session (§3.4), so the scan estimate
+ * EXPECTED_TURNS. One model runs every session, so the scan estimate
  * carries no per-stage tier labels.
  *
  * Per-kind system prompts and briefing builders are the REAL ones (imported
@@ -138,7 +138,7 @@ const AVG_AREA_SIZE = 4; // docs per area (sizes the changed-docs share of overl
 
 // Human-readable labels for the confirm UI — users don't know the internal stage ids.
 const STAGE_LABELS: Record<string, string> = {
-  // scan (session kinds — plan 02)
+  // scan (session kinds)
   [SPEC_SCAN_ORCHESTRATE_SESSION_KIND]: 'Settling scan scope',
   [CURATE_DOC_SESSION_KIND]: 'Curating docs',
   [SETTLE_AREAS_SESSION_KIND]: 'Settling areas',
@@ -158,7 +158,7 @@ const STAGE_LABELS: Record<string, string> = {
 const withLabels = (stages: StageCallEstimate[]): StageCallEstimate[] =>
   stages.map((s) => ({ ...s, label: STAGE_LABELS[s.stage] ?? s.stage }));
 
-// --- Session-kind modeling constants (plan 02 step 7) ------------------------
+// --- Session-kind modeling constants ------------------------
 // PROVISIONAL expected turn counts per session kind, to be re-grounded on real
 // transcript data once a few scans have run. They drive the EXPECTED cost only;
 // the ceiling is always the budget's hard limit.
@@ -187,7 +187,7 @@ const OVERLAP_BRIEFING_FALLBACK_CHARS = 8_000;
  *  CLI/dashboard already render. `calls` = expected TURNS (items × expected
  *  turns per session); `minCalls` = items (one turn each); `maxCalls` = the
  *  budget's hard limit (items × ((maxResumes+1) × turns + the shell's
- *  wrap-up window) — §3.3, 2026-08-21). */
+ *  wrap-up window)). */
 function sessionKindStage(input: {
   kind: string;
   model: string;
@@ -232,7 +232,7 @@ async function probeSessionCache<T>(
   return parsed.success ? parsed.data : null;
 }
 
-/** The one model every scan session runs on (§3.4): the configured api-mode
+/** The one model every scan session runs on: the configured api-mode
  *  flagship, or claude-code mode's pinned tier. No per-stage tiers. */
 function sessionModel(mode?: LlmTransportMode): string {
   return (mode !== undefined ? apiModeModel(mode) : apiModeModel()) ?? SESSION_MODEL_CLAUDE_CODE;
@@ -243,7 +243,7 @@ const mean = (ns: number[]): number =>
 
 /**
  * Pre-flight token estimate for `spec scan`. Pass `prices` to add a ceiling
- * cost. Models SESSIONS (plan 02 step 7): per kind, `items` = cache-missing
+ * cost. Models SESSIONS: per kind, `items` = cache-missing
  * work items, probed against the run's own cache names + key builders — the
  * instructions fingerprint included, so editing a standing instruction shows
  * up here as the full re-scan it really is. A warmed cache yields an EMPTY

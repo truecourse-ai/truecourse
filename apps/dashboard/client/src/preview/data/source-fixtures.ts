@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * The fake documentation sites (./orders-api.catalog.ts, ./other-repos.ts)
  * folded into the EXACT payload shapes the real SOURCES page consumes, so the

@@ -1,7 +1,7 @@
 /**
  * Lazy loader for `@anthropic-ai/claude-agent-sdk` — an OPTIONAL peer,
  * version-pinned in package.json, so the published CLI never drags the SDK's
- * bundled ~300 MB platform binary into every install (§3.3 distribution).
+ * bundled ~300 MB platform binary into every install.
  * The driver spawns the USER'S installed `claude` binary either way; the SDK
  * wrapper is only the protocol layer.
  */

@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * Knowledge: the workspace-level spec corpus, the enterprise page's two tabs
  * (Spec, Sources) with the Spec tab in the two-level shape every list has: a

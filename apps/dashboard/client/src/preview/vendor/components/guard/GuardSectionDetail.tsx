@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/components/guard/GuardSectionDetail.tsx; delete with the preview.
 /**
  * The section detail side panel, opened by clicking a statused section. It tells
  * the FLOW story (the user-directed inversion): the section's status + reason,

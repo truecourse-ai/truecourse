@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's packages/shared/src/guard/decisions.ts; delete with the preview.
 /**
  * The guard decisions file, user-authored curation intent that `guard generate`
  * reads, the guard analogue of the spec-consolidator's `specs/decisions.json`.

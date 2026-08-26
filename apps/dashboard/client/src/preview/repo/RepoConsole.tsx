@@ -1,7 +1,6 @@
 // PREVIEW (UI mock, fake data) with one exception: on a REAL (URL-connected)
 // repository the Activity tab is the real thing, reading and live-tailing the
-// repository's sessions store. Delete the mock when the one-product dashboard
-// lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
+// repository's sessions store.
 
 /**
  * The repository console: one header, ONE menu, no toggle.

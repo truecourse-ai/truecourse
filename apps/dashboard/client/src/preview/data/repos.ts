@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * The connected repositories, their pull requests and the runs that hang off
  * them. The guard data of each repo lives beside this file (orders-api in its

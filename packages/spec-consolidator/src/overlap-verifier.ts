@@ -1,7 +1,7 @@
 /**
  * Section machinery of the old overlap VERIFIER, kept for the overlap SESSION.
  *
- * The verify one-shot itself retired (plan 02 step 5): the `spec-scan.overlap`
+ * The verify one-shot itself retired: the `spec-scan.overlap`
  * session in `@truecourse/core`'s `services/spec-scan/overlap.ts` both flags
  * and adjudicates in one pass, so there is no separate precision judge any
  * more. What stays is the deterministic section reading the session's tools

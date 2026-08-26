@@ -1,9 +1,9 @@
 /**
  * The RETIREMENT of the overlap candidate net's doc-level machinery. Two
  * generations are gone from this module: the one-shot pair-matrix detector
- * (`flagOverlaps` / the window matrix, plan 02 step 5), and then the
- * heading-widened doc net (`hasConcernHeading` / `widenedOverlapDocs`,
- * SPEC_GUARD_PLAN item 119) — the collision pairing's canonical-heading key
+ * (`flagOverlaps` / the window matrix), and then the
+ * heading-widened doc net (`hasConcernHeading` / `widenedOverlapDocs`) — the
+ * collision pairing's canonical-heading key
  * (`deriveCollisionPairs` in `collision-pairing.ts`) does the same folding at
  * SECTION level, so the cross-concern re-coupling the widened net existed for
  * now arrives as concrete section pairs.

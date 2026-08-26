@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's packages/shared/src/guard/result.ts; delete with the preview.
 /**
  * Guard run result types, the materialized current state a `guard run` writes to
  * `.truecourse/guard/LATEST.json` and the dashboard / `guard status` read back.
@@ -26,7 +24,7 @@ import { hasMilestone, type GuardStepMilestone } from './step-parts'
  * executes anything, a stale/orphaned scenario is never run.
  *
  * `blocked` is the sixth and likewise NON-EXECUTED state: the scenario binds a
- * SUPPLIED dependency (§7.2's dependency catalog) for which no instance is
+ * SUPPLIED dependency (the dependency catalog) for which no instance is
  * registered on this machine. Nothing about the repo is in dispute, so it must
  * never read as `fail`, the run makes no network call, spawns no child, and
  * settles with the dependency and its rolled-up requirement named, which is the
@@ -297,7 +295,7 @@ export const GuardScenarioResultSchema = z
     blockedOn: GuardBlockedDependencySchema.optional(),
     /**
      * The ADJUDICATION VERDICT this failure carries (`truecourse guard
-     * adjudicate`, plan 05 step 23), written AFTER the run by the adjudication
+     * adjudicate`), written AFTER the run by the adjudication
      * fold, never by the runner. The board merge carries it with an untouched
      * row and DROPS it from a re-run one (a new actual needs a new verdict -
      * see `mergeGuardBoard`). Present only on `fail` / `error` rows that were

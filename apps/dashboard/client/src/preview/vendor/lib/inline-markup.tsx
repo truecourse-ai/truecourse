@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/lib/inline-markup.tsx; delete with the preview.
 /**
  * The ONE inline-markup reading the dashboard does, for prose an LLM authored:
  * violation text, fix prompts, and the authoring `note` on a guard step all

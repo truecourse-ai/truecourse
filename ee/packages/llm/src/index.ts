@@ -9,8 +9,7 @@
 export {
   createApiTransport,
   createAiSdkTransport,
-  // The api-mode SESSION DRIVER (AGENTIC_PIPELINE_PLAN §3.1: EE and api mode
-  // run our own loop). It ships in `llm-api` with the transport, so it
+  // The api-mode SESSION DRIVER. It ships in `llm-api` with the transport, so it
   // re-exports with it — an EE session reaches the same driver OSS does.
   createApiSessionDriver,
   OUTCOME_TOOL_NAME,

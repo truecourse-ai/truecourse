@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/hooks/useGuardFlowDetail.ts; delete with the preview.
 /**
  * One flow's detail (`guard/flows/:flowId`), milestones bound to their live
  * sections, the per-surface scenario rows, gaps, interfaces and findings. Fetched

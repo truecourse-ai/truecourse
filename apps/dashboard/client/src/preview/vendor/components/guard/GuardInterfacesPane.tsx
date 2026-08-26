@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/components/guard/GuardInterfacesPane.tsx; delete with the preview.
 /**
  * The Interfaces tab's MAIN PANE, the code half's read surface.
  *

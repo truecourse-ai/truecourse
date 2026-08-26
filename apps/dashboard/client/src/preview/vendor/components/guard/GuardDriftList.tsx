@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/components/guard/GuardDriftList.tsx; delete with the preview.
 /**
  * The Runs view's MIDDLE column, the selected run's FULL results. The non-pass
  * results lead, severity-grouped (fail → error → stale → orphaned, most severe

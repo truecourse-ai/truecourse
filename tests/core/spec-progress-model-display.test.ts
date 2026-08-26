@@ -8,8 +8,8 @@
  * (`setShowResolvedStageModel(false)`), because otherwise progress would show a
  * misleading OSS tier ("sonnet, haiku") that EE never called.
  *
- * SPEC SCAN NO LONGER PARTICIPATES (plan 02 steps 3–7). Its stages are agent
- * SESSIONS on ONE model (§3.4): there are no per-stage tiers left to display, and
+ * SPEC SCAN NO LONGER PARTICIPATES. Its stages are agent
+ * SESSIONS on ONE model: there are no per-stage tiers left to display, and
  * `curateInProcess` details are session counts. So the mechanism is pinned
  * directly on `stageUsageTag` (still live for `guard`), and the scan is pinned on
  * the successor contract — its progress names no model at all.
@@ -47,7 +47,7 @@ describe('stageUsageTag — the model fallback and its EE suppression', () => {
   // No usage was recorded for these stages in this process, so both cases take
   // the fallback path — the state a full cache (or EE) leaves behind. The stage
   // must be a LIVE per-stage id: guard generate's content stages became agent
-  // sessions on one model (plan 04 step 20) and left the table, so a retired id
+  // sessions on one model and left the table, so a retired id
   // resolves to no model at all and would pass the EE case vacuously.
   it('OSS (default): falls back to the resolved per-stage model', () => {
     const tag = stageUsageTag(['guard.match'], repo);

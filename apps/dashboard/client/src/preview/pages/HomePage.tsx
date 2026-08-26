@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * Home, for the product owner: the workspace's requirements and how much of
  * them is proven. The repository Coverage overview summed over every connected

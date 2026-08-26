@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * Interfaces: a flat table of the repository's interface catalog (one row per
  * invocable thing: a CLI command, an API operation, a web task), the way

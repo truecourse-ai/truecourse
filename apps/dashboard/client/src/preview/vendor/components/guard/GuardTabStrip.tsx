@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/components/guard/GuardTabStrip.tsx; delete with the preview.
 /**
  * The Guard main-pane tab strip, the shared presentation for a {@link GuardTab}
  * set, identical in look and behaviour to the Spec/Scenarios doc tabs: a scrolling

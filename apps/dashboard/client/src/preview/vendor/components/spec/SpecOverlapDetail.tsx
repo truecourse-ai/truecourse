@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/components/spec/SpecOverlapDetail.tsx; delete with the preview.
 /**
  * SpecOverlapDetail, right-pane viewer for one flagged within-area overlap.
  * Shows the two docs that may disagree (side-by-side, scrolled to + highlighting

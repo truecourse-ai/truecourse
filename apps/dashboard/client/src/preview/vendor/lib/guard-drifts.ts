@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/lib/guard-drifts.ts; delete with the preview.
 /**
  * Client-side guard drift shaping, the read-only labels/formatters the drifts
  * view uses. The ordering composition itself (`orderGuardDrifts`, `GUARD_DRIFT_ORDER`)

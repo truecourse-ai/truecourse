@@ -1,6 +1,5 @@
 // PREVIEW: the repo list and connect-by-URL here are REAL (they talk to the
-// dashboard server); everything else in the preview is fake data. Delete with
-// the preview when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
+// dashboard server); everything else in the preview is fake data.
 
 /**
  * The one seam where the preview touches the real server.

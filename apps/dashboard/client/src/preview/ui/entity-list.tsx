@@ -1,4 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
 /**
  * THE list surface. Every list in the dashboard (the flow inventory, the test
  * inventory, the interface catalog, a run's results, the corpus sidebar, the claims

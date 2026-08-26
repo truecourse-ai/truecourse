@@ -1,12 +1,12 @@
 /**
- * The live tail of one agent-sessions run (AGENTIC_PIPELINE_PLAN §3.6): the
+ * The live tail of one agent-sessions run: the
  * engine process appends transcript events to `<runDir>/<sessionId>.jsonl` and
  * rewrites `run.json`; this service watches the run directory and forwards
  * every appended event (and each run-record update) to the socket layer, which
  * broadcasts into the run's room.
  *
  * Offsets start at the CURRENT file sizes: the client joins the room FIRST and
- * fetches its REST snapshot SECOND (§3.9's subscribe-then-snapshot ordering),
+ * fetches its REST snapshot SECOND (subscribe-then-snapshot ordering),
  * so anything the tail skipped is in the snapshot and anything doubled is
  * deduped by `seq` client-side. A trailing partial line (append in flight) is
  * left unconsumed — the offset only ever advances past complete lines.

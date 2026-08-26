@@ -148,11 +148,6 @@ export function RunConversation({
           )}
         </div>
       </div>
-
-      {/* The composer is the §3.7 shape, deliberately inert: answering or
-          steering needs the INBOUND session-message API (a POST that reaches a
-          live run's endpoint), which does not exist yet. Enable both controls
-          the day it does — nothing else here changes. */}
       <div className="flex shrink-0 justify-center border-t border-border px-6 py-3">
         <div className={`${STREAM} flex items-center gap-2`}>
           <input

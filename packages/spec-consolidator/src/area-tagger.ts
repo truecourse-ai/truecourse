@@ -1,6 +1,6 @@
 /**
  * Area-tag vocabulary + deterministic status parsing — what remains of the
- * per-doc AREA tagger after the spec-scan sessions (plan 02 step 3) absorbed
+ * per-doc AREA tagger after the spec-scan sessions absorbed
  * its LLM call into the merged `spec-scan.curate-doc` session (in
  * `@truecourse/core`'s `services/spec-scan/`).
  *
@@ -16,8 +16,8 @@
  *   this text (provenance, not runtime).
  *
  * The old `consolidator/area-tags` cache is neither written nor read any more
- * (the estimate probes the session cache with the run's own key builders —
- * plan 02 step 7); its files remain on disk, inert.
+ * (the estimate probes the session cache with the run's own key builders);
+ * its files remain on disk, inert.
  */
 
 import { OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm';

@@ -1,9 +1,7 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
 /**
  * UI MOCK: hand-written stand-in data for the Activity surface (agentic runs,
- * sessions, transcripts, chat) of AGENTIC_PIPELINE_PLAN §3.6–§3.9. Nothing here
- * reads the server or the store; delete this file when the real sessions store
- * lands and the view swaps to live data.
+ * sessions, transcripts, chat). Nothing here
+ * reads the server or the store.
  */
 
 export type RunStatus = 'running' | 'finished' | 'failed';
@@ -52,7 +50,7 @@ export interface MockRun {
   gitRef: string;
   started: string;
   status: RunStatus;
-  /** The §3.6 always-sums counter line, pre-partitioned. */
+  /** The always-sums counter line, pre-partitioned. */
   counters: { word: string; count: number; tone: 'ok' | 'warn' | 'fail' | 'muted' | 'active' }[];
   total: number;
   totalNoun: string;

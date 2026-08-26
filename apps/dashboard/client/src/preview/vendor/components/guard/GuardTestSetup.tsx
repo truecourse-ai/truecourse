@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/components/guard/GuardTestSetup.tsx; delete with the preview.
 /**
  * The world a test STARTS in, the scenario's `setup:` block, read above its
  * steps. The steps say what the test DOES; this says what was already true when

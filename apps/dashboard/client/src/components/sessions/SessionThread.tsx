@@ -1,5 +1,5 @@
 /**
- * One session rendered as a CHAT (plan §3.7): the agent narrates on the left
+ * One session rendered as a CHAT: the agent narrates on the left
  * — an intro line, did-bubbles for its tool work, finding cards, questions —
  * and the watching person is the only right-side voice (their answers, and
  * any actor-labelled message). Machinery never renders; the fold in

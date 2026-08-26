@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/hooks/useGuardDecisions.ts; delete with the preview.
 /**
  * The committable guard decisions (`scenarios/decisions.json`) as ONE state
  * object: what the user ruled out of testing, plus the writes that change it.

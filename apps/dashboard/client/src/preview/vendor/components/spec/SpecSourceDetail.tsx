@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/components/spec/SpecSourceDetail.tsx; delete with the preview.
 /**
  * The selected web source, as the Sources page's two remaining panes: the PAGES
  * panel (the site's identity + actions on top, then every page the last fetch

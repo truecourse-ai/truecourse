@@ -1,7 +1,6 @@
 // PREVIEW: the REAL seam, widened — the agent-session runs of the URL-connected
 // repositories, read from the server and followed live over the one socket the
-// shell holds. Delete with the preview when the one-product dashboard lands.
-// See docs/ONE_PRODUCT_PLAN.md §3.5.
+// shell holds.
 
 /**
  * Real runs, streaming into every page.

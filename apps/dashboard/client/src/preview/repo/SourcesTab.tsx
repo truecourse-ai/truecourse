@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * Sources: a flat table of the repository's documentation sites, the way
  * Repositories lists repositories, with Add source as the page action. A row

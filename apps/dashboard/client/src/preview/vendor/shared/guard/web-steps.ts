@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's packages/shared/src/guard/web-steps.ts; delete with the preview.
 /**
  * The WEB driver's verb vocabulary, the per-driver closed sub-schema the driver
  * registry (`drivers.ts`) describes, in its own module because a driver's verbs are
@@ -338,7 +336,7 @@ export const GuardWebClassSchema = z
 /**
  * What a web step asserts about the page, once its action has been taken. Every
  * field is WAITED on until the step's budget runs out, the page is asynchronous,
- * and the discipline (§10.2) is to wait for OBSERVABLE STATE, never for a duration:
+ * and the discipline is to wait for OBSERVABLE STATE, never for a duration:
  * there is no sleep verb and there never will be one, because a timed wait either
  * makes a passing test slow or makes a failing test flaky.
  *
@@ -485,7 +483,7 @@ const capture = GuardWebCapturesSchema.optional()
 
 /**
  * THE STEP-LEVEL DRIVER, made explicit. A step says how it acts; the scenario does
- * not say it for them (§2, 2026-08-09). The cli verbs (`run`, `git`, `write`,
+ * not say it for them. The cli verbs (`run`, `git`, `write`,
  * `delete`, `patch`) are self-naming and keep meaning what they always did, so they
  * declare nothing; a web verb declares `driver: web`, and that is what selects the
  * browser executor for it.

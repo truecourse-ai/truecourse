@@ -1,8 +1,6 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * The fake board (./orders-api.tests.ts, ./other-repos.ts) folded into the EXACT
- * payload shapes the agentic branch's FLOWS surfaces consume, so the Tests tab
+ * payload shapes the vendored FLOWS surfaces consume, so the Tests tab
  * renders the vendored `GuardFlowsPanel` / `GuardFlowsPane` / `GuardFlowDetail`
  * unchanged:
  *

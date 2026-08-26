@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/hooks/useGuardView.ts; delete with the preview.
 /**
  * Guard's bidirectional-navigation primitive. `openSpecSection` jumps from a
  * drift, a scenario, a milestone, or a birth finding to the highlighted spec

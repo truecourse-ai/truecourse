@@ -1,6 +1,6 @@
 /**
  * Agent-sessions routes — the dashboard read surface over the sessions store
- * (`.truecourse/sessions/<command>/<runId>/`, AGENTIC_PIPELINE_PLAN §3.9).
+ * (`.truecourse/sessions/<command>/<runId>/`).
  * Read-only; the live tail rides the socket (`joinRun` → `session:*` events,
  * see ../services/session-tailer.service.ts).
  *

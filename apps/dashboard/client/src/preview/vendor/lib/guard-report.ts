@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/lib/guard-report.ts; delete with the preview.
 /**
  * Client-side shaping of the last-generate report (`guard/result.json`) for the
  * report view. Pure functions that recompute exactly what the CLI summary

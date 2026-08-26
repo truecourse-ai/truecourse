@@ -1,5 +1,5 @@
 /**
- * A SCRIPTED SESSION DRIVER for the spec-scan session tests (plan 02).
+ * A SCRIPTED SESSION DRIVER for the spec-scan session tests.
  *
  * The scan run (`packages/core/src/services/spec-scan/run.ts`) takes its driver
  * through a seam (`SpecScanSessionsOptions.driver` / `CurateInProcessOptions

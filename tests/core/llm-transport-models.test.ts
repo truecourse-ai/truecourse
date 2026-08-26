@@ -182,7 +182,7 @@ describe('guard generate — the models follow the run transport', () => {
 // ---------------------------------------------------------------------------
 
 /**
- * SPEC SCAN runs agent SESSIONS on ONE model (§3.4), so there are no per-stage
+ * SPEC SCAN runs agent SESSIONS on ONE model, so there are no per-stage
  * tiers left to leak — the whole question collapses to "which model does the run
  * resolve". The pre-flight estimate is where that resolution surfaces to the
  * user (the CLI panel and the dashboard modal both render it), so it is what the

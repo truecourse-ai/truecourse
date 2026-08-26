@@ -1,4 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
 /**
  * A page-level left panel with the shared panel-header idiom: an h-10 header
  * carrying the panel's name and the collapse chevron at its right, and the same

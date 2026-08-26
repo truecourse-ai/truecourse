@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's packages/shared/src/guard/cli-steps.ts; delete with the preview.
 /**
  * The CLI driver's verb vocabulary, the per-driver closed sub-schema the driver
  * registry (`drivers.ts`) describes, in its own module because a driver's verbs are

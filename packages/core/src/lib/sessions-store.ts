@@ -1,5 +1,5 @@
 /**
- * The OSS file sessions store (AGENTIC_PIPELINE_PLAN §3.9): one directory per
+ * The OSS file sessions store: one directory per
  * run at `.truecourse/sessions/<command>/<runId>/` — gitignored entirely —
  * holding `run.json` (the run record + session index) and one transcript
  * jsonl per session. `run.json` writes are atomic; transcripts are plain
@@ -66,7 +66,7 @@ export interface SessionRunStore {
   record(): RunRecord;
   /** What `runAgentLoop` persists through. */
   readonly persistence: SessionPersistence;
-  /** Advertise the live session API (§3.9: URL + token, never a bare port). */
+  /** Advertise the live session API (URL + token, never a bare port). */
   setEndpoint(endpoint: { url: string; token: string }): void;
   /**
    * Record what the run's sessions run on: the transport mode plus the
@@ -89,7 +89,7 @@ export function createSessionRun(
   repoDir: string,
   opts: { command: SessionCommand; gitRef: string; now?: () => Date },
 ): SessionRunStore {
-  // Starting a run is the boot the sweep belongs to (§3.9): before this
+  // Starting a run is the boot the sweep belongs to: before this
   // process writes a new record, every run left `running` by a process that
   // is gone gets the honest status. Runs of THIS process are untouched — its
   // pid is alive — so a concurrent run is never mistaken for a corpse.
@@ -243,7 +243,7 @@ function listDirs(dir: string): string[] {
 }
 
 /**
- * The boot reconciliation sweep (§3.9): a run left `running` by a dead
+ * The boot reconciliation sweep: a run left `running` by a dead
  * process is marked `interrupted`, its dead endpoint dropped, and its
  * `running`/`waiting` sessions marked `parked` — resumable from their
  * persisted transcripts, never "running" on a dead process's memory.

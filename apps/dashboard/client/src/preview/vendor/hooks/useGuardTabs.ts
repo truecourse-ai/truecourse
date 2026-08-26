@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/hooks/useGuardTabs.ts; delete with the preview.
 /**
  * The reusable Guard main-pane tab model, the same transient/pinned tab model as
  * the Spec doc tabs (single-click opens a preview tab the next single-click

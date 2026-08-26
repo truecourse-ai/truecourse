@@ -1,5 +1,5 @@
 /**
- * The file-backed provider session mirror (AGENTIC_PIPELINE_PLAN §3.3). The
+ * The file-backed provider session mirror. The
  * cases that matter are the crash ones: an append truncated mid-write must
  * neither poison later appends (a glued, never-parsable line) nor fail every
  * load forever — the store is what a parked session resumes from.

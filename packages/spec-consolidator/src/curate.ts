@@ -2,8 +2,8 @@
  * The deterministic TAIL of the curate pipeline, and the result shapes every
  * scan surface reads.
  *
- * The `curate()` orchestration itself retired with the spec-scan SESSIONS
- * (plan 02 steps 3–5): the run now lives in `@truecourse/core`'s
+ * The `curate()` orchestration itself retired with the spec-scan SESSIONS:
+ * the run now lives in `@truecourse/core`'s
  * `services/spec-scan/run.ts`, one agent session per doc (curation), at most
  * one per corpus (area settling) and one per area (overlap) — replacing the
  * five one-shot LLM stages this module used to chain. What stays here is the

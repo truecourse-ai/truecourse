@@ -1,9 +1,7 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * The repository's Settings tab: the gate policy, who gets notified, the facts,
  * and unlink. It is the last entry of the repository menu, so the Repositories
- * page stays a list whose rows OPEN the repository (§3.5: selecting a repository
+ * page stays a list whose rows OPEN the repository (selecting a repository
  * opens its page) rather than previewing its settings beside the list.
  */
 

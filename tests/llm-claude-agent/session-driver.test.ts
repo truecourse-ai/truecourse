@@ -1,5 +1,5 @@
 /**
- * The Agent SDK session driver (AGENTIC_PIPELINE_PLAN §3.3): streaming-input
+ * The Agent SDK session driver: streaming-input
  * `query()`, one subprocess per session, tools as in-process MCP handlers,
  * the native json-schema outcome, and the HARDCODED isolation invariants.
  * The SDK itself is faked through the driver's lazy-import seam; the fake
@@ -214,7 +214,7 @@ describe('claude agent session driver', () => {
     expect(handle.status()).toBe('completed');
   });
 
-  it('hardcodes the §3.3 isolation invariants on every query', async () => {
+  it('hardcodes the isolation invariants on every query', async () => {
     process.env.TC_TEST_ISOLATION_MARKER = 'inherited';
     const { sdk, captured } = fakeSdk(async function* (ctx) {
       await ctx.nextUserMessage();

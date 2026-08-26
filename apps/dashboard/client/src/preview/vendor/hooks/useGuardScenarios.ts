@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/hooks/useGuardScenarios.ts; delete with the preview.
 /**
  * Loads the TEST inventory: the committed tests + recipe card (`guard/scenarios`)
  * joined to the last run's per-test results (`guard/latest`), so each row can show

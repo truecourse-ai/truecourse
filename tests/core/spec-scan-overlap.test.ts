@@ -1,5 +1,5 @@
 /**
- * THE OVERLAP SESSION — `spec-scan.overlap`, one per area (plan 02 step 5).
+ * THE OVERLAP SESSION — `spec-scan.overlap`, one per area.
  *
  * What is under test is the SESSION'S CONTRACT and the run's FOLD around it,
  * driven through the real `runSpecScanSessions` on a scripted `SessionDriver`:

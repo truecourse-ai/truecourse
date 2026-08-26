@@ -255,7 +255,7 @@ describe('verifyOverlapSections — a located verbatim quote anchors with certai
 // ---------------------------------------------------------------------------
 // Verification runs BEFORE dedup — now in the overlap SESSION's fold
 //
-// `flagOverlaps` retired with the one-shot detector (plan 02 step 5). The rule
+// `flagOverlaps` retired with the one-shot detector. The rule
 // it enforced did not: the run's fold re-anchors every session pointer with
 // `verifyOverlapSections` BEFORE `dedupeCrossAreaOverlaps` merges the same
 // disagreement across the areas that share the pair. This case drives the two

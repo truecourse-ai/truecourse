@@ -1,4 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
 /**
  * Lightweight hover tooltip with the popover look, bordered `bg-popover`
  * surface, `shadow-md`, soft fade. Use for inline hover help anywhere we'd

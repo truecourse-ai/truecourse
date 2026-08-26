@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's packages/shared/src/guard/dashboard.ts; delete with the preview.
 /**
  * Derived guard read-surface DTOs the dashboard renders, the per-section
  * coverage join, the flow inventory and its detail, the interface catalog, the

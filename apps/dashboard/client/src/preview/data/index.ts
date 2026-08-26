@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * The one door onto the fake data. Every preview screen imports from here, so a
  * screen never has to know which module a constant lives in, and the joins the

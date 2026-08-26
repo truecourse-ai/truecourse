@@ -1,6 +1,5 @@
 // PREVIEW: the connect-by-URL path here is REAL (it clones on the server); the
-// provider flow beside it is a mock. Delete with the preview when the
-// one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
+// provider flow beside it is a mock.
 
 /**
  * Connect a repository: pick a provider (a provider with nothing connected

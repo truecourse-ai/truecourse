@@ -1,5 +1,5 @@
 /**
- * THE SCAN RUN — the session-based engine of `spec scan` (plan 02 steps 3–5),
+ * THE SCAN RUN — the session-based engine of `spec scan`,
  * replacing `@truecourse/spec-consolidator`'s retired `curate()` orchestration.
  * The deterministic spine stayed in the consolidator (discovery, identity,
  * prefilter, grouping, pointer verification, corpus store, decisions io); this
@@ -251,7 +251,7 @@ export interface SpecScanSessionsResult extends CurateResult {
   /** Per-kind session rollups (for the CLI/dashboard detail lines). */
   sessions: ScanSessionKindSummary[]
   /**
-   * Questions the interactive orchestrator left unanswered (§3.7). A
+   * Questions the interactive orchestrator left unanswered. A
    * non-interactive run never blocks on them — every consumer must surface
    * them LOUDLY (the CLI summary does).
    */

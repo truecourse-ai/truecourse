@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's packages/shared/src/guard/step-parts.ts; delete with the preview.
 /**
  * The step PRIMITIVES every driver's verb vocabulary is built from, the pieces
  * that are not about cli, api or web, but about what a STEP is.

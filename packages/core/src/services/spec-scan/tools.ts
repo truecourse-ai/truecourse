@@ -1,6 +1,6 @@
 /**
- * THE SCAN SESSIONS' READ TOOLS — every one of them read-only and bounded
- * (plan 02 steps 3–5). A scan session reads the doc universe the run
+ * THE SCAN SESSIONS' READ TOOLS — every one of them read-only and bounded.
+ * A scan session reads the doc universe the run
  * discovered; it writes nothing. Every write — skips, tags, areas, overlap
  * flags — happens in the run's FOLD (`run.ts`), after the outcome, so a
  * session that dies mid-budget strands no half-curated state.
@@ -23,7 +23,7 @@ import {
 } from '@truecourse/spec-consolidator'
 import { parseHeadings, planDocChunks } from '@truecourse/shared'
 
-/** Caps — a tool result is context, and context is the budget (§3.3). */
+/** Caps — a tool result is context, and context is the budget. */
 const MAX_DOCS_LISTED = 200
 /** One chunk of a doc a tool (or the briefing) shows per call. The SAME size
  *  the curate briefing chunks with, so "chunk 2" means one thing everywhere. */

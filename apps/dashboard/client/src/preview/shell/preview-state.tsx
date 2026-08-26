@@ -1,6 +1,5 @@
 // PREVIEW: the repository list is PART REAL (URL-connected repos come from the
-// server); everything else is fake data. Delete when the one-product dashboard
-// lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
+// server); everything else is fake data.
 
 /**
  * The preview's session state: the parts of the mock a user can actually move.

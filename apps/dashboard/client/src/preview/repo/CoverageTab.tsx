@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * Coverage: the landing tab, the agentic coverage overview (sections, claims,
  * flows, tests and surfaces as composition bars, the freshness stamps) over fake

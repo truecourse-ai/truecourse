@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/components/spec/SpecScanButton.tsx; delete with the preview.
 /**
  * The Spec / Guard-Coverage header action: Scan (first curate) or Rescan (re-curate
  * the docs into the corpus). Mirrors the other section header actions

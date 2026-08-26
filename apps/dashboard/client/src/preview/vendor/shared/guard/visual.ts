@@ -1,11 +1,9 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's packages/shared/src/guard/visual.ts; delete with the preview.
 /**
  * THE VISUAL JUDGE'S VERDICT, what a vision model saw in the screenshot a
  * FAILING web step left behind.
  *
  * It is an ANNOTATION and nothing else. The deterministic expectation is the only
- * thing that decides pass or fail (§10.2's determinism rule is not negotiable: a
+ * thing that decides pass or fail (the determinism rule is not negotiable: a
  * model's opinion is not reproducible, so it can never move a verdict). What the
  * judge adds is the answer to the question a human asks first when a web step goes
  * red, "so what was actually on the screen?", which is otherwise only available

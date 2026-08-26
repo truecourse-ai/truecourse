@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/components/spec/SpecDocViewer.tsx; delete with the preview.
 /**
  * SpecDocViewer, right-pane viewer for one corpus source doc, rendered as
  * markdown. Opened from the Spec tab's left nav (preview on click, pinned on

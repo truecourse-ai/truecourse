@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's packages/shared/src/llm/tally.ts; delete with the preview.
 /**
  * Per-stage LLM transport accounting, the run-level record of how many calls a
  * pipeline stage sent to the transport and how many of them FAILED (the call

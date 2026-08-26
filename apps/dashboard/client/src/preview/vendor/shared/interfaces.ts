@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's packages/shared/src/interfaces.ts; delete with the preview.
 /**
  * INTERFACES, the code-side unit (WITH WHAT to test), derived deterministically
  * from the app's own surfaces (commands, routes, screens) with no LLM in the loop.
@@ -1330,13 +1328,13 @@ export const InterfaceSchema = z
      * takes its id with it, and a dangling ref is a visible break instead of a
      * string that still reads plausibly.
      *
-     * Why it exists (plan §2): a surface the docs do not promise, today the
+     * Why it exists: a surface the docs do not promise, today the
      * dashboard server's HTTP API, is a REALIZATION surface, recorded so a
      * scenario can act through it. Without this field the api entries stand
      * unattached: nothing says WHICH screen reaches them, so neither a reader nor
      * a generator can tell a route that serves a promised screen from one nothing
      * reaches. Derived, never authored from docs: the client's own call sites,
-     * resolved one hop through its api-client module (§10.4).
+     * resolved one hop through its api-client module.
      *
      * The absence rule of the contract region applies here too, and both halves
      * are real answers: OMITTED means the extraction established nothing;

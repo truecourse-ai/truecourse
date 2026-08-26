@@ -1,5 +1,5 @@
 /**
- * RETIRED STAGE (plan 02 step 4): cross-doc vocabulary reconciliation is now the
+ * RETIRED STAGE: cross-doc vocabulary reconciliation is now the
  * `spec-scan.settle-areas` SESSION in `@truecourse/core`'s
  * `services/spec-scan/settle-areas.ts` — with more authority than this one-shot
  * ever had (merge-to-core is legal there; concerns can be subdivided).

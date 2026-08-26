@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/components/guard/GuardInterfaceDiagram.tsx; delete with the preview.
 /**
  * An interface as a SEQUENCE DIAGRAM, participants across the top, dashed lifelines
  * beneath them, one labelled message per step (an `input` step is a self-message

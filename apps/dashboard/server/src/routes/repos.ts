@@ -124,7 +124,7 @@ router.post('/connect', async (req: Request, res: Response, next: NextFunction) 
     const repoPath = await cloneRepository(remote);
     const entry = await registerProject(repoPath, remote.displayName, { remoteUrl: remote.url });
 
-    // Onboarding (§4.3): connecting a repository starts its spec scan. The
+    // Onboarding: connecting a repository starts its spec scan. The
     // scan itself runs in the background — the call only claims the slot and
     // returns whether it started (false: a scan for this path is already
     // running, e.g. CLI-started), which the response reports so a client can

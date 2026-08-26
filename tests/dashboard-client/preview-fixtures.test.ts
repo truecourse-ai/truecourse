@@ -1,10 +1,8 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * The preview's fake payloads ARE the shapes the vendored components consume.
  *
- * The components under `src/preview/vendor` are the current dashboard's, copied
- * from `origin/sm/agentic-pipeline-plan` with their imports retargeted, so the
+ * The components under `src/preview/vendor` are the current dashboard's, with
+ * their imports retargeted, so the
  * fixtures behind them have to satisfy the same contracts the real server
  * satisfies. Where the shape has a Zod schema, that schema is the test: a
  * fixture that drifted from it fails here rather than in a component that

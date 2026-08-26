@@ -1,5 +1,5 @@
 /**
- * Total-vs-partial LLM failure accounting in the SCAN RUN (plan 02: the
+ * Total-vs-partial LLM failure accounting in the SCAN RUN (the
  * `curate()` stages are sessions now, so a "call" is a session and a "stage" is
  * a session kind). The rules are carried over verbatim: every kind fails OPEN
  * per item, so total failure would otherwise be written as a healthy corpus (all

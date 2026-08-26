@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/lib/server-url.ts; delete with the preview.
 /**
  * Returns the API server URL, the base every HTTP request and the socket
  * connection hang off.

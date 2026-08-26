@@ -1,8 +1,6 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's packages/agent-loop/src/session-events.ts; delete with the preview.
 /**
- * Agent-session transcript events, the durable record of one session
- * (AGENTIC_PIPELINE_PLAN §3.9). One jsonl file per session; every event is
+ * Agent-session transcript events, the durable record of one session.
+ * One jsonl file per session; every event is
  * full-content (api-mode resume rebuilds the exact history from it, so
  * completeness is correctness). The transcript is turn-granular: streaming
  * deltas never enter the durable record.
@@ -86,7 +84,7 @@ export const SessionErrorClassSchema = z.enum([
 export type SessionErrorClass = z.infer<typeof SessionErrorClassSchema>;
 
 /**
- * The retryability axis, orthogonal to the failure kind (§3.3): `transient`
+ * The retryability axis, orthogonal to the failure kind: `transient`
  * = the shell may retry the turn once (a retried turn does not count against
  * the budget); `blocked` = park loudly, never hammer; `none` = a policy
  * outcome (resume is the path forward, not retry).
@@ -95,7 +93,7 @@ export const RetryabilitySchema = z.enum(['transient', 'blocked', 'none']);
 export type Retryability = z.infer<typeof RetryabilitySchema>;
 
 /**
- * The structured session failures of §3.3. Never an exception, never a
+ * The structured session failures. Never an exception, never a
  * stranded task: a failure is data, persisted with the run.
  */
 export const SessionFailureSchema = z.discriminatedUnion('kind', [
@@ -134,7 +132,7 @@ export type SessionFailure = z.infer<typeof SessionFailureSchema>;
 // ---------------------------------------------------------------------------
 
 /**
- * A structured question a session asks the user (§3.7). `id` is minted by
+ * A structured question a session asks the user. `id` is minted by
  * the run process (never the provider), so resolution correlates across
  * restarts. In a non-interactive run policy auto-resolves what it can and
  * the rest land in the outcome as pending questions.
@@ -254,7 +252,7 @@ export const SessionEventBodySchema = z.discriminatedUnion('type', [
     /** The model the NEXT attempt runs on, so a fallback swap reads as one. */
     model: z.string(),
   }),
-  // The one re-ask for a genuinely invalid action (§3.3's narrowed policy).
+  // The one re-ask for a genuinely invalid action (the narrowed policy).
   z.object({ type: z.literal('re-ask'), invalid: z.string(), reason: z.string() }),
   // A fresh budget grant: `grant` of `of` (maxResumes).
   z.object({

@@ -1,6 +1,3 @@
-// PREVIEW: the connect-by-URL path is the one REAL seam of the preview; delete
-// with the preview when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * Connecting a public repository by URL, from the one-product shell.
  *

@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/components/spec/SpecSourceAddForm.tsx; delete with the preview.
 /**
  * The ADD flow of a web spec source: paste a site's llms.txt URL → Check → a
  * preview of exactly what would be fetched → Fetch.

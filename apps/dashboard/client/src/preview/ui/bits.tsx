@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * The small shared pieces every preview screen reaches for: the provider mark,
  * the neutral capsules (origin, driver, interface source), the pin mark a

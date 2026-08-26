@@ -1,5 +1,5 @@
 /**
- * The api SESSION DRIVER (AGENTIC_PIPELINE_PLAN §3.3): our own per-turn loop
+ * The api SESSION DRIVER: our own per-turn loop
  * on the AI SDK's `generateText` — tools declared without `execute` so the
  * model's tool call comes back unrun (one step per turn), the FULL message
  * history resent every turn under the configured provider's cache strategy
@@ -246,7 +246,7 @@ async function runApiSession(input: SessionRunInput, rt: SessionRuntime): Promis
   const messages: ModelMessage[] = [];
   if (input.resume) messages.push(...rebuildHistory(input.resume.events));
   // On a resume the transcript already carries the original opening messages;
-  // whatever arrives here is a NEW observation (§3.3 resume-with-observation).
+  // whatever arrives here is a NEW observation.
   const say = (content: string): void => {
     messages.push({ role: 'user', content });
     onEvent({ type: 'user-message', content });
@@ -313,7 +313,7 @@ async function runApiSession(input: SessionRunInput, rt: SessionRuntime): Promis
     let sawOutcome = false;
     for (const call of toolCalls) {
       // v6 surfaces an unknown or unparsable tool call as an invalid dynamic
-      // call rather than throwing — §3.3's malformed cases. The call id still
+      // call rather than throwing — the malformed cases. The call id still
       // gets an error result so the provider protocol stays well-formed.
       if (call.dynamic && (call.invalid || !toolByName.has(call.toolName))) {
         const reason =
@@ -599,8 +599,8 @@ function replyToCall(
 }
 
 /**
- * Rebuild the exact message history from a persisted transcript (§3.9:
- * events carry full content, so completeness is correctness). Non-
+ * Rebuild the exact message history from a persisted transcript (events
+ * carry full content, so completeness is correctness). Non-
  * conversational events (grants, children, questions, terminal records) are
  * skipped; a tool call the transcript never answered — an interrupt landed
  * mid-flight — is closed with an error result so the history stays legal.
@@ -719,7 +719,7 @@ function turnUsageOf(
   };
 }
 
-/** The §3.3 retryability axis, from the error's shape — never its message. */
+/** The retryability axis, from the error's shape — never its message. */
 function classifyTransportError(err: unknown, signal: AbortSignal): SessionFailure {
   const detail = err instanceof Error ? err.message : String(err);
   if (signal.aborted || (err instanceof Error && err.name === 'AbortError')) {

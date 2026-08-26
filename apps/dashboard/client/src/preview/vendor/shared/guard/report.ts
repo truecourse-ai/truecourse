@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's packages/shared/src/guard/report.ts; delete with the preview.
 /**
  * The persisted last-generate report, written to `.truecourse/guard/result.json`
  * at the end of every `guard generate` (the `contracts/result.json` convention).
@@ -269,7 +267,7 @@ export const GuardScenarioDiagnosisSchema = z.object({
    *  Absent when the test committed untriaged (no runner, or a fail-soft call). */
   triage: GuardTriageSchema.optional(),
   /**
-   * The FLOW WORKER's own adjudication of this committed red (plan 04 step 17):
+   * The FLOW WORKER's own adjudication of this committed red:
    * the `expectedReds` prediction the engine's confirmation run reproduced before
    * the submission was accepted. On the session path this takes the triage
    * verdict's place, `triage` stays absent; a one-shot generate writes `triage`
@@ -387,7 +385,7 @@ export const GuardBirthFindingSchema = z
      */
     triage: GuardTriageSchema.optional(),
     /**
-     * The FLOW WORKER's adjudication of a committed red (plan 04 step 17), the
+     * The FLOW WORKER's adjudication of a committed red, the
      * confirmed `expectedReds` prediction. The session path's analog of `triage`
      * (a worker-committed red carries this and no triage verdict). Optional so
      * every one-shot report keeps parsing.
@@ -840,7 +838,7 @@ export type GuardSeedDraft = z.infer<typeof GuardSeedDraftSchema>
 
 /**
  * An ADJUDICATION stage that lost EVERY call this run, so the corpus shipped
- * without its verdicts (plan item 88). Fidelity and triage judge content birth has
+ * without its verdicts. Fidelity and triage judge content birth has
  * already validated, a lost fidelity review means a green test persisted
  * unreviewed, a lost triage means a red test committed with no verdict, so their
  * collapse costs annotation, not correctness, and the run ships rather than

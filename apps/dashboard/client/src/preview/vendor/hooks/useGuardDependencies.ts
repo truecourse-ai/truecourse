@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/hooks/useGuardDependencies.ts; delete with the preview.
 /**
  * The Dependencies tab's ONE fetch, the joined catalog view plus the
  * single-dependency registration write.

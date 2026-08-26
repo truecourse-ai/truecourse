@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * acme/orders-api: the test inventory, the runs that produced its verdicts, and
  * the coverage tallies the Overview reads. The board is deliberately mixed (a

@@ -1,6 +1,6 @@
 /**
  * COLLISION PAIRING — the deterministic candidate net behind the overlap
- * sessions (SPEC_GUARD_PLAN item 119). What is under test:
+ * sessions. What is under test:
  *
  * - claim-token extraction: the four code-shaped identifier families, and the
  *   noise they must NOT emit;

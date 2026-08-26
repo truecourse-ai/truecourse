@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * One document or one conflict, as its own page (`/corpus/doc/:ref`,
  * `/corpus/conflict/:id`): the breadcrumb back to Corpus (the version it was

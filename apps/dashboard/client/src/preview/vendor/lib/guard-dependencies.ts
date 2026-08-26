@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/lib/guard-dependencies.ts; delete with the preview.
 /**
  * The Dependencies tab's pure half: how a dependency is NAMED and PAINTED, and
  * how a search narrows the list.

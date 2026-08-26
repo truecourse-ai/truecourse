@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/hooks/useGuardCoverageTabs.ts; delete with the preview.
 /**
  * The Coverage tab's main-pane tab set, Guard's heterogeneous doc/conflict tabs.
  * A binding over the shared {@link useGuardTabs} reducer (one tab model, not a

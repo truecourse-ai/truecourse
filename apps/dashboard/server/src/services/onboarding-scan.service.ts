@@ -1,7 +1,6 @@
 /**
- * The onboarding scan a connect fires (docs/ONE_PRODUCT_PLAN.md §4.3, first
- * link of the chain): connecting a repository by URL starts its spec scan on
- * the cloned default branch. Guard setup / generate / baseline are not on this
+ * The onboarding scan a connect fires: connecting a repository by URL starts
+ * its spec scan on the cloned default branch. Guard setup / generate / baseline are not on this
  * branch yet, so the chain is exactly one step today.
  *
  * BACKGROUND, IN THIS PROCESS. OSS has no job queue — hosted EE enqueues a

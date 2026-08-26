@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * One run, as its own page (`/runs/:runId`): the breadcrumb back to Runs, the
  * run's facts on one line, then its results (the list, the tab strip, the

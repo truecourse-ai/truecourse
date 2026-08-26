@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/lib/guard-interface-diagram.ts; delete with the preview.
 /**
  * Interface → sequence-diagram model. An interface is an entry-rooted interaction path
  * over ONE surface, so it reads as a sequence diagram: the user on the left, the

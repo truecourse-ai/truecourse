@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-// Copied from the agentic branch's apps/dashboard/client/src/components/guard/GuardDocCoverage.tsx; delete with the preview.
 /**
  * The coverage surface: the spec doc rendered in full, each section carrying its
  * guard status as a subtle left-edge band (never banner noise). A tiny corner

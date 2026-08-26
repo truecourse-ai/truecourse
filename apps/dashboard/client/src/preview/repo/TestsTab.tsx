@@ -1,5 +1,3 @@
-// PREVIEW (UI mock, fake data): delete when the one-product dashboard lands. See docs/ONE_PRODUCT_PLAN.md §3.5.
-
 /**
  * Tests: a flat table of the repository's tests, the way Repositories lists
  * repositories. A row opens the test as its own page (`/tests/:flowId`, see

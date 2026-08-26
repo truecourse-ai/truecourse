@@ -1,6 +1,6 @@
 /**
- * THE DOC CURATION SESSION — `spec-scan.curate-doc`, one per discovered doc
- * (plan 02 step 3). It replaces the relevance + area-tag ONE-SHOTS with one
+ * THE DOC CURATION SESSION — `spec-scan.curate-doc`, one per discovered doc.
+ * It replaces the relevance + area-tag ONE-SHOTS with one
  * session that makes both judgments over the whole doc: is this spec-source
  * material for THIS repository, and which areas does it cover.
  *
@@ -52,7 +52,7 @@ export const CURATE_DOC_SESSION_KIND = 'spec-scan.curate-doc'
 export const CURATE_DOC_CACHE_NAME = 'consolidator/curate-doc'
 
 /**
- * The three numbers (§3.3). One doc is one read (the briefing carries chunk 1)
+ * The three numbers. One doc is one read (the briefing carries chunk 1)
  * plus at most a couple of chunk pages or one reference lookup — five turns
  * covers that with room for one wrong guess. No resume grant: a doc that
  * cannot be judged in five turns is judged fail-open, not re-bought.
