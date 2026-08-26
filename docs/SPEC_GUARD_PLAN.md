@@ -7237,3 +7237,69 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     claims to **2 surfaces / 1,166** — the doubled inventory item 133 then
     tripped over.
 
+133. **Flow synthesis has no per-area chunking, so the biggest area refuses
+    outright — 371 claims in one briefing (documenso, 2026-08-26).** STATUS:
+    BUILT (2026-08-26). With the web surface live (item 132) every area's claim inventory
+    roughly doubled, and `core/auth` tipped over: TWO consecutive runs refused
+    with "flow synthesis refused: N claim(s) left unaccounted" (359, then 287 —
+    the count moves, the wall does not), costing the area its 23 api-era flows
+    and leaving the corpus at 186 flows with one hole.
+    The measurements that bound it, from the session transcripts:
+
+    | area | claims | outcome | output tokens |
+    | --- | --- | --- | --- |
+    | core/auth | **371** | REFUSED ×2 | 18.6K / 16K |
+    | core/document-fields | 207 | 41 flows | 26K |
+    | core/compliance | 185 | 33 flows + 27 noFlow | 32K |
+    | core/deployment | 179 | 38 flows | 25K |
+
+    The break is between 207 and 371, and the failing session's briefing was
+    **202,545 characters over 371 claims and 36 doc outlines**.
+    WHY it is structural, not flaky: the session contract is total — every claim
+    must appear either as a milestone or in `noFlowClaims`, copied VERBATIM — so
+    the accounting output grows with the area's claim count while the model's
+    useful output does not. The tell is that the failing session emitted FEWER
+    output tokens (16–18K) than the successful 207-claim one (26K): handed an
+    inventory it cannot account for, the model degrades to a partial answer
+    rather than truncating at a cap, and `checkFlowSet`'s `uncoveredClaims` then
+    correctly refuses it. Retrying re-rolls the partial answer; it cannot fix the
+    arithmetic.
+    The remedy already exists one stage over: the OVERLAP stage solved exactly
+    this with deterministic cluster-chunking (item 119). Flow synthesis needs the
+    same — split an area's claims into chunks under the observed ~200 ceiling,
+    synthesize per chunk, and fold, with the chain-across-chunks question
+    (a flow whose milestones span two chunks) answered the way 119 answered
+    pairing. Until then, an area over ~200 claims is a silent hole in the flow
+    corpus on any repo whose docs are not pre-curated. Related: [119] (the same
+    fix on overlap), [132] (whose fix doubled every inventory and exposed this),
+    [131] (the curation gap that makes areas this large in the first place).
+
+    **THE FIX (TDD).** `buildFlowAreas` now shards: `FLOW_AREA_CLAIM_CEILING =
+    200` (the settling frontier, not the largest observed success), and an area
+    over it is packed greedily into chunks that each fit. **A DOC is never
+    split** — its claims are what a flow's milestones chain through, and
+    scattering them would cost flows no session could compose; docs pack in
+    corpus order, so the shard is deterministic. A single doc that alone exceeds
+    the ceiling gets its own chunk (an oversized doc is a curation problem —
+    item 131 — not a sharding one).
+    Three properties make it safe to land mid-lineage:
+    - **The AREA identity does not change.** Chunks share `areaId` and carry a
+      `chunk` index, so area accounting downstream is untouched.
+    - **An unsharded area keys byte-identically to before**, because the session
+      cache key hashes the claim + outline material, which is unchanged for any
+      area under the ceiling — so an existing corpus loses no cached work.
+    - **Fail-open per chunk comes for free**: `synthesizeFlows` already unsettles
+      per entry, so one chunk refusing costs only its own claims while its
+      siblings' flows are kept — where before, one oversized area lost
+      everything.
+    Chunking lands in `buildFlowAreas` deliberately: BOTH callers (the run and
+    the pre-flight estimate) come through it, so what the estimate counts and
+    what the run spends cannot drift. `flowsSessionWorkItem` takes the chunk so
+    the sessions stay tellable apart in the index and transcripts.
+    Tests: four cases in `tests/guard-generator/flows.test.ts` — an area at the
+    ceiling is untouched (the cache-stability property), an oversized one shards
+    with every claim kept exactly once and no doc split, the chunk indices are
+    dense, and an oversized single doc gets its own chunk. Suite: 12,511 passed,
+    6 failed (all pre-existing; a seventh, `run-anomaly`, is the known
+    real-subprocess flake under full-suite load and passes 16/16 alone).
+

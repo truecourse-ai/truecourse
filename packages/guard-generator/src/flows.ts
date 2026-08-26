@@ -100,6 +100,13 @@ export interface FlowSynthesisArea {
   areaId: string
   claims: FlowClaimInput[]
   docs: FlowDocInput[]
+  /**
+   * 0-based shard index when the area was too big for one session (item 133),
+   * absent when it was not. The AREA identity does not change — only the work is
+   * split — so area accounting downstream is untouched, and an unsharded area
+   * keys byte-identically to before this existed.
+   */
+  chunk?: number
 }
 
 /** A document with its extraction, ready to be grouped into areas. */
@@ -107,6 +114,17 @@ export interface FlowAreaDocInput extends FlowDocInput {
   /** Canonical area ids from the corpus (empty for an untagged doc). */
   areaTags: string[]
   claims: FlowClaimInput[]
+}
+
+/**
+ * The identity of one SYNTHESIS UNIT — the area, plus its chunk when the area
+ * was sharded (item 133). Two chunks share an `areaId`, so anything that pairs a
+ * session RESULT back to the work that produced it must key on this, never on
+ * `areaId` alone: keying on the area silently folds one chunk's flows against
+ * another chunk's claim inventory.
+ */
+export function flowAreaKey(area: Pick<FlowSynthesisArea, 'areaId' | 'chunk'>): string {
+  return area.chunk === undefined ? area.areaId : `${area.areaId}#${area.chunk}`
 }
 
 /** `doc` + `anchor` key for the section-fingerprint lookup bindings resolve through. */
@@ -126,6 +144,60 @@ export function flowAreaIdForDoc(doc: string, areaTags: readonly string[]): stri
 
 /** Group per-document extractions into the areas synthesis calls on, in stable
  *  (area id) order with each area's docs in the order they were given. */
+/**
+ * The most claims one flow-synthesis session is briefed with (item 133).
+ *
+ * The session's contract is TOTAL — every claim it is handed must come back as a
+ * milestone or as a `noFlowClaims` entry, copied verbatim — so the accounting it
+ * owes grows with the inventory while its useful output does not. Measured on
+ * documenso: 91, 179, 185 and 207 claims all settled; **371 refused twice**
+ * ("N claim(s) left unaccounted"), emitting FEWER output tokens than the
+ * 207-claim area as it degraded to a partial answer. The ceiling sits at the
+ * settling frontier rather than at the largest observed success, and it is a
+ * CEILING, not a target: an area under it is never split.
+ */
+export const FLOW_AREA_CLAIM_CEILING = 200
+
+/**
+ * Shard one area's docs into synthesis units under {@link FLOW_AREA_CLAIM_CEILING}.
+ *
+ * A DOC is never split: its claims are what a flow's milestones chain through,
+ * and scattering them across chunks would cost flows no session could compose.
+ * Docs are packed greedily in their existing (corpus) order, so the shard is
+ * deterministic and a doc's neighbours stay together. A single doc that alone
+ * exceeds the ceiling gets its own chunk — the alternative is splitting it, and
+ * an oversized doc is a curation problem (item 131), not a sharding one.
+ */
+function shardArea(area: FlowSynthesisArea): FlowSynthesisArea[] {
+  if (area.claims.length <= FLOW_AREA_CLAIM_CEILING) return [area]
+
+  const claimsByDoc = new Map<string, FlowClaimInput[]>()
+  for (const c of area.claims) {
+    const list = claimsByDoc.get(c.doc) ?? []
+    list.push(c)
+    claimsByDoc.set(c.doc, list)
+  }
+
+  const chunks: FlowSynthesisArea[] = []
+  let current: FlowSynthesisArea | undefined
+  for (const doc of area.docs) {
+    const claims = claimsByDoc.get(doc.doc) ?? []
+    const wouldOverflow = current && current.claims.length + claims.length > FLOW_AREA_CLAIM_CEILING
+    if (!current || wouldOverflow) {
+      current = { areaId: area.areaId, claims: [], docs: [], chunk: chunks.length }
+      chunks.push(current)
+    }
+    current.docs.push(doc)
+    current.claims.push(...claims)
+  }
+  return chunks
+}
+
+/**
+ * Group docs into areas, then shard any area too big for one session. Both
+ * callers — the run and the pre-flight estimate — come through here, so the work
+ * they count and the work they run cannot drift apart.
+ */
 export function buildFlowAreas(docs: readonly FlowAreaDocInput[]): FlowSynthesisArea[] {
   const byArea = new Map<string, FlowSynthesisArea>()
   for (const d of docs) {
@@ -138,7 +210,9 @@ export function buildFlowAreas(docs: readonly FlowAreaDocInput[]): FlowSynthesis
     area.docs.push({ doc: d.doc, outline: d.outline, untestable: d.untestable })
     area.claims.push(...d.claims)
   }
-  return [...byArea.values()].sort((a, b) => a.areaId.localeCompare(b.areaId))
+  return [...byArea.values()]
+    .sort((a, b) => a.areaId.localeCompare(b.areaId))
+    .flatMap(shardArea)
 }
 
 // ---------------------------------------------------------------------------
@@ -725,6 +799,7 @@ export type FlowsAreaSessionSeam = (input: {
   docs?: readonly GuardDoc[]
   /** Ticks once per settled area (cache hits included). */
   onArea?: (areaId: string) => void
+  /** Keyed by {@link flowAreaKey} — the AREA plus its chunk, never `areaId` alone. */
 }) => Promise<{ byArea: Map<string, FlowsAreaSessionResult>; summary: GuardSessionSummary }>
 
 /** The epic session seam — one session over the flow digests, after the area pool. */
@@ -851,7 +926,7 @@ export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<Flo
   sessionSummaries.push(summary)
   calls += summary.ran
   const outcomes: AreaOutcome[] = areas.map((area): AreaOutcome => {
-    const r = byArea.get(area.areaId)
+    const r = byArea.get(flowAreaKey(area))
     if (!r) return { ok: false, reason: 'the flows session produced no result for this area' }
     if (!r.ok) return { ok: false, reason: r.reason }
     const v = validateAreaSynthesis(area, r.value, buildClaimIndex(area.claims), r.inputsKey)

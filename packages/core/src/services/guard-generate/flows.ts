@@ -136,9 +136,11 @@ export function flowsEpicSessionCacheKey(digests: readonly FlowDigest[]): string
   return sha(`${FLOWS_EPIC_SESSION_PROMPT_FINGERPRINT}::${sha(flowEpicDigestsMaterial(digests))}`)
 }
 
-/** The work items, as the session index and the transcripts record them. */
-export function flowsSessionWorkItem(areaId: string): string {
-  return `area:${areaId}`
+/** The work items, as the session index and the transcripts record them. A
+ *  SHARDED area (item 133) names its chunk, so its sessions stay tellable apart
+ *  in the index, the transcripts and the progress line. */
+export function flowsSessionWorkItem(areaId: string, chunk?: number): string {
+  return chunk === undefined ? `area:${areaId}` : `area:${areaId}#${chunk}`
 }
 export const FLOWS_EPIC_WORK_ITEM = 'flows:epic'
 

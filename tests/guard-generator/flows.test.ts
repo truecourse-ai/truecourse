@@ -5,6 +5,8 @@ import { buildDocSectionIndex } from '@truecourse/guard-runner'
 import {
   synthesizeFlows,
   buildFlowAreas,
+  FLOW_AREA_CLAIM_CEILING,
+  flowAreaKey,
   checkFlowSet,
   flowSectionKey,
   isFlowSetClean,
@@ -152,11 +154,9 @@ function areaSessions(
     const byArea = new Map<string, FlowsAreaSessionResult>()
     for (const area of areas) {
       seen.push(area)
-      const answer = answers[area.areaId] ?? { flows: [], noFlowClaims: [] }
-      byArea.set(
-        area.areaId,
-        'flows' in answer ? { ok: true, value: answer, inputsKey: `key:${area.areaId}` } : answer,
-      )
+      const key = flowAreaKey(area)
+      const answer = answers[key] ?? answers[area.areaId] ?? { flows: [], noFlowClaims: [] }
+      byArea.set(key, 'flows' in answer ? { ok: true, value: answer, inputsKey: `key:${key}` } : answer)
       onArea?.(area.areaId)
     }
     return { byArea, summary: sessionSummary(FLOWS_KIND, { ran: areas.length }) }
@@ -975,6 +975,112 @@ describe('buildFlowAreas — the one grouping rule', () => {
     const tasks = areas.find((a) => a.areaId === 'tasks')!
     expect(tasks.docs.map((d) => d.doc)).toEqual([TASKS_DOC, 'docs/tasks-cli.md'])
     expect(tasks.claims).toHaveLength(TASK_CLAIMS.length)
+  })
+})
+
+describe('synthesizeFlows — a sharded area folds per chunk (item 133)', () => {
+  /**
+   * Two chunks share an `areaId`, so anything pairing a session RESULT back to
+   * the work that produced it must key on the CHUNK. Keying on `areaId` alone
+   * folds chunk A's flows against chunk B's claim inventory, and both chunks
+   * refuse — "N milestone(s) matched no claim; M claim(s) left unaccounted" —
+   * which is exactly how this shipped for one run on documenso.
+   */
+  it('keeps both chunks flows instead of validating one against the others claims', async () => {
+    const r = repo()
+    const chunk0: FlowSynthesisArea = { areaId: 'split', claims: TASK_CLAIMS, docs: [{ doc: TASKS.doc, outline: TASKS.outline }], chunk: 0 }
+    const chunk1: FlowSynthesisArea = { areaId: 'split', claims: AUTH_CLAIMS, docs: [{ doc: AUTH.doc, outline: AUTH.outline }], chunk: 1 }
+    // Each chunk accounts for its OWN claims and no others — the contract the
+    // fold enforces, and the thing an areaId-keyed lookup makes impossible.
+    const runner = areaSessions({
+      'split#0': {
+        flows: [
+          {
+            title: 'Add a task',
+            goal: 'a task is added and listed',
+            milestones: [ms(TASKS, 'Creating tasks', ADD), ms(TASKS, 'Listing tasks', LIST)],
+          },
+        ],
+        noFlowClaims: [
+          { doc: TASKS_DOC, anchor: TASKS.anchors['Creating tasks'], claimTitle: ADD_EMPTY, reason: 'an error path' },
+          { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: DONE, reason: 'not in this chunk' },
+          { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: LIST_DONE, reason: 'a filter' },
+        ],
+      },
+      'split#1': {
+        flows: [{ title: 'Sign in', goal: 'a session starts', milestones: [ms(AUTH, 'Signing in', SIGN_IN)] }],
+        noFlowClaims: [
+          { doc: AUTH.doc, anchor: AUTH.anchors['Signing out'], claimTitle: SIGN_OUT, reason: 'the teardown half' },
+        ],
+      },
+    })
+
+    const res = await synth(r, [chunk0, chunk1], runner)
+
+    expect(res.unsettled).toEqual([])
+    expect(res.flows.map((f) => f.title).sort()).toEqual(['Add a task', 'Sign in'])
+  })
+})
+
+describe('buildFlowAreas — chunking an oversized area (item 133)', () => {
+  /**
+   * A flow-synthesis session must account for EVERY claim it is briefed with —
+   * flowed or listed as a no-flow claim, verbatim — so the accounting output
+   * grows with the inventory while the model's useful output does not. On
+   * documenso an area of 371 claims refused twice ("N claim(s) left
+   * unaccounted") while 207, 185 and 179 all settled, so an area is sharded
+   * under that frontier. The shard keeps every DOC whole: claims of one document
+   * belong together, and a flow can only draw milestones from its own chunk.
+   */
+  const BIG_DOC = 'docs/big.md'
+  const claimsFor = (doc: string, n: number): FlowClaimInput[] =>
+    Array.from({ length: n }, (_, i) => claim(TASKS, `claim ${i} of ${doc}`))
+  const docInput = (doc: string, n: number) => ({
+    doc,
+    areaTags: ['one'],
+    outline: [{ anchor: 'a', headingText: 'A', level: 2 }],
+    claims: claimsFor(doc, n).map((c) => ({ ...c, doc })),
+  })
+
+  it('leaves an area at or under the ceiling untouched — its cache key must not move', () => {
+    const areas = buildFlowAreas([docInput('docs/a.md', 100), docInput('docs/b.md', 100)])
+
+    expect(areas).toHaveLength(1)
+    expect(areas[0].claims).toHaveLength(200)
+    expect(areas[0].chunk).toBeUndefined()
+  })
+
+  it('shards an oversized area into chunks that each fit, losing no claim', () => {
+    const areas = buildFlowAreas([
+      docInput('docs/a.md', 150),
+      docInput('docs/b.md', 150),
+      docInput('docs/c.md', 120),
+    ])
+
+    expect(areas.length).toBeGreaterThan(1)
+    for (const a of areas) {
+      expect(a.areaId).toBe('one') // the AREA identity is unchanged — only the work is split
+      expect(a.claims.length).toBeLessThanOrEqual(FLOW_AREA_CLAIM_CEILING)
+    }
+    expect(areas.map((a) => a.chunk)).toEqual(areas.map((_, i) => i))
+    // every claim exactly once, and no doc split across two chunks
+    expect(areas.reduce((n, a) => n + a.claims.length, 0)).toBe(420)
+    const docOf = new Map<string, number>()
+    for (const [i, a] of areas.entries()) {
+      for (const c of a.claims) {
+        const seen = docOf.get(c.doc)
+        expect(seen === undefined || seen === i, `${c.doc} split across chunks`).toBe(true)
+        docOf.set(c.doc, i)
+      }
+    }
+  })
+
+  it('gives a single doc that alone exceeds the ceiling its own chunk', () => {
+    const areas = buildFlowAreas([docInput(BIG_DOC, FLOW_AREA_CLAIM_CEILING + 80), docInput('docs/s.md', 10)])
+
+    const big = areas.find((a) => a.claims.some((c) => c.doc === BIG_DOC))!
+    expect(big.claims.every((c) => c.doc === BIG_DOC)).toBe(true)
+    expect(areas.find((a) => a !== big)!.claims).toHaveLength(10)
   })
 })
 

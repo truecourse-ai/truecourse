@@ -105,6 +105,8 @@ export {
 export {
   synthesizeFlows,
   buildFlowAreas,
+  flowAreaKey,
+  FLOW_AREA_CLAIM_CEILING,
   flowAreaIdForDoc,
   flowAreaClaimsMaterial,
   flowAreaOutlinesMaterial,

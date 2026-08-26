@@ -58,6 +58,7 @@ import {
   type GenerateStep,
   type GuardDoc,
   type GuardSessionSummary,
+  flowAreaKey,
 } from '@truecourse/guard-generator'
 import { createSessionRun, type SessionRunStartedInfo, type SessionRunStore } from '../../lib/sessions-store.js'
 import { resolveCommitSha } from '../../lib/repo-ref.js'
@@ -491,7 +492,7 @@ export function createGuardGenerateSessionSeams(
       kind: FLOWS_SESSION_KIND,
       cacheName: FLOWS_SESSION_CACHE_NAME,
       items: input.areas,
-      workItem: (area) => flowsSessionWorkItem(area.areaId),
+      workItem: (area) => flowsSessionWorkItem(area.areaId, area.chunk),
       cacheKey: (area) => flowsSessionCacheKey(area),
       schema: FlowSetSchema,
       session: (area) => flowsSessionDef({ area, universe, checker }),
@@ -506,14 +507,14 @@ export function createGuardGenerateSessionSeams(
         flowSetRefusalReason(checkFlowSet(output, { area, sectionKeys: checker.sectionKeys, catalogNames: checker.catalogNames })),
       fold: (area, result) => {
         if (result.outcome.status === 'completed') {
-          byArea.set(area.areaId, {
+          byArea.set(flowAreaKey(area), {
             ok: true,
             value: result.outcome.output,
             ...(result.outcome.fromCache ? { fromCache: true } : {}),
             inputsKey: flowsSessionCacheKey(area),
           })
         } else {
-          byArea.set(area.areaId, {
+          byArea.set(flowAreaKey(area), {
             ok: false,
             reason: `flows session failed: ${describeSessionFailure(result.outcome.failure)}`,
           })
