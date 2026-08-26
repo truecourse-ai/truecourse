@@ -2,10 +2,10 @@
  * The Activity surface, both levels.
  *
  * Level one is the runs index: one row per run carrying its status word, its
- * phase dots and the active phase's own counter, its session count and how
+ * step dots and the active step's own counter, its session count and how
  * many of them wait on a person — narrowed by the kind and status chips.
- * Level two is the run as a conversation: the phase checklist and the session
- * index merged into one stream, the open phase expanded to its session lines,
+ * Level two is the run as a conversation: the step checklist and the session
+ * index merged into one stream, the open step expanded to its session lines,
  * a landed one compacted, a waiting session's question posted as a real
  * message out of its transcript, and a composer that is deliberately inert.
  *
@@ -17,7 +17,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import type { SessionEvent } from '@truecourse/agent-loop';
+import type { ChecklistItem, SessionEvent } from '@truecourse/agent-loop';
 
 vi.mock('@/lib/socket', () => {
   const socket = {
@@ -31,7 +31,12 @@ vi.mock('@/lib/socket', () => {
 });
 
 import { SessionsActivityView } from '@/components/sessions/SessionsActivityView';
-import { buildRunStream, progressSentence, runDuration } from '@/components/sessions/run-model';
+import {
+  buildRunStream,
+  progressSentence,
+  runChecklist,
+  runDuration,
+} from '@/components/sessions/run-model';
 import type { PublicSessionRun } from '@/lib/api';
 
 if (!Element.prototype.scrollTo) {
@@ -51,7 +56,7 @@ function session(over: Partial<PublicSessionRun['sessions'][number]> = {}): Publ
   };
 }
 
-/** A live scan: discovery landed, curation is the open phase. */
+/** A live scan: discovery landed, curation is the open step. */
 function scan(over: Partial<PublicSessionRun> = {}): PublicSessionRun {
   return {
     command: 'spec-scan',
@@ -59,26 +64,40 @@ function scan(over: Partial<PublicSessionRun> = {}): PublicSessionRun {
     gitRef: '4d80ec9a1b2c3d4e5f60718293a4b5c6d7e8f900',
     startedAt: '2026-08-25T14:32:00.000Z',
     status: 'running',
-    // Each step names the session kinds that do its work — the run process
-    // declares the mapping, the client only reads it.
-    progress: [
-      {
-        key: 'discover',
-        label: 'Discovering docs',
-        status: 'done',
-        detail: '41 docs · 12 to curate',
-        sessionKinds: ['spec-scan.orchestrate'],
-      },
-      {
-        key: 'tag',
-        label: 'Tagging doc areas',
-        status: 'active',
-        detail: '7/12 docs',
-        sessionKinds: ['spec-scan.curate-doc', 'spec-scan.settle-areas'],
-      },
-      { key: 'overlap', label: 'Flagging overlaps', status: 'pending', sessionKinds: ['spec-scan.overlap'] },
-      { key: 'verify', label: 'Verifying conflicts', status: 'pending', sessionKinds: [] },
-    ],
+    // The run presents itself in the same block vocabulary its sessions use:
+    // the step checklist is a block, and each item names the session kinds
+    // that do its work — the run process declares the mapping, the client only
+    // reads it.
+    display: {
+      blocks: [
+        {
+          kind: 'checklist',
+          items: [
+            {
+              key: 'discover',
+              label: 'Discovering docs',
+              status: 'done',
+              detail: '41 docs · 12 to curate',
+              sessionKinds: ['spec-scan.orchestrate'],
+            },
+            {
+              key: 'tag',
+              label: 'Tagging doc areas',
+              status: 'active',
+              detail: '7/12 docs',
+              sessionKinds: ['spec-scan.curate-doc', 'spec-scan.settle-areas'],
+            },
+            {
+              key: 'overlap',
+              label: 'Flagging overlaps',
+              status: 'pending',
+              sessionKinds: ['spec-scan.overlap'],
+            },
+            { key: 'verify', label: 'Verifying conflicts', status: 'pending', sessionKinds: [] },
+          ],
+        },
+      ],
+    },
     sessions: [
       session({ sessionId: 'ses-scope', kind: 'spec-scan.orchestrate', workItem: 'scan scope' }),
       session({ sessionId: 'ses-kept', spent: { ...spent, turns: 4 } }),
@@ -102,10 +121,19 @@ function setup(over: Partial<PublicSessionRun> = {}): PublicSessionRun {
     startedAt: '2026-08-24T19:47:00.000Z',
     finishedAt: '2026-08-24T19:56:03.000Z',
     status: 'completed',
-    progress: [{ key: 'recipe', label: 'Writing the recipe', status: 'done' }],
+    display: {
+      blocks: [
+        { kind: 'checklist', items: [{ key: 'recipe', label: 'Writing the recipe', status: 'done' }] },
+      ],
+    },
     sessions: [session({ sessionId: 'ses-setup', kind: 'guard-setup.map', workItem: 'journeys' })],
     ...over,
   } as PublicSessionRun;
+}
+
+/** A run whose whole presentation is its step checklist. */
+function checklist(items: ChecklistItem[]): PublicSessionRun['display'] {
+  return { blocks: [{ kind: 'checklist', items }] };
 }
 
 const at = (n: number): string => new Date(Date.parse('2026-08-25T14:36:00.000Z') + n * 1000).toISOString();
@@ -188,42 +216,42 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('a run record as the stream reads it', () => {
-  it('gives each phase its sessions and holds pending phases back as what comes next', () => {
-    const { phases, next } = buildRunStream(scan());
-    expect(phases.map((p) => p.key)).toEqual(['discover', 'tag']);
-    expect(phases[0].sessions.map((s) => s.sessionId)).toEqual(['ses-scope']);
-    // Curation and the vocabulary settlement are both the tagging phase's work.
-    expect(phases[1].sessions.map((s) => s.sessionId)).toEqual(['ses-kept', 'ses-asks']);
+  it('gives each step its sessions and holds pending steps back as what comes next', () => {
+    const { steps, next } = buildRunStream(scan());
+    expect(steps.map((p) => p.key)).toEqual(['discover', 'tag']);
+    expect(steps[0].sessions.map((s) => s.sessionId)).toEqual(['ses-scope']);
+    // Curation and the vocabulary settlement are both the tagging step's work.
+    expect(steps[1].sessions.map((s) => s.sessionId)).toEqual(['ses-kept', 'ses-asks']);
     expect(next).toBe('Flagging overlaps');
   });
 
   it('places sessions on whichever step claims their kind, whatever the command', () => {
-    const { phases } = buildRunStream(
+    const { steps } = buildRunStream(
       setup({
         status: 'running',
-        progress: [
+        display: checklist([
           {
             key: 'recipe',
             label: 'Writing the recipe',
             status: 'active',
             sessionKinds: ['guard-setup.map'],
           },
-        ],
+        ]),
         sessions: [
           session({ sessionId: 'a', kind: 'guard-setup.map', status: 'completed' }),
           session({ sessionId: 'b', kind: 'guard-setup.map', status: 'running' }),
         ],
       }),
     );
-    expect(phases.map((p) => p.key)).toEqual(['recipe']);
-    expect(phases[0].sessions.map((s) => s.sessionId)).toEqual(['a', 'b']);
+    expect(steps.map((p) => p.key)).toEqual(['recipe']);
+    expect(steps[0].sessions.map((s) => s.sessionId)).toEqual(['a', 'b']);
   });
 
   it('still shows the work of a run whose steps claim no session kinds', () => {
-    const { phases } = buildRunStream(
+    const { steps } = buildRunStream(
       setup({
         status: 'running',
-        progress: [{ key: 'recipe', label: 'Writing the recipe', status: 'active' }],
+        display: checklist([{ key: 'recipe', label: 'Writing the recipe', status: 'active' }]),
         sessions: [
           session({ sessionId: 'a', kind: 'guard-setup.map', status: 'completed' }),
           session({ sessionId: 'b', kind: 'guard-setup.map', status: 'running' }),
@@ -232,24 +260,118 @@ describe('a run record as the stream reads it', () => {
     );
     // The checklist card carries no session lines, and the unclaimed kind gets
     // its own card after it — nothing disappears for want of a declaration.
-    expect(phases.map((p) => [p.key, p.label, p.detail, p.sessions.length])).toEqual([
+    expect(steps.map((p) => [p.key, p.label, p.detail, p.sessions.length])).toEqual([
       ['recipe', 'Writing the recipe', undefined, 0],
       ['kind:guard-setup.map', 'guard-setup.map', '1 of 2', 2],
     ]);
-    expect(phases[1].status).toBe('active');
+    expect(steps[1].status).toBe('active');
   });
 
-  it('says what a run is doing, what broke, or how many phases it had', () => {
-    expect(progressSentence(scan())).toBe('tagging doc areas · 7/12 docs');
-    expect(progressSentence(setup())).toBe('1 phase');
-    expect(progressSentence(scan({ status: 'interrupted' }))).toBe(
+  it('renders a run that declares no checklist as one card per session kind', () => {
+    const { steps, next, notes } = buildRunStream(
+      setup({
+        status: 'running',
+        display: undefined,
+        sessions: [
+          session({ sessionId: 'a', kind: 'guard-setup.map', status: 'completed' }),
+          session({ sessionId: 'b', kind: 'guard-setup.probe', status: 'running' }),
+        ],
+      }),
+    );
+    expect(steps.map((p) => [p.key, p.label, p.detail])).toEqual([
+      ['kind:guard-setup.map', 'guard-setup.map', '1 of 1'],
+      ['kind:guard-setup.probe', 'guard-setup.probe', '0 of 1'],
+    ]);
+    expect(next).toBeUndefined();
+    expect(notes).toEqual([]);
+  });
+
+  it('says what a run-level block carries whatever its kind, and never crashes on one', () => {
+    const { steps, notes } = buildRunStream(
+      setup({
+        status: 'running',
+        display: {
+          blocks: [
+            { kind: 'facts', lines: ['12 docs read', '2 areas settled'] },
+            { kind: 'text', text: 'I stopped early — the corpus was already current.' },
+            { kind: 'checklist', items: [{ key: 'recipe', label: 'Writing the recipe', status: 'active' }] },
+            // A kind minted after this client shipped: it states its own fields.
+            { kind: 'budget', spentUsd: 1.4, of: 'the scan ceiling' },
+          ],
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any,
+        sessions: [],
+      }),
+    );
+    expect(steps.map((p) => p.key)).toEqual(['recipe']);
+    expect(notes).toEqual([
+      '12 docs read',
+      '2 areas settled',
+      'I stopped early — the corpus was already current.',
+      'budget · spent usd: 1.4 · of: the scan ceiling',
+    ]);
+  });
+
+  it('reads several checklist blocks as one list, in order', () => {
+    // A run may say its structure in more than one block; every item counts,
+    // and none of them degrades to a "checklist · items: N" line.
+    const run = setup({
+      display: {
+        blocks: [
+          { kind: 'checklist', items: [{ key: 'a', label: 'First', status: 'done' }] },
+          { kind: 'facts', lines: ['41 docs discovered'] },
+          {
+            kind: 'checklist',
+            items: [
+              { key: 'b', label: 'Second', status: 'active' },
+              { key: 'c', label: 'Third', status: 'pending' },
+            ],
+          },
+        ],
+      },
+    });
+    expect(runChecklist(run).map((s) => s.key)).toEqual(['a', 'b', 'c']);
+    const { steps, next, notes } = buildRunStream(run);
+    // The two started steps, then the fallback card for the unclaimed kind.
+    expect(steps.map((p) => p.key)).toEqual(['a', 'b', 'kind:guard-setup.map']);
+    expect(next).toBe('Third');
+    expect(notes).toEqual(['41 docs discovered']);
+  });
+
+  it('states a malformed block as a line instead of rendering an object', () => {
+    // Blocks reach the client as bare wire JSON — a known kind whose fields
+    // are wrong must never reach React as children.
+    const { notes } = buildRunStream(
+      setup({
+        display: {
+          blocks: [
+            { kind: 'text', text: { paragraphs: ['nope'] } },
+            { kind: 'finding', claim: 42, quotes: [] },
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          ] as any,
+        },
+      }),
+    );
+    expect(notes).toEqual(['text · text: 1 fields', 'finding · claim: 42 · quotes: 0']);
+  });
+
+  it('says what a run is doing, what broke, or how many steps it had', () => {
+    expect(progressSentence(runChecklist(scan()), 'running')).toBe('tagging doc areas · 7/12 docs');
+    expect(progressSentence(runChecklist(setup()), 'completed')).toBe('1 step');
+    expect(progressSentence(runChecklist(scan()), 'interrupted')).toBe(
       'stopped at tagging doc areas · 7/12 docs',
     );
-    const broken = scan({
-      status: 'failed',
-      progress: [{ key: 'tag', label: 'Tagging doc areas', status: 'error', detail: 'every session lost its transport' }],
-    });
-    expect(progressSentence(broken)).toBe('tagging doc areas failed · every session lost its transport');
+    const broken = checklist([
+      {
+        key: 'tag',
+        label: 'Tagging doc areas',
+        status: 'error',
+        detail: 'every session lost its transport',
+      },
+    ]);
+    expect(progressSentence(runChecklist(scan({ display: broken })), 'failed')).toBe(
+      'tagging doc areas failed · every session lost its transport',
+    );
   });
 
   it('takes a settled run from its own timestamps and leaves the undatable blank', () => {
@@ -270,7 +392,7 @@ describe('the runs index', () => {
 
     const row = await screen.findByRole('button', { name: /Open spec scan run/ });
     expect(within(row).getByText('Running')).toBeInTheDocument();
-    // The active phase's own counter, in words.
+    // The active step's own counter, in words.
     expect(within(row).getByText('tagging doc areas · 7/12 docs')).toBeInTheDocument();
     // Three sessions, one of them holding a question.
     expect(within(row).getByText('3')).toBeInTheDocument();
@@ -335,24 +457,24 @@ describe('the runs index', () => {
 // ---------------------------------------------------------------------------
 
 describe('a run as a conversation', () => {
-  it('is phase cards: the open one expanded to its sessions, a landed one compact', async () => {
+  it('is step cards: the open one expanded to its sessions, a landed one compact', async () => {
     serve([scan()], { 'ses-asks': askingTranscript });
     renderAt('?run=run-scan');
 
-    // The open phase: its card carries its counter and one line per session.
+    // The open step: its card carries its counter and one line per session.
     const open = await screen.findByRole('button', { name: /Tagging doc areas/ });
     expect(open).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText('7/12 docs')).toBeInTheDocument();
     expect(screen.getByText('docs/getting-started.md')).toBeInTheDocument();
 
-    // The landed phase: header row only, until its chevron says otherwise.
+    // The landed step: header row only, until its chevron says otherwise.
     const done = screen.getByRole('button', { name: /Discovering docs/ });
     expect(done).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByText('scan scope')).toBeNull();
     await userEvent.click(done);
     expect(await screen.findByText('scan scope')).toBeInTheDocument();
 
-    // Pending phases are not cards yet; the next one names itself.
+    // Pending steps are not cards yet; the next one names itself.
     expect(screen.queryByRole('button', { name: /Verifying conflicts/ })).toBeNull();
     expect(screen.getByText('Next: Flagging overlaps')).toBeInTheDocument();
   });

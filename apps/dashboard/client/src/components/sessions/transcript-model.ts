@@ -18,7 +18,8 @@
 
 import type {
   DisplayDispute,
-  OutcomeBlock,
+  DisplayBlock,
+  KnownDisplayBlock,
   SessionDisplay,
   SessionEvent,
   UserInputQuestion,
@@ -43,7 +44,7 @@ export interface ActionCall {
 export type FindingDispute = DisplayDispute;
 
 /** The chat's result card — a `finding` block as the view consumes it. */
-export type ChatFinding = Omit<Extract<OutcomeBlock, { kind: 'finding' }>, 'kind'>;
+export type ChatFinding = Omit<Extract<KnownDisplayBlock, { kind: 'finding' }>, 'kind'>;
 
 export type ChatRow =
   /** The agent talking: narration text or the synthesized intro. */
@@ -203,7 +204,7 @@ export function toChatRows(events: readonly SessionEvent[]): ChatRow[] {
         // guard holds the never-crash contract against a malformed `display`
         // on a tailed transcript line — nothing on the read path validates it.
         const { rows: outcomeRows, facts } = Array.isArray(event.display?.blocks)
-          ? foldBlocks(event.display.blocks, event.seq)
+          ? foldBlocks(displayBlocks(event.display), event.seq)
           : { rows: [], facts: digestOutcome(event.value) };
         for (const row of outcomeRows) push(row);
         push({
@@ -288,47 +289,86 @@ function cap(text: string, max: number): string {
 const FACT_LINE_CAP = 8;
 
 /**
+ * The blocks of a `display`, minus anything that is not a block at all — these
+ * arrive as bare wire JSON that nothing on the read path validates. Both folds
+ * (this one and the run level) take their blocks through here.
+ */
+export function displayBlocks(display: unknown): readonly DisplayBlock[] {
+  const blocks: unknown = (display as { blocks?: unknown } | null | undefined)?.blocks;
+  if (!Array.isArray(blocks)) return [];
+  return blocks.filter(
+    (block): block is DisplayBlock =>
+      typeof block === 'object' &&
+      block !== null &&
+      typeof (block as { kind?: unknown }).kind === 'string',
+  );
+}
+
+/**
  * The blocks a session stamped onto its outcome, as rows: a finding becomes a
- * card, prose becomes narration, and every `facts` line joins the closing
- * message. The vocabulary is append-only, so a kind this client has never
- * heard of still says what it carries — as a fact line, never a crash.
+ * card, prose becomes narration, a checklist states each step, and every
+ * `facts` line joins the closing message. This is the TRANSCRIPT level of the
+ * one fold — the vocabulary that the run level flattens into lines renders
+ * here as cards. Blocks arrive as bare wire JSON, so every field is checked
+ * before it is read: a kind this client has never heard of, or a known kind
+ * whose fields are malformed, still says what it carries — as a fact line,
+ * never a crash.
  */
 function foldBlocks(
-  blocks: readonly OutcomeBlock[],
+  blocks: readonly DisplayBlock[],
   seq: number,
 ): { rows: ChatRow[]; facts: string[] } {
   const rows: ChatRow[] = [];
   const facts: string[] = [];
   for (const block of blocks) {
-    switch (block.kind) {
-      case 'text':
-        rows.push({ seq, sub: rows.length, kind: 'agent-text', text: block.text });
-        break;
-      case 'facts':
-        facts.push(...block.lines);
-        break;
-      case 'finding':
-        rows.push({
-          seq,
-          sub: rows.length,
-          kind: 'finding',
-          finding: {
-            claim: block.claim,
-            quotes: block.quotes,
-            ...(block.recommendation ? { recommendation: block.recommendation } : {}),
-            ...(block.dispute ? { dispute: block.dispute } : {}),
-          },
-        });
-        break;
-      default:
-        facts.push(unknownBlockLine(block));
+    if (block.kind === 'text' && typeof block.text === 'string') {
+      rows.push({ seq, sub: rows.length, kind: 'agent-text', text: block.text });
+      continue;
     }
+    if (block.kind === 'facts' && Array.isArray(block.lines)) {
+      facts.push(...block.lines.filter((line): line is string => typeof line === 'string'));
+      continue;
+    }
+    if (block.kind === 'finding' && typeof block.claim === 'string' && Array.isArray(block.quotes)) {
+      // The card's two load-bearing fields hold up; the rest reads as declared.
+      const finding = block as Extract<KnownDisplayBlock, { kind: 'finding' }>;
+      rows.push({
+        seq,
+        sub: rows.length,
+        kind: 'finding',
+        finding: {
+          claim: finding.claim,
+          quotes: finding.quotes,
+          ...(finding.recommendation ? { recommendation: finding.recommendation } : {}),
+          ...(finding.dispute ? { dispute: finding.dispute } : {}),
+        },
+      });
+      continue;
+    }
+    if (block.kind === 'checklist' && Array.isArray(block.items)) {
+      for (const item of block.items) {
+        const line = checklistLine(item);
+        if (line) facts.push(line);
+      }
+      continue;
+    }
+    facts.push(unknownBlockLine(block));
   }
   return { rows, facts };
 }
 
-/** A block kind that postdates this client, stated by its own fields. */
-function unknownBlockLine(block: object): string {
+/** One checklist step as a fact line — its label, where it got to, and the
+ *  counter it carried. Unnamed or statusless steps say nothing. */
+function checklistLine(item: unknown): string | undefined {
+  if (typeof item !== 'object' || item === null) return undefined;
+  const { label, status, detail } = item as Record<string, unknown>;
+  if (typeof label !== 'string' || typeof status !== 'string') return undefined;
+  return `${label} — ${status}${typeof detail === 'string' ? `: ${detail}` : ''}`;
+}
+
+/** A block kind that postdates this client, stated by its own fields. The run
+ *  level degrades the same way — the vocabulary is one, and so is this. */
+export function unknownBlockLine(block: object): string {
   const record = block as Record<string, unknown>;
   const kind = humanKey(String(record.kind ?? 'result'));
   const parts = Object.entries(record)

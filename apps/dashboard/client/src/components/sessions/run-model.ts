@@ -1,23 +1,33 @@
 /**
  * The pure layer under the Activity surface: how a run record READS.
  *
- * Two shapes come out of here — the runs-index row (status word, phase dots,
+ * Two shapes come out of here — the runs-index row (status word, step dots,
  * progress sentence, counts, duration) and the run-as-a-conversation stream
- * ({@link buildRunStream}), which merges the run's phase checklist with its
- * session index so each phase becomes one activity card carrying the sessions
+ * ({@link buildRunStream}), which merges the run's step checklist with its
+ * session index so each step becomes one activity card carrying the sessions
  * that did its work.
  *
- * Everything here is derived from what the store actually carries: the run
- * record's `progress` steps (the run process mirrors its own step tracker
- * there) and the `sessions[]` index. No narration is invented.
+ * Everything here is derived from what the store actually carries: the run's
+ * own `display` blocks — the SAME append-only vocabulary its sessions' outcomes
+ * use, in which the step checklist is simply a `checklist` block the run
+ * process declares — and the `sessions[]` index. Nothing here holds run-level
+ * structure of its own: a run that declares no checklist renders as a flat
+ * trace of its session kinds. No narration is invented.
+ *
+ * Blocks arrive here as bare wire JSON and are parsed tolerantly upstream, so
+ * every field is checked before it is read: a kind this client has never heard
+ * of, or a known kind whose fields are malformed, states what it carries as a
+ * plain line. This is the RUN level of the one fold — everything that is not
+ * the checklist degrades to lines here; the transcript level renders the same
+ * vocabulary as cards.
  */
 
-import type { SessionIndexEntry, SessionStatus } from '@truecourse/agent-loop';
+import type { ChecklistItem, SessionIndexEntry, SessionStatus } from '@truecourse/agent-loop';
 import type { PublicSessionRun } from '@/lib/api';
-import type { ChatRow } from './transcript-model';
+import { displayBlocks, unknownBlockLine, type ChatRow } from './transcript-model';
 
 export type RunStatus = PublicSessionRun['status'];
-export type PhaseStatus = 'pending' | 'active' | 'done' | 'error';
+export type StepStatus = 'pending' | 'active' | 'done' | 'error';
 
 export const RUN_STATUS_META: Record<RunStatus, { word: string; dot: string }> = {
   running: { word: 'Running', dot: 'bg-sky-500' },
@@ -34,8 +44,8 @@ export const SESSION_STATUS_META: Record<SessionStatus, { word: string; dot: str
   failed: { word: 'Failed', dot: 'bg-red-500' },
 };
 
-/** The phase-dot palette — a pending phase is an empty ring, never a fill. */
-export const PHASE_DOT: Record<PhaseStatus, string> = {
+/** The step-dot palette — a pending step is an empty ring, never a fill. */
+export const STEP_DOT: Record<StepStatus, string> = {
   pending: 'border border-border bg-transparent',
   active: 'bg-sky-500',
   done: 'bg-emerald-500',
@@ -88,74 +98,124 @@ export function runDuration(run: PublicSessionRun, now = Date.now()): string {
   return formatDuration(ended - started);
 }
 
+/** Every checklist item the run declared, in order. A run may present more
+ *  than one `checklist` block; they read as ONE list, and nothing is dropped. */
+export function runChecklist(run: PublicSessionRun): ChecklistItem[] {
+  const items: ChecklistItem[] = [];
+  for (const block of displayBlocks(run.display)) {
+    if (block.kind === 'checklist' && Array.isArray(block.items)) items.push(...block.items);
+  }
+  return items;
+}
+
 /**
- * The index row's progress sentence: what the run is doing (the active phase's
- * own detail), what broke, or — once every phase has landed — how many phases
- * there were.
+ * What the run says about itself, split the only two ways a reader needs it:
+ * the step checklist (every `checklist` block's items, concatenated — the
+ * run's own structure) and everything else as plain lines.
  */
-export function progressSentence(run: PublicSessionRun): string {
-  const steps = run.progress ?? [];
+function readDisplay(run: PublicSessionRun): { checklist: ChecklistItem[]; notes: string[] } {
+  const checklist: ChecklistItem[] = [];
+  const notes: string[] = [];
+  for (const block of displayBlocks(run.display)) {
+    switch (block.kind) {
+      case 'checklist':
+        if (Array.isArray(block.items)) {
+          checklist.push(...block.items);
+          break;
+        }
+        notes.push(unknownBlockLine(block));
+        break;
+      case 'facts':
+        if (Array.isArray(block.lines)) notes.push(...block.lines);
+        else notes.push(unknownBlockLine(block));
+        break;
+      case 'text':
+        if (typeof block.text === 'string') notes.push(block.text);
+        else notes.push(unknownBlockLine(block));
+        break;
+      case 'finding':
+        if (typeof block.claim === 'string') notes.push(block.claim);
+        else notes.push(unknownBlockLine(block));
+        break;
+      default:
+        notes.push(unknownBlockLine(block));
+    }
+  }
+  return { checklist, notes };
+}
+
+/**
+ * The index row's progress sentence: what the run is doing (the active step's
+ * own detail), what broke, or — once every step has landed — how many steps
+ * there were. Takes the checklist the caller already folded, so a row that
+ * also draws the step dots reads the run's display once.
+ */
+export function progressSentence(steps: readonly ChecklistItem[], runStatus: RunStatus): string {
   if (steps.length === 0) return '';
   const failed = steps.find((s) => s.status === 'error');
   if (failed) return `${failed.label.toLowerCase()} failed${failed.detail ? ` · ${failed.detail}` : ''}`;
   const active = steps.find((s) => s.status === 'active');
   if (active) {
     const where = `${active.label.toLowerCase()}${active.detail ? ` · ${active.detail}` : ''}`;
-    return run.status === 'running' ? where : `stopped at ${where}`;
+    return runStatus === 'running' ? where : `stopped at ${where}`;
   }
-  return `${steps.length} phase${steps.length === 1 ? '' : 's'}`;
+  return `${steps.length} step${steps.length === 1 ? '' : 's'}`;
 }
 
 // ---------------------------------------------------------------------------
-// phase ↔ session mapping
+// step ↔ session mapping
 // ---------------------------------------------------------------------------
 
-/** One card in the run's stream: a phase, and the sessions that did its work. */
-export interface StreamPhase {
+/** One card in the run's stream: a step, and the sessions that did its work. */
+export interface StreamStep {
   key: string;
   label: string;
-  status: PhaseStatus;
+  status: StepStatus;
   /** The checklist's own live counter ("3/12 docs"), or a derived one. */
   detail?: string;
   sessions: SessionIndexEntry[];
 }
 
 export interface RunStream {
-  /** In checklist order; pending phases are held back for `next`. */
-  phases: StreamPhase[];
-  /** The label of the phase that has not started yet, when one is known. */
+  /** In checklist order; pending steps are held back for `next`. */
+  steps: StreamStep[];
+  /** The label of the step that has not started yet, when one is known. */
   next?: string;
+  /** Everything else the run said about itself, one line each. */
+  notes: string[];
 }
 
 /**
- * The run's stream: its phase checklist, each phase carrying its sessions.
+ * The run's stream: its step checklist, each step carrying its sessions.
  *
- * WHICH sessions did which phase's work is the run record's own claim: each
- * progress step names its `sessionKinds`. Nothing here knows a command or a
- * kind — a deterministic phase simply claims none.
+ * WHICH sessions did which step's work is the run record's own claim: each
+ * checklist item names its `sessionKinds`. Nothing here knows a command or a
+ * kind — a deterministic step simply claims none.
  *
- * Pending phases don't render as cards — they appear when they start — but the
+ * Pending steps don't render as cards — they appear when they start — but the
  * first one names itself in `next` so the stream says what is coming.
  *
- * FALLBACK: any session kind no step claims still gets its own card, appended
+ * FALLBACK: any session kind no item claims still gets its own card, appended
  * after the checklist ones (title = the kind, counter = done/total). That is
- * what a run whose steps declare nothing renders: checklist cards with no
- * session lines, plus one generic card per kind. Nothing ever disappears.
+ * what a run whose items declare nothing renders: checklist cards with no
+ * session lines, plus one generic card per kind — and a run declaring no
+ * checklist at all renders as one card per kind, a flat agentic trace. Nothing
+ * ever disappears.
  */
 export function buildRunStream(run: PublicSessionRun): RunStream {
-  const steps = run.progress ?? [];
+  const { checklist: items, notes } = readDisplay(run);
   const placed = new Set<string>();
-  const phases: StreamPhase[] = [];
+  const steps: StreamStep[] = [];
 
-  for (const step of steps) {
-    const kinds = step.sessionKinds ?? [];
+  for (const item of items) {
+    const kinds = item.sessionKinds ?? [];
     for (const kind of kinds) placed.add(kind);
-    if (step.status === 'pending') continue;
-    phases.push({
-      key: step.key,
-      label: step.label,
-      status: step.status,
-      ...(step.detail ? { detail: step.detail } : {}),
+    if (item.status === 'pending') continue;
+    steps.push({
+      key: item.key,
+      label: item.label,
+      status: item.status,
+      ...(item.detail ? { detail: item.detail } : {}),
       sessions: run.sessions.filter((s) => kinds.includes(s.kind)),
     });
   }
@@ -164,7 +224,7 @@ export function buildRunStream(run: PublicSessionRun): RunStream {
     if (placed.has(kind)) continue;
     const sessions = run.sessions.filter((s) => s.kind === kind);
     const done = sessions.filter((s) => s.status === 'completed').length;
-    phases.push({
+    steps.push({
       key: `kind:${kind}`,
       label: kind,
       status: kindStatus(sessions),
@@ -173,11 +233,11 @@ export function buildRunStream(run: PublicSessionRun): RunStream {
     });
   }
 
-  const next = steps.find((s) => s.status === 'pending')?.label;
-  return { phases, ...(next ? { next } : {}) };
+  const next = items.find((s) => s.status === 'pending')?.label;
+  return { steps, notes, ...(next ? { next } : {}) };
 }
 
-function kindStatus(sessions: readonly SessionIndexEntry[]): PhaseStatus {
+function kindStatus(sessions: readonly SessionIndexEntry[]): StepStatus {
   if (sessions.some((s) => s.status === 'failed')) return 'error';
   if (sessions.some((s) => s.status === 'running' || s.status === 'waiting' || s.status === 'parked'))
     return 'active';

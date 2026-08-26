@@ -34,6 +34,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { listSessionRuns, type PublicSessionRun } from '@/lib/api';
 import { connectSocket, joinRepoRoom, leaveRepoRoom } from '@/lib/socket';
+import { runChecklist } from '@/components/sessions/run-model';
 import type { JobChain, JobStep, PreviewNotification, Repo } from '@/preview/data/types';
 import { PREVIEW_BASE } from './base';
 
@@ -89,7 +90,7 @@ export const activityHref = (repoId: string): string => `${PREVIEW_BASE}/repos/$
  * but a first scan IS the onboarding chain and a re-scan is not.
  */
 export function toJobChain(repo: RunRepoRef, run: PublicSessionRun, first: boolean): JobChain {
-  const steps: JobStep[] = (run.progress ?? []).map((p) => ({
+  const steps: JobStep[] = runChecklist(run).map((p) => ({
     key: p.key,
     label: p.label,
     state: STEP_STATE[p.status] ?? 'pending',

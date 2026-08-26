@@ -2,7 +2,7 @@
  * Activity, level one: every agentic run of the repository as one flat table.
  *
  * A row is the whole run at a glance — what it was, whether it is alive, how
- * far its phase checklist got (a dot per phase plus the active phase's own
+ * far its step checklist got (a dot per step plus the active step's own
  * counter), how many sessions it holds and how many of them are waiting on an
  * answer, the ref it ran against, when it started and how long it took.
  * Opening a row is level two: the run as a conversation.
@@ -12,10 +12,11 @@ import { useMemo, useState } from 'react';
 import { FilterBar } from '@/components/ui/filter-bar';
 import type { PublicSessionRun } from '@/lib/api';
 import {
-  PHASE_DOT,
+  STEP_DOT,
   RUN_STATUS_META,
   commandLabel,
   progressSentence,
+  runChecklist,
   runDuration,
   shortRef,
   startedLabel,
@@ -144,7 +145,7 @@ export function RunsIndex({
 function RunRow({ run, onOpen }: { run: PublicSessionRun; onOpen: (runId: string) => void }) {
   const meta = RUN_STATUS_META[run.status];
   const waiting = waitingCount(run);
-  const steps = run.progress ?? [];
+  const steps = runChecklist(run);
   const took = runDuration(run);
   return (
     <button
@@ -170,12 +171,12 @@ function RunRow({ run, onOpen }: { run: PublicSessionRun; onOpen: (runId: string
             <span
               key={step.key}
               aria-hidden
-              className={`box-border h-[7px] w-[7px] rounded-full ${PHASE_DOT[step.status]}`}
+              className={`box-border h-[7px] w-[7px] rounded-full ${STEP_DOT[step.status]}`}
             />
           ))}
         </span>
         <span className="min-w-0 truncate text-[11px] text-muted-foreground">
-          {progressSentence(run)}
+          {progressSentence(steps, run.status)}
         </span>
       </span>
 

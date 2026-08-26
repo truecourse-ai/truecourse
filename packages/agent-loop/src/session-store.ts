@@ -12,6 +12,7 @@ import {
   SessionStatusSchema,
   type SessionEvent,
 } from './session-events.js';
+import { DisplayBlocksSchema } from './session-presentation.js';
 
 export const SessionCommandSchema = z.enum([
   'spec-scan',
@@ -45,33 +46,23 @@ export const SessionIndexEntrySchema = z.object({
 });
 export type SessionIndexEntry = z.infer<typeof SessionIndexEntrySchema>;
 
-/**
- * One phase of the run-level checklist. Not every phase of an agentic command
- * is a session (spec scan's discovery/tagging run before any session exists),
- * and the dashboard can only see what the run record carries — so the run
- * process mirrors its step tracker here and every rewrite streams out over
- * the existing run.json tail.
- */
-export const RunProgressStepSchema = z.object({
-  key: z.string(),
-  label: z.string(),
-  status: z.enum(['pending', 'active', 'done', 'error']),
-  detail: z.string().optional(),
-  /** Which session kinds belong to this step — declared by the run process,
-   *  so no reader needs a phase-to-kind table of its own. */
-  sessionKinds: z.array(z.string()).optional(),
-});
-export type RunProgressStep = z.infer<typeof RunProgressStepSchema>;
-
-export const RunRecordSchema = z.object({
+const RunRecordFieldsSchema = z.object({
   command: SessionCommandSchema,
   runId: z.string(),
   gitRef: z.string(),
   startedAt: z.string(),
   finishedAt: z.string().optional(),
   status: RunStatusSchema,
-  /** The run-level phase checklist (see {@link RunProgressStepSchema}). */
-  progress: z.array(RunProgressStepSchema).optional(),
+  /**
+   * How the run presents ITSELF, in the same block vocabulary its sessions'
+   * outcomes use — the phase checklist is a `checklist` block, nothing more.
+   * Not every phase of an agentic command is a session (spec scan's
+   * discovery/tagging run before any session exists) and the dashboard can
+   * only see what the run record carries, so the run process stamps its own
+   * presentation here; every rewrite streams out over the existing run.json
+   * tail.
+   */
+  display: DisplayBlocksSchema.optional(),
   /** The run process's pid — the OSS reconciliation sweep's liveness probe
    *  (nothing stays `running` on a dead process's memory). EE's
    *  table store tracks liveness its own way and may omit it. */
@@ -96,7 +87,23 @@ export const RunRecordSchema = z.object({
     .optional(),
   sessions: z.array(SessionIndexEntrySchema),
 });
-export type RunRecord = z.infer<typeof RunRecordSchema>;
+
+/**
+ * A run record, read tolerantly.
+ *
+ * `progress` is a legacy shape, not a live field: runs written before the
+ * checklist became a display block carry their phases there. Lifting it into a
+ * `checklist` block on the way in is what keeps such a run readable — the boot
+ * sweep rewrites every record it touches, so anything dropped at parse is
+ * erased from disk on the next boot.
+ */
+export const RunRecordSchema = z.preprocess((raw) => {
+  if (typeof raw !== 'object' || raw === null) return raw;
+  const record = raw as Record<string, unknown>;
+  if (record.display !== undefined || !Array.isArray(record.progress)) return raw;
+  return { ...record, display: { blocks: [{ kind: 'checklist', items: record.progress }] } };
+}, RunRecordFieldsSchema);
+export type RunRecord = z.infer<typeof RunRecordFieldsSchema>;
 
 /**
  * What the policy shell needs from a store — file-backed in OSS (core),

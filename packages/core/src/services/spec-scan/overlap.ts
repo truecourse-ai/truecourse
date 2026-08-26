@@ -35,7 +35,7 @@ import { z } from 'zod'
 import {
   defineSessionTool,
   type DisplayDispute,
-  type OutcomeBlock,
+  type KnownDisplayBlock,
   type SessionBudget,
   type SessionDef,
   type SessionTool,
@@ -406,7 +406,7 @@ export interface OverlapSessionInput {
  * `conflictResolutions` entry carries, so a verdict recorded off the card
  * matches the corpus conflict.
  */
-function presentOverlap(overlap: OverlapOutcome['overlaps'][number]): OutcomeBlock {
+function presentOverlap(overlap: OverlapOutcome['overlaps'][number]): KnownDisplayBlock {
   const [docA, docB] = overlap.docs
   const side = (ref: string): { anchor: string | null; quote?: string } => {
     const section = overlap.sections.find((s) => s.doc === ref)
@@ -450,7 +450,7 @@ function presentOverlap(overlap: OverlapOutcome['overlaps'][number]): OutcomeBlo
  * transcript after this display is already persisted, so at emit time the
  * outcome only carries the model's self-report of them.
  */
-function presentOverlapOutcome(outcome: OverlapOutcome): OutcomeBlock[] {
+function presentOverlapOutcome(outcome: OverlapOutcome): KnownDisplayBlock[] {
   const lines: string[] = [
     outcome.overlaps.length === 0
       ? 'These docs agree — I found no disagreements'

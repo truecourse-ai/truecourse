@@ -12,7 +12,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { resetKvCacheStore } from '@truecourse/llm'
-import { OutcomeBlockSchema } from '../../packages/agent-loop/src/index'
+import { KnownDisplayBlockSchema, RunRecordSchema } from '../../packages/agent-loop/src/index'
 import { CURATE_STEPS, curateInProcess } from '../../packages/core/src/commands/spec-in-process'
 import { StepTracker } from '../../packages/core/src/progress'
 import {
@@ -46,9 +46,10 @@ const doc = (path: string): DocCandidate => ({
   size: 32,
 })
 
-/** Every presenter's output must be renderable by the shared vocabulary. */
+/** Every presenter's output must be a WELL-FORMED block of the shared
+ *  vocabulary — readers are tolerant, writers are not. */
 function assertBlocks(blocks: unknown): void {
-  for (const block of blocks as unknown[]) expect(() => OutcomeBlockSchema.parse(block)).not.toThrow()
+  for (const block of blocks as unknown[]) expect(() => KnownDisplayBlockSchema.parse(block)).not.toThrow()
 }
 
 describe('spec-scan.orchestrate — presentOutcome', () => {
@@ -349,11 +350,12 @@ describe('spec-scan.settle-areas — presentOutcome', () => {
 })
 
 /**
- * The run-level half of the same contract: each phase of the checklist names
- * the session kinds that do its work, so a reader places sessions under phases
- * without a table of its own.
+ * The run-level half of the same contract: the run stamps its phase checklist
+ * as a display block in the very vocabulary its sessions use, and each item
+ * names the session kinds that do its work, so a reader places sessions under
+ * phases without a table of its own.
  */
-describe('spec scan run record — sessionKinds', () => {
+describe('spec scan run record — the checklist block', () => {
   let repo: string
   beforeEach(() => {
     resetKvCacheStore()
@@ -366,7 +368,7 @@ describe('spec scan run record — sessionKinds', () => {
     fs.rmSync(repo, { recursive: true, force: true })
   })
 
-  it('stamps each progress step with the kinds that do its work', async () => {
+  it('stamps each checklist item with the kinds that do its work', async () => {
     const driver = stubDriver(async (call) => {
       if (call.kind === 'spec-scan.settle-areas') {
         await call.emit(toolResult('check_settlement', 'valid'))
@@ -412,10 +414,14 @@ describe('spec scan run record — sessionKinds', () => {
       },
     })
 
-    const record = JSON.parse(fs.readFileSync(path.join(runDir, 'run.json'), 'utf-8')) as {
-      progress: { key: string; sessionKinds?: string[] }[]
-    }
-    expect(record.progress.map((s) => [s.key, s.sessionKinds])).toEqual([
+    const record = RunRecordSchema.parse(
+      JSON.parse(fs.readFileSync(path.join(runDir, 'run.json'), 'utf-8')),
+    )
+    // No bespoke run-level field: the checklist is one block among whatever
+    // else the run chooses to say.
+    const block = KnownDisplayBlockSchema.parse(record.display?.blocks[0])
+    if (block.kind !== 'checklist') throw new Error('the run stamped no checklist block')
+    expect(block.items.map((item) => [item.key, item.sessionKinds])).toEqual([
       ['discover', ['spec-scan.orchestrate']],
       ['tag', ['spec-scan.curate-doc', 'spec-scan.settle-areas']],
       ['overlap', ['spec-scan.overlap']],

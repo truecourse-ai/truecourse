@@ -226,6 +226,37 @@ describe('toChatRows', () => {
     expect(JSON.stringify(rows)).not.toContain('TypeError');
   });
 
+  it('states each step of a checklist block, with where it got to', () => {
+    // `checklist` is one vocabulary shared by both levels: a session outcome
+    // may present one, and it must read as its steps, not as "items: 3".
+    seq = 0;
+    const rows = toChatRows([
+      ev({
+        type: 'outcome',
+        value: {},
+        display: {
+          blocks: [
+            {
+              kind: 'checklist',
+              items: [
+                { key: 'read', label: 'Reading the doc', status: 'done', detail: '35 sections' },
+                { key: 'tag', label: 'Tagging areas', status: 'done' },
+                { key: 'verify', label: 'Verifying anchors', status: 'error', detail: 'two moved' },
+              ],
+            },
+          ],
+        },
+      } as never),
+    ]);
+    const close = rows[0];
+    if (close.kind !== 'close') throw new Error('unreachable');
+    expect(close.facts).toEqual([
+      'Reading the doc — done: 35 sections',
+      'Tagging areas — done',
+      'Verifying anchors — error: two moved',
+    ]);
+  });
+
   it('renders a block kind it does not know as a fact line, never crashing', () => {
     seq = 0;
     const rows = toChatRows([

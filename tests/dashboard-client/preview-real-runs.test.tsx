@@ -75,12 +75,21 @@ function runningScan(overrides: Partial<PublicSessionRun> = {}): PublicSessionRu
     gitRef: 'deadbeef',
     startedAt: new Date().toISOString(),
     status: 'running',
-    progress: [
-      { key: 'discover', label: 'Discover documents', status: 'done', detail: '41 docs · 12 to curate' },
-      { key: 'tag', label: 'Curate documents', status: 'active', detail: '3/12 docs' },
-      { key: 'overlap', label: 'Compare areas', status: 'pending' },
-      { key: 'verify', label: 'Verify anchors', status: 'pending' },
-    ],
+    // The checklist is one of the run's own display blocks — the shell reads
+    // it there, and has no run-level shape of its own.
+    display: {
+      blocks: [
+        {
+          kind: 'checklist',
+          items: [
+            { key: 'discover', label: 'Discover documents', status: 'done', detail: '41 docs · 12 to curate' },
+            { key: 'tag', label: 'Curate documents', status: 'active', detail: '3/12 docs' },
+            { key: 'overlap', label: 'Compare areas', status: 'pending' },
+            { key: 'verify', label: 'Verify anchors', status: 'pending' },
+          ],
+        },
+      ],
+    },
     sessions: [],
     ...overrides,
   } as PublicSessionRun;
@@ -153,7 +162,7 @@ describe('a run record as the shell reads it', () => {
   });
 
   it('has one honest step before the run publishes a checklist', () => {
-    const job = toJobChain(repo, runningScan({ progress: undefined }), true);
+    const job = toJobChain(repo, runningScan({ display: undefined }), true);
     expect(job.steps).toEqual([{ key: 'start', label: 'Starting', state: 'active' }]);
   });
 

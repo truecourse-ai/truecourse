@@ -30,7 +30,7 @@ import type {
   TurnUsage,
   UserInputQuestion,
 } from './session-events.js';
-import type { OutcomeDisplay, SessionDisplay, ToolDisplay } from './session-presentation.js';
+import type { DisplayBlocks, SessionDisplay, ToolDisplay } from './session-presentation.js';
 import type { SessionPersistence } from './session-store.js';
 
 /**
@@ -586,7 +586,7 @@ function sessionDisplay<T>(def: SessionDef<T>): SessionDisplay | undefined {
 function presented<T>(
   def: SessionDef<T>,
   outcome: T,
-): { display?: OutcomeDisplay; displayError?: string } {
+): { display?: DisplayBlocks; displayError?: string } {
   if (!def.presentOutcome) return {};
   try {
     return { display: { blocks: def.presentOutcome(outcome) } };

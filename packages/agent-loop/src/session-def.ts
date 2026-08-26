@@ -7,7 +7,7 @@
 
 import type { z } from 'zod';
 import type { BudgetSpent, SessionFailure, UserInputQuestion } from './session-events.js';
-import type { OutcomeBlock, ToolDisplay } from './session-presentation.js';
+import type { KnownDisplayBlock, ToolDisplay } from './session-presentation.js';
 
 /** What a tool hands back to the model. An error result is an observation
  *  the session ingests and revises on — never a session failure. */
@@ -105,7 +105,7 @@ export interface SessionDef<TOutcome = unknown> {
    * into a digest that silently reads a field nobody writes. Runs once, at
    * emit; a throw is recorded on the event and never fails the session.
    */
-  presentOutcome?: (outcome: TOutcome) => OutcomeBlock[];
+  presentOutcome?: (outcome: TOutcome) => KnownDisplayBlock[];
   /**
    * A structural demand that `tool` was called before the outcome is accepted
    * (01 step 2k). Exists because prompting alone did not carry it: across 110

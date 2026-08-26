@@ -15,7 +15,7 @@
 import { z } from 'zod'
 import {
   defineSessionTool,
-  type OutcomeBlock,
+  type KnownDisplayBlock,
   type SessionBudget,
   type SessionDef,
   type SessionTool,
@@ -463,7 +463,7 @@ export interface SettleAreasSessionInput {
 }
 
 /** What the settlement changed, per decision the session makes. */
-function presentSettlement(settlement: AreaSettlement): OutcomeBlock[] {
+function presentSettlement(settlement: AreaSettlement): KnownDisplayBlock[] {
   const concerns = Object.keys(settlement.concernMerges).length
   const products = Object.keys(settlement.productMerges).length
   const lines: string[] = []

@@ -18,7 +18,7 @@
  */
 
 import { z } from 'zod'
-import type { OutcomeBlock, SessionBudget, SessionDef } from '@truecourse/agent-loop'
+import type { KnownDisplayBlock, SessionBudget, SessionDef } from '@truecourse/agent-loop'
 import {
   DocSubjectSchema,
   SkipCategorySchema,
@@ -189,7 +189,7 @@ export interface CurateDocSessionInput {
 }
 
 /** The two judgments in words: corpus membership (with its reason) and areas. */
-function presentDocVerdict(verdict: DocVerdict): OutcomeBlock[] {
+function presentDocVerdict(verdict: DocVerdict): KnownDisplayBlock[] {
   const lines = [
     verdict.keep
       ? `I'm keeping this doc: ${verdict.reason}`

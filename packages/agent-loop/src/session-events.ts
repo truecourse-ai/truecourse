@@ -12,7 +12,7 @@
 
 import { z } from 'zod';
 
-import { OutcomeDisplaySchema, SessionDisplaySchema } from './session-presentation.js';
+import { DisplayBlocksSchema, SessionDisplaySchema } from './session-presentation.js';
 
 // ---------------------------------------------------------------------------
 // usage + budget
@@ -279,7 +279,7 @@ export const SessionEventBodySchema = z.discriminatedUnion('type', [
     /** The def's own rendering of `value`, stamped at emit — the only moment
      *  the definition and the validated outcome coexist. Absent when the def
      *  presents nothing, or when its presenter threw. */
-    display: OutcomeDisplaySchema.optional(),
+    display: DisplayBlocksSchema.optional(),
     /** A presenter that threw, recorded as data: the UI stays silent, the
      *  failure stays greppable. */
     displayError: z.string().optional(),

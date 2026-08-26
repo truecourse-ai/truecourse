@@ -33,7 +33,7 @@
 import { z } from 'zod'
 import {
   defineSessionTool,
-  type OutcomeBlock,
+  type KnownDisplayBlock,
   type SessionBudget,
   type SessionDef,
   type SessionTool,
@@ -436,7 +436,7 @@ function capped(lines: string[], rest: (n: number) => string): string[] {
   return [...lines.slice(0, SCOPE_DIGEST_CAP), rest(lines.length - SCOPE_DIGEST_CAP)]
 }
 
-function presentScanScope(outcome: ScanScopeOutcome): OutcomeBlock[] {
+function presentScanScope(outcome: ScanScopeOutcome): KnownDisplayBlock[] {
   const excluded = outcome.scopeVerdicts.filter((v) => v.verdict === 'exclude')
   const kept = outcome.scopeVerdicts.length - excluded.length
   const lines: string[] = []
@@ -454,7 +454,7 @@ function presentScanScope(outcome: ScanScopeOutcome): OutcomeBlock[] {
   if (outcome.instructions.length === 0) lines.push('no extra instructions for the scan sessions')
   else for (const line of outcome.instructions) lines.push(`instruction for the scan: ${line}`)
 
-  const blocks: OutcomeBlock[] = [{ kind: 'facts', lines }]
+  const blocks: KnownDisplayBlock[] = [{ kind: 'facts', lines }]
   if (outcome.findings && outcome.findings.length > 0) {
     blocks.push({
       kind: 'facts',

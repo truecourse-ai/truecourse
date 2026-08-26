@@ -1,9 +1,11 @@
 /**
  * Activity, level two: one run read as a conversation.
  *
- * The run's phase checklist and its session index are merged into a single
- * chronological stream ({@link buildRunStream}). Each phase is an activity
- * card — expanded while it is the open phase (its live counter, one line per
+ * The run's step checklist (a block it declares, like every other) and its
+ * session index are merged into a single chronological stream
+ * ({@link buildRunStream}); anything else the run said about itself opens the
+ * stream as plain lines. Each step is an activity
+ * card — expanded while it is the open step (its live counter, one line per
  * session that did its work), compacted to its header row once it lands, and
  * re-expandable by its chevron. A session line opens its transcript in place,
  * rendered by the same {@link SessionThread} widgets the old pane used.
@@ -22,7 +24,7 @@ import { Avatar, SessionThread } from './SessionThread';
 import { toChatRows } from './transcript-model';
 import { useSessionEvents } from './useSessionEvents';
 import {
-  PHASE_DOT,
+  STEP_DOT,
   RUN_STATUS_META,
   SESSION_STATUS_META,
   buildRunStream,
@@ -33,7 +35,7 @@ import {
   startedLabel,
   timeLabel,
   waitingCount,
-  type StreamPhase,
+  type StreamStep,
 } from './run-model';
 
 /** The stream column — the mock's 800px, centered, shrinking on narrow panes. */
@@ -58,21 +60,21 @@ export function RunConversation({
 }) {
   const meta = RUN_STATUS_META[run.status];
   const waiting = waitingCount(run);
-  const { phases, next } = useMemo(() => buildRunStream(run), [run]);
+  const { steps, next, notes } = useMemo(() => buildRunStream(run), [run]);
 
-  // A phase card is open while its phase is; a landed one compacts to its
+  // A step card is open while its step is; a landed one compacts to its
   // header row until its chevron says otherwise. The override survives the
-  // phase moving on, which is the point of the chevron. A `?ses=` deep link
+  // step moving on, which is the point of the chevron. A `?ses=` deep link
   // also opens whichever card holds that session, or its line would be hidden.
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
-  const isOpen = (phase: StreamPhase): boolean =>
-    overrides[phase.key] ??
-    (phase.status === 'active' ||
-      phase.status === 'error' ||
-      phase.sessions.some((s) => s.sessionId === openSessionId));
+  const isOpen = (step: StreamStep): boolean =>
+    overrides[step.key] ??
+    (step.status === 'active' ||
+      step.status === 'error' ||
+      step.sessions.some((s) => s.sessionId === openSessionId));
 
   const scrollRef = useRef<HTMLDivElement>(null);
-  const anchor = `${phases.length}:${run.sessions.length}:${run.status}`;
+  const anchor = `${steps.length}:${run.sessions.length}:${run.status}`;
   useEffect(() => {
     if (run.status !== 'running') return;
     const el = scrollRef.current;
@@ -109,24 +111,34 @@ export function RunConversation({
 
       <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-6 pb-3 pt-5">
         <div className={`${STREAM} flex flex-col gap-4`}>
-          {phases.length === 0 && (
+          {/* Whatever else the run said about itself, in its own words. */}
+          {notes.length > 0 && (
+            <div className="ml-[38px] flex flex-col gap-1 text-[11px] text-muted-foreground">
+              {/* Keyed by position: notes are an ordered list with no identity
+                  of their own, and two runs of one step can say the same thing. */}
+              {notes.map((note, i) => (
+                <p key={i}>{note}</p>
+              ))}
+            </div>
+          )}
+          {steps.length === 0 && (
             <p className="text-xs text-muted-foreground">
-              This run has not opened a phase yet.
+              This run has not opened a step yet.
             </p>
           )}
-          {phases.map((phase) => (
-            <div key={phase.key} className="flex flex-col gap-4">
-              <PhaseCard
-                phase={phase}
-                open={isOpen(phase)}
-                onToggle={() => setOverrides((prev) => ({ ...prev, [phase.key]: !isOpen(phase) }))}
+          {steps.map((step) => (
+            <div key={step.key} className="flex flex-col gap-4">
+              <StepCard
+                step={step}
+                open={isOpen(step)}
+                onToggle={() => setOverrides((prev) => ({ ...prev, [step.key]: !isOpen(step) }))}
                 repoId={repoId}
                 run={run}
                 liveEvents={liveEvents}
                 openSessionId={openSessionId}
                 onOpenSession={onOpenSession}
               />
-              {phase.sessions
+              {step.sessions
                 .filter((s) => s.status === 'waiting')
                 .map((session) => (
                   <WaitingQuestion
@@ -173,7 +185,7 @@ export function RunConversation({
 }
 
 /**
- * One phase as an activity card: the header row always, its session lines
+ * One step as an activity card: the header row always, its session lines
  * while open. Indented to the bubble gutter so cards and messages read as one
  * column.
  *
@@ -182,8 +194,8 @@ export function RunConversation({
  * is the only clock the store hands this surface. A number would have to be
  * invented, so the space stays blank.
  */
-function PhaseCard({
-  phase,
+function StepCard({
+  step,
   open,
   onToggle,
   repoId,
@@ -192,7 +204,7 @@ function PhaseCard({
   openSessionId,
   onOpenSession,
 }: {
-  phase: StreamPhase;
+  step: StreamStep;
   open: boolean;
   onToggle: () => void;
   repoId: string;
@@ -214,15 +226,15 @@ function PhaseCard({
         ) : (
           <ChevronRight aria-hidden className="h-3 w-3 shrink-0 text-muted-foreground" />
         )}
-        <span aria-hidden className={`h-[7px] w-[7px] shrink-0 rounded-full ${PHASE_DOT[phase.status]}`} />
-        <span className="min-w-0 truncate text-xs font-medium text-foreground">{phase.label}</span>
-        {phase.detail && (
-          <span className="min-w-0 truncate text-[11px] text-muted-foreground">{phase.detail}</span>
+        <span aria-hidden className={`h-[7px] w-[7px] shrink-0 rounded-full ${STEP_DOT[step.status]}`} />
+        <span className="min-w-0 truncate text-xs font-medium text-foreground">{step.label}</span>
+        {step.detail && (
+          <span className="min-w-0 truncate text-[11px] text-muted-foreground">{step.detail}</span>
         )}
       </button>
-      {open && phase.sessions.length > 0 && (
+      {open && step.sessions.length > 0 && (
         <div className="flex flex-col gap-[7px] border-t border-border/60 px-3 py-2.5">
-          {phase.sessions.map((session) => (
+          {step.sessions.map((session) => (
             <SessionLine
               key={session.sessionId}
               repoId={repoId}
@@ -242,7 +254,7 @@ function PhaseCard({
 }
 
 /**
- * One session inside a phase card. A `waiting` session is a plain line here —
+ * One session inside a step card. A `waiting` session is a plain line here —
  * its thread hangs off the question bubble below the card instead, so the same
  * transcript never renders twice in one stream.
  */

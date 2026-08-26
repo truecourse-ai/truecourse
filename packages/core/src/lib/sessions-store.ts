@@ -15,7 +15,8 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
   RunRecordSchema,
-  type RunProgressStep,
+  type ChecklistItem,
+  type DisplayBlock,
   type RunRecord,
   type RunStatus,
   type SessionCommand,
@@ -76,11 +77,16 @@ export interface SessionRunStore {
    */
   setLlm(llm: NonNullable<RunRecord['llm']>): void;
   /**
-   * Mirror the run-level phase checklist into the record, so a dashboard
-   * watching the run sees progress from phases that are not sessions (spec
-   * scan discovers and tags docs long before its first session exists).
+   * Stamp the run's phase checklist — one block of the same vocabulary its
+   * sessions' outcomes use. Written several times a second while a run moves,
+   * so it replaces the FIRST `checklist` block IN PLACE (inserting one at the
+   * front when the run has none) and leaves every other block untouched: a
+   * progress rewrite must never clobber what another writer said. The
+   * dashboard needs it because phases that are not sessions (spec scan
+   * discovers and tags docs long before its first session exists) can only be
+   * seen through the record.
    */
-  setProgress(steps: RunProgressStep[]): void;
+  setChecklist(items: ChecklistItem[]): void;
   /** Terminal write: stamps `finishedAt` and drops the dead endpoint. */
   finish(status: Exclude<RunStatus, 'running'>): void;
 }
@@ -154,8 +160,13 @@ function openRun(dir: string, record: RunRecord): SessionRunStore {
       record.llm = llm;
       write();
     },
-    setProgress(steps) {
-      record.progress = steps;
+    setChecklist(items) {
+      const blocks = record.display?.blocks ?? [];
+      const checklist: DisplayBlock = { kind: 'checklist', items };
+      const at = blocks.findIndex((block) => block.kind === 'checklist');
+      record.display = {
+        blocks: at === -1 ? [checklist, ...blocks] : blocks.map((b, i) => (i === at ? checklist : b)),
+      };
       write();
     },
     finish(status) {

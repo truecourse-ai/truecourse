@@ -470,12 +470,13 @@ export async function curateInProcess(
   const gitRef = await resolveCommitSha(repoRoot);
   const run = createSessionRun(repoRoot, { command: 'spec-scan', gitRef });
   options.onRunStarted?.({ command: 'spec-scan', runId: run.runId, dir: run.dir });
-  // Mirror the step checklist into the run record: the CLI renders the tracker
-  // locally, but the dashboard can only see what run.json carries, and the
-  // early phases (discover/tag) have no sessions to show progress through.
+  // Mirror the step checklist into the run record as the run's own display:
+  // the CLI renders the tracker locally, but the dashboard can only see what
+  // run.json carries, and the early phases (discover/tag) have no sessions to
+  // show progress through.
   tracker?.tap((p) => {
     if (!p.steps) return;
-    run.setProgress(
+    run.setChecklist(
       p.steps.map((step) => {
         const kinds = CURATE_STEP_SESSION_KINDS[step.key];
         return kinds ? { ...step, sessionKinds: [...kinds] } : step;

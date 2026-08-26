@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import {
+  ChecklistItemSchema,
+  KnownDisplayBlockSchema,
   defineSessionTool,
   resumeGrantMessage,
   runAgentLoop,
-  RunProgressStepSchema,
+  RunRecordSchema,
   SessionEventBodySchema,
   SessionToolArgsError,
   WRAP_UP_TURNS,
@@ -1544,16 +1546,165 @@ describe('runAgentLoop presentation', () => {
   });
 });
 
-describe('run progress steps', () => {
-  it('carries the session kinds a phase step covers', () => {
-    // The run process declares the mapping; no reader keeps a table of kinds.
-    const step = RunProgressStepSchema.parse({
-      key: 'tag',
-      label: 'Tag areas',
-      status: 'active',
-      sessionKinds: ['spec-scan.curate-doc', 'spec-scan.settle-areas'],
+describe('a run presents itself in the same block vocabulary its sessions do', () => {
+  it('carries its phase checklist as a display block on the run record', () => {
+    // The run process declares which kinds do a phase's work; no reader keeps
+    // a table of kinds, and the checklist is just another block.
+    const record = RunRecordSchema.parse({
+      command: 'spec-scan',
+      runId: 'run-1',
+      gitRef: 'main',
+      startedAt: '2026-08-26T09:00:00.000Z',
+      status: 'running',
+      sessions: [],
+      display: {
+        blocks: [
+          {
+            kind: 'checklist',
+            items: [
+              { key: 'discover', label: 'Discovering docs', status: 'done', detail: '41 docs' },
+              {
+                key: 'tag',
+                label: 'Tag areas',
+                status: 'active',
+                sessionKinds: ['spec-scan.curate-doc', 'spec-scan.settle-areas'],
+              },
+            ],
+          },
+        ],
+      },
     });
-    expect(step.sessionKinds).toEqual(['spec-scan.curate-doc', 'spec-scan.settle-areas']);
+
+    // Parsed against the WRITER's schema: the block is well-formed, not merely
+    // carried through the tolerant reader branch.
+    const block = KnownDisplayBlockSchema.parse(record.display?.blocks[0]);
+    if (block.kind !== 'checklist') throw new Error('the checklist block did not round-trip');
+    expect(block.items.map((item) => [item.key, item.status])).toEqual([
+      ['discover', 'done'],
+      ['tag', 'active'],
+    ]);
+    expect(block.items[0].detail).toBe('41 docs');
+    expect(block.items[1].sessionKinds).toEqual([
+      'spec-scan.curate-doc',
+      'spec-scan.settle-areas',
+    ]);
+  });
+
+  it('takes one checklist item on its own, and rejects a status outside the vocabulary', () => {
+    // Writers hold themselves to the vocabulary; readers (below) do not.
+    expect(
+      ChecklistItemSchema.parse({ key: 'verify', label: 'Verify anchors', status: 'pending' }),
+    ).toEqual({ key: 'verify', label: 'Verify anchors', status: 'pending' });
+    expect(() =>
+      ChecklistItemSchema.parse({ key: 'verify', label: 'Verify anchors', status: 'skipped' }),
+    ).toThrow();
+  });
+
+  it('keeps a block kind it has never heard of rather than failing the record', () => {
+    // A run record is the whole run's memory: one block from a newer writer
+    // must not take the run out of the listing, out of resume and off the
+    // dashboard tail. The vocabulary is append-only, so readers are tolerant.
+    const record = RunRecordSchema.parse({
+      command: 'spec-scan',
+      runId: 'run-2',
+      gitRef: 'main',
+      startedAt: '2026-08-26T09:00:00.000Z',
+      status: 'running',
+      sessions: [],
+      display: {
+        blocks: [
+          { kind: 'budget', spentUsd: 1.4, of: 'the scan ceiling' },
+          { kind: 'checklist', items: [{ key: 'discover', label: 'Discovering docs', status: 'done' }] },
+        ],
+      },
+    });
+    expect(record.display?.blocks[0]).toEqual({
+      kind: 'budget',
+      spentUsd: 1.4,
+      of: 'the scan ceiling',
+    });
+    const known = record.display?.blocks[1];
+    expect(known).toMatchObject({ kind: 'checklist' });
+  });
+
+  it('carries an unknown block through an outcome event body too', () => {
+    const outcome = SessionEventBodySchema.parse({
+      type: 'outcome',
+      value: { verdict: 'keep' },
+      display: { blocks: [{ kind: 'timeline', points: [{ at: 'noon', what: 'started' }] }] },
+    });
+    expect(outcome).toMatchObject({
+      display: { blocks: [{ kind: 'timeline', points: [{ at: 'noon', what: 'started' }] }] },
+    });
+  });
+
+  it('degrades a malformed KNOWN block to an unknown one, whole', () => {
+    // A checklist whose status is out of vocabulary is not a reason to lose
+    // the record — it falls through to the tolerant branch and renders there.
+    const record = RunRecordSchema.parse({
+      command: 'spec-scan',
+      runId: 'run-3',
+      gitRef: 'main',
+      startedAt: '2026-08-26T09:00:00.000Z',
+      status: 'running',
+      sessions: [],
+      display: {
+        blocks: [
+          { kind: 'checklist', items: [{ key: 'verify', label: 'Verify anchors', status: 'skipped' }] },
+        ],
+      },
+    });
+    expect(record.display?.blocks[0]).toEqual({
+      kind: 'checklist',
+      items: [{ key: 'verify', label: 'Verify anchors', status: 'skipped' }],
+    });
+  });
+
+  it('reads a record written before the checklist was a display block', () => {
+    // `progress` is a legacy shape, not a live field: lifting it keeps the
+    // phase UI honest, and the boot sweep rewrites what it reads — anything
+    // dropped at parse would be erased from disk.
+    const record = RunRecordSchema.parse({
+      command: 'spec-scan',
+      runId: 'run-0',
+      gitRef: 'main',
+      startedAt: '2026-08-26T09:00:00.000Z',
+      status: 'completed',
+      sessions: [],
+      progress: [
+        { key: 'discover', label: 'Discovering docs', status: 'done', detail: '41 docs' },
+      ],
+    });
+    expect(record.display).toEqual({
+      blocks: [
+        {
+          kind: 'checklist',
+          items: [{ key: 'discover', label: 'Discovering docs', status: 'done', detail: '41 docs' }],
+        },
+      ],
+    });
+    expect(record.status).toBe('completed');
+    expect(record).not.toHaveProperty('progress');
+  });
+
+  it('leaves a record that carries both its own display alone', () => {
+    const record = RunRecordSchema.parse({
+      command: 'spec-scan',
+      runId: 'run-0b',
+      gitRef: 'main',
+      startedAt: '2026-08-26T09:00:00.000Z',
+      status: 'completed',
+      sessions: [],
+      progress: [{ key: 'stale', label: 'Stale', status: 'done' }],
+      display: {
+        blocks: [{ kind: 'checklist', items: [{ key: 'discover', label: 'Discovering docs', status: 'done' }] }],
+      },
+    });
+    expect(record.display).toEqual({
+      blocks: [
+        { kind: 'checklist', items: [{ key: 'discover', label: 'Discovering docs', status: 'done' }] },
+      ],
+    });
   });
 });
 

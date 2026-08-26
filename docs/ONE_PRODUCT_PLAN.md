@@ -543,7 +543,11 @@ dashboard.
   transcript streams, with generic fallbacks for events that carry no
   display — it holds no per-session-kind copy or workflow knowledge, so
   adding a session kind requires zero client changes; only a genuinely new
-  interaction pattern adds a widget.
+  interaction pattern adds a widget. The RUN record carries the same
+  vocabulary in its own `display`: the phase checklist is itself a block
+  (`checklist`) the run process declares and rewrites as phases land, so the
+  client has no run-level structure of its own either — it renders blocks by
+  kind, and a run that declares no checklist reads as a flat agentic trace.
 - **Versioned state** (agentic plan §3.8) lands as rows keyed (repo, ref,
   parent) from the start: corpus versions, generation records, run records,
   each with parent pointers and content-addressed item pointers. The PR

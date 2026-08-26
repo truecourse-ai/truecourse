@@ -110,19 +110,52 @@ describe('sessions store', () => {
     expect(finished.endpoint).toBeUndefined();
   });
 
-  it('persists the run-level progress checklist and serves it to browsers', () => {
+  it('persists the run-level display blocks and serves them to browsers', () => {
     const run = createSessionRun(repo, { command: 'spec-scan', gitRef: 'main' });
-    run.setProgress([
+    run.setChecklist([
       { key: 'discover', label: 'Discovering docs', status: 'done', detail: '142 docs' },
       { key: 'tag', label: 'Tagging doc areas', status: 'active' },
     ]);
     const reopened = openSessionRun(repo, 'spec-scan', run.runId);
-    expect(reopened.record().progress).toEqual([
-      { key: 'discover', label: 'Discovering docs', status: 'done', detail: '142 docs' },
-      { key: 'tag', label: 'Tagging doc areas', status: 'active' },
+    expect(reopened.record().display).toEqual({
+      blocks: [
+        {
+          kind: 'checklist',
+          items: [
+            { key: 'discover', label: 'Discovering docs', status: 'done', detail: '142 docs' },
+            { key: 'tag', label: 'Tagging doc areas', status: 'active' },
+          ],
+        },
+      ],
+    });
+    // toPublicRunRecord strips endpoint/pid only — the display reaches the UI.
+    expect(toPublicRunRecord(reopened.record()).display?.blocks).toHaveLength(1);
+  });
+
+  it('updates the checklist in place, leaving every other block standing', () => {
+    // Progress is rewritten several times a second; anything else the run says
+    // about itself must survive that, or the other lane has no viable writer.
+    const run = createSessionRun(repo, { command: 'spec-scan', gitRef: 'main' });
+    const runJson = path.join(sessionRunDir(repo, 'spec-scan', run.runId), 'run.json');
+    const seeded = JSON.parse(fs.readFileSync(runJson, 'utf-8'));
+    seeded.display = { blocks: [{ kind: 'facts', lines: ['41 docs discovered'] }] };
+    fs.writeFileSync(runJson, JSON.stringify(seeded));
+
+    const reopened = openSessionRun(repo, 'spec-scan', run.runId);
+    reopened.setChecklist([{ key: 'tag', label: 'Tagging doc areas', status: 'active' }]);
+    reopened.setChecklist([
+      { key: 'tag', label: 'Tagging doc areas', status: 'done', detail: '12 docs' },
     ]);
-    // toPublicRunRecord strips endpoint/pid only — progress reaches the UI.
-    expect(toPublicRunRecord(reopened.record()).progress).toHaveLength(2);
+
+    expect(openSessionRun(repo, 'spec-scan', run.runId).record().display).toEqual({
+      blocks: [
+        {
+          kind: 'checklist',
+          items: [{ key: 'tag', label: 'Tagging doc areas', status: 'done', detail: '12 docs' }],
+        },
+        { kind: 'facts', lines: ['41 docs discovered'] },
+      ],
+    });
   });
 
   it('reopens an existing run for resume and lists runs newest first', async () => {
