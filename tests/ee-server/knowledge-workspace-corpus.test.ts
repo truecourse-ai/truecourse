@@ -15,7 +15,7 @@
  *    throws — and still succeeds, proving the corpus path never touches it. The
  *    ledger is seeded before (Sync's job), and Process leaves it untouched.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
@@ -29,9 +29,28 @@ import {
   type CuratedCorpus,
 } from '@truecourse/core/commands/spec-in-process';
 import { resetKvCacheStore } from '@truecourse/llm';
-import { setDefaultTransport, type LlmTransport } from '@truecourse/shared/llm';
+import { setDefaultTransport } from '@truecourse/shared/llm';
 import { PgKnowledgeStore } from '../../ee/packages/data-store/src/index';
 import { processWorkspaceKnowledge } from '../../ee/packages/server/src/knowledge/sync';
+import { docPathOf, outcome, stubDriver, type StubScript } from '../core/spec-scan-session-stub';
+
+/**
+ * The workspace corpus sync runs the SCAN SESSIONS. Called directly it
+ * takes a `driver` seam; reached through `processWorkspaceKnowledge` it does
+ * not, so the driver the run resolves is mocked at the module the built core
+ * imports it from. Anything reaching it without a script fails loudly.
+ */
+let sessionScript: StubScript = () => {
+  throw new Error('no session script installed for this case');
+};
+vi.mock('../../packages/core/dist/services/llm/session-driver.js', () => ({
+  SESSION_MODEL_CLAUDE_CODE: 'opus',
+  assertSessionBackendReady: async () => {},
+  createConfiguredSessionDriver: () => {
+    const { driver } = stubDriver((call) => sessionScript(call));
+    return { driver, mode: 'claude-code', attribution: driver.attribution };
+  },
+}));
 
 const ORG = 'org_ws_corpus';
 
@@ -110,15 +129,29 @@ describe('syncWorkspaceCorpusInProcess — decisions injection', () => {
         manualAreas: [],
         conflictResolutions: [],
       },
-      // Relevance KEEPS A, DROPS B — so if the exclude is ignored, A survives. The
-      // exclude leaves 0 kept docs, so no other curate stage reaches the (throwing)
-      // transport.
-      relevanceRunner: async ({ doc }) => ({
-        path: doc.path,
-        include: doc.path.endsWith('a.md'),
-        reason: doc.path.endsWith('a.md') ? 'spec' : 'noise',
-      }),
-      areaTagRunner: async () => ({ tags: [{ product: 'core', concern: 'cart' }], status: 'shipped' }),
+      // Curation KEEPS A, DROPS B — so if the exclude is ignored, A survives. The
+      // exclude leaves 0 kept docs, so no later session kind runs at all.
+      driver: stubDriver((call) => {
+        const p = docPathOf(call.briefing);
+        return outcome(
+          p.endsWith('a.md')
+            ? {
+                keep: true,
+                reason: 'spec',
+                subject: 'this-product',
+                areas: [{ product: 'core', concern: 'cart' }],
+                status: 'shipped',
+              }
+            : {
+                keep: false,
+                reason: 'noise',
+                subject: 'this-product',
+                category: 'scratch',
+                areas: [],
+                status: null,
+              },
+        );
+      }).driver,
       disableOverlapDetection: true,
     });
 
@@ -137,16 +170,19 @@ describe('syncWorkspaceCorpusInProcess — decisions injection', () => {
 
 describe('processWorkspaceKnowledge — store-backed union (no contract store installed)', () => {
   it('consolidates from stored bodies with the throwing file contract store, leaving the ledger untouched', async () => {
-    // A canned transport answering the two curate stages a single kept doc reaches
-    // (relevance keep + area tag); overlap/vocab/verify don't fire for one doc.
-    // Overrides the throwing default the setup installed.
-    const transport: LlmTransport = async (req) => {
-      if (req.stage === 'spec.relevance') return JSON.stringify({ include: true, reason: 'spec' });
-      if (req.stage === 'spec.areaTag')
-        return JSON.stringify({ areas: [{ product: 'core', concern: 'checkout' }], status: 'shipped' });
-      throw new Error(`unexpected LLM stage: ${req.stage}`);
+    // One curate-doc session for the single kept doc; the settle gate stays shut
+    // (one core concern) and overlap needs a pair, so nothing else runs. A kind
+    // this script does not answer throws, which would fail the run loudly.
+    sessionScript = (call) => {
+      if (call.kind !== 'spec-scan.curate-doc') throw new Error(`unexpected session: ${call.kind}`);
+      return outcome({
+        keep: true,
+        reason: 'spec',
+        subject: 'this-product',
+        areas: [{ product: 'core', concern: 'checkout' }],
+        status: 'shipped',
+      });
     };
-    setDefaultTransport(transport);
 
     const knowledge = new PgKnowledgeStore(db);
     // Sync already ran: the body is content-addressed + the ledger row points at it.

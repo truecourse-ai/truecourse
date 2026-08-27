@@ -16,6 +16,24 @@ vi.mock('../../tools/cli/src/lib/claude-preflight.js', async (importOriginal) =>
   return { ...actual, preflightLlmOrExit: vi.fn(async () => {}) };
 });
 
+/**
+ * The spec scan runs AGENT SESSIONS now, and `runSpecScan` has no
+ * driver seam of its own — so the session driver the run resolves is mocked at
+ * the module the built core imports it from, and each case scripts it. Anything
+ * that reaches it without a script fails loudly rather than calling a provider.
+ */
+let sessionScript: StubScript = () => {
+  throw new Error('no session script installed for this case');
+};
+vi.mock('../../packages/core/dist/services/llm/session-driver.js', () => ({
+  SESSION_MODEL_CLAUDE_CODE: 'opus',
+  assertSessionBackendReady: async () => {},
+  createConfiguredSessionDriver: () => {
+    const { driver } = stubDriver((call) => sessionScript(call));
+    return { driver, mode: 'claude-code', attribution: driver.attribution };
+  },
+}));
+
 import { setDefaultTransport, type LlmTransport } from '@truecourse/shared/llm';
 import { readGuardResult, manifestPath, writeGuardResult } from '@truecourse/guard-runner';
 import { GuardGenerateReportSchema, type GuardGenerateReport } from '@truecourse/shared';
@@ -23,6 +41,14 @@ import { corpusFilePath } from '../../packages/spec-consolidator/src/index.js';
 import { runSpecScan } from '../../tools/cli/src/commands/spec.js';
 import { runGuardGenerate, runGuardStatus, printGuardGenerateSummary } from '../../tools/cli/src/commands/guard.js';
 import { makeTempRepo, rmrf, writeDoc, writeRecipe, writeCorpus } from '../guard-generator/helpers.js';
+import {
+  docPathOf,
+  outcome,
+  stubDriver,
+  toolResult,
+  type StubCall,
+  type StubScript,
+} from '../core/spec-scan-session-stub';
 
 const stripAnsi = (s: string): string => s.replace(/\x1b\[[0-9;]*m/g, '');
 
@@ -96,14 +122,42 @@ function seedSpecRepo(): string {
   return r;
 }
 
-/** The area-tag answer for a doc — a distinct concern per doc, so no doc PAIR shares
- *  an area and the overlap stage makes no calls. */
-function areaAnswerFor(id: string | undefined): string {
-  const concern = (id ?? '').split('/').pop()?.replace('.md', '') ?? 'core';
-  return JSON.stringify({ areas: [{ product: 'core', concern }], status: null });
+/**
+ * The scan's non-curation sessions, answered so a case can script only the part
+ * it is about: the scope orchestrator covers the universe, the settlement is
+ * empty, and no overlap is flagged.
+ */
+async function answerSupportingSession(call: StubCall): Promise<ReturnType<typeof outcome> | null> {
+  if (call.kind === 'spec-scan.orchestrate') {
+    return outcome({
+      scopeVerdicts: [
+        { path: '.', verdict: 'keep', reason: 'root docs' },
+        { path: 'docs', verdict: 'keep', reason: 'the spec tree' },
+      ],
+      instructions: [],
+    });
+  }
+  if (call.kind === 'spec-scan.settle-areas') {
+    await call.emit(toolResult('check_settlement', 'valid'));
+    return outcome({ concernMerges: {}, productMerges: {}, productVerdicts: [], subdivisions: [] });
+  }
+  if (call.kind === 'spec-scan.overlap') {
+    await call.emit(toolResult('check_findings', 'valid'));
+    return outcome({ overlaps: [], notReached: [] });
+  }
+  return null;
 }
 
-describe('spec scan — every relevance call failed', () => {
+/** A kept doc verdict, one concern per doc so no two docs share an area. */
+const keptVerdict = (docPath: string): unknown => ({
+  keep: true,
+  reason: 'spec',
+  subject: 'this-product',
+  areas: [{ product: 'core', concern: docPath.split('/').pop()!.replace('.md', '') }],
+  status: null,
+});
+
+describe('spec scan — every curation session failed', () => {
   it('aborts with a non-zero exit and leaves the previous corpus.json untouched', async () => {
     const r = seedSpecRepo();
     const file = corpusFilePath(r);
@@ -111,14 +165,22 @@ describe('spec scan — every relevance call failed', () => {
     const prior = JSON.stringify({ version: 3, generatedAt: '2026-01-01T00:00:00Z', docs: [], areas: [], skippedDocs: [] });
     fs.writeFileSync(file, prior);
 
-    setDefaultTransport(async () => {
-      throw new Error("Invalid schema for response_format 'response': Missing 'reason'.");
-    });
+    sessionScript = async (call) =>
+      (await answerSupportingSession(call)) ?? {
+        kind: 'failure',
+        failure: {
+          kind: 'transport',
+          detail: "Invalid schema for response_format 'response': Missing 'reason'.",
+          class: 'provider',
+          retryability: 'none',
+        },
+      };
     const { out, exitCode } = await capture(() => runSpecScan({ cwd: r, yes: true }));
 
     expect(exitCode).toBe(1);
     expect(out).toContain('Scan aborted');
-    expect(out).toContain('spec.relevance');
+    // The failed kind is named raw: the CLI's stage-label map predates session kinds.
+    expect(out).toContain('spec-scan.curate-doc');
     expect(out).toContain("Missing 'reason'");
     expect(out).toContain('unchanged');
     expect(out).not.toContain('Done.');
@@ -126,25 +188,33 @@ describe('spec scan — every relevance call failed', () => {
   });
 });
 
-describe('spec scan — one relevance call failed', () => {
+describe('spec scan — one curation session failed', () => {
   it('writes the corpus, reports the stage counts + the kept-by-default effect, and qualifies the close', async () => {
     const r = seedSpecRepo();
-    const failing: LlmTransport = async (req) => {
-      if (req.stage === 'spec.relevance') {
-        if (req.id?.includes('auth.md')) throw new Error('claude API error (api 429): usage limit reached');
-        return '{"include":true,"reason":"spec"}';
+    sessionScript = async (call) => {
+      const supporting = await answerSupportingSession(call);
+      if (supporting) return supporting;
+      const docPath = docPathOf(call.briefing);
+      if (docPath.includes('auth.md')) {
+        return {
+          kind: 'failure',
+          failure: {
+            kind: 'transport',
+            detail: 'claude API error (api 429): usage limit reached',
+            class: 'provider',
+            retryability: 'none',
+          },
+        };
       }
-      if (req.stage === 'spec.areaTag') return areaAnswerFor(req.id);
-      return '{}';
+      return outcome(keptVerdict(docPath));
     };
-    setDefaultTransport(failing);
 
     const { out, exitCode } = await capture(() => runSpecScan({ cwd: r, yes: true }));
 
     expect(exitCode).toBeNull();
     expect(out).toContain('LLM calls failed');
-    expect(out).toContain('relevance: 1 of 3 calls failed — affected docs kept by default');
-    expect(out).toContain('first failure: claude API error (api 429): usage limit reached');
+    expect(out).toContain('spec-scan.curate-doc: 1 of 3 calls failed — affected items skipped');
+    expect(out).toContain('first failure: the provider failed (provider): claude API error (api 429): usage limit reached');
     // The close never reads as an unqualified success.
     expect(out).toContain('INCOMPLETE');
     expect(fs.existsSync(corpusFilePath(r))).toBe(true);
@@ -199,7 +269,7 @@ describe('guard generate — every extraction call failed', () => {
 });
 
 describe('guard generate — every fidelity review was lost', () => {
-  // The end-to-end round trip of the adjudication carve-out (plan item 88): the
+  // The end-to-end round trip of the adjudication carve-out: the
   // command SUCCEEDS, the corpus lands, and the stored report — the file `guard
   // status` and the dashboard read back — says the tests carry no review. Before
   // the carve-out this run aborted at the very last stage and threw away every
@@ -399,7 +469,7 @@ describe('guard status — an llm-failed report', () => {
 
 /**
  * The unadjudicated surfaces. A generate whose fidelity or triage stage lost every
- * call no longer aborts — it ships the corpus (plan item 88). The terminal is what
+ * call no longer aborts — it ships the corpus. The terminal is what
  * keeps that honest: both the closing summary and `guard status` must say the
  * tests carry no verdict, or an unreviewed corpus reads as a reviewed one.
  */

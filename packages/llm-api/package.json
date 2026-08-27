@@ -21,8 +21,11 @@
     "@ai-sdk/anthropic": "^3.0.0",
     "@ai-sdk/openai": "^3.0.0",
     "@ai-sdk/openai-compatible": "^2.0.0",
+    "@truecourse/agent-loop": "workspace:*",
     "@truecourse/shared": "workspace:*",
-    "ai": "^6.0.0"
+    "ai": "^6.0.0",
+    "zod": "^3.23.8",
+    "zod-to-json-schema": "^3.25.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

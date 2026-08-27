@@ -11,13 +11,10 @@
  * while a later Storage section only mentions it in passing) — not its literal
  * prose — so the scoring is exercised, not memorized.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { resetKvCacheStore } from '@truecourse/llm';
-import { flagOverlaps, verifyOverlapSections } from '../../packages/spec-consolidator/src/index.js';
-import type { Area, DocCandidate, OverlapRunner } from '../../packages/spec-consolidator/src/index.js';
+import { describe, it, expect } from 'vitest';
+import { verifyOverlapSections } from '../../packages/spec-consolidator/src/index.js';
+import { dedupeCrossAreaOverlaps } from '@truecourse/shared';
+import type { Overlap } from '../../packages/spec-consolidator/src/index.js';
 
 // A README whose LEAD (the H1 + intro, before `## Install`) states the disputed
 // deletion rule; the later `## Storage` section talks about the JSON file and ids
@@ -256,68 +253,57 @@ describe('verifyOverlapSections — a located verbatim quote anchors with certai
 });
 
 // ---------------------------------------------------------------------------
-// Verification runs BEFORE dedup at assembly (flagOverlaps)
+// Verification runs BEFORE dedup — now in the overlap SESSION's fold
+//
+// `flagOverlaps` retired with the one-shot detector. The rule
+// it enforced did not: the run's fold re-anchors every session pointer with
+// `verifyOverlapSections` BEFORE `dedupeCrossAreaOverlaps` merges the same
+// disagreement across the areas that share the pair. This case drives the two
+// deterministic halves in that order, exactly as `services/spec-scan/run.ts`
+// chains them. (The end-to-end path through a scripted session driver lives in
+// `tests/core/spec-scan-overlap.test.ts`.)
 // ---------------------------------------------------------------------------
 
-function doc(p: string, content: string): DocCandidate {
-  return {
-    path: p,
-    absPath: `/abs/${p}`,
-    content,
-    kind: 'prd',
-    preview: content.split('\n').slice(0, 5).join('\n'),
-    lastTouched: '2026-01-01T00:00:00Z',
-    contentHash: `hash-${p}`,
-    size: content.length,
-  };
-}
-
-function area(id: string, refs: string[]): Area {
-  const slash = id.indexOf('/');
-  return { id, product: id.slice(0, slash), concern: id.slice(slash + 1), docRefs: refs, overlaps: [] };
-}
-
-let repo: string;
-beforeEach(() => {
-  resetKvCacheStore();
-  repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-ptr-verify-'));
-});
-afterEach(() => {
-  fs.rmSync(repo, { recursive: true, force: true });
-});
-
-describe('flagOverlaps — verification before dedup', () => {
-  it('converges a wrong-named duplicate onto the verified lead anchor and merges to one record', async () => {
+describe('verification before dedup', () => {
+  it('converges a wrong-named duplicate onto the verified lead anchor and merges to one record', () => {
     // The live bug: the SAME README+SPEC `rm` dispute is flagged in two shared
-    // areas. One flag anchors the README side at the LEAD (null, correct); the
-    // other at `## Storage` (wrong-but-NAMED). Before verification the fewest-null
-    // dedup rule would keep the wrong-named record as the representative. With
-    // verification the Storage anchor re-anchors to the lead first, so BOTH agree
-    // and the surviving record carries the correct null (lead) pointer.
-    const docs = [doc('README.md', README_MD), doc('docs/SPEC.md', SPEC_MD)];
-    const areas = [
-      area('core/persistence', ['README.md', 'docs/SPEC.md']),
-      area('core/tasks-entity', ['README.md', 'docs/SPEC.md']),
+    // areas. One area\'s session anchors the README side at the LEAD (null,
+    // correct); the other at `## Storage` (wrong-but-NAMED). Un-verified, the
+    // fewest-null dedup rule would keep the wrong-named record as the
+    // representative. Verified first, the Storage anchor re-anchors to the lead,
+    // so BOTH agree and the surviving record carries the correct null pointer.
+    const bodies = bodyOf({ 'README.md': README_MD, 'docs/SPEC.md': SPEC_MD });
+    const flagged = [
+      { area: 'core/persistence', heading: null as string | null },
+      { area: 'core/tasks-entity', heading: 'Storage' as string | null },
     ];
-    const runner: OverlapRunner = async ({ areaId }) => ({
-      overlap: true,
-      note: NOTE,
-      sections: [
-        // persistence anchors the README side at the lead; tasks-entity at Storage.
-        { doc: 'README.md', heading: areaId === 'core/tasks-entity' ? 'Storage' : null },
-        { doc: 'docs/SPEC.md', heading: '`rm <id>`' },
-      ],
-    });
-    const out = await flagOverlaps(repo, areas, docs, { runner });
+    const entries = flagged.map(({ area, heading }) => ({
+      area,
+      overlap: {
+        docs: ['README.md', 'docs/SPEC.md'] as [string, string],
+        note: NOTE,
+        areas: [] as string[],
+        sections: verifyOverlapSections({
+          docs: ['README.md', 'docs/SPEC.md'],
+          note: NOTE,
+          sections: [
+            { doc: 'README.md', heading },
+            { doc: 'docs/SPEC.md', heading: '`rm <id>`' },
+          ],
+          bodyOf: bodies,
+        }),
+      } satisfies Overlap,
+    }));
+
+    const merged = dedupeCrossAreaOverlaps(entries);
 
     // One merged record, under the representative (lexicographically-first) area.
-    expect(out.get('core/persistence')).toHaveLength(1);
-    expect(out.has('core/tasks-entity')).toBe(false);
-    const rec = out.get('core/persistence')![0];
-    expect(rec.areas).toEqual(['core/persistence', 'core/tasks-entity']);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].area).toBe('core/persistence');
+    expect(merged[0].areas).toEqual(['core/persistence', 'core/tasks-entity']);
     // The README side is the verified LEAD anchor (null), NOT the mis-anchored Storage.
-    expect(rec.sections).toContainEqual({ doc: 'README.md', heading: null });
-    expect(rec.sections).not.toContainEqual({ doc: 'README.md', heading: 'Storage' });
-    expect(rec.sections).toContainEqual({ doc: 'docs/SPEC.md', heading: '`rm <id>`' });
+    expect(merged[0].overlap.sections).toContainEqual({ doc: 'README.md', heading: null });
+    expect(merged[0].overlap.sections).not.toContainEqual({ doc: 'README.md', heading: 'Storage' });
+    expect(merged[0].overlap.sections).toContainEqual({ doc: 'docs/SPEC.md', heading: '`rm <id>`' });
   });
 });

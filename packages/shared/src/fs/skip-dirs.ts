@@ -14,4 +14,5 @@ export const DOC_DISCOVERY_SKIP_DIRS: ReadonlySet<string> = new Set([
   '.truecourse', // TrueCourse's own outputs — never re-discover
   '.cache',
   'coverage',
+  'vendor', // vendored third-party code — the docs promise it is never read
 ]);

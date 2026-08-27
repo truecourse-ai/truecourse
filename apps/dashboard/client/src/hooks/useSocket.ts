@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { connectSocket, disconnectSocket, joinRepoRoom, leaveRepoRoom } from '@/lib/socket';
 
@@ -16,6 +15,8 @@ export type AnalysisProgress = {
   percent: number;
   detail?: string;
   steps?: AnalysisStep[];
+  /** Job family, when one is stamped ('sources' renders inline, not as the popup). */
+  kind?: string;
 };
 
 /**

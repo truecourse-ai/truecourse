@@ -16,21 +16,19 @@
  */
 
 import {
-  curate,
   classifyDoc,
   readDecisions,
   writeDecisions,
   type CuratedCorpus,
-  type CurateModels,
-  type CurateOptions,
   type CurateResult,
   type ConflictResolution,
   type DecisionsFile,
   type DocCandidate,
+  type RepoIdentity,
 } from '@truecourse/spec-consolidator';
 import type { CoverageGap, ValidationIssue } from '@truecourse/contract-extractor';
 import { effectiveLlmMode, type LlmTransportMode } from '../config/global-config.js';
-import { resolveFallbackModel, resolveModel, type StageId } from '../config/llm-models.js';
+import { resolveModel, type StageId } from '../config/llm-models.js';
 import { openConflicts } from '@truecourse/shared';
 
 export type {
@@ -38,18 +36,23 @@ export type {
   ConflictResolution,
   CuratedCorpus,
 } from '@truecourse/spec-consolidator';
+import { getStageUsage, stageTokenTotal } from '@truecourse/shared/llm';
+import type { SessionDriver, UserInputQuestion } from '@truecourse/agent-loop';
+import { runSpecScanSessions, type ScanStep } from '../services/spec-scan/run.js';
+export { SCAN_STEPS, ScanStepNotReadyError, type ScanStep } from '../services/spec-scan/run.js';
 import {
-  agentTransport,
-  cliTransport,
-  getDefaultTransport,
-  getStageUsage,
-  resetStageUsage,
-  setLlmCallSink,
-  stageTokenTotal,
-  type LlmTransport,
-} from '@truecourse/shared/llm';
-import { createConfiguredApiTransport } from '../services/llm/install-transport.js';
-import { createLlmCallLogger } from '../lib/llm-call-log.js';
+  SPEC_SCAN_ORCHESTRATE_SESSION_KIND,
+  normalizeScopePath,
+} from '../services/spec-scan/orchestrate.js';
+import { CURATE_DOC_SESSION_KIND } from '../services/spec-scan/curate-doc.js';
+import { SETTLE_AREAS_SESSION_KIND } from '../services/spec-scan/settle-areas.js';
+import { OVERLAP_SESSION_KIND } from '../services/spec-scan/overlap.js';
+import { createSessionRun, type SessionRunStartedInfo } from '../lib/sessions-store.js';
+import { resolveCommitSha } from '../lib/repo-ref.js';
+import {
+  createConfiguredSessionDriver,
+  type ConfiguredSessionDriver,
+} from '../services/llm/session-driver.js';
 import type { LlmEstimate } from './analyze-core.js';
 import { estimateScanTokens } from '../services/llm/spec-estimate.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
@@ -66,15 +69,6 @@ export class EstimateDeclined extends Error {
   }
 }
 
-// Debug timing — gated behind TRUECOURSE_DEBUG_TIMING=1.
-function perfNow(): number {
-  return Number(process.hrtime.bigint() / 1_000_000n);
-}
-function debugLog(msg: string): void {
-  if (process.env.TRUECOURSE_DEBUG_TIMING) {
-    process.stderr.write(`[tc-timing] ${msg}\n`);
-  }
-}
 import {
   infer,
   writeInferred,
@@ -131,6 +125,19 @@ export const CURATE_STEPS = [
   { key: 'verify', label: 'Verifying conflicts' },
 ] as const;
 
+/**
+ * Which session kinds do each scan phase's work — declared here, beside the
+ * checklist itself, and stamped onto the run record so a reader places sessions
+ * under phases without a mapping of its own. `verify` is the deterministic fold
+ * (re-anchoring, dedup, auto-apply): no sessions at all.
+ */
+const CURATE_STEP_SESSION_KINDS: Record<string, readonly string[]> = {
+  discover: [SPEC_SCAN_ORCHESTRATE_SESSION_KIND],
+  tag: [CURATE_DOC_SESSION_KIND, SETTLE_AREAS_SESSION_KIND],
+  overlap: [OVERLAP_SESSION_KIND],
+  verify: [],
+};
+
 export const INFER_STEPS = [
   { key: 'load', label: 'Loading authored contracts' },
   { key: 'scan', label: 'Reverse-engineering decisions from code' },
@@ -140,17 +147,6 @@ export const INFER_STEPS = [
 // ---------------------------------------------------------------------------
 // Live per-step usage tag (` · <model> · <tok> tok · $<cost>`)
 // ---------------------------------------------------------------------------
-
-/** Which LLM stage(s) each UI progress step covers — so a step line can show the
- *  model + live tokens/$ of the work it's doing. Shared by the terminal renderer
- *  and the dashboard popup (both render the same step `detail`). */
-const STEP_STAGES: Record<string, StageId[]> = {
-  // scan (curate)
-  discover: ['spec.relevance'],
-  tag: ['spec.areaTag', 'spec.vocab'],
-  overlap: ['spec.overlap'],
-  verify: ['spec.verifyOverlap'],
-};
 
 function humanTokens(n: number): string {
   if (n >= 999_500) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -171,17 +167,6 @@ let showResolvedStageModel = true;
 /** EE calls this at boot (`false`) so progress doesn't show OSS per-stage tiers. */
 export function setShowResolvedStageModel(show: boolean): void {
   showResolvedStageModel = show;
-}
-
-/**
- * ` · <model> · <tok> tok · $<cost>` suffix for a step. Tokens/cost appear only
- * when real LLM calls were recorded this run (cache hits and the agent transport
- * record nothing). The model shows the resolved id once a call happened; absent
- * that, it falls back to the configured per-stage alias UNLESS the single-model
- * (EE) transport is active. Empty string when there's nothing to add.
- */
-function stepUsageTag(stepKey: string, repoRoot: string, mode?: LlmTransportMode): string {
-  return stageUsageTag(STEP_STAGES[stepKey] ?? [], repoRoot, mode);
 }
 
 /**
@@ -248,32 +233,6 @@ export interface InferInProcessResult {
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Build the LLM transport for a run — an explicit per-run override of the saved
- * selection. `agent` → a filesystem-mailbox transport under `options.io`
- * (required). `api` → the direct-API transport from the user's global config
- * (throws when it isn't configured). `cli` → a `claude -p` transport, forcing
- * Claude Code even when an API transport is installed as the default. Unset →
- * the process-installed default when present (the EE edition installs an
- * API-backed transport at boot so hosted runs need no `claude` binary, and the
- * OSS CLI installs one in API mode), else `undefined` so each runner falls back
- * to its built-in cli transport.
- */
-function resolveTransport(options: {
-  llm?: 'cli' | 'agent' | 'api';
-  io?: string;
-}): LlmTransport | undefined {
-  if (options.llm === 'agent') {
-    if (!options.io) {
-      throw new Error('--llm agent requires --io <dir> (the request/response mailbox directory)');
-    }
-    return agentTransport(options.io);
-  }
-  if (options.llm === 'api') return createConfiguredApiTransport();
-  if (options.llm === 'cli') return cliTransport();
-  return getDefaultTransport();
-}
 
 /**
  * The last `contracts generate` run's result + staleness marker. Lives in
@@ -345,60 +304,74 @@ export function readGeneratedSummary(repoRoot: string): GeneratedSummary | null 
   }
 }
 
-/** Per-stage models for the corpus-path curate pipeline. */
-function resolveCurateModels(repoRoot: string, mode: LlmTransportMode): CurateModels {
-  return {
-    relevance: resolveModel('spec.relevance', undefined, repoRoot, mode),
-    areaTag: resolveModel('spec.areaTag', undefined, repoRoot, mode),
-    vocab: resolveModel('spec.vocab', undefined, repoRoot, mode),
-    overlap: resolveModel('spec.overlap', undefined, repoRoot, mode),
-    verifyOverlap: resolveModel('spec.verifyOverlap', undefined, repoRoot, mode),
-    fallback: resolveFallbackModel(repoRoot, mode) ?? undefined,
-  };
-}
-
 // ---------------------------------------------------------------------------
 // Corpus path driver — shared by the CLI (`spec scan`) and the dashboard
-// routes. `curateInProcess` builds corpus.json (discover → tag → group →
-// flag overlaps).
+// routes. `curateInProcess` builds corpus.json via the SESSION-based scan run
+// (`services/spec-scan/run.ts`): one `spec-scan.curate-doc`
+// session per doc, at most one `spec-scan.settle-areas` session, one
+// `spec-scan.overlap` session per area. The four CURATE_STEPS keys are kept so
+// both surfaces' progress UIs render unchanged.
 // ---------------------------------------------------------------------------
 
 export interface SpecCurateInProcessResult {
   curate: CurateResult;
   /** True when the scan made zero LLM calls — every doc was unchanged (cached). */
   noChanges: boolean;
+  /**
+   * Questions the interactive scope orchestrator left unanswered. A
+   * non-interactive run never blocks on them; the CLI/dashboard summary must
+   * surface them LOUDLY.
+   */
+  pendingQuestions: UserInputQuestion[];
+  /** The orchestrator session's findings — verbatim observations for human eyes. */
+  scanFindings: string[];
+  /**
+   * Set when a single-step run (`only`) stopped before assembly — the step ran,
+   * corpus.json is untouched. Absent on a completed scan (including
+   * `only: 'overlap'`, which runs through the corpus write).
+   */
+  stoppedAfter?: ScanStep;
+  /** The sessions-store run dir (`.truecourse/sessions/spec-scan/<runId>/`) —
+   *  where this run's transcripts landed, for stepwise inspection. */
+  sessionsRunDir: string;
 }
 
 export interface CurateInProcessOptions {
   tracker?: StepTracker;
   source?: TelemetrySource;
-  /** LLM transport mode (`cli` / `agent` mailbox / `api`). `agent` requires `io`. */
+  /**
+   * LLM transport mode for the scan SESSIONS (`cli` = the claude-code driver,
+   * `api` = the per-turn API driver). The `agent` mailbox transport has no
+   * session driver and is refused — sessions are multi-turn, tool-calling
+   * conversations the one-shot mailbox cannot carry.
+   */
   llm?: 'cli' | 'agent' | 'api';
+  /** Retired with the `agent` transport; accepted for caller compatibility. */
   io?: string;
   skipGit?: boolean;
   /** Compute the corpus without overwriting corpus.json — for read-only callers. */
   skipCorpusWrite?: boolean;
   /**
-   * User resolutions (manual areas / includes / conflict verdicts) to fold into curate.
-   * EE MUST pass the stored decisions here: its re-scan runs on a fresh clone with
-   * no `.truecourse/specs/decisions.json` (resolutions live in Postgres), so
-   * without this the re-scan re-detects already-resolved conflicts. Omit in OSS —
-   * curate then reads them from the repo tree.
+   * User resolutions (manual areas / includes / conflict verdicts) to fold into
+   * the scan. EE MUST pass the stored decisions here: its re-scan runs on a
+   * fresh clone with no `.truecourse/specs/decisions.json` (resolutions live in
+   * Postgres), so without this the re-scan re-detects already-resolved
+   * conflicts. Omit in OSS — the run reads them from the repo tree.
    */
-  decisions?: CurateOptions['decisions'];
+  decisions?: DecisionsFile;
   /**
    * Inject the doc set instead of walking the filesystem. Editions with no live
    * working tree (EE) source docs through the repo-doc seam (`readRepoDoc`); OSS
-   * omits it and curate discovers from disk.
+   * omits it and the run discovers from disk.
    */
-  docSource?: CurateOptions['docSource'];
+  docSource?: () => DocCandidate[] | Promise<DocCandidate[]>;
   /**
-   * Who this repository is, for the relevance classifier's IDENTITY block.
-   * Omit and curate resolves it from the repo tree (OSS). EE passes it
+   * Who this repository is, for the curation session's IDENTITY block.
+   * Omit and the run resolves it from the repo tree (OSS). EE passes it
    * explicitly — including explicit `null` — because its scan runs on an
    * ephemeral shallow clone whose directory is named `tc-gate-scan-XXXX`.
    */
-  repoIdentity?: CurateOptions['repoIdentity'];
+  repoIdentity?: RepoIdentity | null;
   /**
    * Pre-flight LLM cost estimate gate. Called with the token estimate before any
    * LLM work; return `false` to abort (throws {@link EstimateDeclined}). Omit to
@@ -411,47 +384,80 @@ export interface CurateInProcessOptions {
    * the estimate panel; the dashboard passes `estimateStepPhase(tracker)`.
    */
   onEstimatePhase?: EstimatePhase;
-  // --- test seams (mirror curate(); production passes none) -----------------
-  relevanceRunner?: CurateOptions['relevanceRunner'];
-  areaTagRunner?: CurateOptions['areaTagRunner'];
-  overlapRunner?: CurateOptions['overlapRunner'];
-  verifyOverlapRunner?: CurateOptions['verifyOverlapRunner'];
-  vocabRunner?: CurateOptions['vocabRunner'];
-  disableRelevanceFilter?: boolean;
-  disableAreaTagging?: boolean;
+  /** Ceiling on concurrent sessions (the pool's governor may run fewer). */
+  concurrency?: number;
+  /**
+   * Single-step mode (the CLI's `--only-<step>` flags): run only this step's
+   * sessions — prior steps replay from their durable artifacts (a missing one
+   * throws {@link ScanStepNotReadyError}), later steps never start, and
+   * corpus.json is written only by the final step (`overlap`). The estimate
+   * gate prices only the chosen step.
+   */
+  only?: ScanStep;
+  /** Skip the overlap sessions (the workspace corpus sync passes this). */
   disableOverlapDetection?: boolean;
-  disableVocabNormalization?: boolean;
+  /**
+   * Skip the scope-orchestrator session (stored verdicts still apply). The
+   * workspace corpus sync passes this — its scratch tree (and the decisions
+   * materialized into it) is deleted after the run, so a scope session there
+   * would re-spend on every sync and settle nothing durable.
+   */
+  disableScopeOrchestration?: boolean;
+  /**
+   * A `question-asked` event from a scan session (the interactive scope
+   * orchestrator), as it happens. The CLI prints the dashboard deep
+   * link; nothing ever blocks on it — an unanswered question lands in the
+   * result's `pendingQuestions`.
+   */
+  onQuestion?: (workItem: string, question: UserInputQuestion) => void;
+  /**
+   * The sessions-store run record was just created (post-estimate-confirm,
+   * before any session runs). The CLI prints the dashboard "watch live" deep
+   * link from it.
+   */
+  onRunStarted?: (info: SessionRunStartedInfo) => void;
+  /**
+   * Test seam / EE injection: run the sessions on THIS driver instead of the
+   * configured one. Tests pass a scripted driver; production passes none.
+   */
+  driver?: SessionDriver;
 }
 
 /**
- * Run the curate pipeline (corpus path) and drive a tracker through CURATE_STEPS.
- * Writes `.truecourse/specs/corpus.json` (curate does). Idempotent: unchanged
- * docs hit the per-doc tag cache and cost nothing.
+ * Run the session-based scan (corpus path) and drive a tracker through
+ * CURATE_STEPS. Writes `.truecourse/specs/corpus.json` (the run does).
+ * Idempotent: unchanged docs hit the per-doc session cache and cost nothing.
+ *
+ * The four step keys survive from the one-shot pipeline so both surfaces'
+ * progress UIs render unchanged; what each covers moved: `discover` =
+ * discovery + prefilter, `tag` = the curate-doc pool + the settle session,
+ * `overlap` = the per-area overlap sessions, `verify` = the deterministic
+ * fold (pointer re-anchoring, cross-area dedup, confidence auto-apply).
  */
 export async function curateInProcess(
   repoRoot: string,
   options: CurateInProcessOptions = {},
 ): Promise<SpecCurateInProcessResult> {
   const { tracker } = options;
-  // The transport this run actually uses decides the models — never the saved
-  // selection a `--llm-transport` flag just overrode.
+  if (options.llm === 'agent') {
+    throw new Error(
+      'spec scan now runs agent sessions; the `agent` mailbox transport cannot carry them — use `--llm api` or `--llm cli`.',
+    );
+  }
+  // The transport this run actually uses decides what the estimate names —
+  // never the saved selection a `--llm-transport` flag just overrode.
   const mode = effectiveLlmMode(options.llm);
-  resetStageUsage();
   const startedAt = Date.now();
 
-  // A step's detail line = base text + its live usage tag (model/tokens/$).
-  const withUsage = (key: string, base?: string): string | undefined => {
-    const tag = stepUsageTag(key, repoRoot, mode);
-    if (base !== undefined) return `${base}${tag}`;
-    return tag ? tag.replace(/^ · /, '') : undefined;
-  };
-
-  // Pre-flight cost estimate + confirm, before any LLM call. Skip the prompt when
-  // there's no LLM work to do (nothing to spend). Decline → abort.
+  // Pre-flight cost estimate + confirm, before any LLM work. Skip the prompt
+  // when there's nothing to spend (a warmed cache yields an empty estimate).
+  // Decline → abort. The estimate models SESSIONS: it probes the same scan
+  // caches (same key builders, instructions fingerprint included) the run
+  // reads, so estimate and run agree on what is actually spent.
   if (options.onLlmEstimate) {
     const prices = await getModelPrices();
     const estimate = await withEstimatePhase(options.onEstimatePhase, () =>
-      estimateScanTokens(repoRoot, prices, { identity: options.repoIdentity, mode }),
+      estimateScanTokens(repoRoot, prices, { identity: options.repoIdentity, mode, only: options.only }),
     );
     if ((estimate.stages?.length ?? 0) > 0) {
       const proceed = await options.onLlmEstimate(estimate);
@@ -459,89 +465,145 @@ export async function curateInProcess(
     }
   }
 
+  // The sessions run + transcript store: `sessions/spec-scan/<runId>/`.
+  // Created after the estimate gate, so a declined scan leaves no run record.
+  const gitRef = await resolveCommitSha(repoRoot);
+  const run = createSessionRun(repoRoot, { command: 'spec-scan', gitRef });
+  options.onRunStarted?.({ command: 'spec-scan', runId: run.runId, dir: run.dir });
+  // Mirror the step checklist into the run record as the run's own display:
+  // the CLI renders the tracker locally, but the dashboard can only see what
+  // run.json carries, and the early phases (discover/tag) have no sessions to
+  // show progress through.
+  tracker?.tap((p) => {
+    if (!p.steps) return;
+    run.setChecklist(
+      p.steps.map((step) => {
+        const kinds = CURATE_STEP_SESSION_KINDS[step.key];
+        return kinds ? { ...step, sessionKinds: [...kinds] } : step;
+      }),
+    );
+  });
+
+  // The driver, LAZILY: a fully-cached re-scan resolves nothing (so an edition
+  // that cannot construct a driver offline still re-scans for free), and the
+  // run record learns what it ran on the moment the first session needs it.
+  let configured: ConfiguredSessionDriver | null = null;
+  const driver = async (): Promise<SessionDriver> => {
+    if (options.driver) return options.driver;
+    if (!configured) {
+      configured = createConfiguredSessionDriver({
+        ...(options.llm && options.llm !== 'agent' ? { transport: options.llm } : {}),
+        cwd: repoRoot,
+        providerStateDir: path.join(run.dir, 'provider'),
+      });
+      run.setLlm({
+        mode: configured.mode,
+        provider: configured.attribution.provider,
+        model: configured.attribution.model,
+        ...(configured.attribution.fallbackModel
+          ? { fallbackModel: configured.attribution.fallbackModel }
+          : {}),
+      });
+    }
+    return configured.driver;
+  };
+
   let tagStarted = false;
   let overlapStarted = false;
   let verifyStarted = false;
   const ensureTag = (): void => {
     if (tagStarted) return;
-    tracker?.done('discover', withUsage('discover'));
+    tracker?.done('discover');
     tracker?.start('tag');
     tagStarted = true;
   };
   const ensureOverlap = (): void => {
     ensureTag();
     if (overlapStarted) return;
-    tracker?.done('tag', withUsage('tag'));
+    tracker?.done('tag');
     tracker?.start('overlap');
     overlapStarted = true;
   };
-  // The verify pass judges the flagged overlaps right after detection.
+  // The verify step is now the deterministic fold: pointer re-anchoring,
+  // cross-area dedup, and the confidence auto-apply.
   const ensureVerify = (): void => {
     ensureOverlap();
     if (verifyStarted) return;
-    tracker?.done('overlap', withUsage('overlap'));
+    tracker?.done('overlap');
     tracker?.start('verify');
     verifyStarted = true;
   };
 
-  // Instrument every LLM call (opt-in via TRUECOURSE_LLM_LOG, or on by default
-  // under TRUECOURSE_DEV) so each scan stage's model and wall time are recorded
-  // — same as the generate path. Null + zero overhead when unset.
-  const llmLog = createLlmCallLogger(repoRoot, 'spec-scan');
-  if (llmLog) setLlmCallSink(llmLog.sink);
-  const tScanStart = perfNow();
   try {
     tracker?.start('discover');
-    let result: CurateResult;
+    let result: Awaited<ReturnType<typeof runSpecScanSessions>>;
     try {
-      result = await curate(repoRoot, {
-        models: resolveCurateModels(repoRoot, mode),
-        transport: resolveTransport(options),
+      result = await runSpecScanSessions({
+        repoRoot,
+        driver,
+        persistence: run.persistence,
+        decisions: options.decisions,
         docSource: options.docSource,
         repoIdentity: options.repoIdentity,
         skipGit: options.skipGit,
         skipCorpusWrite: options.skipCorpusWrite,
-        decisions: options.decisions,
-        relevanceRunner: options.relevanceRunner,
-        areaTagRunner: options.areaTagRunner,
-        overlapRunner: options.overlapRunner,
-        verifyOverlapRunner: options.verifyOverlapRunner,
-        vocabRunner: options.vocabRunner,
-        disableRelevanceFilter: options.disableRelevanceFilter,
-        disableAreaTagging: options.disableAreaTagging,
         disableOverlapDetection: options.disableOverlapDetection,
-        disableVocabNormalization: options.disableVocabNormalization,
-        onRelevanceProgress: (done, total) => {
-          if (total > 0) tracker?.detail('discover', withUsage('discover', `${done}/${total} docs`)!);
+        disableScopeOrchestration: options.disableScopeOrchestration,
+        ...(options.only !== undefined ? { only: options.only } : {}),
+        ...(options.concurrency !== undefined ? { concurrency: options.concurrency } : {}),
+        onDiscover: (docs, toCurate) =>
+          tracker?.detail('discover', `${docs} docs · ${toCurate} to curate`),
+        onScope: (state) => {
+          if (state === 'covered') tracker?.detail('discover', 'scope covered — no orchestrator session');
+          else if (state === 'ran') tracker?.detail('discover', 'scan scope settled');
+          else if (state === 'failed')
+            tracker?.detail('discover', 'scope session failed — stored verdicts kept');
         },
-        onTagProgress: (done, total) => {
+        onSessionEvent: (workItem, event) => {
+          if (event.type === 'question-asked') options.onQuestion?.(workItem, event.question);
+        },
+        onCurateProgress: (done, total) => {
           ensureTag();
-          if (total > 0) tracker?.detail('tag', withUsage('tag', `${done}/${total} docs`)!);
+          if (total > 0) tracker?.detail('tag', `${done}/${total} docs`);
+        },
+        onSettle: (state) => {
+          ensureTag();
+          if (state !== 'skipped') tracker?.detail('tag', `vocabulary ${state === 'cached' ? 'settled (cached)' : state === 'ran' ? 'settled' : 'settlement failed — labels kept as-is'}`);
         },
         onOverlapProgress: (done, total) => {
           ensureOverlap();
-          tracker?.detail('overlap', withUsage('overlap', total > 0 ? `${done}/${total} pairs` : 'no pairs')!);
-        },
-        onVerifyProgress: (done, total) => {
-          ensureVerify();
-          tracker?.detail('verify', withUsage('verify', total > 0 ? `${done}/${total} flagged` : 'no conflicts')!);
+          tracker?.detail('overlap', total > 0 ? `${done}/${total} areas` : 'no areas');
         },
       });
     } catch (e) {
       const active = verifyStarted ? 'verify' : overlapStarted ? 'overlap' : tagStarted ? 'tag' : 'discover';
       tracker?.error(active, (e as Error).message);
+      run.finish('failed');
       throw e;
     }
 
-    ensureVerify();
-    const open = result.stats.overlapFlags;
-    const pruned = result.stats.overlapRefuted;
-    // The overlap step reports what it FLAGGED (open + pruned); verify reports the
-    // detector false positives it pruned, leaving `open` in the corpus.
-    tracker?.done('overlap', withUsage('overlap', `${result.stats.areaCount} areas · ${open + pruned} overlaps`));
-    tracker?.done('verify', withUsage('verify', pruned > 0 ? `${pruned} pruned · ${open} kept` : 'no false positives'));
+    if (result.stoppedAfter) {
+      // Single-step run: close only the steps that actually opened. The CLI
+      // hands the tracker a reduced checklist, so the later keys don't exist
+      // (and StepTracker no-ops on unknown keys anyway).
+      const note = `stopped after ${result.stoppedAfter}`;
+      if (tagStarted) tracker?.done('tag', note);
+      else tracker?.done('discover', note);
+    } else {
+      ensureVerify();
+      tracker?.done('overlap', `${result.stats.areaCount} areas · ${result.stats.overlapFlags} overlaps`);
+      tracker?.done(
+        'verify',
+        result.stats.autoResolvedConflicts.length > 0
+          ? `${result.stats.autoResolvedConflicts.length} auto-resolved`
+          : 'anchors verified',
+      );
+    }
+    run.finish('completed');
 
-    if (options.source) {
+    // A partial (single-step) run never reports telemetry — its counts would
+    // read as a whole scan's.
+    if (options.source && !result.stoppedAfter) {
       await trackEvent('spec_scan', {
         source: options.source,
         docsScannedRange: bucketFileCount(result.stats.docsScanned),
@@ -551,19 +613,22 @@ export async function curateInProcess(
       });
     }
 
-    // "Nothing changed" = the scan made zero real LLM calls (every stage was a
-    // cache hit — cache hits don't reach the transport, so they don't record
-    // usage). Lets the dashboard tell the user a rescan found no doc changes. A
-    // run that LOST calls is never "nothing changed": a failed call records no
-    // usage, so without the second term a scan whose only work failed would close
-    // on "corpus is up to date".
-    const llmCalls = [...getStageUsage().values()].reduce((n, u) => n + u.calls, 0);
-    return { curate: result, noChanges: llmCalls === 0 && result.stats.llmFailures.length === 0 };
-  } finally {
-    if (llmLog) {
-      setLlmCallSink(undefined);
-      llmLog.finish(perfNow() - tScanStart);
-    }
+    // "Nothing changed" = the scan ran zero fresh sessions (every kind was a
+    // cache hit) and lost none. Computed by the run itself — sessions never
+    // touch the one-shot stage-usage sink the old derivation read.
+    return {
+      curate: result,
+      noChanges: result.noChanges,
+      pendingQuestions: result.pendingQuestions,
+      scanFindings: result.scanFindings,
+      ...(result.stoppedAfter ? { stoppedAfter: result.stoppedAfter } : {}),
+      sessionsRunDir: run.dir,
+    };
+  } catch (e) {
+    // The run record is closed exactly once; the inner catch handled the scan
+    // path, this covers the estimate/telemetry edges around it.
+    if (run.record().status === 'running') run.finish('failed');
+    throw e;
   }
 }
 
@@ -614,8 +679,7 @@ export async function syncWorkspaceCorpusInProcess(options: {
   llm?: 'cli' | 'agent' | 'api';
   io?: string;
   // --- test seams (mirror curateInProcess(); production passes none) --------
-  relevanceRunner?: CurateInProcessOptions['relevanceRunner'];
-  areaTagRunner?: CurateInProcessOptions['areaTagRunner'];
+  driver?: CurateInProcessOptions['driver'];
   disableOverlapDetection?: boolean;
 }): Promise<WorkspaceCorpusSyncResult> {
   const ref: WorkspaceRef = { workspaceOrgId: options.workspaceOrgId };
@@ -636,9 +700,11 @@ export async function syncWorkspaceCorpusInProcess(options: {
       skipGit: true,
       llm: options.llm,
       io: options.io,
-      relevanceRunner: options.relevanceRunner,
-      areaTagRunner: options.areaTagRunner,
+      driver: options.driver,
       disableOverlapDetection: options.disableOverlapDetection,
+      // The scratch tree is transient — a scope session here would re-spend on
+      // every sync and its verdicts die with the tree.
+      disableScopeOrchestration: true,
     });
     // Persist the curated corpus under workspace scope (the dashboard reads it).
     await saveWorkspaceSpec(ref, 'corpus', curateResult.corpus);
@@ -927,11 +993,13 @@ function autodetectCodeDir(repoRoot: string): string {
 
 /** An empty decisions document (all lists empty) — the "no resolutions yet" base. */
 export const EMPTY_DECISIONS: DecisionsFile = {
-  version: 1,
+  version: 2,
   manualIncludes: [],
   manualExcludes: [],
   manualAreas: [],
   conflictResolutions: [],
+  scopeVerdicts: [],
+  instructions: [],
 };
 /** Sentinel commit for the per-repo "current" decisions document in EE. */
 const DECISIONS_REF = '_repo';
@@ -996,6 +1064,8 @@ export async function getDecisions(
  *     per path — a path the overlay excludes is dropped from includes and vice
  *     versa (never a contradictory pair).
  *   - manualAreas: the overlay's override replaces the base's for that doc.
+ *   - scopeVerdicts (v2): the overlay wins per verdict path.
+ *   - instructions (v2): union — base order kept, overlay's new lines appended.
  */
 export function mergeDecisions(base: DecisionsFile, overlay: DecisionsFile): DecisionsFile {
   const overlayIncludes = new Set(overlay.manualIncludes ?? []);
@@ -1023,7 +1093,24 @@ export function mergeDecisions(base: DecisionsFile, overlay: DecisionsFile): Dec
     ...(overlay.conflictResolutions ?? []),
   ];
 
-  return { version: 1, manualIncludes, manualExcludes, manualAreas, conflictResolutions };
+  // Scope verdicts: the overlay wins per verdict path (same normalization the
+  // scan's own fold applies, so `docs/` and `docs` are one path).
+  const overlayScopePaths = new Set((overlay.scopeVerdicts ?? []).map((v) => normalizeScopePath(v.path)));
+  const scopeVerdicts = [
+    ...(base.scopeVerdicts ?? []).filter((v) => !overlayScopePaths.has(normalizeScopePath(v.path))),
+    ...(overlay.scopeVerdicts ?? []),
+  ];
+  const instructions = uniqueStrings([...(base.instructions ?? []), ...(overlay.instructions ?? [])]);
+
+  return {
+    version: 2,
+    manualIncludes,
+    manualExcludes,
+    manualAreas,
+    conflictResolutions,
+    scopeVerdicts,
+    instructions,
+  };
 }
 
 function uniqueStrings(items: string[]): string[] {
@@ -1217,26 +1304,40 @@ const conflictResolutionKey = (r: ConflictResolution): string => {
 // Include and exclude are mutually exclusive per doc: adding one clears the
 // other for that path, so decisions.json can never hold a contradictory pair.
 
+/**
+ * The v2 fields every rebuild carries through untouched — a mutation of one
+ * dimension must never drop another's rows (an EE row stored before v2 may
+ * genuinely lack them, hence the `?? []`).
+ */
+function carriedV2Fields(existing: DecisionsFile): Pick<DecisionsFile, 'scopeVerdicts' | 'instructions'> {
+  return {
+    scopeVerdicts: existing.scopeVerdicts ?? [],
+    instructions: existing.instructions ?? [],
+  };
+}
+
 function applyAddManualInclude(existing: DecisionsFile, docPath: string): DecisionsFile {
   const includes = existing.manualIncludes ?? [];
   const excludes = existing.manualExcludes ?? [];
   if (includes.includes(docPath) && !excludes.includes(docPath)) return existing;
   return {
-    version: 1,
+    version: 2,
     manualIncludes: includes.includes(docPath) ? includes : [...includes, docPath],
     manualExcludes: excludes.filter((p) => p !== docPath),
     manualAreas: existing.manualAreas ?? [],
     conflictResolutions: existing.conflictResolutions ?? [],
+    ...carriedV2Fields(existing),
   };
 }
 
 function applyRemoveManualInclude(existing: DecisionsFile, docPath: string): DecisionsFile {
   return {
-    version: 1,
+    version: 2,
     manualIncludes: (existing.manualIncludes ?? []).filter((p) => p !== docPath),
     manualExcludes: existing.manualExcludes ?? [],
     manualAreas: existing.manualAreas ?? [],
     conflictResolutions: existing.conflictResolutions ?? [],
+    ...carriedV2Fields(existing),
   };
 }
 
@@ -1245,21 +1346,23 @@ function applyAddManualExclude(existing: DecisionsFile, docPath: string): Decisi
   const excludes = existing.manualExcludes ?? [];
   if (excludes.includes(docPath) && !includes.includes(docPath)) return existing;
   return {
-    version: 1,
+    version: 2,
     manualIncludes: includes.filter((p) => p !== docPath),
     manualExcludes: excludes.includes(docPath) ? excludes : [...excludes, docPath],
     manualAreas: existing.manualAreas ?? [],
     conflictResolutions: existing.conflictResolutions ?? [],
+    ...carriedV2Fields(existing),
   };
 }
 
 function applyRemoveManualExclude(existing: DecisionsFile, docPath: string): DecisionsFile {
   return {
-    version: 1,
+    version: 2,
     manualIncludes: existing.manualIncludes ?? [],
     manualExcludes: (existing.manualExcludes ?? []).filter((p) => p !== docPath),
     manualAreas: existing.manualAreas ?? [],
     conflictResolutions: existing.conflictResolutions ?? [],
+    ...carriedV2Fields(existing),
   };
 }
 
@@ -1274,11 +1377,12 @@ function applyAddConflictResolution(existing: DecisionsFile, input: ConflictReso
   const key = conflictResolutionKey(input);
   const dedup = (existing.conflictResolutions ?? []).filter((r) => conflictResolutionKey(r) !== key);
   return {
-    version: 1,
+    version: 2,
     manualIncludes: existing.manualIncludes ?? [],
     manualExcludes: existing.manualExcludes ?? [],
     manualAreas: existing.manualAreas ?? [],
     conflictResolutions: [...dedup, input],
+    ...carriedV2Fields(existing),
   };
 }
 
@@ -1288,11 +1392,12 @@ function applyRemoveConflictResolution(
 ): DecisionsFile {
   const key = conflictResolutionKey({ ...input, verdict: 'dismissed', resolvedAt: '' });
   return {
-    version: 1,
+    version: 2,
     manualIncludes: existing.manualIncludes ?? [],
     manualExcludes: existing.manualExcludes ?? [],
     manualAreas: existing.manualAreas ?? [],
     conflictResolutions: (existing.conflictResolutions ?? []).filter((r) => conflictResolutionKey(r) !== key),
+    ...carriedV2Fields(existing),
   };
 }
 

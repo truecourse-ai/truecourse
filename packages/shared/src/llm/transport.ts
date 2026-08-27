@@ -37,6 +37,9 @@ import {
 // Re-exported here so every output-only prompt reaches it through the same
 // `@truecourse/shared/llm` entry it already imports the transport from.
 export { OUTPUT_ONLY_GUARDRAIL } from './guardrail.js';
+// The agent-session contract and policy shell live in `@truecourse/agent-loop`
+// (decision 2026-08-17): one package defines the loop, one package per
+// backend implements it.
 export {
   StageTransportTallySchema,
   LlmStageFailureError,

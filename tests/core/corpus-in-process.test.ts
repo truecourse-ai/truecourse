@@ -1,6 +1,7 @@
 /**
- * The corpus-path driver behind `spec scan`: curateInProcess writes corpus.json
- * with stub runners (no Claude subprocesses), proving the wiring end-to-end.
+ * The corpus-path driver behind `spec scan`: `curateInProcess` writes
+ * corpus.json over a SCRIPTED SessionDriver, proving the wiring end-to-end,
+ * including the pre-flight estimate phase that sits in front of it.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
@@ -10,6 +11,8 @@ import { resetKvCacheStore } from '@truecourse/llm';
 import { curateInProcess, CURATE_STEPS } from '../../packages/core/src/commands/spec-in-process.js';
 import { StepTracker, estimateStepPhase, type AnalysisStep } from '../../packages/core/src/progress.js';
 import { readCorpus } from '../../packages/spec-consolidator/src/index.js';
+import type { DecisionsFile } from '../../packages/spec-consolidator/src/index.js';
+import { docPathOf, outcome, stubDriver, toolResult } from './spec-scan-session-stub';
 
 let repo: string;
 beforeEach(() => {
@@ -24,24 +27,66 @@ afterEach(() => {
   fs.rmSync(repo, { recursive: true, force: true });
 });
 
-const includeAll = async ({ doc }: { doc: { path: string } }) => ({ path: doc.path, include: true, reason: 'ok' });
-// The two docs carry two concerns, so the vocab stage makes a real call. Stub it to
-// a no-op mapping — unstubbed it reaches the transport, and a stage that loses every
-// call aborts the scan.
-const noVocabDrift = async () => ({ products: {}, concerns: {} });
-const tagByPath = async ({ doc }: { doc: { path: string } }) => ({
-  tags: [{ product: 'core', concern: doc.path.includes('auth') ? 'auth' : 'users' }],
-  status: 'shipped' as const,
+/**
+ * Scope verdicts covering the whole universe, so the scan spends zero
+ * orchestrator sessions and these cases are about the curation wiring alone.
+ */
+const DECISIONS: DecisionsFile = {
+  version: 2,
+  manualIncludes: [],
+  manualExcludes: [],
+  manualAreas: [],
+  conflictResolutions: [],
+  instructions: [],
+  scopeVerdicts: ['.', 'docs'].map((p) => ({
+    path: p,
+    verdict: 'keep' as const,
+    reason: 'covered by the test',
+    decidedAt: '2026-01-01T00:00:00.000Z',
+    resolvedBy: 'user' as const,
+  })),
+};
+
+/** Keep every doc, tagged by path; the two docs carry two concerns, so the
+ *  settle barrier opens — answer it with an empty settlement. */
+const scanDriver = (keep: (docPath: string) => boolean = () => true) =>
+  stubDriver(async (call) => {
+    if (call.kind === 'spec-scan.settle-areas') {
+      await call.emit(toolResult('check_settlement', 'valid'));
+      return outcome({ concernMerges: {}, productMerges: {}, productVerdicts: [], subdivisions: [] });
+    }
+    const p = docPathOf(call.briefing);
+    return outcome(
+      keep(p)
+        ? {
+            keep: true,
+            reason: 'ok',
+            subject: 'this-product',
+            areas: [{ product: 'core', concern: p.includes('auth') ? 'auth' : 'users' }],
+            status: 'shipped',
+          }
+        : {
+            keep: false,
+            reason: 'not a spec',
+            subject: 'this-product',
+            category: 'scratch',
+            areas: [],
+            status: null,
+          },
+    );
+  }).driver;
+
+/** The scan options every case shares. */
+const scanOptions = (driver = scanDriver()) => ({
+  driver,
+  decisions: DECISIONS,
+  repoIdentity: null,
+  disableOverlapDetection: true,
+  skipGit: true,
 });
 describe('curateInProcess', () => {
   it('curates the repo docs into corpus.json', async () => {
-    const { curate } = await curateInProcess(repo, {
-      relevanceRunner: includeAll,
-      areaTagRunner: tagByPath,
-      vocabRunner: noVocabDrift,
-      disableOverlapDetection: true,
-      skipGit: true,
-    });
+    const { curate } = await curateInProcess(repo, scanOptions());
     expect(curate.stats.docsKept).toBe(2);
     expect(curate.stats.areaCount).toBe(2);
     const corpus = readCorpus(repo);
@@ -50,18 +95,11 @@ describe('curateInProcess', () => {
   });
 
   it('persists relevance-dropped docs as skippedDocs (for the dashboard force-include UI)', async () => {
-    const { curate } = await curateInProcess(repo, {
-      // Drop auth.md; keep users.md.
-      relevanceRunner: async ({ doc }: { doc: { path: string } }) => ({
-        path: doc.path,
-        include: !doc.path.includes('auth'),
-        reason: doc.path.includes('auth') ? 'not a spec' : 'ok',
-      }),
-      areaTagRunner: tagByPath,
-      vocabRunner: noVocabDrift,
-      disableOverlapDetection: true,
-      skipGit: true,
-    });
+    // Drop auth.md; keep users.md.
+    const { curate } = await curateInProcess(
+      repo,
+      scanOptions(scanDriver((p) => !p.includes('auth'))),
+    );
     expect(curate.skippedDocs.some((s) => s.path.includes('auth'))).toBe(true);
     // …and it round-trips through corpus.json so the dashboard can read it.
     const corpus = readCorpus(repo);
@@ -92,11 +130,7 @@ describe('curateInProcess', () => {
         framesWhenGateOpened = frames.length;
         return true;
       },
-      relevanceRunner: includeAll,
-      areaTagRunner: tagByPath,
-      vocabRunner: noVocabDrift,
-      disableOverlapDetection: true,
-      skipGit: true,
+      ...scanOptions(),
     });
 
     // Started and completed — with the estimate's own subject — before the confirm.
@@ -125,11 +159,7 @@ describe('curateInProcess', () => {
         doneWhenGateOpened = frames[frames.length - 1].find((s) => s.key === 'estimate')?.status;
         return true;
       },
-      relevanceRunner: includeAll,
-      areaTagRunner: tagByPath,
-      vocabRunner: noVocabDrift,
-      disableOverlapDetection: true,
-      skipGit: true,
+      ...scanOptions(),
     });
 
     expect(doneWhenGateOpened).toBe('done');
@@ -155,11 +185,7 @@ describe('curateInProcess', () => {
         done: () => phase.push('done'),
         error: () => phase.push('error'),
       },
-      relevanceRunner: includeAll,
-      areaTagRunner: tagByPath,
-      vocabRunner: noVocabDrift,
-      disableOverlapDetection: true,
-      skipGit: true,
+      ...scanOptions(),
     });
     expect(phase).toEqual([]);
     expect(frames[frames.length - 1].some((s) => s.key === 'estimate')).toBe(false);

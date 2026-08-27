@@ -115,7 +115,42 @@ describe('DecisionsFileSchema (corpus curation intent)', () => {
     expect(parsed.conflictResolutions[0].verdict).toBe('b');
   });
 
-  it('rejects the wrong version literal — bumping is intentional', () => {
-    expect(() => DecisionsFileSchema.parse({ version: 2 })).toThrow();
+  // v2 added the scan orchestrator's scope verdicts + standing
+  // instructions. BOTH versions parse — a v1 file simply has neither and gets the
+  // defaults — while every writer stamps 2. Any OTHER version literal is still a
+  // deliberate bump nobody has made, so it must fail loud.
+  it('parses a v2 file with scope verdicts and standing instructions', () => {
+    const parsed = DecisionsFileSchema.parse({
+      version: 2,
+      scopeVerdicts: [
+        { path: 'docs/archive', verdict: 'exclude', reason: 'superseded', decidedAt: '2026-08-19T00:00:00Z' },
+        { path: 'docs', verdict: 'keep', reason: 'our specs', decidedAt: '2026-08-19T00:00:00Z', resolvedBy: 'auto' },
+      ],
+      instructions: ['the English tree under docs/en is canonical'],
+    });
+    expect(parsed.scopeVerdicts).toHaveLength(2);
+    expect(parsed.scopeVerdicts[0].resolvedBy).toBeUndefined(); // absent = a human wrote it
+    expect(parsed.scopeVerdicts[1].resolvedBy).toBe('auto');
+    expect(parsed.instructions).toEqual(['the English tree under docs/en is canonical']);
+  });
+
+  it('defaults the v2 fields on a v1 file', () => {
+    const parsed = DecisionsFileSchema.parse({ version: 1 });
+    expect(parsed.scopeVerdicts).toEqual([]);
+    expect(parsed.instructions).toEqual([]);
+  });
+
+  it('rejects a scope verdict with an unknown verdict word', () => {
+    expect(() =>
+      DecisionsFileSchema.parse({
+        version: 2,
+        scopeVerdicts: [{ path: 'docs', verdict: 'maybe', reason: 'r', decidedAt: 'now' }],
+      }),
+    ).toThrow();
+  });
+
+  it('rejects a version literal nobody bumped to — bumping is intentional', () => {
+    expect(() => DecisionsFileSchema.parse({ version: 3 })).toThrow();
+    expect(() => DecisionsFileSchema.parse({ version: 0 })).toThrow();
   });
 });

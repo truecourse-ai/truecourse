@@ -69,13 +69,14 @@ describe('navigation registry — pure lookups', () => {
     }
   });
 
-  it('the guard section carries coverage / sources / flows / tests / journeys / externals / runs tabs', () => {
+  it('the guard section carries coverage / sources / flows / tests / journeys / externals / runs / activity tabs', () => {
     // The reading order IS the product story: the spec half first (coverage → the
     // sites those docs can come from → the flows it claims → the tests that hold
     // them), then the code half (journeys) and what that code talks to (external
-    // APIs), then history (runs). The Flows id is `guardflows`, not `flows`: tab
-    // ids are global and Code Analysis owns `flows` — the same collision rule
-    // that named the Runs tab `guarddrifts`.
+    // APIs), then history (runs) and, last, the agentic work itself (activity —
+    // every run's sessions and their transcripts). The Flows id is `guardflows`,
+    // not `flows`: tab ids are global and Code Analysis owns `flows` — the same
+    // collision rule that named the Runs tab `guarddrifts`.
     expect(tabsForSection('guard').map((t) => t.id)).toEqual([
       'coverage',
       'sources',
@@ -84,6 +85,7 @@ describe('navigation registry — pure lookups', () => {
       'journeys',
       'externals',
       'guarddrifts',
+      'activity',
     ]);
     expect(tabsForSection('guard').map((t) => t.label)).toEqual([
       'Coverage',
@@ -93,6 +95,7 @@ describe('navigation registry — pure lookups', () => {
       'Journeys',
       'External APIs',
       'Runs',
+      'Activity',
     ]);
     // External APIs reads and WRITES the working tree (recipe.json + the gitignored
     // overlay), so it is local-filesystem-gated exactly like Files/Flows — a hosted
@@ -269,7 +272,7 @@ describe('navigation registry — capability gating', () => {
       </AppProvider>,
     );
     expect(screen.getByTestId('tabs')).toHaveTextContent(
-      /^coverage,sources,guardflows,tests,journeys,externals,guarddrifts$/,
+      /^coverage,sources,guardflows,tests,journeys,externals,guarddrifts,activity$/,
     );
     unmount();
 
@@ -281,7 +284,7 @@ describe('navigation registry — capability gating', () => {
       </AppProvider>,
     );
     expect(screen.getByTestId('tabs')).toHaveTextContent(
-      /^coverage,guardflows,tests,journeys,guarddrifts$/,
+      /^coverage,guardflows,tests,journeys,guarddrifts,activity$/,
     );
   });
 

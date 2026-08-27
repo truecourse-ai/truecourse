@@ -40,10 +40,23 @@ export interface RegistryEntry {
    * unset, and the repo route reads the branch from the on-disk git repo.
    */
   defaultBranch?: string;
+  /**
+   * The https git URL this project was connected from, when it was connected by
+   * URL rather than by local path (`POST /api/repos/connect`). `path` then points
+   * at a clone the dashboard manages, and disconnecting deletes that clone.
+   * Absent for repos the user registered by path — their source is never touched.
+   */
+  remoteUrl?: string;
 }
 
 interface RegistryFile {
   projects: RegistryEntry[];
+}
+
+/** Extra fields to stamp on the entry when registering. */
+export interface RegisterProjectOptions {
+  /** See `RegistryEntry.remoteUrl`. Only set by the connect-by-URL flow. */
+  remoteUrl?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -56,7 +69,12 @@ export interface RegistryStore {
   pruneStaleProjects(): Promise<RegistryEntry[]>;
   getProjectBySlug(slug: string): Promise<RegistryEntry | null>;
   getProjectByPath(repoPath: string): Promise<RegistryEntry | null>;
-  registerProject(repoPath: string, displayName?: string): Promise<RegistryEntry>;
+  /** `options` is additive — impls that ignore it stay valid (fewer params is assignable). */
+  registerProject(
+    repoPath: string,
+    displayName?: string,
+    options?: RegisterProjectOptions,
+  ): Promise<RegistryEntry>;
   unregisterProject(slug: string): Promise<boolean>;
   touchProject(slug: string): Promise<void>;
   setLastAnalyzed(slug: string, isoTimestamp: string): Promise<void>;
@@ -105,7 +123,11 @@ class FileRegistryStore implements RegistryStore {
     return this.loadRaw().projects.find((p) => p.path === normalized) ?? null;
   }
 
-  async registerProject(repoPath: string, displayName?: string): Promise<RegistryEntry> {
+  async registerProject(
+    repoPath: string,
+    displayName?: string,
+    options?: RegisterProjectOptions,
+  ): Promise<RegistryEntry> {
     const normalized = path.resolve(repoPath);
     ensureRepoTruecourseDir(normalized);
     const file = this.loadRaw();
@@ -115,6 +137,9 @@ class FileRegistryStore implements RegistryStore {
     if (existing) {
       existing.name = name;
       existing.lastOpened = new Date().toISOString();
+      // Only ever set, never cleared — re-registering a connected repo by path
+      // must not turn it back into a plain local repo.
+      if (options?.remoteUrl) existing.remoteUrl = options.remoteUrl;
       this.persist(file);
       return existing;
     }
@@ -124,6 +149,7 @@ class FileRegistryStore implements RegistryStore {
       name,
       path: normalized,
       lastOpened: new Date().toISOString(),
+      ...(options?.remoteUrl ? { remoteUrl: options.remoteUrl } : {}),
     };
     file.projects.push(entry);
     this.persist(file);
@@ -191,8 +217,11 @@ export const getProjectByPath = (repoPath: string): Promise<RegistryEntry | null
  * Add (or update) an entry for `repoPath`. Returns the resulting entry.
  * Existing entries keep their slug; lastOpened is refreshed.
  */
-export const registerProject = (repoPath: string, displayName?: string): Promise<RegistryEntry> =>
-  active.registerProject(repoPath, displayName);
+export const registerProject = (
+  repoPath: string,
+  displayName?: string,
+  options?: RegisterProjectOptions,
+): Promise<RegistryEntry> => active.registerProject(repoPath, displayName, options);
 
 export const unregisterProject = (slug: string): Promise<boolean> =>
   active.unregisterProject(slug);

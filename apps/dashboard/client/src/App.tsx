@@ -9,6 +9,8 @@ import { EeModuleProvider, useEeModule } from './ee/EeModuleContext';
 import { EeAuthProvider, EnterpriseAuthGate } from './ee/EeAuthContext';
 import { EePageShell } from './ee/EePageShell';
 
+const PreviewApp = lazy(() => import('./preview/PreviewApp'));
+
 /**
  * Route registry: the OSS routes plus any routes contributed by the
  * enterprise client module (capability-filtered, lazy-loaded into their
@@ -94,6 +96,15 @@ function AppRoutes() {
               <RepoPage />
             </Suspense>
           )
+        }
+      />
+      {/* The one-product dashboard, mounted at /preview until it replaces the legacy routes. */}
+      <Route
+        path="/preview/*"
+        element={
+          <Suspense>
+            <PreviewApp />
+          </Suspense>
         }
       />
       {eeElements.map(({ path, Component }) => (

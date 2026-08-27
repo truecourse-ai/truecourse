@@ -1,23 +1,34 @@
 /**
- * End-to-end curate(): discover → relevance keep/drop → area-tag → group →
- * overlap-flag → assemble + persist corpus.json. All LLM stages are stubbed.
+ * The SCAN RUN end to end: discover → curate-doc sessions →
+ * settle-areas → group → overlap sessions → assemble + persist corpus.json.
+ * `curate()` — the one-shot orchestration this file was written against — is
+ * retired; the run now lives in `packages/core/src/services/spec-scan/run.ts`
+ * and every LLM stage is a session, so the stubs are a scripted SessionDriver
+ * instead of five per-stage runners.
+ *
+ * Retired with their stages: the separate `verifyFlaggedOverlaps` precision pass
+ * (the overlap session adjudicates inline, so nothing is "refuted" after the
+ * fact — `stats.overlapRefuted` is always 0), and the per-pair window MATRIX
+ * (one session reads the area's docs by section instead of N×M windows).
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { resetKvCacheStore } from '@truecourse/llm';
-import { planDocChunks } from '@truecourse/shared';
-import { curate, readCorpus, OVERLAP_WINDOW_CHARS } from '../../packages/spec-consolidator/src/index.js';
-import type {
-  AreaTagRunner,
-  DecisionsFile,
-  DocCandidate,
-  OverlapRunner,
-  RelevanceRunner,
-  VerifyOverlapRunner,
-  VocabRunner,
-} from '../../packages/spec-consolidator/src/index.js';
+import { runSpecScanSessions } from '../../packages/core/src/services/spec-scan/run';
+import { readCorpus } from '../../packages/spec-consolidator/src/index.js';
+import type { DecisionsFile, DocCandidate } from '../../packages/spec-consolidator/src/index.js';
+import type { SessionDriver } from '../../packages/agent-loop/src/index';
+import {
+  docPathOf,
+  memoryPersistence,
+  outcome,
+  stubDriver,
+  toolResult,
+  type StubCall,
+  type StubScript,
+} from '../core/spec-scan-session-stub';
 
 function doc(p: string, content = `body of ${p}`): DocCandidate {
   return {
@@ -32,51 +43,106 @@ function doc(p: string, content = `body of ${p}`): DocCandidate {
   };
 }
 
+// The kept docs carry pairwise-shared claim tokens so the deterministic
+// collision pairing (item 119) nominates every within-area pair — without a
+// shared identifier or heading, a doc pair costs no session and can flag
+// nothing. The bodies keep the `body of <path>` line the flag() quotes pin.
 const DOCS = [
-  doc('docs/users-v1.md'),
-  doc('docs/users-v2.md'),
-  doc('docs/auth.md'),
+  doc('docs/users-v1.md', 'body of docs/users-v1.md\n\nUses `userList`, `userQuota`, `authRealm`, `authScope`.\n'),
+  doc('docs/users-v2.md', 'body of docs/users-v2.md\n\nUses `userList`, `userQuota`, `sessionKey`, `sessionTtl`.\n'),
+  doc('docs/auth.md', 'body of docs/auth.md\n\nUses `authRealm`, `authScope`, `sessionKey`, `sessionTtl`.\n'),
   doc('notes/scratch.md'),
 ];
 
-// Skip the scratch note; keep the rest.
-const relevance: RelevanceRunner = async ({ doc }) => ({
-  path: doc.path,
-  include: doc.path !== 'notes/scratch.md',
-  reason: doc.path === 'notes/scratch.md' ? 'scratch' : 'spec',
-});
-
-// Tag by path: the users docs are users-entity; auth.md spans auth + users-entity.
-const areaTagger: AreaTagRunner = async ({ doc }) => {
-  if (doc.path === 'docs/auth.md') {
-    return {
-      tags: [
-        { product: 'core', concern: 'auth' },
-        { product: 'core', concern: 'users' },
-      ],
-      status: 'shipped',
-    };
-  }
-  return { tags: [{ product: 'core', concern: 'users' }], status: 'shipped' };
+const EMPTY_DECISIONS: DecisionsFile = {
+  version: 2,
+  manualIncludes: [],
+  manualExcludes: [],
+  manualAreas: [],
+  conflictResolutions: [],
+  scopeVerdicts: [],
+  instructions: [],
 };
 
-const flagAll: OverlapRunner = async ({ a, b }) => ({ overlap: true, note: `${a.path} vs ${b.path}` });
+/** The area a `spec-scan.overlap` briefing is about. */
+const areaOf = (briefing: string): string => /^Area: (.+)$/m.exec(briefing)?.[1] ?? '';
 
-// Verify keeps every flag by default; individual tests override to refute.
-const confirmAll: VerifyOverlapRunner = async () => ({ verdict: 'confirmed', reason: 'genuine' });
+type OverlapFlag = {
+  docs: [string, string];
+  note: string;
+  sections: Array<{ doc: string; heading: string | null; quote: string }>;
+  review: unknown;
+};
 
-// These docs carry ≥2 concerns, so the vocab stage makes a real call. Stub it to a
-// no-op mapping — without a runner it reaches the transport, and a stage that loses
-// every call now aborts the scan (which is the point of that accounting).
-const noVocabDrift: VocabRunner = async () => ({ products: {}, concerns: {} });
+const REVIEW = {
+  explanation: 'the two users docs disagree on the same field',
+  recommendation: { action: 'pick-b' as const, rationale: 'users-v2 is the newer doc' },
+};
 
-const EMPTY_DECISIONS: DecisionsFile = {
-  version: 1,
-  decisions: [],
-  manualChains: [],
-  manualIncludes: [],
-  relations: [],
-  manualAreas: [],
+/** An overlap flag pinned at both docs' leads (heading-free bodies). */
+const flag = (a: string, b: string, review: unknown = REVIEW): OverlapFlag => ({
+  docs: [a, b],
+  note: `${a} vs ${b}`,
+  sections: [
+    { doc: a, heading: null, quote: `body of ${a}` },
+    { doc: b, heading: null, quote: `body of ${b}` },
+  ],
+  review,
+});
+
+/** The doc pairs of a briefing's CANDIDATE COLLISIONS checklist, in order. */
+const checklistPairs = (briefing: string): Array<[string, string]> =>
+  [...briefing.matchAll(/^ {2}\d+\. (\S+) · .+? {2}<-> {2}(\S+) · /gm)].map((m) => [m[1], m[2]]);
+
+/** Every briefed candidate pair, flagged — the shape of an obedient session. */
+const allPairs = (briefing: string, review?: unknown): OverlapFlag[] =>
+  checklistPairs(briefing).map(([a, b]) => flag(a, b, review));
+
+/**
+ * The scan's three session kinds, scripted. `curate` answers per doc;
+ * `overlaps` answers per cluster session (default: flag every pair of the
+ * briefed checklist); the settlement is always the empty one.
+ */
+function scanScript(opts: {
+  curate: (call: StubCall) => unknown;
+  overlaps?: (areaId: string, briefedDocs: string[], briefing: string) => OverlapFlag[];
+}): StubScript {
+  return async (call) => {
+    if (call.kind === 'spec-scan.settle-areas') {
+      await call.emit(toolResult('check_settlement', 'valid'));
+      return outcome({ concernMerges: {}, productMerges: {}, productVerdicts: [], subdivisions: [] });
+    }
+    if (call.kind === 'spec-scan.overlap') {
+      const areaId = areaOf(call.briefing);
+      const briefed = [...call.briefing.matchAll(/^--- doc: (\S+)  ·/gm)].map((m) => m[1]);
+      await call.emit(toolResult('check_findings', 'valid'));
+      return outcome({ overlaps: opts.overlaps?.(areaId, briefed, call.briefing) ?? [], notReached: [] });
+    }
+    return outcome(opts.curate(call));
+  };
+}
+
+/** Skip the scratch note; keep the rest, tagged by path. */
+const CURATE_BY_PATH = (call: StubCall): unknown => {
+  const p = docPathOf(call.briefing);
+  if (p === 'notes/scratch.md') {
+    return {
+      keep: false,
+      reason: 'scratch',
+      subject: 'this-product',
+      category: 'scratch',
+      areas: [],
+      status: null,
+    };
+  }
+  const areas =
+    p === 'docs/auth.md'
+      ? [
+          { product: 'core', concern: 'auth' },
+          { product: 'core', concern: 'users' },
+        ]
+      : [{ product: 'core', concern: 'users' }];
+  return { keep: true, reason: 'spec', subject: 'this-product', areas, status: 'shipped' };
 };
 
 let repo: string;
@@ -85,29 +151,50 @@ beforeEach(() => {
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-curate-'));
 });
 afterEach(() => {
+  resetKvCacheStore();
   fs.rmSync(repo, { recursive: true, force: true });
 });
 
-function run(extra: Parameters<typeof curate>[1] = {}) {
-  return curate(repo, {
+interface RunExtra {
+  decisions?: DecisionsFile | undefined;
+  docSource?: () => DocCandidate[];
+  skipCorpusWrite?: boolean;
+  repoIdentity?: Parameters<typeof runSpecScanSessions>[0]['repoIdentity'];
+  disableOverlapDetection?: boolean;
+  driver?: SessionDriver;
+  overlaps?: (areaId: string, briefedDocs: string[], briefing: string) => OverlapFlag[];
+  curate?: (call: StubCall) => unknown;
+}
+
+function run(extra: RunExtra = {}) {
+  const { overlaps, curate, driver, ...rest } = extra;
+  const stub =
+    driver ??
+    stubDriver(
+      scanScript({
+        curate: curate ?? CURATE_BY_PATH,
+        overlaps: overlaps ?? ((_area, _briefed, briefing) => allPairs(briefing)),
+      }),
+    ).driver;
+  return runSpecScanSessions({
+    repoRoot: repo,
+    driver: async () => stub,
+    persistence: memoryPersistence().persistence,
     docSource: () => DOCS,
     decisions: EMPTY_DECISIONS,
-    relevanceRunner: relevance,
-    areaTagRunner: areaTagger,
-    overlapRunner: flagAll,
-    verifyOverlapRunner: confirmAll,
-    vocabRunner: noVocabDrift,
     skipGit: true,
-    ...extra,
+    ...rest,
   });
 }
 
-describe('curate', () => {
+describe('the scan run', () => {
   it('curates docs into an area-grouped corpus with overlaps', async () => {
     const result = await run();
 
-    // Relevance dropped the scratch note.
-    expect(result.skippedDocs).toEqual([{ path: 'notes/scratch.md', reason: 'scratch' }]);
+    // The curation session dropped the scratch note.
+    expect(result.skippedDocs).toEqual([
+      { path: 'notes/scratch.md', reason: 'scratch', category: 'scratch' },
+    ]);
     expect(result.corpus.docs.map((d) => d.ref).sort()).toEqual([
       'docs/auth.md',
       'docs/users-v1.md',
@@ -115,25 +202,23 @@ describe('curate', () => {
     ]);
 
     // Areas: core/auth (auth.md only) + core/users-entity (all three).
-    const areaIds = result.corpus.areas.map((a) => a.id);
-    expect(areaIds).toEqual(['core/auth', 'core/users-entity']);
+    expect(result.corpus.areas.map((a) => a.id)).toEqual(['core/auth', 'core/users-entity']);
     const usersArea = result.corpus.areas.find((a) => a.id === 'core/users-entity')!;
     expect(usersArea.docRefs).toEqual(['docs/auth.md', 'docs/users-v1.md', 'docs/users-v2.md']);
 
-    // A corpus carries no relations field.
-    expect(result.corpus.relations).toBeUndefined();
-
-    // Every within-area pair is examined.
-    const overlapPairs = usersArea.overlaps.map((o) => o.docs);
+    // Every nominated pair the session flagged reached the corpus, under the
+    // ONE area each pair was assigned to (all three pairs share users-entity).
+    const overlapPairs = usersArea.overlaps.map((o) => [...o.docs].sort());
     expect(overlapPairs).toContainEqual(['docs/auth.md', 'docs/users-v1.md']);
     expect(overlapPairs).toContainEqual(['docs/auth.md', 'docs/users-v2.md']);
     expect(overlapPairs).toContainEqual(['docs/users-v1.md', 'docs/users-v2.md']);
 
-    // Stats.
     expect(result.stats.docsScanned).toBe(4);
     expect(result.stats.docsKept).toBe(3);
     expect(result.stats.areaCount).toBe(2);
     expect(result.stats.overlapFlags).toBe(3);
+    // The session adjudicates inline: there is no separate refutation pass.
+    expect(result.stats.overlapRefuted).toBe(0);
   });
 
   it('persists corpus.json (round-trips through readCorpus)', async () => {
@@ -153,14 +238,9 @@ describe('curate', () => {
     expect(readCorpus(repo)).toBeNull();
   });
 
-  it('applies manualAreas and tolerates legacy relations in decisions', async () => {
-    // A legacy `relations` entry is still parsed (back-compat) but inert — the
-    // scan neither consumes it nor lets it skip an overlap pair.
+  it('applies manualAreas', async () => {
     const decisions: DecisionsFile = {
       ...EMPTY_DECISIONS,
-      relations: [
-        { type: 'precedence', older: 'docs/users-v1.md', newer: 'docs/users-v2.md', scope: 'core/users-entity' },
-      ],
       manualAreas: [{ doc: 'docs/auth.md', areas: ['core/auth'] }],
     };
     const result = await run({ decisions });
@@ -168,8 +248,6 @@ describe('curate', () => {
     // auth.md re-homed to core/auth only → users-entity now has just the two users docs.
     const usersArea = result.corpus.areas.find((a) => a.id === 'core/users-entity')!;
     expect(usersArea.docRefs).toEqual(['docs/users-v1.md', 'docs/users-v2.md']);
-
-    // The legacy relation does NOT skip the pair — the disagreement is still flagged.
     expect(usersArea.overlaps).toHaveLength(1);
     expect(usersArea.overlaps[0].docs).toEqual(['docs/users-v1.md', 'docs/users-v2.md']);
   });
@@ -178,9 +256,6 @@ describe('curate', () => {
     const decisions: DecisionsFile = { ...EMPTY_DECISIONS, manualExcludes: ['docs/auth.md'] };
     const result = await run({ decisions });
 
-    // auth.md is gone entirely: not a kept doc, its core/auth area vanishes, and
-    // the two overlaps it drove are gone. The (v1,v2) pair stays flagged — the
-    // filename replace relation never resolves the disagreement.
     expect(result.corpus.docs.map((d) => d.ref)).not.toContain('docs/auth.md');
     expect(result.corpus.areas.map((a) => a.id)).toEqual(['core/users-entity']);
     const usersArea = result.corpus.areas.find((a) => a.id === 'core/users-entity')!;
@@ -190,7 +265,7 @@ describe('curate', () => {
     expect(result.stats.docsKept).toBe(2);
   });
 
-  it('reads manualAreas from decisions.json on disk when not injected', async () => {
+  it('reads manualAreas from a legacy v1 decisions.json on disk when not injected', async () => {
     const specsDir = path.join(repo, '.truecourse', 'specs');
     fs.mkdirSync(specsDir, { recursive: true });
     fs.writeFileSync(
@@ -198,183 +273,95 @@ describe('curate', () => {
       JSON.stringify({
         version: 1,
         manualIncludes: [],
-        relations: [],
+        relations: [{ type: 'precedence', older: 'a.md', newer: 'b.md' }], // legacy, dropped on parse
         manualAreas: [{ doc: 'docs/auth.md', areas: ['core/auth'] }],
       }),
     );
-    const result = await curate(repo, {
-      docSource: () => DOCS,
-      relevanceRunner: relevance,
-      areaTagRunner: areaTagger,
-      overlapRunner: flagAll,
-      verifyOverlapRunner: confirmAll,
-      vocabRunner: noVocabDrift,
-      skipGit: true,
-    });
+    const result = await run({ decisions: undefined });
     const usersArea = result.corpus.areas.find((a) => a.id === 'core/users-entity')!;
     expect(usersArea.docRefs).toEqual(['docs/users-v1.md', 'docs/users-v2.md']);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Overlap verification (precision pass) — the recall-biased detector over-flags;
-// an explicit `refuted` verdict prunes a flag before the corpus is assembled, so
-// a refuted flag never reaches corpus.json. Confirmed + error-path flags stay.
+// The overlap session's adjudication rides into the corpus
 // ---------------------------------------------------------------------------
 
-describe('curate — overlap verification', () => {
-  it('a refuted flag is pruned from the corpus, excluded from openOverlaps, counted in overlapRefuted', async () => {
-    // Refute exactly the (v1,v2) pair; keep every other flag.
-    const verify: VerifyOverlapRunner = async ({ a, b }) => {
-      const pair = [a.path, b.path].sort().join('|');
-      return pair === 'docs/users-v1.md|docs/users-v2.md'
-        ? { verdict: 'refuted', reason: 'complementary detail' }
-        : { verdict: 'confirmed', reason: 'genuine' };
-    };
-    const result = await run({ verifyOverlapRunner: verify });
+describe('the scan run — overlap adjudication', () => {
+  it('a flagged overlap carries its resolution brief into (and through) the corpus', async () => {
+    const result = await run({
+      overlaps: (_area, briefed) =>
+        briefed.length === 3 ? [flag('docs/users-v1.md', 'docs/users-v2.md')] : [],
+    });
 
     const usersArea = result.corpus.areas.find((a) => a.id === 'core/users-entity')!;
-    const pairs = usersArea.overlaps.map((o) => o.docs);
-    // The refuted (v1,v2) pair is GONE from the corpus; the other two survive.
-    expect(pairs).not.toContainEqual(['docs/users-v1.md', 'docs/users-v2.md']);
-    expect(pairs).toContainEqual(['docs/auth.md', 'docs/users-v1.md']);
-    expect(pairs).toContainEqual(['docs/auth.md', 'docs/users-v2.md']);
-
-    // Stats: openOverlaps excludes the refuted flag; overlapRefuted counts it.
-    expect(result.stats.overlapRefuted).toBe(1);
-    expect(result.stats.overlapFlags).toBe(2);
-    expect(result.stats.openOverlaps.map((o) => [o.a, o.b])).not.toContainEqual([
-      'docs/users-v1.md',
-      'docs/users-v2.md',
-    ]);
-  });
-
-  it('confirmed flags stay exactly as before (nothing refuted)', async () => {
-    const result = await run(); // confirmAll
-    expect(result.stats.overlapRefuted).toBe(0);
-    expect(result.stats.overlapFlags).toBe(3);
-  });
-
-  it('fail-open: a verifier that throws leaves every flag in the corpus', async () => {
-    const throwing: VerifyOverlapRunner = async () => {
-      throw new Error('judge unavailable');
-    };
-    const result = await run({ verifyOverlapRunner: throwing });
-    // No verdict = no prune: all three flags survive.
-    expect(result.stats.overlapRefuted).toBe(0);
-    expect(result.stats.overlapFlags).toBe(3);
-    const usersArea = result.corpus.areas.find((a) => a.id === 'core/users-entity')!;
-    expect(usersArea.overlaps).toHaveLength(3);
-  });
-
-  it('a confirmed flag carries its resolution brief into (and through) the corpus', async () => {
-    const review = {
-      explanation:
-        'Both users docs give the identity field a different key: v1 says "auth0_id" while v2 says "auth0_sub" for the same user record, so a consumer reading one gets the wrong field.',
-      recommendation: { action: 'pick-b' as const, rationale: 'v2 is the newer schema' },
-    };
-    // Attach the brief to the (v1,v2) pair; the auth pairs confirm without a brief.
-    const verify: VerifyOverlapRunner = async ({ a, b }) => {
-      const pair = [a.path, b.path].sort().join('|');
-      return pair === 'docs/users-v1.md|docs/users-v2.md'
-        ? { verdict: 'confirmed', review }
-        : { verdict: 'confirmed', reason: 'genuine' };
-    };
-    const result = await run({ verifyOverlapRunner: verify });
-
-    const usersArea = result.corpus.areas.find((a) => a.id === 'core/users-entity')!;
-    const flagged = usersArea.overlaps.find(
-      (o) => o.docs[0] === 'docs/users-v1.md' && o.docs[1] === 'docs/users-v2.md',
-    )!;
-    expect(flagged.review).toEqual(review);
-    // A confirmed flag with no brief stays bare.
-    const auth = usersArea.overlaps.find((o) => o.docs[0] === 'docs/auth.md')!;
-    expect(auth.review).toBeUndefined();
+    expect(usersArea.overlaps).toHaveLength(1);
+    expect(usersArea.overlaps[0].review).toEqual(REVIEW);
 
     // The brief survives the persist → read round-trip through corpus.json.
     const persisted = readCorpus(repo)!;
-    const persistedFlag = persisted.areas
-      .find((a) => a.id === 'core/users-entity')!
-      .overlaps.find((o) => o.docs[0] === 'docs/users-v1.md' && o.docs[1] === 'docs/users-v2.md')!;
-    expect(persistedFlag.review).toEqual(review);
+    expect(persisted.areas.find((a) => a.id === 'core/users-entity')!.overlaps[0].review).toEqual(
+      REVIEW,
+    );
   });
-});
 
-// ---------------------------------------------------------------------------
-// Overlap full-matrix coverage — a within-area doc pair is judged across its
-// COMPLETE window matrix; nothing is truncated no matter how large the docs.
-// ---------------------------------------------------------------------------
+  it('drops a flag naming a doc the session was never briefed on, keeping the valid one', async () => {
+    const result = await run({
+      overlaps: (_area, briefed) =>
+        briefed.length === 3
+          ? [
+              flag('docs/users-v1.md', 'docs/users-v2.md'),
+              flag('docs/users-v1.md', 'docs/not-in-the-universe.md'),
+            ]
+          : [],
+    });
+    expect(result.stats.overlapFlags).toBe(1);
+    expect(result.stats.openOverlaps).toEqual([
+      { area: 'core/users-entity', a: 'docs/users-v1.md', b: 'docs/users-v2.md' },
+    ]);
+  });
 
-describe('curate — overlap full window matrix', () => {
-  // A realistic long configuration reference: many `## key` sections, well past a
-  // single OVERLAP_WINDOW_CHARS window, so both docs split into several windows.
-  function configReference(product: string, sections: number): string {
-    const out = [
-      `# ${product} Configuration Reference`,
-      '',
-      `Every runtime setting the ${product} service reads at boot, with its type, default, and reload semantics.`,
-      '',
-    ];
-    for (let i = 0; i < sections; i++) {
-      out.push(
-        `## ${product}.pipeline.stage-${i}`,
-        '',
-        `Controls how stage ${i} of the request pipeline behaves. Accepts a string; the default is "auto".`,
-        `When set to a non-default value the ${product} runtime applies policy ${i} to every inbound request and records the decision in the audit log.`,
-        `Type: string. Default: auto. Scope: runtime. Reloadable: yes. Since: 1.${i}. Related: ${product}.pipeline.stage-${(i + 1) % sections}.`,
-        '',
-      );
-    }
-    return out.join('\n');
-  }
+  // The window MATRIX is gone: however large the docs, a collision cluster
+  // costs ONE session (the shared `## Defaults` heading pairs them).
+  it('costs one overlap session per cluster, whatever the docs weigh', async () => {
+    const big = (name: string): string =>
+      [
+        `# ${name}`,
+        '## Defaults',
+        ...Array.from({ length: 4000 }, (_, i) => `${name} setting ${i} defaults to auto.`),
+      ].join('\n');
+    const DOCS_BIG = [doc('docs/gateway.md', big('gateway')), doc('docs/ingress.md', big('ingress'))];
+    const stub = stubDriver(
+      scanScript({
+        curate: () => ({
+          keep: true,
+          reason: 'spec',
+          subject: 'this-product',
+          areas: [{ product: 'core', concern: 'config' }],
+          status: 'shipped',
+        }),
+      }),
+    );
 
-  // Distinct products so the relevance prefilter never treats them as near-duplicates.
-  const bigA = configReference('gateway', 300);
-  const bigB = configReference('ingress', 300);
-  const DOCS_BIG: DocCandidate[] = [
-    { path: 'docs/gateway-config-a.md', absPath: '', content: bigA, kind: 'prd', preview: bigA.slice(0, 200), lastTouched: '2026-01-01T00:00:00Z', contentHash: 'hash-big-a', size: bigA.length },
-    { path: 'docs/gateway-config-b.md', absPath: '', content: bigB, kind: 'prd', preview: bigB.slice(0, 200), lastTouched: '2026-01-01T00:00:00Z', contentHash: 'hash-big-b', size: bigB.length },
-  ];
-  // Both docs land in the same area, so they form one within-area pair.
-  const tagSame: AreaTagRunner = async () => ({ tags: [{ product: 'core', concern: 'config' }], status: 'shipped' });
-  const keepAll: RelevanceRunner = async ({ doc }) => ({ path: doc.path, include: true, reason: 'spec' });
-  const noOverlap: OverlapRunner = async () => ({ overlap: false, note: '' });
-
-  it('judges the pair across every window combination of both oversized docs', async () => {
-    let calls = 0;
-    const counting: OverlapRunner = async (i) => {
-      calls++;
-      return noOverlap(i);
-    };
-    const result = await curate(repo, {
+    await runSpecScanSessions({
+      repoRoot: repo,
+      driver: async () => stub.driver,
+      persistence: memoryPersistence().persistence,
       docSource: () => DOCS_BIG,
       decisions: EMPTY_DECISIONS,
-      relevanceRunner: keepAll,
-      areaTagRunner: tagSame,
-      overlapRunner: counting,
       skipGit: true,
     });
 
-    // The pair formed (both docs share the one area) and the judge saw the FULL
-    // matrix: every window of A against every window of B, no truncation.
-    expect(result.corpus.areas.some((a) => a.docRefs.length === 2)).toBe(true);
-    const nA = planDocChunks('docs/gateway-config-a.md', bigA, OVERLAP_WINDOW_CHARS).length;
-    const nB = planDocChunks('docs/gateway-config-b.md', bigB, OVERLAP_WINDOW_CHARS).length;
-    expect(nA).toBeGreaterThan(3);
-    expect(nB).toBeGreaterThan(3);
-    expect(calls).toBe(nA * nB);
+    expect(stub.calls.filter((c) => c.kind === 'spec-scan.overlap')).toHaveLength(1);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Include-scope — exercises the real filesystem discovery path (NOT docSource,
-// which bypasses scoping) so config `spec.include` actually applies.
+// Include-scope — the real filesystem discovery path (NOT docSource, which
+// bypasses scoping), so config `spec.include` actually applies.
 // ---------------------------------------------------------------------------
 
-describe('curate — include-scope', () => {
-  const keepAll: RelevanceRunner = async ({ doc }) => ({ path: doc.path, include: true, reason: 'spec' });
-  const tagOne: AreaTagRunner = async () => ({ tags: [{ product: 'core', concern: 'x' }], status: 'shipped' });
-
+describe('the scan run — include-scope', () => {
   function place(rel: string, body: string): void {
     const full = path.join(repo, rel);
     fs.mkdirSync(path.dirname(full), { recursive: true });
@@ -384,11 +371,26 @@ describe('curate — include-scope', () => {
     place('.truecourse/config.json', JSON.stringify({ spec: { include } }));
   }
   function runFs(decisions: DecisionsFile = EMPTY_DECISIONS) {
-    return curate(repo, {
+    const stub = stubDriver(
+      scanScript({
+        curate: () => ({
+          keep: true,
+          reason: 'spec',
+          subject: 'this-product',
+          areas: [{ product: 'core', concern: 'x' }],
+          status: 'shipped',
+        }),
+      }),
+    );
+    return runSpecScanSessions({
+      repoRoot: repo,
+      driver: async () => stub.driver,
+      persistence: memoryPersistence().persistence,
       decisions,
-      relevanceRunner: keepAll,
-      areaTagRunner: tagOne,
       disableOverlapDetection: true,
+      // The scope orchestrator is step 6's own subject; these cases are about the
+      // config-level include scope, so they run with it switched off.
+      disableScopeOrchestration: true,
       skipGit: true,
     });
   }
@@ -412,8 +414,7 @@ describe('curate — include-scope', () => {
     const result = await runFs();
     // Out-of-scope docs never enter the universe, so they are neither kept nor
     // "skipped" — they must not surface in the dashboard's not-included list.
-    const skippedPaths = result.skippedDocs.map((s) => s.path);
-    expect(skippedPaths).not.toContain('reference/answers.md');
+    expect(result.skippedDocs.map((s) => s.path)).not.toContain('reference/answers.md');
     expect(result.corpus.skippedDocs.map((s) => s.ref)).not.toContain('reference/answers.md');
   });
 
@@ -422,8 +423,7 @@ describe('curate — include-scope', () => {
     place('docs/spec.md', '# in scope');
     place('reference/answers.md', '# out of scope, but force-included');
 
-    const decisions: DecisionsFile = { ...EMPTY_DECISIONS, manualIncludes: ['reference/answers.md'] };
-    const result = await runFs(decisions);
+    const result = await runFs({ ...EMPTY_DECISIONS, manualIncludes: ['reference/answers.md'] });
     // A manual include is a relevance-level override, not a universe override:
     // the out-of-scope path stays out, but is surfaced so it isn't a silent no-op.
     expect(result.stats.outOfScopeManualIncludes).toEqual(['reference/answers.md']);
@@ -445,11 +445,9 @@ describe('curate — include-scope', () => {
  * F12 visibility: the third-party drop rate is what made the bug invisible for
  * so long — cal.com's whole v2 API reference vanished into an undifferentiated
  * "7 dropped". Both counters are reported, not just the first: `restored` is the
- * regression detector. If the identity block is doing its job it should be ~0; a
- * nonzero value means the prompt half is incomplete and the deterministic net is
- * carrying the fix.
+ * regression detector.
  */
-describe('curate — third-party visibility', () => {
+describe('the scan run — third-party visibility', () => {
   const identity = { name: 'wekan', aliases: ['Wekan'], sources: ['git-remote'] };
 
   const DOCS_WITH_VENDOR = [
@@ -460,46 +458,50 @@ describe('curate — third-party visibility', () => {
 
   // Reproduces the measured failure: the model calls our OWN api doc third-party
   // because it names our product, exactly like a vendor's docs would.
-  const vendorConfused: RelevanceRunner = async ({ doc }) =>
-    doc.path === 'docs/auth.md'
-      ? { path: doc.path, include: true, reason: 'spec' }
+  const vendorConfused = (call: StubCall): unknown => {
+    const p = docPathOf(call.briefing);
+    return p === 'docs/auth.md'
+      ? {
+          keep: true,
+          reason: 'spec',
+          subject: 'this-product',
+          areas: [{ product: 'core', concern: 'auth' }],
+          status: null,
+        }
       : {
-          path: doc.path,
-          include: false,
+          keep: false,
+          reason: `vendor API research (${p})`,
+          subject: 'different-product',
           category: 'third-party',
-          reason: `vendor API research (${doc.path})`,
+          areas: [{ product: 'core', concern: 'auth' }],
+          status: null,
         };
+  };
 
-  it('counts third-party drops and backstop restores separately', async () => {
-    const res = await curate(repo, {
+  const runVendor = () =>
+    runSpecScanSessions({
+      repoRoot: repo,
+      driver: async () =>
+        stubDriver(scanScript({ curate: vendorConfused })).driver,
+      persistence: memoryPersistence().persistence,
       docSource: () => DOCS_WITH_VENDOR,
       decisions: EMPTY_DECISIONS,
       repoIdentity: identity,
-      relevanceRunner: vendorConfused,
-      areaTagRunner: areaTagger,
-      disableVocabNormalization: true,
       disableOverlapDetection: true,
       skipCorpusWrite: true,
+      skipGit: true,
     });
 
+  it('counts third-party drops and backstop restores separately', async () => {
+    const res = await runVendor();
     expect(res.stats.thirdPartyDropped).toBe(2); // both were dropped as third-party
     expect(res.stats.thirdPartyRestored).toBe(1); // only ours names our product
-    // The genuine vendor doc stays dropped; our API reference is back.
     expect(res.stats.docsKept).toBe(2);
     expect(res.skippedDocs.map((s) => s.path)).toEqual(['docs/trello.md']);
   });
 
   it('records the skip category on the corpus so the dashboard can group drops', async () => {
-    const res = await curate(repo, {
-      docSource: () => DOCS_WITH_VENDOR,
-      decisions: EMPTY_DECISIONS,
-      repoIdentity: identity,
-      relevanceRunner: vendorConfused,
-      areaTagRunner: areaTagger,
-      disableVocabNormalization: true,
-      disableOverlapDetection: true,
-      skipCorpusWrite: true,
-    });
+    const res = await runVendor();
     expect(res.corpus.skippedDocs).toEqual([
       { ref: 'docs/trello.md', reason: expect.stringMatching(/vendor/), category: 'third-party' },
     ]);
@@ -507,39 +509,50 @@ describe('curate — third-party visibility', () => {
 
   // EE scans an ephemeral shallow clone in a temp dir. If an explicit null were
   // treated as "resolve it yourself", the basename `tc-gate-scan-XXXX` would
-  // become the repo's identity.
+  // become the repo's identity — and it would reach the session in the briefing.
   it('honors an explicitly null identity instead of resolving one', async () => {
-    let seen: unknown = 'unset';
-    await curate(repo, {
+    const briefings: string[] = [];
+    const stub = stubDriver(
+      scanScript({
+        curate: (call) => {
+          briefings.push(call.briefing);
+          return {
+            keep: true,
+            reason: 'spec',
+            subject: 'this-product',
+            areas: [{ product: 'core', concern: 'auth' }],
+            status: null,
+          };
+        },
+      }),
+    );
+    await runSpecScanSessions({
+      repoRoot: repo,
+      driver: async () => stub.driver,
+      persistence: memoryPersistence().persistence,
       docSource: () => [doc('docs/auth.md')],
       decisions: EMPTY_DECISIONS,
       repoIdentity: null,
-      relevanceRunner: async ({ doc, identity }) => {
-        seen = identity;
-        return { path: doc.path, include: true, reason: 'spec' };
-      },
-      areaTagRunner: areaTagger,
-      disableVocabNormalization: true,
       disableOverlapDetection: true,
       skipCorpusWrite: true,
+      skipGit: true,
     });
-    expect(seen).toBeNull();
+    expect(briefings).toHaveLength(1);
+    expect(briefings[0]).not.toMatch(/IDENTITY/);
+    expect(briefings[0]).not.toContain(path.basename(repo));
   });
 });
 
 /**
  * A stored conflict verdict that matches no overlap the fresh corpus flags is
  * PRUNED in the same write cycle the corpus rides — decisions.json never
- * accumulates bookkeeping about disputes that stopped existing. "Orphaned" is
- * decided by the shared resolved-derivation, so the prune and every surface that
- * renders conflicts agree by construction.
+ * accumulates bookkeeping about disputes that stopped existing.
  */
-describe('curate — orphaned conflict-verdict prune', () => {
+describe('the scan run — orphaned conflict-verdict prune', () => {
   const specsDir = () => path.join(repo, '.truecourse', 'specs');
   const decisionsFile = () => path.join(specsDir(), 'decisions.json');
 
-  /** A section-scoped verdict on a doc pair, anchored at both preambles (the
-   *  shape that matches a flagged overlap carrying no section pointers). */
+  /** A section-scoped verdict on a doc pair, anchored at both preambles. */
   const verdict = (docA: string, docB: string) => ({
     docA,
     anchorA: null,
@@ -566,16 +579,14 @@ describe('curate — orphaned conflict-verdict prune', () => {
 
   const readStored = () => JSON.parse(fs.readFileSync(decisionsFile(), 'utf-8'));
 
-  /** curate() reading decisions.json from disk (never the injected seam). */
-  const runFromDisk = (extra: Parameters<typeof curate>[1] = {}) => run({ decisions: undefined, ...extra });
+  /** The run reading decisions.json from disk (never the injected seam). */
+  const runFromDisk = (extra: RunExtra = {}) => run({ decisions: undefined, ...extra });
 
   it('keeps a verdict that still matches a flagged conflict', async () => {
     seedDecisions([verdict('docs/users-v1.md', 'docs/users-v2.md')]);
 
     const result = await runFromDisk();
 
-    // The pair IS flagged by this corpus, so the verdict stands — on disk and in
-    // the decisions the run reports.
     expect(readStored().conflictResolutions).toHaveLength(1);
     expect(result.decisions.conflictResolutions).toHaveLength(1);
   });
@@ -624,5 +635,133 @@ describe('curate — orphaned conflict-verdict prune', () => {
 
     // The prune rides the corpus write; a dry read must never mutate the store.
     expect(fs.readFileSync(decisionsFile(), 'utf-8')).toBe(before);
+  });
+});
+
+/**
+ * HIGH-confidence recommendation auto-apply: a confirmed conflict whose brief
+ * grades its actionable recommendation `high` is resolved BY THE SCAN as a
+ * `resolvedBy: 'auto'` conflict resolution — visible, undoable, suppressing like
+ * a user verdict. Lower grades and `fix-doc` stay advisory, an existing verdict
+ * always wins, and nothing is written on a dry (skipCorpusWrite) run.
+ */
+describe('the scan run — high-confidence recommendation auto-apply', () => {
+  const specsDir = () => path.join(repo, '.truecourse', 'specs');
+  const decisionsFile = () => path.join(specsDir(), 'decisions.json');
+  const readStored = () => JSON.parse(fs.readFileSync(decisionsFile(), 'utf-8'));
+
+  /** Flags ONLY the users-v1 ↔ users-v2 pair, carrying the given brief. */
+  const withBrief = (recommendation: {
+    action: 'pick-a' | 'pick-b' | 'fix-doc' | 'dismiss';
+    rationale: string;
+    fix?: string;
+    confidence?: 'low' | 'medium' | 'high';
+  }) =>
+    (_area: string, briefed: string[]): OverlapFlag[] =>
+      briefed.includes('docs/users-v1.md') && briefed.includes('docs/users-v2.md')
+        ? [
+            flag('docs/users-v1.md', 'docs/users-v2.md', {
+              explanation: 'the two users docs disagree on the same field',
+              recommendation,
+            }),
+          ]
+        : [];
+
+  it('applies a high-confidence pick verdict as a resolvedBy:auto resolution', async () => {
+    const result = await run({
+      decisions: undefined,
+      overlaps: withBrief({ action: 'pick-b', rationale: 'users-v2 is the newer doc', confidence: 'high' }),
+    });
+
+    const stored = readStored().conflictResolutions;
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({
+      verdict: 'b',
+      resolvedBy: 'auto',
+      note: 'users-v2 is the newer doc',
+    });
+    expect([stored[0].docA, stored[0].docB].sort()).toEqual(['docs/users-v1.md', 'docs/users-v2.md']);
+    expect(result.stats.autoResolvedConflicts).toHaveLength(1);
+    expect(result.stats.autoResolvedConflicts[0].verdict).toBe('b');
+    expect(result.decisions.conflictResolutions).toHaveLength(1);
+  });
+
+  it('a high-confidence dismissal auto-applies as a dismissed verdict', async () => {
+    const result = await run({
+      decisions: undefined,
+      overlaps: withBrief({ action: 'dismiss', rationale: 'the two coexist', confidence: 'high' }),
+    });
+    expect(readStored().conflictResolutions[0]).toMatchObject({ verdict: 'dismissed', resolvedBy: 'auto' });
+    expect(result.stats.autoResolvedConflicts).toEqual([
+      expect.objectContaining({ verdict: 'dismissed' }),
+    ]);
+  });
+
+  it('medium confidence stays advisory — nothing is written', async () => {
+    const result = await run({
+      decisions: undefined,
+      overlaps: withBrief({ action: 'pick-b', rationale: 'probably v2', confidence: 'medium' }),
+    });
+    expect(fs.existsSync(decisionsFile())).toBe(false);
+    expect(result.stats.autoResolvedConflicts).toEqual([]);
+  });
+
+  it('a high-confidence fix-doc never auto-applies (a doc edit is not a verdict)', async () => {
+    const result = await run({
+      decisions: undefined,
+      overlaps: withBrief({
+        action: 'fix-doc',
+        rationale: 'users-v1 needs a correction',
+        fix: 'update the field default in users-v1',
+        confidence: 'high',
+      }),
+    });
+    expect(fs.existsSync(decisionsFile())).toBe(false);
+    expect(result.stats.autoResolvedConflicts).toEqual([]);
+  });
+
+  it('an existing resolution always wins — auto-apply never touches a resolved dispute', async () => {
+    fs.mkdirSync(specsDir(), { recursive: true });
+    fs.writeFileSync(
+      decisionsFile(),
+      JSON.stringify({
+        version: 1,
+        manualIncludes: [],
+        manualExcludes: [],
+        manualAreas: [],
+        conflictResolutions: [
+          {
+            docA: 'docs/users-v1.md',
+            anchorA: null,
+            docB: 'docs/users-v2.md',
+            anchorB: null,
+            verdict: 'a',
+            resolvedAt: '2026-07-20T00:00:00Z',
+          },
+        ],
+      }),
+    );
+
+    const result = await run({
+      decisions: undefined,
+      overlaps: withBrief({ action: 'pick-b', rationale: 'v2 is newer', confidence: 'high' }),
+    });
+
+    // The user's 'a' verdict stands; no auto entry joins it.
+    const stored = readStored().conflictResolutions;
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({ verdict: 'a' });
+    expect(stored[0].resolvedBy).toBeUndefined();
+    expect(result.stats.autoResolvedConflicts).toEqual([]);
+  });
+
+  it('writes nothing on a dry (skipCorpusWrite) run', async () => {
+    const result = await run({
+      decisions: undefined,
+      skipCorpusWrite: true,
+      overlaps: withBrief({ action: 'pick-b', rationale: 'v2 is newer', confidence: 'high' }),
+    });
+    expect(fs.existsSync(decisionsFile())).toBe(false);
+    expect(result.stats.autoResolvedConflicts).toEqual([]);
   });
 });

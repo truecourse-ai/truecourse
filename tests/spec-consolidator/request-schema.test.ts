@@ -1,44 +1,52 @@
 /**
- * Every spec-scan stage sends its response schema on the request, so the API
- * transport can enforce the shape via structured output (the cli transport
- * ignores it). Each case also pins the request's prompts to the exported system
- * constant + user builder — the strings the KV cache fingerprints hash — so a
- * schema addition can never move a cache key.
+ * Every spec-scan session declares its OUTCOME SCHEMA on the session def, so the
+ * loop can refuse an outcome the schema rejects (and the api driver can enforce
+ * the shape through structured output). This replaces the retired one-shot
+ * check that each stage put a JSON schema on its `LlmRequest`.
+ *
+ * Each case also pins the def's `systemPrompt` to the exported constant — the
+ * string the session CACHE fingerprints hash (`promptFingerprint`) — so a schema
+ * addition can never move a cache key, and a prompt edit always does.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { resetKvCacheStore } from '@truecourse/llm';
+import { describe, it, expect } from 'vitest';
+import type { z } from 'zod';
+import { createHash } from 'node:crypto';
 import {
-  filterByRelevance,
-  buildRelevanceUserPrompt,
-  RELEVANCE_SYSTEM_PROMPT,
-  tagDocs,
-  buildAreaTaggerUserPrompt,
-  AREA_TAGGER_SYSTEM_PROMPT,
-  normalizeVocabulary,
-  buildVocabUserPrompt,
-  VOCAB_NORMALIZER_SYSTEM_PROMPT,
-  flagOverlaps,
-  buildOverlapUserPrompt,
-  OVERLAP_DETECTOR_SYSTEM_PROMPT,
-  verifyFlaggedOverlaps,
-  buildVerifyOverlapUserPrompt,
-  VERIFY_OVERLAP_SYSTEM_PROMPT,
-} from '../../packages/spec-consolidator/src/index.js';
-import type {
-  Area,
-  DocCandidate,
-  DocAreaTags,
-  Overlap,
-} from '../../packages/spec-consolidator/src/index.js';
-import type { LlmRequest, LlmTransport } from '@truecourse/shared/llm';
+  CURATE_DOC_PROMPT_FINGERPRINT,
+  CURATE_DOC_SESSION_KIND,
+  CURATE_DOC_SYSTEM_PROMPT,
+  DocVerdictSchema,
+  curateDocSessionDef,
+} from '../../packages/core/src/services/spec-scan/curate-doc';
+import {
+  AreaSettlementSchema,
+  SETTLE_AREAS_PROMPT_FINGERPRINT,
+  SETTLE_AREAS_SESSION_KIND,
+  SETTLE_AREAS_SYSTEM_PROMPT,
+  collectAreaVocab,
+  settleAreasSessionDef,
+} from '../../packages/core/src/services/spec-scan/settle-areas';
+import {
+  OVERLAP_SESSION_KIND,
+  OVERLAP_SESSION_PROMPT_FINGERPRINT,
+  OVERLAP_SESSION_SYSTEM_PROMPT,
+  OverlapOutcomeSchema,
+  overlapSessionDef,
+} from '../../packages/core/src/services/spec-scan/overlap';
+import {
+  ORCHESTRATE_SYSTEM_PROMPT,
+  SPEC_SCAN_ORCHESTRATE_SESSION_KIND,
+  ScanScopeOutcomeSchema,
+  buildScanScopeUniverse,
+  orchestrateSessionDef,
+} from '../../packages/core/src/services/spec-scan/orchestrate';
+import { buildScanUniverse } from '../../packages/core/src/services/spec-scan/tools';
+import type { DocCandidate } from '../../packages/spec-consolidator/src/index.js';
 
 function doc(p: string, content = `# ${p}\n\nThe service returns a Bearer JWT for ${p}.`): DocCandidate {
   return {
     path: p,
-    absPath: `/abs/${p}`,
+    absPath: '',
     content,
     kind: 'prd',
     preview: content.split('\n').slice(0, 5).join('\n'),
@@ -48,149 +56,128 @@ function doc(p: string, content = `# ${p}\n\nThe service returns a Bearer JWT fo
   };
 }
 
-/** A transport that answers every call with `response` and records the requests. */
-function capture(response: string): { transport: LlmTransport; reqs: LlmRequest[] } {
-  const reqs: LlmRequest[] = [];
-  return {
-    reqs,
-    transport: async (req) => {
-      reqs.push(req);
-      return response;
-    },
-  };
-}
+/** The root property names a session's outcome schema accepts. */
+const props = (schema: z.ZodTypeAny): string[] =>
+  Object.keys((schema as unknown as { shape: Record<string, unknown> }).shape).sort();
 
-/** The request's schema parsed back, with its root object's property names. */
-function schemaOf(req: LlmRequest): { root: Record<string, unknown>; props: string[] } {
-  expect(typeof req.schema).toBe('string');
-  const root = JSON.parse(req.schema as string) as Record<string, unknown>;
-  const props = Object.keys((root.properties ?? {}) as Record<string, unknown>).sort();
-  return { root, props };
-}
+const fingerprint = (prompt: string): string =>
+  createHash('sha256').update(prompt, 'utf-8').digest('hex').slice(0, 16);
 
-let repo: string;
-beforeEach(() => {
-  resetKvCacheStore();
-  repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-req-schema-'));
-});
-afterEach(() => {
-  fs.rmSync(repo, { recursive: true, force: true });
-});
+const DOC = doc('docs/orders-prd.md');
+const UNIVERSE = buildScanUniverse([DOC]);
 
-describe('spec.relevance', () => {
-  it('sends the verdict schema and the unchanged prompts', async () => {
-    const d = doc('docs/orders-prd.md');
-    const { transport, reqs } = capture(JSON.stringify({ include: true, reason: 'spec' }));
-
-    const out = await filterByRelevance(repo, [d], { transport });
-
-    expect(out.included).toHaveLength(1);
-    expect(reqs).toHaveLength(1);
-    expect(reqs[0].system).toBe(RELEVANCE_SYSTEM_PROMPT);
-    expect(reqs[0].user).toBe(buildRelevanceUserPrompt(d, null));
-    const { root, props } = schemaOf(reqs[0]);
-    expect(root.type).toBe('object');
-    expect(props).toEqual(['category', 'include', 'reason', 'subject']);
-    expect(root.required).toEqual(['include']);
+describe('spec-scan.curate-doc', () => {
+  const def = curateDocSessionDef({
+    doc: DOC,
+    universe: UNIVERSE,
+    liveVocab: () => ({ products: [], concerns: [] }),
   });
-});
 
-describe('spec.areaTag', () => {
-  it('sends the tagger schema and the unchanged prompts', async () => {
-    const d = doc('docs/auth-prd.md');
-    const { transport, reqs } = capture(
-      JSON.stringify({ areas: [{ product: 'core', concern: 'auth' }], status: null }),
-    );
-
-    await tagDocs(repo, [d], { transport });
-
-    expect(reqs).toHaveLength(1);
-    expect(reqs[0].system).toBe(AREA_TAGGER_SYSTEM_PROMPT);
-    expect(reqs[0].user).toBe(buildAreaTaggerUserPrompt(d, d.content as string));
-    const { root, props } = schemaOf(reqs[0]);
-    expect(root.type).toBe('object');
-    expect(props).toEqual(['areas', 'status']);
-  });
-});
-
-describe('spec.vocab', () => {
-  it('sends the mapping schema and the unchanged prompts', async () => {
-    const tags = new Map<string, DocAreaTags>([
-      ['a.md', { tags: [{ product: 'core', concern: 'booking' }] }],
-      ['b.md', { tags: [{ product: 'core', concern: 'appointments' }] }],
+  it('declares the verdict schema, the prompt constant and its read tools', () => {
+    expect(def.kind).toBe(CURATE_DOC_SESSION_KIND);
+    expect(def.systemPrompt).toBe(CURATE_DOC_SYSTEM_PROMPT);
+    expect(props(DocVerdictSchema)).toEqual(['areas', 'category', 'keep', 'reason', 'status', 'subject']);
+    expect(def.outcomeSchema).toBe(DocVerdictSchema);
+    expect(def.tools.map((t) => t.name).sort()).toEqual([
+      'corpus_vocab',
+      'list_docs',
+      'read_chunk',
+      'read_doc',
     ]);
-    const { transport, reqs } = capture(
-      JSON.stringify({ products: {}, concerns: { appointments: 'booking' } }),
-    );
+    expect(def.tools.every((t) => t.readOnly && !t.destructive)).toBe(true);
+  });
 
-    await normalizeVocabulary(repo, tags, { transport });
-
-    expect(reqs).toHaveLength(1);
-    expect(reqs[0].system).toBe(VOCAB_NORMALIZER_SYSTEM_PROMPT);
-    expect(reqs[0].user).toBe(
-      buildVocabUserPrompt({ products: [], concerns: ['appointments', 'booking'] }),
+  it('refuses an outcome the schema rejects, and strips nothing silently', () => {
+    expect(DocVerdictSchema.safeParse({ keep: true, reason: 'ok', areas: [] }).success).toBe(true);
+    // A bad enum re-asks rather than degrading (no `.catch(undefined)` tolerance).
+    expect(DocVerdictSchema.safeParse({ keep: true, reason: 'ok', areas: [], subject: 'nope' }).success).toBe(
+      false,
     );
-    const { root, props } = schemaOf(reqs[0]);
-    expect(root.type).toBe('object');
-    expect(props).toEqual(['concerns', 'products']);
+    // `.strict()`: an invented field is a refusal, not a silent drop.
+    expect(DocVerdictSchema.safeParse({ keep: true, reason: 'ok', areas: [], extra: 1 }).success).toBe(false);
+  });
+
+  it('fingerprints the cache on the prompt constant alone', () => {
+    expect(CURATE_DOC_PROMPT_FINGERPRINT).toBe(fingerprint(CURATE_DOC_SYSTEM_PROMPT));
+    expect(CURATE_DOC_PROMPT_FINGERPRINT).toMatch(/^[0-9a-f]{16}$/);
   });
 });
 
-describe('spec.overlap', () => {
-  it('sends the side-keyed verdict schema and the unchanged prompts', async () => {
-    const a = doc('docs/a.md');
-    const b = doc('docs/b.md');
-    const area: Area = {
-      id: 'core/auth',
-      product: 'core',
-      concern: 'auth',
-      docRefs: [a.path, b.path],
-      overlaps: [],
-    };
-    const { transport, reqs } = capture(
-      JSON.stringify({ overlap: true, note: 'token ttl', sections: [] }),
-    );
+describe('spec-scan.settle-areas', () => {
+  const def = settleAreasSessionDef({
+    vocab: collectAreaVocab(new Map([['a.md', [{ product: 'booking', concern: 'auth' }]]])),
+    universe: UNIVERSE,
+  });
 
-    await flagOverlaps(repo, [area], [a, b], { transport });
+  it('declares the settlement schema, the prompt constant and its validator tool', () => {
+    expect(def.kind).toBe(SETTLE_AREAS_SESSION_KIND);
+    expect(def.systemPrompt).toBe(SETTLE_AREAS_SYSTEM_PROMPT);
+    expect(props(AreaSettlementSchema)).toEqual([
+      'concernMerges',
+      'productMerges',
+      'productVerdicts',
+      'subdivisions',
+    ]);
+    expect(def.outcomeSchema).toBe(AreaSettlementSchema);
+    expect(def.tools.map((t) => t.name).sort()).toEqual(['check_settlement', 'docs_with_label', 'read_doc']);
+    // The validator's INPUT schema is the outcome schema — one definition of valid.
+    expect(def.tools.find((t) => t.name === 'check_settlement')!.inputSchema).toBe(AreaSettlementSchema);
+  });
 
-    expect(reqs).toHaveLength(1);
-    expect(reqs[0].system).toBe(OVERLAP_DETECTOR_SYSTEM_PROMPT);
-    expect(reqs[0].user).toBe(buildOverlapUserPrompt(area.id, a, b));
-    const { root, props } = schemaOf(reqs[0]);
-    expect(root.type).toBe('object');
-    expect(props).toEqual(['note', 'overlap', 'sections']);
+  it('fingerprints the cache on the prompt constant alone', () => {
+    expect(SETTLE_AREAS_PROMPT_FINGERPRINT).toBe(fingerprint(SETTLE_AREAS_SYSTEM_PROMPT));
   });
 });
 
-describe('spec.verifyOverlap', () => {
-  it('sends the whole verdict shape and the unchanged prompts', async () => {
-    const a = doc('docs/a.md');
-    const b = doc('docs/b.md');
-    const ov: Overlap = { docs: [a.path, b.path], note: 'token ttl', sections: [], areas: ['core/auth'] };
-    const { transport, reqs } = capture(
-      JSON.stringify({ verdict: 'refuted', reason: 'different services (rule a)' }),
-    );
+describe('spec-scan.overlap', () => {
+  const def = overlapSessionDef({
+    item: { areaId: 'core/orders', concern: 'orders', cluster: 0, docs: [DOC], pairs: [], overflow: [] },
+    universe: UNIVERSE,
+  });
 
-    const out = await verifyFlaggedOverlaps(repo, new Map([['core/auth', [ov]]]), [a, b], {
-      transport,
+  it('declares the findings schema, the prompt constant and its validator tool', () => {
+    expect(def.kind).toBe(OVERLAP_SESSION_KIND);
+    expect(def.systemPrompt).toBe(OVERLAP_SESSION_SYSTEM_PROMPT);
+    // `sectionsOpened` and `uncheckedPairs` are on the schema only so the
+    // RUN's transcript-derived stamps can ride the cached value; they are
+    // never accepted from the session (the stamps overwrite a self-report)
+    // and they are OPTIONAL, so an entry cached before the fields existed
+    // still parses as a hit.
+    expect(props(OverlapOutcomeSchema)).toEqual(['notReached', 'overlaps', 'sectionsOpened', 'uncheckedPairs']);
+    expect(OverlapOutcomeSchema.safeParse({ overlaps: [], notReached: [] }).success).toBe(true);
+    expect(def.outcomeSchema).toBe(OverlapOutcomeSchema);
+    expect(def.tools.map((t) => t.name).sort()).toEqual([
+      'check_findings',
+      'read_doc_chunk',
+      'read_section',
+    ]);
+  });
+
+  it('fingerprints the cache on the prompt constant alone', () => {
+    expect(OVERLAP_SESSION_PROMPT_FINGERPRINT).toBe(fingerprint(OVERLAP_SESSION_SYSTEM_PROMPT));
+  });
+});
+
+describe('spec-scan.orchestrate', () => {
+  const def = orchestrateSessionDef(buildScanScopeUniverse(UNIVERSE, []));
+
+  it('declares the scope schema, the prompt constant and its read tools', () => {
+    expect(def.kind).toBe(SPEC_SCAN_ORCHESTRATE_SESSION_KIND);
+    expect(def.systemPrompt).toBe(ORCHESTRATE_SYSTEM_PROMPT);
+    expect(props(ScanScopeOutcomeSchema)).toEqual(['findings', 'instructions', 'scopeVerdicts']);
+    expect(def.outcomeSchema).toBe(ScanScopeOutcomeSchema);
+    expect(def.tools.map((t) => t.name).sort()).toEqual(['doc_outline', 'list_universe']);
+    // The scope session may wait on user input; nothing ever blocks on it.
+    expect(def.interactive).toBe(true);
+  });
+
+  it('never lets a session stamp its own authority or clock', () => {
+    const parsed = ScanScopeOutcomeSchema.safeParse({
+      scopeVerdicts: [
+        { path: 'docs', verdict: 'keep', reason: 'specs', decidedAt: '2026-01-01', resolvedBy: 'user' },
+      ],
+      instructions: [],
     });
-
-    expect(out.refuted).toBe(1);
-    expect(reqs).toHaveLength(1);
-    expect(reqs[0].system).toBe(VERIFY_OVERLAP_SYSTEM_PROMPT);
-    expect(reqs[0].user).toBe(buildVerifyOverlapUserPrompt('core/auth', ov, a, b));
-    // Every field the runner reads off the reply is in the schema — the verdict,
-    // a refuted `reason`, and a confirmed verdict's brief (explanation +
-    // recommendation). Only the verdict is required; the rest are per-verdict.
-    const { root, props } = schemaOf(reqs[0]);
-    expect(root.type).toBe('object');
-    expect(props).toEqual(['explanation', 'reason', 'recommendation', 'verdict']);
-    expect(root.required).toEqual(['verdict']);
-    const recommendation = (root.properties as Record<string, Record<string, unknown>>).recommendation;
-    expect(Object.keys((recommendation.properties ?? {}) as Record<string, unknown>).sort()).toEqual([
-      'action',
-      'fix',
-      'rationale',
-    ]);
+    expect(parsed.success).toBe(false);
   });
 });

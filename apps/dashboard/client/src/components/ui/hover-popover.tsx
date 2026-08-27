@@ -135,11 +135,12 @@ export function HoverPopover({
         : 'left-1/2 -translate-x-1/2';
 
   return (
-    <span className="group relative inline-flex">
+    // Named group: unnamed `group-hover` fires from ANY ancestor `.group`.
+    <span className="group/popover relative inline-flex">
       {children}
       <span
         role="tooltip"
-        className={`${SURFACE} absolute ${sideCls} ${alignCls} ${widthCls} opacity-0 group-hover:opacity-100 ${popoverClassName}`}
+        className={`${SURFACE} absolute ${sideCls} ${alignCls} ${widthCls} opacity-0 group-hover/popover:opacity-100 ${popoverClassName}`}
       >
         {content}
       </span>

@@ -1,4 +1,6 @@
+import fs from 'node:fs'
 import os from 'node:os'
+import path from 'node:path'
 import { initParsers } from '../packages/analyzer/src/parser'
 
 // Never emit usage telemetry from the test suite — analyze and the
@@ -26,6 +28,21 @@ process.env.CLAUDE_CODE_BINARY = '/nonexistent/claude-test-tripwire'
 // per-repo (or via GIT_AUTHOR_*/GIT_COMMITTER_* env), as CI already requires.
 process.env.GIT_CONFIG_GLOBAL = os.devNull
 process.env.GIT_CONFIG_NOSYSTEM = '1'
+
+// Make the USER-level store hermetic for the same reason git is: `~/.truecourse/
+// config.json` holds the developer's LLM transport selection, and any test that
+// renders a model name reads it. On a machine configured for the `api` transport
+// that leaks the configured model into assertions expecting the `claude-code`
+// defaults (`expected 'gpt-5.5-2' to be 'opus'`), so the suite passes in CI and
+// fails locally. An empty per-process dir gives every test the same cold-start
+// defaults CI has. Tests that exercise global config point this at their own temp
+// dir and restore it; those that `delete` it fall back to the real home, which is
+// exactly what they did before this pin existed.
+const testHome = fs.mkdtempSync(path.join(os.tmpdir(), 'truecourse-test-home-'))
+process.env.TRUECOURSE_HOME = testHome
+process.on('exit', () => {
+  fs.rmSync(testHome, { recursive: true, force: true })
+})
 
 // Load tree-sitter WASM grammars once before any test runs.
 // initParsers() is idempotent (returns cached promise), so repeated imports

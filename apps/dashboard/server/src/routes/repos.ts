@@ -2,7 +2,7 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { CreateRepoSchema, BrowseDirQuerySchema } from '@truecourse/shared';
+import { CreateRepoSchema, ConnectRepoSchema, BrowseDirQuerySchema } from '@truecourse/shared';
 import { getCapabilities } from '../ee-loader.js';
 import { createAppError } from '@truecourse/core/lib/errors';
 import { getGit } from '@truecourse/core/lib/git';
@@ -17,6 +17,14 @@ import {
   registerProject,
   unregisterProject,
 } from '@truecourse/core/config/registry';
+import {
+  cloneRepository,
+  getClonePath,
+  isManagedClonePath,
+  normalizeRemoteUrl,
+  parseRemoteUrl,
+} from '../services/repo-clone.service.js';
+import { isSpecScanRunning, startOnboardingScan } from '../services/onboarding-scan.service.js';
 
 const router: Router = Router();
 
@@ -54,6 +62,89 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
   }
 });
 
+// POST /api/repos/connect - Connect a PUBLIC repository by its git URL.
+// Clones it into `<globalDir>/clones/<owner>__<repo>` and registers the clone,
+// so it behaves like any path-registered repo from then on. Disconnecting it
+// (DELETE below) deletes the clone.
+//
+// Synchronous: the clone happens inside the request and the client shows a
+// pending state. No job system, deliberately — this is the first step toward
+// provider-connected repos, not the destination.
+//
+// The ONBOARDING SCAN is the exception to that synchrony: once the clone is
+// registered the response goes out and the repo's spec scan starts in the
+// background of this process (../services/onboarding-scan.service.ts). Its
+// progress reaches the client over the socket and the sessions store, not over
+// this response.
+router.post('/connect', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const parsed = ConnectRepoSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw createAppError('Invalid request body: url is required', 400);
+    }
+
+    const remote = parseRemoteUrl(parsed.data.url);
+    const registry = await readRegistry();
+
+    // Already connected? Hand back the existing repo so the client can navigate
+    // to it instead of cloning a second copy.
+    const duplicate = registry.find(
+      (e) => e.remoteUrl && normalizeRemoteUrl(e.remoteUrl) === remote.normalized,
+    );
+    if (duplicate) {
+      res.status(409).json({
+        error: `${remote.displayName} is already connected`,
+        repoId: duplicate.slug,
+      });
+      return;
+    }
+
+    // Same `<owner>__<repo>` directory, different remote (e.g. the same
+    // owner/repo on two hosts). Refuse rather than clobber the other clone.
+    // Case-insensitive: clone dir names are lowercased now, but a registry
+    // written before that can still hold a mixed-case dir which, on a
+    // case-insensitive filesystem (macOS default), IS the directory this
+    // connect would rmSync. A false 409 on Linux for a genuinely distinct
+    // casing is the safe direction.
+    const clonePath = getClonePath(remote);
+    const occupant = registry.find(
+      (e) => path.resolve(e.path).toLowerCase() === path.resolve(clonePath).toLowerCase(),
+    );
+    if (occupant) {
+      throw createAppError(
+        `${occupant.name} already occupies the directory ${remote.displayName} would clone into. Disconnect it first.`,
+        409,
+      );
+    }
+
+    // Cloning can take a while on a big repo; don't let the socket time out
+    // under it. (Node's default request timeout is 5 minutes.)
+    req.setTimeout(0);
+
+    const repoPath = await cloneRepository(remote);
+    const entry = await registerProject(repoPath, remote.displayName, { remoteUrl: remote.url });
+
+    // Onboarding: connecting a repository starts its spec scan. The
+    // scan itself runs in the background — the call only claims the slot and
+    // returns whether it started (false: a scan for this path is already
+    // running, e.g. CLI-started), which the response reports so a client can
+    // tell "scanning now" from "join the run already in flight". Never throws
+    // (see the service).
+    const onboardingScanStarted = startOnboardingScan(entry.slug, entry.path);
+
+    res.status(201).json({
+      id: entry.slug,
+      name: entry.name,
+      path: entry.path,
+      remoteUrl: entry.remoteUrl ?? null,
+      lastAnalyzed: null,
+      onboardingScanStarted,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // GET /api/repos - List all registered projects (home page).
 // `lastAnalyzed` comes straight from the registry so unanalyzed projects don't
 // surface a fake date. `latestEvent` is the repo's most recent lifecycle event
@@ -68,6 +159,7 @@ router.get('/', async (_req: Request, res: Response, next: NextFunction) => {
         id: e.slug,
         name: e.name,
         path: e.path,
+        remoteUrl: e.remoteUrl ?? null,
         lastAnalyzed: e.lastAnalyzed ?? null,
         latestEvent: await resolveLatestEvent(e.path, e.lastAnalyzed ?? null),
       })),
@@ -221,6 +313,7 @@ router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
       id: entry.slug,
       name: entry.name,
       path: entry.path,
+      remoteUrl: entry.remoteUrl ?? null,
       lastAnalyzed,
       branches,
       defaultBranch,
@@ -248,7 +341,10 @@ router.get('/:id/branches', async (req: Request, res: Response, next: NextFuncti
 
 // DELETE /api/repos/:id - Unregister the project, close its PGlite, and
 // remove `<repo>/.truecourse/` from disk. The repo source itself is never
-// touched.
+// touched — UNLESS the project was connected by URL and lives in a clone the
+// dashboard manages, in which case disconnecting deletes the whole clone. Both
+// conditions are required: a `remoteUrl` alone (a hosted registry could carry
+// one for a repo we did not clone) never authorizes deleting a directory.
 router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const slug = req.params.id as string;
@@ -257,9 +353,24 @@ router.delete('/:id', async (req: Request, res: Response, next: NextFunction) =>
       throw createAppError('Project not found', 404);
     }
 
-    const tcDir = getRepoTruecourseDir(entry.path);
-    if (fs.existsSync(tcDir)) {
-      fs.rmSync(tcDir, { recursive: true, force: true });
+    // A running spec scan is writing into this tree right now. Deleting it
+    // under the scan leaves an orphaned `.truecourse/` the scan's later writes
+    // recreate, and — because the in-flight guard is keyed on the path — blocks
+    // a same-URL reconnect from ever getting its onboarding scan.
+    if (isSpecScanRunning(entry.path)) {
+      throw createAppError(
+        'A spec scan is running for this repository. Wait for it to finish, then disconnect.',
+        409,
+      );
+    }
+
+    if (entry.remoteUrl && isManagedClonePath(entry.path)) {
+      fs.rmSync(entry.path, { recursive: true, force: true });
+    } else {
+      const tcDir = getRepoTruecourseDir(entry.path);
+      if (fs.existsSync(tcDir)) {
+        fs.rmSync(tcDir, { recursive: true, force: true });
+      }
     }
 
     await unregisterProject(slug);

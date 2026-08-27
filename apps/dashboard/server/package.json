@@ -10,6 +10,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@truecourse/agent-loop": "workspace:*",
     "@truecourse/contract-extractor": "workspace:*",
     "@truecourse/core": "workspace:*",
     "@truecourse/shared": "workspace:*",
