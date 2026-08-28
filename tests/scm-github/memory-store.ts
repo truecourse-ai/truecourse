@@ -68,6 +68,10 @@ export class MemoryGateStore implements GateStore {
     return [...this.repos.values()].filter((r) => r.workspaceOrgId === workspaceOrgId);
   }
 
+  async listReposForInstallation(installationId: number): Promise<RepoLinkRecord[]> {
+    return [...this.repos.values()].filter((r) => r.installationId === installationId);
+  }
+
   /** Every link row, regardless of workspace — what a derived registry reads. */
   async listRepos(): Promise<RepoLinkRecord[]> {
     return [...this.repos.values()];

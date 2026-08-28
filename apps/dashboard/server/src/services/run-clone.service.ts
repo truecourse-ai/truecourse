@@ -18,6 +18,7 @@
  */
 
 import { execFile } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -54,13 +55,17 @@ function sanitizeSegment(segment: string): string {
 }
 
 /**
- * A filesystem-safe directory name for `owner/repo` — `<owner>__<repo>`,
+ * A filesystem-safe directory name for `owner/repo` — `<owner>__<repo>-<hash>`,
  * sanitized. Used wherever per-repo server-side state needs a directory keyed
- * by the repo identity (persistent sessions, run clones).
+ * by the repo identity (persistent sessions, run clones). Sanitization is
+ * lossy (case-folding, dot/dash stripping, truncation), so the hash of the
+ * EXACT full name keeps distinct repos in distinct directories — two repos
+ * must never share one: disconnect deletes the directory wholesale.
  */
 export function repoDirName(repoFullName: string): string {
   const [owner = '', repo = ''] = repoFullName.split('/');
-  return `${sanitizeSegment(owner) || 'repo'}__${sanitizeSegment(repo) || 'repo'}`;
+  const hash = crypto.createHash('sha256').update(repoFullName).digest('hex').slice(0, 8);
+  return `${sanitizeSegment(owner) || 'repo'}__${sanitizeSegment(repo) || 'repo'}-${hash}`;
 }
 
 /** Root of all per-run clones, one subdirectory per workspace. */

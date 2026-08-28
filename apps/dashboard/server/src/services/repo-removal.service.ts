@@ -1,13 +1,16 @@
 /**
- * Disconnecting a repository: stop its running scan and drop the server-side
- * per-repo run state. Shared by the two ways a repo leaves — `DELETE
- * /api/repos/:id` and the GitHub unlink hook — so both make the same decision.
+ * Disconnecting a repository: stop its running scan, drop the server-side
+ * per-repo run state, and purge the repo's rows from the database. Shared by
+ * every way a repo leaves — `DELETE /api/repos/:id`, the GitHub unlink hook,
+ * and the webhook's repo-removal path — so all of them make the same decision.
  *
  * There is no working copy to delete: connected repos have no persistent
- * clone (runs use ephemeral work trees that dispose themselves), and every
- * durable artifact lives in Postgres, invisible once the link row is gone.
- * What remains on disk is the repo's session-transcript directory, keyed by
- * identity under the global dir — removed here.
+ * clone (runs use ephemeral work trees that dispose themselves). The durable
+ * artifacts live in Postgres keyed by the bare repo key with no workspace
+ * column, so they MUST be purged here — left behind, they would be inherited
+ * by the next workspace to connect the same `owner/repo`. What remains on
+ * disk is the repo's session-transcript directory, keyed by identity under
+ * the global dir — also removed here.
  */
 
 import fs from 'node:fs';
@@ -15,6 +18,19 @@ import path from 'node:path';
 import { createAppError } from '@truecourse/core/lib/errors';
 import { sessionsDir } from '@truecourse/core/lib/sessions-store';
 import { cancelSpecScan, isSpecScanRunning, ownsSpecScan } from './onboarding-scan.service.js';
+
+/**
+ * Deletes every per-repo database row. Installed at boot alongside the
+ * Postgres stores; absent in file mode (tests), where the registry entry IS
+ * the state and there is nothing keyed by repo identity to purge.
+ */
+export type RepoDataPurge = (repoKey: string) => Promise<void>;
+
+let purgeRepoData: RepoDataPurge | null = null;
+
+export function setRepoDataPurge(next: RepoDataPurge | null): void {
+  purgeRepoData = next;
+}
 
 export async function removeRepoRunState(repoKey: string): Promise<void> {
   // A running spec scan holds an ephemeral clone and is appending transcripts
@@ -37,4 +53,9 @@ export async function removeRepoRunState(repoKey: string): Promise<void> {
   if (path.isAbsolute(dir)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+
+  // The database rows. A purge failure throws: the caller keeps the repo
+  // connected (and the disconnect retryable) rather than deleting the link
+  // row over data the next workspace would inherit.
+  await purgeRepoData?.(repoKey);
 }

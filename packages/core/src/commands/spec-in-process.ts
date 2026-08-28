@@ -1092,6 +1092,17 @@ async function storeDecisions(
 }
 
 /**
+ * Replace the repo's current decisions document — file in OSS, Postgres in EE.
+ * The write half of {@link getDecisions}: a scan that ran against an ephemeral
+ * clone persists the decisions it produced (auto scope verdicts, standing
+ * instructions, auto conflict resolutions) through this, so they outlive the
+ * clone the way the corpus does.
+ */
+export async function saveDecisions(repoKey: string, next: DecisionsFile): Promise<void> {
+  await storeDecisions(repoKey, next);
+}
+
+/**
  * The repo's current decisions (dashboard read) — file in OSS, Postgres in EE.
  * With `pr`, returns the effective decisions for that PR: the repo row merged
  * with the PR's overlay (the overlay wins — see {@link mergeDecisions}).

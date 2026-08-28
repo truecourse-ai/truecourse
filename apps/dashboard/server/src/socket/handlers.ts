@@ -309,6 +309,16 @@ export function createSocketSpecEstimateHandler(
       const io = getIO();
       const room = `repo:${repoId}`;
 
+      // The scan can be cancelled (repo disconnected) between claiming its
+      // slot and reaching this estimate — and addEventListener on an ALREADY
+      // aborted signal never fires. Answer "don't proceed" without ever
+      // opening the modal, instead of arming listeners nothing will clear.
+      if (signal?.aborted) {
+        io.to(room).emit('analysis:llm-resolved', { repoId, proceed: false });
+        resolve(false);
+        return;
+      }
+
       io.to(room).emit('analysis:llm-estimate', { repoId, estimate });
 
       // Backstop: abort (not proceed) if unanswered for 10 minutes.

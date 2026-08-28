@@ -101,6 +101,12 @@ export function createGithubConnection(
     // Push-triggered baseline refresh arrives with the PR gate; until then a
     // repo re-scans when someone asks it to, not when its default branch moves.
     onBaseline: () => {},
+    // GitHub taking a repo away (app uninstall, repo removed from the
+    // installation) disconnects it exactly like an explicit unlink does.
+    onRepoRemoved: async (link: RepoLinkRecord) => {
+      await removeRepoRunState(link.repoFullName);
+      log.info(`[github] ${link.repoFullName} disconnected by GitHub`);
+    },
   });
 
   const connect = createConnectRouter({

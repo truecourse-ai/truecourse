@@ -87,6 +87,23 @@ export function createApp(opts: CreateAppOptions): express.Express {
   // answers 503 with the env vars to set, rather than a 404 that reads as a bug.
   if (opts.github) {
     app.use('/api/github', opts.github.webhook);
+    // GET /setup is a browser TOP-LEVEL NAVIGATION from GitHub after an App
+    // install. Behind the gate, a missing/expired session would render raw
+    // 401 JSON as the whole page and the installation would never bind to a
+    // workspace (invisible to /status, 403 on connect — a dead end). Bounce
+    // through login instead, returning here with a live session; with one,
+    // fall through to the gate and the connect router's real handler.
+    if (opts.authVerifier) {
+      const verify = opts.authVerifier;
+      app.get('/api/github/setup', async (req, res, next) => {
+        const session = await verify(req.headers.cookie).catch(() => null);
+        if (session) {
+          next();
+          return;
+        }
+        res.redirect(`/api/auth/login?next=${encodeURIComponent(req.originalUrl)}`);
+      });
+    }
   } else {
     app.use('/api/github', (_req, res) => {
       res.status(503).json({ error: GITHUB_NOT_CONFIGURED });

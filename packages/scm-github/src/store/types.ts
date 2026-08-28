@@ -100,6 +100,8 @@ export interface GateStore {
   unlinkRepo(repoFullName: string): Promise<void>;
   getRepo(repoFullName: string): Promise<RepoLinkRecord | null>;
   listReposForWorkspace(workspaceOrgId: string): Promise<RepoLinkRecord[]>;
+  /** Every repo linked through this installation (webhook uninstall cleanup). */
+  listReposForInstallation(installationId: number): Promise<RepoLinkRecord[]>;
 
   // --- baseline ---
   saveBaseline(rec: BaselineRecord): Promise<void>;

@@ -224,6 +224,17 @@ export class PostgresGateStore implements GateStore {
     return rows.map(toRepo);
   }
 
+  async listReposForInstallation(
+    installationId: number,
+  ): Promise<RepoLinkRecord[]> {
+    const rows = await this.db
+      .select()
+      .from(ghRepos)
+      .where(eq(ghRepos.installationId, installationId))
+      .orderBy(ghRepos.repoFullName);
+    return rows.map(toRepo);
+  }
+
   // --- baseline ---
 
   async saveBaseline(rec: BaselineRecord): Promise<void> {

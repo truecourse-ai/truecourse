@@ -9,7 +9,7 @@
 import { Router, type Request, type Response } from 'express';
 import { log } from '@truecourse/core/lib/logger';
 import { verifyWebhookSignature } from './signature.js';
-import type { GateStore } from './store/types.js';
+import type { GateStore, RepoLinkRecord } from './store/types.js';
 
 export interface BaselineTrigger {
   repoFullName: string;
@@ -25,6 +25,17 @@ export interface WebhookDeps {
   store: GateStore;
   /** Kick a baseline run for a connected repo (fire-and-forget). */
   onBaseline: (trigger: BaselineTrigger) => void;
+  /**
+   * Per-repo cleanup when GitHub takes a linked repo away — the App is
+   * uninstalled, or the repo is removed from the installation. The webhook is
+   * the only notice we get, so this must run the same cleanup the connect
+   * router's unlink hook runs (cancel the running scan, drop the repo's server
+   * state); it runs BEFORE the link row is deleted, mirroring that hook's
+   * ordering. A throw fails the delivery (500), and GitHub redelivers —
+   * already-cleaned repos are no longer linked, so the retry only re-attempts
+   * what actually failed.
+   */
+  onRepoRemoved?: (link: RepoLinkRecord) => Promise<void>;
   /** Handle a pull_request event (offer scan in Phase 2, gate in Phase 4). */
   onPullRequest?: (payload: PullRequestPayload) => void;
   /** Handle an issue_comment event (the scan checkbox); fire-and-forget. */
@@ -34,6 +45,12 @@ export interface WebhookDeps {
 interface InstallationPayload {
   action: string;
   installation: { id: number; account: { login: string; type: string } };
+}
+
+interface InstallationRepositoriesPayload {
+  action: string;
+  installation: { id: number };
+  repositories_removed?: { full_name: string }[];
 }
 
 interface PushPayload {
@@ -128,6 +145,12 @@ async function dispatch(
     case 'installation':
       await handleInstallation(deps, payload as InstallationPayload);
       break;
+    case 'installation_repositories':
+      await handleInstallationRepositories(
+        deps,
+        payload as InstallationRepositoriesPayload,
+      );
+      break;
     case 'push':
       await handlePush(deps, payload as PushPayload);
       break;
@@ -149,6 +172,15 @@ async function handleInstallation(
 ): Promise<void> {
   const { action, installation } = payload;
   if (action === 'deleted') {
+    // Uninstalling the App disconnects every repo it linked. Run the same
+    // per-repo cleanup an explicit unlink runs (cancel the running scan, drop
+    // the repo's server state) BEFORE the rows go — the cascade below deletes
+    // the link rows, and cleanup must not run on repos nobody owns anymore.
+    for (const link of await deps.store.listReposForInstallation(installation.id)) {
+      await deps.onRepoRemoved?.(link);
+      await deps.store.unlinkRepo(link.repoFullName);
+      log.info(`[github-app] ${link.repoFullName} disconnected (app uninstalled)`);
+    }
     await deps.store.removeInstallation(installation.id);
     log.info(`[github-app] installation ${installation.id} removed`);
     return;
@@ -168,6 +200,28 @@ async function handleInstallation(
   log.info(
     `[github-app] installation ${installation.id} (${installation.account.login}) saved`,
   );
+}
+
+/**
+ * Repos granted to / revoked from an existing installation. A revoked repo we
+ * hold a link for is disconnected exactly like an explicit unlink — the grant
+ * is gone, so the connection cannot outlive it. Additions need nothing: repos
+ * become connected through the connect flow, not by being installable.
+ */
+async function handleInstallationRepositories(
+  deps: WebhookDeps,
+  payload: InstallationRepositoriesPayload,
+): Promise<void> {
+  if (payload.action !== 'removed') return;
+  for (const repo of payload.repositories_removed ?? []) {
+    const link = await deps.store.getRepo(repo.full_name);
+    if (!link || link.installationId !== payload.installation.id) continue;
+    await deps.onRepoRemoved?.(link);
+    await deps.store.unlinkRepo(link.repoFullName);
+    log.info(
+      `[github-app] ${link.repoFullName} disconnected (removed from installation ${payload.installation.id})`,
+    );
+  }
 }
 
 async function handlePush(

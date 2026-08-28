@@ -249,7 +249,12 @@ export function createAuthRouter(
   router.get('/callback', async (req, res) => {
     const code = typeof req.query.code === 'string' ? req.query.code : '';
     const next = safeNext(req.query.state);
-    const destination = next ? `${cfg.appUrl}${next}` : cfg.appUrl;
+    // An /api destination (e.g. the GitHub setup redirect resuming after
+    // login) lives on THIS server, so redirect relative to it; in production
+    // the app origin is the same origin and this changes nothing, but in
+    // cross-origin dev an appUrl-prefixed /api path would land on the SPA
+    // origin, which has no API. Everything else is an SPA route on appUrl.
+    const destination = next ? (next.startsWith('/api/') ? next : `${cfg.appUrl}${next}`) : cfg.appUrl;
     if (!code) {
       res.redirect(`${cfg.appUrl}/?auth_error=missing_code`);
       return;

@@ -43,6 +43,7 @@ import { saveSpec, specsMaterializeInPlace } from '@truecourse/core/lib/spec-sto
 import {
   curateInProcess,
   getDecisions,
+  saveDecisions,
   CURATE_STEPS,
   type CurateInProcessOptions,
   type SpecCurateInProcessResult,
@@ -195,6 +196,12 @@ export async function runStoredSpecScan(
     if (!specsMaterializeInPlace()) {
       const commitSha = await resolveCommitSha(tree.dir);
       await saveSpec({ repoKey, commitSha }, 'corpus', result.curate.corpus);
+      // Same for the decisions the run produced: the scan folds auto scope
+      // verdicts, standing instructions and auto-applied conflict resolutions
+      // into the document it started from, then writes it into the clone —
+      // which is about to be disposed. Without this, every re-scan re-pays the
+      // scope orchestrator and auto-resolved conflicts reopen.
+      await saveDecisions(repoKey, result.curate.decisions);
     }
     return result;
   } finally {

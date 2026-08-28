@@ -35,8 +35,10 @@ import {
   GhReposRegistryStore,
   PgKvCacheStore,
   PgAnalyzeLock,
+  purgeRepoData,
 } from '@truecourse/data-store';
 import { repoDirName } from './services/run-clone.service.js';
+import { setRepoDataPurge } from './services/repo-removal.service.js';
 
 /** Swap every core/llm storage seam for its Postgres impl. */
 export function installDbStores({ db, lockPool }: DbHandle): void {
@@ -70,6 +72,11 @@ export function installDbStores({ db, lockPool }: DbHandle): void {
       ? path.join(repoDirOrKey, '.truecourse', 'sessions')
       : path.join(getGlobalDir(), 'sessions', repoDirName(repoDirOrKey)),
   );
+
+  // Disconnecting a repo purges its per-repo rows (they key on the bare repo
+  // key with no workspace column — left behind, the next workspace to connect
+  // the same owner/repo would inherit them).
+  setRepoDataPurge((repoKey) => purgeRepoData(db, repoKey));
 
   log.info('[Server] Postgres stores installed');
 }

@@ -152,6 +152,14 @@ export class FileGateStore implements GateStore {
       .sort((a, b) => a.repoFullName.localeCompare(b.repoFullName));
   }
 
+  async listReposForInstallation(
+    installationId: number,
+  ): Promise<RepoLinkRecord[]> {
+    return Object.values(this.readRepos())
+      .filter((r) => r.installationId === installationId)
+      .sort((a, b) => a.repoFullName.localeCompare(b.repoFullName));
+  }
+
   // --- baselines (keyed by repoFullName) ---
 
   private readBaselines(): Record<string, BaselineRecord> {

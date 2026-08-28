@@ -53,6 +53,8 @@ import {
 import type { LatestSnapshot } from '@truecourse/core/types/snapshot';
 import { log, popLogger, pushLogger } from '@truecourse/core/lib/logger';
 import { ensureLlmTransport } from '../services/llm-transport.service.js';
+import { acquireWorkTree } from '../services/work-tree.service.js';
+import type { RunClone } from '../services/run-clone.service.js';
 
 const router: Router = Router();
 
@@ -68,6 +70,19 @@ router.post('/:id/analyses', async (req: Request, res: Response, next: NextFunct
     const { mode, skipGit } = parsed.data;
 
     const repo = await resolveProjectForRequest(id);
+
+    // A connected repo's `path` is its `owner/repo` identity, not a checkout —
+    // the analysis below runs against an ephemeral clone of the default
+    // branch. A diff compares the WORKING TREE against the baseline, and a
+    // fresh clone has no working-tree changes to diff, so diff mode needs a
+    // real local checkout.
+    const isRepoIdentity = !path.isAbsolute(repo.path);
+    if (mode === 'diff' && isRepoIdentity) {
+      throw createAppError(
+        'Diff analysis needs a local working copy; connected repositories analyze their default branch in full.',
+        400,
+      );
+    }
 
     // Diff requires a baseline. Fail fast with 400 before the 202 accept
     // so the client doesn't wait on sockets that never come.
@@ -94,12 +109,19 @@ router.post('/:id/analyses', async (req: Request, res: Response, next: NextFunct
     const trackerSteps = buildAnalysisSteps(effectiveCategories, effectiveLlmRules);
     const tracker = createSocketTracker(id, trackerSteps);
 
-    pushLogger({
-      filePath: path.join(repo.path, '.truecourse/logs/analyze.log'),
-      tee: process.env.TRUECOURSE_DEV === '1',
-    });
-
+    // A repo identity has no checkout: clone it for this run (storage stays
+    // keyed by `repo.path`, the code is read from the clone via `codeDir`).
+    // The log rides the clone too — `repo.path` is not a directory here.
+    let workTree: RunClone | null = null;
+    let loggerPushed = false;
     try {
+      if (isRepoIdentity) workTree = await acquireWorkTree(repo.path);
+      pushLogger({
+        filePath: path.join(workTree?.dir ?? repo.path, '.truecourse/logs/analyze.log'),
+        tee: process.env.TRUECOURSE_DEV === '1',
+      });
+      loggerPushed = true;
+
       if (mode === 'full') {
         await runFullAnalyze(id, repo, {
           skipGit,
@@ -107,6 +129,7 @@ router.post('/:id/analyses', async (req: Request, res: Response, next: NextFunct
           effectiveLlmRules,
           tracker,
           signal: abortController.signal,
+          codeDir: workTree?.dir,
         });
       } else {
         await runDiffAnalyze(id, repo, {
@@ -130,7 +153,8 @@ router.post('/:id/analyses', async (req: Request, res: Response, next: NextFunct
       }
     } finally {
       unregisterAnalysis(id);
-      popLogger();
+      if (loggerPushed) popLogger();
+      workTree?.dispose();
     }
   } catch (error) {
     next(error);
@@ -290,6 +314,8 @@ interface StartRunOptions {
   effectiveLlmRules: boolean;
   tracker: StepTracker;
   signal: AbortSignal;
+  /** The ephemeral clone to read code from, when `repo.path` is an identity. */
+  codeDir?: string;
 }
 
 // Mirror of CLI `resolveStashDecision` for the dashboard. Returns 'stash' /
@@ -321,7 +347,10 @@ async function resolveStashDecisionForRoute(
 }
 
 async function runFullAnalyze(id: string, repo: RegistryEntry, opts: StartRunOptions): Promise<void> {
-  const stashDecision = await resolveStashDecisionForRoute(id, repo.path);
+  // A fresh per-run clone is always clean — no stash decision to prompt for.
+  const stashDecision = opts.codeDir
+    ? 'stash'
+    : await resolveStashDecisionForRoute(id, repo.path);
   if (stashDecision === 'cancel') {
     emitAnalysisCanceled(id);
     return;
@@ -330,13 +359,14 @@ async function runFullAnalyze(id: string, repo: RegistryEntry, opts: StartRunOpt
   const provider: LLMProvider | undefined = opts.effectiveLlmRules ? createLLMProvider() : undefined;
   if (provider) {
     provider.setRepoId(id);
-    provider.setRepoPath(repo.path);
+    provider.setRepoPath(opts.codeDir ?? repo.path);
     provider.setAbortSignal(opts.signal);
   }
 
   const outcome = await analyzeInProcess(repo, {
+    codeDir: opts.codeDir,
     skipGit: opts.skipGit,
-    skipStash: stashDecision === 'no-stash',
+    skipStash: opts.codeDir ? true : stashDecision === 'no-stash',
     enabledCategoriesOverride: opts.effectiveCategories,
     enableLlmRulesOverride: opts.effectiveLlmRules,
     tracker: opts.tracker,
