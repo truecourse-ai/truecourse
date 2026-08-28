@@ -25,11 +25,14 @@ function toEntry(r: GhRepoRow): RegistryEntry {
   // `path` is the opaque repo identity every per-repo store keys by (repoKey).
   // `defaultBranch` comes from gh_repos so the repo route never has to shell out
   // to git on a non-path identity (there's no local checkout in hosted mode).
+  // `remoteUrl` marks the entry as a connected GitHub repo to the client
+  // (the preview shell keys "real" repos off its presence).
   return {
     slug: slugify(r.repoFullName, []),
     name: r.repoFullName,
     path: r.repoFullName,
     defaultBranch: r.defaultBranch,
+    remoteUrl: `https://github.com/${r.repoFullName}`,
   };
 }
 

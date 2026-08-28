@@ -303,6 +303,9 @@ importers:
       '@truecourse/core':
         specifier: workspace:*
         version: link:../../../packages/core
+      '@truecourse/data-store':
+        specifier: workspace:*
+        version: link:../../../packages/data-store
       '@truecourse/db':
         specifier: workspace:*
         version: link:../../../packages/db
@@ -444,6 +447,9 @@ importers:
       '@truecourse/core':
         specifier: workspace:*
         version: link:../../../packages/core
+      '@truecourse/data-store':
+        specifier: workspace:*
+        version: link:../../../packages/data-store
       '@truecourse/db':
         specifier: workspace:*
         version: link:../../../packages/db
@@ -811,6 +817,34 @@ importers:
       tsx:
         specifier: ^4.19.0
         version: 4.21.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  packages/data-store:
+    dependencies:
+      '@truecourse/core':
+        specifier: workspace:*
+        version: link:../core
+      '@truecourse/db':
+        specifier: workspace:*
+        version: link:../db
+      '@truecourse/guard-runner':
+        specifier: workspace:*
+        version: link:../guard-runner
+      '@truecourse/llm':
+        specifier: workspace:*
+        version: link:../llm
+      '@truecourse/shared':
+        specifier: workspace:*
+        version: link:../shared
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@electric-sql/pglite@0.2.17)(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(pg@8.21.0)
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.15
       typescript:
         specifier: ^5.7.0
         version: 5.9.3

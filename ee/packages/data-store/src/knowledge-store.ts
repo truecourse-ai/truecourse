@@ -13,7 +13,7 @@
 
 import { and, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
 import { knowledgeDocuments, type Db } from '@truecourse/db';
-import { ContentStore, contentScope } from './content-store.js';
+import { ContentStore, contentScope } from '@truecourse/data-store';
 
 export interface KnowledgeDocRow {
   workspaceOrgId: string;

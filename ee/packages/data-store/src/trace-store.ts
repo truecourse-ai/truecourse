@@ -24,8 +24,7 @@ import type {
   TraceSummary,
 } from '@truecourse/shared';
 import { log } from '@truecourse/core/lib/logger';
-import { sha256 } from './pack.js';
-import { ContentStore, contentScope } from './content-store.js';
+import { sha256, ContentStore, contentScope } from '@truecourse/data-store';
 
 type TraceRow = typeof llmTraces.$inferSelect;
 

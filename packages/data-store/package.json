@@ -1,5 +1,5 @@
 {
-  "name": "@truecourse/ee-data-store",
+  "name": "@truecourse/data-store",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -18,9 +18,7 @@
   },
   "dependencies": {
     "@truecourse/core": "workspace:*",
-    "@truecourse/data-store": "workspace:*",
     "@truecourse/db": "workspace:*",
-    "@truecourse/ee-storage": "workspace:*",
     "@truecourse/guard-runner": "workspace:*",
     "@truecourse/llm": "workspace:*",
     "@truecourse/shared": "workspace:*",
