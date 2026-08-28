@@ -13,8 +13,8 @@
  */
 
 import type {
+  AuthVerifier,
   Capability,
-  EeAuthVerifier,
   EePlugin,
   EeServerRegistry,
 } from '@truecourse/shared';
@@ -36,7 +36,7 @@ class Registry implements EeServerRegistry {
   // holds: OSS advertises it, EE doesn't. In community mode `loadEnterprise()`
   // early-returns, so this seed is what `getCapabilities()` reports.
   capabilities: Capability[] = [...COMMUNITY_CAPABILITIES];
-  authVerifier: EeAuthVerifier | null = null;
+  authVerifier: AuthVerifier | null = null;
   loaded = false;
 
   registerRouter(
@@ -51,7 +51,7 @@ class Registry implements EeServerRegistry {
     });
   }
 
-  setAuthVerifier(verify: EeAuthVerifier): void {
+  setAuthVerifier(verify: AuthVerifier): void {
     this.authVerifier = verify;
   }
 }
@@ -122,7 +122,7 @@ export function getProtectedRouters(): RegisteredRouter[] {
 }
 
 /** The auth verifier, or null when there's no active enterprise session layer. */
-export function getAuthVerifier(): EeAuthVerifier | null {
+export function getAuthVerifier(): AuthVerifier | null {
   return registry.authVerifier;
 }
 

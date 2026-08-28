@@ -1,5 +1,5 @@
 /**
- * WorkOS AuthKit auth: the session verifier the OSS gate calls, plus the
+ * WorkOS AuthKit auth: the session verifier the auth gate calls, plus the
  * public auth routes (login / callback / logout / me).
  *
  * Session model: AuthKit seals the session into an encrypted cookie
@@ -10,7 +10,7 @@
 import { Router } from 'express';
 import { WorkOS } from '@workos-inc/node';
 import type { User } from '@workos-inc/node';
-import type { AuthResult, AuthUser, EeAuthVerifier } from '@truecourse/shared';
+import type { AuthResult, AuthUser, AuthVerifier } from '@truecourse/shared';
 import type { WorkosConfig } from './config.js';
 import { parseCookies, serializeCookie } from './cookies.js';
 
@@ -69,7 +69,7 @@ function toAuthUser(u: User, organizationId?: string | null): AuthUser {
 }
 
 /**
- * Builds the verifier the OSS auth gate calls on every request.
+ * Builds the verifier the auth gate calls on every request.
  *
  * Validates the sealed session; if the access token has expired it
  * transparently refreshes it (via the refresh token) and returns the
@@ -81,7 +81,7 @@ function toAuthUser(u: User, organizationId?: string | null): AuthUser {
 export function createSessionVerifier(
   workos: WorkOS,
   cfg: WorkosConfig,
-): EeAuthVerifier {
+): AuthVerifier {
   const secure = isSecure(cfg.appUrl);
   // Keyed by the (expired) sealed cookie so a burst of navigation
   // requests dedupes to a single refresh.
@@ -101,7 +101,7 @@ export function createSessionVerifier(
     };
   }
 
-  const verify: EeAuthVerifier = async (cookieHeader) => {
+  const verify: AuthVerifier = async (cookieHeader) => {
     const sealed = parseCookies(cookieHeader)[SESSION_COOKIE];
     if (!sealed) return null;
     try {
@@ -134,26 +134,53 @@ export function createSessionVerifier(
   };
 }
 
-/** Public auth router mounted at /api/ee/auth (before the gate). */
-export function createAuthRouter(workos: WorkOS, cfg: WorkosConfig): Router {
+/**
+ * A post-login destination is only honored when it is a path on our own app:
+ * it must start with a single `/`. `//evil.test` (protocol-relative) and any
+ * absolute URL are rejected, so `?next=` can't be turned into an open redirect.
+ */
+function safeNext(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  if (!value.startsWith('/') || value.startsWith('//')) return null;
+  return value;
+}
+
+/**
+ * Public auth router mounted at /api/auth (before the gate).
+ *
+ * Takes the ONE session verifier the gate also uses — it must not build its
+ * own. WorkOS rotates refresh tokens, so two verifiers means two single-flight
+ * maps, and a `/me` refresh racing a gate refresh invalidates one of them.
+ */
+export function createAuthRouter(
+  workos: WorkOS,
+  cfg: WorkosConfig,
+  verify: AuthVerifier,
+): Router {
   const router = Router();
-  const verify = createSessionVerifier(workos, cfg);
   const secure = isSecure(cfg.appUrl);
 
-  // Kick off login — redirect to the WorkOS AuthKit hosted UI.
-  router.get('/login', (_req, res) => {
+  // Kick off login — redirect to the WorkOS AuthKit hosted UI. `?next=/path`
+  // rides the OAuth `state` param so the callback can land the user where they
+  // were headed before the redirect to login.
+  router.get('/login', (req, res) => {
+    const next = safeNext(req.query.next);
     const url = workos.userManagement.getAuthorizationUrl({
       provider: 'authkit',
       clientId: cfg.clientId,
       redirectUri: cfg.redirectUri,
+      ...(next ? { state: next } : {}),
     });
     res.redirect(url);
   });
 
   // OAuth callback — exchange the code, seal the session into a cookie,
-  // then return the browser to the dashboard.
+  // then return the browser to the dashboard (at `state`, when login carried
+  // a destination through).
   router.get('/callback', async (req, res) => {
     const code = typeof req.query.code === 'string' ? req.query.code : '';
+    const next = safeNext(req.query.state);
+    const destination = next ? `${cfg.appUrl}${next}` : cfg.appUrl;
     if (!code) {
       res.redirect(`${cfg.appUrl}/?auth_error=missing_code`);
       return;
@@ -175,7 +202,7 @@ export function createAuthRouter(workos: WorkOS, cfg: WorkosConfig): Router {
           secure,
         }),
       );
-      res.redirect(cfg.appUrl);
+      res.redirect(destination);
     } catch {
       res.redirect(`${cfg.appUrl}/?auth_error=callback_failed`);
     }

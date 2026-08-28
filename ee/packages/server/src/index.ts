@@ -24,8 +24,6 @@ import { setSpecInheritanceHook } from '@truecourse/core/lib/spec-inheritance-ho
 import { setKnowledgeLedgerReader, setKnowledgeDocBodyReader } from '@truecourse/core/lib/knowledge-ledger-reader';
 import { createSpecInheritanceHook, createKnowledgeLedgerReader, createKnowledgeDocBodyReader } from './knowledge/inheritance.js';
 import { guardGateJobKey } from './jobs/constants.js';
-import { loadWorkosConfig } from './config.js';
-import { createAuthRouter, createSessionVerifier } from './auth.js';
 import { createWorkspaceRouter } from './workspace.js';
 import { registerLlmProviders } from './llm/index.js';
 import { registerIntegrations } from './integrations/index.js';
@@ -59,18 +57,13 @@ const plugin: EePlugin = {
       });
     }
 
-    // Throws if WorkOS env is incomplete; the OSS loader catches it and
-    // falls back to community rather than running half-authenticated.
-    const cfg = loadWorkosConfig();
-    const workos = new WorkOS(cfg.apiKey, { clientId: cfg.clientId });
-
-    // Auth endpoints must be reachable without a session.
-    registry.registerRouter('/api/ee/auth', createAuthRouter(workos, cfg), {
-      public: true,
+    // WorkOS session auth (routes + verifier) now lives in the dashboard server
+    // itself. What remains here needs only a WorkOS client (workspace directory
+    // reads) and the app URL (GitHub App install callbacks).
+    const workos = new WorkOS(process.env.WORKOS_API_KEY ?? '', {
+      clientId: process.env.WORKOS_CLIENT_ID ?? '',
     });
-
-    // The gate uses this to protect every other route in enterprise mode.
-    registry.setAuthVerifier(createSessionVerifier(workos, cfg));
+    const appUrl = process.env.WORKOS_APP_URL || 'http://localhost:3000';
 
     // The enterprise edition stores ALL per-repo state in Postgres — there is
     // no file fallback. DATABASE_URL is therefore REQUIRED; the stores are
@@ -143,7 +136,7 @@ const plugin: EePlugin = {
     // lights up `github-gate`). The repo scan (connect + push) runs on the
     // background job queue via enqueueBaseline.
     await registerGithubApp(registry, {
-      appUrl: cfg.appUrl,
+      appUrl,
       db: eeDb,
       enqueueBaseline: jobs.enqueueBaseline,
       enqueueGuardGate: jobs.enqueueGuardGate,

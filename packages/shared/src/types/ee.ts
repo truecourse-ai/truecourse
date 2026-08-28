@@ -44,10 +44,10 @@ export interface AuthResult {
 
 /**
  * Resolves the current session from a request's Cookie header, or null
- * if unauthenticated. Supplied by the ee auth plugin; called by the OSS
- * auth gate. Framework-free so it's trivially unit-testable.
+ * if unauthenticated. Built by the dashboard server's auth module and
+ * called by its auth gate. Framework-free so it's trivially unit-testable.
  */
-export type EeAuthVerifier = (
+export type AuthVerifier = (
   cookieHeader: string | undefined,
 ) => Promise<AuthResult | null>
 
@@ -68,7 +68,7 @@ export interface EeServerRegistry {
     router: unknown,
     opts?: { public?: boolean },
   ): void
-  setAuthVerifier(verify: EeAuthVerifier): void
+  setAuthVerifier(verify: AuthVerifier): void
 }
 
 export interface EePlugin {
