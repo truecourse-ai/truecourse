@@ -30,6 +30,7 @@ import {
   type Recipe,
 } from '@truecourse/guard-runner';
 import {
+  collectProbeCandidates,
   ecosystemFingerprint,
   runGuardSetup,
   type GuardSetupOptions,
@@ -40,6 +41,8 @@ import { FINGERPRINT_INPUTS } from '@truecourse/guard-runner';
 import {
   buildSeedSession,
   existingSeedMachinery,
+  missingPrincipalSurfaces,
+  requiredPrincipalSurfaces,
   seedScriptTargetPath,
   seedSessionBriefing,
   seedSessionCacheKey,
@@ -130,6 +133,32 @@ const DATABASE: SeedDraftDatabase = {
   appImports: ["src/db.js: import { PrismaClient } from '@prisma/client'"],
 };
 
+/** DATABASE plus a login-principal table — the web surface's "this app
+ *  authenticates" evidence. */
+const PRINCIPAL_DATABASE: SeedDraftDatabase = {
+  ...DATABASE,
+  tables: [
+    ...DATABASE.tables,
+    {
+      name: 'User',
+      columns: [
+        { name: 'id', type: 'Int', isPrimaryKey: true },
+        { name: 'email', type: 'String', isUnique: true },
+        { name: 'password', type: 'String' },
+      ],
+    },
+  ],
+};
+
+/** A recipe `web` block serving the fixture app's web routes (same server). */
+const webBlock = (r: string) => ({
+  web: {
+    serve: ['node', path.join(r, 'server.mjs')],
+    healthPath: '/signin',
+    env: { SEED_STORE: path.join(r, 'store.json') },
+  },
+});
+
 function seedInput(r: string, over: Partial<GuardSetupSeedSessionInput> = {}): GuardSetupSeedSessionInput {
   return {
     repoRoot: r,
@@ -137,6 +166,7 @@ function seedInput(r: string, over: Partial<GuardSetupSeedSessionInput> = {}): G
     database: DATABASE,
     routes: [{ method: 'GET', path: '/orgs' }],
     securitySchemes: [],
+    probeCandidates: [],
     roles: [],
     specExcerpts: [],
     ecosystem: 'js',
@@ -524,6 +554,291 @@ describe('buildSeedSession — credential probes', () => {
 });
 
 // ---------------------------------------------------------------------------
+// The binding fitness check — a runnable surface that authenticates gets a
+// probed principal, or the step fails naming it
+// (2026-08-27 documenso: a seed declaring ZERO credentials matched its own
+// empty `provides` trivially, and 34% of the next generate blocked on auth)
+// ---------------------------------------------------------------------------
+
+describe('buildSeedSession — every authenticating surface must get a probed principal', () => {
+  const SCHEMES = [{ name: 'bearerAuth', summary: 'http bearer' }];
+
+  it('refuses a fixtures-only draft when the api declares security schemes, then passes once principals land', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    const stub = stubDriver(async (call) => {
+      const refusal = await callTool(call.input, 'run_seed_draft', {
+        script: goodScript(),
+        command: COMMAND,
+        provides: PROVIDES,
+      });
+      expect(refusal.isError).toBe(true);
+      expect(refusal.content).toMatch(/api surface requires an authenticated principal/);
+      expect(refusal.content).toMatch(/bearerAuth/);
+      await callTool(call.input, 'run_seed_draft', {
+        script: mintingScript(),
+        command: COMMAND,
+        provides: MINT_PROVIDES,
+        probes: PROBES,
+      });
+      return outcome({ script: mintingScript(), command: COMMAND, provides: MINT_PROVIDES, probes: PROBES, findings: [] });
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(
+      seedInput(r, { securitySchemes: SCHEMES }),
+    );
+    expect(result).toMatchObject({ status: 'ok', credentials: ['owner'] });
+  }, 60_000);
+
+  it('the fold refuses an outcome that dropped the principals, naming the surface, and restores the tree', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    const recipeBefore = fs.readFileSync(recipePath(r), 'utf-8');
+    const stub = stubDriver(async (call) => {
+      await callTool(call.input, 'run_seed_draft', {
+        script: mintingScript(),
+        command: COMMAND,
+        provides: MINT_PROVIDES,
+        probes: PROBES,
+      });
+      // The outcome keeps only the fixtures — exactly the declaration gap the
+      // check exists to refuse.
+      return outcome({ script: goodScript(), command: COMMAND, provides: PROVIDES, findings: [] });
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(
+      seedInput(r, { securitySchemes: SCHEMES }),
+    );
+
+    expect(result.status).toBe('failed');
+    expect(result.status === 'failed' && result.reason).toMatch(/api surface requires an authenticated principal/);
+    expect(fs.existsSync(path.join(r, TARGET))).toBe(false);
+    expect(fs.readFileSync(recipePath(r), 'utf-8')).toBe(recipeBefore);
+  }, 60_000);
+
+  it('a budget death after the principal draft salvages a seed WITH principals', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    const stub = stubDriver(async (call) => {
+      const verdict = await callTool(call.input, 'run_seed_draft', {
+        script: mintingScript(),
+        command: COMMAND,
+        provides: MINT_PROVIDES,
+        probes: PROBES,
+      });
+      expect(verdict.isError).toBeUndefined();
+      return malformedFailure('budget exhausted after the principal draft');
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(
+      seedInput(r, { securitySchemes: SCHEMES }),
+    );
+    expect(result).toMatchObject({ status: 'ok', salvaged: true, credentials: ['owner'] });
+  }, 60_000);
+
+  it('a session that never got past fixtures salvages nothing — the step fails', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    const stub = stubDriver(async (call) => {
+      const refusal = await callTool(call.input, 'run_seed_draft', {
+        script: goodScript(),
+        command: COMMAND,
+        provides: PROVIDES,
+      });
+      expect(refusal.isError).toBe(true);
+      return malformedFailure('budget exhausted with only a fixtures draft');
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(
+      seedInput(r, { securitySchemes: SCHEMES }),
+    );
+    expect(result.status).toBe('failed');
+    expect(fs.existsSync(path.join(r, TARGET))).toBe(false);
+  }, 60_000);
+
+  it('a genuinely unauthenticated API still passes with a fixtures-only seed', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    const stub = stubDriver(async (call) => {
+      const verdict = await callTool(call.input, 'run_seed_draft', {
+        script: goodScript(),
+        command: COMMAND,
+        provides: PROVIDES,
+      });
+      expect(verdict.isError).toBeUndefined();
+      return outcome({ script: goodScript(), command: COMMAND, provides: PROVIDES, findings: [] });
+    });
+
+    // No security schemes, no roles, no login table: nothing requires a principal.
+    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+    expect(result).toMatchObject({ status: 'ok', fixtures: ['org'] });
+  }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// Web principals — a prepared `recipe.web` on an app with logins means a
+// browser-session principal, proven by an authenticated page load
+// ---------------------------------------------------------------------------
+
+/** Mints a user (login fields → fixture) and a durable session (cookie →
+ *  credential). `emitted` lets a test drift the manifest from the store. */
+function webMintingScript(stored = 'session=tok-web-1', emitted = stored): string {
+  return [
+    '// Idempotent: the store is one JSON document, rewritten wholesale.',
+    "import fs from 'node:fs'",
+    'const user = { id: 7, email: "owner@acme.test", password: "pw-guard-1" }',
+    'const org = { id: 42, slug: "acme" }',
+    `fs.writeFileSync(process.env.SEED_STORE, JSON.stringify({ orgs: [org], users: [user], sessions: [${JSON.stringify(stored)}] }))`,
+    'fs.writeFileSync(process.env.GUARD_SEED_OUT, JSON.stringify({',
+    '  fixtures: { org: { id: org.id, slug: org.slug }, webUser: { email: user.email, password: user.password } },',
+    `  credentials: { webSession: { value: ${JSON.stringify(emitted)} } },`,
+    '}))',
+    '',
+  ].join('\n');
+}
+
+const WEB_PROVIDES = {
+  fixtures: { org: ['id', 'slug'], webUser: ['email', 'password'] },
+  credentials: { webSession: { header: 'Cookie', description: 'signed-in browser session' } },
+};
+const WEB_PROBES = { webSession: { surface: 'web', path: '/dashboard' } };
+
+describe('buildSeedSession — web principals prove themselves by an authenticated page load', () => {
+  it('proves the session cookie against the booted web surface, in-session and at the fold', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, webBlock(r));
+    const stub = stubDriver(async (call) => {
+      const verdict = await callTool(call.input, 'run_seed_draft', {
+        script: webMintingScript(),
+        command: COMMAND,
+        provides: WEB_PROVIDES,
+        probes: WEB_PROBES,
+      });
+      expect(verdict.isError).toBeUndefined();
+      expect(verdict.content).toMatch(/probes passed/);
+      expect(verdict.content).toMatch(/dashboard/);
+      return outcome({ script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes: WEB_PROBES, findings: [] });
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(
+      seedInput(r, { database: PRINCIPAL_DATABASE }),
+    );
+
+    expect(result).toMatchObject({
+      status: 'ok',
+      credentials: ['webSession'],
+      fixtures: ['org', 'webUser'],
+    });
+  }, 60_000);
+
+  it('refuses a session value the web surface redirects to the login page', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, webBlock(r));
+    const stub = stubDriver(async (call) => {
+      const refusal = await callTool(call.input, 'run_seed_draft', {
+        script: webMintingScript('session=tok-web-1', 'session=WRONG'),
+        command: COMMAND,
+        provides: WEB_PROVIDES,
+        probes: WEB_PROBES,
+      });
+      expect(refusal.isError).toBe(true);
+      expect(refusal.content).toMatch(/did not authenticate the web surface/);
+      await callTool(call.input, 'run_seed_draft', {
+        script: webMintingScript(),
+        command: COMMAND,
+        provides: WEB_PROVIDES,
+        probes: WEB_PROBES,
+      });
+      return outcome({ script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes: WEB_PROBES, findings: [] });
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(
+      seedInput(r, { database: PRINCIPAL_DATABASE }),
+    );
+    expect(result.status).toBe('ok');
+  }, 60_000);
+
+  it('refuses a probe page an anonymous load can reach', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, webBlock(r));
+    const stub = stubDriver(async (call) => {
+      const refusal = await callTool(call.input, 'run_seed_draft', {
+        script: webMintingScript(),
+        command: COMMAND,
+        provides: WEB_PROVIDES,
+        probes: { webSession: { surface: 'web', path: '/signin' } },
+      });
+      expect(refusal.isError).toBe(true);
+      expect(refusal.content).toMatch(/does not gate/);
+      expect(refusal.content).toMatch(/signed-in/);
+      await callTool(call.input, 'run_seed_draft', {
+        script: webMintingScript(),
+        command: COMMAND,
+        provides: WEB_PROVIDES,
+        probes: WEB_PROBES,
+      });
+      return outcome({ script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes: WEB_PROBES, findings: [] });
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(
+      seedInput(r, { database: PRINCIPAL_DATABASE }),
+    );
+    expect(result.status).toBe('ok');
+  }, 60_000);
+
+  it('refuses a `surface: "web"` probe when the recipe prepares no web surface', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r); // no `web` block
+    const stub = stubDriver(async (call) => {
+      const refusal = await callTool(call.input, 'run_seed_draft', {
+        script: webMintingScript(),
+        command: COMMAND,
+        provides: WEB_PROVIDES,
+        probes: WEB_PROBES,
+      });
+      expect(refusal.isError).toBe(true);
+      expect(refusal.content).toMatch(/no `web` block/);
+      await callTool(call.input, 'run_seed_draft', { script: goodScript(), command: COMMAND, provides: PROVIDES });
+      return outcome({ script: goodScript(), command: COMMAND, provides: PROVIDES, findings: [] });
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(seedInput(r));
+    expect(result.status).toBe('ok');
+  }, 60_000);
+
+  it('the fold refuses an outcome whose probes abandon the required web surface', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, webBlock(r));
+    const recipeBefore = fs.readFileSync(recipePath(r), 'utf-8');
+    const stub = stubDriver(async (call) => {
+      await callTool(call.input, 'run_seed_draft', {
+        script: webMintingScript(),
+        command: COMMAND,
+        provides: WEB_PROVIDES,
+        probes: WEB_PROBES,
+      });
+      // The outcome re-declares the probe as an api one — the web surface is
+      // left with no proven principal.
+      return outcome({
+        script: webMintingScript(),
+        command: COMMAND,
+        provides: WEB_PROVIDES,
+        probes: { webSession: { path: '/me' } },
+        findings: [],
+      });
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(
+      seedInput(r, { database: PRINCIPAL_DATABASE }),
+    );
+
+    expect(result.status).toBe('failed');
+    expect(result.status === 'failed' && result.reason).toMatch(/web surface requires an authenticated principal/);
+    expect(fs.readFileSync(recipePath(r), 'utf-8')).toBe(recipeBefore);
+  }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
 // Salvage — a draft the tool itself verified is an implicit outcome
 // (2026-08-23 bench: the session died budget-exhausted holding a draft the
 // engine had ALREADY run and verified, and the engine threw it away)
@@ -759,6 +1074,129 @@ describe('seedSessionBriefing — the repository’s own seed machinery', () => 
 });
 
 // ---------------------------------------------------------------------------
+// The binding-check signals + the briefing sections they drive
+// ---------------------------------------------------------------------------
+
+describe('requiredPrincipalSurfaces — which surfaces demand a probed principal', () => {
+  it('requires an api principal when the corpus declares security schemes, and none when nothing authenticates', () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    expect(requiredPrincipalSurfaces(seedInput(r))).toEqual([]);
+    const required = requiredPrincipalSurfaces(
+      seedInput(r, { securitySchemes: [{ name: 'bearerAuth', summary: 'http bearer' }] }),
+    );
+    expect(required).toHaveLength(1);
+    expect(required[0]).toMatchObject({ surface: 'api' });
+    expect(required[0].why).toMatch(/bearerAuth/);
+  });
+
+  it('requires a web principal when the recipe prepares a web surface and the schema holds login principals', () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, webBlock(r));
+    const required = requiredPrincipalSurfaces(seedInput(r, { database: PRINCIPAL_DATABASE }));
+    expect(required).toHaveLength(1);
+    expect(required[0]).toMatchObject({ surface: 'web' });
+    expect(required[0].why).toMatch(/User/);
+    // No web block ⇒ no web requirement, whatever the schema says.
+    writeRecipe(r);
+    expect(requiredPrincipalSurfaces(seedInput(r, { database: PRINCIPAL_DATABASE }))).toEqual([]);
+    // A web block over a schema with no login table (and no schemes/roles)
+    // requires nothing — a public site stays seedable with fixtures alone.
+    writeRecipe(r, {}, webBlock(r));
+    expect(requiredPrincipalSurfaces(seedInput(r))).toEqual([]);
+  });
+
+  it('missingPrincipalSurfaces is satisfied only by a credential probed on the required surface', () => {
+    const required = [{ surface: 'web' as const, why: 'the schema holds login principals (User)' }];
+    const provides = {
+      fixtures: { org: ['id'] },
+      credentials: { webSession: { header: 'Cookie' } },
+    };
+    // An api probe does not satisfy the web surface…
+    const missing = missingPrincipalSurfaces(provides, { webSession: { path: '/me' } }, required);
+    expect(missing).toHaveLength(1);
+    expect(missing[0].reason).toMatch(/web surface requires an authenticated principal/);
+    // …a web probe does.
+    expect(
+      missingPrincipalSurfaces(provides, { webSession: { surface: 'web', path: '/dashboard' } }, required),
+    ).toEqual([]);
+  });
+});
+
+describe('seedSessionBriefing — runnable surfaces and probe candidates', () => {
+  const worldFor = (r: string, over: Partial<GuardSetupSeedSessionInput> = {}) =>
+    ({
+      input: seedInput(r, over),
+      server: { name: 'default', serve: ['node', 'x'], cwd: 'sandbox', healthPath: '/health', readyTimeoutMs: 1, env: {} },
+      targetPath: TARGET,
+      scratchDir: path.join(r, 'scratch'),
+      knownSchemes: new Set(),
+      secrets: new Map(),
+    }) as never;
+
+  it('briefs the web principal mandate when the recipe prepares a web surface', () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, webBlock(r));
+    const briefing = seedSessionBriefing(worldFor(r, { database: PRINCIPAL_DATABASE }));
+    expect(briefing).toMatch(/Runnable surfaces/);
+    expect(briefing).toMatch(/SIGN IN to the web UI/);
+    expect(briefing).toContain('{{fixture:webUser.password}}');
+    expect(briefing).toContain('"surface": "web"');
+    expect(briefing).toContain('header: "Cookie"');
+  });
+
+  it('lists the spec-derived candidate probe endpoints as a lookup, not a search', () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    const briefing = seedSessionBriefing(
+      worldFor(r, {
+        securitySchemes: [{ name: 'apiKey', summary: 'apiKey in header Authorization' }],
+        probeCandidates: [{ method: 'GET', path: '/api/v1/me', schemes: ['apiKey'] }],
+      }),
+    );
+    expect(briefing).toMatch(/Candidate probe endpoints/);
+    expect(briefing).toContain('- GET /api/v1/me (requires: apiKey)');
+    expect(briefing).toMatch(/CONFIRM one/);
+  });
+
+  it('states the fixtures-only allowance when nothing authenticates', () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    const briefing = seedSessionBriefing(worldFor(r));
+    expect(briefing).toMatch(/fixtures-only seed passes/);
+    expect(briefing).not.toMatch(/Candidate probe endpoints/);
+  });
+});
+
+describe('collectProbeCandidates — probe endpoints are a lookup, not a search', () => {
+  it('keeps only operations whose security requires a scheme, cheapest first, base path applied', () => {
+    const spec = JSON.stringify({
+      openapi: '3.0.0',
+      info: { title: 't', version: '1' },
+      servers: [{ url: 'https://api.acme.test/api/v1' }],
+      components: { securitySchemes: { apiKey: { type: 'apiKey', in: 'header', name: 'Authorization' } } },
+      security: [{ apiKey: [] }],
+      paths: {
+        '/public': { get: { security: [] } }, // explicitly public
+        '/optional': { get: { security: [{ apiKey: [] }, {}] } }, // public alternative gates nothing
+        '/me': { get: {} }, // inherits the doc-level requirement
+        '/documents/{id}': { get: {} }, // templated → after the parameter-free GET
+        '/documents': { post: {} }, // write → after the GETs
+      },
+    });
+    const out = collectProbeCandidates([{ doc: 'api.json', content: spec }]);
+    expect(out.map((c) => `${c.method} ${c.path}`)).toEqual([
+      'GET /api/v1/me',
+      'GET /api/v1/documents/{id}',
+      'POST /api/v1/documents',
+    ]);
+    expect(out[0].schemes).toEqual(['apiKey']);
+    // A non-OpenAPI doc contributes nothing.
+    expect(collectProbeCandidates([{ doc: 'notes.md', content: '# notes' }])).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // The engine half: `--refresh` asks before it replaces
 // ---------------------------------------------------------------------------
 
@@ -843,6 +1281,43 @@ describe('runGuardSetup — the seed step honors confirmSeedReplace', () => {
     });
     // The step's cache key is the fingerprint the engine computed for it.
     expect(seed.inputs[0].fingerprint).toHaveLength(64);
+  }, 120_000);
+
+  it('hands the corpus-derived security schemes and probe candidates to the seam', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    fs.writeFileSync(
+      path.join(r, 'docs/api.json'),
+      JSON.stringify({
+        openapi: '3.0.0',
+        info: { title: 't', version: '1' },
+        components: { securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } } },
+        paths: { '/me': { get: { security: [{ bearerAuth: [] }] } } },
+      }),
+    );
+    fs.writeFileSync(
+      path.join(r, '.truecourse', 'specs', 'corpus.json'),
+      JSON.stringify({
+        version: 3,
+        generatedAt: '2026-01-01T00:00:00Z',
+        docs: [
+          { ref: DOC, kind: 'prd', lastTouched: '', areaTags: [] },
+          { ref: 'docs/api.json', kind: 'api', lastTouched: '', areaTags: [] },
+        ],
+        areas: [],
+        relations: [],
+        skippedDocs: [],
+      }),
+    );
+    const seed = recordingSeam();
+
+    await runGuardSetup(opts(r, { seedSession: seed.seam }));
+
+    expect(seed.inputs).toHaveLength(1);
+    expect(seed.inputs[0].securitySchemes.map((s) => s.name)).toEqual(['bearerAuth']);
+    expect(seed.inputs[0].probeCandidates).toEqual([
+      { method: 'GET', path: '/me', schemes: ['bearerAuth'] },
+    ]);
   }, 120_000);
 });
 

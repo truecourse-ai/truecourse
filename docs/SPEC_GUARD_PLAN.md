@@ -7220,7 +7220,8 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     web, so the row reads `{ id: 'web', runnable: false, recipeKey: 'web' }` and
     web work settles as awaiting-driver instead of burning sessions that can
     only fail. The flip — and with it the status fallout (`web` leaving
-    `awaitingDriverIds`, precedence 22 → 21) — waits on the worker's web arm.
+    `awaitingDriverIds`, precedence 22 → 21) — waits on the worker's web arm:
+    delivered by [135], which flipped the row and inverted the two pins below.
     Tests: `tests/shared/guard-drivers.test.ts` (new — web stays UNRUNNABLE
     though its runner shipped, every runnable driver names a recipe block, a
     driver still awaiting its runner stays unprepared and labelled) and two
@@ -7239,7 +7240,8 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
 
 133. **Flow synthesis has no per-area chunking, so the biggest area refuses
     outright — 371 claims in one briefing (documenso, 2026-08-26).** STATUS:
-    BUILT (2026-08-26). With the web surface live (item 132) every area's claim inventory
+    BUILT (2026-08-26). With the web surface live under item 132's FIRST CUT (the
+    flipped row later rolled back, then landed for good by [135]) every area's claim inventory
     roughly doubled, and `core/auth` tipped over: TWO consecutive runs refused
     with "flow synthesis refused: N claim(s) left unaccounted" (359, then 287 —
     the count moves, the wall does not), costing the area its 23 api-era flows
@@ -7338,3 +7340,184 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     `blocked`), so the case stays a second rather than a birth-validation crawl.
     Suite: 12,515 passed, 6 failed (all pre-existing). Related: [125] (the world
     invariant that made conc 4 the habit — matching touches no world).
+
+135. **The third authoring arm — generate authors web.** STATUS: BUILT
+    (2026-08-26). Item 132 ended with the registry row deliberately unflipped:
+    RUNNABLE means authorable AND executable, and the flow worker had an api arm
+    and a cli arm and nothing else — the first cut's flip bought 121 doomed
+    sessions on documenso, every web task handed CLI tooling. This item is the
+    arm, built exactly as AGENTIC_PIPELINE_PLAN §10.6 step 3 reserved it: the
+    §8.4 flow worker UNCHANGED — same loop, same outcomes, same budget, same
+    tools — plus `GENERATE_WEB_SYSTEM_PROMPT`, whose one genuinely new section is
+    the locator policy (role + accessible name primary, five alternates, no
+    CSS/XPath/test ids, strict single-match with `pick: first` the one authored
+    exception, unlocatable → `blockedOn`), taught in the same `<role> "<name>"`
+    vocabulary the interface-author's sessions and the match stage's realization
+    lines already speak, with the one worked translation example
+    (`click: button "Add Repository"` →
+    `{ driver: web, click: { role: button, name: "Add Repository" } }`).
+    Building the arm surfaced three blockers beyond the prompt, each alone able
+    to reproduce the doomed-session class:
+    - **The draft could not parse.** `RawGeneratedScenarioSchema` was a
+      cli|api union, so a submitted web step failed with `(root): Invalid
+      input` — the mechanical cause of the 121 sessions. The new
+      `RawGeneratedWebScenarioSchema` admits the six web verbs PLUS the authored
+      cli `run` step and the api `request` step — a web scenario runs in ONE
+      sandbox world shared by three vocabularies (the reference corpus's mixed
+      scenarios are the proof), a cli step seeding what the browser sees and a
+      `request` verifying what the UI wrote; `git`/`write`/`patch` stay
+      reference-corpus vocabulary and `boot`/`signal`/`logs` stay out (the
+      sandbox owns the served surface's lifecycle). A refinement demands at
+      least one `driver: web` step, and drafts now parse BY SURFACE
+      (`rawScenarioSchemaFor`, `parseRawScenarioYaml(text, surface)`), with
+      `flattenZodError` descending union failures to the furthest branch — the
+      worker reads `steps.0.click.role: Invalid enum value…`, not
+      `(root): Invalid input`.
+    - **The composition check crashed on a web step.**
+      `scenarioCompositionDefect` branched on `steps.every(isApiStep)` and fed
+      everything else to the cli rule's `run[0]` read — a TypeError on a mixed
+      draft. It PARTITIONS now: api rules over the api steps, the cli rule over
+      only the `run` steps (also fixing the latent `git`/`write` crash), web
+      steps carrying no composition rule of their own yet. The
+      example-fidelity carriers likewise learned web (`fill` value, upload
+      `text`).
+    - **The web surface's own build never ran under generate.** Every worker
+      execution passes `skipBuild`, so `recipe.web.build` compiled nowhere and
+      every web scenario would author against an unbuilt client. Generate's
+      `startBuild` now runs it — with the surface's env, exactly as `guard run`
+      does — whenever any author task is web.
+    Two supporting mechanics: `jsonSchemaHint` grew an optional `definitions`
+    map (`$refStrategy: 'root'`) because the web scenario schema inlines its
+    locator union — the 80-role enum, ~30 recurrences — at ~119K characters,
+    and named it renders at ~18K, keeping the whole web prompt near 31K (a
+    `< 40K` size guard pins the regression); and the flow worker's two ternaries
+    became surface-keyed lookups (`flowWorkerSystemPrompt`,
+    `flowWorkerPromptFingerprint`), per the no-hardcoded-specializations rule.
+    The cli and api system prompts were not touched by a byte — their pinned
+    fingerprints (`GENERATE_*` and `FLOW_WORKER_*`) are now asserted as
+    LITERALS so a prompt edit that would silently re-author a committed corpus
+    fails a test first. `AuthorUserContext.driver` widened to `GuardDriverId`
+    with a web preparation framing (serve argv, health path, the cli entrypoint
+    when the repo has one — a seeding `run` step appends to it) read through
+    `resolveWebSurface`, and the estimate prices the worker stage at the largest
+    prepared surface's prompt.
+    With the arm in place the row flipped for good:
+    `{ id: 'web', runnable: true, recipeKey: 'web' }`. The item-132 gates open
+    by data — web claims enter flow synthesis, flows match against the web
+    catalog, workers author — and the predicted status fallout landed: `web`
+    left `awaitingDriverIds`, the coverage-status precedence went 22 → 21, all
+    registry-derived, no per-surface edit anywhere. One accounting wrinkle,
+    stated rather than coded around: a scenario authored on the `web` surface
+    that carries cli and `request` steps reports `guardScenarioDrivers` of all
+    three, so per-driver tallies count it thrice while it occupies one flow's
+    web plan slot (§10.9's open question, unchanged). And a stale committed
+    `awaiting-driver: web` gap renders as no gap until the next generate
+    rewrites the manifest — acceptable, since that generate authors the flows.
+    Tests: `tests/guard-generator/generate-web.test.ts` (NEW, real browser,
+    asserts `isBrowserInstalled` rather than skipping, own file so the main
+    generate suite stays browser-free) proves a web-only scenario authors,
+    executes green and commits with step-derived `['web']` drivership, the
+    mixed one-world case (`relkit note` seeds what `/notes` then shows), and
+    the web build marker; the schema admission matrix and surface-keyed parse
+    error quality in `tests/guard-generator/schemas.test.ts`; the partition in
+    `generate-composition.test.ts`; the third prompt + the fingerprint literals
+    in `tests/core/guard-generate-worker-seam.test.ts` and
+    `tests/guard-generator/prompts.test.ts`; item 132's two pins inverted
+    (`guard-drivers.test.ts` flips web runnable; `generate.test.ts` shows a
+    prepared web surface reaching a worker session under the web briefing,
+    browser-free via a `blocked` outcome). Still true, by design: `recipe.web`
+    is hand-authored (`recipe-repair.ts` still refuses to derive one), and an
+    auth-gated web flow with no browser credential supply settles as an honest
+    `blockedOn` — expect a meaningful share of exactly that on documenso, which
+    is the correct outcome, not the arm failing. Related: [104] (the authored
+    tasks this finally consumes), [132] (the gates), [133] (the inventory
+    doubling the flip re-enables), [102] (the PLACES block the web briefing
+    reuses un-rolled).
+
+136. **A journey-defect is DIAGNOSED, not guessed — it may carry `attempts` and
+    `lastEvidence` (documenso web run, 2026-08-26).** STATUS: BUILT. The first
+    run with the web authoring arm produced **117 errors, 83 of them the outcome
+    schema refusing work the sessions had actually done**: `kind
+    "journey-defect" must not carry \`attempts\`` / `` `lastEvidence` ``. Item
+    128 admitted both fields on `blocked` and deliberately scoped the allowance
+    blocked-only, on the assumption that a defect is STATED rather than probed —
+    there was even a test pinning the refusal. The web run disproved the
+    assumption: a worker reaches `journey-defect` by TRYING the interface and
+    watching it fail (here, the web serve command exiting before `/signin` came
+    up), so it volunteers the probe count and the last evidence for precisely
+    the reason a blocked one does. Refusing them threw away 83 real diagnoses
+    and turned them into malformed-session failures.
+    FIX: `FLOW_WORKER_OPTIONAL_FIELDS['journey-defect'] = ['lastEvidence',
+    'attempts']` (`packages/shared/src/guard/flows.ts`). `settled` and `retired`
+    stay closed — settled carries its accepted scenario, retired REQUIRES both
+    fields already — so the allowance is exactly "the kinds that probe".
+    The pinning test is inverted with the incident cited, and a new case keeps
+    `settled` refusing `attempts` so the rule is still enforced somewhere.
+    Related: [128] (the same allowance on blocked, and its amendment), [135]
+    (the web authoring arm whose first run surfaced this).
+
+
+137. **The seed drafts principals for the API only — a runnable web surface has
+    no way to log in (documenso, 2026-08-27).** STATUS: BUILT (2026-08-27). With
+    the web authoring arm live [135] and the web server booting, the first full
+    web run authored **3 web scenarios against 531 web blocks whose capability
+    is the bare word `credentials`**. The api half of the same run authored 39,
+    because it has the one principal the seed mints (`apiToken`). documenso's
+    web UI authenticates by BROWSER SESSION; nothing mints one.
+    Cause: `GuardSetupSeedSessionInput` carries `securitySchemes` and `roles` —
+    both OpenAPI concepts read off the api surface — and nothing else. The
+    drafter is api-centric by construction, so it cannot be asked for a session
+    principal, and `providesWarnings`'s "one principal per role" doctrine counts
+    only API roles. The seed even upserts a durable session row in the app's own
+    session-validator format (the 2026-08-26 draft's header says so) and then
+    declares no credential for it.
+    FIX (seed-session.ts): a prepared `recipe.web` on an app with evidence of
+    login (a principal-shaped table — email/username/password columns — or
+    schemes/roles) now REQUIRES a web principal (`requiredPrincipalSurfaces`).
+    The briefing's "Runnable surfaces" section states the recipe: the login
+    email+password ship as FIXTURE fields (web `fill` values already resolve
+    `{{fixture:…}}`, so scenarios sign in through the form — no new channel),
+    plus a DURABLE session whose full Cookie header value ships as a credential
+    probed with `{surface: "web", path}` — the web analogue of the api probe:
+    the engine boots `recipe.web` (running `web.build` first when declared) and
+    proves the authenticated page load succeeds while the anonymous one is
+    refused, where a web refusal is 401/403 OR a redirect to the login page.
+    Enforcement is item [138]'s binding check. Tests in
+    `tests/core/guard-setup-seed-session.test.ts`.
+    Related: [135] (the arm that made web authorable), [136] (the schema fix that
+    let these verdicts survive), [128], [138] (the binding fitness check).
+
+
+138. **The seed step's fitness check must BIND, probes must be a LOOKUP, and
+    principals come FIRST (documenso, 2026-08-27 — the same incident as
+    [137]).** STATUS: BUILT (2026-08-27). Three more causes behind the
+    zero-credential seed that blocked ~15M tokens of downstream sessions:
+    (a) `providesWarnings` said "no credentials declared while the API declares
+    security schemes" and "N roles but M credentials" — both ignorable, and the
+    step's verification only checked the manifest MATCHED `provides`, which an
+    empty declaration does trivially; (b) the probe requirement ("an endpoint
+    that requires the credential and fails cleanly without it") sent the session
+    SEARCHING the route surface, which consumed its whole budget; (c) the
+    session spent that budget on fixtures before principals, hit its ceiling,
+    and the salvage folded the half that does not matter.
+    FIXES:
+    - BINDING: `requiredPrincipalSurfaces` (api requires a principal when the
+      corpus declares security schemes; web per [137]) + `missingPrincipalSurfaces`.
+      `run_seed_draft` REFUSES a draft that leaves a required surface without a
+      credential probed on that surface — before spending the execution — and
+      the fold re-applies the check to the outcome, so the salvage path can only
+      ever keep a draft that carries the principals and a principal-less outcome
+      fails the step with the surface named. A genuinely unauthenticated API
+      (no schemes, no roles, no login table for web) still passes fixtures-only.
+    - LOOKUP: `collectProbeCandidates` (openapi-security.ts) derives the
+      endpoints whose OpenAPI security REQUIRES a scheme with no public
+      alternative — parameter-free GETs first, base path applied — and
+      `GuardSetupSeedSessionInput.probeCandidates` puts them in the briefing:
+      the session confirms one instead of discovering one.
+    - ORDER: principals-first is instructed (briefing work loop + system prompt)
+      AND structural — since no principal-less draft can verify, a budget death
+      after the first verified draft salvages a seed WITH principals; before it,
+      nothing salvages and the step fails loud. No second session was needed;
+      the cache key moves with the prompt fingerprint, invalidating pre-doctrine
+      cached outcomes.
+    Related: [137], [118] (the draft checkpoint this composes with), [128].

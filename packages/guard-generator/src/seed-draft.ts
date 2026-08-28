@@ -166,11 +166,7 @@ export function detectRoleColumns(database: SeedDraftDatabase): { name: string; 
   const out: { name: string; source: string }[] = []
   const seen = new Set<string>()
   for (const table of database.tables) {
-    const names = new Set(table.columns.map((c) => c.name.toLowerCase()))
-    const principal = ['email', 'username', 'password', 'password_hash', 'passwordhash'].some((c) =>
-      names.has(c),
-    )
-    if (!principal) continue
+    if (!isPrincipalShaped(table)) continue
     for (const column of table.columns) {
       if (!/^(roles?|type|kind)$/i.test(column.name)) continue
       const source = `${table.name}.${column.name}`
@@ -182,6 +178,25 @@ export function detectRoleColumns(database: SeedDraftDatabase): { name: string; 
     }
   }
   return out
+}
+
+/** Column names that mark a table as holding login principals. */
+const PRINCIPAL_COLUMNS = ['email', 'username', 'password', 'password_hash', 'passwordhash']
+
+/** Whether a table looks like it holds login principals. */
+function isPrincipalShaped(table: SeedDraftDatabase['tables'][number]): boolean {
+  const names = new Set(table.columns.map((c) => c.name.toLowerCase()))
+  return PRINCIPAL_COLUMNS.some((c) => names.has(c))
+}
+
+/**
+ * The tables that hold login principals — an email/username/password column is
+ * what an app's own login reads. This is the "this app authenticates" signal
+ * for surfaces that declare no security schemes: a repo with such a table and a
+ * served web UI has a login worth minting a session for.
+ */
+export function principalShapedTables(database: SeedDraftDatabase): string[] {
+  return database.tables.filter(isPrincipalShaped).map((t) => t.name)
 }
 
 /** The literal values an enum-ish column type (or its default) names, if any. */

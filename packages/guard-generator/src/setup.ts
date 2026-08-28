@@ -93,7 +93,12 @@ import {
   type SeedDraftDatabase,
 } from './seed-draft.js'
 import { hasGuardUniverse, corpusOpenApiDocs, readCorpusAreaTags } from './section-plan.js'
-import { recipeAuthCredentials, validateCredentialSatisfies } from './openapi-security.js'
+import {
+  collectProbeCandidates,
+  recipeAuthCredentials,
+  validateCredentialSatisfies,
+  type ProbeCandidate,
+} from './openapi-security.js'
 import type { InterfaceProvider } from './generate.js'
 import type { RecipeRunner } from './runners.js'
 
@@ -312,6 +317,13 @@ export interface GuardSetupSeedSessionInput {
   database: SeedDraftDatabase
   routes: { method: string; path: string }[]
   securitySchemes: { name: string; summary: string }[]
+  /**
+   * Spec-derived endpoints whose security REQUIRES a scheme — the briefing
+   * hands them to the session so a credential probe is CONFIRMED, never hunted
+   * (the hunt is what exhausted the documenso session's whole budget, which
+   * then shipped a seed declaring zero credentials).
+   */
+  probeCandidates: ProbeCandidate[]
   roles: { name: string; source: string }[]
   specExcerpts: { doc: string; text: string }[]
   /** The repo's ecosystem — decides the drafted script's language/extension. */
@@ -735,6 +747,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         database,
         routes: routesFromInterfaces(mapped.interfaces),
         schemes: collectSecuritySchemes(openApiDocs),
+        probeCandidates: collectProbeCandidates(openApiDocs),
         fingerprint: seedFpPre,
         onPhase: (running, done) => phases.enter({ running, done }),
       })
@@ -1122,6 +1135,7 @@ async function runSeedStep(args: {
   database: SeedDraftDatabase | null
   routes: readonly ApiRouteRef[]
   schemes: { name: string; summary: string }[]
+  probeCandidates: ProbeCandidate[]
   /** The step's PRE-RUN fingerprint — the seed session's cache key. */
   fingerprint: string
   onPhase: (running: string, done: string) => void
@@ -1194,6 +1208,7 @@ async function runSeedStep(args: {
     database,
     routes: routes.map((r) => ({ method: r.method, path: r.path })),
     securitySchemes: schemes,
+    probeCandidates: args.probeCandidates,
     roles: detectRoleColumns(database),
     specExcerpts: readSpecExcerpts(opts.repoRoot),
     ecosystem: detectEcosystems(opts.repoRoot)[0] ?? 'js',

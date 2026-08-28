@@ -55,6 +55,7 @@ import {
   SeedProvidesProposalSchema,
   buildSeedUserPrompt,
   connectionEnvVars,
+  principalShapedTables,
   suggestedScriptPath,
   toRecipeSeed,
   writeSeedArtifacts,
@@ -73,6 +74,7 @@ import {
   recipePath,
   resolveApiServers,
   resolveEntry,
+  resolveWebSurface,
   runBuild,
   runSeed,
   type Recipe,
@@ -116,6 +118,15 @@ export const SeedCredentialProbeSchema = z
     method: z.string().min(1).optional(),
     /** Request path (starts with `/`) of an endpoint that requires the credential. */
     path: z.string().min(1).regex(/^\//, 'a probe path starts with `/`'),
+    /**
+     * Which served surface the probe drives; `api` when omitted. An `api` probe
+     * expects the anonymous control request to be refused with 401/403; a `web`
+     * probe is an authenticated PAGE LOAD against the booted `recipe.web`
+     * surface — accepted with the credential (typically a durable session sent
+     * as the `Cookie` header), refused without it, where a web surface's
+     * refusal is 401/403 OR a redirect to its login page.
+     */
+    surface: z.enum(['api', 'web']).optional(),
   })
   .strict();
 export type SeedCredentialProbe = z.infer<typeof SeedCredentialProbeSchema>;
@@ -197,6 +208,82 @@ export function providesWarnings(
     );
   }
   return warnings;
+}
+
+// ---------------------------------------------------------------------------
+// The binding fitness check: every runnable surface gets a probed principal
+// ---------------------------------------------------------------------------
+
+/** One runnable surface the seed MUST mint a principal for, and the evidence. */
+export interface RequiredPrincipalSurface {
+  surface: 'api' | 'web';
+  /** Why the surface is judged to authenticate, in the words a refusal states. */
+  why: string;
+}
+
+/**
+ * The runnable surfaces this seed must declare a PROBED principal for — the
+ * binding form of `providesWarnings`' advisory. The advisory was ignorable, and
+ * on documenso (2026-08-27) it was: a seed declaring ZERO credentials matched
+ * its own empty `provides` trivially, the step reported success, and a third of
+ * the next generate's work then blocked on the literal word "credentials".
+ *
+ * Precise on purpose: a surface with no evidence of authentication requires
+ * nothing, so a genuinely open API still passes with a fixtures-only seed.
+ *  - `api` authenticates when the corpus declares security schemes.
+ *  - `web` (only when the recipe prepares a `web` surface) authenticates when
+ *    the schema holds login principals, or schemes/roles say the app does.
+ */
+export function requiredPrincipalSurfaces(
+  input: Pick<GuardSetupSeedSessionInput, 'recipe' | 'database' | 'securitySchemes' | 'roles'>,
+): RequiredPrincipalSurface[] {
+  const out: RequiredPrincipalSurface[] = [];
+  const schemeNames = input.securitySchemes.map((s) => s.name).join(', ');
+  if (input.recipe.api && input.securitySchemes.length > 0) {
+    out.push({
+      surface: 'api',
+      why: `the corpus declares ${input.securitySchemes.length} security scheme(s): ${schemeNames}`,
+    });
+  }
+  if (input.recipe.web) {
+    const loginTables = principalShapedTables(input.database);
+    const why =
+      loginTables.length > 0
+        ? `the schema holds login principals (${loginTables.join(', ')})`
+        : input.securitySchemes.length > 0
+          ? `the corpus declares security schemes (${schemeNames})`
+          : input.roles.length > 0
+            ? `role(s) were detected (${input.roles.map((r) => r.name).join(', ')})`
+            : null;
+    if (why !== null) out.push({ surface: 'web', why });
+  }
+  return out;
+}
+
+/** Whether a probe drives the given surface (`api` is the default). */
+const probesSurface = (probe: SeedCredentialProbe, surface: 'api' | 'web'): boolean =>
+  (probe.surface ?? 'api') === surface;
+
+/**
+ * The required surfaces a declaration leaves without a probed principal.
+ * `run_seed_draft` refuses on this BEFORE spending an execution — so no
+ * principal-less draft can ever verify, and the salvage path can only keep a
+ * draft that carries them — and the fold re-applies it to the outcome.
+ */
+export function missingPrincipalSurfaces(
+  provides: SeedProvidesProposal,
+  probes: Record<string, SeedCredentialProbe> | undefined,
+  required: readonly RequiredPrincipalSurface[],
+): { surface: 'api' | 'web'; reason: string }[] {
+  const names = Object.keys(provides.credentials ?? {});
+  return required
+    .filter((r) => !names.some((name) => probes?.[name] && probesSurface(probes[name], r.surface)))
+    .map((r) => ({
+      surface: r.surface,
+      reason:
+        `the ${r.surface} surface requires an authenticated principal (${r.why}), ` +
+        `but the seed declares no credential with a ${r.surface} probe`,
+    }));
 }
 
 // ---------------------------------------------------------------------------
@@ -338,6 +425,8 @@ export function seedSessionBriefing(world: SeedSessionWorld): string {
     '',
     `The services are LIVE right now (\`api.services.up\` already ran); your \`run_seed_draft\` calls execute against that world, and \`db_query\` reads its database.`,
     `The fold will write your script to \`${world.targetPath}\` — your \`command\` must run exactly that path from the repository root (during the session, \`run_seed_draft\` substitutes its scratch copy for it).`,
+    ...requiredSurfaceLines(input),
+    ...probeCandidateLines(input),
     '',
     '## The dependency catalog (scenarios/dependencies.json)',
     catalog.dependencies.length === 0
@@ -356,9 +445,54 @@ export function seedSessionBriefing(world: SeedSessionWorld): string {
     '',
     grounding,
     '',
-    'Work loop: draft EARLY, iterate from real errors. Read only what the briefing above does not already answer, then `check_provides` for the free shape check and `run_seed_draft` to PROVE the draft (idempotence included: run it twice — the second run against the rows the first left behind is the real test). For every credential you mint, the same call must declare `probes` — per credential, an endpoint that REQUIRES it; the engine sends the minted value verbatim and also checks the same request is refused without it. Then produce the outcome `{script, command, provides, probes, findings}`. `findings` is for code-vs-docs contradictions you established (two named sides, verbatim); usually empty.',
+    'Work loop: PRINCIPALS FIRST — your first `run_seed_draft` must already mint and probe every principal the "Runnable surfaces" section above requires, with only the rows they need; grow the fixtures in later drafts (a draft omitting a required principal is refused without running, and a budget death only salvages what has verified). Draft EARLY, iterate from real errors. Read only what the briefing above does not already answer, then `check_provides` for the free shape check and `run_seed_draft` to PROVE the draft (idempotence included: run it twice — the second run against the rows the first left behind is the real test). For every credential you mint, the same call must declare `probes` — per credential, an endpoint that REQUIRES it; the engine sends the minted value verbatim and also checks the same request is refused without it. Then produce the outcome `{script, command, provides, probes, findings}`. `findings` is for code-vs-docs contradictions you established (two named sides, verbatim); usually empty.',
   ];
   return lines.join('\n');
+}
+
+/**
+ * The briefing's "Runnable surfaces" section — the binding principal mandate,
+ * stated where the session plans its first draft. A web principal's PASSWORD
+ * reaches scenarios as a FIXTURE: web `fill` values resolve `{{fixture:…}}`
+ * (the runner's `tok` pass feeds the web driver), so scenarios sign in through
+ * the login form — the `Cookie` credential exists for the probe's authenticated
+ * page load (and any cookie-authed api call), never as a new scenario channel.
+ */
+function requiredSurfaceLines(input: GuardSetupSeedSessionInput): string[] {
+  const required = requiredPrincipalSurfaces(input);
+  const lines = ['', '## Runnable surfaces — the principals this seed must mint'];
+  if (required.length === 0) {
+    lines.push(
+      'No security schemes, login tables or roles were detected. If the app truly has no authentication, a fixtures-only seed passes; if you FIND authentication while reading, mint the principal anyway.',
+    );
+    return lines;
+  }
+  for (const r of required) {
+    if (r.surface === 'api') {
+      lines.push(
+        `- **api** — ${r.why}. Mint at least one credential and prove it with a live probe; a draft (or outcome) declaring none is refused.`,
+      );
+    } else {
+      lines.push(
+        `- **web** — ${r.why}, and the recipe prepares a web surface (\`${(input.recipe.web?.serve ?? []).join(' ')}\`). Mint a principal that can SIGN IN to the web UI:`,
+        `  1. create the user with a KNOWN password and publish the login fields as a FIXTURE (e.g. \`webUser\` with \`email\` + \`password\`) — web scenarios fill the login form with \`{{fixture:webUser.email}}\` / \`{{fixture:webUser.password}}\`;`,
+        `  2. mint a DURABLE browser session the app's own validator accepts (a session row/token that survives the seed process) and publish its full Cookie header value as a credential (\`header: "Cookie"\`);`,
+        `  3. probe it with \`{"surface": "web", "path": "/<page that requires a signed-in user>"}\` — the engine boots the web surface and proves the authenticated page load succeeds while the anonymous one is refused (401/403 or a redirect to the login page).`,
+      );
+    }
+  }
+  return lines;
+}
+
+/** The briefing's candidate-probe section: confirming a probe is a LOOKUP. */
+function probeCandidateLines(input: GuardSetupSeedSessionInput): string[] {
+  if (input.probeCandidates.length === 0) return [];
+  return [
+    '',
+    '## Candidate probe endpoints (derived from the spec)',
+    'These routes declare security that REQUIRES a scheme, so they are probe-shaped by construction. CONFIRM one for each api credential instead of hunting the route surface for one:',
+    ...input.probeCandidates.map((c) => `- ${c.method} ${c.path} (requires: ${c.schemes.join(' | ')})`),
+  ];
 }
 
 function buildSeedTools(world: SeedSessionWorld): SessionTool[] {
@@ -411,18 +545,24 @@ function uncoveredCredentials(
 }
 
 /**
- * Prove each minted credential against the LIVE server: the probe request with
- * the credential must not be refused (401/403), and the SAME request without it
- * must be — an endpoint that answers anonymously gates nothing and proves
- * nothing. Values are sent VERBATIM, exactly as the runner will inject them.
+ * Prove each minted credential against the LIVE surface: the probe request with
+ * the credential must not be refused, and the SAME request without it must be —
+ * an endpoint that answers anonymously gates nothing and proves nothing. Values
+ * are sent VERBATIM, exactly as the runner will inject them. What "refused"
+ * means depends on the surface: an api refuses with 401/403; a web surface also
+ * refuses by REDIRECTING the anonymous page load to its login page, so 3xx
+ * counts there (requests never follow redirects).
  */
 async function probeCredentials(opts: {
   baseUrl: string;
+  surface: 'api' | 'web';
   probes: Record<string, SeedCredentialProbe>;
   credentials: ReadonlyMap<string, ResolvedCredential>;
   signal?: AbortSignal;
 }): Promise<{ ok: true; lines: string[] } | { ok: false; reason: string }> {
   const lines: string[] = [];
+  const refused = (status: number): boolean =>
+    status === 401 || status === 403 || (opts.surface === 'web' && status >= 300 && status < 400);
   for (const [name, cred] of opts.credentials) {
     const probe = opts.probes[name];
     if (!probe) continue; // Coverage is the caller's refusal; here we prove what is declared.
@@ -454,18 +594,22 @@ async function probeCredentials(opts: {
     } catch (error) {
       return { ok: false, reason: `probe ${method} ${probe.path} for "${name}" failed: ${message(error)}` };
     }
-    if (authed === 401 || authed === 403) {
+    if (refused(authed)) {
       return {
         ok: false,
         reason:
-          `credential "${name}" was refused (HTTP ${authed}) at ${method} ${probe.path} — the minted value, sent verbatim in the ${cred.header} header, does not authenticate. Fix the value (or its shape: prefix, casing) in the script.`,
+          opts.surface === 'web'
+            ? `credential "${name}" did not authenticate the web surface: ${method} ${probe.path} answered HTTP ${authed} WITH the credential (a 3xx here is the login redirect). The minted value is sent verbatim as the ${cred.header} header — a web principal is the FULL Cookie header value of a durable session the app's own validator accepts.`
+            : `credential "${name}" was refused (HTTP ${authed}) at ${method} ${probe.path} — the minted value, sent verbatim in the ${cred.header} header, does not authenticate. Fix the value (or its shape: prefix, casing) in the script.`,
       };
     }
-    if (control !== 401 && control !== 403) {
+    if (!refused(control)) {
       return {
         ok: false,
         reason:
-          `probe ${method} ${probe.path} answers HTTP ${control} WITHOUT the credential — it does not gate on auth, so it proves nothing about "${name}". Pick an endpoint that requires it.`,
+          opts.surface === 'web'
+            ? `probe ${method} ${probe.path} answers HTTP ${control} WITHOUT the credential — it does not gate, so it proves nothing about "${name}". Pick a page that requires a signed-in user (its anonymous load is refused with 401/403 or a redirect to the login page).`
+            : `probe ${method} ${probe.path} answers HTTP ${control} WITHOUT the credential — it does not gate on auth, so it proves nothing about "${name}". Pick an endpoint that requires it.`,
       };
     }
     lines.push(`${name}: ${method} ${probe.path} → ${authed} with the credential, ${control} without`);
@@ -473,11 +617,48 @@ async function probeCredentials(opts: {
   return { ok: true, lines };
 }
 
+/** The boot parameters of one probed surface, or the reason it has none. */
+function surfaceBootParams(
+  world: SeedSessionWorld,
+  surface: 'api' | 'web',
+): { params: Omit<Parameters<typeof preflightApiServer>[0], 'onReady' | 'signal'> } | { reason: string } {
+  if (surface === 'api') {
+    return {
+      params: {
+        resolvedServe: resolveEntry(world.input.repoRoot, [...world.server.serve]),
+        displayServe: world.server.serve,
+        ...(world.server.cwd === 'repo' ? { cwd: world.input.repoRoot } : {}),
+        recipeEnv: world.server.env,
+        healthPath: world.server.healthPath,
+        readyTimeoutMs: world.server.readyTimeoutMs,
+      },
+    };
+  }
+  const web = resolveWebSurface(world.input.recipe);
+  if (!web) {
+    return {
+      reason:
+        'a probe declares `surface: "web"` but the recipe prepares no `web` block — nothing serves the page an authenticated load would prove',
+    };
+  }
+  return {
+    params: {
+      resolvedServe: resolveEntry(world.input.repoRoot, [...web.serve]),
+      displayServe: web.serve,
+      ...(web.cwd === 'repo' ? { cwd: world.input.repoRoot } : {}),
+      recipeEnv: web.env,
+      healthPath: web.healthPath,
+      readyTimeoutMs: web.readyTimeoutMs,
+    },
+  };
+}
+
 /**
- * Boot the recipe's default server once (the same preflight the runner uses)
- * and run the credential probes against it — shared verbatim by the in-session
- * tool and the fold's fresh-world proof, so a draft cannot pass one and fail
- * the other for a different reason.
+ * Boot each probed surface once (the same preflight the runner uses) and run
+ * its credential probes against it — the api server for `api` probes, the
+ * recipe's `web` surface for `web` ones. Shared verbatim by the in-session tool
+ * and the fold's fresh-world proof, so a draft cannot pass one and fail the
+ * other for a different reason.
  */
 async function bootAndProbe(
   world: SeedSessionWorld,
@@ -485,23 +666,42 @@ async function bootAndProbe(
   credentials: ReadonlyMap<string, ResolvedCredential>,
   signal?: AbortSignal,
 ): Promise<{ ok: true; lines: string[] } | { ok: false; reason: string }> {
-  let probed: Awaited<ReturnType<typeof probeCredentials>> | null = null;
-  const boot = await preflightApiServer({
-    resolvedServe: resolveEntry(world.input.repoRoot, [...world.server.serve]),
-    displayServe: world.server.serve,
-    ...(world.server.cwd === 'repo' ? { cwd: world.input.repoRoot } : {}),
-    recipeEnv: world.server.env,
-    healthPath: world.server.healthPath,
-    readyTimeoutMs: world.server.readyTimeoutMs,
-    ...(signal ? { signal } : {}),
-    onReady: async (baseUrl) => {
-      probed = await probeCredentials({ baseUrl, probes, credentials, ...(signal ? { signal } : {}) });
-    },
-  });
-  if (!boot.ok) {
-    return { ok: false, reason: `the server would not boot for the credential probes: ${boot.stderr || 'unknown'}` };
+  const bySurface: Record<'api' | 'web', Record<string, SeedCredentialProbe>> = { api: {}, web: {} };
+  for (const [name, probe] of Object.entries(probes)) bySurface[probe.surface ?? 'api'][name] = probe;
+  const lines: string[] = [];
+  for (const surface of ['api', 'web'] as const) {
+    const subset = bySurface[surface];
+    if (![...credentials.keys()].some((name) => subset[name] !== undefined)) continue;
+    const boot = surfaceBootParams(world, surface);
+    if ('reason' in boot) return { ok: false, reason: boot.reason };
+    let probed: Awaited<ReturnType<typeof probeCredentials>> | null = null;
+    const result = await preflightApiServer({
+      ...boot.params,
+      ...(signal ? { signal } : {}),
+      onReady: async (baseUrl) => {
+        probed = await probeCredentials({
+          baseUrl,
+          surface,
+          probes: subset,
+          credentials,
+          ...(signal ? { signal } : {}),
+        });
+      },
+    });
+    if (!result.ok) {
+      const noun = surface === 'web' ? 'the web surface' : 'the server';
+      return { ok: false, reason: `${noun} would not boot for the credential probes: ${result.stderr || 'unknown'}` };
+    }
+    // The cast undoes TS's null-narrowing: `probed` is assigned inside onReady,
+    // which control-flow analysis cannot see.
+    const verdict = (probed as Awaited<ReturnType<typeof probeCredentials>> | null) ?? {
+      ok: false as const,
+      reason: `${surface === 'web' ? 'the web surface' : 'the server'} booted but the probes never ran`,
+    };
+    if (!verdict.ok) return verdict;
+    lines.push(...verdict.lines);
   }
-  return probed ?? { ok: false, reason: 'the server booted but the probes never ran' };
+  return { ok: true, lines };
 }
 
 function runSeedDraftTool(world: SeedSessionWorld): SessionTool {
@@ -531,6 +731,26 @@ function runSeedDraftTool(world: SeedSessionWorld): SessionTool {
             `your provides declares credential(s) with no live probe: ${uncovered.join(', ')}. ` +
             `Add \`probes\` to this same call — per credential, an endpoint that REQUIRES it, e.g. ` +
             `{"${uncovered[0]}": {"method": "GET", "path": "/…"}}. The engine sends the minted value verbatim and expects the request to be accepted, and the same request WITHOUT the credential to be refused.`,
+          isError: true,
+        };
+      }
+      // The binding half of the fitness check, applied BEFORE the execution is
+      // spent: a draft that omits a required principal can never verify, so the
+      // salvage path can only ever keep one that carries them (the documenso
+      // incident inverted — the session spent its budget on fixtures, died at
+      // the ceiling, and the folded partial declared zero credentials).
+      const missing = missingPrincipalSurfaces(
+        args.provides,
+        args.probes,
+        requiredPrincipalSurfaces(world.input),
+      );
+      if (missing.length > 0) {
+        return {
+          content:
+            `refused before running — principals come FIRST:\n- ${missing.map((m) => m.reason).join('\n- ')}\n` +
+            `Mint the principal(s) in this same script and declare them under \`provides.credentials\`, each with a probe on its surface ` +
+            `(api: an endpoint that requires the credential; web: {"surface": "web", "path": "/<signed-in page>"} — proven by an authenticated page load). ` +
+            `A draft with principals and thin fixtures is salvageable; the inverse is not.`,
           isError: true,
         };
       }
@@ -800,6 +1020,27 @@ export function buildSeedSession(
         };
       }
     }
+    // The web surface is built too when a web principal will be probed: the
+    // probe's authenticated page load boots `web.serve`, and an unbuilt client
+    // is the cal.diy incident again, one surface over. Only when a web
+    // principal is actually required — a cli/api-only seed never pays for it.
+    const webSurface = resolveWebSurface(input.recipe);
+    if (webSurface?.build && requiredPrincipalSurfaces(input).some((s) => s.surface === 'web')) {
+      input.onPhase?.(`building the web surface (\`${webSurface.build}\`)`, 'web build');
+      const built = await runBuild(
+        input.repoRoot,
+        webSurface.build,
+        input.recipe.env,
+        DEFAULT_BUILD_TIMEOUT_MS,
+        opts.signal,
+      );
+      if (!built.ok) {
+        return {
+          status: 'failed',
+          reason: `the recipe \`web.build\` failed${built.timedOut ? ' (timed out)' : ''}: ${tail(built.output)}`,
+        };
+      }
+    }
 
     try {
       const outcome = await cachedSessionOutcome<SeedSessionOutcome>({
@@ -938,6 +1179,18 @@ async function foldSeedOutcome(
         `the outcome declares credential(s) with no live probe: ${unprobed.join(', ')} — every minted credential must name an endpoint that proves it (\`probes\`)`,
     };
   }
+  // The binding fitness check, re-applied to what actually lands: an outcome
+  // (or a salvaged draft) that leaves a runnable surface without a probed
+  // principal is a seed every authenticated test downstream will block on, so
+  // the step fails with the surface named rather than reporting success.
+  const missing = missingPrincipalSurfaces(
+    output.provides,
+    output.probes,
+    requiredPrincipalSurfaces(input),
+  );
+  if (missing.length > 0) {
+    return { reason: missing.map((m) => m.reason).join('; ') };
+  }
   const scriptAbs = path.resolve(input.repoRoot, targetPath);
   const scriptExisted = fs.existsSync(scriptAbs);
   if (scriptExisted && !(input.replaceExisting && input.existingScript?.scriptPath === targetPath)) {
@@ -1034,8 +1287,10 @@ Data and auth are ONE artifact on purpose: a login token cannot be minted withou
 - NO ANCHOR STALENESS: the ids/slugs/emails you declare in \`provides\` are what scenarios interpolate for the life of the corpus. Mint STABLE values (fixed emails, fixed slugs), never timestamps or randoms — a value that moves re-anchors every test that references it.
 - FAIL LOUDLY: any error — a failed connection, a rejected insert, a missing env var — prints a diagnostic and exits non-zero. Never exit 0 on a partial seed.
 - The manifest: the engine sets GUARD_SEED_OUT to a file path; write ONE JSON object there — {"credentials": {"<name>": {"value": "<minted secret>"}}, "fixtures": {"<name>": {"<field>": <any JSON value>}}} — matching \`provides\` EXACTLY. Values keep their native JSON type.
+- PRINCIPALS FIRST, FIXTURES SECOND: mint and probe every principal the briefing's "Runnable surfaces" section requires in your FIRST draft, with only the rows they need; grow fixtures afterwards. \`run_seed_draft\` refuses a draft that omits a required principal, so nothing without them can verify — a budget death before they exist salvages nothing, while one after keeps them.
 - Principals: one per role the app actually distinguishes; mint the secret the way the APP would (its own token issuance, or the same signing secret and algorithm it verifies with); the value must survive the seed process (stateless token or a session row — a secret held in memory authenticates nothing); the header value is injected VERBATIM ("Bearer <token>" ONLY if that is what the API's own verifier expects — read the verifier, do not assume the prefix).
-- CREDENTIALS PROVE THEMSELVES LIVE: every \`run_seed_draft\` (and the outcome) that mints credentials must declare \`probes\` — per credential, one endpoint that REQUIRES it. The engine boots the server, sends the minted value verbatim, and refuses the draft if the request is rejected OR if the same request succeeds without the credential (an ungated endpoint proves nothing). Pick the cheapest truly-gated read endpoint the route surface offers.
+- A WEB SURFACE AUTHENTICATES BY SESSION, NOT HEADER: when the briefing requires a web principal, create the user with a known password and publish the login fields as a FIXTURE (scenarios fill the login form from them), mint a DURABLE session the app's own validator accepts, publish its full Cookie header value as a credential, and probe it with \`{"surface": "web", "path": …}\` — an authenticated page load against the booted web surface, refused anonymously (401/403 or a login redirect).
+- CREDENTIALS PROVE THEMSELVES LIVE: every \`run_seed_draft\` (and the outcome) that mints credentials must declare \`probes\` — per credential, one endpoint that REQUIRES it. The engine boots the credential's surface, sends the minted value verbatim, and refuses the draft if the request is rejected OR if the same request succeeds without the credential (an ungated endpoint proves nothing). Probe endpoints are a LOOKUP, not a search: the briefing lists spec-derived candidates whose security requires a scheme — confirm one; do not spend turns hunting the route surface.
 
 # Your tools
 

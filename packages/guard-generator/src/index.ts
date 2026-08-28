@@ -78,6 +78,8 @@ export {
   securityFingerprintForSection,
   recipeAuthCredentials,
   validateCredentialSatisfies,
+  collectProbeCandidates,
+  type ProbeCandidate,
   type AuthCredential,
   type SatisfiesDiagnostics,
   type SpecDocText,
@@ -208,6 +210,7 @@ export {
 export {
   seedDraftGate,
   detectRoleColumns,
+  principalShapedTables,
   readExistingSeedScript,
   connectionEnvVars,
   suggestedScriptPath,

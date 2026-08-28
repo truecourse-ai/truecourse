@@ -13,6 +13,13 @@
  *                 (store `tokens` array, matched VERBATIM), else 401 — the
  *                 auth-gated route the credential probes prove against
  *   GET /boom   → 500
+ *
+ * It doubles as the WEB surface (a recipe `web` block may serve the same file):
+ *   GET /signin    → 200 html — the login page, always public
+ *   GET /dashboard → 200 html when the Cookie header matches a seeded session
+ *                    (store `sessions` array, matched VERBATIM), else a 302
+ *                    redirect to /signin — the signed-in page the web
+ *                    credential probes prove an authenticated load of
  */
 
 import http from 'node:http'
@@ -52,6 +59,18 @@ http
       return json(401, { error: 'unauthorized' })
     }
     if (url.pathname === '/boom') return json(500, { error: 'kaboom' })
+    if (url.pathname === '/signin') {
+      res.writeHead(200, { 'content-type': 'text/html' })
+      return res.end('<form>sign in</form>')
+    }
+    if (url.pathname === '/dashboard') {
+      if ((read().sessions ?? []).includes(req.headers.cookie ?? '')) {
+        res.writeHead(200, { 'content-type': 'text/html' })
+        return res.end('<h1>dashboard</h1>')
+      }
+      res.writeHead(302, { location: '/signin' })
+      return res.end()
+    }
     json(404, { error: 'not found' })
   })
   .listen(port)
