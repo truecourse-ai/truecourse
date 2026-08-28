@@ -17,6 +17,16 @@ import { parseCookies, serializeCookie } from './cookies.js';
 export const SESSION_COOKIE = 'tc_session';
 const SESSION_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
+/**
+ * How long a settled refresh stays memoized under the (by then dead) sealed
+ * cookie that triggered it. WorkOS rotates refresh tokens, so once a refresh
+ * resolves that cookie can never be refreshed again — a request carrying it
+ * that arrives just afterwards (a second tab, or one sent before the rotated
+ * Set-Cookie landed) can only be answered from the memo. Dropping the entry on
+ * settle 401s a validly signed-in user.
+ */
+const REFRESH_GRACE_MS = 30_000;
+
 function isSecure(appUrl: string): boolean {
   return appUrl.startsWith('https://');
 }
@@ -42,19 +52,42 @@ function isOperatorUser(u: User): boolean {
  * cold cache) with NO re-login required.
  */
 const operatorCache = new Map<string, { isOperator: boolean; at: number }>();
+/**
+ * The lookups currently on the wire, one entry per user. This runs on EVERY
+ * authenticated request, so a cold cache would otherwise fire one `getUser` per
+ * concurrent request for the same person; concurrent callers share this promise.
+ */
+const operatorInFlight = new Map<string, Promise<boolean>>();
+
+async function lookupIsOperator(
+  workos: WorkOS,
+  userId: string,
+  fallback: boolean,
+): Promise<boolean> {
+  try {
+    return isOperatorUser(await workos.userManagement.getUser(userId));
+  } catch {
+    // Falls back to the last known value (default: not an operator) and is
+    // cached like any other answer — see resolveIsOperator.
+    return fallback;
+  }
+}
 
 async function resolveIsOperator(workos: WorkOS, userId: string): Promise<boolean> {
-  const now = Date.now();
   const cached = operatorCache.get(userId);
-  if (cached && now - cached.at < OPERATOR_CACHE_TTL_MS) return cached.isOperator;
-  try {
-    const u = await workos.userManagement.getUser(userId);
-    const isOperator = isOperatorUser(u);
-    operatorCache.set(userId, { isOperator, at: now });
-    return isOperator;
-  } catch {
-    return cached?.isOperator ?? false;
-  }
+  if (cached && Date.now() - cached.at < OPERATOR_CACHE_TTL_MS) return cached.isOperator;
+  const inFlight = operatorInFlight.get(userId);
+  if (inFlight) return inFlight;
+  const pending = lookupIsOperator(workos, userId, cached?.isOperator ?? false)
+    // Failures are cached too: leaving the entry unstamped would re-attempt
+    // getUser on every single request for the length of a WorkOS outage.
+    .then((isOperator) => {
+      operatorCache.set(userId, { isOperator, at: Date.now() });
+      return isOperator;
+    })
+    .finally(() => operatorInFlight.delete(userId));
+  operatorInFlight.set(userId, pending);
+  return pending;
 }
 
 function toAuthUser(
@@ -101,10 +134,10 @@ async function resolveOrgName(
  *
  * Validates the sealed session; if the access token has expired it
  * transparently refreshes it (via the refresh token) and returns the
- * rotated cookie so the gate can set it. Concurrent requests carrying
- * the same expired cookie share ONE refresh (single-flight) — WorkOS
- * rotates refresh tokens, so parallel refreshes would race and all but
- * one would fail.
+ * rotated cookie so the gate can set it. Requests carrying the same
+ * expired cookie share ONE refresh (single-flight, memoized for
+ * REFRESH_GRACE_MS after it settles) — WorkOS rotates refresh tokens, so a
+ * second refresh of that cookie would race the first or simply be rejected.
  */
 export function createSessionVerifier(
   workos: WorkOS,
@@ -144,8 +177,16 @@ export function createSessionVerifier(
       // Access token expired/invalid → refresh (single-flight per cookie).
       let pending = refreshInFlight.get(sealed);
       if (!pending) {
-        pending = refresh(session).finally(() => refreshInFlight.delete(sealed));
+        pending = refresh(session);
         refreshInFlight.set(sealed, pending);
+        // Every outcome — a refreshed session, a refusal, a thrown request —
+        // is memoized for the grace window; handling both settlements keeps a
+        // failed refresh from surfacing as an unhandled rejection, and the
+        // timer must never hold the process open.
+        const evict = () => {
+          setTimeout(() => refreshInFlight.delete(sealed), REFRESH_GRACE_MS).unref();
+        };
+        void pending.then(evict, evict);
       }
       return await pending;
     } catch {
