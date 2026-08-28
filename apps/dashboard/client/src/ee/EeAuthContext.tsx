@@ -1,15 +1,11 @@
 /**
- * Enterprise auth state for the client (OSS side).
+ * The client's auth state: who is signed in, and how to sign in or out.
  *
- * In community mode this is inert (`disabled`). In enterprise it probes
- * the WorkOS-backed session via the platform auth endpoints and exposes
- * sign-in / sign-out. The endpoint paths are the stable platform auth
- * contract (served by ee-server); OSS references them by convention so
- * it doesn't need to import anything from `ee/`.
- *
- * <EnterpriseAuthGate> implements the "whole dashboard behind login"
- * model: in enterprise, an unauthenticated visitor is redirected to the
- * hosted WorkOS login. Community renders straight through.
+ * Auth is part of the product — the provider always probes the WorkOS-backed
+ * session at `/api/auth/me` and the gate puts the whole dashboard behind it.
+ * `disabled` survives only as the context's DEFAULT value, so a tree rendered
+ * WITHOUT a provider (fixture-only tests) reads as "no auth here" instead of
+ * hanging on a probe that never happens. The provider itself never sets it.
  */
 
 import {
@@ -24,11 +20,10 @@ import {
 } from 'react';
 import { Loader2 } from 'lucide-react';
 import type { AuthUser } from '@truecourse/shared';
-import { useCapabilityContext } from '@/contexts/CapabilityContext';
 import { getServerUrl } from '@/lib/server-url';
 
-// Platform auth contract (implemented by ee-server's public router).
-const AUTH_BASE = '/api/ee/auth';
+// The server's public auth router.
+const AUTH_BASE = '/api/auth';
 
 type AuthStatus = 'disabled' | 'loading' | 'authed' | 'anon';
 
@@ -47,17 +42,10 @@ const EeAuthContext = createContext<EeAuthValue>({
 });
 
 export function EeAuthProvider({ children }: { children: ReactNode }) {
-  const { edition, isLoading } = useCapabilityContext();
   const [status, setStatus] = useState<AuthStatus>('loading');
   const [user, setUser] = useState<AuthUser | null>(null);
 
   useEffect(() => {
-    if (isLoading) return;
-    if (edition !== 'enterprise') {
-      setStatus('disabled');
-      setUser(null);
-      return;
-    }
     let cancelled = false;
     setStatus('loading');
     fetch(`${getServerUrl()}${AUTH_BASE}/me`, { credentials: 'include' })
@@ -80,10 +68,15 @@ export function EeAuthProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [edition, isLoading]);
+  }, []);
 
+  // Ride the address the visitor asked for through login, so the callback
+  // returns them to it rather than to the dashboard root.
   const signIn = useCallback(() => {
-    window.location.href = `${getServerUrl()}${AUTH_BASE}/login`;
+    const next = encodeURIComponent(
+      `${window.location.pathname}${window.location.search}`,
+    );
+    window.location.href = `${getServerUrl()}${AUTH_BASE}/login?next=${next}`;
   }, []);
 
   const signOut = useCallback(async () => {
@@ -148,8 +141,9 @@ function CreateWorkspace() {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? `Request failed (${res.status})`);
       }
-      // Session is now scoped to the new org → full reload re-probes /me.
-      window.location.href = '/';
+      // Session is now scoped to the new org → a reload IN PLACE re-probes
+      // /me and drops the visitor on the page they were headed for.
+      window.location.reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setBusy(false);
@@ -187,10 +181,10 @@ function CreateWorkspace() {
 }
 
 /**
- * Whole-dashboard auth gate. Community / disabled renders through.
- * Enterprise: shows a spinner while probing, redirects to hosted login
- * when anonymous, and surfaces a retry screen if a callback error came
- * back (so we never redirect-loop).
+ * Whole-dashboard auth gate: a spinner while the session probe is up, a
+ * redirect to the hosted login when anonymous, and a retry screen when a
+ * callback error came back (so we never redirect-loop). A tree with no
+ * provider above it (`disabled`) renders straight through.
  */
 export function EnterpriseAuthGate({ children }: { children: ReactNode }) {
   const { status, user, signIn } = useEeAuth();
