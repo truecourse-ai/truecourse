@@ -1,5 +1,5 @@
-// PREVIEW: the repository list is PART REAL (URL-connected repos come from the
-// server); everything else is fake data.
+// PREVIEW: the repository list is PART REAL (repos connected through the GitHub
+// App come from the server); everything else is fake data.
 
 /**
  * The preview's session state: the parts of the mock a user can actually move.
@@ -11,7 +11,7 @@
  * The exceptions are the parts a signed-in user would catch lying. The ACTIVE
  * WORKSPACE wears the name of the organization the session is in (its initial
  * follows); the switcher's list, the plan and the repo counts are still
- * fixtures. And repositories connected by git URL are REAL: they are read from
+ * fixtures. And repositories connected through the GitHub App are REAL: they are read from
  * `GET /api/repos` on mount, listed ahead of the fixtures, and unlinking one
  * really disconnects it. With no session and no server behind the preview,
  * both reads yield nothing and the mock is exactly what it was.
@@ -74,7 +74,7 @@ interface PreviewStateValue {
   repos: Repo[];
   updateRepo: (id: string, patch: Partial<Repo>) => void;
   unlinkRepo: (id: string) => void;
-  /** Re-read the real registry. Called after a connect-by-URL succeeds. */
+  /** Re-read the real registry. Called once a repository is linked through the GitHub App. */
   refreshRealRepos: () => Promise<void>;
   connections: ProviderConnection[];
   /** Repositories the picker can offer: the seeded ones plus those of added connections. */

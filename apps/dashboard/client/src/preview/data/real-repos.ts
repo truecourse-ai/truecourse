@@ -1,5 +1,5 @@
-// PREVIEW: the repo list here is REAL (it talks to the dashboard server);
-// everything else in the preview is fake data.
+// PREVIEW: the repository list and the GitHub connect flow here are REAL (they
+// talk to the dashboard server); everything else in the preview is fake data.
 
 /**
  * The one seam where the preview touches the real server.
@@ -12,22 +12,49 @@
  * Only repos with a `remoteUrl` are shown. A developer's own path-registered
  * repos are their local dashboard's business, not the product preview's.
  *
- * Every call degrades to nothing: with no server behind it (a static preview, a
- * test) the list is simply empty rather than an error the mock has no place for.
+ * The GitHub App is how one gets there: the status read says which installations
+ * this workspace has and which repositories are already linked, an installation
+ * lists what it can see, and linking one CLONES IT INSIDE THE REQUEST — minutes,
+ * not milliseconds, which is why its caller has to say so.
+ *
+ * The registry reads degrade to nothing: with no server behind them (a static
+ * preview, a test) the list is simply empty rather than an error the mock has no
+ * place for. The GitHub calls do the opposite and reject, because the reason is
+ * the whole answer — an unconfigured server names the variables it wants.
  */
 
 import { deleteRepo, fetchApi, getRepos, type RepoResponse } from '@/lib/api';
+import type {
+  GithubConnectStatusResponse,
+  GithubInstallableRepo,
+  GithubInstallationReposResponse,
+} from '@truecourse/shared';
 import type { ProviderId, Repo } from './types';
 
-/**
- * DEAD ROUTE. Connect-by-URL is gone from the server: repositories arrive
- * through the GitHub App now, and this call 404s. It stays only to keep the
- * preview's URL form compiling until that form is rebuilt around the App.
- */
-export function connectRepo(url: string): Promise<RepoResponse> {
-  return fetchApi<RepoResponse>('/api/repos/connect', {
+/** The App's installations on this workspace, and the repositories already linked. */
+export function fetchGithubStatus(): Promise<GithubConnectStatusResponse> {
+  return fetchApi<GithubConnectStatusResponse>('/api/github/status');
+}
+
+/** Everything one installation can see, linked or not. */
+export async function fetchInstallationRepos(
+  installationId: number,
+): Promise<GithubInstallableRepo[]> {
+  const body = await fetchApi<GithubInstallationReposResponse>(
+    `/api/github/installations/${installationId}/repos`,
+  );
+  return body.repos;
+}
+
+/** Link one repository. Slow by design: the server clones it before answering. */
+export async function linkGithubRepo(link: {
+  repoFullName: string;
+  installationId: number;
+  defaultBranch: string;
+}): Promise<void> {
+  await fetchApi<{ ok: boolean }>('/api/github/repos/link', {
     method: 'POST',
-    body: JSON.stringify({ url }),
+    body: JSON.stringify(link),
   });
 }
 
@@ -80,7 +107,7 @@ export function toPreviewRepo(entry: RepoResponse): Repo {
   };
 }
 
-/** The URL-connected repos of the real registry. Empty when there is no server to ask. */
+/** The connected repos of the real registry. Empty when there is no server to ask. */
 export async function fetchRealRepos(): Promise<Repo[]> {
   try {
     const entries = await getRepos();
