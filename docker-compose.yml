@@ -9,9 +9,10 @@
 #   GITHUB_APP_ID=... GITHUB_APP_PRIVATE_KEY=... GITHUB_APP_WEBHOOK_SECRET=... GITHUB_APP_SLUG=... \
 #   docker compose up --build
 #
-# EE activates when WORKOS_* + TRUECOURSE_SECRET_KEY are present; with WORKOS_*
-# unset it runs the community (file-based) edition. In EE the GitHub App PR gate
-# is required — all four GITHUB_APP_* vars must be set or the server won't boot.
+# WORKOS_* and DATABASE_URL are required — the server boots authenticated and
+# on Postgres or not at all. For just a local database (the usual dev case):
+#
+#   POSTGRES_PASSWORD=truecourse docker compose up -d db
 
 services:
   db:
@@ -40,17 +41,18 @@ services:
       - "3001:3001"
     environment:
       PORT: "3001"
-      TRUECOURSE_EDITION: enterprise
       DATABASE_URL: postgres://${POSTGRES_USER:-truecourse}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-truecourse}
-      # Required for EE — generate a strong 32+ char value (see header).
+      # Generate a strong 32+ char value (see header).
       TRUECOURSE_SECRET_KEY: ${TRUECOURSE_SECRET_KEY:?set a 32+ char secret}
-      # SSO (WorkOS). Leave unset to run the community edition instead.
+      # Session auth (WorkOS) — required; the server refuses to boot without it.
       WORKOS_API_KEY: ${WORKOS_API_KEY:-}
       WORKOS_CLIENT_ID: ${WORKOS_CLIENT_ID:-}
       WORKOS_COOKIE_PASSWORD: ${WORKOS_COOKIE_PASSWORD:-}
       WORKOS_REDIRECT_URI: ${WORKOS_REDIRECT_URI:-}
       WORKOS_APP_URL: ${WORKOS_APP_URL:-}
-      # GitHub App PR gate — required for EE; the server refuses to boot without it.
+      # GitHub App PR gate. These `:?` guards are vestigial on this branch — the
+      # GitHub App moves into the base product in the next PR, which is when they
+      # get revisited. Left as-is so the hosted image keeps its current contract.
       GITHUB_APP_ID: ${GITHUB_APP_ID:?set the GitHub App id}
       GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:?set the GitHub App private key}
       GITHUB_APP_WEBHOOK_SECRET: ${GITHUB_APP_WEBHOOK_SECRET:?set the GitHub App webhook secret}

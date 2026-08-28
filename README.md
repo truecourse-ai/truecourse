@@ -1260,11 +1260,24 @@ cd truecourse
 pnpm install
 pnpm build              # Build all packages — required before the first `pnpm test` (tests resolve workspace packages from their dist/)
 dotnet build -c Release tools/csharp-roslyn-host   # One-time, needs the .NET 8 SDK — see note below
+POSTGRES_PASSWORD=truecourse docker compose up -d db   # Postgres on :5432
+cp .env.example .env    # Then fill in the REQUIRED section (see below)
 pnpm dev                # Start dashboard at http://localhost:3000 (server on :3001, Vite on :3000)
 pnpm test               # Run tests
 ```
 
-`pnpm dev` expects a `.truecourse/` folder at the repo root — created automatically on the first `truecourse analyze` against the repo (or simply `mkdir -p .truecourse`).
+The dashboard server is authenticated and Postgres-backed: it will not boot until these are set, in `.env` at the repo root or in `~/.truecourse/.env`.
+
+| Variable | Notes |
+| --- | --- |
+| `DATABASE_URL` | e.g. `postgres://truecourse:truecourse@localhost:5432/truecourse`. Migrations apply at boot. |
+| `WORKOS_API_KEY` | WorkOS dashboard → API Keys. |
+| `WORKOS_CLIENT_ID` | Same page. |
+| `WORKOS_COOKIE_PASSWORD` | 32+ characters. `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` |
+| `WORKOS_REDIRECT_URI` | `http://localhost:3001/api/auth/callback` — register it on the WorkOS app. |
+| `WORKOS_APP_URL` | `http://localhost:3000` in dev. |
+
+`pnpm dev` also expects a `.truecourse/` folder at the repo root — created automatically on the first `truecourse analyze` against the repo (or simply `mkdir -p .truecourse`).
 
 The full test suite requires the C# Roslyn host to be built (same requirement as [analyzing C#](#prerequisites)): the C# e2e test fails without it, and the Roslyn semantic-rule tests silently skip. CI builds it before running tests (`.github/workflows/test.yml`); do the same locally, once per checkout/worktree.
 
