@@ -3,9 +3,12 @@
  *
  * Top to bottom: the workspace switcher, then
  * Repositories, Notifications (with the unread badge) and Settings, then Admin
- * on its own, separated, because the signed-in user is an operator, then the
+ * on its own, separated, when the signed-in user is an operator, then the
  * user menu. Pull requests is NOT here: it lives inside a repository, and the
  * cross-repo feed it used to be is the home page's gate activity.
+ *
+ * The user menu is REAL: the identity is the session's (`usePreviewUser`) and
+ * Sign out really ends it.
  *
  * Collapsing leaves an icon-only rail. Session state only, nothing is stored.
  */
@@ -27,9 +30,10 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { USER } from '@/preview/data';
+import { useEeAuth } from '@/ee/EeAuthContext';
 import { useThemeToggle } from '@/hooks/useThemeToggle';
 import { usePreviewState } from './preview-state';
+import { usePreviewUser } from './use-preview-user';
 import { PREVIEW_BASE } from './base';
 
 export { PREVIEW_BASE };
@@ -169,6 +173,8 @@ function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
 function UserMenu({ collapsed }: { collapsed: boolean }) {
   const { isDark, toggle: toggleTheme } = useThemeToggle();
   const { workspace } = usePreviewState();
+  const user = usePreviewUser();
+  const { signOut } = useEeAuth();
   const [open, setOpen] = useState(false);
   const close = useCallback(() => setOpen(false), []);
   const ref = useClickOutside(open, close);
@@ -185,20 +191,20 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
         }`}
       >
         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-foreground">
-          {USER.initial}
+          {user.initial}
         </span>
         {!collapsed && (
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-[13px] text-foreground">{USER.name}</span>
-            <span className="block truncate text-[11px] text-muted-foreground">{USER.email}</span>
+            <span className="block truncate text-[13px] text-foreground">{user.name}</span>
+            <span className="block truncate text-[11px] text-muted-foreground">{user.email}</span>
           </span>
         )}
       </button>
       {open && (
         <div className="absolute bottom-full left-0 z-30 mb-1 w-56 overflow-hidden rounded-md border border-border bg-popover shadow-md">
           <div className="border-b border-border px-3 py-2">
-            <div className="text-[13px] text-foreground">{USER.name}</div>
-            <div className="truncate text-[11px] text-muted-foreground">{USER.email}</div>
+            <div className="text-[13px] text-foreground">{user.name}</div>
+            <div className="truncate text-[11px] text-muted-foreground">{user.email}</div>
             <div className="mt-1.5 flex items-center gap-1.5">
               <Badge variant="outline" className="h-4 px-1.5 text-[10px]">
                 {workspace.plan}
@@ -216,7 +222,10 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
           </button>
           <button
             type="button"
-            onClick={() => setOpen(false)}
+            onClick={() => {
+              setOpen(false);
+              void signOut();
+            }}
             className="flex w-full items-center gap-2 border-t border-border px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
           >
             <LogOut className="h-3.5 w-3.5" />
@@ -230,6 +239,7 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
 
 export function PreviewShell({ children }: { children: ReactNode }) {
   const { unreadCount } = usePreviewState();
+  const user = usePreviewUser();
   const [collapsed, setCollapsed] = useState(false);
   const { pathname } = useLocation();
 
@@ -281,7 +291,7 @@ export function PreviewShell({ children }: { children: ReactNode }) {
           ))}
         </nav>
 
-        {USER.isOperator && (
+        {user.isOperator && (
           <div className="space-y-0.5 border-t border-border px-2 py-2">
             {!collapsed && (
               <div className="px-2.5 pb-1 text-xs uppercase tracking-wider text-muted-foreground/70">
