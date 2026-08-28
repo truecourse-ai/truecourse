@@ -306,6 +306,9 @@ importers:
       '@truecourse/db':
         specifier: workspace:*
         version: link:../../../packages/db
+      '@truecourse/scm-github':
+        specifier: workspace:*
+        version: link:../../../packages/scm-github
       '@truecourse/shared':
         specifier: workspace:*
         version: link:../../../packages/shared

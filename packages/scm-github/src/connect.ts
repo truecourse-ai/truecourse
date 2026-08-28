@@ -3,8 +3,10 @@
  * dashboard's GitHub integration page: install URL, post-install linking, and
  * connecting repos. Everything is scoped to the authenticated user's workspace.
  *
- * What happens to a repo once it is connected is not this router's business —
- * it hands the fresh link to {@link ConnectDeps.onRepoLinked} and returns.
+ * What happens to a repo once it is connected — or once it is disconnected —
+ * is not this router's business: it hands the link to
+ * {@link ConnectDeps.onRepoLinked} / {@link ConnectDeps.onRepoUnlinked} and
+ * returns.
  */
 
 import { Router, type Request, type Response } from 'express';
@@ -69,6 +71,13 @@ export type OnRepoLinked = (
   octokit: OctokitClient,
 ) => Promise<void>;
 
+/**
+ * Cleanup for a repo the user just disconnected — dropping the project it was
+ * registered as, deleting the managed clone. Runs after the link is gone, with
+ * the record that was removed (the link itself is no longer readable).
+ */
+export type OnRepoUnlinked = (link: RepoLinkRecord) => Promise<void>;
+
 export interface ConnectDeps {
   store: GateStore;
   appSlug: string;
@@ -81,6 +90,12 @@ export interface ConnectDeps {
    * so the repo stays connected even when the follow-up work can't run.
    */
   onRepoLinked?: OnRepoLinked;
+  /**
+   * Post-unlink hook. Best-effort on the same terms as {@link onRepoLinked}:
+   * the link is already gone, so a failing cleanup must not report a failed
+   * disconnect the user cannot retry.
+   */
+  onRepoUnlinked?: OnRepoUnlinked;
 }
 
 export function createConnectRouter(deps: ConnectDeps): Router {
@@ -300,6 +315,15 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     const existing = await deps.store.getRepo(repoFullName);
     if (existing && existing.workspaceOrgId === orgId) {
       await deps.store.unlinkRepo(repoFullName);
+      if (deps.onRepoUnlinked) {
+        try {
+          await deps.onRepoUnlinked(existing);
+        } catch (err) {
+          log.warn(
+            `[github-app] post-unlink cleanup failed for ${repoFullName}: ${(err as Error).message}`,
+          );
+        }
+      }
     }
     res.json({ ok: true });
   });

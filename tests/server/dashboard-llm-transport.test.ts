@@ -108,7 +108,7 @@ describe('Dashboard server LLM transport install', () => {
 
     fixture = await setupTestFixture();
     execFileSync('git', ['init'], { cwd: fixture.repoPath, stdio: 'ignore' });
-    app = createApp({ serveStatic: false, authVerifier: null });
+    app = createApp({ serveStatic: false, authVerifier: null, github: null });
   });
 
   afterEach(async () => {

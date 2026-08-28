@@ -25,7 +25,7 @@ describe('guard generate route — open-conflict gate', () => {
   beforeEach(async () => {
     fixture = await setupTestFixture();
     root = fixture.repoPath;
-    app = createApp({ serveStatic: false, authVerifier: null });
+    app = createApp({ serveStatic: false, authVerifier: null, github: null });
 
     fs.mkdirSync(path.join(root, '.truecourse', 'specs'), { recursive: true });
     fs.mkdirSync(path.join(root, 'docs'), { recursive: true });

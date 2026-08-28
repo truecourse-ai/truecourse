@@ -52,7 +52,7 @@ function makeTmpRoot(): string {
 
 beforeEach(() => {
   mockCaps = ['local-filesystem'];
-  app = createApp({ serveStatic: false, authVerifier: null });
+  app = createApp({ serveStatic: false, authVerifier: null, github: null });
 });
 
 afterEach(() => {

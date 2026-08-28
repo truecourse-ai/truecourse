@@ -93,7 +93,7 @@ const url = (suffix: string) => `/api/repos/${fixture.project.slug}/guard/${suff
 
 beforeEach(async () => {
   fixture = await setupTestFixture();
-  app = createApp({ serveStatic: false, authVerifier: null });
+  app = createApp({ serveStatic: false, authVerifier: null, github: null });
   // The hosted store keys by the SAME canonical path the route resolves (the Pg
   // store matches keys by exact string, unlike the FS store's symlink-following).
   repoKey = (await resolveProjectForRequest(fixture.project.slug)).path;

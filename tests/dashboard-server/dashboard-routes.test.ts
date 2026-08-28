@@ -334,7 +334,7 @@ describe('dashboard routes (seeded store)', () => {
     fixture = await setupTestFixture();
     seed = await seedStore(fixture.repoPath);
     await setLastAnalyzed(fixture.project.slug, seed.violations[0].createdAt);
-    app = createApp({ serveStatic: false, authVerifier: null });
+    app = createApp({ serveStatic: false, authVerifier: null, github: null });
   });
 
   afterEach(async () => {
@@ -675,7 +675,7 @@ describe('dashboard routes (no analysis yet)', () => {
 
   beforeEach(async () => {
     fixture = await setupTestFixture();
-    app = createApp({ serveStatic: false, authVerifier: null });
+    app = createApp({ serveStatic: false, authVerifier: null, github: null });
     clearLatestCache();
   });
 

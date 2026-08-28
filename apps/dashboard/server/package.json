@@ -14,6 +14,7 @@
     "@truecourse/contract-extractor": "workspace:*",
     "@truecourse/core": "workspace:*",
     "@truecourse/db": "workspace:*",
+    "@truecourse/scm-github": "workspace:*",
     "@truecourse/shared": "workspace:*",
     "@truecourse/spec-consolidator": "workspace:*",
     "@workos-inc/node": "^7.0.0",

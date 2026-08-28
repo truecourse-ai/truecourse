@@ -4,6 +4,7 @@ import '@truecourse/core/config/env';
 import { setupSocket } from './socket/index.js';
 import { createApp } from './app.js';
 import { createAuth } from './auth/index.js';
+import { createGithubConnection } from './github/index.js';
 import { closeDb, initDb } from './db.js';
 import { stopAllWatchers } from './services/watcher.service.js';
 import { stopAllRunTails } from './services/session-tailer.service.js';
@@ -52,12 +53,21 @@ async function main() {
   //    unusable API config warns and the pipeline routes surface it.
   installLlmTransportAtBoot();
 
-  // 5. Setup Express app + socket.io
-  const app = createApp({ authVerifier: auth.verify, authRouter: auth.router });
+  // 5. GitHub App connection. Optional: without GITHUB_APP_* the server still
+  //    boots, and /api/github answers 503 with the vars to set.
+  const github = createGithubConnection();
+  if (github) {
+    log.info('[Server] GitHub connect enabled');
+  } else {
+    log.info('[Server] GitHub connect disabled — set GITHUB_APP_* to enable');
+  }
+
+  // 6. Setup Express app + socket.io
+  const app = createApp({ authVerifier: auth.verify, authRouter: auth.router, github });
   const httpServer = createServer(app);
   setupSocket(httpServer);
 
-  // 6. Start listening
+  // 7. Start listening
   await new Promise<void>((resolve, reject) => {
     httpServer.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRINUSE') {

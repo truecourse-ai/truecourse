@@ -90,7 +90,7 @@ describe('GET /spec/corpus?ref (EE, commit-scoped)', () => {
     await writeLatest(fixture.repoPath, baselineLatest('base1'));
     await spec.saveSpec({ repoKey: fixture.repoPath, commitSha: 'base1' }, 'corpus', corpusWithArea('base/area'));
     await spec.saveSpec({ repoKey: fixture.repoPath, commitSha: 'head1' }, 'corpus', corpusWithArea('head/area'));
-    app = createApp({ serveStatic: false, authVerifier: null });
+    app = createApp({ serveStatic: false, authVerifier: null, github: null });
   });
   afterEach(async () => {
     resetSpecStore();
@@ -135,7 +135,7 @@ describe('GET /spec/corpus?ref — 404 when neither ref nor baseline has a corpu
     const db = await makeDb(client);
     setSpecStore(new PgSpecStore(db));
     // No baseline analysis written → baselineCommit resolves to null.
-    app = createApp({ serveStatic: false, authVerifier: null });
+    app = createApp({ serveStatic: false, authVerifier: null, github: null });
   });
   afterEach(async () => {
     resetSpecStore();
@@ -168,7 +168,7 @@ describe('GET /spec/doc?ref=<path>&commit=<sha>', () => {
       seen.push({ docPath, commit: opts?.commit });
       return `# doc ${docPath} @ ${opts?.commit ?? 'default'}`;
     });
-    app = createApp({ serveStatic: false, authVerifier: null });
+    app = createApp({ serveStatic: false, authVerifier: null, github: null });
   });
   afterEach(async () => {
     setRepoDocReader(async () => null);
@@ -212,7 +212,7 @@ describe('mutation routes — PR scope', () => {
     setBackgroundTaskRunner(async (t) => {
       tasks.push(t);
     });
-    app = createApp({ serveStatic: false, authVerifier: null });
+    app = createApp({ serveStatic: false, authVerifier: null, github: null });
   });
   afterEach(async () => {
     setBackgroundTaskRunner(null);

@@ -1277,6 +1277,17 @@ The dashboard server is authenticated and Postgres-backed: it will not boot unti
 | `WORKOS_REDIRECT_URI` | `http://localhost:3001/api/auth/callback` — register it on the WorkOS app. |
 | `WORKOS_APP_URL` | `http://localhost:3000` in dev. |
 
+Connecting repositories through the TrueCourse GitHub App is optional — the server boots without it and `/api/github/*` answers `503` with the variables to set. Set all four to turn it on:
+
+| Variable | Notes |
+| --- | --- |
+| `GITHUB_APP_ID` | Numeric App ID from the App's settings page. |
+| `GITHUB_APP_PRIVATE_KEY` | The App's PEM private key — raw (escaped `\n` newlines are fine) or base64-encoded. |
+| `GITHUB_APP_WEBHOOK_SECRET` | Shared secret; the webhook receiver at `POST /api/github/webhook` verifies every delivery against it. |
+| `GITHUB_APP_SLUG` | The `github.com/apps/<slug>` handle, used to build the install URL. |
+
+Connecting a repository (`POST /api/github/repos/link`) clones it into `~/.truecourse/clones/<owner>__<repo>` with an installation token, registers the clone as a project, and starts its spec scan in the background. Disconnecting it (`DELETE /api/github/repos/link`) unregisters the project and deletes that clone.
+
 `pnpm dev` also expects a `.truecourse/` folder at the repo root — created automatically on the first `truecourse analyze` against the repo (or simply `mkdir -p .truecourse`).
 
 The full test suite requires the C# Roslyn host to be built (same requirement as [analyzing C#](#prerequisites)): the C# e2e test fails without it, and the Roslyn semantic-rule tests silently skip. CI builds it before running tests (`.github/workflows/test.yml`); do the same locally, once per checkout/worktree.

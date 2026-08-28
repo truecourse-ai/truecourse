@@ -50,7 +50,12 @@ export {
   type PullRequestPayload,
   type IssueCommentPayload,
 } from './webhook.js';
-export { createConnectRouter, type ConnectDeps, type OnRepoLinked } from './connect.js';
+export {
+  createConnectRouter,
+  type ConnectDeps,
+  type OnRepoLinked,
+  type OnRepoUnlinked,
+} from './connect.js';
 export type {
   GateStore,
   InstallationRecord,

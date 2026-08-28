@@ -1,12 +1,12 @@
 /**
- * Connect-by-URL support: parse a public git URL, clone it into a directory the
- * dashboard manages, and answer "is this path one of ours?" for the disconnect
- * path.
+ * The clones the dashboard manages: cloning a repository into a directory it
+ * owns, and answering "is this path one of ours?" for the disconnect path.
  *
- * Managed clones live under `<getGlobalDir()>/clones/<owner>__<repo>`. Only
- * repos registered through `POST /api/repos/connect` land there, and only paths
- * inside that root are ever deleted wholesale — a repo the user registered by
- * local path keeps today's behavior (only `.truecourse/` is removed).
+ * Two ways in — a connected GitHub repo (cloned with an installation token) and
+ * a public git URL — and one directory layout: `<getGlobalDir()>/clones/<owner>__<repo>`.
+ * Only repos the dashboard cloned land there, and only paths inside that root
+ * are ever deleted wholesale — a repo the user registered by local path keeps
+ * today's behavior (only `.truecourse/` is removed).
  *
  * Git runs as a child process rather than through simple-git: `simple-git` is a
  * dependency of `@truecourse/core`, not of this package, and core's `getGit`
@@ -21,6 +21,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { createAppError } from '@truecourse/core/lib/errors';
 import { getGlobalDir } from '@truecourse/core/config/paths';
+import { cloneAuthArgs, cloneUrl } from '@truecourse/scm-github';
 
 const execFileAsync = promisify(execFile);
 
@@ -69,6 +70,11 @@ function sanitizeSegment(segment: string): string {
     .replace(/[^a-z0-9._-]+/g, '-')
     .replace(/^[.\-]+/, '')
     .slice(0, 64);
+}
+
+/** The managed directory name for `owner/repo` — `<owner>__<repo>`, sanitized. */
+export function cloneDirName(owner: string, repo: string): string {
+  return `${sanitizeSegment(owner) || 'repo'}__${sanitizeSegment(repo) || 'repo'}`;
 }
 
 /**
@@ -121,7 +127,7 @@ export function parseRemoteUrl(raw: string): ParsedRemote {
   // single-segment path falls back to the host as the owner.
   const owner = segments.length > 1 ? (segments[segments.length - 2] as string) : parsed.hostname;
 
-  const dirName = `${sanitizeSegment(owner) || 'repo'}__${sanitizeSegment(last) || 'repo'}`;
+  const dirName = cloneDirName(owner, last);
 
   return {
     url,
@@ -171,45 +177,95 @@ export function getClonePath(remote: ParsedRemote): string {
 }
 
 /**
- * Shallow-clone `remote` into its managed directory and return the path.
+ * How git is run. The default shells out; tests inject a recorder so the argv
+ * a clone is built from can be asserted without touching the network.
+ */
+export type GitRunner = (args: string[], cwd?: string) => Promise<void>;
+
+const runGit: GitRunner = async (args, cwd) => {
+  await execFileAsync('git', args, {
+    cwd,
+    timeout: CLONE_TIMEOUT_MS,
+    maxBuffer: 10 * 1024 * 1024,
+    env: {
+      ...process.env,
+      // Never block on a credential prompt: a private or missing repo must
+      // fail fast with git's own message instead of hanging the request.
+      GIT_TERMINAL_PROMPT: '0',
+      GIT_ASKPASS: 'true',
+      GCM_INTERACTIVE: 'never',
+    },
+  });
+};
+
+/**
+ * Shallow-clone `url` into `<clones>/<dirName>` and return the path.
  *
  * Clones into a temp sibling and renames on success, so an interrupted clone
  * never leaves a half-populated directory behind for the registry to point at.
  * A pre-existing target directory is removed first — it can only be the debris
  * of an earlier failed attempt, since the caller has already established that
  * no registry entry claims it.
+ *
+ * `authArgs` are `git clone -c` flags (see `cloneAuthArgs`): they apply to the
+ * fetch AND persist into the new repo's config, so `unsetKeys` names the config
+ * keys to strip from the temp clone before it is published.
  */
-export async function cloneRepository(remote: ParsedRemote): Promise<string> {
+async function cloneManaged(
+  url: string,
+  dirName: string,
+  { authArgs = [], unsetKeys = [] }: { authArgs?: string[]; unsetKeys?: string[] } = {},
+  run: GitRunner = runGit,
+): Promise<string> {
   const root = getClonesDir();
   fs.mkdirSync(root, { recursive: true });
 
-  const target = getClonePath(remote);
+  const target = path.join(root, dirName);
   fs.rmSync(target, { recursive: true, force: true });
 
-  const tmp = path.join(root, `.tmp-${remote.dirName}-${randomUUID().slice(0, 8)}`);
+  const tmp = path.join(root, `.tmp-${dirName}-${randomUUID().slice(0, 8)}`);
   try {
-    await execFileAsync(
-      'git',
-      ['clone', '--depth', '1', '--single-branch', remote.url, tmp],
-      {
-        timeout: CLONE_TIMEOUT_MS,
-        maxBuffer: 10 * 1024 * 1024,
-        env: {
-          ...process.env,
-          // Never block on a credential prompt: a private or missing repo must
-          // fail fast with git's own message instead of hanging the request.
-          GIT_TERMINAL_PROMPT: '0',
-          GIT_ASKPASS: 'true',
-          GCM_INTERACTIVE: 'never',
-        },
-      },
-    );
+    await run(['clone', ...authArgs, '--depth', '1', '--single-branch', url, tmp]);
+    for (const key of unsetKeys) {
+      await run(['config', '--unset-all', key], tmp);
+    }
     fs.renameSync(tmp, target);
     return target;
   } catch (err) {
     fs.rmSync(tmp, { recursive: true, force: true });
-    throw createAppError(`Could not clone ${remote.url}: ${gitFailureMessage(err)}`, 400);
+    throw createAppError(`Could not clone ${url}: ${gitFailureMessage(err)}`, 400);
   }
+}
+
+/** The config key `cloneAuthArgs` sets, and that the fresh clone must not keep. */
+const GITHUB_AUTH_HEADER_KEY = 'http.https://github.com/.extraheader';
+
+/**
+ * Shallow-clone a connected GitHub repository with an installation token.
+ *
+ * The token rides an `http.*.extraheader` flag rather than the URL, so it stays
+ * out of the recorded remote, out of git's error output (which quotes the URL),
+ * and out of anything that later reads the clone's origin. The header that flag
+ * persists is unset again before the clone is published, so no credential is
+ * left at rest in it.
+ */
+export async function cloneGithubRepo(
+  repoFullName: string,
+  token: string,
+  run: GitRunner = runGit,
+): Promise<string> {
+  const [owner = '', repo = ''] = repoFullName.split('/');
+  return cloneManaged(
+    cloneUrl(repoFullName),
+    cloneDirName(owner, repo),
+    { authArgs: cloneAuthArgs(token), unsetKeys: [GITHUB_AUTH_HEADER_KEY] },
+    run,
+  );
+}
+
+/** Shallow-clone a public `remote` into its managed directory. */
+export async function cloneRepository(remote: ParsedRemote): Promise<string> {
+  return cloneManaged(remote.url, remote.dirName);
 }
 
 /** The most useful line of a failed `git clone` — its last stderr line. */

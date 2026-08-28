@@ -340,7 +340,7 @@ describe('Guard flow read surfaces', () => {
   beforeEach(async () => {
     fixture = await setupTestFixture();
     root = fixture.repoPath;
-    app = createApp({ serveStatic: false, authVerifier: null });
+    app = createApp({ serveStatic: false, authVerifier: null, github: null });
   });
   afterEach(async () => {
     await teardownTestFixture(fixture.project.slug);

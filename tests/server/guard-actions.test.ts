@@ -92,7 +92,7 @@ describe('Guard action routes', () => {
     vi.mocked(guardGenerateInProcess).mockReset();
     vi.mocked(guardRunInProcess).mockReset();
     vi.mocked(emitSpecComplete).mockClear();
-    app = createApp({ serveStatic: false, authVerifier: null });
+    app = createApp({ serveStatic: false, authVerifier: null, github: null });
   });
   afterEach(async () => {
     await teardownTestFixture(fixture.project.slug);
@@ -256,7 +256,7 @@ describe('Guard dismiss/undismiss routes — PR overlay (hosted)', () => {
 
   beforeEach(async () => {
     fixture = await setupTestFixture();
-    app = createApp({ serveStatic: false, authVerifier: null });
+    app = createApp({ serveStatic: false, authVerifier: null, github: null });
     client = new PGlite();
     const db = drizzle(client, { schema }) as unknown as Db;
     await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
@@ -406,7 +406,7 @@ describe('Guard dismiss → hosted auto-regenerate (repo scope)', () => {
   beforeEach(async () => {
     fixture = await setupTestFixture();
     root = fixture.repoPath;
-    app = createApp({ serveStatic: false, authVerifier: null });
+    app = createApp({ serveStatic: false, authVerifier: null, github: null });
     enqueue = vi.fn().mockResolvedValue(undefined);
     setGuardGenerateEnqueue(enqueue);
   });
@@ -567,7 +567,7 @@ describe('Guard dismiss → hosted PR-head regenerate (PR scope)', () => {
   beforeEach(async () => {
     fixture = await setupTestFixture();
     root = fixture.repoPath;
-    app = createApp({ serveStatic: false, authVerifier: null });
+    app = createApp({ serveStatic: false, authVerifier: null, github: null });
     client = new PGlite();
     const db = drizzle(client, { schema }) as unknown as Db;
     await migrate(db, { migrationsFolder: MIGRATIONS_DIR });

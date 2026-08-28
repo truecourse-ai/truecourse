@@ -51,7 +51,7 @@ describe('Guard externals routes', () => {
     fixture = await setupTestFixture();
     root = fixture.repoPath;
     vi.mocked(emitSpecComplete).mockClear();
-    app = createApp({ serveStatic: false, authVerifier: null });
+    app = createApp({ serveStatic: false, authVerifier: null, github: null });
   });
   afterEach(async () => {
     await teardownTestFixture(fixture.project.slug);

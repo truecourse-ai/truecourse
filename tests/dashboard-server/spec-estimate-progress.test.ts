@@ -65,7 +65,7 @@ describe('spec scan route — estimate progress', () => {
   beforeEach(async () => {
     fixture = await setupTestFixture();
     execSync('git init -q', { cwd: fixture.repoPath });
-    app = createApp({ serveStatic: false, authVerifier: null });
+    app = createApp({ serveStatic: false, authVerifier: null, github: null });
     progress.length = 0;
   });
   afterEach(async () => {

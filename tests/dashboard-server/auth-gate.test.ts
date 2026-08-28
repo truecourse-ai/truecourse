@@ -91,7 +91,7 @@ describe('createApp with a verifier', () => {
 
   let app: ReturnType<typeof createApp>;
   beforeEach(() => {
-    app = createApp({ serveStatic: false, authVerifier: verify });
+    app = createApp({ serveStatic: false, authVerifier: verify, github: null });
   });
 
   it('401s a protected route without a session cookie', async () => {
