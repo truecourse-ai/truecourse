@@ -179,7 +179,15 @@ describe('Dashboard server LLM transport install', () => {
     const entries: [string, () => Promise<unknown>][] = [
       ['guard generate', () => request(app).post(url('guard/generate')).send({ confirmed: true }).expect(200)],
       ['spec scan', () => request(app).get(url('spec/corpus/scan')).expect(200)],
-      ['analyze', () => request(app).post(url('analyses')).send({ mode: 'full' }).expect(202)],
+      [
+        'analyze',
+        async () => {
+          await request(app).post(url('analyses')).send({ mode: 'full' }).expect(202);
+          // The 202 is fire-and-forget — wait for the run so its call cannot
+          // leak past a later test's mockReset.
+          await vi.waitFor(() => expect(vi.mocked(analyzeInProcess)).toHaveBeenCalledOnce());
+        },
+      ],
       ['flow enrich', () => request(app).post(url('flows/f1/enrich')).expect(200)],
     ];
     for (const [name, hit] of entries) {
@@ -211,6 +219,10 @@ describe('Dashboard server LLM transport install', () => {
     writeGlobalConfig({ llm: { transport: 'api' } });
 
     await request(app).post(url('analyses')).send({ mode: 'full' }).expect(202);
+    // The 202 is fire-and-forget: the run itself starts after the response, so
+    // wait for it here — both because the run happening IS this test's claim,
+    // and so the in-flight call cannot leak past the next test's mockReset.
+    await vi.waitFor(() => expect(vi.mocked(analyzeInProcess)).toHaveBeenCalledOnce());
   });
 
   // --- The typed error reaching the client ---------------------------------
