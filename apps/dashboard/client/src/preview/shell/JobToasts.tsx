@@ -1,8 +1,9 @@
 /**
- * A job announces itself ONCE, as a toast carrying a link to its session in the
- * repository's Activity tab. Nothing in the toast moves: no steps, no counter,
- * no bar. Progress lives in one place, the Activity surface, and the toast only
- * says where to look. Renders nothing itself.
+ * A job that starts while the page is open announces itself ONCE, as a toast
+ * carrying a link to its session in the repository's Activity tab. Jobs already
+ * in flight when the page loads never announce. Nothing in the toast moves: no
+ * steps, no counter, no bar. Progress lives in one place, the Activity surface,
+ * and the toast only says where to look. Renders nothing itself.
  *
  * Both kinds of job pass through here. A REAL run (a repository connected by
  * URL, scanning) carries its own preview address and lands on the real Activity
@@ -22,9 +23,17 @@ const slugOf = (fullName: string): string => fullName.split('/').slice(-1)[0] ??
 export function JobToasts() {
   const { jobs } = usePreviewState();
   const navigate = useNavigate();
-  const announced = useRef<Set<string>>(new Set());
+  // Only jobs that START while the page is open announce (e.g. a repository
+  // just connected). Jobs already in flight on arrival — fixtures seeded into
+  // initial state, or a run resumed after a reload — stay silent: the user
+  // didn't just start them, and every sign-in reloads the page.
+  const announced = useRef<Set<string> | null>(null);
 
   useEffect(() => {
+    if (announced.current === null) {
+      announced.current = new Set(jobs.map((job) => job.id));
+      return;
+    }
     for (const job of jobs) {
       if (announced.current.has(job.id)) continue;
       announced.current.add(job.id);
