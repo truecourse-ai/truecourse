@@ -5,6 +5,8 @@ import {
   GENERATE_API_SYSTEM_PROMPT,
   GENERATE_PROMPT_FINGERPRINT,
   GENERATE_API_PROMPT_FINGERPRINT,
+  GENERATE_WEB_SYSTEM_PROMPT,
+  GENERATE_WEB_PROMPT_FINGERPRINT,
   RECIPE_SYSTEM_PROMPT,
   FIDELITY_SYSTEM_PROMPT,
   FIDELITY_PROMPT_FINGERPRINT,
@@ -1257,4 +1259,68 @@ describe('guard-generator prompts', () => {
   // longer blind to the code — the briefing carries interface digests and the
   // dependency catalog as GROUNDING, while the binding rule (a milestone COPIES
   // a given claim) survives whole.
+})
+
+describe('GENERATE_WEB_SYSTEM_PROMPT — the third authoring arm', () => {
+  it('teaches the locator policy in the interface catalog’s own vocabulary', () => {
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('# THE LOCATOR POLICY')
+    // Role + accessible name primary, the five alternates, and the exclusions.
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('role + accessible name')
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('NO CSS selectors, NO XPath, NO test ids')
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('"pick": "first"')
+    // The translation rule — realization lines become locators, one worked example.
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('click: button "Add Repository"')
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('"click": { "role": "button", "name": "Add Repository" }')
+  })
+
+  it('closes the verb set at six, tags every step, and bans the sleep', () => {
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('# The verb vocabulary — six verbs, closed')
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('Every web step declares `driver: web`')
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('no sleep verb, ever')
+    // Addresses are surface-relative; url matches origin-stripped.
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('# Addresses are SURFACE-RELATIVE')
+  })
+
+  it('admits the one-world mix and bans the api lifecycle verbs', () => {
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('# Mixing vocabularies — one sandbox, one world')
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('the api lifecycle verbs (`boot`, `signal`, `logs`) do not')
+    // A milestone about a screen is realized by a web step, never a request alone.
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('a milestone\nabout a SCREEN must be realized by a web step')
+  })
+
+  it('embeds its canonical schema NAMED, not inlined — the 119K regression guard', () => {
+    // Inlined, the locator union’s 80-role enum recurs ~30× and the prompt lands
+    // near 131K chars; named under `definitions` the whole prompt stays bounded.
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('"definitions"')
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('#/definitions/webLocator')
+    expect(GENERATE_WEB_SYSTEM_PROMPT.length).toBeLessThan(40_000)
+  })
+
+  it('GENERATE_WEB_PROMPT_FINGERPRINT is pinned — and the cli/api pins did not move with the arm', () => {
+    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe(fingerprint(GENERATE_WEB_SYSTEM_PROMPT))
+    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('3127dad6dc678368')
+  })
+
+  it('buildAuthorUserPrompt opens a web batch on the web preparation framing', () => {
+    const p = buildAuthorUserPrompt(
+      authorCtx({
+        driver: 'web',
+        recipeEntry: ['node', 'cli.js'],
+        recipeServe: ['node', 'web.js'],
+        recipeHealthPath: '/health',
+      }),
+    )
+    expect(p).toContain('Web surface serve command: ["node","web.js"]')
+    expect(p).toContain('Health endpoint: GET /health  (polled until 2xx before the first browser step)')
+    // The entrypoint rides along for the seeding `run` steps — framed as theirs.
+    expect(p).toContain("(a cli step's `run` argv is appended to this)")
+    expect(p).toContain('Build command: true')
+  })
+
+  it('a web batch without a cli entry omits the entrypoint line', () => {
+    const p = buildAuthorUserPrompt(
+      authorCtx({ driver: 'web', recipeEntry: undefined, recipeServe: ['node', 'web.js'] }),
+    )
+    expect(p).not.toContain('Program entrypoint')
+  })
 })

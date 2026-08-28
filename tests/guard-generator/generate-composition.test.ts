@@ -19,7 +19,7 @@ import {
   cliCompositionDefect,
   scenarioCompositionDefect,
 } from '@truecourse/guard-generator'
-import type { GuardApiStep, GuardStep } from '@truecourse/shared'
+import type { GuardApiStep, GuardStep, GuardWebStep } from '@truecourse/shared'
 import {
   makeTempRepo,
   rmrf,
@@ -213,4 +213,42 @@ describe('generateGuards — the composition defect is the worker’s pre-flight
     }
     expect(res.written).toEqual([])
   }, 60_000)
+})
+
+describe('scenarioCompositionDefect — partitioned by vocabulary (the web arm)', () => {
+  const webNav: GuardWebStep = {
+    driver: 'web',
+    navigate: '/',
+    expect: { visible: { role: 'heading', name: 'Board' } },
+  }
+
+  it('composes a mixed web + cli scenario instead of crashing on the web step', () => {
+    // Pre-partition, a web step fell into the cli rule's `run[0]` read — a
+    // TypeError inside the worker tool, not a verdict.
+    expect(scenarioCompositionDefect({ steps: [webNav, step(['add', 'x'])] }, ['node', 'cli.js'])).toBeNull()
+  })
+
+  it('still catches a cli entrypoint repeat inside a mixed draft', () => {
+    const defect = scenarioCompositionDefect({ steps: [webNav, step(['node', 'cli.js', 'add'])] }, ['node', 'cli.js'])
+    expect(defect).toContain('repeats the entrypoint')
+  })
+
+  it('still catches an api ${var} with no earlier capture inside a mixed draft', () => {
+    const defect = scenarioCompositionDefect(
+      { steps: [webNav, request('/api/notes/${id}')] },
+      ['node', 'cli.js'],
+    )
+    expect(defect).toContain('${id}')
+  })
+
+  it('web captures live in their own namespace — a request reading ${captured:…} is not the api rule’s business', () => {
+    const captures: GuardWebStep = {
+      driver: 'web',
+      navigate: '/',
+      capture: { noteId: { from: { role: 'link', name: 'Permalink' }, get: { attribute: 'href' } } },
+    }
+    expect(
+      scenarioCompositionDefect({ steps: [captures, request('/api/notes/${captured:noteId}')] }, undefined),
+    ).toBeNull()
+  })
 })

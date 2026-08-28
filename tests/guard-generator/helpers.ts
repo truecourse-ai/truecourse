@@ -35,6 +35,7 @@ import {
   type RawGeneratedApiScenario,
   type RawGeneratedCliScenario,
   type RawGeneratedScenario,
+  type RawGeneratedWebScenario,
   type SeedDraftDatabase,
   type UntestableNote,
   type WorkerFidelityJudge,
@@ -43,6 +44,12 @@ import {
 /** The realistic fixture CLI (`relkit`) shared with the guard-runner engine tests. */
 export const FIXTURE_BIN = fileURLToPath(
   new URL('../fixtures/guard-fixture-cli/bin.mjs', import.meta.url),
+)
+
+/** The fixture WEB app (dependency-free, two linked pages) shared with the
+ *  guard-runner web-driver tests. */
+export const FIXTURE_WEB_SERVER = fileURLToPath(
+  new URL('../fixtures/guard-fixture-web/server.mjs', import.meta.url),
 )
 
 export function makeTempRepo(): string {
@@ -66,7 +73,7 @@ export function writeRecipe(
     build?: string
     entry?: string[]
     /** The web driver's preparation layer — present when a case authors web. */
-    web?: { serve: string[]; cwd?: string; healthPath?: string }
+    web?: { serve: string[]; cwd?: string; healthPath?: string; build?: string }
   } = {},
 ): void {
   const recipe = {
@@ -118,6 +125,20 @@ export function raw(
 ): RawGeneratedScenario {
   return { title, steps, ...extra }
 }
+
+/** A raw generated WEB scenario as a worker would submit it. */
+export function rawWeb(
+  title: string,
+  steps: RawGeneratedWebScenario['steps'],
+  extra: Partial<RawGeneratedScenario> = {},
+): RawGeneratedScenario {
+  return { title, steps, ...extra } as RawGeneratedScenario
+}
+
+/** One web step that passes against the fixture web app's home page. */
+export const PASSING_WEB_STEPS: RawGeneratedWebScenario['steps'] = [
+  { driver: 'web', navigate: '/', expect: { visible: { role: 'heading', name: 'Guard Web Fixture' } } },
+]
 
 /** A scenario running `--version` and expecting exit 0 (passes against relkit). */
 export const PASSING_STEPS: RawGeneratedCliScenario['steps'] = [{ run: ['--version'], expect: { exit: 0 } }]

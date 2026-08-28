@@ -282,28 +282,39 @@ describe('generateGuards — realization gaps', () => {
     expect(gap.reason).toContain('Needs TUI driver')
   }, 60_000)
 
-  // Item 132: the web RUNNER shipped (guard-runner's web-driver, playwright-core,
-  // the reference corpus's eleven executed web scenarios) — but GENERATE still
-  // cannot author one, because the flow-worker has an api arm and a cli arm and
-  // nothing else. So web keeps the awaiting-driver treatment every unshipped
-  // surface gets, and its recipe block is READ (the row names one) without making
-  // the surface authorable.
-  it('records web as awaiting its driver even when the recipe prepares it', async () => {
+  // The web arm: a prepared web surface reaches a WORKER SESSION — matched,
+  // planned, and briefed under the web preparation framing — instead of the
+  // awaiting-driver treatment it got while the flow worker had two arms. The
+  // full author-and-execute path (a real browser) lives in generate-web.test.ts;
+  // here the web session ends `blocked` so the case stays browser-free.
+  it('hands a prepared web surface to a worker session instead of recording awaiting-driver', async () => {
     const r = repo()
     writeRecipe(r, { web: { serve: ['node', 'server.js'], healthPath: '/' } })
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, DOC_CONTENT)
 
+    const surfaces: string[] = []
+    const briefings = new Map<string, string>()
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, cliInterface(['relkit']), webInterface()),
       extractSession: versionCliBgUntestable,
-      flowWorkerSession: authorsEvery(),
+      flowWorkerSession: submitWorkerSessions(
+        (task) => {
+          surfaces.push(task.surface)
+          return task.surface === 'web'
+            ? { blocked: [{ order: 1, capability: 'credentials' }] }
+            : raw('v', PASSING_STEPS)
+        },
+        { onBriefing: (task, briefing) => briefings.set(task.surface, briefing) },
+      ),
     })
 
-    expect(res.written.some((w) => w.surface === 'web')).toBe(false)
-    const gap = res.coverageGaps.find((g) => g.surface === 'web')!
-    expect(gap.kind).toBe('awaiting-driver')
+    expect(surfaces).toContain('web')
+    expect(res.coverageGaps.some((g) => g.kind === 'awaiting-driver' && g.driver === 'web')).toBe(false)
+    // The web briefing opens on the web preparation framing, not the cli one.
+    expect(briefings.get('web')).toContain('Web surface serve command')
+    expect(briefings.get('web')).toContain('polled until 2xx before the first browser step')
   }, 60_000)
 })
 

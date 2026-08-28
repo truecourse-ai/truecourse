@@ -213,17 +213,25 @@ const FLOW_WORKER_PAYLOAD_FIELDS = {
   retired: ['attempts', 'lastEvidence'],
 } as const satisfies Record<string, readonly string[]>
 
-/** Fields a kind MAY carry beyond its required payload. A worker that ends
- *  `blocked` after real runs naturally attaches the evidence that proved the
- *  block — refusing it cost a whole re-ask turn for information worth keeping
- *  (the documenso 13-worker bench, 2026-08-24). `attempts` is admitted on
- *  blocked for the same reason: workers volunteer their probe count alongside
- *  the evidence, and refusing it turned three honest blocked verdicts into
- *  malformed-session failures (run 6, same bench). */
+/** Fields a kind MAY carry beyond its required payload — admitted for the kinds
+ *  a worker reaches by PROBING, which volunteer what the probing showed.
+ *  `blocked` came first: a worker that ends blocked after real runs attaches the
+ *  evidence that proved the block, and refusing it cost a whole re-ask turn for
+ *  information worth keeping (documenso 13-worker bench, 2026-08-24); `attempts`
+ *  followed, after refusing it turned three honest blocked verdicts into
+ *  malformed-session failures (run 6, same bench).
+ *  `journey-defect` was scoped OUT of that allowance on the assumption that a
+ *  defect is stated rather than probed. The first run with the web authoring arm
+ *  disproved it: 83 journey-defects died malformed on these exact two fields
+ *  (2026-08-26). A worker reaches `journey-defect` by TRYING the interface and
+ *  watching it fail, so it reports the attempt count and the last evidence for
+ *  precisely the reason a blocked one does.
+ *  `settled` and `retired` stay closed: settled carries its accepted scenario,
+ *  and retired REQUIRES both fields already. */
 const FLOW_WORKER_OPTIONAL_FIELDS = {
   settled: [],
   blocked: ['lastEvidence', 'attempts'],
-  'journey-defect': [],
+  'journey-defect': ['lastEvidence', 'attempts'],
   retired: [],
 } as const satisfies Record<keyof typeof FLOW_WORKER_PAYLOAD_FIELDS, readonly string[]>
 

@@ -54,6 +54,7 @@ import {
   FLOW_WORKER_CACHE_NAME,
   FLOW_WORKER_CLI_PROMPT_FINGERPRINT,
   FLOW_WORKER_CLI_SYSTEM_PROMPT,
+  FLOW_WORKER_WEB_SYSTEM_PROMPT,
   FLOW_WORKER_SESSION_KIND,
   buildGuardDocUniverse,
   cacheableWorkerOutcome,
@@ -171,7 +172,7 @@ async function callTool(call: StubCall, name: string, args: unknown): Promise<{ 
 // ---------------------------------------------------------------------------
 
 describe('flowWorkerSessionDef', () => {
-  const def = (surface: 'cli' | 'api') =>
+  const def = (surface: 'cli' | 'api' | 'web') =>
     flowWorkerSessionDef({
       task: { ...fakeTask().task, surface },
       judgeWith: () => async () => ({ kind: 'faithful' }),
@@ -195,9 +196,10 @@ describe('flowWorkerSessionDef', () => {
   it('authors each surface under its own prompt', () => {
     expect(def('cli').systemPrompt).toBe(FLOW_WORKER_CLI_SYSTEM_PROMPT)
     expect(def('api').systemPrompt).toBe(FLOW_WORKER_API_SYSTEM_PROMPT)
-    expect(FLOW_WORKER_CLI_SYSTEM_PROMPT).not.toBe(FLOW_WORKER_API_SYSTEM_PROMPT)
-    // Both carry the loop's overriding output contract.
-    for (const p of [FLOW_WORKER_CLI_SYSTEM_PROMPT, FLOW_WORKER_API_SYSTEM_PROMPT]) {
+    expect(def('web').systemPrompt).toBe(FLOW_WORKER_WEB_SYSTEM_PROMPT)
+    expect(new Set([FLOW_WORKER_CLI_SYSTEM_PROMPT, FLOW_WORKER_API_SYSTEM_PROMPT, FLOW_WORKER_WEB_SYSTEM_PROMPT]).size).toBe(3)
+    // All three carry the loop's overriding output contract.
+    for (const p of [FLOW_WORKER_CLI_SYSTEM_PROMPT, FLOW_WORKER_API_SYSTEM_PROMPT, FLOW_WORKER_WEB_SYSTEM_PROMPT]) {
       expect(p).toContain('YOU ARE THE FLOW WORKER')
       expect(p).toContain('"kind": "settled"')
       expect(p).toContain('"kind": "blocked"')
@@ -205,6 +207,15 @@ describe('flowWorkerSessionDef', () => {
       expect(p).toContain('"kind": "retired"')
       expect(p).toContain('the engine refuses a sha it')
     }
+  })
+
+  it('holds the cli and api prompt fingerprints bit-for-bit — the corpus-roll tripwire', () => {
+    // These literals are the author-cache keys of every committed cli/api corpus.
+    // A prompt edit that moves one re-authors EVERY such flow; fail here first,
+    // loudly, so the roll is a decision rather than an accident. The web arm was
+    // added with both of these unchanged.
+    expect(FLOW_WORKER_CLI_PROMPT_FINGERPRINT).toBe('461564a482560dca')
+    expect(FLOW_WORKER_API_PROMPT_FINGERPRINT).toBe('c3f27b81e0bab9b9')
   })
 
   it('routes both tools to the task’s engine closures', async () => {

@@ -2857,7 +2857,11 @@ stages as §10.1, with the subject fixed:
    designed, from this document: the expectation is the §8.4 flow
    worker unchanged — same loop, same outcomes, `run_scenario` already
    executing web steps by then — plus an authoring-prompt extension
-   teaching the locator policy. That design is reserved for the owner.
+   teaching the locator policy. DELIVERED (SPEC_GUARD_PLAN item 135,
+   2026-08-26) exactly on that expectation: the §8.4 worker reused
+   unchanged, `GENERATE_WEB_SYSTEM_PROMPT` the locator-policy extension,
+   the web arm's own raw schema and surface-keyed parse the two pieces
+   this step could not foresee.
 
 ### 10.7 Estimation
 

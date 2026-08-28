@@ -22,9 +22,15 @@ import {
   GuardStepObjectSchema,
   promptKeysNeedATerminal,
   GuardApiStepSchema,
+  GuardApiRequestStepSchema,
   GuardNormalizerSchema,
   GuardTestabilityVerdictSchema,
+  GuardWebStepSchema,
   guardDriverIds,
+  isWebStep,
+  type GuardApiRequestStep,
+  type GuardDriverId,
+  type GuardWebStep,
 } from '@truecourse/shared'
 import { isNoOpEntry, NO_OP_ENTRY_MESSAGE } from '@truecourse/guard-runner'
 
@@ -330,18 +336,81 @@ export const RawGeneratedApiScenarioSchema = z
 export type RawGeneratedApiScenario = z.infer<typeof RawGeneratedApiScenarioSchema>
 
 /**
+ * One step of an authored WEB scenario. A web scenario runs in ONE sandbox world
+ * shared by three vocabularies, so beside the six web verbs it admits:
+ *  - the authored cli `run` step (the SAME arm the cli prompt uses — `git`/`write`/
+ *    `delete`/`patch` stay reference-corpus vocabulary here too), because a browser
+ *    flow routinely needs a cli step to seed the world it then looks at;
+ *  - the api `request` step, because "verify through the server what the UI just
+ *    wrote" is half of what makes a web assertion honest. The api LIFECYCLE verbs
+ *    (`boot`/`signal`/`logs`) deliberately stay out — in a sandbox the served
+ *    surface's lifecycle belongs to the sandbox.
+ */
+/** One authored web-scenario step. The explicit annotation is load-bearing: the
+ *  web step union's inferred type exceeds what tsc will serialize into a
+ *  declaration (TS7056), and the alias keeps every schema built on it emittable. */
+export type AuthoredWebStep = GuardWebStep | z.infer<typeof AuthoredCliStepSchema> | GuardApiRequestStep
+const AuthoredWebStepSchema: z.ZodType<AuthoredWebStep, z.ZodTypeDef, unknown> = z.union([
+  GuardWebStepSchema,
+  AuthoredCliStepSchema,
+  GuardApiRequestStepSchema,
+])
+
+/** The web arm's object shape alone — exported because the prompt's canonical
+ *  schema hint needs `.strip()`, which the refinement wrapper below cannot offer
+ *  (a refinement renders nothing in JSON Schema anyway; it exists for the parse). */
+export const RawGeneratedWebScenarioObjectSchema = z
+  .object({
+    title: z.string().min(1),
+    setup: GuardSetupSchema.optional(),
+    steps: z.array(AuthoredWebStepSchema).min(1),
+    normalize: z.array(GuardNormalizerSchema).optional(),
+  })
+  .passthrough()
+
+export const RawGeneratedWebScenarioSchema = RawGeneratedWebScenarioObjectSchema.refine(
+  (s) => s.steps.some(isWebStep),
+  {
+    path: ['steps'],
+    message:
+      'a web scenario carries at least one `driver: web` step — a draft of only run/request steps belongs on the cli or api surface',
+  },
+)
+export type RawGeneratedWebScenario = z.infer<typeof RawGeneratedWebScenarioSchema>
+
+/**
  * A scenario as authored, whichever surface the call was for. The arms are keyed by
  * their STEP VOCABULARY, not by a declared driver: an authored cli step always
- * carries `run`, an api step never does, so the union resolves without a
- * discriminator (and each authoring call parses against its own arm anyway — the
- * prompt and the schema follow the same `ctx.driver`, so a batch cannot smuggle one
- * driver's vocabulary into another's).
+ * carries `run`, an api step never does, and a web step tags itself `driver: web`,
+ * so the union resolves without a discriminator (and each authoring call parses
+ * against its own arm anyway — the prompt and the schema follow the same
+ * `ctx.driver`, so a batch cannot smuggle one driver's vocabulary into another's).
+ * The web arm sits LAST so no pre-existing cli/api draft's resolution changes.
  */
 export const RawGeneratedScenarioSchema = z.union([
   RawGeneratedCliScenarioSchema,
   RawGeneratedApiScenarioSchema,
+  RawGeneratedWebScenarioSchema,
 ])
 export type RawGeneratedScenario = z.infer<typeof RawGeneratedScenarioSchema>
+
+/**
+ * The raw scenario schema ONE surface's drafts parse against. Parsing by surface —
+ * the engine always knows which surface it asked for — is what turns a union
+ * failure's useless `(root): Invalid input` into a field-path error the worker can
+ * act on. A surface with no arm of its own falls back to the whole union.
+ */
+const RAW_SCENARIO_SCHEMAS = {
+  cli: RawGeneratedCliScenarioSchema,
+  api: RawGeneratedApiScenarioSchema,
+  web: RawGeneratedWebScenarioSchema,
+} as const satisfies Partial<Record<GuardDriverId, z.ZodTypeAny>>
+
+export function rawScenarioSchemaFor(
+  surface: GuardDriverId,
+): z.ZodType<RawGeneratedScenario, z.ZodTypeDef, unknown> {
+  return RAW_SCENARIO_SCHEMAS[surface as keyof typeof RAW_SCENARIO_SCHEMAS] ?? RawGeneratedScenarioSchema
+}
 
 /**
  * One (flow, surface) authoring call's output: the scenario that realizes the
@@ -353,7 +422,13 @@ export type RawGeneratedScenario = z.infer<typeof RawGeneratedScenarioSchema>
  * present — a reply with neither is malformed and earns the corrective re-ask,
  * never a silent empty settle.
  */
-export const AuthoredFlowScenarioSchema = z
+export interface AuthoredFlowScenario {
+  scenario: RawGeneratedScenario | null
+  blockedOn: string[]
+}
+// Annotated for the same TS7056 reason as `AuthoredWebStepSchema` above: with
+// the web arm in the union, the transform's inferred type stops being emittable.
+export const AuthoredFlowScenarioSchema: z.ZodType<AuthoredFlowScenario, z.ZodTypeDef, unknown> = z
   .object({
     scenario: RawGeneratedScenarioSchema.nullish(),
     blockedOn: z.array(z.string().min(1)).optional(),
@@ -365,7 +440,6 @@ export const AuthoredFlowScenarioSchema = z
     scenario: a.scenario ?? null,
     blockedOn: a.scenario == null ? (a.blockedOn ?? []) : [],
   }))
-export type AuthoredFlowScenario = z.infer<typeof AuthoredFlowScenarioSchema>
 
 /** The reply's two fields, narrowed to one driver's scenario shape. */
 function authoredResponse(scenario: z.ZodTypeAny) {

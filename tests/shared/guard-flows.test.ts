@@ -353,10 +353,32 @@ describe('GuardFlowWorkerOutcomeSchema payload pairing', () => {
     expect(res.success).toBe(true)
   })
 
-  it('journey-defect still refuses attempts — the allowance is blocked-only', () => {
+  it('journey-defect MAY carry attempts and lastEvidence — a defect is DIAGNOSED, not guessed (documenso web run, 2026-08-26)', () => {
+    // Incident-verbatim: the first run with the web authoring arm produced 83
+    // journey-defects that all died malformed on exactly these two fields —
+    // "kind \"journey-defect\" must not carry `attempts`". The allowance was
+    // scoped blocked-only when item 128 landed, on the assumption that a defect
+    // is stated rather than probed. It is not: a worker reaches `journey-defect`
+    // by TRYING the interface and watching it fail, so it volunteers the probe
+    // count and the last evidence for the same reason a blocked one does — and
+    // refusing them threw away 83 real diagnoses.
     const res = GuardFlowWorkerOutcomeSchema.safeParse({
       kind: 'journey-defect',
-      report: { interfaceId: 'api/get-api-v2-envelope', detail: 'the derived route does not exist' },
+      report: {
+        interfaceId: 'web/upload-document-to-current-folder',
+        detail: 'the supplied web serve command exited before /signin became healthy',
+      },
+      attempts: 3,
+      lastEvidence: 'npm run start -w @documenso/remix exited 1; /signin never answered within 60s',
+    })
+    expect(res.success).toBe(true)
+  })
+
+  it('settled still refuses attempts — the allowance is for the kinds that PROBE', () => {
+    const res = GuardFlowWorkerOutcomeSchema.safeParse({
+      kind: 'settled',
+      scenarioYamlSha: 'a'.repeat(64),
+      expectedReds: [],
       attempts: 2,
     })
     expect(res.success).toBe(false)

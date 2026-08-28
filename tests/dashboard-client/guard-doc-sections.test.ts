@@ -132,10 +132,10 @@ describe('guard status treatments', () => {
       expect(guardBandClasses(status), status).toBeTruthy();
     }
     // fail/error + stale/orphaned/blocked/authoring-error/needs-setup/blocked-on/
-    // no-interface + web/tui/library/desktop/mobile + unguarded + never-run +
-    // pass/guarded + unrealizable/untestable/no-claim/dismissed (api is runnable —
-    // no awaiting row).
-    expect(GUARD_COVERAGE_STATUS_PRECEDENCE).toHaveLength(22);
+    // no-interface + tui/library/desktop/mobile + unguarded + never-run +
+    // pass/guarded + unrealizable/untestable/no-claim/dismissed (cli, api and web
+    // are runnable — no awaiting row).
+    expect(GUARD_COVERAGE_STATUS_PRECEDENCE).toHaveLength(21);
   });
 
   it('maps each status group to its own colour treatment — FOUR colours, no more', () => {

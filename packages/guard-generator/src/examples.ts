@@ -29,7 +29,14 @@
  * claim-faithfulness rules, not here.
  */
 
-import { isApiRequestStep, type GuardApiStep, type GuardSetup, type GuardStep } from '@truecourse/shared'
+import {
+  isApiRequestStep,
+  isWebStep,
+  type GuardApiStep,
+  type GuardSetup,
+  type GuardStep,
+  type GuardWebStep,
+} from '@truecourse/shared'
 
 /** One fenced block mined from a section, byte-exact. */
 export interface MinedExampleBlock {
@@ -111,9 +118,10 @@ interface ExampleCarrier {
 }
 
 /** The input-side carriers — where a doc example RUNS, and where byte comparison
- *  is feasible: seeded file content, cli stdin, api raw request body. */
+ *  is feasible: seeded file content, cli stdin, api raw request body, a web
+ *  step's filled value or uploaded text. */
 function exampleCarriers(scenario: {
-  steps: readonly (GuardStep | GuardApiStep)[]
+  steps: readonly (GuardStep | GuardApiStep | GuardWebStep)[]
   setup?: GuardSetup
 }): ExampleCarrier[] {
   const carriers: ExampleCarrier[] = []
@@ -121,11 +129,19 @@ function exampleCarriers(scenario: {
     carriers.push({ where: `setup.files["${file}"]`, value: content })
   }
   // Each step names its own carrier — a cli step's `stdin`, a request step's raw
-  // body — so a mixed scenario contributes both without anyone declaring a driver.
+  // body, a web step's typed value or uploaded text — so a mixed scenario
+  // contributes them all without anyone declaring a driver.
   scenario.steps.forEach((step, i) => {
     if (isApiRequestStep(step)) {
       if (typeof step.request.body === 'string') {
         carriers.push({ where: `step ${i + 1} request.body`, value: step.request.body })
+      }
+      return
+    }
+    if (isWebStep(step)) {
+      if ('fill' in step) carriers.push({ where: `step ${i + 1} fill value`, value: step.value })
+      if ('upload' in step && typeof step.file.text === 'string') {
+        carriers.push({ where: `step ${i + 1} upload file.text`, value: step.file.text })
       }
       return
     }
@@ -143,7 +159,7 @@ function exampleCarriers(scenario: {
  * composition defect gets. An example no carrier resembles constrains nothing.
  */
 export function exampleFidelityDefect(
-  scenario: { steps: readonly (GuardStep | GuardApiStep)[]; setup?: GuardSetup },
+  scenario: { steps: readonly (GuardStep | GuardApiStep | GuardWebStep)[]; setup?: GuardSetup },
   examples: readonly DocExampleBlock[],
 ): string | null {
   if (examples.length === 0) return null

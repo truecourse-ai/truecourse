@@ -35,6 +35,7 @@ import {
 import {
   GENERATE_SYSTEM_PROMPT,
   GENERATE_API_SYSTEM_PROMPT,
+  GENERATE_WEB_SYSTEM_PROMPT,
   workerCacheKey,
   type FlowWorkerTask,
   type WorkerFidelityJudge,
@@ -110,15 +111,35 @@ no run behind it is refused once and costs you a turn.`
 
 export const FLOW_WORKER_CLI_SYSTEM_PROMPT = GENERATE_SYSTEM_PROMPT + WORKER_ADDENDUM
 export const FLOW_WORKER_API_SYSTEM_PROMPT = GENERATE_API_SYSTEM_PROMPT + WORKER_ADDENDUM
+export const FLOW_WORKER_WEB_SYSTEM_PROMPT = GENERATE_WEB_SYSTEM_PROMPT + WORKER_ADDENDUM
 
 /** Exported for the step-20 estimate rework (probe the REAL keys). */
 export const FLOW_WORKER_CLI_PROMPT_FINGERPRINT = promptFingerprint(FLOW_WORKER_CLI_SYSTEM_PROMPT)
 export const FLOW_WORKER_API_PROMPT_FINGERPRINT = promptFingerprint(FLOW_WORKER_API_SYSTEM_PROMPT)
+export const FLOW_WORKER_WEB_PROMPT_FINGERPRINT = promptFingerprint(FLOW_WORKER_WEB_SYSTEM_PROMPT)
+
+/** The per-surface prompt table — cli is also the fallback for a surface with no
+ *  arm of its own, exactly the resolution the old ternary made. */
+const SYSTEM_PROMPT_BY_SURFACE: Partial<Record<GuardDriverId, string>> = {
+  cli: FLOW_WORKER_CLI_SYSTEM_PROMPT,
+  api: FLOW_WORKER_API_SYSTEM_PROMPT,
+  web: FLOW_WORKER_WEB_SYSTEM_PROMPT,
+}
+const PROMPT_FINGERPRINT_BY_SURFACE: Partial<Record<GuardDriverId, string>> = {
+  cli: FLOW_WORKER_CLI_PROMPT_FINGERPRINT,
+  api: FLOW_WORKER_API_PROMPT_FINGERPRINT,
+  web: FLOW_WORKER_WEB_PROMPT_FINGERPRINT,
+}
+
+/** The system prompt one surface's workers author under. */
+export function flowWorkerSystemPrompt(surface: GuardDriverId): string {
+  return SYSTEM_PROMPT_BY_SURFACE[surface] ?? FLOW_WORKER_CLI_SYSTEM_PROMPT
+}
 
 /** Each surface authors under its own prompt, so a scenario's cache entry moves
  *  only when ITS prompt changes — the one-shot rule, kept. */
 export function flowWorkerPromptFingerprint(surface: GuardDriverId): string {
-  return surface === 'api' ? FLOW_WORKER_API_PROMPT_FINGERPRINT : FLOW_WORKER_CLI_PROMPT_FINGERPRINT
+  return PROMPT_FINGERPRINT_BY_SURFACE[surface] ?? FLOW_WORKER_CLI_PROMPT_FINGERPRINT
 }
 
 /**
@@ -216,7 +237,7 @@ export function flowWorkerSessionDef(input: FlowWorkerSessionInput): SessionDef<
   const { task } = input
   return {
     kind: FLOW_WORKER_SESSION_KIND,
-    systemPrompt: task.surface === 'api' ? FLOW_WORKER_API_SYSTEM_PROMPT : FLOW_WORKER_CLI_SYSTEM_PROMPT,
+    systemPrompt: flowWorkerSystemPrompt(task.surface),
     tools: [runScenarioTool(task), submitScenarioTool(task, input.judgeWith)],
     outcomeSchema: GuardFlowWorkerOutcomeSchema,
     budget: FLOW_WORKER_BUDGET,

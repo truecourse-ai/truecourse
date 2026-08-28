@@ -527,8 +527,18 @@ export function extractJsonValue(text: string): string {
  * validators require `$ref`s under `$defs`/`definitions` and reject the rest
  * ("References must be defined under '$defs'…") — which fails the whole call.
  * Inlining sidesteps it; these extraction schemas are flat DTOs, not recursive.
+ *
+ * `definitions` opts a DEEPLY-SHARED schema out of that inlining: each named
+ * sub-schema renders once under `definitions` and is referenced everywhere it
+ * recurs. Without it the web scenario schema — whose locator union (with its
+ * 80-role enum) recurs in every verb, expectation, and capture — renders at
+ * ~119K characters; named, it is ~18K. Callers without `definitions` get the
+ * exact bytes they always did, so every existing prompt fingerprint holds.
  */
-export function jsonSchemaHint(schema: ZodTypeAny): string {
+export function jsonSchemaHint(schema: ZodTypeAny, definitions?: Record<string, ZodTypeAny>): string {
+  if (definitions) {
+    return JSON.stringify(zodToJsonSchema(schema, { $refStrategy: 'root', definitions }));
+  }
   return JSON.stringify(zodToJsonSchema(schema, { $refStrategy: 'none' }));
 }
 

@@ -21,7 +21,7 @@ import {
   type Interface,
 } from '@truecourse/shared'
 import { slugifyHeading, scenariosDir, loadScenarios } from '@truecourse/guard-runner'
-import { RawGeneratedScenarioSchema, type RawGeneratedScenario } from './schemas.js'
+import { RawGeneratedScenarioSchema, rawScenarioSchemaFor, type RawGeneratedScenario } from './schemas.js'
 import { flattenZodError } from './validate.js'
 import type { SectionInput } from './section-plan.js'
 
@@ -117,8 +117,17 @@ export function buildFlowScenario(opts: {
  * them — so a worker yaml carrying any is refused with the reason, not silently
  * stripped. Returns a model-facing error line on any defect (the tool result's
  * isError seed).
+ *
+ * Pass the SURFACE the engine asked for and the draft parses against that
+ * surface's own arm: a union failure flattens to one `(root): Invalid input`,
+ * while the arm reports the real field path (`steps.1.click.role: Invalid enum
+ * value…`) — the difference between a worker that fixes its draft in one turn
+ * and one that loops until it retires. Surface-less callers keep the union.
  */
-export function parseRawScenarioYaml(text: string): { raw: RawGeneratedScenario } | { error: string } {
+export function parseRawScenarioYaml(
+  text: string,
+  surface?: GuardDriverId,
+): { raw: RawGeneratedScenario } | { error: string } {
   let loaded: unknown
   try {
     loaded = yaml.load(text)
@@ -136,7 +145,8 @@ export function parseRawScenarioYaml(text: string): { raw: RawGeneratedScenario 
         'Author ONLY title, setup?, steps, normalize?.',
     }
   }
-  const parsed = RawGeneratedScenarioSchema.safeParse(loaded)
+  const schema = surface ? rawScenarioSchemaFor(surface) : RawGeneratedScenarioSchema
+  const parsed = schema.safeParse(loaded)
   if (!parsed.success) return { error: `invalid scenario: ${flattenZodError(parsed.error)}` }
   return { raw: parsed.data }
 }

@@ -70,12 +70,14 @@ import {
   runInstall,
   resolveEntry,
   resolveApiServers,
+  resolveWebSurface,
   credentialServers,
   buildRouteManifest,
   loadRecipe,
   loadDependencyCatalog,
   recipePath,
   preflightEntry,
+  preflightBrowser,
   formatEntryPreflightError,
   defaultGuardExecutor,
   loadResolvedExternals,
@@ -524,6 +526,8 @@ export interface GenerateGuardsOptions {
   escalateAutoResolveAfter?: number
   /** Interface mapping seam — see {@link InterfaceProvider}. */
   interfaces?: InterfaceProvider
+  /** Test seam for the web-browser preflight; production checks the real machine. */
+  browserPreflight?: typeof preflightBrowser
   /**
    * The hard gate: refuse to run without a committed `recipe.json` instead of
    * deriving one. TRUE on every working-tree path (`truecourse guard setup` owns
@@ -1637,6 +1641,30 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     })),
   )
 
+  // THE BROWSER PREFLIGHT: every web worker execution needs Chromium, and the
+  // engine never downloads a browser mid-run — so a missing one is judged ONCE,
+  // before a session, the app build or the web build is paid for, not
+  // discovered inside every worker (documenso 2026-08-27: 130 web sessions each
+  // probed their way to the same missing binary, retired their flows, and
+  // bumped the auto-resolve ledger toward escalation on a fault of the machine,
+  // not the flows). One loud error, per the run-refusal doctrine; the affected
+  // flows stay unsettled (`errored` ⇒ no inputs hash), so the next generate
+  // re-attempts them once the browser exists. Api and cli work proceeds.
+  if (authorTasks.some((t) => t.surface === 'web')) {
+    const browser = await (options.browserPreflight ?? preflightBrowser)()
+    if (!browser.ok) {
+      const webTasks = authorTasks.filter((t) => t.surface === 'web')
+      for (const t of webTasks) t.errored = true
+      errors.push({
+        doc: webTasks[0].work.primary.doc,
+        anchor: webTasks[0].work.primary.anchor,
+        message:
+          `the web surface cannot be driven: ${browser.reason} — ` +
+          `${webTasks.length} web flow(s) skipped, left unsettled for the next generate`,
+      })
+    }
+  }
+
   // The build is kicked ONCE, as soon as there is anything to author, so it overlaps
   // authoring; every birth round then reuses it (skipBuild). A run with no authoring
   // work never builds at all. The optional recipe install runs first; a failed
@@ -1648,11 +1676,25 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         const install = await runInstall(repoRoot, recipe.install, recipe.env)
         if (!install.ok) return install
       }
-      return runBuild(repoRoot, recipe.build, recipe.env)
+      const build = await runBuild(repoRoot, recipe.build, recipe.env)
+      if (!build.ok) return build
+      // The WEB surface's own build, only when this run authors for it: every
+      // worker execution runs with skipBuild, so if the client is not compiled
+      // HERE it never is — and every web scenario dies red for a reason no claim
+      // named. Built with the SURFACE's env (`recipe.env` ⊕ `web.env`), the same
+      // env the serve process gets, exactly as `guard run` does.
+      const web = resolveWebSurface(recipe)
+      // `!t.errored` carries the browser preflight: a run that cannot drive the
+      // browser must not pay for the client compile either.
+      if (web?.build && authorTasks.some((t) => t.surface === 'web' && !t.errored)) {
+        const webBuild = await runBuild(repoRoot, web.build, web.env)
+        if (!webBuild.ok) return webBuild
+      }
+      return build
     })()
     return buildMemo
   }
-  if (authorTasks.length > 0) void startBuild()
+  if (authorTasks.some((t) => !t.errored)) void startBuild()
   let buildAnnounced = false
   const awaitBuild = async (): Promise<BuildResult> => {
     if (!buildAnnounced) {
@@ -1844,11 +1886,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // worker spends), and persist below consumes the containers the routing
   // fold fills, so the settle invariant and the manifest mechanics are
   // unchanged.
-  if (authorTasks.length > 0) {
+  if (authorTasks.some((t) => !t.errored)) {
     const build = await awaitBuild()
     if (!build.ok) {
       const message = `build failed (\`${build.command}\`)${build.timedOut ? ' — timed out' : ''}`
       for (const task of authorTasks) {
+        if (task.errored) continue // the browser preflight already reported it
         task.errored = true
         errors.push({
           doc: task.work.primary.doc,
@@ -1862,8 +1905,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       // tasks are skipped (their flows stay unsettled — the ONE loud error
       // was recorded by `deadEntry`) before a session is spent. Api tasks
       // proceed: the api server has its own preflight inside the runner.
-      const dead = authorTasks.some((t) => t.surface !== 'api') && (await deadEntry())
-      const runnable = dead ? authorTasks.filter((t) => t.surface === 'api') : authorTasks
+      // `!t.errored` carries the browser preflight's web skips the same way.
+      const dead = authorTasks.some((t) => t.surface !== 'api' && !t.errored) && (await deadEntry())
+      const runnable = authorTasks.filter((t) => !t.errored && (!dead || t.surface === 'api'))
       if (dead) for (const t of authorTasks) if (t.surface !== 'api') t.errored = true
 
       // Latches. A C4 anomaly aborts AFTER the pool, before persist — nothing
@@ -2271,7 +2315,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             return lines.join('\n')
           },
           runScenario: async (yamlText) => {
-            const parsed = parseRawScenarioYaml(yamlText)
+            const parsed = parseRawScenarioYaml(yamlText, task.surface)
             if ('error' in parsed) return { content: parsed.error, isError: true }
             const defect = preflightDefect(task, parsed.raw)
             if (defect) return { content: `pre-flight defect (not executed): ${defect}`, isError: true }
@@ -2285,7 +2329,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             }
           },
           submitScenario: async (yamlText, expectedReds, judge) => {
-            const parsed = parseRawScenarioYaml(yamlText)
+            const parsed = parseRawScenarioYaml(yamlText, task.surface)
             if ('error' in parsed) return { content: parsed.error, isError: true }
             const defect = preflightDefect(task, parsed.raw)
             if (defect) return { content: `pre-flight defect (not executed): ${defect}`, isError: true }
@@ -3525,7 +3569,7 @@ function buildAuthorCtx(
     // scenario with web steps), and gated on non-empty like every grounding block.
     ...(grounding.resources.length > 0 ? { resources: grounding.resources } : {}),
     areaTags: [...new Set(sections.flatMap((s) => s.areaTags))],
-    driver: surface === 'api' ? 'api' : 'cli',
+    driver: surface,
     ...(surface === 'api'
       ? {
           recipeServe: bound ? [...bound.serve] : defaultServerServe(recipe),
@@ -3565,9 +3609,23 @@ function buildAuthorCtx(
               }
             : {}),
         }
-      : { recipeEntry: recipe.entry }),
+      : surface === 'web'
+        ? webPreparationCtx(recipe)
+        : { recipeEntry: recipe.entry }),
     recipeBuild: recipe.build,
     probes,
+  }
+}
+
+/** The web batch's preparation framing: how the surface is served and probed, plus
+ *  the cli entrypoint when the repo has one (a web scenario's seeding `run` steps
+ *  append to it). Defaults come from `resolveWebSurface` — the ONE place the web
+ *  block's defaults exist — so the prompt can never disagree with the runner. */
+function webPreparationCtx(recipe: Recipe): Pick<AuthorUserContext, 'recipeServe' | 'recipeHealthPath' | 'recipeEntry'> {
+  const web = resolveWebSurface(recipe)
+  return {
+    ...(web ? { recipeServe: [...web.serve], recipeHealthPath: web.healthPath } : {}),
+    ...(recipe.entry ? { recipeEntry: recipe.entry } : {}),
   }
 }
 

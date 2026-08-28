@@ -1109,10 +1109,9 @@ describe('Guard flow read surfaces', () => {
       const res = await request(app).get(url('interfaces')).expect(200);
       const bySurface = new Map<string, any>(res.body.surfaces.map((s: any) => [s.surface, s]));
       expect(bySurface.get('cli')).toMatchObject({ label: 'CLI', runnable: true, interfaces: 4, detected: true, source: 'tree' });
-      // web's runner shipped, but generate cannot author a web scenario yet, so
-      // its row stays awaiting (item 132)…
-      expect(bySurface.get('web')).toMatchObject({ label: 'Web', runnable: false, waitingLabel: 'Needs web driver', interfaces: 0, detected: false });
-      // …as does a surface whose runner has not shipped at all.
+      // web is runnable since the flow worker grew its authoring arm…
+      expect(bySurface.get('web')).toMatchObject({ label: 'Web', runnable: true, interfaces: 0, detected: false });
+      // …while a surface whose runner has not shipped stays awaiting.
       expect(bySurface.get('tui')).toMatchObject({ label: 'TUI', runnable: false, waitingLabel: 'Needs TUI driver', interfaces: 0, detected: false });
     });
 

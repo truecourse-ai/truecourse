@@ -52,10 +52,10 @@ describe('guard scenario schema — api driver', () => {
   })
 
   it('the api driver is runnable in the registry', () => {
-    expect(runnableDriverIds).toEqual(['cli', 'api'])
+    expect(runnableDriverIds).toEqual(['cli', 'api', 'web'])
     // desktop + mobile are recorded interface types, appended last (the enum order
     // is fingerprinted into the extraction prompt).
-    expect(awaitingDriverIds).toEqual(['web', 'tui', 'library', 'desktop', 'mobile'])
+    expect(awaitingDriverIds).toEqual(['tui', 'library', 'desktop', 'mobile'])
     expect(isRunnableDriver('api')).toBe(true)
   })
 

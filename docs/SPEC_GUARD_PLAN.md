@@ -7521,3 +7521,32 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
       the cache key moves with the prompt fingerprint, invalidating pre-doctrine
       cached outcomes.
     Related: [137], [118] (the draft checkpoint this composes with), [128].
+
+
+139. **A missing browser was discovered 130 times inside the worker pool and
+    cached as 117 permanent-looking retirements (documenso, 2026-08-27).**
+    STATUS: BUILT (2026-08-28). The first generate after the [137] seed fix got
+    past login on every web flow and then hit the machine: Chromium was not
+    installed, so 130 web workers each probed their way to the same
+    `BROWSER_MISSING_MESSAGE`, retired their flows (117 identical
+    `lastEvidence` lines), and bumped the auto-resolve ledger toward
+    escalation on a fault of the environment, not the flows. The engine never
+    downloads a browser mid-run — correct — but nothing judged its absence
+    before the pool spent ~5M tokens rediscovering it per session.
+    What was already right: a retirement that commits no row records
+    `generationInputsHash: null`, so the flows DO re-attempt on the next
+    generate (the poison is per-run cost + ledger bumps, not a permanent skip).
+    FIX: `preflightBrowser()` (guard-runner `web/browser.ts`, the
+    reason-bearing form of `isBrowserInstalled`) is run ONCE in generate when
+    any authored task targets the web surface, before the build is kicked. A
+    refusal marks every web task `errored` — one loud error row carrying the
+    remedy (the run-refusal doctrine: never one copy per flow), no session
+    spent, no ledger bump, `web.build` and (on a web-only run) `recipe.build`
+    skipped — and the flows stay unsettled for the generate after the install.
+    Api and cli tasks proceed, mirroring the dead-entry short-circuit beside
+    it. Test seam: `GenerateGuardsOptions.browserPreflight`; pinned in
+    `tests/guard-generator/generate-web-preflight.test.ts`, including the
+    re-attempt on the run after the browser appears.
+    Related: [135] (the arm this gates), [137]/[138] (the same incident's seed
+    half), [77] (setup as the home of environment facts — a future setup row
+    could surface the browser earlier still).

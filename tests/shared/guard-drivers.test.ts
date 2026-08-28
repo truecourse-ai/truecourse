@@ -23,12 +23,12 @@ import { describe, it, expect } from 'vitest'
 import { GUARD_DRIVERS, driverRecipeKey, isRunnableDriver } from '@truecourse/shared'
 
 describe('the guard driver registry', () => {
-  it('keeps web UNRUNNABLE until generate can author it, though its runner shipped', () => {
-    // `guard run` executes web scenarios; `guard generate` cannot author one —
-    // the flow-worker has an api arm and a cli arm, and nothing else. Runnable
-    // means BOTH, so the row stays false and web work settles as awaiting-driver
-    // instead of burning a session that can only fail (item 132).
-    expect(isRunnableDriver('web')).toBe(false)
+  it('flips web runnable now that generate can author it', () => {
+    // Runnable means authorable AND executable. The runner shipped long before
+    // the authoring arm; flipping this row on the runner alone handed web tasks
+    // CLI tooling (121 doomed sessions on documenso). It flipped for good only
+    // with the flow worker's web arm — prompt, raw schema, surface-keyed parse.
+    expect(isRunnableDriver('web')).toBe(true)
     expect(driverRecipeKey('web')).toBe('web')
   })
 

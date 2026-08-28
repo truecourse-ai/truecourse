@@ -137,13 +137,29 @@ function isBinaryPresent(chromium: BrowserType): boolean {
   }
 }
 
+/** The browser preflight's verdict — the refusal carries the exact remedy. */
+export type BrowserPreflight = { ok: true } | { ok: false; reason: string }
+
+/**
+ * Whether the browser the runner would launch is ready — `playwright-core`
+ * installed AND its Chromium binary present on this machine — with the refusal
+ * reason when it is not. Judged ONCE per run by callers that are about to
+ * spend on web executions: a missing browser fails every one of them
+ * identically, so discovering it inside each is N copies of one machine fact.
+ */
+export async function preflightBrowser(): Promise<BrowserPreflight> {
+  const loaded = await loadChromium()
+  if (!loaded.ok) return { ok: false, reason: loaded.reason }
+  if (!isBinaryPresent(loaded.chromium)) return { ok: false, reason: BROWSER_MISSING_MESSAGE }
+  return { ok: true }
+}
+
 /**
  * True when the browser the runner would launch is ready — `playwright-core`
  * installed AND its Chromium binary present on this machine.
  */
 export async function isBrowserInstalled(): Promise<boolean> {
-  const loaded = await loadChromium()
-  return loaded.ok && isBinaryPresent(loaded.chromium)
+  return (await preflightBrowser()).ok
 }
 
 /**

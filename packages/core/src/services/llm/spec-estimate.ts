@@ -129,6 +129,7 @@ import {
   FLOW_WORKER_CACHE_NAME,
   FLOW_WORKER_CLI_SYSTEM_PROMPT,
   FLOW_WORKER_SESSION_KIND,
+  flowWorkerSystemPrompt,
   flowWorkerPromptFingerprint,
   CachedWorkerEntrySchema,
   FIDELITY_SESSION_BUDGET,
@@ -1247,7 +1248,12 @@ export async function estimateGuardTokens(
       items: realization.workerItems,
       maxItems: realization.maxPairs,
       budget: FLOW_WORKER_BUDGET,
-      systemPromptChars: FLOW_WORKER_CLI_SYSTEM_PROMPT.length,
+      // The LARGEST prepared surface's prompt — the ceiling convention; pricing
+      // every worker at the cli prompt under-counts a web-preparing repo ~2×.
+      systemPromptChars: Math.max(
+        FLOW_WORKER_CLI_SYSTEM_PROMPT.length,
+        ...preparedSurfaces(repoRoot).map((s) => flowWorkerSystemPrompt(s).length),
+      ),
       briefingChars: workerBodyChars,
       bound: pairBound,
     }),

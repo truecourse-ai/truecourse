@@ -23,13 +23,23 @@
 
 import { createHash } from 'node:crypto'
 import type { InterfaceResource, InvalidMatchPattern, OutputExcerpts } from '@truecourse/shared'
-import { describeWebLocator } from '@truecourse/shared'
+import {
+  describeWebLocator,
+  GuardStreamMatcherSchema,
+  GuardWebCapturesSchema,
+  GuardWebExpectSchema,
+  GuardWebFileSchema,
+  GuardWebLocatorSchema,
+  GuardWebStateSchema,
+  type GuardDriverId,
+} from '@truecourse/shared'
 import { jsonSchemaHint, OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm'
 import {
   RecipeProposalSchema,
   SeedProposalSchema,
   RawGeneratedCliScenarioSchema,
   RawGeneratedApiScenarioSchema,
+  RawGeneratedWebScenarioObjectSchema,
   FidelityReviewSchema,
   RealizationMatchSchema,
 } from './schemas.js'
@@ -42,6 +52,17 @@ import type { MinedExampleBlock } from './examples.js'
  *  per runnable driver: each authoring prompt embeds its own. */
 const SCENARIO_JSON_SCHEMA = jsonSchemaHint(RawGeneratedCliScenarioSchema.strip())
 const API_SCENARIO_JSON_SCHEMA = jsonSchemaHint(RawGeneratedApiScenarioSchema.strip())
+/** The web arm's hint NAMES its deeply-shared sub-schemas: the locator union (with
+ *  its 80-role enum) recurs in every verb, expectation and capture, and inlined it
+ *  renders at ~119K characters — named under `definitions`, ~18K. */
+const WEB_SCENARIO_JSON_SCHEMA = jsonSchemaHint(RawGeneratedWebScenarioObjectSchema.strip(), {
+  webLocator: GuardWebLocatorSchema,
+  webState: GuardWebStateSchema,
+  webExpect: GuardWebExpectSchema,
+  webCaptures: GuardWebCapturesSchema,
+  webFile: GuardWebFileSchema,
+  matcher: GuardStreamMatcherSchema,
+})
 /** The extraction + recipe-proposal JSON Schemas, from the runner's Zod source. */
 const RECIPE_JSON_SCHEMA = jsonSchemaHint(RecipeProposalSchema)
 /** The seed-draft JSON Schema, from the engine's own Zod source. */
@@ -535,6 +556,222 @@ Exactly one of the two. No prose, no fences — only the JSON object.`
  */
 export const GENERATE_API_PROMPT_FINGERPRINT = fingerprint(GENERATE_API_SYSTEM_PROMPT)
 
+// ---------------------------------------------------------------------------
+// Scenario authoring — web driver
+// ---------------------------------------------------------------------------
+
+export const GENERATE_WEB_SYSTEM_PROMPT = `\
+You author ONE guard SCENARIO — a declarative, executable test that walks a spec
+FLOW through an application's WEB SURFACE, in a real browser. A flow is a
+user-goal path: an ordered list of MILESTONES, each one a spec claim. You are
+given the flow, each milestone's claim and the section text it came from, a
+REALIZATION PLAN naming the screens and tasks that serve each milestone, and how
+the surface is built and served. You return ONE scenario whose steps walk the
+path in order. No prose, only JSON.
+
+# No tools, no repository access
+You have NO tools and NO repository access. Tool-call JSON or \`<tool_use>\` markup is
+invalid output — your response can ONLY be the JSON object described below. You never
+need to inspect code: author steps from what the CLAIMS and their sections state and
+what the PLACES listed in the user prompt really render, and when a scenario fails
+birth validation the retry supplies the failing step's observed page state — use it
+to fix LOCATORS, ADDRESSES, and SETUP, never to decide WHAT to assert (see the next
+rule).
+
+# Assertions come from the claim, never the observed page
+Every ASSERTION must state what the milestone's CLAIM — read against its section's
+text — says: the exact text it quotes, the address it names, the state it promises,
+adapting only placeholders to the concrete values your scenario creates. If the page
+demonstrably behaves DIFFERENTLY from the claim, you MUST STILL assert the CLAIM'S
+version. The scenario then fails birth — and that is the CORRECT, desired outcome:
+the doc-vs-code disagreement surfaces as a finding. Never weaken, generalize, or
+swap a claimed assertion for a softer, effect-only check (asserting "some text
+changed" where the claim quotes a message) to make a scenario pass — a green test
+that proves less than the claim is the worst outcome.
+
+# Faithfulness — the prime directive
+Assert only what each claim, read against its section's text, states. A scenario
+must never claim more than the prose does.
+
+# The doc's own examples run VERBATIM
+Some milestone sections contain a WORKED EXAMPLE: a fenced block whose surrounding
+prose promises an outcome for it. The user prompt repeats each such block byte-exact
+between DOC EXAMPLE markers. When the example is what the scenario RUNS or FEEDS the
+app — a file it imports, a value it fills in — copy the bytes BETWEEN the markers
+EXACTLY (into \`setup.files\` content, a \`fill\` value, an upload's \`text\`), never a
+paraphrase and never a reformat; a deliberately-broken example must stay broken. When
+the prose also quotes the example's OUTCOME, the assertion states that outcome exactly
+as quoted. A block nothing runs (a pure illustration) constrains nothing.
+
+# The path is the point: one scenario, every milestone
+The flow's milestones are ORDERED, and the state one leaves behind is what the next
+acts on: create a thing, see it listed, open it, change it. Author ONE scenario that
+walks them in order in a single sandbox world.
+- Every milestone MUST be realized by at least one step, and each such step carries
+  \`milestone: <that milestone's number>\`. A step that only prepares the world (a
+  login, a seeding action nothing asserts) carries NO \`milestone\`.
+- A milestone may take several steps (act, then observe): annotate each of them
+  with that milestone's number.
+- Never renumber, merge, split, skip, or invent a milestone — the numbers are given.
+- When a milestone needs world-state the milestones before it do not produce, declare
+  it in \`setup\` or seed it with a plumbing step — never drop the milestone.
+
+# Two-sided promises get two-sided tests
+Some claims state BOTH halves of a behavior: what DOES happen and what does NOT —
+the input a form ACCEPTS and the one it REJECTS, the item a filter SHOWS and the one
+it HIDES. BOTH halves are that milestone's contract. A scenario exercising only the
+positive half is HALF a test: it would STILL PASS if the logic broke so the excluded
+case wrongly succeeded too. When a milestone's claim names what must NOT happen,
+realize that milestone with steps for BOTH halves — each carrying its number — and
+assert the exclusion OBSERVABLY (the item absent from the page's text, the
+documented error message shown, the control disabled). A scenario that drops the
+exclusion half is weak and will be flagged.
+
+# The verb vocabulary — six verbs, closed
+A web step is one of: \`navigate\` (go to a surface-relative path), \`click\`
+(activate an element), \`fill\` (type a \`value\` into an input; empty clears it),
+\`upload\` (hand a \`file\` to the control a user would operate), \`history\` (the
+browser's own \`back\`/\`forward\` — the claim "Back returns you" is about the
+BROWSER, never re-navigation), and \`expect\` (assert on the page without acting).
+There is deliberately no hover, no scroll, no keyboard — and no sleep verb, ever:
+every expectation WAITS on observable state, bounded by \`timeoutMs\`, so "the page
+catches up" is expressed by asserting what it must show, never by waiting a
+duration.
+
+# Every web step declares \`driver: web\`
+Every web step carries \`"driver": "web"\` — all six verbs, not only the ambiguous
+one. If it says \`web\`, the browser does it; a step without the tag is a cli or api
+step. (The rule exists because a step whose only verb is \`expect\` would otherwise
+be ambiguous against every other step's \`expect\` block.)
+
+# THE LOCATOR POLICY — address elements the way a user finds them
+Every element a step touches is addressed by a LOCATOR, and the locator family is
+closed to the handles a USER perceives:
+- The PRIMARY handle is role + accessible name: \`{ "role": "button", "name": "Save" }\`.
+  The role is a real ARIA role; the name is the element's label, text, or aria-label.
+- The five alternates, for elements a role+name does not reach: \`placeholder\` (the
+  prompt inside an empty input), \`label\` (the visible label of a form control),
+  \`text\` (the element's own visible words), \`title\` (the tooltip), \`alt\` (an
+  image's alt text). Each member is exclusive — one handle per locator.
+- NO CSS selectors, NO XPath, NO test ids: those address the IMPLEMENTATION, and a
+  scenario that addresses the implementation stops being a user-replayable probe of
+  the promise.
+- The match is case-insensitive substring by default; \`"exact": true\` demands the
+  whole string (use it when one name is a prefix of another).
+- A locator is STRICT: it must resolve to exactly ONE element. Two matches is a
+  genuine ambiguity and fails loudly. \`"pick": "first"\` is the one authored
+  exception, for a page that legitimately shows many controls reading the same (a
+  grid of slot buttons) where ANY serves the flow.
+- An element no user-perceivable handle reaches is NOT guessed at: the milestone
+  that needs it makes the flow blocked — name the unlocatable element in
+  \`blockedOn\`.
+The realization plan writes targets as \`<role> "<name>"\`. Translate them directly:
+\`click: button "Add Repository"\` becomes
+\`{ "driver": "web", "click": { "role": "button", "name": "Add Repository" } }\`, and
+\`fill: textbox "Repository path"\` becomes
+\`{ "driver": "web", "fill": { "role": "textbox", "name": "Repository path" }, "value": "…" }\`.
+
+# Addresses are SURFACE-RELATIVE
+A \`navigate\` path starts with \`/\` and never carries an origin — the sandbox
+allocates the port, so \`navigate: "/analyses/42"\`, never a host. \`expect.url\`
+matches \`pathname + search\` with the origin stripped: \`/notes?title=x\` is what a
+scenario writes and what a failure quotes.
+
+# What an expectation may assert
+A web \`expect\` waits on, then asserts, one or more of:
+- \`text\` — the page's visible text (or, with \`within\`, one element's), using the
+  same equals | contains | matches vocabulary every stream matcher has;
+- \`url\` — the address, origin-stripped (above);
+- \`visible\` — an element (or a list of them) that must be present and visible: the
+  plainest form of "the page arrived";
+- \`state\` — an ARIA state of one element: checked | pressed | selected | expanded |
+  disabled. These are the states with NO text — the active tab, the switch's
+  position — and the state assertion is the only honest form of such a claim. A
+  control that exposes no such state fails the assertion by saying so, and that
+  failure is a real finding: the control is unobservable to a screen reader too.
+- \`attribute\` / \`class\` — what the page keeps OUTSIDE its text, on the document
+  element by default: a theme (\`class\` has \`dark\`), a locale, a \`data-\` fact.
+  \`class\` matches a TOKEN, the way \`classList.contains\` does.
+
+# Mixing vocabularies — one sandbox, one world
+Your scenario runs in ONE sandbox world shared by three vocabularies, and two other
+step kinds may appear beside the web steps:
+- a cli step — \`run\` is argv APPENDED to the program entrypoint the user prompt
+  names — may SEED the world the browser then sees (create the record a screen must
+  list);
+- an api \`request\` step may VERIFY through the server what the UI just wrote (and
+  \`capture\` ids from responses).
+Both are ordinary steps and may carry a \`milestone\`. Two prohibitions: a milestone
+about a SCREEN must be realized by a web step — a \`request\` alone proves the API,
+not the page — and the api lifecycle verbs (\`boot\`, \`signal\`, \`logs\`) do not
+exist here: the sandbox owns the served surface's lifecycle. Values cross the
+boundary through ONE capture namespace: a cli/api capture is read back as \`\${name}\`
+and a web capture as \`\${captured:<name>}\`, in any authored string of any step.
+
+# How a scenario runs
+The web surface is built once (its build command, when it declares one) and served
+FRESH for each scenario in an empty sandbox working directory on a runner-chosen
+port, health-polled before the first browser step. The browser, the cli entrypoint
+and the served app all share that one sandbox cwd — one world. Seed inputs
+declaratively with \`setup.files\` (path → content) and \`setup.env\` (extra env for
+the served process); \`setup.git\` declares a git repo the sandbox starts with. There
+is no shell escape.
+
+# Web captures — carry what the page shows
+A web step may take a value OFF the page for later steps:
+\`"capture": { "<name>": { "from": <locator>, "get": "text" | "value" | "count" |
+{ "state": … } | { "attribute": … } } }\` — \`text\` is the default; add
+\`"number": "<regex with ONE capturing group>"\` to slice a figure out of a sentence
+("seats left: 3"). Later steps read it as \`\${captured:<name>}\`. A capture whose
+element or pattern finds nothing FAILS its step — capture only what the page really
+shows. Whenever the scenario CREATES a resource with a client-chosen identifier,
+embed the run-unique \`\${unique}\` token in it so parallel and repeated runs never
+collide.
+
+# World-state capabilities
+\`setup\` declares the WORLD a test needs — never code, never shell. The sandbox is
+otherwise bare: no network egress beyond the surface under test, no credentials, no
+external systems. When the flow needs world-state neither \`setup\` nor the app's own
+UI can produce — an authenticated session no supplied credential opens, a screen the
+recipe's web block does not serve, a third-party service, pre-existing DATA no
+screen can create — author NOTHING: omit \`scenario\` AND name the missing capability
+in \`blockedOn\`. An honest blocked flow is right; a scenario that fakes the missing
+world is wrong. NAME the blocker with the right noun: \`"credentials"\` for a missing
+secret or login, the SERVICE ITSELF for a third party (\`"stripe"\`), the unlocatable
+element when no user-perceivable handle reaches it, and \`"missing-data"\` plus a
+second entry naming the entity when pre-existing data is what is missing.
+
+# The scenario schema (CANONICAL)
+This JSON Schema is generated from the engine's Zod definition — match it exactly.
+It contains ONLY the fields you author; the engine assigns the scenario's id, its
+flow/interface references, and its section bindings itself, so do not emit any
+field that is not in the schema.
+${WEB_SCENARIO_JSON_SCHEMA}
+
+# The title states the PROMISE, never the expected output
+\`title\` is what the DOCUMENT promises, in the words a reader of the doc would use
+— "Creating a note shows it on the board", not "the page contains \`Note created\`"
+and not "the url is /notes". The assertions are already in the steps; a title that
+repeats a literal expected value tells a reviewer nothing about what the test is
+FOR, and reads as an implementation detail the moment the wording changes.
+
+# Determinism
+No timing assumptions, no retries, no assertions on values the app generates
+non-deterministically (timestamps, ids) unless you \`capture\` them first or list the
+matching \`normalize\` entry (timestamps | abs-paths | versions | durations). Prefer
+\`contains\` on the meaningful phrase over \`equals\` on a whole page's text, and
+prefer asserting a DELTA against a captured value over an absolute number that only
+tests the state the world happened to be in.
+
+# Output — ONE object, carrying one scenario
+Return EXACTLY ONE JSON object:
+  { "scenario": { … the scenario, its steps carrying \`milestone\` … } }
+or, when the flow needs world-state the sandbox cannot provide:
+  { "blockedOn": ["<capability, e.g. credentials|missing-data|<service>|<the unlocatable element>"] }
+Exactly one of the two. No prose, no fences — only the JSON object.`
+
+export const GENERATE_WEB_PROMPT_FINGERPRINT = fingerprint(GENERATE_WEB_SYSTEM_PROMPT)
+
 /**
  * A birth-validation failure attached to a flow scenario on a retry so the model
  * can fix it. Extends the shared excerpt pair: the failing run's RAW program output
@@ -665,13 +902,14 @@ export interface AuthorUserContext {
   areaTags: string[]
   /** The surface this scenario runs on — selects the system prompt + the
    *  preparation framing below. */
-  driver: 'cli' | 'api'
-  /** cli batches: the recipe entrypoint argv, so the model knows what `run` is
-   *  appended to. Absent on api batches. */
+  driver: GuardDriverId
+  /** cli and web batches: the recipe entrypoint argv, so the model knows what
+   *  `run` is appended to. Absent on api batches, and on web batches whose
+   *  recipe declares no entry. */
   recipeEntry?: string[]
-  /** api batches: the recipe's serve argv (the runner boots it per scenario). */
+  /** api and web batches: the surface's serve argv (the runner boots it per scenario). */
   recipeServe?: string[]
-  /** api batches: the health endpoint the runner polls before any step runs. */
+  /** api and web batches: the health endpoint the runner polls before any step runs. */
   recipeHealthPath?: string
   /**
    * api batches: the recipe server this scenario is BOUND to — its name,
@@ -911,26 +1149,43 @@ function indentBlock(text: string): string {
     .join('\n')
 }
 
+/** The preparation framing that heads the author prompt, per driver. The cli and
+ *  api arms' lines are byte-identical to what they always were — only web adds a
+ *  shape of its own. */
+function preparationLines(ctx: AuthorUserContext): string[] {
+  if (ctx.driver === 'api') {
+    return [
+      // Name the bound service FIRST when the repo has more than one —
+      // every line under it describes that server and nothing else.
+      ...(ctx.server
+        ? [
+            `Service: "${ctx.server.name}"${ctx.server.app ? ` — the workspace app ${ctx.server.app}` : ''}${ctx.server.description ? ` (${ctx.server.description})` : ''}.`,
+            'This repository runs several HTTP services; your scenario runs against THIS one only.',
+          ]
+        : []),
+      `Service serve command: ${JSON.stringify(ctx.recipeServe)}  (the runner boots it fresh per scenario and injects PORT)`,
+      `Health endpoint: GET ${ctx.recipeHealthPath ?? '/'}  (polled until 2xx before any step runs)`,
+      `Build command: ${ctx.recipeBuild}`,
+    ]
+  }
+  if (ctx.driver === 'web') {
+    return [
+      `Web surface serve command: ${JSON.stringify(ctx.recipeServe)}  (the runner boots it fresh per scenario and injects PORT)`,
+      `Health endpoint: GET ${ctx.recipeHealthPath ?? '/'}  (polled until 2xx before the first browser step)`,
+      ...(ctx.recipeEntry
+        ? [`Program entrypoint: ${JSON.stringify(ctx.recipeEntry)}  (a cli step's \`run\` argv is appended to this)`]
+        : []),
+      `Build command: ${ctx.recipeBuild}`,
+    ]
+  }
+  return [
+    `Program entrypoint: ${JSON.stringify(ctx.recipeEntry)}  (your step \`run\` argv is appended to this)`,
+    `Build command: ${ctx.recipeBuild}`,
+  ]
+}
+
 export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
-  const lines: string[] =
-    ctx.driver === 'api'
-      ? [
-          // Name the bound service FIRST when the repo has more than one —
-          // every line under it describes that server and nothing else.
-          ...(ctx.server
-            ? [
-                `Service: "${ctx.server.name}"${ctx.server.app ? ` — the workspace app ${ctx.server.app}` : ''}${ctx.server.description ? ` (${ctx.server.description})` : ''}.`,
-                'This repository runs several HTTP services; your scenario runs against THIS one only.',
-              ]
-            : []),
-          `Service serve command: ${JSON.stringify(ctx.recipeServe)}  (the runner boots it fresh per scenario and injects PORT)`,
-          `Health endpoint: GET ${ctx.recipeHealthPath ?? '/'}  (polled until 2xx before any step runs)`,
-          `Build command: ${ctx.recipeBuild}`,
-        ]
-      : [
-          `Program entrypoint: ${JSON.stringify(ctx.recipeEntry)}  (your step \`run\` argv is appended to this)`,
-          `Build command: ${ctx.recipeBuild}`,
-        ]
+  const lines: string[] = preparationLines(ctx)
   // Declared api credentials (Phase 1): advertise the available `{{cred:<name>}}`
   // placeholders and the header each is injected as — never the secret value.
   // Gated so a credential-less repo's prompt is byte-identical to before.
