@@ -6,7 +6,7 @@ import {
   createWebhookRouter,
   type BaselineTrigger,
   type RepoLinkRecord,
-} from '../../packages/scm-github/src/index';
+} from '../../packages/github-app/src/index';
 import { MemoryGateStore } from './memory-store';
 
 const SECRET = 'whsec';

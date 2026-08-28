@@ -25,7 +25,7 @@ import { promisify } from 'node:util';
 import { createAppError } from '@truecourse/core/lib/errors';
 import { getGlobalDir } from '@truecourse/core/config/paths';
 import { log } from '@truecourse/core/lib/logger';
-import { cloneAuthArgs, cloneUrl } from '@truecourse/scm-github';
+import { cloneAuthArgs, cloneUrl } from '@truecourse/github-app';
 
 const execFileAsync = promisify(execFile);
 

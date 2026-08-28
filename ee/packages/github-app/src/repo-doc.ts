@@ -14,7 +14,7 @@ import {
   type GateStore,
   installationOctokit,
   splitRepo,
-} from '@truecourse/scm-github';
+} from '@truecourse/github-app';
 
 export async function readRepoDocFromGithub(
   cfg: GithubAppConfig,

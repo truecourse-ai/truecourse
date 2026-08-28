@@ -4,7 +4,7 @@
  * actor-triggered run, and the fork check (a head in a different repo).
  */
 
-import type { PullRequestPayload } from '@truecourse/scm-github';
+import type { PullRequestPayload } from '@truecourse/github-app';
 
 /** PR actions that (re)trigger our handlers — one shared list for all of them. */
 export const PR_TRIGGER_ACTIONS = ['opened', 'synchronize', 'reopened'];

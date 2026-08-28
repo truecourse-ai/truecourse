@@ -27,7 +27,7 @@
     "@truecourse/guard-generator": "workspace:*",
     "@truecourse/guard-runner": "workspace:*",
     "@truecourse/llm": "workspace:*",
-    "@truecourse/scm-github": "workspace:*",
+    "@truecourse/github-app": "workspace:*",
     "@truecourse/shared": "workspace:*",
     "@types/express": "^5.0.6",
     "@types/js-yaml": "^4.0.9",

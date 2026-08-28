@@ -827,7 +827,7 @@ A sketch, not a file list. Names are illustrative.
 - `packages/db/` (schema and migrations), `packages/store/` (the one
   store implementation), `packages/jobs/` (runner, events, chains)
 - `packages/scm/` (the provider contract, the gate, onboarding, the
-  pull-request model), `packages/scm-github/` (adapter one), later
+  pull-request model), `packages/github-app/` (adapter one), later
   `packages/scm-gitlab/`, `packages/scm-azure-devops/`
 - `packages/entitlements/` (plans, resolver, license keys)
 - `tools/cli/` (login, run, status, pull)

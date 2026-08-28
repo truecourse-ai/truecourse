@@ -19,7 +19,7 @@ import {
   createComment,
   updateComment,
   type OctokitClient,
-} from '@truecourse/scm-github';
+} from '@truecourse/github-app';
 import { decideCodeQuality, type GateSeverity } from './gate.js';
 import {
   GATE_MARKER,

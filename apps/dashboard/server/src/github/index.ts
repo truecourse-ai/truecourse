@@ -1,7 +1,7 @@
 /**
  * The GitHub App connection, as this server wires it.
  *
- * `@truecourse/scm-github` owns the protocol — the webhook receiver, the connect
+ * `@truecourse/github-app` owns the protocol — the webhook receiver, the connect
  * API, the link store. This module owns what connecting a repository MEANS here:
  * the `gh_repos` row IS the connection. Nothing is cloned at connect time — the
  * work-tree provider installed here clones per run (spec scan now; guard runs
@@ -33,7 +33,7 @@ import {
   type GithubAuth,
   type OctokitClient,
   type RepoLinkRecord,
-} from '@truecourse/scm-github';
+} from '@truecourse/github-app';
 import { getDb } from '../db.js';
 import { createRunClone } from '../services/run-clone.service.js';
 import { setWorkTreeProvider, type WorkTreeProvider } from '../services/work-tree.service.js';

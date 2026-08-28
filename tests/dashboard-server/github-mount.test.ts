@@ -111,8 +111,8 @@ import {
   setSessionsRootResolver,
   resetSessionsRootResolver,
 } from '@truecourse/core/lib/sessions-store';
-import type { OctokitClient } from '../../packages/scm-github/src/octokit';
-import { MemoryGateStore } from '../scm-github/memory-store';
+import type { OctokitClient } from '../../packages/github-app/src/octokit';
+import { MemoryGateStore } from '../github-app/memory-store';
 
 const ORG = 'org_A';
 const OTHER_ORG = 'org_B';

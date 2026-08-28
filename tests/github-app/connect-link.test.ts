@@ -16,8 +16,8 @@ import {
   createConnectRouter,
   type OnRepoLinked,
   type OnRepoUnlinked,
-} from '../../packages/scm-github/src/connect';
-import type { OctokitClient } from '../../packages/scm-github/src/octokit';
+} from '../../packages/github-app/src/connect';
+import type { OctokitClient } from '../../packages/github-app/src/octokit';
 import { MemoryGateStore } from './memory-store';
 
 const ORG = 'org_A';

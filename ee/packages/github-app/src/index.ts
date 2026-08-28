@@ -2,7 +2,7 @@
  * GitHub App (PR gate) — enterprise plugin module.
  *
  * Composed by `@truecourse/ee-server`'s `register()`: it mounts the connection
- * layer from `@truecourse/scm-github` (the public webhook receiver, the
+ * layer from `@truecourse/github-app` (the public webhook receiver, the
  * protected connect router) wired to the gate's handlers, mounts the gate's own
  * connect routes beside them, and reports whether the `github-gate` capability
  * should light up (i.e. the App is configured).
@@ -20,7 +20,7 @@ import {
   loadGithubAppConfig,
   splitRepo,
   updateComment,
-} from '@truecourse/scm-github';
+} from '@truecourse/github-app';
 import { notifierFromConfig } from './email.js';
 import { selectGateStore } from './store/index.js';
 import { runBaseline } from './baseline.js';
@@ -328,7 +328,7 @@ export {
   type BaselineTrigger,
   type PullRequestPayload,
   type IssueCommentPayload,
-} from '@truecourse/scm-github';
+} from '@truecourse/github-app';
 export { createConnectGateRouter, createRepoLinkedHook } from './connect-gate.js';
 export { runBaseline, resolveMergedPr, promoteMergedPrDecisions, type BaselineResult } from './baseline.js';
 export { handlePullRequestClosed } from './pr-closed.js';
@@ -348,7 +348,7 @@ export {
   getInstallationToken,
   cloneUrl,
   type GithubAuth,
-} from '@truecourse/scm-github';
+} from '@truecourse/github-app';
 export * from './store/index.js';
 
 // Phase 2: spec-doc scan
@@ -369,7 +369,7 @@ export {
   getFileContent,
   getPullRequest,
   type OctokitClient,
-} from '@truecourse/scm-github';
+} from '@truecourse/github-app';
 export { readRepoDocFromGithub } from './repo-doc.js';
 export { createGuardGateHeadsLookup } from './guard-gate-heads.js';
 

@@ -1,6 +1,6 @@
 /**
  * The gate's half of the connect API, mounted alongside the connection router
- * from `@truecourse/scm-github` at the same base path: per-repo gate settings
+ * from `@truecourse/github-app` at the same base path: per-repo gate settings
  * and the run feeds the dashboard reads. Also the post-link hook that router
  * calls once a repo is connected.
  */
@@ -19,7 +19,7 @@ import {
   type PrRecord,
   type PrState,
   type RepoLinkRecord,
-} from '@truecourse/scm-github';
+} from '@truecourse/github-app';
 import type {
   AuthUser,
   GithubRunSummary,

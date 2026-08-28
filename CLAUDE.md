@@ -19,7 +19,7 @@
 - `packages/shared/` — Shared Zod schemas and TypeScript types
 - `packages/db/` — `@truecourse/db`: the Postgres schema (drizzle) + `createDb` (one pool, migrations at boot, a dedicated advisory-lock pool). Used by the dashboard server and EE.
 - `packages/data-store/` — `@truecourse/data-store`: Postgres implementations of core's storage seams (analyses, specs, guard, config/ui-state, the gh_repos-derived registry, the LLM KV cache, the advisory analyze lock) over a content-addressed `content` table. Installed by the dashboard server at boot (`apps/dashboard/server/src/stores.ts`); `@truecourse/ee-data-store` re-exports it and keeps only EE-only stores (jobs, knowledge, traces, workspace settings).
-- `packages/scm-github/` — The GitHub App protocol: webhook receiver, connect API, the `gh_repos`/installations link store (`PostgresGateStore`).
+- `packages/github-app/` — The GitHub App protocol: webhook receiver, connect API, the `gh_repos`/installations link store (`PostgresGateStore`).
 - `tools/cli/` — CLI commands (analyze, dashboard, list, add, rules). Thin adapter over `@truecourse/core` — does NOT depend on the dashboard server.
 - `tests/` — All tests (centralized, not colocated). Organized by package: `tests/shared/`, `tests/analyzer/`, `tests/server/` (covers both dashboard-server routes and core services), `tests/cli/`.
 - `tests/fixtures/` — Fixture repos the tests drive: `sample-{js,python,csharp}-project-{positive,negative,il}/` (analyzer rule fixtures), `sample-scheduling-saas/`, `guard-fixture-cli/` (the `relkit` CLI) and `guard-fixture-api/` (the `todos` + `api-v2` HTTP servers) for the guard drivers, `recipe-propose/` and `route-manifest-monorepo/` for the deterministic recipe/route derivations

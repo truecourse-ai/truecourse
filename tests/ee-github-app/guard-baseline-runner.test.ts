@@ -24,7 +24,7 @@ import {
 } from '@truecourse/guard-runner';
 import { PgGuardStore } from '../../ee/packages/data-store/src/index';
 import { createSemaphore } from '../../ee/packages/server/src/jobs/guard-gate-limiter';
-import type { GithubAuth } from '../../packages/scm-github/src/github';
+import type { GithubAuth } from '../../packages/github-app/src/github';
 import {
   createGuardBaselinePipeline,
   type GuardBaselinePipelineDeps,

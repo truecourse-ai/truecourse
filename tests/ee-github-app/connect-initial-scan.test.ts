@@ -13,7 +13,7 @@ vi.mock('@truecourse/core/config/registry', () => ({
 }));
 
 import { createRepoLinkedHook } from '../../ee/packages/github-app/src/connect-gate';
-import type { OctokitClient, RepoLinkRecord } from '../../packages/scm-github/src/index';
+import type { OctokitClient, RepoLinkRecord } from '../../packages/github-app/src/index';
 
 const LINK: RepoLinkRecord = {
   repoFullName: 'mushgev/truecourse-gate-test',

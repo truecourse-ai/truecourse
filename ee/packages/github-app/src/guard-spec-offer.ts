@@ -26,7 +26,7 @@ import {
   getActorPermission,
   type OctokitClient,
   wantsNotification,
-} from '@truecourse/scm-github';
+} from '@truecourse/github-app';
 import { detectSpecDocChanges, specScopeFromConfigJson } from './spec-detect.js';
 import type { EmailNotifier } from './email.js';
 import { PR_TRIGGER_ACTIONS, WRITE_PERMISSIONS } from './pr-events.js';

@@ -29,7 +29,7 @@ import {
   splitRepo,
   listPrsForCommit,
   type OctokitClient,
-} from '@truecourse/scm-github';
+} from '@truecourse/github-app';
 import { defaultSpecScanPipeline, type SpecScanPipeline } from './spec-scan.js';
 
 export interface BaselineDeps {

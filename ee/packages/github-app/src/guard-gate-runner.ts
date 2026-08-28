@@ -61,7 +61,7 @@ import {
   postCheck,
   type OctokitClient,
   wantsNotification,
-} from '@truecourse/scm-github';
+} from '@truecourse/github-app';
 import { decideGuardGate, emptyGuardGateDiff, type GuardGateDecision } from './guard-gate.js';
 import { prGuardUrl } from './links.js';
 import type { EmailNotifier } from './email.js';

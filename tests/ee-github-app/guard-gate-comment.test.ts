@@ -16,7 +16,7 @@ import {
   type GuardGateDiff,
   type GuardStaleAnnotation,
 } from '../../ee/packages/github-app/src/index';
-import { postCheck } from '../../packages/scm-github/src/octokit';
+import { postCheck } from '../../packages/github-app/src/octokit';
 import type { GuardScenarioResult } from '@truecourse/shared';
 
 function scen(id: string, outcome: GuardScenarioResult['outcome']): GuardScenarioResult {

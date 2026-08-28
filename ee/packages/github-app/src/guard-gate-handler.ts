@@ -15,7 +15,7 @@ import {
   startCheck,
   postCheck,
   type OctokitClient,
-} from '@truecourse/scm-github';
+} from '@truecourse/github-app';
 import { PR_TRIGGER_ACTIONS } from './pr-events.js';
 import { GUARD_GATE_CHECK_NAME } from './guard-gate-comment.js';
 import { postGuardGateErrorCheck, type GuardGateRunRequest } from './guard-gate-runner.js';

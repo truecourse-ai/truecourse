@@ -26,7 +26,7 @@ import {
   cloneAuthArgs,
   stripEmbeddedAuth,
   type GithubAuth,
-} from '@truecourse/scm-github';
+} from '@truecourse/github-app';
 
 /** The expensive spec-scan pipeline, abstracted for injection in tests. */
 export interface SpecScanPipeline {

@@ -12,7 +12,7 @@ import type {
   BaselineRecord,
   GateRunRecord,
   PrRecord,
-} from '../../packages/scm-github/src/store/types';
+} from '../../packages/github-app/src/store/types';
 
 export class MemoryGateStore implements GateStore {
   private installations = new Map<number, InstallationRecord>();

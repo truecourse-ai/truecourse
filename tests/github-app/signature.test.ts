@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import crypto from 'node:crypto';
-import { verifyWebhookSignature } from '../../packages/scm-github/src/index';
+import { verifyWebhookSignature } from '../../packages/github-app/src/index';
 
 const SECRET = 'topsecret';
 const BODY = JSON.stringify({ hello: 'world', n: 42 });

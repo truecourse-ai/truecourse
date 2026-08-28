@@ -18,7 +18,7 @@ import {
 } from '@truecourse/core/commands/guard-read';
 import { deleteDiff } from '@truecourse/core/lib/analysis-store';
 import { log } from '@truecourse/core/lib/logger';
-import type { PullRequestPayload } from '@truecourse/scm-github';
+import type { PullRequestPayload } from '@truecourse/github-app';
 
 /** Key the gate writes the PR-scoped Code Quality diff under (gate-runner.ts). */
 function prDiffKey(repoFullName: string, prNumber: number): string {

@@ -9,7 +9,7 @@ import {
   type GateStore,
   type PrState,
   type PullRequestPayload,
-} from '@truecourse/scm-github';
+} from '@truecourse/github-app';
 
 /**
  * Derive the tracked state from the webhook: a `closed` action resolves to

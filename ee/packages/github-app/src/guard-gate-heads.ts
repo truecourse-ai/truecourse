@@ -13,7 +13,7 @@
 
 import { log } from '@truecourse/core/lib/logger';
 import type { GuardGateHeadsLookup } from '@truecourse/core/lib/guard-gate-pending';
-import type { GateStore } from '@truecourse/scm-github';
+import type { GateStore } from '@truecourse/github-app';
 
 /** Repo-wide record window scanned per lookup (newest-first). */
 const RUN_RECORD_WINDOW = 200;

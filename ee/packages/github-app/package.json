@@ -24,7 +24,7 @@
     "@truecourse/db": "workspace:*",
     "@truecourse/guard-generator": "workspace:*",
     "@truecourse/guard-runner": "workspace:*",
-    "@truecourse/scm-github": "workspace:*",
+    "@truecourse/github-app": "workspace:*",
     "@truecourse/shared": "workspace:*",
     "@truecourse/spec-consolidator": "workspace:*",
     "drizzle-orm": "^0.45.2",

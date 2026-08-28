@@ -8,7 +8,7 @@ import {
   type InstallationRecord,
   type RepoLinkRecord,
   type GateRunRecord,
-} from '../../packages/scm-github/src/index';
+} from '../../packages/github-app/src/index';
 import { schema, MIGRATIONS_DIR } from '@truecourse/db';
 
 let client: PGlite;

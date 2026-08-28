@@ -7,7 +7,7 @@
  */
 
 import type { GuardScenarioResult } from '@truecourse/shared';
-import type { CheckAnnotation } from '@truecourse/scm-github';
+import type { CheckAnnotation } from '@truecourse/github-app';
 import type { GuardGateDecision } from './guard-gate.js';
 
 /** The guard gate's own Check — one verdict per PR, alongside Code Quality. */

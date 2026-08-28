@@ -29,7 +29,7 @@ import {
 } from '@truecourse/core/commands/guard-read';
 import type { GuardDismissedClaim } from '@truecourse/shared';
 import { handlePullRequestClosed } from '../../ee/packages/github-app/src/index';
-import type { PullRequestPayload } from '../../packages/scm-github/src/webhook';
+import type { PullRequestPayload } from '../../packages/github-app/src/webhook';
 
 const REPO = 'acme/api';
 
