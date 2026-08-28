@@ -150,6 +150,7 @@ import {
   type SectionInput,
 } from './section-plan.js'
 import { buildOperationIndex, matchedRequestSchemas, parseOperationSection, type OperationEntry } from './openapi-enrich.js'
+import { persistExtractedClaims } from './claims-persist.js'
 import {
   resolveSectionAuth,
   recipeAuthCredentials,
@@ -1187,6 +1188,15 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       stoppedAfter: 'extract',
     }
   }
+
+  // Persist what extraction minted BEFORE synthesis writes the flows naming it —
+  // a flow referencing a claim `scenarios/claims.json` does not hold is a load
+  // error on every `guard run` (see claims-persist.ts). Additive-only, and a
+  // warm re-run adds nothing, so nothing is written on a no-op.
+  persistExtractedClaims(
+    repoRoot,
+    extracted.flatMap(({ doc, result }) => (result.ok ? [{ doc: doc.doc, outcome: result.data }] : [])),
+  )
 
   // 4. Interfaces — deterministic, free, and independent of everything spec-side.
   const mapped = await interfacesOnce()

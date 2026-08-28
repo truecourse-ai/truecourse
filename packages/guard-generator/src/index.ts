@@ -105,6 +105,12 @@ export {
 } from './extract.js'
 
 export {
+  mergeExtractedClaims,
+  persistExtractedClaims,
+  type ExtractedDocOutcome,
+} from './claims-persist.js'
+
+export {
   synthesizeFlows,
   buildFlowAreas,
   flowAreaKey,
