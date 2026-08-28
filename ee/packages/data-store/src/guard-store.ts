@@ -51,8 +51,8 @@ import {
   guardResults,
   guardScenarioSets,
   decisions,
-  type EeDb,
-} from '@truecourse/ee-db';
+  type Db,
+} from '@truecourse/db';
 import type {
   GuardStore,
   RepoRef,
@@ -107,7 +107,7 @@ export class PgGuardStore implements GuardStore {
   readonly materializesInPlace = false;
   private readonly content: ContentStore;
 
-  constructor(private readonly db: EeDb) {
+  constructor(private readonly db: Db) {
     this.content = new ContentStore(db);
   }
 

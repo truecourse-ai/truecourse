@@ -10,7 +10,7 @@
  */
 
 import { asc, eq } from 'drizzle-orm';
-import { registry, type EeDb } from '@truecourse/ee-db';
+import { registry, type Db } from '@truecourse/db';
 import { slugify, type RegistryEntry, type RegistryStore } from '@truecourse/core/config/registry';
 
 interface RegistryRow {
@@ -37,7 +37,7 @@ function basename(repoPath: string): string {
 }
 
 export class PgRegistryStore implements RegistryStore {
-  constructor(private readonly db: EeDb) {}
+  constructor(private readonly db: Db) {}
 
   private async rows(): Promise<RegistryRow[]> {
     return this.db

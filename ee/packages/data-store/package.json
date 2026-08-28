@@ -18,7 +18,7 @@
   },
   "dependencies": {
     "@truecourse/core": "workspace:*",
-    "@truecourse/ee-db": "workspace:*",
+    "@truecourse/db": "workspace:*",
     "@truecourse/ee-storage": "workspace:*",
     "@truecourse/guard-runner": "workspace:*",
     "@truecourse/llm": "workspace:*",

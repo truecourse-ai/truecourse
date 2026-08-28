@@ -9,7 +9,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import {
   PendingGuardBaselineStore,
   GuardBackfillMarkerStore,
@@ -20,11 +20,11 @@ const ORG = 'org_A';
 const REPO = 'acme/api';
 
 let client: PGlite;
-let db: EeDb;
+let db: Db;
 
 beforeEach(async () => {
   client = new PGlite();
-  db = drizzle(client, { schema }) as unknown as EeDb;
+  db = drizzle(client, { schema }) as unknown as Db;
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
 });
 

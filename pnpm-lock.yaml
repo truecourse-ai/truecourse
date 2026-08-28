@@ -23,12 +23,12 @@ importers:
       '@truecourse/core':
         specifier: workspace:*
         version: link:packages/core
+      '@truecourse/db':
+        specifier: workspace:*
+        version: link:packages/db
       '@truecourse/ee-data-store':
         specifier: workspace:*
         version: link:ee/packages/data-store
-      '@truecourse/ee-db':
-        specifier: workspace:*
-        version: link:ee/packages/db
       '@truecourse/ee-github-app':
         specifier: workspace:*
         version: link:ee/packages/github-app
@@ -432,9 +432,9 @@ importers:
       '@truecourse/core':
         specifier: workspace:*
         version: link:../../../packages/core
-      '@truecourse/ee-db':
+      '@truecourse/db':
         specifier: workspace:*
-        version: link:../db
+        version: link:../../../packages/db
       '@truecourse/ee-storage':
         specifier: workspace:*
         version: link:../storage
@@ -458,28 +458,6 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
-  ee/packages/db:
-    dependencies:
-      drizzle-orm:
-        specifier: ^0.45.2
-        version: 0.45.2(@electric-sql/pglite@0.2.17)(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(pg@8.21.0)
-      pg:
-        specifier: ^8.13.1
-        version: 8.21.0
-    devDependencies:
-      '@types/node':
-        specifier: ^22.0.0
-        version: 22.19.15
-      '@types/pg':
-        specifier: ^8.11.10
-        version: 8.20.0
-      drizzle-kit:
-        specifier: ^0.31.10
-        version: 0.31.10
-      typescript:
-        specifier: ^5.7.0
-        version: 5.9.3
-
   ee/packages/github-app:
     dependencies:
       '@octokit/auth-app':
@@ -494,9 +472,9 @@ importers:
       '@truecourse/core':
         specifier: workspace:*
         version: link:../../../packages/core
-      '@truecourse/ee-db':
+      '@truecourse/db':
         specifier: workspace:*
-        version: link:../db
+        version: link:../../../packages/db
       '@truecourse/guard-generator':
         specifier: workspace:*
         version: link:../../../packages/guard-generator
@@ -553,12 +531,12 @@ importers:
       '@truecourse/core':
         specifier: workspace:*
         version: link:../../../packages/core
+      '@truecourse/db':
+        specifier: workspace:*
+        version: link:../../../packages/db
       '@truecourse/ee-data-store':
         specifier: workspace:*
         version: link:../data-store
-      '@truecourse/ee-db':
-        specifier: workspace:*
-        version: link:../db
       '@truecourse/ee-github-app':
         specifier: workspace:*
         version: link:../github-app
@@ -617,9 +595,9 @@ importers:
       '@azure/storage-blob':
         specifier: ^12.31.0
         version: 12.32.0
-      '@truecourse/ee-db':
+      '@truecourse/db':
         specifier: workspace:*
-        version: link:../db
+        version: link:../../../packages/db
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@electric-sql/pglite@0.2.17)(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(pg@8.21.0)
@@ -818,6 +796,28 @@ importers:
       tsx:
         specifier: ^4.19.0
         version: 4.21.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  packages/db:
+    dependencies:
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@electric-sql/pglite@0.2.17)(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(pg@8.21.0)
+      pg:
+        specifier: ^8.13.1
+        version: 8.21.0
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.15
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.0
+      drizzle-kit:
+        specifier: ^0.31.10
+        version: 0.31.10
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -1590,11 +1590,11 @@ packages:
 
   '@esbuild-kit/core-utils@3.3.2':
     resolution: {integrity: sha512-sPRAnw9CdSsRmEtnsl2WXWdyquogVpB3yZ3dgwJfe8zrOzTsV7cJvmwrKVa+0ma5BoiGJ+BoqkMvawbayKUsqQ==}
-    deprecated: 'Merged into tsx: https://tsx.is'
+    deprecated: 'Merged into tsx: https://tsx.hirok.io'
 
   '@esbuild-kit/esm-loader@2.6.5':
     resolution: {integrity: sha512-FxEMIkJKnodyA1OaCUoEvbYRkoZlLZ4d/eXFu9Fh8CbBBgP5EmZxrfTRyN0qpXZ4vOvqnE5YdRdcrmUUXuU+dA==}
-    deprecated: 'Merged into tsx: https://tsx.is'
+    deprecated: 'Merged into tsx: https://tsx.hirok.io'
 
   '@esbuild/aix-ppc64@0.24.2':
     resolution: {integrity: sha512-thpVCb/rhxE/BnMLQ7GReQLLN8q9qbHmI55F4489/ByVg2aQaQ6kbcLb6FHkocZzQhxc4gx0sCk0tJkKBFzDhA==}

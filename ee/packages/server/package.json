@@ -19,8 +19,8 @@
   "dependencies": {
     "@sentry/node": "^10.0.0",
     "@truecourse/core": "workspace:*",
+    "@truecourse/db": "workspace:*",
     "@truecourse/ee-data-store": "workspace:*",
-    "@truecourse/ee-db": "workspace:*",
     "@truecourse/ee-github-app": "workspace:*",
     "@truecourse/ee-llm": "workspace:*",
     "@truecourse/ee-storage": "workspace:*",

@@ -13,8 +13,8 @@ import {
   specSets,
   workspaceSpecSets,
   decisions,
-  type EeDb,
-} from '@truecourse/ee-db';
+  type Db,
+} from '@truecourse/db';
 import type {
   RepoRef,
   WorkspaceRef,
@@ -45,7 +45,7 @@ export class PgSpecStore implements SpecStore {
   readonly materializesInPlace = false;
   private readonly content: ContentStore;
 
-  constructor(private readonly db: EeDb) {
+  constructor(private readonly db: Db) {
     this.content = new ContentStore(db);
   }
 

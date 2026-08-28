@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import {
   FsBlobStore,
   selectBlobStore,

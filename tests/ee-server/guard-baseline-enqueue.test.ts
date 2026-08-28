@@ -11,7 +11,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import type { EeServerRegistry } from '@truecourse/shared';
 import { setBackgroundTaskRunner } from '@truecourse/core/lib/background-tasks';
 // Import from the BUILT package (not src): the coalescing code does an
@@ -56,11 +56,11 @@ const registry: EeServerRegistry = {
 };
 
 let client: PGlite;
-let db: EeDb;
+let db: Db;
 
 beforeEach(async () => {
   client = new PGlite();
-  db = drizzle(client, { schema }) as unknown as EeDb;
+  db = drizzle(client, { schema }) as unknown as Db;
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
   startWorkerMock.mockReset();
   addJobMock.mockReset();

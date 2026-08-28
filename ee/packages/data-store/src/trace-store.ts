@@ -14,7 +14,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { and, desc, eq, gte, inArray, lt, sql, type SQL } from 'drizzle-orm';
-import { llmTraces, type EeDb } from '@truecourse/ee-db';
+import { llmTraces, type Db } from '@truecourse/db';
 import type {
   LlmTraceInput,
   LlmTraceRecorder,
@@ -61,7 +61,7 @@ function toSummary(r: TraceRow): TraceSummary {
 export class PgTraceStore implements LlmTraceRecorder {
   private readonly content: ContentStore;
 
-  constructor(private readonly db: EeDb) {
+  constructor(private readonly db: Db) {
     this.content = new ContentStore(db);
   }
 

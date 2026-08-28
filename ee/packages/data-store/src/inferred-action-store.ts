@@ -5,11 +5,11 @@
  */
 
 import { and, eq, sql } from 'drizzle-orm';
-import { ghInferredActions, type EeDb } from '@truecourse/ee-db';
+import { ghInferredActions, type Db } from '@truecourse/db';
 import type { InferredActionStore, InferredAction } from '@truecourse/core/lib/inferred-action-store';
 
 export class PgInferredActionStore implements InferredActionStore {
-  constructor(private readonly db: EeDb) {}
+  constructor(private readonly db: Db) {}
 
   async setAction(repoKey: string, action: InferredAction): Promise<void> {
     await this.db

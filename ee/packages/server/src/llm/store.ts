@@ -7,7 +7,7 @@
 import { eq, sql } from 'drizzle-orm';
 import type { PgDatabase } from 'drizzle-orm/pg-core';
 import type { ProviderConfig, LlmProviderKind } from '@truecourse/ee-llm';
-import { llmProviderConfig } from '@truecourse/ee-db';
+import { llmProviderConfig } from '@truecourse/db';
 import { encryptSecret, decryptSecret, maskKey } from './crypto.js';
 
 /** The single row's fixed id — config is instance-wide. */

@@ -7,7 +7,7 @@
  */
 
 import type { EeServerRegistry } from '@truecourse/shared';
-import type { EeDb } from '@truecourse/ee-db';
+import type { Db } from '@truecourse/db';
 import { log } from '@truecourse/core/lib/logger';
 import { loadGithubAppConfig } from './config.js';
 import { createGithubAuth } from './github.js';
@@ -51,8 +51,8 @@ export type EnqueueBaseline = (req: {
 export interface RegisterGithubAppOptions {
   /** Dashboard client origin for browser-facing redirects (e.g. /setup). */
   appUrl?: string;
-  /** Shared ee-db (Postgres) when hosted; null → the file gate store. */
-  db?: EeDb | null;
+  /** Shared db (Postgres) when hosted; null → the file gate store. */
+  db?: Db | null;
   /** Background-queue enqueue for repo scans (connect + push). Inline fallback if omitted. */
   enqueueBaseline?: EnqueueBaseline;
   /** Background-queue enqueue for guard-gate runs (PR events). Inline fallback if omitted. */

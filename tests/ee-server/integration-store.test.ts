@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import type { IntegrationPendingView } from '@truecourse/shared';
 import { IntegrationStore } from '../../ee/packages/server/src/integrations/store';
 
@@ -10,10 +10,10 @@ const SECRET = 'master-secret-at-least-32-characters!!';
 const ORG_A = 'org_aaa';
 const ORG_B = 'org_bbb';
 
-async function makeDb(client: PGlite): Promise<EeDb> {
+async function makeDb(client: PGlite): Promise<Db> {
   const db = drizzle(client, { schema });
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
-  return db as unknown as EeDb;
+  return db as unknown as Db;
 }
 
 const config = {
@@ -25,7 +25,7 @@ const config = {
 describe('IntegrationStore (pglite)', () => {
   let client: PGlite;
   let store: IntegrationStore;
-  let db: EeDb;
+  let db: Db;
 
   beforeEach(async () => {
     client = new PGlite();

@@ -7,7 +7,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import { PgSpecStore, PgAnalysisStore, PgGuardStore } from '../../ee/packages/data-store/src/index';
 import { setSpecStore, resetSpecStore } from '@truecourse/core/lib/spec-store';
 import { setGuardStore, resetGuardStore } from '@truecourse/core/lib/guard-store';
@@ -53,9 +53,9 @@ beforeEach(async () => {
   client = new PGlite();
   const db = drizzle(client, { schema });
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
-  setSpecStore(new PgSpecStore(db as unknown as EeDb));
-  setGuardStore(new PgGuardStore(db as unknown as EeDb));
-  setAnalysisStore(new PgAnalysisStore(db as unknown as EeDb));
+  setSpecStore(new PgSpecStore(db as unknown as Db));
+  setGuardStore(new PgGuardStore(db as unknown as Db));
+  setAnalysisStore(new PgAnalysisStore(db as unknown as Db));
 });
 
 afterEach(async () => {

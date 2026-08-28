@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 
 // Curate and the scan token estimator have their own tests; here we exercise the
 // Sync stage's fetch+persist path, the store-backed union Process, and the Stage-1
@@ -43,10 +43,10 @@ import type {
 const ORG = 'org_estimate';
 const EMPTY = { totalEstimatedTokens: 0, tiers: [], stages: [] };
 
-async function makeDb(client: PGlite): Promise<EeDb> {
+async function makeDb(client: PGlite): Promise<Db> {
   const db = drizzle(client, { schema });
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
-  return db as unknown as EeDb;
+  return db as unknown as Db;
 }
 
 // The ledger's contentHash doubles as the body's content-address sha, so it uses

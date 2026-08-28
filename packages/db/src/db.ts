@@ -18,12 +18,12 @@ export const MIGRATIONS_DIR = path.resolve(
   '../drizzle',
 );
 
-export type EeDb = NodePgDatabase<typeof schema>;
+export type Db = NodePgDatabase<typeof schema>;
 
 export type { Pool, PoolClient } from 'pg';
 
-export interface EeDbHandle {
-  db: EeDb;
+export interface DbHandle {
+  db: Db;
   /**
    * A SEPARATE pool, dedicated to the `pg_advisory_lock` analyze lock. The lock
    * holds a connection open for the entire (minutes-long) analyze; the store
@@ -36,11 +36,11 @@ export interface EeDbHandle {
   close: () => Promise<void>;
 }
 
-export async function createEeDb(connectionString: string): Promise<EeDbHandle> {
+export async function createDb(connectionString: string): Promise<DbHandle> {
   const pool = new Pool({ connectionString });
   const db = drizzle(pool, { schema });
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
-  // Dedicated lock pool (see EeDbHandle.lockPool). A generous `max` — concurrent
+  // Dedicated lock pool (see DbHandle.lockPool). A generous `max` — concurrent
   // analyses are bounded by merge cadence — and a connect timeout so pathological
   // contention fails fast instead of hanging. Advisory locks are session-scoped,
   // so Postgres auto-releases them if a held connection ever drops.

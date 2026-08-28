@@ -12,7 +12,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import type { AuthUser, GithubConnectStatusResponse } from '@truecourse/shared';
 import {
   createConnectRouter,
@@ -45,7 +45,7 @@ beforeEach(async () => {
   client = new PGlite();
   const db = drizzle(client, { schema });
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
-  setSpecStore(new PgSpecStore(db as unknown as EeDb));
+  setSpecStore(new PgSpecStore(db as unknown as Db));
   setRegistryStore(stubRegistry);
 
   gateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-overview-gate-'));

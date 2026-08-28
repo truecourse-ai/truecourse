@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { schema, MIGRATIONS_DIR, type EeDbHandle } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, type DbHandle } from '@truecourse/db';
 import { installEeStores, sweepStaleTempDirs } from '../../ee/packages/server/src/storage';
 import { getSpecStore, resetSpecStore } from '@truecourse/core/lib/spec-store';
 import { getRepoConfigStore, resetRepoConfigStore } from '@truecourse/core/config/project-config';
@@ -26,7 +26,7 @@ import {
 // test only asserts the seam was swapped (instanceof), so a no-op pool suffices.
 const stubLockPool = {
   connect: async () => ({ query: async () => ({}), release: () => {} }),
-} as unknown as EeDbHandle['lockPool'];
+} as unknown as DbHandle['lockPool'];
 
 function resetAll() {
   resetSpecStore();
@@ -47,7 +47,7 @@ describe('installEeStores — swaps every seam to its Postgres/Blob impl', () =>
     await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
     prevBlob = process.env.BLOB_STORE;
     process.env.BLOB_STORE = 'postgres'; // use the shared db, no real cloud
-    installEeStores({ db, lockPool: stubLockPool, close: async () => {} } as unknown as EeDbHandle);
+    installEeStores({ db, lockPool: stubLockPool, close: async () => {} } as unknown as DbHandle);
   });
   afterEach(async () => {
     resetAll();

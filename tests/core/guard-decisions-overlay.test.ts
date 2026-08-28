@@ -12,7 +12,7 @@ import path from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import { PgGuardStore } from '../../ee/packages/data-store/src/index';
 import {
   mergeGuardDecisions,
@@ -174,7 +174,7 @@ describe('guard dismiss/undismiss over the PR overlay (hosted store)', () => {
     client = new PGlite();
     const db = drizzle(client, { schema });
     await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
-    setGuardStore(new PgGuardStore(db as unknown as EeDb));
+    setGuardStore(new PgGuardStore(db as unknown as Db));
   });
   afterEach(async () => {
     resetGuardStore();

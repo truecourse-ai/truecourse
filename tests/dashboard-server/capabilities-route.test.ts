@@ -35,11 +35,11 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
 // EE now requires DATABASE_URL and always installs the Postgres stores. Stub the
 // DB layer so register() succeeds without a real Postgres — this test only
 // exercises /api/capabilities, never the stores themselves.
-vi.mock('@truecourse/ee-db', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@truecourse/ee-db')>();
+vi.mock('@truecourse/db', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@truecourse/db')>();
   return {
     ...actual,
-    createEeDb: async () => ({ db: {}, lockPool: {}, close: async () => {} }),
+    createDb: async () => ({ db: {}, lockPool: {}, close: async () => {} }),
   };
 });
 

@@ -11,7 +11,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { schema, MIGRATIONS_DIR, knowledgeDocuments, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, knowledgeDocuments, type Db } from '@truecourse/db';
 import type { AuthUser } from '@truecourse/shared';
 import { setSpecStore, resetSpecStore, saveWorkspaceSpec } from '@truecourse/core/lib/spec-store';
 import { getWorkspaceDecisions } from '@truecourse/core/commands/spec-in-process';
@@ -50,7 +50,7 @@ import type { JobsApi } from '../../ee/packages/server/src/jobs/index';
 const SECRET = 'master-secret-at-least-32-characters!!';
 const ORG = 'org_spec';
 
-function makeJobs(db: EeDb, enqueueSync = vi.fn(async () => {})): JobsApi {
+function makeJobs(db: Db, enqueueSync = vi.fn(async () => {})): JobsApi {
   return {
     jobStore: new JobStore(db),
     enqueueSync,
@@ -79,7 +79,7 @@ function corpusFixture(skippedCount: number) {
 
 describe('Knowledge spec routes', () => {
   let client: PGlite;
-  let db: EeDb;
+  let db: Db;
   let app: Express;
   let enqueueSync: ReturnType<typeof vi.fn>;
 
@@ -111,7 +111,7 @@ describe('Knowledge spec routes', () => {
 
   beforeEach(async () => {
     client = new PGlite();
-    db = drizzle(client, { schema }) as unknown as EeDb;
+    db = drizzle(client, { schema }) as unknown as Db;
     await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
     setSpecStore(new PgSpecStore(db));
     llmConfigured.mockReturnValue(true);

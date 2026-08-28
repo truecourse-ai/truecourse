@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import type { AuthUser } from '@truecourse/shared';
 // From the package (not src) so the JobStore's ActiveJobExistsError is the SAME
 // class the router's `instanceof` check (also the package import) compares against.
@@ -29,7 +29,7 @@ const ORG = 'org_A';
 const CONFIG = { baseUrl: 'https://acme.atlassian.net', spaceKey: 'ENG', accountEmail: 'u@acme.test' };
 
 /** A JobsApi whose enqueues are no-ops (the worker isn't running) over a real store. */
-function makeJobs(db: EeDb): JobsApi {
+function makeJobs(db: Db): JobsApi {
   return {
     jobStore: new JobStore(db),
     enqueueSync: async () => {},
@@ -40,11 +40,11 @@ function makeJobs(db: EeDb): JobsApi {
 describe('Knowledge route — LLM-provider gate differs by endpoint', () => {
   let client: PGlite;
   let app: Express;
-  let db: EeDb;
+  let db: Db;
 
   beforeEach(async () => {
     client = new PGlite();
-    db = drizzle(client, { schema }) as unknown as EeDb;
+    db = drizzle(client, { schema }) as unknown as Db;
     await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
     llmConfigured.mockReturnValue(false);
     // A configured connection so the endpoints get past the connection check.
@@ -121,7 +121,7 @@ describe('Knowledge route — the estimate single-flight key is per ORG', () => 
   const ORG_B = 'org_B';
   let client: PGlite;
   let app: Express;
-  let db: EeDb;
+  let db: Db;
   /** Per-request org — the auth middleware stamps whatever this holds. */
   let currentOrg: string;
   /** Every graphile jobKey the router hands `enqueueEstimate`. */
@@ -129,7 +129,7 @@ describe('Knowledge route — the estimate single-flight key is per ORG', () => 
 
   beforeEach(async () => {
     client = new PGlite();
-    db = drizzle(client, { schema }) as unknown as EeDb;
+    db = drizzle(client, { schema }) as unknown as Db;
     await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
     currentOrg = ORG;
     estimateKeys = [];

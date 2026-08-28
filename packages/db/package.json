@@ -1,5 +1,5 @@
 {
-  "name": "@truecourse/ee-db",
+  "name": "@truecourse/db",
   "version": "0.1.0",
   "private": true,
   "type": "module",

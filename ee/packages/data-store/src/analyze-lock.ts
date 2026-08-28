@@ -11,7 +11,7 @@
  * harmless).
  */
 
-import type { Pool, PoolClient } from '@truecourse/ee-db';
+import type { Pool, PoolClient } from '@truecourse/db';
 import type { AnalyzeLock } from '@truecourse/core/lib/analyze-lock';
 
 export class PgAnalyzeLock implements AnalyzeLock {

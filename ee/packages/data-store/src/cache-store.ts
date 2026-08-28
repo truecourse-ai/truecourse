@@ -7,11 +7,11 @@
  */
 
 import { and, eq } from 'drizzle-orm';
-import { extractionCache, type EeDb } from '@truecourse/ee-db';
+import { extractionCache, type Db } from '@truecourse/db';
 import type { KvCacheStore } from '@truecourse/llm';
 
 export class PgKvCacheStore implements KvCacheStore {
-  constructor(private readonly db: EeDb) {}
+  constructor(private readonly db: Db) {}
 
   async get(_scope: string, cacheName: string, key: string): Promise<unknown | null> {
     const rows = await this.db

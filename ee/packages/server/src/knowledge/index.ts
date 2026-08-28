@@ -15,7 +15,7 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import type { AuthUser, EeServerRegistry } from '@truecourse/shared';
-import type { EeDb } from '@truecourse/ee-db';
+import type { Db } from '@truecourse/db';
 import { PgKnowledgeStore, ActiveJobExistsError } from '@truecourse/ee-data-store';
 import { IntegrationStore } from '../integrations/store.js';
 import { CONNECTORS } from './connectors/registry.js';
@@ -40,7 +40,7 @@ function orgIdOf(req: Request): string | null {
 // gets a clean 400 from the registry lookup below.
 const syncSchema = z.object({ kind: z.string().min(1) });
 
-export function createKnowledgeRouter(db: EeDb, masterSecret: string, jobs: JobsApi): Router {
+export function createKnowledgeRouter(db: Db, masterSecret: string, jobs: JobsApi): Router {
   const router = Router();
   const knowledge = new PgKnowledgeStore(db);
   const integrations = new IntegrationStore(db, masterSecret);
@@ -179,7 +179,7 @@ export function createKnowledgeRouter(db: EeDb, masterSecret: string, jobs: Jobs
 /** Mount the Knowledge API. Protected by default (behind the enterprise auth gate). */
 export function registerKnowledge(
   registry: EeServerRegistry,
-  opts: { db: EeDb; masterSecret: string; jobs: JobsApi },
+  opts: { db: Db; masterSecret: string; jobs: JobsApi },
 ): void {
   registry.registerRouter('/api/ee/knowledge', createKnowledgeRouter(opts.db, opts.masterSecret, opts.jobs));
 }

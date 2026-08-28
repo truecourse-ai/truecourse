@@ -9,7 +9,7 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import type { AuthUser, EeServerRegistry } from '@truecourse/shared';
-import type { EeDb } from '@truecourse/ee-db';
+import type { Db } from '@truecourse/db';
 import { log } from '@truecourse/core/lib/logger';
 import { captureEeException, upstreamStatusOf } from '../observability/sentry.js';
 import { IntegrationStore } from './store.js';
@@ -53,7 +53,7 @@ function connectorFor(kind: string): KnowledgeConnector | undefined {
   return CONNECTORS[kind as ConnectorKind];
 }
 
-export function createIntegrationsRouter(db: EeDb, masterSecret: string): Router {
+export function createIntegrationsRouter(db: Db, masterSecret: string): Router {
   const router = Router();
   const store = new IntegrationStore(db, masterSecret);
 
@@ -136,6 +136,6 @@ export function createIntegrationsRouter(db: EeDb, masterSecret: string): Router
 }
 
 /** Mount the Integrations API. Protected by default (behind the enterprise gate). */
-export function registerIntegrations(registry: EeServerRegistry, opts: { db: EeDb; masterSecret: string }): void {
+export function registerIntegrations(registry: EeServerRegistry, opts: { db: Db; masterSecret: string }): void {
   registry.registerRouter('/api/ee/integrations', createIntegrationsRouter(opts.db, opts.masterSecret));
 }

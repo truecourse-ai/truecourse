@@ -14,7 +14,7 @@ import path from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import type {
   GuardLatest,
   GuardOutcome,
@@ -175,14 +175,14 @@ function fakeCheckout() {
 }
 
 let client: PGlite;
-let db: EeDb;
+let db: Db;
 let guardStore: PgGuardStore;
 let gateStore: GateStore;
 let savedKillSwitch: string | undefined;
 
 beforeEach(async () => {
   client = new PGlite();
-  db = drizzle(client, { schema }) as unknown as EeDb;
+  db = drizzle(client, { schema }) as unknown as Db;
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
   guardStore = new PgGuardStore(db);
   gateStore = selectGateStore(db);

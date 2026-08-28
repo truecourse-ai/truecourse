@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import { PgSpecStore, PgGuardStore } from '../../ee/packages/data-store/src/index';
 import { setSpecStore, resetSpecStore, saveSpec } from '@truecourse/core/lib/spec-store';
 import {
@@ -133,7 +133,7 @@ let client: PGlite;
 
 beforeEach(async () => {
   client = new PGlite();
-  const db = drizzle(client, { schema }) as unknown as EeDb;
+  const db = drizzle(client, { schema }) as unknown as Db;
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
   setSpecStore(new PgSpecStore(db));
   setGuardStore(new PgGuardStore(db));

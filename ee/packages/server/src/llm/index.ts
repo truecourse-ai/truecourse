@@ -16,7 +16,7 @@ import { captureEeException, upstreamStatusOf } from '../observability/sentry.js
 import { setDefaultTransport, noProviderTransport } from '@truecourse/shared/llm';
 import { setShowResolvedStageModel } from '@truecourse/core/commands/spec-in-process';
 import type { LlmTraceRecorder } from '@truecourse/shared';
-import type { EeDb } from '@truecourse/ee-db';
+import type { Db } from '@truecourse/db';
 import { createAiSdkTransport, type ProviderConfig } from '@truecourse/ee-llm';
 import { LlmConfigStore } from './store.js';
 
@@ -154,8 +154,8 @@ function createLlmRouter(store: LlmConfigStore, recorder?: LlmTraceRecorder): Ro
 // ---------------------------------------------------------------------------
 
 export interface RegisterLlmOptions {
-  /** Shared ee-db (Postgres). EE is always Postgres; required. */
-  db: EeDb;
+  /** Shared db (Postgres). EE is always Postgres; required. */
+  db: Db;
   /** Master secret deriving the store's AES key; validated (>=32) by the caller. */
   masterSecret: string;
   /** LLM trace sink — installed transports record every call to it. Omit ⇒ no tracing. */

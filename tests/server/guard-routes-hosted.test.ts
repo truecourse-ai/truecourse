@@ -14,7 +14,7 @@ import { type Express } from 'express';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import { PgGuardStore, PgSpecStore } from '../../ee/packages/data-store/src/index';
 // Import the store setters from the PACKAGE (dist) specifiers — the SAME module
 // instances the dashboard route uses, so setGuardStore actually swaps the store
@@ -59,7 +59,7 @@ const runAt = (commit: string, id: string, outcome: GuardLatest['scenarios'][num
 });
 
 let client: PGlite;
-let db: EeDb;
+let db: Db;
 let guardStore: PgGuardStore;
 let app: Express;
 let fixture: TestFixture;
@@ -98,7 +98,7 @@ beforeEach(async () => {
   // store matches keys by exact string, unlike the FS store's symlink-following).
   repoKey = (await resolveProjectForRequest(fixture.project.slug)).path;
   client = new PGlite();
-  db = drizzle(client, { schema }) as unknown as EeDb;
+  db = drizzle(client, { schema }) as unknown as Db;
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
   guardStore = new PgGuardStore(db);
   setGuardStore(guardStore);

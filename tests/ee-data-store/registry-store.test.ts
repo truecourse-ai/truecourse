@@ -2,18 +2,18 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { schema, MIGRATIONS_DIR, ghRepos, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, ghRepos, type Db } from '@truecourse/db';
 import { GhReposRegistryStore } from '../../ee/packages/data-store/src/index';
 
 let client: PGlite;
-let db: EeDb;
+let db: Db;
 let store: GhReposRegistryStore;
 
 beforeEach(async () => {
   client = new PGlite();
   const d = drizzle(client, { schema });
   await migrate(d, { migrationsFolder: MIGRATIONS_DIR });
-  db = d as unknown as EeDb;
+  db = d as unknown as Db;
   store = new GhReposRegistryStore(db);
 });
 afterEach(async () => {

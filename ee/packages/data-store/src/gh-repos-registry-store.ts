@@ -16,7 +16,7 @@
  */
 
 import { eq } from 'drizzle-orm';
-import { ghRepos, type EeDb } from '@truecourse/ee-db';
+import { ghRepos, type Db } from '@truecourse/db';
 import { slugify, type RegistryEntry, type RegistryStore } from '@truecourse/core/config/registry';
 
 type GhRepoRow = typeof ghRepos.$inferSelect;
@@ -34,7 +34,7 @@ function toEntry(r: GhRepoRow): RegistryEntry {
 }
 
 export class GhReposRegistryStore implements RegistryStore {
-  constructor(private readonly db: EeDb) {}
+  constructor(private readonly db: Db) {}
 
   async readRegistry(): Promise<RegistryEntry[]> {
     const rows = await this.db.select().from(ghRepos);

@@ -11,7 +11,7 @@
  */
 
 import { and, eq, inArray } from 'drizzle-orm';
-import { content, type EeDb } from '@truecourse/ee-db';
+import { content, type Db } from '@truecourse/db';
 import { sha256 } from './pack.js';
 
 /** Scope builders — keep the namespacing in one place. */
@@ -28,7 +28,7 @@ export const contentScope = {
 };
 
 export class ContentStore {
-  constructor(private readonly db: EeDb) {}
+  constructor(private readonly db: Db) {}
 
   /** Hash + store `body` under `scope`; returns its sha. Idempotent (dedup). */
   async putText(scope: string, body: string): Promise<string> {

@@ -21,7 +21,7 @@ import {
   ghBaselines,
   ghRuns,
   ghPrs,
-} from '@truecourse/ee-db';
+} from '@truecourse/db';
 
 /** Any Drizzle Postgres db (node-postgres in prod, PGlite in tests). */
 export type GateDb = PgDatabase<any, any, any>;

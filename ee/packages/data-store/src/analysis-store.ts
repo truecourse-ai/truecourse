@@ -8,7 +8,7 @@
  */
 
 import { and, asc, desc, eq } from 'drizzle-orm';
-import { analyses, analysisCurrent, analysisHistory, type EeDb } from '@truecourse/ee-db';
+import { analyses, analysisCurrent, analysisHistory, type Db } from '@truecourse/db';
 import {
   buildAnalysisFilename,
   type AnalysisStore,
@@ -25,7 +25,7 @@ import type {
 type CurrentKind = 'latest' | 'diff';
 
 export class PgAnalysisStore implements AnalysisStore {
-  constructor(private readonly db: EeDb) {}
+  constructor(private readonly db: Db) {}
 
   // ---- mutable per-repo singletons (LATEST / diff) ----
 

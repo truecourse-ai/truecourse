@@ -11,7 +11,7 @@
 
 import { WorkOS } from '@workos-inc/node';
 import type { EePlugin } from '@truecourse/shared';
-import { createEeDb, type EeDb } from '@truecourse/ee-db';
+import { createDb, type Db } from '@truecourse/db';
 import { WorkspaceSettingsStore, PgKnowledgeStore } from '@truecourse/ee-data-store';
 import { log } from '@truecourse/core/lib/logger';
 import { registerGithubApp, selectGateStore, loadGithubAppConfig, readRepoDocFromGithub, createGuardGateHeadsLookup, installationOctokit } from '@truecourse/ee-github-app';
@@ -94,9 +94,9 @@ const plugin: EePlugin = {
       );
     }
 
-    const handle = await createEeDb(databaseUrl);
-    const eeDb: EeDb = handle.db;
-    log.info('[ee-server] ee-db ready (Postgres, migrations applied)');
+    const handle = await createDb(databaseUrl);
+    const eeDb: Db = handle.db;
+    log.info('[ee-server] db ready (Postgres, migrations applied)');
     const { traceStore } = installEeStores(handle);
     sweepStaleTempDirs();
 

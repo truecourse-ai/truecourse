@@ -15,7 +15,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import type { AuthUser, EeServerRegistry, TraceStatus, JobStatus } from '@truecourse/shared';
 import { log } from '@truecourse/core/lib/logger';
-import type { EeDb } from '@truecourse/ee-db';
+import type { Db } from '@truecourse/db';
 import { JobStore, type PgTraceStore } from '@truecourse/ee-data-store';
 import { captureEeException } from '../observability/sentry.js';
 
@@ -43,7 +43,7 @@ const jobStatus = (v: unknown): JobStatus | undefined =>
   v === 'queued' || v === 'running' || v === 'succeeded' || v === 'failed' ? v : undefined;
 
 export interface RegisterAdminOptions {
-  db: EeDb;
+  db: Db;
   /** The LLM trace store (built in `installEeStores`, shared with the transport). */
   traceStore: PgTraceStore;
 }

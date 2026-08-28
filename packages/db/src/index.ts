@@ -1,9 +1,9 @@
 export * from './schema/index.js';
 export {
-  createEeDb,
+  createDb,
   MIGRATIONS_DIR,
-  type EeDb,
-  type EeDbHandle,
+  type Db,
+  type DbHandle,
   type Pool,
   type PoolClient,
 } from './db.js';

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import { PgAnalysisStore } from '../../ee/packages/data-store/src/index';
 import type {
   AnalysisSnapshot,
@@ -15,13 +15,13 @@ import { buildAnalysisFilename } from '@truecourse/core/lib/analysis-store';
 const REPO = 'workspace-1/my-repo';
 
 let client: PGlite;
-let db: EeDb;
+let db: Db;
 
 beforeEach(async () => {
   client = new PGlite();
   const d = drizzle(client, { schema });
   await migrate(d, { migrationsFolder: MIGRATIONS_DIR });
-  db = d as unknown as EeDb;
+  db = d as unknown as Db;
 });
 afterEach(async () => {
   await client.close();

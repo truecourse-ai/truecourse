@@ -12,7 +12,7 @@ import { execSync } from 'node:child_process';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import { PgSpecStore, PgGuardStore } from '../../ee/packages/data-store/src/index';
 import { setSpecStore, resetSpecStore, saveSpec } from '@truecourse/core/lib/spec-store';
 import { setGuardStore, resetGuardStore, type RepoRef } from '@truecourse/core/lib/guard-store';
@@ -123,7 +123,7 @@ let guardStore: PgGuardStore;
 
 beforeEach(async () => {
   client = new PGlite();
-  const db = drizzle(client, { schema }) as unknown as EeDb;
+  const db = drizzle(client, { schema }) as unknown as Db;
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
   setSpecStore(new PgSpecStore(db));
   guardStore = new PgGuardStore(db);
@@ -286,7 +286,7 @@ describe('guard head-regen pipeline', () => {
     // A second, independent PGlite-backed store stands in for the injected seam;
     // the process-global store (set in beforeEach) must stay untouched.
     const client2 = new PGlite();
-    const db2 = drizzle(client2, { schema }) as unknown as EeDb;
+    const db2 = drizzle(client2, { schema }) as unknown as Db;
     await migrate(db2, { migrationsFolder: MIGRATIONS_DIR });
     const injected = new PgGuardStore(db2);
     try {

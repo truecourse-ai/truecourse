@@ -6,14 +6,14 @@ import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { eq } from 'drizzle-orm';
-import { schema, MIGRATIONS_DIR, llmTraces, content, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, llmTraces, content, type Db } from '@truecourse/db';
 import type { LlmTraceInput } from '@truecourse/shared';
 import { PgTraceStore, contentScope } from '../../ee/packages/data-store/src/index';
 
-async function makeDb(client: PGlite): Promise<EeDb> {
+async function makeDb(client: PGlite): Promise<Db> {
   const db = drizzle(client, { schema });
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
-  return db as unknown as EeDb;
+  return db as unknown as Db;
 }
 
 /** A complete trace input; override only what a case cares about. */
@@ -48,7 +48,7 @@ function mkInput(over: Partial<LlmTraceInput> = {}): LlmTraceInput {
 
 describe('PgTraceStore (pglite + fs blob)', () => {
   let client: PGlite;
-  let db: EeDb;
+  let db: Db;
   let store: PgTraceStore;
 
   beforeEach(async () => {

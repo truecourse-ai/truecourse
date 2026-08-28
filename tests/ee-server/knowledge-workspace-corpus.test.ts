@@ -20,7 +20,7 @@ import { createHash } from 'node:crypto';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { schema, MIGRATIONS_DIR, type EeDb, type EeDbHandle } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, type Db, type DbHandle } from '@truecourse/db';
 import { installEeStores } from '../../ee/packages/server/src/storage';
 import { loadWorkspaceSpec, resetSpecStore } from '@truecourse/core/lib/spec-store';
 import { resetContractStore } from '@truecourse/core/lib/contract-store';
@@ -61,7 +61,7 @@ const hashOf = (markdown: string): string => 'sha256-' + createHash('sha256').up
 // one, and these tests never take the lock, so a no-op pool suffices.
 const stubLockPool = {
   connect: async () => ({ query: async () => ({}), release: () => {} }),
-} as unknown as EeDbHandle['lockPool'];
+} as unknown as DbHandle['lockPool'];
 
 /** Seed the store the way Sync leaves it: the body content-addressed + a ledger row. */
 async function seedStored(
@@ -86,16 +86,16 @@ async function seedStored(
 }
 
 let client: PGlite;
-let db: EeDb;
+let db: Db;
 let prevBlob: string | undefined;
 
 beforeEach(async () => {
   client = new PGlite();
-  db = drizzle(client, { schema }) as unknown as EeDb;
+  db = drizzle(client, { schema }) as unknown as Db;
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
   prevBlob = process.env.BLOB_STORE;
   process.env.BLOB_STORE = 'postgres';
-  installEeStores({ db, lockPool: stubLockPool, close: async () => {} } as unknown as EeDbHandle);
+  installEeStores({ db, lockPool: stubLockPool, close: async () => {} } as unknown as DbHandle);
   // installEeStores installs the spec store but NOT a contract store — it stays the
   // file default whose saveWorkspaceContracts throws. The corpus path must never
   // reach it. A throwing default transport guards against an accidental LLM call.

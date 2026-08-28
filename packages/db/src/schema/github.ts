@@ -36,7 +36,7 @@ export const ghRepos = pgTable('gh_repos', {
   blocking: boolean('blocking').notNull().default(true),
   // Code Quality (analyze) gate: whether new violations at/above the min severity
   // fail a required Check (default block on `high`+). Separate from `blocking`
-  // (drift). `min severity` is loosely typed text here (ee-db is a leaf).
+  // (drift). `min severity` is loosely typed text here (@truecourse/db is a leaf).
   codeQualityBlocking: boolean('code_quality_blocking').notNull().default(true),
   codeQualityMinSeverity: text('code_quality_min_severity').notNull().default('high'),
   enabled: boolean('enabled').notNull().default(true),
@@ -45,7 +45,7 @@ export const ghRepos = pgTable('gh_repos', {
     .notNull()
     .default(sql`'{}'::text[]`),
   // Per-type email toggles ({ gateFailure, conflicts }). Loosely typed here
-  // (ee-db is a dependency-free leaf); the gate store casts at the boundary.
+  // (@truecourse/db is a dependency-free leaf); the gate store casts at the boundary.
   // Null = unset → every type on.
   notifications: jsonb('notifications').$type<Record<string, boolean>>(),
   createdAt: ts('created_at').notNull(),
@@ -67,7 +67,7 @@ export const ghInferredActions = pgTable(
     repoFullName: text('repo_full_name').notNull(),
     kind: text('kind').notNull(),
     identity: text('identity').notNull(),
-    // 'dismissed' | 'promoted' — loosely typed (ee-db is a leaf).
+    // 'dismissed' | 'promoted' — loosely typed (@truecourse/db is a leaf).
     status: text('status').notNull(),
     createdAt: ts('created_at').notNull(),
   },
@@ -92,7 +92,7 @@ export const ghRuns = pgTable(
 
 // Open/closed/merged state per PR, tracked from every pull_request webhook so
 // the dashboard feed can filter (GitHub-style Open default + Closed toggle).
-// `state` is loosely typed text here (ee-db is a leaf); the gate store casts it
+// `state` is loosely typed text here (@truecourse/db is a leaf); the gate store casts it
 // to 'open' | 'closed' | 'merged' at the boundary.
 export const ghPrs = pgTable(
   'gh_prs',

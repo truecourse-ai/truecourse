@@ -14,7 +14,7 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { openConflicts, type AuthUser, type EeServerRegistry } from '@truecourse/shared';
-import type { EeDb } from '@truecourse/ee-db';
+import type { Db } from '@truecourse/db';
 import {
   JobStore,
   NotificationStore,
@@ -224,7 +224,7 @@ function createNotificationsRouter(notifications: NotificationStore): Router {
 }
 
 export interface RegisterJobsOptions {
-  db: EeDb;
+  db: Db;
   connectionString: string;
   masterSecret: string;
 }

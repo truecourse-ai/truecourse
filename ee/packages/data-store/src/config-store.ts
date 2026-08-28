@@ -5,12 +5,12 @@
  */
 
 import { eq } from 'drizzle-orm';
-import { repoConfig, repoUiState, type EeDb } from '@truecourse/ee-db';
+import { repoConfig, repoUiState, type Db } from '@truecourse/db';
 import type { ProjectConfig, RepoConfigStore } from '@truecourse/core/config/project-config';
 import type { UiState, UiStateStore } from '@truecourse/core/config/ui-state';
 
 export class PgRepoConfigStore implements RepoConfigStore {
-  constructor(private readonly db: EeDb) {}
+  constructor(private readonly db: Db) {}
 
   async readProjectConfig(repoKey: string): Promise<ProjectConfig> {
     const rows = await this.db
@@ -32,7 +32,7 @@ export class PgRepoConfigStore implements RepoConfigStore {
 const EMPTY_UI_STATE: UiState = { positions: {}, collapsed: {} };
 
 export class PgUiStateStore implements UiStateStore {
-  constructor(private readonly db: EeDb) {}
+  constructor(private readonly db: Db) {}
 
   async readUiState(repoKey: string): Promise<UiState> {
     const rows = await this.db

@@ -16,7 +16,7 @@ const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'string
  * The processing cost estimate the sweep captured — structurally the OSS
  * `LlmEstimate` (the shape the Process confirm dialog renders), so the dialog
  * opens instantly from the stored record without re-sweeping. Mirrors
- * `IntegrationPendingEstimate` in @truecourse/shared (ee-db has no shared dep).
+ * `IntegrationPendingEstimate` in @truecourse/shared (@truecourse/db has no shared dep).
  */
 export interface IntegrationPendingEstimate {
   totalEstimatedTokens: number;
