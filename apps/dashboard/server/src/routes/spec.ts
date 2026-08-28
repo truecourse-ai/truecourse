@@ -58,7 +58,7 @@ import {
 import { estimateStepPhase } from '@truecourse/core/progress';
 import { baselineCommit } from './diff-base.js';
 import { ensureLlmTransport } from '../services/llm-transport.service.js';
-import { beginSpecScan } from '../services/onboarding-scan.service.js';
+import { beginSpecScan, type SpecScanClaim } from '../services/onboarding-scan.service.js';
 import {
   createSocketSpecTracker,
   createSocketSpecEstimateHandler,
@@ -291,7 +291,7 @@ router.get(
   '/:id/spec/corpus/scan',
   async (req: Request, res: Response, next: NextFunction) => {
     let repoIdForCleanup: string | null = null;
-    let releaseScanSlot: (() => void) | null = null;
+    let scanClaim: SpecScanClaim | null = null;
     try {
       const repo = await resolveProjectForRequest(req.params.id as string);
       repoIdForCleanup = req.params.id as string;
@@ -304,8 +304,8 @@ router.get(
       // writes. The slot is held through the whole request — the estimate
       // confirm included, which is exactly the window the run record can't
       // cover yet.
-      releaseScanSlot = beginSpecScan(repo.path);
-      if (!releaseScanSlot) {
+      scanClaim = beginSpecScan(repo.path);
+      if (!scanClaim) {
         res.status(409).json({ error: 'A spec scan is already running for this repository.' });
         return;
       }
@@ -317,6 +317,9 @@ router.get(
       const result = await curateInProcess(repo.path, {
         tracker,
         source: 'dashboard',
+        // Same slot, same cancellation: disconnecting the repository stops a
+        // manual scan exactly as it stops an onboarding one.
+        signal: scanClaim.signal,
         // The popup replaces in place, so the estimate rides the checklist here as
         // a leading step (the terminal renders it as its own line instead).
         onEstimatePhase: estimateStepPhase(tracker),
@@ -338,7 +341,7 @@ router.get(
       }
       next(e);
     } finally {
-      releaseScanSlot?.();
+      scanClaim?.release();
     }
   },
 );

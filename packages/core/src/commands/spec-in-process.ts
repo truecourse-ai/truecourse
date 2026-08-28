@@ -39,7 +39,13 @@ export type {
 import { getStageUsage, stageTokenTotal } from '@truecourse/shared/llm';
 import type { SessionDriver, UserInputQuestion } from '@truecourse/agent-loop';
 import { runSpecScanSessions, type ScanStep } from '../services/spec-scan/run.js';
-export { SCAN_STEPS, ScanStepNotReadyError, type ScanStep } from '../services/spec-scan/run.js';
+export {
+  SCAN_STEPS,
+  ScanAbortedError,
+  ScanStepNotReadyError,
+  type ScanStep,
+} from '../services/spec-scan/run.js';
+import { ScanAbortedError } from '../services/spec-scan/run.js';
 import {
   SPEC_SCAN_ORCHESTRATE_SESSION_KIND,
   normalizeScopePath,
@@ -387,6 +393,14 @@ export interface CurateInProcessOptions {
   /** Ceiling on concurrent sessions (the pool's governor may run fewer). */
   concurrency?: number;
   /**
+   * Cancel the scan. In-flight sessions get the signal, queued ones never
+   * start, corpus.json is never written, and the call rejects with
+   * {@link ScanAbortedError} — the run record closes `interrupted`. The
+   * dashboard passes this so disconnecting a repository can stop the
+   * onboarding scan that is holding it.
+   */
+  signal?: AbortSignal;
+  /**
    * Single-step mode (the CLI's `--only-<step>` flags): run only this step's
    * sessions — prior steps replay from their durable artifacts (a missing one
    * throws {@link ScanStepNotReadyError}), later steps never start, and
@@ -551,6 +565,7 @@ export async function curateInProcess(
         disableScopeOrchestration: options.disableScopeOrchestration,
         ...(options.only !== undefined ? { only: options.only } : {}),
         ...(options.concurrency !== undefined ? { concurrency: options.concurrency } : {}),
+        ...(options.signal ? { signal: options.signal } : {}),
         onDiscover: (docs, toCurate) =>
           tracker?.detail('discover', `${docs} docs · ${toCurate} to curate`),
         onScope: (state) => {
@@ -578,7 +593,10 @@ export async function curateInProcess(
     } catch (e) {
       const active = verifyStarted ? 'verify' : overlapStarted ? 'overlap' : tagStarted ? 'tag' : 'discover';
       tracker?.error(active, (e as Error).message);
-      run.finish('failed');
+      // A cancelled scan is not a failed one: it stopped because the caller
+      // said so, which is the same word the boot sweep gives a run whose
+      // process died under it.
+      run.finish(e instanceof ScanAbortedError ? 'interrupted' : 'failed');
       throw e;
     }
 

@@ -37,6 +37,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { toast } from 'sonner';
 import {
   ACTIVE_WORKSPACE_ID,
   CONNECTABLE_REPOS,
@@ -171,12 +172,23 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
     setRepos((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   }, []);
 
-  /** A fixture row just disappears; a real one is really disconnected. */
+  /**
+   * A fixture row just disappears; a real one is really disconnected. The row
+   * goes optimistically and the refresh settles it either way — so a refused
+   * disconnect (the server holds the repo while a scan it cannot stop writes
+   * into it) has to SAY so, or the row simply reappears and reads as a bug.
+   */
   const unlinkRepo = useCallback(
     (id: string) => {
       if (realRepos.some((r) => r.id === id)) {
         setRealRepos((prev) => prev.filter((r) => r.id !== id));
-        void disconnectRealRepo(id).then(refreshRealRepos);
+        void disconnectRealRepo(id)
+          .catch((e: unknown) => {
+            toast.error('Could not disconnect', {
+              description: e instanceof Error ? e.message : String(e),
+            });
+          })
+          .then(refreshRealRepos);
         return;
       }
       setRepos((prev) => prev.filter((r) => r.id !== id));

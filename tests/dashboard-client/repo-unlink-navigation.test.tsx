@@ -2,10 +2,20 @@
  * Unlinking a repository from its Settings tab leaves a route that no longer
  * resolves, so the console must navigate back to Home rather than strand the
  * user on "No such repository".
+ *
+ * And when the server REFUSES the disconnect, the row that was optimistically
+ * removed comes back — which on its own reads as a bug, so the reason has to be
+ * spoken. The toast is the only place it is.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+
+const { toastMock } = vi.hoisted(() => ({
+  toastMock: { error: vi.fn(), success: vi.fn(), custom: vi.fn(), dismiss: vi.fn() },
+}));
+vi.mock('sonner', () => ({ toast: toastMock }));
+
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import PreviewApp from '@/preview/PreviewApp';
@@ -31,7 +41,12 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
 
+/** The DELETE the next render's unlink meets. Set per test. */
+let refusal: string | null = null;
+
 beforeEach(() => {
+  toastMock.error.mockClear();
+  refusal = null;
   const registry = [
     {
       id: 'spiderhands-filecli',
@@ -46,6 +61,8 @@ beforeEach(() => {
     const method = (init?.method ?? 'GET').toUpperCase();
     if (pathname === '/api/repos' && method === 'GET') return json(registry);
     if (pathname === '/api/repos/spiderhands-filecli' && method === 'DELETE') {
+      // A refused disconnect leaves the registry exactly as it was.
+      if (refusal) return json({ error: refusal }, 409);
       registry.length = 0;
       return json({ ok: true });
     }
@@ -75,5 +92,28 @@ describe('unlinking a repository from its settings', () => {
     // Home, not the dead repo route's empty state.
     await screen.findByRole('button', { name: 'Connect repository' });
     expect(screen.queryByText('No such repository')).toBeNull();
+  });
+
+  it('says why when the server refuses, and lets the row come back', async () => {
+    refusal = 'Another process is scanning this repository. Wait for it to finish, then disconnect.';
+    window.history.replaceState({}, '', '/preview/repos/spiderhands-filecli/settings');
+    render(
+      <MemoryRouter initialEntries={['/preview/repos/spiderhands-filecli/settings']}>
+        <Routes>
+          <Route path="/preview/*" element={<PreviewApp />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Unlink repository' }));
+    const dialog = await screen.findByRole('dialog');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Unlink' }));
+
+    // The refusal is spoken, verbatim — a row that reappears with no
+    // explanation is indistinguishable from a bug.
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalled());
+    expect(JSON.stringify(toastMock.error.mock.calls[0])).toContain(refusal);
+    // And the refresh puts it back: the repository is still connected.
+    await screen.findByText('spiderhands/filecli');
   });
 });

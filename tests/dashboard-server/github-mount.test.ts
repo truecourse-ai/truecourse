@@ -57,7 +57,10 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
 // scan open and watch the response come back anyway.
 const scan = vi.hoisted(() => ({
   calls: [] as string[],
-  impl: (async () => ({})) as (repoRoot: string) => Promise<unknown>,
+  impl: (async () => ({})) as (
+    repoRoot: string,
+    options?: { signal?: AbortSignal },
+  ) => Promise<unknown>,
 }));
 
 vi.mock('@truecourse/core/commands/spec-in-process', async (importOriginal) => {
@@ -65,9 +68,11 @@ vi.mock('@truecourse/core/commands/spec-in-process', async (importOriginal) => {
     await importOriginal<typeof import('@truecourse/core/commands/spec-in-process')>();
   return {
     ...actual,
-    curateInProcess: (repoRoot: string) => {
+    // The real options ride through — `signal` above all, since disconnecting a
+    // repository cancels the scan holding it.
+    curateInProcess: (repoRoot: string, options?: { signal?: AbortSignal }) => {
       scan.calls.push(repoRoot);
-      return scan.impl(repoRoot);
+      return scan.impl(repoRoot, options);
     },
   };
 });
@@ -759,6 +764,35 @@ describe('connecting a repository starts its spec scan', () => {
 
     await until(() => scan.calls.length > 0);
     expect(scan.calls).toEqual([repo]);
+  });
+
+  it('unlinking mid-scan cancels the scan and takes the clone with it', async () => {
+    // A scan that ends only when it is cancelled: without cancellation the
+    // unlink hook has nothing to do but refuse.
+    let reached = false;
+    scan.impl = (_repoRoot, options) =>
+      new Promise((_resolve, reject) => {
+        reached = true;
+        const stop = (): void => reject(new Error('the spec scan was cancelled'));
+        if (options?.signal?.aborted) stop();
+        else options?.signal?.addEventListener('abort', stop, { once: true });
+      });
+
+    const app = appWithRealScan();
+    await linkRepo(app).expect(201);
+    const clone = path.join(getClonesDir(), 'acme__widgets');
+    await until(() => reached);
+    expect(isSpecScanRunning(clone)).toBe(true);
+
+    await request(app)
+      .delete('/api/github/repos/link')
+      .query({ repoFullName: REPO })
+      .set('Cookie', `tc_session=${ORG}`)
+      .expect(200);
+
+    expect(isSpecScanRunning(clone)).toBe(false);
+    expect(await readRegistry()).toHaveLength(0);
+    expect(fs.existsSync(clone)).toBe(false);
   });
 
   it('sees a scan another process started, through the sessions store', async () => {

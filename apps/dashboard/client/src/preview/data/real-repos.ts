@@ -121,11 +121,12 @@ export async function fetchRealRepos(): Promise<Repo[]> {
   }
 }
 
-/** Disconnect a real repo. Failure is swallowed: the caller refreshes either way. */
-export async function disconnectRealRepo(id: string): Promise<void> {
-  try {
-    await deleteRepo(id);
-  } catch {
-    // The refresh that follows shows whether it actually went.
-  }
+/**
+ * Disconnect a real repo. REJECTS with the server's reason (an `ApiError`
+ * carrying its message): the server refuses a disconnect it cannot make safely
+ * — a spec scan another process is running holds the tree — and a caller that
+ * swallowed that would show the row snap back with nothing said.
+ */
+export function disconnectRealRepo(id: string): Promise<void> {
+  return deleteRepo(id);
 }

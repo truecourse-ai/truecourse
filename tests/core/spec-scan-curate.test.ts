@@ -14,7 +14,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { resetKvCacheStore } from '@truecourse/llm'
 import { LlmStageFailureError } from '@truecourse/shared/llm'
-import { runSpecScanSessions } from '../../packages/core/src/services/spec-scan/run'
+import { ScanAbortedError, runSpecScanSessions } from '../../packages/core/src/services/spec-scan/run'
 import {
   CURATE_DOC_SESSION_KIND,
   CURATE_DOC_SYSTEM_PROMPT,
@@ -39,6 +39,7 @@ import {
   type StubCall,
   type StubScript,
 } from './spec-scan-session-stub'
+import type { DriverResult } from '../../packages/agent-loop/src/index'
 
 let repo: string
 
@@ -119,6 +120,27 @@ function scanScript(curateDoc: (call: StubCall) => ReturnType<StubScript>): Stub
     }
     return curateDoc(call)
   }
+}
+
+/**
+ * A driver run that ends only when the scan is cancelled — the shell rewrites
+ * the failure into its own `aborted by caller`. Absent a cancellation it
+ * settles on `ifNotCancelled` after a short grace, so a signal that never
+ * reaches the session reads as a scan that simply finished, not as a hang.
+ */
+function untilCancelled(call: StubCall, ifNotCancelled: DriverResult): Promise<DriverResult> {
+  return new Promise((resolve) => {
+    if (call.input.signal.aborted) return resolve(transportFailure())
+    const timer = setTimeout(() => resolve(ifNotCancelled), 250)
+    call.input.signal.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer)
+        resolve(transportFailure())
+      },
+      { once: true },
+    )
+  })
 }
 
 /** Only the curate-doc runs, by the doc each was briefed on. */
@@ -623,6 +645,51 @@ describe('curateInProcess — the scan command over the session run', () => {
       fs.readFileSync(path.join(runsDir, runIds[0], 'run.json'), 'utf-8'),
     ) as { status: string }
     expect(record.status).toBe('failed')
+  })
+
+  it('a cancelled scan writes no corpus, caches only what completed, and closes the run `interrupted`', async () => {
+    twoDocs()
+    const controller = new AbortController()
+    // One doc completes, the other is still in flight when the caller cancels —
+    // so the abort is decided by the signal, not by the one-abort rule (which
+    // needs EVERY session of a kind to have died).
+    const stub = stubDriver(
+      scanScript(async (call) => {
+        if (docPathOf(call.briefing).includes('users')) {
+          controller.abort()
+          return outcome(KEEP('users entity'))
+        }
+        return untilCancelled(call, outcome(KEEP('auth')))
+      }),
+    )
+
+    await expect(
+      curateInProcess(repo, {
+        driver: stub.driver,
+        decisions: covering(['docs']),
+        repoIdentity: IDENTITY,
+        skipGit: true,
+        disableOverlapDetection: true,
+        concurrency: 2,
+        signal: controller.signal,
+      }),
+    ).rejects.toBeInstanceOf(ScanAbortedError)
+
+    // The corpus the cancelled run would have written is exactly the degenerate
+    // one — every unfinished doc folded open — so it must not exist at all.
+    expect(readCorpus(repo)).toBeNull()
+    const runsDir = path.join(repo, '.truecourse', 'sessions', 'spec-scan')
+    const runIds = fs.readdirSync(runsDir)
+    expect(runIds).toHaveLength(1)
+    const record = JSON.parse(
+      fs.readFileSync(path.join(runsDir, runIds[0], 'run.json'), 'utf-8'),
+    ) as { status: string }
+    expect(record.status).toBe('interrupted')
+
+    // The completed session is cached (real work, valid output); the aborted
+    // one is a failure, and a failure is never cached.
+    const cacheDir = path.join(repo, '.truecourse', '.cache', 'consolidator', 'curate-doc')
+    expect(fs.existsSync(cacheDir) ? fs.readdirSync(cacheDir) : []).toHaveLength(1)
   })
 
   it('curates the docs into corpus.json through the driver seam', async () => {

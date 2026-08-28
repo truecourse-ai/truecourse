@@ -27,6 +27,14 @@
  * Nothing here ever throws or rejects: every failure lands in the run record
  * (`curateInProcess` finishes it `failed`), the server log, and a terminal
  * `spec:progress` error for any client watching the repo.
+ *
+ * CANCELLABLE. A scan started here — the onboarding one and the manual Scan
+ * route alike, since both claim the same slot — runs under an `AbortSignal` we
+ * keep, so {@link cancelSpecScan} can stop it and wait for it to settle. That
+ * is what makes disconnecting a repository possible while its own onboarding
+ * scan is still writing into it: the disconnect IS the answer to whether the
+ * scan is still wanted. A scan another process owns has no such signal, and
+ * still blocks the disconnect.
  */
 
 import path from 'node:path';
@@ -41,15 +49,30 @@ import {
   emitSpecProgress,
 } from '../socket/handlers.js';
 
+/** One claimed scan slot: how to stop the scan, and when it has really stopped. */
+interface ScanClaim {
+  controller: AbortController;
+  /** Resolves when the scan has settled and released the slot. */
+  done: Promise<void>;
+  settle: () => void;
+}
+
 /**
  * Repos whose scan THIS PROCESS started and has not finished — the onboarding
  * scan or the manual Scan route, which share this guard. The store's own
  * `running` records cover a scan started by anything else (a CLI run, an
- * earlier server process); this set covers the window between "started" and
+ * earlier server process); this map covers the window between "started" and
  * "the run record exists", which the store cannot see. (For the manual scan
  * that window includes the whole estimate-confirm wait.)
+ *
+ * It is also the CANCELLATION REGISTRY: a scan of ours can be stopped, which
+ * is what lets a repository be disconnected while its onboarding scan is still
+ * running instead of being held hostage by it.
  */
-const inFlight = new Set<string>();
+const inFlight = new Map<string, ScanClaim>();
+
+/** How long a cancel waits for the scan to actually stop before giving up. */
+const CANCEL_TIMEOUT_MS = 30_000;
 
 /** Is a spec scan already running for this repo — here or anywhere else? */
 export function isSpecScanRunning(repoPath: string): boolean {
@@ -63,16 +86,65 @@ export function isSpecScanRunning(repoPath: string): boolean {
   }
 }
 
+/** Is the scan running for this repo OURS — i.e. one we can stop? */
+export function ownsSpecScan(repoPath: string): boolean {
+  return inFlight.has(path.resolve(repoPath));
+}
+
+/** A claimed scan slot: the signal to run under, and the release that frees it. */
+export interface SpecScanClaim {
+  /** Pass to `curateInProcess` so a cancel reaches the sessions. */
+  signal: AbortSignal;
+  /** Call once the scan has settled, however it settled. */
+  release: () => void;
+}
+
 /**
- * Claim the repo's one scan slot. Returns the release function, or `null`
- * when a scan is already running (here or anywhere else). Check-and-claim is
- * synchronous, so two concurrent requests cannot both get a slot.
+ * Claim the repo's one scan slot. Returns the claim, or `null` when a scan is
+ * already running (here or anywhere else). Check-and-claim is synchronous, so
+ * two concurrent requests cannot both get a slot.
  */
-export function beginSpecScan(repoPath: string): (() => void) | null {
+export function beginSpecScan(repoPath: string): SpecScanClaim | null {
   if (isSpecScanRunning(repoPath)) return null;
   const key = path.resolve(repoPath);
-  inFlight.add(key);
-  return () => inFlight.delete(key);
+  let settle!: () => void;
+  const done = new Promise<void>((resolve) => (settle = resolve));
+  const claim: ScanClaim = { controller: new AbortController(), done, settle };
+  inFlight.set(key, claim);
+  return {
+    signal: claim.controller.signal,
+    release: () => {
+      // Drop the slot BEFORE waking anyone waiting on `done`, so a canceller
+      // that resumes sees a free repo rather than its own scan still listed.
+      if (inFlight.get(key) === claim) inFlight.delete(key);
+      claim.settle();
+    },
+  };
+}
+
+/**
+ * Stop the scan THIS process is running for `repoPath` and wait for it to
+ * settle. `true` once the slot is free; `false` when we own no scan there (a
+ * CLI run in the same tree is nobody's to abort) or when it did not stop
+ * within `timeoutMs` — in both cases the caller must not touch the tree.
+ */
+export async function cancelSpecScan(
+  repoPath: string,
+  timeoutMs = CANCEL_TIMEOUT_MS,
+): Promise<boolean> {
+  const key = path.resolve(repoPath);
+  const claim = inFlight.get(key);
+  if (!claim) return false;
+  claim.controller.abort();
+  let timer: NodeJS.Timeout | undefined;
+  const stopped = await Promise.race([
+    claim.done.then(() => true),
+    new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(false), timeoutMs);
+    }),
+  ]);
+  if (timer) clearTimeout(timer);
+  return stopped && !inFlight.has(key);
 }
 
 /**
@@ -82,12 +154,12 @@ export function beginSpecScan(repoPath: string): (() => void) | null {
  */
 export function startOnboardingScan(repoId: string, repoPath: string): boolean {
   try {
-    const release = beginSpecScan(repoPath);
-    if (!release) {
+    const claim = beginSpecScan(repoPath);
+    if (!claim) {
       log.info(`[onboarding] spec scan already running for ${repoId} — not starting a second`);
       return false;
     }
-    void runScan(repoId, repoPath).finally(release);
+    void runScan(repoId, repoPath, claim.signal).finally(claim.release);
     return true;
   } catch (err) {
     log.error(`[onboarding] could not start the spec scan for ${repoId}: ${messageOf(err)}`);
@@ -96,7 +168,7 @@ export function startOnboardingScan(repoId: string, repoPath: string): boolean {
 }
 
 /** The scan itself. Resolves in every case — failures are reported, not thrown. */
-async function runScan(repoId: string, repoPath: string): Promise<void> {
+async function runScan(repoId: string, repoPath: string, signal: AbortSignal): Promise<void> {
   try {
     if (!(await isGitRepo(repoPath))) throw new Error(NOT_A_GIT_REPO_MESSAGE);
     // Refresh the saved LLM selection (a `stat` when unchanged). An unusable API
@@ -108,12 +180,19 @@ async function runScan(repoId: string, repoPath: string): Promise<void> {
     await curateInProcess(repoPath, {
       tracker,
       source: 'dashboard',
+      signal,
       onRunStarted: (info) =>
         log.info(`[onboarding] spec scan ${info.runId} started for ${repoId}`),
     });
     log.info(`[onboarding] spec scan finished for ${repoId}`);
     safely(() => emitSpecComplete(repoId, 'scan'));
   } catch (err) {
+    // A cancelled scan is not a failure to report: the repository it was
+    // scanning is being disconnected, and there is nobody left to tell.
+    if (signal.aborted) {
+      log.info(`[onboarding] spec scan cancelled for ${repoId}`);
+      return;
+    }
     const message = messageOf(err);
     log.error(`[onboarding] spec scan failed for ${repoId}: ${message}`);
     // The run record already carries the failure when one was created; this is
