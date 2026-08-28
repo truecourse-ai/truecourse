@@ -22,6 +22,12 @@ export interface AuthUser {
   profilePictureUrl?: string | null
   organizationId?: string | null
   /**
+   * The organization's display name — the workspace name the shell draws.
+   * Resolved server-side on `/me` (the session carries only the id), so it is
+   * absent whenever the user belongs to no organization.
+   */
+  organizationName?: string
+  /**
    * Platform operator (TrueCourse staff) — derived server-side from the WorkOS
    * user's `metadata.role === 'operator'`. Operators see the cross-org Admin
    * console (all workspaces' traces + jobs); regular members never do. Org-

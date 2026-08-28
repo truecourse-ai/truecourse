@@ -57,7 +57,11 @@ async function resolveIsOperator(workos: WorkOS, userId: string): Promise<boolea
   }
 }
 
-function toAuthUser(u: User, organizationId?: string | null): AuthUser {
+function toAuthUser(
+  u: User,
+  organizationId?: string | null,
+  organizationName?: string,
+): AuthUser {
   return {
     id: u.id,
     email: u.email,
@@ -65,7 +69,31 @@ function toAuthUser(u: User, organizationId?: string | null): AuthUser {
     lastName: u.lastName,
     profilePictureUrl: u.profilePictureUrl,
     organizationId: organizationId ?? null,
+    ...(organizationName ? { organizationName } : {}),
   };
+}
+
+/**
+ * Organization names, cached for the life of the process and never expired.
+ * A name changes only when someone renames the org in the WorkOS dashboard —
+ * there is no rename UI here — so a restart is a fine invalidation. Read on
+ * `/me` alone, never in the verifier: the gate runs on every request.
+ */
+const orgNameCache = new Map<string, string>();
+
+async function resolveOrgName(
+  workos: WorkOS,
+  organizationId: string,
+): Promise<string | undefined> {
+  const cached = orgNameCache.get(organizationId);
+  if (cached) return cached;
+  try {
+    const org = await workos.organizations.getOrganization(organizationId);
+    orgNameCache.set(organizationId, org.name);
+    return org.name;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -216,7 +244,14 @@ export function createAuthRouter(
       return;
     }
     if (result.setCookie) res.append('Set-Cookie', result.setCookie);
-    res.json({ user: result.user });
+    // The session carries the org id only; the shell needs its name.
+    const organizationId = result.user.organizationId;
+    const organizationName = organizationId
+      ? await resolveOrgName(workos, organizationId)
+      : undefined;
+    res.json({
+      user: organizationName ? { ...result.user, organizationName } : result.user,
+    });
   });
 
   // Self-serve onboarding: a signed-in user who belongs to no organization
@@ -274,7 +309,9 @@ export function createAuthRouter(
           secure,
         }),
       );
-      res.json({ user: toAuthUser(refreshed.user, refreshed.organizationId) });
+      // The name is the one just typed — no lookup needed.
+      orgNameCache.set(org.id, org.name);
+      res.json({ user: toAuthUser(refreshed.user, refreshed.organizationId, org.name) });
     } catch (err) {
       res.status(500).json({ error: `Could not create workspace: ${(err as Error).message}` });
     }

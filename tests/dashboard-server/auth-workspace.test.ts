@@ -5,8 +5,9 @@ import { createAuthRouter } from '../../apps/dashboard/server/src/auth/workos-au
 
 /**
  * The public auth router (`/api/auth`): the self-serve workspace-creation
- * endpoint, the login → callback `next` round-trip, and the fact that the
- * router uses the ONE verifier it is handed rather than building a second one.
+ * endpoint, the organization name `/me` puts on the session, the login →
+ * callback `next` round-trip, and the fact that the router uses the ONE
+ * verifier it is handed rather than building a second one.
  * WorkOS is faked so the tests assert orchestration without a live SDK.
  */
 
@@ -23,10 +24,17 @@ interface Calls {
   membership: Array<{ organizationId: string; userId: string }>;
   refresh: Array<{ organizationId?: string }>;
   authorizationUrl: Array<Record<string, unknown>>;
+  getOrg: string[];
 }
 
 function makeWorkos(opts: { existingOrg?: string | null; sealedSession?: string | null } = {}) {
-  const calls: Calls = { createOrg: [], membership: [], refresh: [], authorizationUrl: [] };
+  const calls: Calls = {
+    createOrg: [],
+    membership: [],
+    refresh: [],
+    authorizationUrl: [],
+    getOrg: [],
+  };
   const user = { id: 'user_1', email: 'u@acme.test' };
   const workos = {
     userManagement: {
@@ -63,6 +71,10 @@ function makeWorkos(opts: { existingOrg?: string | null; sealedSession?: string 
       createOrganization: async (o: { name: string }) => {
         calls.createOrg.push(o);
         return { id: 'org_new', name: o.name };
+      },
+      getOrganization: async (id: string) => {
+        calls.getOrg.push(id);
+        return { id, name: `Org ${id}` };
       },
     },
   };
@@ -102,6 +114,9 @@ describe('POST /api/auth/workspace', () => {
     expect(calls.membership).toEqual([{ organizationId: 'org_new', userId: 'user_1' }]);
     expect(calls.refresh).toEqual([{ organizationId: 'org_new' }]); // org-scoped refresh
     expect(res.body.user.organizationId).toBe('org_new');
+    // The name the user just typed comes straight back — no second lookup.
+    expect(res.body.user.organizationName).toBe('Acme Inc.');
+    expect(calls.getOrg).toEqual([]);
     // The re-minted session is written back as the session cookie.
     expect(res.headers['set-cookie']?.[0]).toContain('tc_session=sealed%3Aorg_new');
   });
@@ -146,9 +161,10 @@ describe('POST /api/auth/workspace', () => {
 });
 
 describe('GET /api/auth/me', () => {
+  beforeEach(() => verify.mockReset());
+
   it('resolves the session through the verifier it was constructed with', async () => {
     const m = makeWorkos();
-    verify.mockReset();
     verify.mockResolvedValue({ user: { id: 'user_1', email: 'u@acme.test' } });
 
     const res = await request(makeApp(m.workos))
@@ -158,6 +174,38 @@ describe('GET /api/auth/me', () => {
 
     expect(verify).toHaveBeenCalledWith('tc_session=sealed');
     expect(res.body.user.id).toBe('user_1');
+    // No organization on the session → nothing to look up.
+    expect(m.calls.getOrg).toEqual([]);
+  });
+
+  it('names the organization, looking it up once per process', async () => {
+    const m = makeWorkos();
+    verify.mockResolvedValue({
+      user: { id: 'user_1', email: 'u@acme.test', organizationId: 'org_me_1' },
+    });
+    const app = makeApp(m.workos);
+
+    const first = await request(app).get('/api/auth/me').expect(200);
+    expect(first.body.user.organizationName).toBe('Org org_me_1');
+
+    const second = await request(app).get('/api/auth/me').expect(200);
+    expect(second.body.user.organizationName).toBe('Org org_me_1');
+    // Cached for the life of the process: one lookup, two requests.
+    expect(m.calls.getOrg).toEqual(['org_me_1']);
+  });
+
+  it('still answers when the organization lookup fails', async () => {
+    const m = makeWorkos();
+    m.workos.organizations.getOrganization = async () => {
+      throw new Error('workos down');
+    };
+    verify.mockResolvedValue({
+      user: { id: 'user_1', email: 'u@acme.test', organizationId: 'org_me_2' },
+    });
+
+    const res = await request(makeApp(m.workos)).get('/api/auth/me').expect(200);
+    expect(res.body.user.organizationId).toBe('org_me_2');
+    expect(res.body.user.organizationName).toBeUndefined();
   });
 });
 

@@ -8,10 +8,13 @@
  * clears its dot, and the active job's counter climbs on a timer (a counter,
  * never a bar).
  *
- * One exception, and only one: repositories connected by git URL are REAL. They
- * are read from `GET /api/repos` on mount, listed ahead of the fixtures, and
- * unlinking one really disconnects it. With no server behind the preview that
- * read yields nothing and the mock is exactly what it was.
+ * The exceptions are the parts a signed-in user would catch lying. The ACTIVE
+ * WORKSPACE wears the name of the organization the session is in (its initial
+ * follows); the switcher's list, the plan and the repo counts are still
+ * fixtures. And repositories connected by git URL are REAL: they are read from
+ * `GET /api/repos` on mount, listed ahead of the fixtures, and unlinking one
+ * really disconnects it. With no session and no server behind the preview,
+ * both reads yield nothing and the mock is exactly what it was.
  *
  * That exception now includes their WORK: `useRealRunStream` follows the agent
  * runs of the real repositories over the shell's one socket, so a real run is a
@@ -47,6 +50,7 @@ import {
   WORKSPACES,
 } from '@/preview/data';
 import { disconnectRealRepo, fetchRealRepos } from '@/preview/data/real-repos';
+import { useEeAuth } from '@/ee/EeAuthContext';
 import { useRealRunStream } from './real-runs';
 import type {
   ConnectableRepo,
@@ -112,6 +116,8 @@ function tickJobs(jobs: JobChain[]): JobChain[] {
 const slugOf = (fullName: string): string => fullName.split('/').slice(-1)[0] ?? fullName;
 
 export function PreviewStateProvider({ children }: { children: ReactNode }) {
+  const { status, user } = useEeAuth();
+  const orgName = status === 'authed' ? user?.organizationName : undefined;
   const [workspaceId, setWorkspaceId] = useState(ACTIVE_WORKSPACE_ID);
   const [repos, setRepos] = useState<Repo[]>(REPOS);
   const [realRepos, setRealRepos] = useState<Repo[]>([]);
@@ -260,7 +266,11 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
   }, [realRuns]);
 
   const value = useMemo<PreviewStateValue>(() => {
-    const workspace = WORKSPACES.find((w) => w.id === workspaceId) ?? WORKSPACES[0]!;
+    const fixture = WORKSPACES.find((w) => w.id === workspaceId) ?? WORKSPACES[0]!;
+    // The workspace the user is in is theirs, so it wears their org's name.
+    const workspace = orgName
+      ? { ...fixture, name: orgName, initial: orgName.trim().charAt(0).toUpperCase() }
+      : fixture;
     // A real repository's row tells the truth about its runs: the onboarding
     // marker while its first scan is up, and a settled run's own words after.
     const allRepos = [
@@ -302,6 +312,7 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
     };
   }, [
     workspaceId,
+    orgName,
     repos,
     realRepos,
     realRuns,
