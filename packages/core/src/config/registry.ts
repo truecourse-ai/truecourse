@@ -55,7 +55,7 @@ interface RegistryFile {
 
 /** Extra fields to stamp on the entry when registering. */
 export interface RegisterProjectOptions {
-  /** See `RegistryEntry.remoteUrl`. Only set by the connect-by-URL flow. */
+  /** See `RegistryEntry.remoteUrl`. Only set when connecting through a provider. */
   remoteUrl?: string;
 }
 
