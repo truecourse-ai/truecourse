@@ -13,7 +13,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import type { AuthUser } from '@truecourse/shared';
-import { EeAuthProvider } from '@/ee/EeAuthContext';
+import { AuthProvider } from '@/ee/AuthContext';
 import { USER, WORKSPACES } from '@/preview/data';
 import { toPreviewUser, usePreviewUser } from '@/preview/shell/use-preview-user';
 import { PreviewStateProvider, usePreviewState } from '@/preview/shell/preview-state';
@@ -91,7 +91,7 @@ describe('usePreviewUser', () => {
       isOperator: true,
     });
 
-    const { result } = renderHook(() => usePreviewUser(), { wrapper: EeAuthProvider });
+    const { result } = renderHook(() => usePreviewUser(), { wrapper: AuthProvider });
 
     await waitFor(() => expect(result.current.name).toBe('Dana Rees'));
     expect(result.current.email).toBe('dana@acme.dev');
@@ -107,9 +107,9 @@ describe('usePreviewUser', () => {
 
 describe('the active workspace', () => {
   const withAuth = ({ children }: { children: ReactNode }) => (
-    <EeAuthProvider>
+    <AuthProvider>
       <PreviewStateProvider>{children}</PreviewStateProvider>
-    </EeAuthProvider>
+    </AuthProvider>
   );
 
   it('wears the signed-in organization name; the rest of it stays fixture', async () => {

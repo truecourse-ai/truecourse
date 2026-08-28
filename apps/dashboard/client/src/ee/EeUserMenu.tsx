@@ -14,7 +14,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { LogOut, ChevronDown, Sun, Moon, Github, Star } from 'lucide-react';
-import { useEeAuth } from '@/ee/EeAuthContext';
+import { useAuth } from '@/ee/AuthContext';
 import { useThemeToggle } from '@/hooks/useThemeToggle';
 import { DiscordIcon, GITHUB_URL, DISCORD_URL } from '@/components/layout/social';
 
@@ -29,7 +29,7 @@ export function EeUserMenu({
   /** Sidebar collapsed to an icon rail → show only the avatar. */
   collapsed?: boolean;
 }) {
-  const { status, user, signOut } = useEeAuth();
+  const { status, user, signOut } = useAuth();
   const { isDark, toggle: toggleTheme } = useThemeToggle();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);

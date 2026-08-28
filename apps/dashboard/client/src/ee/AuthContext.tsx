@@ -27,21 +27,21 @@ const AUTH_BASE = '/api/auth';
 
 type AuthStatus = 'disabled' | 'loading' | 'authed' | 'anon';
 
-interface EeAuthValue {
+interface AuthValue {
   status: AuthStatus;
   user: AuthUser | null;
   signIn: () => void;
   signOut: () => Promise<void>;
 }
 
-const EeAuthContext = createContext<EeAuthValue>({
+const AuthContext = createContext<AuthValue>({
   status: 'disabled',
   user: null,
   signIn: () => {},
   signOut: async () => {},
 });
 
-export function EeAuthProvider({ children }: { children: ReactNode }) {
+export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading');
   const [user, setUser] = useState<AuthUser | null>(null);
 
@@ -94,16 +94,16 @@ export function EeAuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const value = useMemo<EeAuthValue>(
+  const value = useMemo<AuthValue>(
     () => ({ status, user, signIn, signOut }),
     [status, user, signIn, signOut],
   );
 
-  return <EeAuthContext.Provider value={value}>{children}</EeAuthContext.Provider>;
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
-export function useEeAuth(): EeAuthValue {
-  return useContext(EeAuthContext);
+export function useAuth(): AuthValue {
+  return useContext(AuthContext);
 }
 
 function FullScreen({ children }: { children: ReactNode }) {
@@ -186,8 +186,8 @@ function CreateWorkspace() {
  * callback error came back (so we never redirect-loop). A tree with no
  * provider above it (`disabled`) renders straight through.
  */
-export function EnterpriseAuthGate({ children }: { children: ReactNode }) {
-  const { status, user, signIn } = useEeAuth();
+export function AuthGate({ children }: { children: ReactNode }) {
+  const { status, user, signIn } = useAuth();
   const authError = new URLSearchParams(window.location.search).get(
     'auth_error',
   );

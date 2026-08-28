@@ -53,9 +53,9 @@ beforeEach(() => {
   ];
   app = express();
   app.use(express.json());
-  // Stand in for the enterprise auth gate: attach req.eeUser.
+  // Stand in for the auth gate: attach req.user.
   app.use((req, _res, next) => {
-    (req as Request & { eeUser?: AuthUser }).eeUser = {
+    (req as Request & { user?: AuthUser }).user = {
       id: 'u1',
       email: 'u@acme.test',
       organizationId: currentOrg,

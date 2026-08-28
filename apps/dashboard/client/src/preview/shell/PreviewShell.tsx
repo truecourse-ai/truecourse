@@ -30,7 +30,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { useEeAuth } from '@/ee/EeAuthContext';
+import { useAuth } from '@/ee/AuthContext';
 import { useThemeToggle } from '@/hooks/useThemeToggle';
 import { usePreviewState } from './preview-state';
 import { usePreviewUser } from './use-preview-user';
@@ -174,7 +174,7 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
   const { isDark, toggle: toggleTheme } = useThemeToggle();
   const { workspace } = usePreviewState();
   const user = usePreviewUser();
-  const { signOut } = useEeAuth();
+  const { signOut } = useAuth();
   const [open, setOpen] = useState(false);
   const close = useCallback(() => setOpen(false), []);
   const ref = useClickOutside(open, close);

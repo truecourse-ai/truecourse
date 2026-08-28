@@ -53,7 +53,7 @@ describe('Knowledge route — LLM-provider gate differs by endpoint', () => {
     app = express();
     app.use(express.json());
     app.use((req, _res, next) => {
-      (req as Request & { eeUser?: AuthUser }).eeUser = {
+      (req as Request & { user?: AuthUser }).user = {
         id: 'u1',
         email: 'u@acme.test',
         organizationId: ORG,
@@ -147,7 +147,7 @@ describe('Knowledge route — the estimate single-flight key is per ORG', () => 
     app = express();
     app.use(express.json());
     app.use((req, _res, next) => {
-      (req as Request & { eeUser?: AuthUser }).eeUser = {
+      (req as Request & { user?: AuthUser }).user = {
         id: 'u1',
         email: 'u@acme.test',
         organizationId: currentOrg,

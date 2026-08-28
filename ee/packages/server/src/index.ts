@@ -240,7 +240,7 @@ const plugin: EePlugin = {
     plugin.capabilities.push('llm-config');
 
     // Cross-org Admin console (operator-only): LLM traces + jobs across every
-    // workspace. Gated PER-USER on `eeUser.isOperator` (the nav/page hide for
+    // workspace. Gated PER-USER on `user.isOperator` (the nav/page hide for
     // members; the routes 403) — NOT a deployment capability, so the feature
     // isn't advertised in the public capabilities list.
     registerAdmin(registry, { db: eeDb, traceStore });

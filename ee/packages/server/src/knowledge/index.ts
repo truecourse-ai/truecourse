@@ -3,7 +3,7 @@
  *
  * Workspace Knowledge is the curated-corpus spec derived from connected tools
  * (Confluence/…), shared by every repo in the workspace. Every route is scoped to
- * the signed-in user's WorkOS organization (`req.eeUser.organizationId`).
+ * the signed-in user's WorkOS organization (`req.user.organizationId`).
  *
  * Two stages: `/estimate` ("Sync now") is the only stage that talks to a source —
  * it fetches every doc, PERSISTS each body (content-addressed) + reconciles the
@@ -31,7 +31,7 @@ import { registerKnowledgeSpecRoutes, parsePageParams } from './spec-routes.js';
 
 /** The OSS auth gate attaches the resolved user; read it without the augmentation. */
 function orgIdOf(req: Request): string | null {
-  const user = (req as Request & { eeUser?: AuthUser }).eeUser;
+  const user = (req as Request & { user?: AuthUser }).user;
   return user?.organizationId ?? null;
 }
 

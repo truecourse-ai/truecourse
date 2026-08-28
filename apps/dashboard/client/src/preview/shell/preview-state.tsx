@@ -50,7 +50,7 @@ import {
   WORKSPACES,
 } from '@/preview/data';
 import { disconnectRealRepo, fetchRealRepos } from '@/preview/data/real-repos';
-import { useEeAuth } from '@/ee/EeAuthContext';
+import { useAuth } from '@/ee/AuthContext';
 import { useRealRunStream } from './real-runs';
 import type {
   ConnectableRepo,
@@ -116,7 +116,7 @@ function tickJobs(jobs: JobChain[]): JobChain[] {
 const slugOf = (fullName: string): string => fullName.split('/').slice(-1)[0] ?? fullName;
 
 export function PreviewStateProvider({ children }: { children: ReactNode }) {
-  const { status, user } = useEeAuth();
+  const { status, user } = useAuth();
   const orgName = status === 'authed' ? user?.organizationName : undefined;
   const [workspaceId, setWorkspaceId] = useState(ACTIVE_WORKSPACE_ID);
   const [repos, setRepos] = useState<Repo[]>(REPOS);

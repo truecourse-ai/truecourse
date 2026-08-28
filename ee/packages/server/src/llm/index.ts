@@ -26,7 +26,7 @@ import { LlmConfigStore } from './store.js';
 export { isLlmConfigured, NO_LLM_PROVIDER_MESSAGE } from '@truecourse/shared/llm';
 
 function orgIdOf(req: Request): string | undefined {
-  return (req as Request & { eeUser?: AuthUser }).eeUser?.organizationId ?? undefined;
+  return (req as Request & { user?: AuthUser }).user?.organizationId ?? undefined;
 }
 
 // ---------------------------------------------------------------------------

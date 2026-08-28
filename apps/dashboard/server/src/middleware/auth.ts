@@ -17,7 +17,7 @@ declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
-      eeUser?: AuthUser;
+      user?: AuthUser;
     }
   }
 }
@@ -40,7 +40,7 @@ export function createAuthGate(verify: AuthVerifier | null): RequestHandler {
       // The session may have been transparently refreshed; if so, hand the
       // rotated cookie back to the browser.
       if (result.setCookie) res.append('Set-Cookie', result.setCookie);
-      req.eeUser = result.user;
+      req.user = result.user;
       next();
     } catch {
       res.status(401).json({ error: 'Authentication failed' });

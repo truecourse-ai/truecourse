@@ -36,7 +36,7 @@ const VALID_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_NOTIFY_EMAILS = 20;
 
 function orgIdOf(req: Request): string | null {
-  const user = (req as Request & { eeUser?: AuthUser }).eeUser;
+  const user = (req as Request & { user?: AuthUser }).user;
   return user?.organizationId ?? null;
 }
 

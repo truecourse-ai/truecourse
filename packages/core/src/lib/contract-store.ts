@@ -36,7 +36,7 @@ export interface RepoRef {
  * generated from connected tools (or manual upload) and shared by every repo in
  * the workspace. It is **always-latest** — one current set per org per
  * artifact/kind, with no commit dimension. `workspaceOrgId` is the WorkOS
- * organization id (= `req.eeUser.organizationId`, the same value stored as
+ * organization id (= `req.user.organizationId`, the same value stored as
  * `gh_repos.workspace_org_id`).
  *
  * Declared here next to `RepoRef` — the canonical home for store scope handles —

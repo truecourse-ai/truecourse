@@ -23,7 +23,7 @@ function makeApp(overrides: {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
-    (req as Request & { eeUser?: AuthUser }).eeUser = { id: 'u1', email: 'u@acme.test', organizationId: ORG };
+    (req as Request & { user?: AuthUser }).user = { id: 'u1', email: 'u@acme.test', organizationId: ORG };
     next();
   });
   const octokit = {

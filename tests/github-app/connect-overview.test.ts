@@ -54,7 +54,7 @@ beforeEach(async () => {
   app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
-    (req as Request & { eeUser?: AuthUser }).eeUser = {
+    (req as Request & { user?: AuthUser }).user = {
       id: 'u1', email: 'u@acme.test', organizationId: 'org_A',
     };
     next();

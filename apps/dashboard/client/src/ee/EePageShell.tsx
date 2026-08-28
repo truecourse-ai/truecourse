@@ -26,7 +26,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useEeModule } from '@/ee/EeModuleContext';
-import { useEeAuth } from '@/ee/EeAuthContext';
+import { useAuth } from '@/ee/AuthContext';
 import { EeUserMenu } from '@/ee/EeUserMenu';
 
 const COLLAPSE_KEY = 'tc-ee-nav-collapsed';
@@ -96,7 +96,7 @@ function useHeaderWidget(): ComponentType<{ collapsed?: boolean }> | null {
 
 export function EePageShell({ children }: { children: ReactNode }) {
   const { navItems } = useEeModule();
-  const { user } = useEeAuth();
+  const { user } = useAuth();
   // Operator-only items (the Admin console) are hidden for regular members, and
   // grouped with notifications at the bottom rather than in the section nav.
   const visibleNav = navItems.filter((n) => !n.requiresOperator || user?.isOperator);

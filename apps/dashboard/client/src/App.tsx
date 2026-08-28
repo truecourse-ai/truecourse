@@ -6,7 +6,7 @@ import RepoPage from './components/pages/RepoPage';
 import { useDarkMode } from './hooks/useDarkMode';
 import { AppProvider } from './contexts/CapabilityContext';
 import { EeModuleProvider, useEeModule } from './ee/EeModuleContext';
-import { EeAuthProvider, EnterpriseAuthGate } from './ee/EeAuthContext';
+import { AuthProvider, AuthGate } from './ee/AuthContext';
 import { EePageShell } from './ee/EePageShell';
 
 const PreviewApp = lazy(() => import('./preview/PreviewApp'));
@@ -132,9 +132,9 @@ export default function App() {
   return (
     <AppProvider>
       <EeModuleProvider>
-        <EeAuthProvider>
+        <AuthProvider>
         <BrowserRouter>
-          <EnterpriseAuthGate>
+          <AuthGate>
           <EeShellProvider>
           <AppRoutes />
         <Toaster
@@ -167,9 +167,9 @@ export default function App() {
           }}
         />
           </EeShellProvider>
-          </EnterpriseAuthGate>
+          </AuthGate>
         </BrowserRouter>
-        </EeAuthProvider>
+        </AuthProvider>
       </EeModuleProvider>
     </AppProvider>
   );

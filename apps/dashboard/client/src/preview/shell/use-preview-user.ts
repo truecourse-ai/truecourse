@@ -11,7 +11,7 @@
 
 import { useMemo } from 'react';
 import type { AuthUser } from '@truecourse/shared';
-import { useEeAuth } from '@/ee/EeAuthContext';
+import { useAuth } from '@/ee/AuthContext';
 import { USER } from '@/preview/data';
 import type { PreviewUser } from '@/preview/data/types';
 
@@ -35,7 +35,7 @@ export function toPreviewUser(user: AuthUser): PreviewUser {
 }
 
 export function usePreviewUser(): PreviewUser {
-  const { status, user } = useEeAuth();
+  const { status, user } = useAuth();
   return useMemo(
     () => (status === 'authed' && user ? toPreviewUser(user) : USER),
     [status, user],

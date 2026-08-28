@@ -22,7 +22,7 @@ import {
 } from '../knowledge/connectors/types.js';
 
 function orgIdOf(req: Request): string | null {
-  return (req as Request & { eeUser?: AuthUser }).eeUser?.organizationId ?? null;
+  return (req as Request & { user?: AuthUser }).user?.organizationId ?? null;
 }
 
 const saveSchema = z.object({

@@ -54,7 +54,7 @@ export interface WorkspaceSettingsReader {
 // The OSS auth gate attaches the resolved user; read it without
 // depending on the OSS type augmentation.
 function orgIdOf(req: Request): string | null {
-  const user = (req as Request & { eeUser?: AuthUser }).eeUser;
+  const user = (req as Request & { user?: AuthUser }).user;
   return user?.organizationId ?? null;
 }
 

@@ -14,7 +14,7 @@ import { createApp } from '../../apps/dashboard/server/src/app';
 function mkCtx(cookie?: string) {
   const req = { headers: { cookie } } as never as {
     headers: { cookie?: string };
-    eeUser?: unknown;
+    user?: unknown;
   };
   const res = {
     statusCode: 200,
@@ -57,11 +57,11 @@ describe('createAuthGate', () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it('passes and attaches req.eeUser when the verifier resolves a session', async () => {
+  it('passes and attaches req.user when the verifier resolves a session', async () => {
     const user = { id: 'u1', email: 'a@b.com' };
     const { req, next } = await run(createAuthGate(async () => ({ user })), 'sess=abc');
     expect(next).toHaveBeenCalledTimes(1);
-    expect(req.eeUser).toEqual(user);
+    expect(req.user).toEqual(user);
   });
 
   it('applies a refreshed Set-Cookie when the session was renewed', async () => {
