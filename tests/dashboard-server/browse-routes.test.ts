@@ -31,9 +31,9 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
 // Switchable capability set — reset to OSS default before each case; only the
 // last case flips it off to prove the gate.
 let mockCaps: string[] = ['local-filesystem'];
-vi.mock('../../apps/dashboard/server/src/ee-loader', async (importOriginal) => {
+vi.mock('../../apps/dashboard/server/src/capabilities', async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import('../../apps/dashboard/server/src/ee-loader')>();
+    await importOriginal<typeof import('../../apps/dashboard/server/src/capabilities')>();
   return { ...actual, getCapabilities: () => mockCaps };
 });
 

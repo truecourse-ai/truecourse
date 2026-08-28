@@ -6,9 +6,8 @@
  * while the dashboard is up takes effect without a restart.
  *
  * The engines are mocked (never a real LLM call); what's asserted is the
- * process-wide default transport around each entry, the enterprise gate (EE
- * installs its own from its encrypted store — OSS must never touch it), and the
- * typed config error reaching the client through the existing error plumbing.
+ * process-wide default transport around each entry and the typed config error
+ * reaching the client through the existing error plumbing.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -61,7 +60,7 @@ vi.mock('@truecourse/core/services/flow', async (importOriginal) => ({
 
 // The dist entries the dashboard server itself imports — the source copies would
 // be different module instances, with their own default-transport slot.
-import { getDefaultTransport, setDefaultTransport, type LlmTransport } from '@truecourse/shared/llm';
+import { getDefaultTransport, setDefaultTransport } from '@truecourse/shared/llm';
 import { writeGlobalConfig, type GlobalConfig } from '@truecourse/core/config/global-config';
 import { resetConfiguredLlmTransport } from '@truecourse/core/services/llm/install-transport';
 import { log } from '@truecourse/core/lib/logger';
@@ -74,7 +73,6 @@ import { installLlmTransportAtBoot } from '../../apps/dashboard/server/src/servi
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 
 const savedEnv = { ...process.env };
-const sentinel: LlmTransport = async () => 'enterprise';
 
 function apiConfig(over: Partial<NonNullable<NonNullable<GlobalConfig['llm']>['api']>> = {}): GlobalConfig {
   return {
@@ -96,7 +94,6 @@ describe('Dashboard server LLM transport install', () => {
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-dash-llm-home-'));
     process.env.TRUECOURSE_HOME = home;
     delete process.env.TRUECOURSE_LLM_TRANSPORT;
-    delete process.env.TRUECOURSE_EDITION;
     delete process.env.ANTHROPIC_API_KEY;
 
     setDefaultTransport(undefined);
@@ -136,15 +133,6 @@ describe('Dashboard server LLM transport install', () => {
     writeGlobalConfig({ llm: { transport: 'claude-code', api: apiConfig().llm!.api } });
     installLlmTransportAtBoot();
     expect(getDefaultTransport()).toBeUndefined();
-  });
-
-  it('skips the boot install in enterprise mode, leaving EE\'s own transport alone', () => {
-    process.env.TRUECOURSE_EDITION = 'enterprise';
-    // EE registered its transport from the encrypted store before this point.
-    setDefaultTransport(sentinel);
-    writeGlobalConfig(apiConfig());
-    installLlmTransportAtBoot();
-    expect(getDefaultTransport()).toBe(sentinel);
   });
 
   it('warns and boots anyway when the saved API config is unusable', () => {
@@ -189,17 +177,6 @@ describe('Dashboard server LLM transport install', () => {
       await hit();
       expect(typeof getDefaultTransport(), name).toBe('function');
     }
-  });
-
-  it('never installs at a pipeline entry in enterprise mode', async () => {
-    process.env.TRUECOURSE_EDITION = 'enterprise';
-    setDefaultTransport(sentinel);
-    writeGlobalConfig(apiConfig());
-
-    await request(app).post(url('guard/generate')).send({ confirmed: true }).expect(200);
-    await request(app).get(url('spec/corpus/scan')).expect(200);
-    await request(app).post(url('flows/f1/enrich')).expect(200);
-    expect(getDefaultTransport()).toBe(sentinel);
   });
 
   it('leaves analyze alone when LLM rules are off, however broken the API config', async () => {

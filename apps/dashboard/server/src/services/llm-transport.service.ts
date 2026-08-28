@@ -4,14 +4,6 @@
  * guard generate, analyze, flow enrich — reach the model the CLI would. The
  * dashboard only reads that selection; it never edits it.
  *
- * Community only. Enterprise installs its own transport at boot from its
- * encrypted store (`registerLlmProviders`, always — the configured provider or
- * the loud no-provider stub) and has no CLI/file-config fallback by design, so
- * every call here is gated on `isEnterprise()`: the same predicate `ee-loader`
- * uses to decide whether that EE transport gets installed at all. In an
- * enterprise process nothing here ever reads the global config or touches the
- * process default, so the two can never compete for it.
- *
  * Called at boot and again at each pipeline entry: the install is keyed on the
  * config file's mtime, so a repeat call is one `stat` — and a `config llm setup`
  * run while the dashboard is up takes effect without a restart.
@@ -19,7 +11,6 @@
 
 import { log } from '@truecourse/core/lib/logger';
 import { installConfiguredLlmTransport } from '@truecourse/core/services/llm/install-transport';
-import { isEnterprise } from '../edition.js';
 
 /**
  * Install (or refresh) the configured transport before work that spends on the
@@ -27,7 +18,6 @@ import { isEnterprise } from '../edition.js';
  * config; routes let it surface through their normal error plumbing.
  */
 export function ensureLlmTransport(): void {
-  if (isEnterprise()) return;
   installConfiguredLlmTransport();
 }
 

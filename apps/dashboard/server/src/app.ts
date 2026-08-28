@@ -21,7 +21,6 @@ import guardActionsRouter from './routes/guard-actions.js';
 import sessionsRouter from './routes/sessions.js';
 import capabilitiesRouter from './routes/capabilities.js';
 import { createAuthGate } from './middleware/auth.js';
-import { getPublicRouters, getProtectedRouters } from './ee-loader.js';
 import type { AuthVerifier } from '@truecourse/shared';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -41,12 +40,12 @@ export interface CreateAppOptions {
 export function createApp(opts: CreateAppOptions): express.Express {
   const app: express.Express = express();
 
-  // Reflect the request origin and allow credentials so the enterprise
-  // session cookie flows on cross-origin dev requests (client :3000 →
-  // server :3001). Same-origin in production, where this is a no-op.
+  // Reflect the request origin and allow credentials so the session cookie
+  // flows on cross-origin dev requests (client :3000 → server :3001).
+  // Same-origin in production, where this is a no-op.
   app.use(cors({ origin: true, credentials: true }));
-  // Capture the raw body alongside JSON parsing so webhook receivers (e.g. the
-  // enterprise GitHub App) can verify HMAC signatures over the exact bytes.
+  // Capture the raw body alongside JSON parsing so a webhook receiver can
+  // verify an HMAC signature over the exact bytes.
   app.use(
     express.json({
       // GitHub webhook payloads (e.g. large pull_request events) can exceed the
@@ -62,11 +61,8 @@ export function createApp(opts: CreateAppOptions): express.Express {
   // without a session, so they mount before the gate.
   if (opts.authRouter) app.use('/api/auth', opts.authRouter);
 
-  // --- Enterprise (no-ops in community) -----------------------------
-  for (const r of getPublicRouters()) app.use(r.basePath, r.router);
-
   // Capabilities + health stay public so the client can discover the
-  // edition and liveness before authenticating.
+  // feature gates and liveness before authenticating.
   app.use('/api/capabilities', capabilitiesRouter);
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -75,9 +71,6 @@ export function createApp(opts: CreateAppOptions): express.Express {
   // The auth gate protects everything under /api below this line. Static SPA
   // assets are outside /api, so the dashboard shell still loads to drive login.
   app.use('/api', createAuthGate(opts.authVerifier));
-
-  // Protected enterprise routers (e.g. Workspace data) sit behind the gate.
-  for (const r of getProtectedRouters()) app.use(r.basePath, r.router);
 
   // Home page / registry routes run without a project.
   app.use('/api/repos', reposRouter);

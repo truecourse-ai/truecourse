@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { CreateRepoSchema, ConnectRepoSchema, BrowseDirQuerySchema } from '@truecourse/shared';
-import { getCapabilities } from '../ee-loader.js';
+import { getCapabilities } from '../capabilities.js';
 import { createAppError } from '@truecourse/core/lib/errors';
 import { getGit } from '@truecourse/core/lib/git';
 import { getRepoTruecourseDir } from '@truecourse/core/config/paths';
@@ -191,10 +191,10 @@ function isTrustedBrowseOrigin(origin: string | undefined, host: string | undefi
 }
 
 // GET /api/repos/browse?path=<abs> — list subdirectories for the directory picker.
-// LOCAL-ONLY: gated on the 'local-filesystem' capability (present in OSS, absent
-// in hosted EE where there is no per-user disk) and on a trusted Origin (see
-// isTrustedBrowseOrigin above). MUST be declared before GET '/:id' so 'browse'
-// is not captured as a project id.
+// LOCAL-ONLY: gated on the 'local-filesystem' capability (see ../capabilities.ts
+// — an install without a per-user disk would not carry it) and on a trusted
+// Origin (see isTrustedBrowseOrigin above). MUST be declared before GET '/:id'
+// so 'browse' is not captured as a project id.
 router.get('/browse', async (req: Request, res: Response, next: NextFunction) => {
   try {
     // Origin gate — reject cross-origin reads before anything else.
