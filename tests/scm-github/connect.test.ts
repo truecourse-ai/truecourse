@@ -136,7 +136,7 @@ describe('connect router', () => {
       .get('/api/ee/github/setup')
       .query({ installation_id: '100', state: 'org_A' })
       .expect(302)
-      .expect('location', 'http://localhost:3000/repositories');
+      .expect('location', 'http://localhost:3000/preview?connect=1');
     // Ownership is unchanged.
     expect((await store.getInstallation(100))?.workspaceOrgId).toBe('org_OTHER');
   });

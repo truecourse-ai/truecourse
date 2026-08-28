@@ -232,7 +232,9 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       // Else: the installation already belongs to another workspace — never
       // re-link it (prevents cross-tenant installation takeover).
     }
-    res.redirect(`${deps.appUrl}/repositories`);
+    // Land back on the connect dialog so the new installation is immediately
+    // pickable.
+    res.redirect(`${deps.appUrl}/preview?connect=1`);
   });
 
   router.post('/repos/link', async (req: Request, res: Response) => {
