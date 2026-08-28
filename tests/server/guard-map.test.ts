@@ -57,7 +57,7 @@ describe('Guard map action', () => {
   beforeEach(async () => {
     fixture = await setupTestFixture();
     root = fixture.repoPath;
-    app = createApp({ serveStatic: false });
+    app = createApp({ serveStatic: false, authVerifier: null });
     vi.mocked(mapJourneys).mockClear();
     fs.mkdirSync(path.join(root, 'src'), { recursive: true });
     fs.writeFileSync(path.join(root, 'src', 'cli.ts'), CLI_SOURCE);

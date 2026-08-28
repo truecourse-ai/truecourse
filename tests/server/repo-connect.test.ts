@@ -113,7 +113,7 @@ beforeAll(() => {
   // The registry and the managed clones root both hang off TRUECOURSE_HOME;
   // point them at a throwaway dir. Both are read lazily, per call.
   process.env.TRUECOURSE_HOME = makeTmpDir('tc-connect-home-');
-  app = createApp({ serveStatic: false });
+  app = createApp({ serveStatic: false, authVerifier: null });
 });
 
 afterEach(async () => {

@@ -3,7 +3,7 @@ import path from 'node:path';
 import '@truecourse/core/config/env';
 import { setupSocket } from './socket/index.js';
 import { createApp } from './app.js';
-import { loadEnterprise } from './ee-loader.js';
+import { getAuthVerifier, loadEnterprise } from './ee-loader.js';
 import { stopAllWatchers } from './services/watcher.service.js';
 import { stopAllRunTails } from './services/session-tailer.service.js';
 import { installLlmTransportAtBoot } from './services/llm-transport.service.js';
@@ -41,7 +41,7 @@ async function main() {
   installLlmTransportAtBoot();
 
   // 4. Setup Express app + socket.io
-  const app = createApp();
+  const app = createApp({ authVerifier: getAuthVerifier() });
   const httpServer = createServer(app);
   setupSocket(httpServer);
 

@@ -28,7 +28,7 @@ describe('Guard dismiss + finding-evidence routes', () => {
   beforeEach(async () => {
     fixture = await setupTestFixture();
     root = fixture.repoPath;
-    app = createApp({ serveStatic: false });
+    app = createApp({ serveStatic: false, authVerifier: null });
   });
   afterEach(async () => {
     await teardownTestFixture(fixture.project.slug);

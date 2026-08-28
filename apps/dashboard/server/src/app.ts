@@ -20,16 +20,25 @@ import guardRouter from './routes/guard.js';
 import guardActionsRouter from './routes/guard-actions.js';
 import sessionsRouter from './routes/sessions.js';
 import capabilitiesRouter from './routes/capabilities.js';
-import { enterpriseAuthGate } from './middleware/ee-auth.js';
+import { createAuthGate } from './middleware/auth.js';
 import { getPublicRouters, getProtectedRouters } from './ee-loader.js';
+import type { AuthVerifier } from '@truecourse/shared';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export interface CreateAppOptions {
   serveStatic?: boolean;
+  /**
+   * The session verifier the gate enforces with. REQUIRED — omitting it would
+   * mean an app that boots wide open, so that must not compile. Pass `null`
+   * deliberately (tests do) to make the gate a pass-through.
+   */
+  authVerifier: AuthVerifier | null;
+  /** Public auth routes, mounted at /api/auth above the gate. */
+  authRouter?: express.Router;
 }
 
-export function createApp(opts: CreateAppOptions = {}): express.Express {
+export function createApp(opts: CreateAppOptions): express.Express {
   const app: express.Express = express();
 
   // Reflect the request origin and allow credentials so the enterprise
@@ -49,9 +58,11 @@ export function createApp(opts: CreateAppOptions = {}): express.Express {
     }),
   );
 
+  // Auth endpoints (login / callback / logout / me) must be reachable
+  // without a session, so they mount before the gate.
+  if (opts.authRouter) app.use('/api/auth', opts.authRouter);
+
   // --- Enterprise (no-ops in community) -----------------------------
-  // Public enterprise endpoints (login / callback / logout / me) must
-  // be reachable without a session, so they mount before the gate.
   for (const r of getPublicRouters()) app.use(r.basePath, r.router);
 
   // Capabilities + health stay public so the client can discover the
@@ -61,10 +72,9 @@ export function createApp(opts: CreateAppOptions = {}): express.Express {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
   });
 
-  // The enterprise auth gate protects everything under /api below this
-  // line (transparent pass-through in community). Static SPA assets are
-  // outside /api, so the dashboard shell still loads to drive login.
-  app.use('/api', enterpriseAuthGate);
+  // The auth gate protects everything under /api below this line. Static SPA
+  // assets are outside /api, so the dashboard shell still loads to drive login.
+  app.use('/api', createAuthGate(opts.authVerifier));
 
   // Protected enterprise routers (e.g. Workspace data) sit behind the gate.
   for (const r of getProtectedRouters()) app.use(r.basePath, r.router);

@@ -100,7 +100,7 @@ afterEach(() => {
 
 describe('GET /api/capabilities', () => {
   it('returns community edition with no capabilities by default', async () => {
-    const app = createApp({ serveStatic: false });
+    const app = createApp({ serveStatic: false, authVerifier: null });
     const res = await request(app).get('/api/capabilities');
 
     expect(res.status).toBe(200);
@@ -110,7 +110,7 @@ describe('GET /api/capabilities', () => {
   it('stays reachable without auth even in enterprise mode (mounted before the gate)', async () => {
     setEnterpriseEnv();
     await loadEnterprise();
-    const app = createApp({ serveStatic: false });
+    const app = createApp({ serveStatic: false, authVerifier: null });
     // No session cookie — capabilities must still answer.
     const res = await request(app).get('/api/capabilities');
     expect(res.status).toBe(200);
@@ -119,7 +119,7 @@ describe('GET /api/capabilities', () => {
   it("never advertises 'guard' when the background job worker failed to start", async () => {
     setEnterpriseEnv();
     await loadEnterprise();
-    const app = createApp({ serveStatic: false });
+    const app = createApp({ serveStatic: false, authVerifier: null });
     const res = await request(app).get('/api/capabilities');
     expect(res.status).toBe(200);
     expect(res.body.edition).toBe('enterprise');
