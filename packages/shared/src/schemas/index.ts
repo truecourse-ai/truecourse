@@ -10,17 +10,6 @@ export const CreateRepoSchema = z.object({
 
 export type CreateRepoInput = z.infer<typeof CreateRepoSchema>
 
-/**
- * Body for POST /api/repos/connect — connect a PUBLIC repository by its git
- * URL. The server clones it into a managed directory and registers the clone,
- * so from then on it behaves like any path-registered repo.
- */
-export const ConnectRepoSchema = z.object({
-  url: z.string().min(1),
-})
-
-export type ConnectRepoInput = z.infer<typeof ConnectRepoSchema>
-
 export const AnalyzeRepoSchema = z.object({
   /** Which mode to run — full analyze (HEAD committed state) or diff (working tree
    *  vs LATEST). Required; no silent default. */

@@ -2,7 +2,7 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { CreateRepoSchema, ConnectRepoSchema, BrowseDirQuerySchema } from '@truecourse/shared';
+import { CreateRepoSchema, BrowseDirQuerySchema } from '@truecourse/shared';
 import { getCapabilities } from '../capabilities.js';
 import { createAppError } from '@truecourse/core/lib/errors';
 import { getGit } from '@truecourse/core/lib/git';
@@ -16,13 +16,6 @@ import {
   registerProject,
   type RegistryEntry,
 } from '@truecourse/core/config/registry';
-import {
-  cloneRepository,
-  getClonePath,
-  normalizeRemoteUrl,
-  parseRemoteUrl,
-} from '../services/repo-clone.service.js';
-import { startOnboardingScan } from '../services/onboarding-scan.service.js';
 import { removeProject } from '../services/repo-removal.service.js';
 
 /**
@@ -96,89 +89,6 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
         name: entry.name,
         path: entry.path,
         lastAnalyzed: null,
-      });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  // POST /api/repos/connect - Connect a PUBLIC repository by its git URL.
-  // Clones it into `<globalDir>/clones/<owner>__<repo>` and registers the clone,
-  // so it behaves like any path-registered repo from then on. Disconnecting it
-  // (DELETE below) deletes the clone.
-  //
-  // Synchronous: the clone happens inside the request and the client shows a
-  // pending state. No job system, deliberately — this is the first step toward
-  // provider-connected repos, not the destination.
-  //
-  // The ONBOARDING SCAN is the exception to that synchrony: once the clone is
-  // registered the response goes out and the repo's spec scan starts in the
-  // background of this process (../services/onboarding-scan.service.ts). Its
-  // progress reaches the client over the socket and the sessions store, not over
-  // this response.
-  router.post('/connect', async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const parsed = ConnectRepoSchema.safeParse(req.body);
-      if (!parsed.success) {
-        throw createAppError('Invalid request body: url is required', 400);
-      }
-
-      const remote = parseRemoteUrl(parsed.data.url);
-      const registry = await readRegistry();
-
-      // Already connected? Hand back the existing repo so the client can navigate
-      // to it instead of cloning a second copy.
-      const duplicate = registry.find(
-        (e) => e.remoteUrl && normalizeRemoteUrl(e.remoteUrl) === remote.normalized,
-      );
-      if (duplicate) {
-        res.status(409).json({
-          error: `${remote.displayName} is already connected`,
-          repoId: duplicate.slug,
-        });
-        return;
-      }
-
-      // Same `<owner>__<repo>` directory, different remote (e.g. the same
-      // owner/repo on two hosts). Refuse rather than clobber the other clone.
-      // Case-insensitive: clone dir names are lowercased now, but a registry
-      // written before that can still hold a mixed-case dir which, on a
-      // case-insensitive filesystem (macOS default), IS the directory this
-      // connect would rmSync. A false 409 on Linux for a genuinely distinct
-      // casing is the safe direction.
-      const clonePath = getClonePath(remote);
-      const occupant = registry.find(
-        (e) => path.resolve(e.path).toLowerCase() === path.resolve(clonePath).toLowerCase(),
-      );
-      if (occupant) {
-        throw createAppError(
-          `${occupant.name} already occupies the directory ${remote.displayName} would clone into. Disconnect it first.`,
-          409,
-        );
-      }
-
-      // Cloning can take a while on a big repo; don't let the socket time out
-      // under it. (Node's default request timeout is 5 minutes.)
-      req.setTimeout(0);
-
-      const repoPath = await cloneRepository(remote);
-      const entry = await registerProject(repoPath, remote.displayName, { remoteUrl: remote.url });
-
-      // Onboarding: connecting a repository starts its spec scan. The
-      // scan itself runs in the background — the call only claims the slot and
-      // returns whether it started (false: a scan for this path is already
-      // running, e.g. CLI-started), which the response reports so a client can
-      // tell "scanning now" from "join the run already in flight". Never throws
-      // (see the service).
-      const onboardingScanStarted = startOnboardingScan(entry.slug, entry.path);
-
-      res.status(201).json({
-        id: entry.slug,
-        name: entry.name,
-        path: entry.path,
-        remoteUrl: entry.remoteUrl ?? null,
-        lastAnalyzed: null,
-        onboardingScanStarted,
       });
     } catch (error) {
       next(error);

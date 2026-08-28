@@ -1,14 +1,13 @@
-// PREVIEW: the repo list and connect-by-URL here are REAL (they talk to the
-// dashboard server); everything else in the preview is fake data.
+// PREVIEW: the repo list here is REAL (it talks to the dashboard server);
+// everything else in the preview is fake data.
 
 /**
  * The one seam where the preview touches the real server.
  *
- * `POST /api/repos/connect` clones a public repository and registers it, so a
- * URL-connected repo is a real row on the real registry. The preview shows those
- * rows beside its fixtures: they carry no coverage, no runs and no corpus (the
- * fixture lookups all fall back to empty), so they render as a freshly connected
- * repository would.
+ * A repository connected on the server is a real row on the real registry. The
+ * preview shows those rows beside its fixtures: they carry no coverage, no runs
+ * and no corpus (the fixture lookups all fall back to empty), so they render as
+ * a freshly connected repository would.
  *
  * Only repos with a `remoteUrl` are shown. A developer's own path-registered
  * repos are their local dashboard's business, not the product preview's.
@@ -17,10 +16,20 @@
  * test) the list is simply empty rather than an error the mock has no place for.
  */
 
-import { connectRepo, deleteRepo, getRepos, type RepoResponse } from '@/lib/api';
+import { deleteRepo, fetchApi, getRepos, type RepoResponse } from '@/lib/api';
 import type { ProviderId, Repo } from './types';
 
-export { connectRepo };
+/**
+ * DEAD ROUTE. Connect-by-URL is gone from the server: repositories arrive
+ * through the GitHub App now, and this call 404s. It stays only to keep the
+ * preview's URL form compiling until that form is rebuilt around the App.
+ */
+export function connectRepo(url: string): Promise<RepoResponse> {
+  return fetchApi<RepoResponse>('/api/repos/connect', {
+    method: 'POST',
+    body: JSON.stringify({ url }),
+  });
+}
 
 /** The provider of a remote, by host. An unknown host reads as github: the preview has no fourth icon. */
 function providerOf(host: string): ProviderId {
