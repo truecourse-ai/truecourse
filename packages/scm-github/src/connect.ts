@@ -1,13 +1,15 @@
 /**
- * Connect router (protected — behind the enterprise auth gate). Powers the
- * dashboard's GitHub integration page: install URL, post-install linking,
- * connecting repos to the gate, and run history. Everything is scoped to the
- * authenticated user's workspace (WorkOS org).
+ * Connect router (protected — mounted behind the host's auth gate). Powers the
+ * dashboard's GitHub integration page: install URL, post-install linking, and
+ * connecting repos. Everything is scoped to the authenticated user's workspace.
+ *
+ * What happens to a repo once it is connected is not this router's business —
+ * it hands the fresh link to {@link ConnectDeps.onRepoLinked} and returns.
  */
 
 import { Router, type Request, type Response } from 'express';
 import { log } from '@truecourse/core/lib/logger';
-import { registerProject, getProjectByPath } from '@truecourse/core/config/registry';
+import { getProjectByPath } from '@truecourse/core/config/registry';
 import { loadSpec, loadLatestSpec } from '@truecourse/core/lib/spec-store';
 import { openConflicts, type CorpusLike, type DecisionsLike } from '@truecourse/shared';
 import type {
@@ -17,23 +19,10 @@ import type {
   GithubInstallationReposResponse,
   GithubInstallationSummary,
   GithubRepoSummary,
-  GithubRunSummary,
-  WorkspaceRunItem,
 } from '@truecourse/shared';
 import type { OctokitClient } from './octokit.js';
-import { resolveNotificationPrefs, NOTIFICATION_KEYS } from './notifications.js';
-import type {
-  GateStore,
-  InstallationRecord,
-  RepoLinkRecord,
-  GateRunRecord,
-  PrRecord,
-  PrState,
-} from './store/types.js';
-
-/** Conservative email shape: one `@`, non-empty local/domain, dotted domain. */
-const VALID_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const MAX_NOTIFY_EMAILS = 20;
+import { resolveNotificationPrefs } from './notifications.js';
+import type { GateStore, InstallationRecord, RepoLinkRecord } from './store/types.js';
 
 function orgIdOf(req: Request): string | null {
   const user = (req as Request & { user?: AuthUser }).user;
@@ -71,34 +60,14 @@ function toRepoSummary(
 }
 
 /**
- * PR-state fields grafted onto every feed row. `prState` is null for PRs with no
- * gh_prs row (history predating close-tracking); the client treats null as open.
- * Defined locally rather than on the shared feed types (which the OSS dashboard
- * also consumes) — the fields are additive, so those consumers simply ignore them.
+ * Follow-up work on a freshly connected repo — registering it as a project,
+ * kicking its initial scan, whatever the host wires up. Runs after the link is
+ * persisted, with an installation-scoped client for the repo's own installation.
  */
-type PrFeedFields = { prState: PrState | null; title: string | null };
-type RunSummaryWithState = GithubRunSummary & PrFeedFields;
-type WorkspaceRunItemWithState = WorkspaceRunItem & PrFeedFields;
-
-function toRunSummary(r: GateRunRecord): GithubRunSummary {
-  return {
-    id: r.id,
-    prNumber: r.prNumber,
-    headSha: r.headSha,
-    conclusion: r.conclusion,
-    addedCount: r.addedCount,
-    resolvedCount: r.resolvedCount,
-    createdAt: r.createdAt,
-  };
-}
-
-function prMapFor(prs: PrRecord[]): Map<number, PrRecord> {
-  return new Map(prs.map((p) => [p.prNumber, p]));
-}
-
-function prFieldsFor(pr: PrRecord | undefined): PrFeedFields {
-  return { prState: pr?.state ?? null, title: pr?.title ?? null };
-}
+export type OnRepoLinked = (
+  link: RepoLinkRecord,
+  octokit: OctokitClient,
+) => Promise<void>;
 
 export interface ConnectDeps {
   store: GateStore;
@@ -108,16 +77,10 @@ export interface ConnectDeps {
   /** Installation-scoped GitHub client, for listing the repos a user can connect. */
   octokitFor: (installationId: number) => OctokitClient;
   /**
-   * Enqueue the initial repo scan on connect (background job). Returns the job id
-   * or null when one is already running. Omitted ⇒ no auto-scan (e.g. tests).
+   * Post-link hook. Best-effort: a failure is logged and never fails the link,
+   * so the repo stays connected even when the follow-up work can't run.
    */
-  enqueueBaseline?: (req: {
-    repoFullName: string;
-    installationId: number;
-    defaultBranch: string;
-    commitSha: string;
-    workspaceOrgId: string;
-  }) => Promise<string | null>;
+  onRepoLinked?: OnRepoLinked;
 }
 
 export function createConnectRouter(deps: ConnectDeps): Router {
@@ -291,7 +254,7 @@ export function createConnectRouter(deps: ConnectDeps): Router {
         .json({ error: 'repository already connected to another workspace' });
       return;
     }
-    await deps.store.linkRepo({
+    const link: RepoLinkRecord = {
       repoFullName,
       installationId,
       workspaceOrgId: orgId,
@@ -304,125 +267,23 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       notifyEmails: existing?.notifyEmails ?? [],
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
-    });
-    // Surface the connected repo in the dashboard's project list immediately
-    // (keyed by `owner/repo`, deterministic slug).
-    await registerProject(repoFullName, repoFullName);
+    };
+    await deps.store.linkRepo(link);
 
-    // Kick off the INITIAL scan now (background job) rather than waiting for the
-    // next default-branch push — so the repo's spec + Code Quality baseline populate
-    // as soon as it's connected.
-    // Best-effort: a failure to enqueue must not fail the link.
-    if (deps.enqueueBaseline) {
+    // Hand the connected repo to the host (project registration, initial scan).
+    // Best-effort: the repo is already linked, so a failing hook must not turn
+    // the user's successful connect into an error.
+    if (deps.onRepoLinked) {
       try {
-        const [owner, repo] = repoFullName.split('/');
-        const octokit = deps.octokitFor(installationId);
-        const branch = await octokit.repos.getBranch({ owner, repo, branch: defaultBranch });
-        await deps.enqueueBaseline({
-          repoFullName,
-          installationId,
-          defaultBranch,
-          commitSha: branch.data.commit.sha,
-          workspaceOrgId: orgId,
-        });
+        await deps.onRepoLinked(link, deps.octokitFor(installationId));
       } catch (err) {
-        log.warn(`[github-app] initial scan enqueue failed for ${repoFullName}: ${(err as Error).message}`);
+        log.warn(
+          `[github-app] post-link handling failed for ${repoFullName}: ${(err as Error).message}`,
+        );
       }
     }
 
     res.status(201).json({ ok: true });
-  });
-
-  router.patch('/repos/config', async (req: Request, res: Response) => {
-    const orgId = orgIdOf(req);
-    if (!orgId) {
-      res.status(401).json({ error: 'unauthenticated' });
-      return;
-    }
-    const body = (req.body ?? {}) as Record<string, unknown>;
-    const repoFullName = body.repoFullName;
-    if (typeof repoFullName !== 'string') {
-      res.status(400).json({ error: 'repoFullName required' });
-      return;
-    }
-    const existing = await deps.store.getRepo(repoFullName);
-    if (!existing || existing.workspaceOrgId !== orgId) {
-      res.status(404).json({ error: 'repo not connected' });
-      return;
-    }
-
-    let notifyEmails = existing.notifyEmails;
-    if (body.notifyEmails !== undefined) {
-      if (!Array.isArray(body.notifyEmails)) {
-        res.status(400).json({ error: 'notifyEmails must be an array' });
-        return;
-      }
-      const normalized = (body.notifyEmails as unknown[]).map((e) =>
-        typeof e === 'string' ? e.trim().toLowerCase() : '',
-      );
-      const invalid = normalized.filter((e) => e && !VALID_EMAIL.test(e));
-      if (invalid.length > 0) {
-        res
-          .status(400)
-          .json({ error: `invalid email(s): ${invalid.slice(0, 3).join(', ')}` });
-        return;
-      }
-      const deduped = [...new Set(normalized.filter(Boolean))];
-      if (deduped.length > MAX_NOTIFY_EMAILS) {
-        res
-          .status(400)
-          .json({ error: `at most ${MAX_NOTIFY_EMAILS} notify addresses` });
-        return;
-      }
-      notifyEmails = deduped;
-    }
-
-    // Per-type notification toggles — merge any provided booleans onto the
-    // resolved (defaults-applied) prefs so a partial PATCH only flips what it sends.
-    let notifications = existing.notifications;
-    if (body.notifications !== undefined) {
-      const incoming = body.notifications;
-      if (typeof incoming !== 'object' || incoming === null || Array.isArray(incoming)) {
-        res.status(400).json({ error: 'notifications must be an object' });
-        return;
-      }
-      const merged = resolveNotificationPrefs(existing);
-      for (const key of NOTIFICATION_KEYS) {
-        const v = (incoming as Record<string, unknown>)[key];
-        if (typeof v === 'boolean') merged[key] = v;
-      }
-      notifications = merged;
-    }
-
-    let codeQualityMinSeverity = existing.codeQualityMinSeverity ?? 'high';
-    if (body.codeQualityMinSeverity !== undefined) {
-      const valid = ['info', 'low', 'medium', 'high', 'critical'];
-      if (
-        typeof body.codeQualityMinSeverity !== 'string' ||
-        !valid.includes(body.codeQualityMinSeverity)
-      ) {
-        res.status(400).json({ error: 'invalid codeQualityMinSeverity' });
-        return;
-      }
-      codeQualityMinSeverity = body.codeQualityMinSeverity as typeof codeQualityMinSeverity;
-    }
-
-    await deps.store.linkRepo({
-      ...existing,
-      blocking:
-        typeof body.blocking === 'boolean' ? body.blocking : existing.blocking,
-      codeQualityBlocking:
-        typeof body.codeQualityBlocking === 'boolean'
-          ? body.codeQualityBlocking
-          : existing.codeQualityBlocking,
-      codeQualityMinSeverity,
-      enabled:
-        typeof body.enabled === 'boolean' ? body.enabled : existing.enabled,
-      notifyEmails,
-      notifications,
-      updatedAt: new Date().toISOString(),
-    });
-    res.json({ ok: true });
   });
 
   router.delete('/repos/link', async (req: Request, res: Response) => {
@@ -441,69 +302,6 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       await deps.store.unlinkRepo(repoFullName);
     }
     res.json({ ok: true });
-  });
-
-  router.get('/repos/:owner/:repo/runs', async (req: Request, res: Response) => {
-    const orgId = orgIdOf(req);
-    const repoFullName = `${req.params.owner}/${req.params.repo}`;
-    const link = await deps.store.getRepo(repoFullName);
-    if (!orgId || !link || link.workspaceOrgId !== orgId) {
-      res.json({ runs: [] });
-      return;
-    }
-    const [runs, prs] = await Promise.all([
-      deps.store.listRuns(repoFullName),
-      deps.store.listPrs(repoFullName),
-    ]);
-    const byPr = prMapFor(prs);
-    const withState: RunSummaryWithState[] = runs.map((r) => ({
-      ...toRunSummary(r),
-      ...prFieldsFor(byPr.get(r.prNumber)),
-    }));
-    res.json({ runs: withState });
-  });
-
-  // Cross-repo gate activity for the workspace home — recent runs across every
-  // connected repo, merged + newest-first. (N small per-repo reads; the repo
-  // count per workspace is bounded.)
-  router.get('/runs', async (req: Request, res: Response) => {
-    const orgId = orgIdOf(req);
-    if (!orgId) {
-      res.json({ runs: [] });
-      return;
-    }
-    const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 50);
-    const repos = await deps.store.listReposForWorkspace(orgId);
-    const all: WorkspaceRunItemWithState[] = [];
-    for (const repo of repos) {
-      // The registered slug (lossy slugify with collision suffixes), so the feed
-      // can deep-link each run to /repos/:slug?pr=N. Resolved once per repo.
-      const slug = (await getProjectByPath(repo.repoFullName))?.slug ?? null;
-      const [runs, prs] = await Promise.all([
-        deps.store.listRuns(repo.repoFullName, limit),
-        deps.store.listPrs(repo.repoFullName),
-      ]);
-      const prByNumber = prMapFor(prs);
-      for (const r of runs) {
-        all.push({
-          ...toRunSummary(r),
-          repoFullName: repo.repoFullName,
-          slug,
-          ...prFieldsFor(prByNumber.get(r.prNumber)),
-        });
-      }
-    }
-    all.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    // One row per PR: keep only the newest run per (repo, PR). A PR with several
-    // gate runs (one per pushed commit) collapses to a single row. `all` is already
-    // newest-first, so the first run seen per key is the latest — and the limit now
-    // counts PRs, not commits.
-    const byPr = new Map<string, WorkspaceRunItemWithState>();
-    for (const r of all) {
-      const k = `${r.repoFullName}#${r.prNumber}`;
-      if (!byPr.has(k)) byPr.set(k, r);
-    }
-    res.json({ runs: [...byPr.values()].slice(0, limit) });
   });
 
   return router;

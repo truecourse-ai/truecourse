@@ -1,5 +1,5 @@
 {
-  "name": "@truecourse/ee-github-app",
+  "name": "@truecourse/scm-github",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -19,17 +19,10 @@
   "dependencies": {
     "@octokit/auth-app": "^7.1.3",
     "@octokit/rest": "^21.0.2",
-    "@sentry/node": "^10.0.0",
     "@truecourse/core": "workspace:*",
     "@truecourse/db": "workspace:*",
-    "@truecourse/guard-generator": "workspace:*",
-    "@truecourse/guard-runner": "workspace:*",
-    "@truecourse/scm-github": "workspace:*",
     "@truecourse/shared": "workspace:*",
-    "@truecourse/spec-consolidator": "workspace:*",
-    "drizzle-orm": "^0.45.2",
-    "resend": "^4.0.0",
-    "simple-git": "^3.27.0"
+    "drizzle-orm": "^0.45.2"
   },
   "peerDependencies": {
     "express": "^4.21.0"
@@ -37,6 +30,7 @@
   "devDependencies": {
     "@types/express": "^5.0.0",
     "@types/node": "^22.0.0",
+    "simple-git": "^3.27.0",
     "typescript": "^5.7.0"
   }
 }

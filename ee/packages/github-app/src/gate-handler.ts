@@ -8,10 +8,10 @@
 
 import { randomUUID } from 'node:crypto';
 import { log } from '@truecourse/core/lib/logger';
-import type { GateStore } from './store/types.js';
-import type { GithubAuth } from './github.js';
-import type { PullRequestPayload } from './webhook.js';
 import {
+  type GateStore,
+  type GithubAuth,
+  type PullRequestPayload,
   splitRepo,
   postCheck,
   startCheck,
@@ -19,7 +19,7 @@ import {
   createComment,
   updateComment,
   type OctokitClient,
-} from './octokit.js';
+} from '@truecourse/scm-github';
 import { decideCodeQuality, type GateSeverity } from './gate.js';
 import {
   GATE_MARKER,

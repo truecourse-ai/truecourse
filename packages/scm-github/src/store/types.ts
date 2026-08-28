@@ -1,9 +1,8 @@
 /**
- * Persistence contract for the GitHub App gate.
- *
- * Two adapters implement this: a file-based one (default, local/dev — keeps
- * the file-only storage model unchanged) and a Postgres one (hosted, selected
- * when DATABASE_URL is set). Callers depend only on this interface.
+ * Persistence contract for connected GitHub installations, repos and their gate
+ * runs. Two adapters implement it: the Postgres one next door (used wherever a
+ * shared db exists) and a file-based one for deployments without a database.
+ * Callers depend only on this interface.
  */
 
 import type { GithubNotificationPrefs } from '@truecourse/shared';

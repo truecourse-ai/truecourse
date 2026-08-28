@@ -1,7 +1,7 @@
 /**
- * Installation-scoped GitHub REST client + the few helpers Phase 2 needs:
- * list a PR's changed files, find/create/update our scan comment, and read a
- * PR's head ref.
+ * Installation-scoped GitHub REST client, plus the narrow helpers its callers
+ * need: a PR's changed files, repo file contents, our bot comments, Check runs,
+ * inline review comments, and PR lookups.
  */
 
 import { Octokit } from '@octokit/rest';

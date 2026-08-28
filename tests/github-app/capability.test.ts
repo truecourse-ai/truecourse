@@ -60,18 +60,21 @@ describe('registerGithubApp', () => {
     expect(routers).toEqual([]);
   });
 
-  it('registers a public webhook + protected connect router when configured', async () => {
+  it('registers a public webhook + the protected connect routers when configured', async () => {
     configure();
     const { registry, routers } = fakeRegistry();
 
     expect(await registerGithubApp(registry)).toBe(true);
-    expect(routers).toHaveLength(2);
 
     const publicRouters = routers.filter((r) => r.public);
     const protectedRouters = routers.filter((r) => !r.public);
     expect(publicRouters).toHaveLength(1);
-    expect(protectedRouters).toHaveLength(1);
+    // The connection routes and the gate's settings/feeds mount side by side.
+    expect(protectedRouters).toHaveLength(2);
     expect(publicRouters[0].basePath).toBe('/api/ee/github');
-    expect(protectedRouters[0].basePath).toBe('/api/ee/github');
+    expect(protectedRouters.map((r) => r.basePath)).toEqual([
+      '/api/ee/github',
+      '/api/ee/github',
+    ]);
   });
 });

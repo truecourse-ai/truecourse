@@ -19,8 +19,8 @@ import type {
 import type { GuardExecReport, GuardExecutor, Recipe } from '@truecourse/guard-runner';
 import { PgGuardStore } from '../../ee/packages/data-store/src/index';
 import { selectGateStore } from '../../ee/packages/github-app/src/store/index';
-import type { GateStore, RepoLinkRecord } from '../../ee/packages/github-app/src/store/types';
-import type { GithubAuth } from '../../ee/packages/github-app/src/github';
+import type { GateStore, RepoLinkRecord } from '../../packages/scm-github/src/store/types';
+import type { GithubAuth } from '../../packages/scm-github/src/github';
 import type {
   EmailNotifier,
   GuardGateFailureEmail,

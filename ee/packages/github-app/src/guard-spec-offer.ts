@@ -12,9 +12,10 @@
  */
 
 import { log } from '@truecourse/core/lib/logger';
-import type { GateStore } from './store/types.js';
-import type { PullRequestPayload, IssueCommentPayload } from './webhook.js';
 import {
+  type GateStore,
+  type PullRequestPayload,
+  type IssueCommentPayload,
   splitRepo,
   listPrFiles,
   getFileContent,
@@ -24,10 +25,10 @@ import {
   getPullRequest,
   getActorPermission,
   type OctokitClient,
-} from './octokit.js';
+  wantsNotification,
+} from '@truecourse/scm-github';
 import { detectSpecDocChanges, specScopeFromConfigJson } from './spec-detect.js';
 import type { EmailNotifier } from './email.js';
-import { wantsNotification } from './notifications.js';
 import { PR_TRIGGER_ACTIONS, WRITE_PERMISSIONS } from './pr-events.js';
 import {
   GUARD_SPEC_MARKER,

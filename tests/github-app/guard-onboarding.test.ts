@@ -42,7 +42,7 @@ import {
   type GenerateRunner,
 } from '@truecourse/guard-generator';
 import { flowStageRunners, stampMilestones, stubAdjudicationRunners } from '../guard-generator/helpers.js';
-import type { GithubAuth } from '../../ee/packages/github-app/src/github';
+import type { GithubAuth } from '../../packages/scm-github/src/github';
 import {
   materializeStoredCorpus,
   materializeAndGenerateGuard,

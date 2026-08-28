@@ -6,7 +6,7 @@
  * never allowed to fail the view).
  */
 import { describe, it, expect } from 'vitest';
-import type { GateStore, GateRunRecord } from '../../ee/packages/github-app/src/store/types';
+import type { GateStore, GateRunRecord } from '../../packages/scm-github/src/store/types';
 import { createGuardGateHeadsLookup } from '../../ee/packages/github-app/src/guard-gate-heads';
 
 const rec = (prNumber: number, headSha: string, createdAt: string): GateRunRecord => ({

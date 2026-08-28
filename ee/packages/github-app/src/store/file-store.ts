@@ -17,7 +17,7 @@ import type {
   BaselineRecord,
   GateRunRecord,
   PrRecord,
-} from './types.js';
+} from '@truecourse/scm-github';
 
 function atomicWriteJson(file: string, data: unknown): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });

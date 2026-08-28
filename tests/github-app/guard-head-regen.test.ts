@@ -20,7 +20,7 @@ import { setDefaultTransport, type LlmTransport } from '@truecourse/shared/llm';
 import { buildGuardReport, OpenConflictsError } from '@truecourse/core/commands/guard-in-process';
 import { writeGuardResult as writeCloneGuardResult } from '@truecourse/guard-runner';
 import type { GuardGenerateResult } from '@truecourse/guard-generator';
-import type { GithubAuth } from '../../ee/packages/github-app/src/github';
+import type { GithubAuth } from '../../packages/scm-github/src/github';
 import {
   createGuardHeadRegenPipeline,
   checkoutPinnedHead,

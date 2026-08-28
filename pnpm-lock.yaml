@@ -50,6 +50,9 @@ importers:
       '@truecourse/llm':
         specifier: workspace:*
         version: link:packages/llm
+      '@truecourse/scm-github':
+        specifier: workspace:*
+        version: link:packages/scm-github
       '@truecourse/shared':
         specifier: workspace:*
         version: link:packages/shared
@@ -487,6 +490,9 @@ importers:
       '@truecourse/guard-runner':
         specifier: workspace:*
         version: link:../../../packages/guard-runner
+      '@truecourse/scm-github':
+        specifier: workspace:*
+        version: link:../../../packages/scm-github
       '@truecourse/shared':
         specifier: workspace:*
         version: link:../../../packages/shared
@@ -964,6 +970,43 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.15
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  packages/scm-github:
+    dependencies:
+      '@octokit/auth-app':
+        specifier: ^7.1.3
+        version: 7.2.2
+      '@octokit/rest':
+        specifier: ^21.0.2
+        version: 21.1.1
+      '@truecourse/core':
+        specifier: workspace:*
+        version: link:../core
+      '@truecourse/db':
+        specifier: workspace:*
+        version: link:../db
+      '@truecourse/shared':
+        specifier: workspace:*
+        version: link:../shared
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@electric-sql/pglite@0.2.17)(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(pg@8.21.0)
+      express:
+        specifier: ^4.21.0
+        version: 4.22.1
+    devDependencies:
+      '@types/express':
+        specifier: ^5.0.0
+        version: 5.0.6
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.15
+      simple-git:
+        specifier: ^3.27.0
+        version: 3.33.0
       typescript:
         specifier: ^5.7.0
         version: 5.9.3

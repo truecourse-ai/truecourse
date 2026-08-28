@@ -1,10 +1,9 @@
 /**
  * GitHub App configuration, read from the environment.
  *
- * Unlike WorkOS (which throws when misconfigured to fail the whole ee
- * plugin), this returns `null` when the GitHub App vars are absent — so an
- * enterprise deploy that only uses SSO is unaffected and the `github-gate`
- * capability simply stays off.
+ * Missing vars return `null` rather than throwing, so a deployment that doesn't
+ * connect GitHub at all just runs without it (the `github-gate` capability
+ * simply stays off).
  */
 
 export interface GithubAppConfig {

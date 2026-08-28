@@ -1,22 +1,29 @@
 /**
  * GitHub App (PR gate) — enterprise plugin module.
  *
- * Composed by `@truecourse/ee-server`'s `register()`: it mounts the public
- * webhook receiver and the protected connect router, and reports whether the
- * `github-gate` capability should light up (i.e. the App is configured).
+ * Composed by `@truecourse/ee-server`'s `register()`: it mounts the connection
+ * layer from `@truecourse/scm-github` (the public webhook receiver, the
+ * protected connect router) wired to the gate's handlers, mounts the gate's own
+ * connect routes beside them, and reports whether the `github-gate` capability
+ * should light up (i.e. the App is configured).
  */
 
 import type { EeServerRegistry } from '@truecourse/shared';
 import type { Db } from '@truecourse/db';
 import { log } from '@truecourse/core/lib/logger';
-import { loadGithubAppConfig } from './config.js';
-import { createGithubAuth } from './github.js';
+import {
+  createConnectRouter,
+  createGithubAuth,
+  createWebhookRouter,
+  installationOctokit,
+  loadGithubAppConfig,
+  splitRepo,
+  updateComment,
+} from '@truecourse/scm-github';
 import { notifierFromConfig } from './email.js';
 import { selectGateStore } from './store/index.js';
 import { runBaseline } from './baseline.js';
-import { createWebhookRouter } from './webhook.js';
-import { createConnectRouter } from './connect.js';
-import { installationOctokit, splitRepo, updateComment } from './octokit.js';
+import { createConnectGateRouter, createRepoLinkedHook } from './connect-gate.js';
 import {
   handlePullRequestGuardSpecOffer,
   handleCommentEditedGuardSpec,
@@ -287,7 +294,9 @@ export async function registerGithubApp(
     { public: true },
   );
 
-  // Protected: dashboard connect/config endpoints, scoped to the workspace.
+  // Protected: dashboard connect/config endpoints, scoped to the workspace. The
+  // connection routes come from the base package; the gate's own settings + run
+  // feeds mount beside them under the same path.
   registry.registerRouter(
     '/api/ee/github',
     createConnectRouter({
@@ -295,26 +304,29 @@ export async function registerGithubApp(
       appSlug: cfg.appSlug,
       appUrl,
       octokitFor: (installationId: number) => installationOctokit(cfg, installationId),
-      enqueueBaseline: opts.enqueueBaseline,
+      onRepoLinked: createRepoLinkedHook(opts.enqueueBaseline),
     }),
   );
+  registry.registerRouter('/api/ee/github', createConnectGateRouter({ store }));
 
   log.info('[github-app] registered — github-gate on');
   return true;
 }
 
-export { verifyWebhookSignature } from './signature.js';
-export { createWebhookRouter } from './webhook.js';
-export type {
-  BaselineTrigger,
-  PullRequestPayload,
-  IssueCommentPayload,
-} from './webhook.js';
-export { createConnectRouter } from './connect.js';
+// The connection layer, re-exported so consumers reach it through this package.
+export {
+  verifyWebhookSignature,
+  createWebhookRouter,
+  createConnectRouter,
+  loadGithubAppConfig,
+  type BaselineTrigger,
+  type PullRequestPayload,
+  type IssueCommentPayload,
+} from '@truecourse/scm-github';
+export { createConnectGateRouter, createRepoLinkedHook } from './connect-gate.js';
 export { runBaseline, resolveMergedPr, promoteMergedPrDecisions, type BaselineResult } from './baseline.js';
 export { handlePullRequestClosed } from './pr-closed.js';
 export { upsertPrState, prStateFromPayload } from './pr-state.js';
-export { loadGithubAppConfig } from './config.js';
 export {
   createEmailNotifier,
   notifierFromConfig,
@@ -323,9 +335,14 @@ export {
   type GuardGateFailureEmail,
   type GuardConflictsBlockedEmail,
 } from './email.js';
-export { wantsNotification } from './notifications.js';
 export { repoGuardCoverageUrl } from './links.js';
-export { createGithubAuth, getInstallationToken, cloneUrl, type GithubAuth } from './github.js';
+export {
+  wantsNotification,
+  createGithubAuth,
+  getInstallationToken,
+  cloneUrl,
+  type GithubAuth,
+} from '@truecourse/scm-github';
 export * from './store/index.js';
 
 // Phase 2: spec-doc scan
@@ -346,7 +363,7 @@ export {
   getFileContent,
   getPullRequest,
   type OctokitClient,
-} from './octokit.js';
+} from '@truecourse/scm-github';
 export { readRepoDocFromGithub } from './repo-doc.js';
 export { createGuardGateHeadsLookup } from './guard-gate-heads.js';
 

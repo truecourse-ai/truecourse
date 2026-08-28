@@ -30,8 +30,8 @@ import type {
 import { PgGuardStore } from '../../ee/packages/data-store/src/index';
 import { createSemaphore } from '../../ee/packages/server/src/jobs/guard-gate-limiter';
 import { selectGateStore } from '../../ee/packages/github-app/src/store/index';
-import type { GateStore } from '../../ee/packages/github-app/src/store/types';
-import type { GithubAuth } from '../../ee/packages/github-app/src/github';
+import type { GateStore } from '../../packages/scm-github/src/store/types';
+import type { GithubAuth } from '../../packages/scm-github/src/github';
 import type { RepoRef } from '@truecourse/core/lib/guard-store';
 import { OpenConflictsError } from '@truecourse/core/commands/guard-in-process';
 import {

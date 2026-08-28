@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { loadGithubAppConfig } from '../../ee/packages/github-app/src/index';
+import { loadGithubAppConfig } from '../../packages/scm-github/src/index';
 
 const KEYS = [
   'GITHUB_APP_ID',

@@ -1,8 +1,8 @@
 /**
- * Postgres GateStore — the hosted, multi-tenant adapter, built on Drizzle ORM.
- * Selected only when DATABASE_URL is set; local/dev keeps using the file
- * adapter unchanged. Takes a ready (migrated) Drizzle db — `createPostgresGateStore`
- * builds + migrates it for production; tests inject a PGlite-backed db.
+ * Postgres GateStore — the multi-tenant adapter, built on Drizzle ORM. Selected
+ * when a shared db is available; deployments without one pick a different
+ * adapter. Takes a ready (migrated) Drizzle db: the server owns the pool and the
+ * migrations, and tests inject a PGlite-backed db.
  */
 
 import { eq, and, desc, inArray, notInArray, sql } from 'drizzle-orm';

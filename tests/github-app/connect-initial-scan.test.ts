@@ -1,98 +1,73 @@
-import express, { type Express, type Request } from 'express';
-import request from 'supertest';
+/**
+ * What the gate hangs off the connection router's post-link seam: register the
+ * project, then enqueue the repo's INITIAL scan at the default branch's head.
+ */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import type { AuthUser } from '@truecourse/shared';
 
-// registerProject writes to the file-based OSS registry; stub it so the connect
-// route is exercised without touching disk.
+const { registerProject } = vi.hoisted(() => ({ registerProject: vi.fn() }));
+// The registry writes to the file-based OSS registry; stub it so the hook is
+// exercised without touching disk.
 vi.mock('@truecourse/core/config/registry', () => ({
-  registerProject: vi.fn().mockResolvedValue(undefined),
+  registerProject,
   getProjectByPath: vi.fn().mockResolvedValue(null),
 }));
 
-import { createConnectRouter } from '../../ee/packages/github-app/src/connect';
-import type { GateStore } from '../../ee/packages/github-app/src/store/types';
+import { createRepoLinkedHook } from '../../ee/packages/github-app/src/connect-gate';
+import type { OctokitClient, RepoLinkRecord } from '../../packages/scm-github/src/index';
 
-const ORG = 'org_A';
+const LINK: RepoLinkRecord = {
+  repoFullName: 'mushgev/truecourse-gate-test',
+  installationId: 42,
+  workspaceOrgId: 'org_A',
+  defaultBranch: 'main',
+  blocking: true,
+  enabled: true,
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+};
 
-function makeApp(overrides: {
-  store: Partial<GateStore>;
-  enqueueBaseline?: ReturnType<typeof vi.fn>;
-  getBranch?: ReturnType<typeof vi.fn>;
-}): Express {
-  const app = express();
-  app.use(express.json());
-  app.use((req, _res, next) => {
-    (req as Request & { user?: AuthUser }).user = { id: 'u1', email: 'u@acme.test', organizationId: ORG };
-    next();
-  });
-  const octokit = {
-    repos: {
-      getBranch:
-        overrides.getBranch ?? vi.fn().mockResolvedValue({ data: { commit: { sha: 'deadbeefcafe' } } }),
-    },
-  };
-  app.use(
-    '/api/ee/github',
-    createConnectRouter({
-      store: overrides.store as GateStore,
-      appSlug: 'tc-app',
-      appUrl: 'http://localhost:3000',
-      octokitFor: () => octokit as never,
-      enqueueBaseline: overrides.enqueueBaseline,
-    }),
-  );
-  return app;
-}
+let getBranch: ReturnType<typeof vi.fn>;
+let octokit: OctokitClient;
 
-describe('Connect — initial scan on link', () => {
-  let store: Partial<GateStore>;
-  beforeEach(() => {
-    store = {
-      getInstallation: vi.fn().mockResolvedValue({ installationId: 42, workspaceOrgId: ORG }),
-      getRepo: vi.fn().mockResolvedValue(null),
-      linkRepo: vi.fn().mockResolvedValue(undefined),
-    };
-  });
+beforeEach(() => {
+  registerProject.mockReset().mockResolvedValue(undefined);
+  getBranch = vi.fn().mockResolvedValue({ data: { commit: { sha: 'abc1234567' } } });
+  octokit = { repos: { getBranch } } as unknown as OctokitClient;
+});
 
-  it('resolves the default-branch head SHA and enqueues a baseline scan', async () => {
+describe('the gate’s post-link hook', () => {
+  it('registers the project and enqueues a baseline scan at the branch head', async () => {
     const enqueueBaseline = vi.fn().mockResolvedValue('job_1');
-    const getBranch = vi.fn().mockResolvedValue({ data: { commit: { sha: 'abc1234567' } } });
-    const app = makeApp({ store, enqueueBaseline, getBranch });
 
-    const res = await request(app)
-      .post('/api/ee/github/repos/link')
-      .send({ repoFullName: 'mushgev/truecourse-gate-test', installationId: 42, defaultBranch: 'main' });
+    await createRepoLinkedHook(enqueueBaseline)(LINK, octokit);
 
-    expect(res.status).toBe(201);
-    expect(getBranch).toHaveBeenCalledWith({ owner: 'mushgev', repo: 'truecourse-gate-test', branch: 'main' });
+    expect(registerProject).toHaveBeenCalledWith(LINK.repoFullName, LINK.repoFullName);
+    expect(getBranch).toHaveBeenCalledWith({
+      owner: 'mushgev',
+      repo: 'truecourse-gate-test',
+      branch: 'main',
+    });
     expect(enqueueBaseline).toHaveBeenCalledWith({
-      repoFullName: 'mushgev/truecourse-gate-test',
+      repoFullName: LINK.repoFullName,
       installationId: 42,
       defaultBranch: 'main',
       commitSha: 'abc1234567',
-      workspaceOrgId: ORG,
+      workspaceOrgId: 'org_A',
     });
   });
 
-  it('still links the repo (201) when the scan enqueue fails — best-effort', async () => {
-    const enqueueBaseline = vi.fn().mockRejectedValue(new Error('queue down'));
-    const app = makeApp({ store, enqueueBaseline });
+  it('registers the project but resolves no branch head when no queue is wired', async () => {
+    await createRepoLinkedHook()(LINK, octokit);
 
-    const res = await request(app)
-      .post('/api/ee/github/repos/link')
-      .send({ repoFullName: 'mushgev/truecourse-gate-test', installationId: 42, defaultBranch: 'main' });
-
-    expect(res.status).toBe(201);
-    expect(store.linkRepo).toHaveBeenCalled();
+    expect(registerProject).toHaveBeenCalledOnce();
+    expect(getBranch).not.toHaveBeenCalled();
   });
 
-  it('links without enqueuing when no queue is wired (enqueueBaseline omitted)', async () => {
-    const app = makeApp({ store }); // no enqueueBaseline
-    const res = await request(app)
-      .post('/api/ee/github/repos/link')
-      .send({ repoFullName: 'mushgev/truecourse-gate-test', installationId: 42, defaultBranch: 'main' });
-    expect(res.status).toBe(201);
-    expect(store.linkRepo).toHaveBeenCalled();
+  it('surfaces an enqueue failure to the caller (the router keeps the link)', async () => {
+    const enqueueBaseline = vi.fn().mockRejectedValue(new Error('queue down'));
+
+    await expect(createRepoLinkedHook(enqueueBaseline)(LINK, octokit)).rejects.toThrow(
+      'queue down',
+    );
   });
 });

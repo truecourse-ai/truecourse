@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { runBaseline, type BaselineDeps } from '../../ee/packages/github-app/src/baseline';
-import type { GateStore, BaselineRecord } from '../../ee/packages/github-app/src/store/types';
+import type { GateStore, BaselineRecord } from '../../packages/scm-github/src/store/types';
 
 /**
  * The `force` skip-bypass on `runBaseline`. Both cases stop at the FIRST post-skip

@@ -18,7 +18,7 @@ import {
   createConnectRouter,
   FileGateStore,
 } from '../../ee/packages/github-app/src/index';
-import type { OctokitClient } from '../../ee/packages/github-app/src/octokit';
+import type { OctokitClient } from '../../packages/scm-github/src/octokit';
 import { PgSpecStore } from '../../ee/packages/data-store/src/index';
 import { setSpecStore, resetSpecStore, saveSpec } from '@truecourse/core/lib/spec-store';
 import { setRegistryStore, resetRegistryStore, type RegistryStore } from '@truecourse/core/config/registry';

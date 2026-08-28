@@ -1,7 +1,7 @@
 /**
- * Thin GitHub auth layer. Phase 1 only needs short-lived installation tokens
- * (to clone private repos for baseline/gate runs). REST helpers for Checks
- * and comments arrive in later phases.
+ * Thin GitHub App auth layer: short-lived installation tokens (used to clone
+ * private repos) and the git args that authenticate a clone with one without
+ * leaving the token behind. The REST surface lives in `octokit.ts`.
  */
 
 import { createAppAuth } from '@octokit/auth-app';

@@ -6,9 +6,8 @@
 
 import { log } from '@truecourse/core/lib/logger';
 import type { Db } from '@truecourse/db';
-import type { GateStore } from './types.js';
+import { PostgresGateStore, type GateStore } from '@truecourse/scm-github';
 import { FileGateStore } from './file-store.js';
-import { PostgresGateStore } from './pg-store.js';
 
 export function selectGateStore(db: Db | null): GateStore {
   if (db) {
@@ -19,9 +18,17 @@ export function selectGateStore(db: Db | null): GateStore {
   return new FileGateStore();
 }
 
-export * from './types.js';
+export type {
+  GateStore,
+  InstallationRecord,
+  RepoLinkRecord,
+  BaselineRecord,
+  PrState,
+  PrRecord,
+  GateRunRecord,
+} from '@truecourse/scm-github';
+export { PostgresGateStore, type GateDb } from '@truecourse/scm-github';
 export { FileGateStore } from './file-store.js';
-export { PostgresGateStore, type GateDb } from './pg-store.js';
 export {
   selectOperatorRepoEnumeration,
   type OperatorRepoEnumeration,

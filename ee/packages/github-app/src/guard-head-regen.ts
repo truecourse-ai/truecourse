@@ -28,7 +28,7 @@ import {
   cloneAuthArgs,
   stripEmbeddedAuth,
   type GithubAuth,
-} from './github.js';
+} from '@truecourse/scm-github';
 import { materializeAndGenerateGuard, type GuardGenerateFn } from './guard-onboarding.js';
 import { defaultSpecScanPipeline } from './spec-scan.js';
 import {
