@@ -14,9 +14,10 @@
  * real mount with no network, no database and no LLM.
  */
 
+import path from 'node:path';
 import type { Router } from 'express';
 import { log } from '@truecourse/core/lib/logger';
-import { readRegistry, registerProject } from '@truecourse/core/config/registry';
+import { getProjectByPath, registerProject } from '@truecourse/core/config/registry';
 import {
   createConnectRouter,
   createGithubAuth,
@@ -25,13 +26,14 @@ import {
   installationOctokit,
   loadGithubAppConfig,
   PostgresGateStore,
+  repoWebUrl,
   type GateStore,
   type GithubAuth,
   type OctokitClient,
   type RepoLinkRecord,
 } from '@truecourse/scm-github';
 import { getDb } from '../db.js';
-import { cloneGithubRepo } from '../services/repo-clone.service.js';
+import { cloneDirName, cloneGithubRepo, getClonesDir } from '../services/repo-clone.service.js';
 import { startOnboardingScan } from '../services/onboarding-scan.service.js';
 import { removeProject } from '../services/repo-removal.service.js';
 
@@ -55,9 +57,6 @@ export interface GithubConnectionOverrides {
   /** Start a repo's onboarding scan. Default: the in-process background scan. */
   scan?: (repoId: string, repoPath: string) => boolean;
 }
-
-/** The https URL a connected repo is registered under (what the client displays). */
-const repoUrl = (repoFullName: string): string => `https://github.com/${repoFullName}`;
 
 export function createGithubConnection(
   overrides: GithubConnectionOverrides = {},
@@ -99,14 +98,16 @@ export function createGithubConnection(
     onRepoLinked: async (link) => {
       const clonePath = await clone(link);
       const entry = await registerProject(clonePath, link.repoFullName, {
-        remoteUrl: repoUrl(link.repoFullName),
+        remoteUrl: repoWebUrl(link.repoFullName),
       });
       scan(entry.slug, entry.path);
     },
     onRepoUnlinked: async (link) => {
-      // The project this repo was registered as, found by the remote it carries
-      // — the one field only the link flow writes.
-      const entry = (await readRegistry()).find((e) => e.remoteUrl === repoUrl(link.repoFullName));
+      // The project this repo was registered as, found where the clone lives:
+      // the managed directory name is derived from the full name and is the
+      // registry's primary key, so no string has to be rebuilt and matched.
+      const clonePath = path.join(getClonesDir(), cloneDirName(link.repoFullName));
+      const entry = await getProjectByPath(clonePath);
       if (!entry) {
         log.info(`[github] ${link.repoFullName} was not registered — nothing to clean up`);
         return;

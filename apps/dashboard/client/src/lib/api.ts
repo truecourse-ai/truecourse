@@ -71,7 +71,7 @@ export type RepoResponse = {
   id: string;
   name: string;
   path: string;
-  /** Set when the repo was connected by git URL; `path` is then a managed clone. */
+  /** Set when the repo was connected through a provider; `path` is then a managed clone. */
   remoteUrl?: string | null;
   lastAnalyzed?: string;
   /** Most recent lifecycle event across features (home-page card), or null. */

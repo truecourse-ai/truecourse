@@ -21,7 +21,8 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { createAppError } from '@truecourse/core/lib/errors';
 import { getGlobalDir } from '@truecourse/core/config/paths';
-import { cloneAuthArgs, cloneUrl } from '@truecourse/scm-github';
+import { getProjectByPath } from '@truecourse/core/config/registry';
+import { cloneAuthArgs, cloneUrl, repoWebUrl } from '@truecourse/scm-github';
 
 const execFileAsync = promisify(execFile);
 
@@ -46,8 +47,16 @@ function sanitizeSegment(segment: string): string {
     .slice(0, 64);
 }
 
-/** The managed directory name for `owner/repo` — `<owner>__<repo>`, sanitized. */
-export function cloneDirName(owner: string, repo: string): string {
+/**
+ * The managed directory name for `owner/repo` — `<owner>__<repo>`, sanitized.
+ * Deterministic, so it is also how the clone of a connected repo is FOUND
+ * again (see the unlink hook) rather than reconstructed from a URL.
+ *
+ * Sanitizing is lossy: `acme/.github` and `acme/github` land on one name. That
+ * is what `cloneGithubRepo` guards against before it deletes anything.
+ */
+export function cloneDirName(repoFullName: string): string {
+  const [owner = '', repo = ''] = repoFullName.split('/');
   return `${sanitizeSegment(owner) || 'repo'}__${sanitizeSegment(repo) || 'repo'}`;
 }
 
@@ -100,23 +109,37 @@ const runGit: GitRunner = async (args, cwd) => {
  *
  * Clones into a temp sibling and renames on success, so an interrupted clone
  * never leaves a half-populated directory behind for the registry to point at.
- * A pre-existing target directory is removed first: it can only be the debris
- * of an earlier failed attempt, since a connected repo owns its directory.
+ *
+ * A pre-existing target directory is removed first, but only once it is clear
+ * nothing else lives there: directory names are sanitized and therefore lossy,
+ * so two repositories can want the same one, and clearing it blind would delete
+ * another repository's working copy along with its `.truecourse/` data. A
+ * directory some OTHER project is registered at is a conflict (409); one no
+ * project claims is debris from a failed attempt and goes.
  */
 export async function cloneGithubRepo(
   repoFullName: string,
   token: string,
   run: GitRunner = runGit,
 ): Promise<string> {
-  const [owner = '', repo = ''] = repoFullName.split('/');
   const url = cloneUrl(repoFullName);
-  const dirName = cloneDirName(owner, repo);
 
   const root = getClonesDir();
   fs.mkdirSync(root, { recursive: true });
 
+  const dirName = cloneDirName(repoFullName);
   const target = path.join(root, dirName);
-  fs.rmSync(target, { recursive: true, force: true });
+  if (fs.existsSync(target)) {
+    const occupant = await getProjectByPath(target);
+    if (occupant && occupant.name !== repoFullName && occupant.remoteUrl !== repoWebUrl(repoFullName)) {
+      throw createAppError(
+        `Cannot clone ${repoFullName}: ${occupant.name} already occupies ${target}. ` +
+          'Disconnect it first.',
+        409,
+      );
+    }
+    fs.rmSync(target, { recursive: true, force: true });
+  }
 
   const tmp = path.join(root, `.tmp-${dirName}-${randomUUID().slice(0, 8)}`);
   try {

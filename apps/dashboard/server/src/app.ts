@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { errorHandler } from './middleware/error.js';
-import { projectResolver } from './middleware/project.js';
+import { createProjectResolver } from './middleware/project.js';
 import { createReposRouter } from './routes/repos.js';
 import analysesRouter from './routes/analyses.js';
 import graphRouter from './routes/graph.js';
@@ -97,26 +97,22 @@ export function createApp(opts: CreateAppOptions): express.Express {
   // assets are outside /api, so the dashboard shell still loads to drive login.
   app.use('/api', createAuthGate(opts.authVerifier));
 
-  // The connect API is workspace-scoped, so it sits behind the gate. Linking a
-  // repository clones it inside the request, which can outlive Node's 5-minute
-  // default request timeout — hence the hold-open.
+  // The connect API is workspace-scoped, so it sits behind the gate.
   if (opts.github) {
-    app.use(
-      '/api/github',
-      (req, _res, next) => {
-        req.setTimeout(0);
-        next();
-      },
-      opts.github.connect,
-    );
+    app.use('/api/github', opts.github.connect);
   }
 
+  // Which workspace owns a connected repository — the one thing every
+  // slug-resolving route needs, so another workspace's repo reads as absent.
+  const githubLinks = opts.github?.store ?? null;
+
   // Home page / registry routes run without a project.
-  app.use('/api/repos', createReposRouter({ githubLinks: opts.github?.store ?? null }));
+  app.use('/api/repos', createReposRouter({ githubLinks }));
   // Project-scoped routes. Each router's patterns declare their own `:id`
   // (e.g. `/:id/violations`), so we mount at `/api/repos` — the router
-  // matches the `:id` segment itself. The resolver validates the slug and
-  // touches `lastAccessed`.
+  // matches the `:id` segment itself. The resolver validates the slug, scopes
+  // it to the caller's workspace, and touches `lastAccessed`.
+  const projectResolver = createProjectResolver(githubLinks);
   app.use('/api/repos', projectResolver, analysesRouter);
   app.use('/api/repos', projectResolver, graphRouter);
   app.use('/api/repos', projectResolver, filesRouter);

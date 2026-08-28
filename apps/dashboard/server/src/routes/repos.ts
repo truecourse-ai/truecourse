@@ -17,55 +17,56 @@ import {
   type RegistryEntry,
 } from '@truecourse/core/config/registry';
 import { removeProject } from '../services/repo-removal.service.js';
+import { isVisibleTo, type RepoOwnershipLookup } from '../middleware/project.js';
 
 /**
- * Just enough of the GitHub link store to scope the repo list: which workspace
- * owns a connected repository, if any. Structural, so the real `GateStore`
- * satisfies it without this module depending on the GitHub package.
+ * The GitHub link store, as this router uses it: who owns a connected
+ * repository, and the ability to disconnect one. Structural, so the real
+ * `GateStore` satisfies it without this module depending on the GitHub package.
  */
-export interface RepoOwnershipLookup {
-  getRepo(repoFullName: string): Promise<{ workspaceOrgId: string } | null>;
+export interface RepoLinkStore extends RepoOwnershipLookup {
+  unlinkRepo(repoFullName: string): Promise<void>;
 }
 
 export interface ReposRouterDeps {
   /** Present when the server has a GitHub App configured; null otherwise. */
-  githubLinks?: RepoOwnershipLookup | null;
-}
-
-async function requireRegistryEntry(slug: string) {
-  const entry = await getProjectBySlug(slug);
-  if (!entry) throw createAppError('Project not found', 404);
-  return entry;
+  githubLinks?: RepoLinkStore | null;
 }
 
 /**
- * The registry rows this caller may see. A repository connected through GitHub
- * belongs to exactly one workspace, so it is hidden from every other one.
- *
- * KNOWN GAP: only linked repos are scoped. A repo registered by local path has
- * no link row and no owner, so it stays visible to everyone — the file registry
- * is per-machine and has nowhere to record a workspace. This narrows when the
- * registry itself moves to Postgres.
+ * The entry this slug names, if this caller may act on it. A slug another
+ * workspace's repository owns reads as "not found" — see `isVisibleTo`, and the
+ * known gap it documents for path-registered repos.
  */
+async function requireVisibleEntry(
+  deps: ReposRouterDeps,
+  req: Request,
+  slug: string,
+): Promise<RegistryEntry> {
+  const entry = await getProjectBySlug(slug);
+  if (!entry || !(await isVisibleTo(deps.githubLinks, req, entry))) {
+    throw createAppError('Project not found', 404);
+  }
+  return entry;
+}
+
+/** The registry rows this caller may see. */
 async function visibleTo(
   deps: ReposRouterDeps,
   req: Request,
   entries: RegistryEntry[],
 ): Promise<RegistryEntry[]> {
-  const links = deps.githubLinks;
-  if (!links) return entries;
-  const orgId = req.user?.organizationId ?? null;
+  if (!deps.githubLinks) return entries;
   const decided = await Promise.all(
-    entries.map(async (e) => {
-      const link = await links.getRepo(e.name);
-      return !link || link.workspaceOrgId === orgId ? e : null;
-    }),
+    entries.map(async (e) => ((await isVisibleTo(deps.githubLinks, req, e)) ? e : null)),
   );
   return decided.filter((e): e is RegistryEntry => e !== null);
 }
 
 export function createReposRouter(deps: ReposRouterDeps = {}): Router {
   const router: Router = Router();
+  const requireEntry = (req: Request): Promise<RegistryEntry> =>
+    requireVisibleEntry(deps, req, req.params.id as string);
 
   // POST /api/repos - Register a new repo
   router.post('/', async (req: Request, res: Response, next: NextFunction) => {
@@ -232,7 +233,7 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
   // registry doesn't track one (the hosted gh_repos-derived registry).
   router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const entry = await requireRegistryEntry(req.params.id as string);
+      const entry = await requireEntry(req);
       let branches: string[] = [];
       // The hosted registry tracks the default branch from gh_repos and has no local
       // checkout, so only shell out to git when a registry didn't supply it (OSS
@@ -277,7 +278,7 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
   // GET /api/repos/:id/branches - List git branches
   router.get('/:id/branches', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const entry = await requireRegistryEntry(req.params.id as string);
+      const entry = await requireEntry(req);
       const git = await getGit(entry.path);
       const branchSummary = await git.branch();
       res.json({
@@ -292,13 +293,18 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
   // DELETE /api/repos/:id - Unregister the project and clean up its disk
   // footprint (see removeProject — a managed clone goes whole, a path-registered
   // repo loses only `.truecourse/`). 409 while a spec scan is still writing.
+  //
+  // This is the SAME disconnect the GitHub unlink hook performs, reached from
+  // Home instead of the connect dialog, so it drops the link row too: leaving it
+  // behind would have the connect dialog call the repo connected forever, with
+  // nothing left to disconnect and no way to add it back.
   router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const entry = await getProjectBySlug(req.params.id as string);
-      if (!entry) {
-        throw createAppError('Project not found', 404);
-      }
+      const entry = await requireEntry(req);
+      const links = deps.githubLinks;
+      const linked = links ? await links.getRepo(entry.name) : null;
       await removeProject(entry);
+      if (links && linked) await links.unlinkRepo(entry.name);
       res.status(204).send();
     } catch (error) {
       next(error);
@@ -308,7 +314,7 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
   // PUT /api/repos/:id/categories - Update per-repo enabled categories
   router.put('/:id/categories', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const entry = await requireRegistryEntry(req.params.id as string);
+      const entry = await requireEntry(req);
       const { enabledCategories } = req.body as { enabledCategories: string[] | null };
       const updated = await updateProjectConfig(entry.path, { enabledCategories });
       res.json({ enabledCategories: updated.enabledCategories ?? null });
@@ -320,7 +326,7 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
   // PUT /api/repos/:id/llm - Update per-repo LLM rules toggle
   router.put('/:id/llm', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const entry = await requireRegistryEntry(req.params.id as string);
+      const entry = await requireEntry(req);
       const { enableLlmRules } = req.body as { enableLlmRules: boolean | null };
       const updated = await updateProjectConfig(entry.path, { enableLlmRules });
       res.json({ enableLlmRules: updated.enableLlmRules ?? null });
@@ -332,7 +338,7 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
   // GET /api/repos/:id/config - Read per-repo config.json
   router.get('/:id/config', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const entry = await requireRegistryEntry(req.params.id as string);
+      const entry = await requireEntry(req);
       res.json(await readProjectConfig(entry.path));
     } catch (error) {
       next(error);
@@ -342,7 +348,7 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
   // GET /api/repos/:id/rules - Catalog with per-repo enabled overrides applied.
   router.get('/:id/rules', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const entry = await requireRegistryEntry(req.params.id as string);
+      const entry = await requireEntry(req);
       res.json(await getRules(entry.path));
     } catch (error) {
       next(error);
@@ -353,7 +359,7 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
   // Rule keys contain slashes so the client must URL-encode the key segment.
   router.patch('/:id/rules/:ruleKey', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const entry = await requireRegistryEntry(req.params.id as string);
+      const entry = await requireEntry(req);
       const ruleKey = req.params.ruleKey as string;
       const { enabled } = req.body as { enabled?: boolean };
       if (typeof enabled !== 'boolean') {

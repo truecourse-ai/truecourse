@@ -11,6 +11,7 @@ export { verifyWebhookSignature } from './signature.js';
 export {
   createGithubAuth,
   getInstallationToken,
+  repoWebUrl,
   cloneUrl,
   cloneAuthArgs,
   stripEmbeddedAuth,

@@ -1,7 +1,8 @@
 /**
- * The onboarding scan a connect fires: connecting a repository by URL starts
- * its spec scan on the cloned default branch. Guard setup / generate / baseline are not on this
- * branch yet, so the chain is exactly one step today.
+ * The onboarding scan a connect fires: connecting a repository through the
+ * GitHub App starts its spec scan on the cloned default branch. Guard setup /
+ * generate / baseline are not on this branch yet, so the chain is exactly one
+ * step today.
  *
  * BACKGROUND, IN THIS PROCESS. OSS has no job queue — hosted EE enqueues a
  * baseline job on link instead — so "background" here is a fire-and-forget

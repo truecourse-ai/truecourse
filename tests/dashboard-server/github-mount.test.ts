@@ -83,7 +83,11 @@ import {
   isSpecScanRunning,
   startOnboardingScan,
 } from '../../apps/dashboard/server/src/services/onboarding-scan.service';
-import { readRegistry, unregisterProject } from '../../packages/core/src/config/registry';
+import {
+  readRegistry,
+  registerProject,
+  unregisterProject,
+} from '../../packages/core/src/config/registry';
 import { createSessionRun } from '../../packages/core/src/lib/sessions-store';
 import type {
   OctokitClient,
@@ -378,6 +382,125 @@ describe('disconnecting a repository', () => {
     expect(await readRegistry()).toHaveLength(0);
     expect(fs.existsSync(clone)).toBe(false);
   });
+
+  it('drops the link row when the repo is disconnected from Home', async () => {
+    const app = buildApp({
+      clone: async (link) => fakeClonedRepo(link.repoFullName),
+      scan: () => true,
+    });
+    await request(app)
+      .post('/api/github/repos/link')
+      .set('Cookie', `tc_session=${ORG}`)
+      .send({ repoFullName: REPO, installationId: INSTALLATION_ID, defaultBranch: 'main' })
+      .expect(201);
+    const entry = (await readRegistry())[0]!;
+
+    // Home's disconnect. It removes the same three things the unlink hook does,
+    // so it has to remove the link too — otherwise the connect dialog reports the
+    // repo connected forever and refuses to add it back.
+    await request(app)
+      .delete(`/api/repos/${entry.slug}`)
+      .set('Cookie', `tc_session=${ORG}`)
+      .expect(204);
+
+    expect(await store.getRepo(REPO)).toBeNull();
+    expect(await readRegistry()).toHaveLength(0);
+    expect(fs.existsSync(entry.path)).toBe(false);
+
+    const status = await request(app)
+      .get('/api/github/status')
+      .set('Cookie', `tc_session=${ORG}`)
+      .expect(200);
+    expect(status.body.repos).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Workspace scoping, everywhere a slug resolves
+// ---------------------------------------------------------------------------
+
+describe('a slug that belongs to another workspace', () => {
+  /** Connect REPO to ORG and register a path repo owned by nobody. */
+  async function twoRepos(app: Express): Promise<{ connected: string; local: string }> {
+    await request(app)
+      .post('/api/github/repos/link')
+      .set('Cookie', `tc_session=${ORG}`)
+      .send({ repoFullName: REPO, installationId: INSTALLATION_ID, defaultBranch: 'main' })
+      .expect(201);
+    const localPath = makeTmpDir('tc-github-local-');
+    const local = await request(app)
+      .post('/api/repos')
+      .set('Cookie', `tc_session=${OTHER_ORG}`)
+      .send({ path: localPath })
+      .expect(201);
+    const connected = (await readRegistry()).find((e) => e.name === REPO)!.slug;
+    return { connected, local: (local.body as { id: string }).id };
+  }
+
+  const app = (): Express =>
+    buildApp({ clone: async (link) => fakeClonedRepo(link.repoFullName), scan: () => true });
+
+  it('404s the repo detail route — not 403, which would confirm it exists', async () => {
+    const server = app();
+    const { connected, local } = await twoRepos(server);
+
+    await request(server)
+      .get(`/api/repos/${connected}`)
+      .set('Cookie', `tc_session=${OTHER_ORG}`)
+      .expect(404);
+    // The owner still reads it, and a path-registered repo has no owner at all.
+    await request(server)
+      .get(`/api/repos/${connected}`)
+      .set('Cookie', `tc_session=${ORG}`)
+      .expect(200);
+    await request(server)
+      .get(`/api/repos/${local}`)
+      .set('Cookie', `tc_session=${ORG}`)
+      .expect(200);
+  });
+
+  it('404s a project-scoped router behind the resolver', async () => {
+    const server = app();
+    const { connected } = await twoRepos(server);
+
+    await request(server)
+      .get(`/api/repos/${connected}/sessions/runs`)
+      .set('Cookie', `tc_session=${OTHER_ORG}`)
+      .expect(404);
+    await request(server)
+      .get(`/api/repos/${connected}/sessions/runs`)
+      .set('Cookie', `tc_session=${ORG}`)
+      .expect(200);
+  });
+
+  it('404s the per-repo config route', async () => {
+    const server = app();
+    const { connected } = await twoRepos(server);
+
+    await request(server)
+      .get(`/api/repos/${connected}/config`)
+      .set('Cookie', `tc_session=${OTHER_ORG}`)
+      .expect(404);
+    await request(server)
+      .get(`/api/repos/${connected}/config`)
+      .set('Cookie', `tc_session=${ORG}`)
+      .expect(200);
+  });
+
+  it('refuses to DELETE it — the clone and the link both survive', async () => {
+    const server = app();
+    const { connected } = await twoRepos(server);
+    const clonePath = (await readRegistry()).find((e) => e.name === REPO)!.path;
+
+    await request(server)
+      .delete(`/api/repos/${connected}`)
+      .set('Cookie', `tc_session=${OTHER_ORG}`)
+      .expect(404);
+
+    expect(fs.existsSync(clonePath)).toBe(true);
+    expect(await store.getRepo(REPO)).not.toBeNull();
+    expect((await readRegistry()).some((e) => e.name === REPO)).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -454,6 +577,36 @@ describe('cloneGithubRepo', () => {
     // The remote is the bare https URL.
     expect(cloneArgs).toContain(`https://github.com/${REPO}.git`);
     expect(cloneArgs).toContain('--depth');
+  });
+
+  it('refuses to clone over a DIFFERENT repo occupying the same directory', async () => {
+    const { calls, run } = recordingGit();
+    // `acme/.widgets` and `acme/widgets` sanitize to one directory name, so the
+    // clone target is already someone else's clone — with its `.truecourse/` in it.
+    const target = path.join(getClonesDir(), 'acme__widgets');
+    fs.mkdirSync(target, { recursive: true });
+    fs.writeFileSync(path.join(target, 'their-work'), 'not mine');
+    await registerProject(target, 'acme/.widgets', {
+      remoteUrl: 'https://github.com/acme/.widgets',
+    });
+
+    await expect(cloneGithubRepo(REPO, 'ghs_secret_token', run)).rejects.toThrow(
+      /acme\/\.widgets/,
+    );
+    // Nothing was deleted and git was never run.
+    expect(fs.existsSync(path.join(target, 'their-work'))).toBe(true);
+    expect(calls).toEqual([]);
+  });
+
+  it('clears an orphan directory no project claims', async () => {
+    const { run } = recordingGit();
+    const target = path.join(getClonesDir(), 'acme__widgets');
+    fs.mkdirSync(target, { recursive: true });
+    // Debris of an earlier failed attempt: on disk, in no registry.
+    fs.writeFileSync(path.join(target, 'half-cloned'), '');
+
+    expect(await cloneGithubRepo(REPO, 'ghs_secret_token', run)).toBe(target);
+    expect(fs.existsSync(path.join(target, 'half-cloned'))).toBe(false);
   });
 
   it('unsets the persisted auth header before the clone is published', async () => {

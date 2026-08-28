@@ -1,6 +1,6 @@
-// PREVIEW (UI mock, fake data) with one exception: on a REAL (URL-connected)
-// repository the Activity tab is the real thing, reading and live-tailing the
-// repository's sessions store.
+// PREVIEW (UI mock, fake data) with one exception: on a REAL
+// (provider-connected) repository the Activity tab is the real thing, reading
+// and live-tailing the repository's sessions store.
 
 /**
  * The repository console: one header, ONE menu, no toggle.
@@ -148,7 +148,7 @@ export default function RepoConsole() {
           {active === 'settings' ? (
             <SettingsTab repo={repo} />
           ) : active === 'activity' && repo.real ? (
-            // REAL, not mock: a URL-connected repository is a real registry
+            // REAL, not mock: a provider-connected repository is a real registry
             // entry, so its Activity reads the real sessions store over
             // `/api/repos/<id>/sessions/*` and live-tails it over the socket.
             // A `truecourse spec scan` in that clone shows up here as it runs.

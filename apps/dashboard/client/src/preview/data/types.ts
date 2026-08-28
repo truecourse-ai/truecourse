@@ -76,9 +76,9 @@ export interface Repo {
   /** True while the onboarding chain is still running on this repo. */
   onboarding: boolean;
   /**
-   * Set on a repository that really exists on the server (connected by URL),
-   * as opposed to a fixture. Unlinking one is a real delete, and none of the
-   * guard fixtures are keyed by its slug.
+   * Set on a repository that really exists on the server (connected through a
+   * provider), as opposed to a fixture. Unlinking one is a real delete, and
+   * none of the guard fixtures are keyed by its slug.
    */
   real?: true;
 }

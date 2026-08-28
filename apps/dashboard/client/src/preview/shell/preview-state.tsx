@@ -67,7 +67,8 @@ interface PreviewStateValue {
   workspaces: Workspace[];
   setWorkspaceId: (id: string) => void;
   /**
-   * The real URL-connected repositories first, then the fixtures. A real row
+   * The repositories connected through the GitHub App first, then the
+   * fixtures. A real row
    * carries what its runs say: onboarding while its first scan is up, and the
    * settled run's own words as its last check afterwards.
    */
