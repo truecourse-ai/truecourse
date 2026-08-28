@@ -303,6 +303,9 @@ export async function registerGithubApp(
       store,
       appSlug: cfg.appSlug,
       appUrl,
+      // The gate dashboard's repository list, where a new installation is
+      // immediately pickable.
+      setupRedirectPath: '/repositories?connect=1',
       octokitFor: (installationId: number) => installationOctokit(cfg, installationId),
       onRepoLinked: createRepoLinkedHook(opts.enqueueBaseline),
     }),

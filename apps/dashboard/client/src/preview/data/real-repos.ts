@@ -31,9 +31,13 @@ import type {
 } from '@truecourse/shared';
 import type { ProviderId, Repo } from './types';
 
-/** The App's installations on this workspace, and the repositories already linked. */
+/**
+ * The App's installations on this workspace, and the repositories already
+ * linked. `slim` because the dialog only needs the names: the full read walks
+ * each repo's spec store, which the dialog would pay for on every open.
+ */
 export function fetchGithubStatus(): Promise<GithubConnectStatusResponse> {
-  return fetchApi<GithubConnectStatusResponse>('/api/github/status');
+  return fetchApi<GithubConnectStatusResponse>('/api/github/status?slim=1');
 }
 
 /** Everything one installation can see, linked or not. */

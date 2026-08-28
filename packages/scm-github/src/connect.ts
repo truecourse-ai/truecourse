@@ -3,10 +3,11 @@
  * dashboard's GitHub integration page: install URL, post-install linking, and
  * connecting repos. Everything is scoped to the authenticated user's workspace.
  *
- * What happens to a repo once it is connected — or once it is disconnected —
- * is not this router's business: it hands the link to
- * {@link ConnectDeps.onRepoLinked} / {@link ConnectDeps.onRepoUnlinked} and
- * returns.
+ * WHAT happens to a repo once it is connected — or once it is disconnected — is
+ * not this router's business: it hands the link to
+ * {@link ConnectDeps.onRepoLinked} / {@link ConnectDeps.onRepoUnlinked}. WHETHER
+ * it happened is: both hooks are transactional, so the link row and the work
+ * behind it are never out of step (see the two hook types).
  */
 
 import { Router, type Request, type Response } from 'express';
@@ -62,9 +63,15 @@ function toRepoSummary(
 }
 
 /**
- * Follow-up work on a freshly connected repo — registering it as a project,
- * kicking its initial scan, whatever the host wires up. Runs after the link is
- * persisted, with an installation-scoped client for the repo's own installation.
+ * Follow-up work on a freshly connected repo — cloning it, registering it as a
+ * project, kicking its initial scan, whatever the host wires up. Runs after the
+ * link is persisted, with an installation-scoped client for the repo's own
+ * installation.
+ *
+ * PART OF THE LINK: a hook that throws rolls the link back, because for a host
+ * where the hook IS the connection (the OSS mount clones inside it) a link row
+ * with none of that work behind it is a repo the UI calls connected and nothing
+ * can act on.
  */
 export type OnRepoLinked = (
   link: RepoLinkRecord,
@@ -72,9 +79,11 @@ export type OnRepoLinked = (
 ) => Promise<void>;
 
 /**
- * Cleanup for a repo the user just disconnected — dropping the project it was
- * registered as, deleting the managed clone. Runs after the link is gone, with
- * the record that was removed (the link itself is no longer readable).
+ * Cleanup for a repo the user is disconnecting — dropping the project it was
+ * registered as, deleting the managed clone. Runs BEFORE the link is removed,
+ * so everything it touches is still owned by exactly one workspace while it
+ * works; a hook that throws leaves the link intact and fails the request, since
+ * a clone that outlives its link row is scoped to nobody and visible to all.
  */
 export type OnRepoUnlinked = (link: RepoLinkRecord) => Promise<void>;
 
@@ -83,19 +92,24 @@ export interface ConnectDeps {
   appSlug: string;
   /** Dashboard client origin, for browser-facing redirects (e.g. /setup). */
   appUrl: string;
+  /**
+   * Where the post-install redirect lands, relative to {@link appUrl} — the
+   * host's own connect surface, since the two dashboards that mount this router
+   * route it differently.
+   */
+  setupRedirectPath: string;
   /** Installation-scoped GitHub client, for listing the repos a user can connect. */
   octokitFor: (installationId: number) => OctokitClient;
-  /**
-   * Post-link hook. Best-effort: a failure is logged and never fails the link,
-   * so the repo stays connected even when the follow-up work can't run.
-   */
+  /** Post-link hook; see {@link OnRepoLinked}. Its failure fails the link. */
   onRepoLinked?: OnRepoLinked;
-  /**
-   * Post-unlink hook. Best-effort on the same terms as {@link onRepoLinked}:
-   * the link is already gone, so a failing cleanup must not report a failed
-   * disconnect the user cannot retry.
-   */
+  /** Pre-unlink hook; see {@link OnRepoUnlinked}. Its failure fails the disconnect. */
   onRepoUnlinked?: OnRepoUnlinked;
+}
+
+/** An error's own HTTP status if it carries one, else a bad-gateway default. */
+function statusOf(err: unknown): number {
+  const status = (err as { statusCode?: unknown }).statusCode;
+  return typeof status === 'number' && status >= 400 && status <= 599 ? status : 502;
 }
 
 export function createConnectRouter(deps: ConnectDeps): Router {
@@ -120,6 +134,20 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       deps.store.listInstallationsForWorkspace(orgId),
       deps.store.listReposForWorkspace(orgId),
     ]);
+    // `?slim=1` — the store rows bare, for callers that only need which repos
+    // are connected (the connect dialog, on every open). The enrichment below
+    // reads a baseline, a corpus and a decisions file PER REPO, which is
+    // megabytes of JSON on a workspace with real repos.
+    if (req.query.slim === '1') {
+      const slim: GithubConnectStatusResponse = {
+        configured: true,
+        installUrl: buildInstallUrl(orgId),
+        installations: installations.map(toInstallationSummary),
+        repos: repos.map((r) => toRepoSummary(r, null, 0)),
+      };
+      res.json(slim);
+      return;
+    }
     // Resolve each repo's dashboard slug (registered on link) so the UI can
     // deep-link to `/repos/:slug`, plus its flagged-overlap count (within-area
     // doc disagreements awaiting a relation) so the list can flag repos that need review.
@@ -234,7 +262,7 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     }
     // Land back on the connect dialog so the new installation is immediately
     // pickable.
-    res.redirect(`${deps.appUrl}/preview?connect=1`);
+    res.redirect(`${deps.appUrl}${deps.setupRedirectPath}`);
   });
 
   router.post('/repos/link', async (req: Request, res: Response) => {
@@ -271,32 +299,47 @@ export function createConnectRouter(deps: ConnectDeps): Router {
         .json({ error: 'repository already connected to another workspace' });
       return;
     }
+    // Nor let a workspace re-link its OWN repo: linking runs the post-link hook,
+    // and for a host that clones in it that means deleting and re-cloning the
+    // working copy other surfaces (and any running scan) are using right now.
+    if (existing) {
+      res.status(409).json({ error: 'repository is already connected' });
+      return;
+    }
+    // A first connection, so every setting starts at its default: Code Quality
+    // config and notify addresses are authored later, through the settings PATCH.
     const link: RepoLinkRecord = {
       repoFullName,
       installationId,
       workspaceOrgId: orgId,
       defaultBranch,
-      blocking: typeof blocking === 'boolean' ? blocking : existing?.blocking ?? true,
-      // Code Quality config is set via the settings PATCH, not connect — preserve it.
-      codeQualityBlocking: existing?.codeQualityBlocking ?? true,
-      codeQualityMinSeverity: existing?.codeQualityMinSeverity ?? 'high',
+      blocking: typeof blocking === 'boolean' ? blocking : true,
+      codeQualityBlocking: true,
+      codeQualityMinSeverity: 'high',
       enabled: true,
-      notifyEmails: existing?.notifyEmails ?? [],
-      createdAt: existing?.createdAt ?? now,
+      notifyEmails: [],
+      createdAt: now,
       updatedAt: now,
     };
     await deps.store.linkRepo(link);
 
-    // Hand the connected repo to the host (project registration, initial scan).
-    // Best-effort: the repo is already linked, so a failing hook must not turn
-    // the user's successful connect into an error.
+    // Hand the connected repo to the host (clone, project registration, initial
+    // scan). The hook is part of the link: if it fails there is nothing behind
+    // the row, so drop it again and tell the caller why — a repo the UI shows as
+    // connected but that nothing can act on has no retry path.
     if (deps.onRepoLinked) {
       try {
         await deps.onRepoLinked(link, deps.octokitFor(installationId));
       } catch (err) {
-        log.warn(
-          `[github-app] post-link handling failed for ${repoFullName}: ${(err as Error).message}`,
-        );
+        await deps.store.unlinkRepo(repoFullName).catch((cleanupErr: unknown) => {
+          log.error(
+            `[github-app] could not roll back the link for ${repoFullName}: ${(cleanupErr as Error).message}`,
+          );
+        });
+        const message = (err as Error).message;
+        log.warn(`[github-app] connecting ${repoFullName} failed: ${message}`);
+        res.status(statusOf(err)).json({ error: `could not connect ${repoFullName}: ${message}` });
+        return;
       }
     }
 
@@ -316,16 +359,21 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     }
     const existing = await deps.store.getRepo(repoFullName);
     if (existing && existing.workspaceOrgId === orgId) {
-      await deps.store.unlinkRepo(repoFullName);
+      // Cleanup FIRST, link row second. The row is what scopes the repo to this
+      // workspace, so removing it ahead of a cleanup that then fails would leave
+      // the clone and its registry entry visible to every workspace, with no way
+      // to disconnect them again.
       if (deps.onRepoUnlinked) {
         try {
           await deps.onRepoUnlinked(existing);
         } catch (err) {
-          log.warn(
-            `[github-app] post-unlink cleanup failed for ${repoFullName}: ${(err as Error).message}`,
-          );
+          const message = (err as Error).message;
+          log.warn(`[github-app] disconnecting ${repoFullName} failed: ${message}`);
+          res.status(statusOf(err)).json({ error: message });
+          return;
         }
       }
+      await deps.store.unlinkRepo(repoFullName);
     }
     res.json({ ok: true });
   });

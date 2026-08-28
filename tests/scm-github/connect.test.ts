@@ -1,6 +1,6 @@
 import express, { type Express, type Request } from 'express';
 import request from 'supertest';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type {
   AuthUser,
   GithubConnectStatusResponse,
@@ -63,6 +63,7 @@ beforeEach(() => {
       store,
       appSlug: 'tc-gate',
       appUrl: 'http://localhost:3000',
+      setupRedirectPath: '/preview?connect=1',
       octokitFor: () => stubOctokit,
     }),
   );
@@ -195,6 +196,65 @@ describe('connect router', () => {
 
     res = await request(app).get('/api/ee/github/status').expect(200);
     expect((res.body as GithubConnectStatusResponse).repos).toEqual([]);
+  });
+
+  it('lands the setup callback on the path its host declared', async () => {
+    await seedInstallation(null);
+    // A second host, whose SPA has no /preview at all.
+    const eeApp = express();
+    eeApp.use(express.json());
+    eeApp.use((req, _res, next) => {
+      (req as Request & { user?: AuthUser }).user = {
+        id: 'u1',
+        email: 'u@acme.test',
+        organizationId: 'org_A',
+      };
+      next();
+    });
+    eeApp.use(
+      '/api/ee/github',
+      createConnectRouter({
+        store,
+        appSlug: 'tc-gate',
+        appUrl: 'https://app.truecourse.test',
+        setupRedirectPath: '/repositories?connect=1',
+        octokitFor: () => stubOctokit,
+      }),
+    );
+
+    await request(eeApp)
+      .get('/api/ee/github/setup')
+      .query({ installation_id: '100', state: 'org_A' })
+      .expect(302)
+      .expect('location', 'https://app.truecourse.test/repositories?connect=1');
+  });
+
+  it('skips the per-repo spec reads on ?slim=1', async () => {
+    await seedInstallation('org_A');
+    await request(app)
+      .post('/api/ee/github/repos/link')
+      .send({ repoFullName: 'acme/api', installationId: 100, defaultBranch: 'main' })
+      .expect(201);
+
+    const getBaseline = vi.spyOn(store, 'getBaseline');
+
+    const slim = await request(app)
+      .get('/api/ee/github/status')
+      .query({ slim: '1' })
+      .expect(200);
+    const body = slim.body as GithubConnectStatusResponse;
+    // Everything the connect dialog reads is still there.
+    expect(body.installUrl).toContain('state=org_A');
+    expect(body.installations.map((i) => i.installationId)).toEqual([100]);
+    expect(body.repos.map((r) => r.repoFullName)).toEqual(['acme/api']);
+    // The enrichment did not run: no baseline read, so no corpus read either.
+    expect(getBaseline).not.toHaveBeenCalled();
+    expect(body.repos[0]!.slug).toBeNull();
+    expect(body.repos[0]!.openConflicts).toBe(0);
+
+    // The full read still enriches.
+    await request(app).get('/api/ee/github/status').expect(200);
+    expect(getBaseline).toHaveBeenCalledWith('acme/api');
   });
 
   it('rejects an invalid link payload with 400', async () => {

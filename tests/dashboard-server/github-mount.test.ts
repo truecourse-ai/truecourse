@@ -307,7 +307,7 @@ describe('linking a repository', () => {
     expect(started).toEqual([[registry[0]!.slug, registry[0]!.path]]);
   });
 
-  it('still connects the repo when the clone fails', async () => {
+  it('refuses the connection when the clone fails, leaving no link behind', async () => {
     const app = buildApp({
       clone: async () => {
         throw new Error('github unreachable');
@@ -315,14 +315,38 @@ describe('linking a repository', () => {
       scan: () => true,
     });
 
-    await request(app)
+    const res = await request(app)
       .post('/api/github/repos/link')
       .set('Cookie', `tc_session=${ORG}`)
       .send({ repoFullName: REPO, installationId: INSTALLATION_ID, defaultBranch: 'main' })
-      .expect(201);
+      .expect(502);
+    expect(res.body.error).toContain('github unreachable');
 
-    expect(await store.getRepo(REPO)).not.toBeNull();
+    // Here the hook IS the connection, so a half-connected repo — a link row the
+    // dialog renders as connected, with no clone under it — is worse than none.
+    expect(await store.getRepo(REPO)).toBeNull();
     expect(await readRegistry()).toHaveLength(0);
+  });
+
+  it('refuses to connect the same repository twice', async () => {
+    let clones = 0;
+    const app = buildApp({
+      clone: async (link) => {
+        clones += 1;
+        return fakeClonedRepo(link.repoFullName);
+      },
+      scan: () => true,
+    });
+    const connect = () =>
+      request(app)
+        .post('/api/github/repos/link')
+        .set('Cookie', `tc_session=${ORG}`)
+        .send({ repoFullName: REPO, installationId: INSTALLATION_ID, defaultBranch: 'main' });
+
+    await connect().expect(201);
+    // A second link would re-clone over the live working copy.
+    await connect().expect(409);
+    expect(clones).toBe(1);
   });
 });
 

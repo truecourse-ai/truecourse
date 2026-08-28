@@ -93,6 +93,8 @@ export function createGithubConnection(
     store,
     appSlug: cfg.appSlug,
     appUrl: process.env.WORKOS_APP_URL ?? 'http://localhost:3000',
+    // Back to the connect dialog, so the new installation is pickable at once.
+    setupRedirectPath: '/preview?connect=1',
     octokitFor,
     onRepoLinked: async (link) => {
       const clonePath = await clone(link);
