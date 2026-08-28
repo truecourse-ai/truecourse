@@ -147,6 +147,9 @@ const verify: AuthVerifier = async (cookieHeader) => {
 interface MountOptions {
   clone?: (link: RepoLinkRecord) => Promise<string>;
   scan?: (repoId: string, repoPath: string) => boolean;
+  lookupInstallationAccount?: (
+    installationId: number,
+  ) => Promise<{ accountLogin: string; accountType: string } | null>;
 }
 
 let store: MemoryGateStore;
@@ -268,6 +271,36 @@ describe('mount order', () => {
     const app = buildApp({ scan: () => true });
     await request(app).get('/api/github/status').expect(401);
     await request(app).get('/api/github/status').set('Cookie', `tc_session=${ORG}`).expect(200);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Naming an installation
+// ---------------------------------------------------------------------------
+
+describe('an installation the webhook never announced', () => {
+  it('takes its account from the App API on the setup redirect', async () => {
+    const looked: number[] = [];
+    const app = buildApp({
+      lookupInstallationAccount: async (installationId) => {
+        looked.push(installationId);
+        return { accountLogin: 'acme', accountType: 'Organization' };
+      },
+    });
+
+    // No `installation` delivery for 99 — only the browser coming back from GitHub.
+    await request(app)
+      .get('/api/github/setup')
+      .set('Cookie', `tc_session=${ORG}`)
+      .query({ installation_id: '99', state: ORG })
+      .expect(302);
+
+    expect(looked).toEqual([99]);
+    expect(await store.getInstallation(99)).toMatchObject({
+      accountLogin: 'acme',
+      accountType: 'Organization',
+      workspaceOrgId: ORG,
+    });
   });
 });
 

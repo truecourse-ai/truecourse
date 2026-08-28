@@ -287,6 +287,34 @@ describe('connecting a repository through the GitHub App', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
+  it('names the account each installation belongs to', async () => {
+    serve({ installationRepos: { 42: [] } });
+
+    renderAt('/preview?connect=1');
+    const dialog = await screen.findByRole('dialog');
+    const row = (await within(dialog).findByText('GitHub')).closest('li')!;
+    // The provider row says whose GitHub this is before anything is picked.
+    expect(await within(row).findByText('linkwarden')).toBeInTheDocument();
+
+    await userEvent.click(within(row).getByRole('button', { name: 'Select' }));
+    expect(
+      await within(dialog).findByRole('button', { name: 'linkwarden' }),
+    ).toBeInTheDocument();
+  });
+
+  it('falls back to the installation id when the account has no name', async () => {
+    serve({
+      status: () =>
+        json(status({ installations: [{ installationId: 42, accountLogin: '', accountType: '' }] })),
+      installationRepos: { 42: [] },
+    });
+
+    renderAt('/preview?connect=1');
+    const dialog = await screen.findByRole('dialog');
+    const row = (await within(dialog).findByText('GitHub')).closest('li')!;
+    expect(await within(row).findByText('#42')).toBeInTheDocument();
+  });
+
   it('says what the server is missing when the App is not configured', async () => {
     const missing =
       'GitHub is not configured on this server. Set GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, ' +

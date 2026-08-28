@@ -19,6 +19,8 @@ export {
 } from './github.js';
 export {
   installationOctokit,
+  appOctokit,
+  fetchInstallationAccount,
   splitRepo,
   listPrFiles,
   getFileContent,

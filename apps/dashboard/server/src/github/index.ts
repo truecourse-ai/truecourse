@@ -22,6 +22,7 @@ import {
   createConnectRouter,
   createGithubAuth,
   createWebhookRouter,
+  fetchInstallationAccount,
   getInstallationToken,
   installationOctokit,
   loadGithubAppConfig,
@@ -52,6 +53,10 @@ export interface GithubConnectionOverrides {
   store?: GateStore;
   /** Installation-scoped GitHub client. Default: a real Octokit. */
   octokitFor?: (installationId: number) => OctokitClient;
+  /** Who an installation belongs to. Default: the App API (app-level auth). */
+  lookupInstallationAccount?: (
+    installationId: number,
+  ) => Promise<{ accountLogin: string; accountType: string } | null>;
   /** Clone a connected repo, returning the path. Default: token clone into the managed dir. */
   clone?: (link: RepoLinkRecord) => Promise<string>;
   /** Start a repo's onboarding scan. Default: the in-process background scan. */
@@ -95,6 +100,9 @@ export function createGithubConnection(
     // Back to the connect dialog, so the new installation is pickable at once.
     setupRedirectPath: '/preview?connect=1',
     octokitFor,
+    lookupInstallationAccount:
+      overrides.lookupInstallationAccount ??
+      ((installationId: number) => fetchInstallationAccount(cfg, installationId)),
     onRepoLinked: async (link) => {
       const clonePath = await clone(link);
       const entry = await registerProject(clonePath, link.repoFullName, {

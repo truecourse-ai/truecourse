@@ -1,12 +1,13 @@
 import express, { type Express, type Request } from 'express';
 import request from 'supertest';
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import type {
   AuthUser,
   GithubConnectStatusResponse,
   GithubInstallationReposResponse,
 } from '@truecourse/shared';
 import { createConnectRouter } from '../../packages/scm-github/src/index';
+import type { ConnectDeps } from '../../packages/scm-github/src/connect';
 import type { OctokitClient } from '../../packages/scm-github/src/octokit';
 import { MemoryGateStore } from './memory-store';
 // Shared via the bare specifier so this overrides the singleton `connect.ts` uses.
@@ -16,9 +17,14 @@ import {
   type RegistryStore,
 } from '@truecourse/core/config/registry';
 
+type AccountLookup = NonNullable<ConnectDeps['lookupInstallationAccount']>;
+
 let store: MemoryGateStore;
 let app: Express;
 let currentOrg: string | null;
+// The App-level account lookup the host injects. A row that already carries a
+// login must never reach it — that is half of what these tests pin.
+let lookupAccount: Mock<AccountLookup>;
 // Repos the stubbed installation client returns (the connect router paginates it).
 let installRepos: Array<{ full_name: string; default_branch: string; private: boolean }>;
 const stubOctokit = {
@@ -46,6 +52,10 @@ beforeEach(() => {
     { full_name: 'acme/api', default_branch: 'main', private: true },
     { full_name: 'acme/web', default_branch: 'develop', private: false },
   ];
+  lookupAccount = vi.fn<AccountLookup>(async () => ({
+    accountLogin: 'acme',
+    accountType: 'Organization',
+  }));
   app = express();
   app.use(express.json());
   // Stand in for the auth gate: attach req.user.
@@ -65,6 +75,7 @@ beforeEach(() => {
       appUrl: 'http://localhost:3000',
       setupRedirectPath: '/preview?connect=1',
       octokitFor: () => stubOctokit,
+      lookupInstallationAccount: lookupAccount,
     }),
   );
   setRegistryStore(stubRegistry);
@@ -263,5 +274,107 @@ describe('connect router', () => {
       .post('/api/ee/github/repos/link')
       .send({ repoFullName: 'acme/api' }) // missing installationId + defaultBranch
       .expect(400);
+  });
+});
+
+/**
+ * Who an installation belongs to comes from the App API, not from the
+ * `installation` webhook: a webhook that is late — or misconfigured, so it never
+ * arrives at all — used to leave the row anonymous and the UI showing `#<id>`.
+ */
+describe('the account behind an installation', () => {
+  /** A row created by /setup before this fix: linked, but nameless. */
+  async function seedAnonymous(installationId = 157207108) {
+    await store.saveInstallation({
+      installationId,
+      accountLogin: '',
+      accountType: '',
+      workspaceOrgId: 'org_A',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+  }
+
+  it('names a fresh installation at /setup, without waiting for the webhook', async () => {
+    lookupAccount.mockResolvedValue({ accountLogin: 'octo-org', accountType: 'Organization' });
+
+    await request(app)
+      .get('/api/ee/github/setup')
+      .query({ installation_id: '157207108', state: 'org_A' })
+      .expect(302);
+
+    expect(lookupAccount).toHaveBeenCalledWith(157207108);
+    expect(await store.getInstallation(157207108)).toMatchObject({
+      accountLogin: 'octo-org',
+      accountType: 'Organization',
+      workspaceOrgId: 'org_A',
+    });
+  });
+
+  it('keeps what the webhook already wrote, and does not call the API for it', async () => {
+    await seedInstallation(null); // the webhook's row: 'acme' / Organization, unlinked
+
+    await request(app)
+      .get('/api/ee/github/setup')
+      .query({ installation_id: '100', state: 'org_A' })
+      .expect(302);
+
+    expect(lookupAccount).not.toHaveBeenCalled();
+    expect(await store.getInstallation(100)).toMatchObject({
+      accountLogin: 'acme',
+      accountType: 'Organization',
+      workspaceOrgId: 'org_A',
+    });
+  });
+
+  it('names a row left anonymous by /setup on the next status read, once', async () => {
+    await seedAnonymous();
+    lookupAccount.mockResolvedValue({ accountLogin: 'octo-org', accountType: 'Organization' });
+
+    const first = await request(app)
+      .get('/api/ee/github/status')
+      .query({ slim: '1' })
+      .expect(200);
+    expect((first.body as GithubConnectStatusResponse).installations).toEqual([
+      { installationId: 157207108, accountLogin: 'octo-org', accountType: 'Organization' },
+    ]);
+    // Persisted, so the next read is already named and costs no API call.
+    expect(await store.getInstallation(157207108)).toMatchObject({
+      accountLogin: 'octo-org',
+      workspaceOrgId: 'org_A',
+    });
+
+    const second = await request(app)
+      .get('/api/ee/github/status')
+      .query({ slim: '1' })
+      .expect(200);
+    expect((second.body as GithubConnectStatusResponse).installations[0]!.accountLogin).toBe(
+      'octo-org',
+    );
+    expect(lookupAccount).toHaveBeenCalledTimes(1);
+  });
+
+  it('names it on the full status read too', async () => {
+    await seedAnonymous();
+    lookupAccount.mockResolvedValue({ accountLogin: 'octo-org', accountType: 'User' });
+
+    const res = await request(app).get('/api/ee/github/status').expect(200);
+    expect((res.body as GithubConnectStatusResponse).installations).toEqual([
+      { installationId: 157207108, accountLogin: 'octo-org', accountType: 'User' },
+    ]);
+    expect(await store.getInstallation(157207108)).toMatchObject({ accountLogin: 'octo-org' });
+  });
+
+  it('still answers when the lookup fails, leaving the row as it is', async () => {
+    await seedAnonymous();
+    lookupAccount.mockRejectedValue(new Error('GitHub is down'));
+
+    const res = await request(app)
+      .get('/api/ee/github/status')
+      .query({ slim: '1' })
+      .expect(200);
+    // The dialog falls back to `#<id>` on an empty login — nothing 502s.
+    expect((res.body as GithubConnectStatusResponse).installations[0]!.accountLogin).toBe('');
+    expect(await store.getInstallation(157207108)).toMatchObject({ accountLogin: '' });
   });
 });

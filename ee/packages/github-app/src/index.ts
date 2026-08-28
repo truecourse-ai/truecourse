@@ -15,6 +15,7 @@ import {
   createConnectRouter,
   createGithubAuth,
   createWebhookRouter,
+  fetchInstallationAccount,
   installationOctokit,
   loadGithubAppConfig,
   splitRepo,
@@ -307,6 +308,8 @@ export async function registerGithubApp(
       // immediately pickable.
       setupRedirectPath: '/repositories?connect=1',
       octokitFor: (installationId: number) => installationOctokit(cfg, installationId),
+      lookupInstallationAccount: (installationId: number) =>
+        fetchInstallationAccount(cfg, installationId),
       onRepoLinked: createRepoLinkedHook(opts.enqueueBaseline),
     }),
   );

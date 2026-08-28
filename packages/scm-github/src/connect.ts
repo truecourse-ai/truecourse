@@ -100,6 +100,18 @@ export interface ConnectDeps {
   setupRedirectPath: string;
   /** Installation-scoped GitHub client, for listing the repos a user can connect. */
   octokitFor: (installationId: number) => OctokitClient;
+  /**
+   * Who an installation belongs to, read from the App API (app-level auth). The
+   * account identity must not depend on the `installation` webhook: that
+   * delivery can lose the race with the setup redirect, or never arrive at all
+   * when the App's webhook URL is unreachable at install time.
+   *
+   * Best-effort — a null (or a throw) leaves the record as it is, and the UI
+   * shows the installation id.
+   */
+  lookupInstallationAccount?: (
+    installationId: number,
+  ) => Promise<{ accountLogin: string; accountType: string } | null>;
   /** Post-link hook; see {@link OnRepoLinked}. Its failure fails the link. */
   onRepoLinked?: OnRepoLinked;
   /** Pre-unlink hook; see {@link OnRepoUnlinked}. Its failure fails the disconnect. */
@@ -118,6 +130,44 @@ export function createConnectRouter(deps: ConnectDeps): Router {
   const buildInstallUrl = (orgId: string): string =>
     `https://github.com/apps/${deps.appSlug}/installations/new?state=${encodeURIComponent(orgId)}`;
 
+  /** The installation's account, or null — a lookup failure is never fatal here. */
+  const lookupAccount = async (
+    installationId: number,
+  ): Promise<{ accountLogin: string; accountType: string } | null> => {
+    if (!deps.lookupInstallationAccount) return null;
+    try {
+      const account = await deps.lookupInstallationAccount(installationId);
+      return account?.accountLogin ? account : null;
+    } catch (err) {
+      log.warn(
+        `[github] could not read the account of installation ${installationId}: ${(err as Error).message}`,
+      );
+      return null;
+    }
+  };
+
+  /**
+   * Name an installation the `installation` webhook never named, and persist it,
+   * so a row stubbed by /setup stops rendering as `#<id>` from the next read on.
+   * Returns the record to render — the healed one when the lookup answered.
+   */
+  const withAccount = async (inst: InstallationRecord): Promise<InstallationRecord> => {
+    if (inst.accountLogin) return inst;
+    const account = await lookupAccount(inst.installationId);
+    if (!account) return inst;
+    const named: InstallationRecord = {
+      ...inst,
+      ...account,
+      updatedAt: new Date().toISOString(),
+    };
+    await deps.store.saveInstallation(named).catch((err: unknown) => {
+      log.warn(
+        `[github] could not save the account of installation ${inst.installationId}: ${(err as Error).message}`,
+      );
+    });
+    return named;
+  };
+
   router.get('/status', async (req: Request, res: Response) => {
     const orgId = orgIdOf(req);
     if (!orgId) {
@@ -130,10 +180,13 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       res.json(empty);
       return;
     }
-    const [installations, repos] = await Promise.all([
+    const [listed, repos] = await Promise.all([
       deps.store.listInstallationsForWorkspace(orgId),
       deps.store.listReposForWorkspace(orgId),
     ]);
+    // Self-heal the rows no `installation` webhook ever named: one lookup each,
+    // persisted, so the repair happens once and not on every dialog open.
+    const installations = await Promise.all(listed.map(withAccount));
     // `?slim=1` — the store rows bare, for callers that only need which repos
     // are connected (the connect dialog, on every open). The enrichment below
     // reads a baseline, a corpus and a decisions file PER REPO, which is
@@ -242,20 +295,25 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     if (orgId && Number.isInteger(installationId) && (state === null || state === orgId)) {
       const inst = await deps.store.getInstallation(installationId);
       if (!inst) {
-        // The setup redirect raced ahead of the installation webhook — stub
-        // the record with the owning workspace; the webhook fills account
-        // details later (its upsert preserves the workspace link).
+        // The setup redirect got here before the installation webhook — or the
+        // webhook URL is unreachable and it is never coming. Ask the API who
+        // this installation belongs to rather than waiting for a delivery; the
+        // webhook's own upsert writes the same values if it does land.
         const now = new Date().toISOString();
+        const account = await lookupAccount(installationId);
         await deps.store.saveInstallation({
           installationId,
-          accountLogin: '',
-          accountType: '',
+          accountLogin: account?.accountLogin ?? '',
+          accountType: account?.accountType ?? '',
           workspaceOrgId: orgId,
           createdAt: now,
           updatedAt: now,
         });
       } else if (inst.workspaceOrgId == null || inst.workspaceOrgId === orgId) {
         await deps.store.linkInstallationToWorkspace(installationId, orgId);
+        // A row an earlier /setup stubbed is still nameless; name it now that we
+        // are here. (Carrying the fresh link, since the row above is pre-link.)
+        await withAccount({ ...inst, workspaceOrgId: orgId });
       }
       // Else: the installation already belongs to another workspace — never
       // re-link it (prevents cross-tenant installation takeover).
