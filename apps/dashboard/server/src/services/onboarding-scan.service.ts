@@ -1,28 +1,28 @@
 /**
- * The onboarding scan a connect fires: connecting a repository through the
- * GitHub App starts its spec scan on the cloned default branch. Guard setup /
- * generate / baseline are not on this branch yet, so the chain is exactly one
- * step today.
+ * The onboarding scan a connect fires, and the shared spec-scan pipeline the
+ * manual Scan route reuses. Connecting a repository through the GitHub App
+ * starts its spec scan; the scan clones the repo into an ephemeral per-run
+ * work tree (see work-tree.service.ts), curates against that tree, persists
+ * the corpus to the server-side spec store keyed by `(owner/repo, commit)`,
+ * and deletes the clone — nothing durable ever lives in a working copy.
  *
- * BACKGROUND, IN THIS PROCESS. OSS has no job queue — hosted EE enqueues a
- * baseline job on link instead — so "background" here is a fire-and-forget
- * promise started after the connect response has already gone out. The scan is
- * therefore never inside the request: a slow scan cannot hold the response, and
- * a failed scan cannot change it.
+ * BACKGROUND, IN THIS PROCESS. There is no job queue — "background" here is a
+ * fire-and-forget promise started after the connect response has already gone
+ * out. The scan is therefore never inside the request: a slow clone or scan
+ * cannot hold the response, and a failed one cannot change it.
  *
- * NO CONFIRMATION GATE. `curateInProcess`'s estimate hooks are deliberately not
- * passed: connecting a repository IS the request for onboarding, so the scan
- * runs without a second prompt. That spends whatever LLM transport the operator
- * configured, unattended — accepted for the preview, and the reason this entry
- * lives here rather than being folded into the manual Scan route, which keeps
- * its estimate gate.
+ * NO CONFIRMATION GATE for the onboarding scan. `curateInProcess`'s estimate
+ * hooks are deliberately not passed: connecting a repository IS the request
+ * for onboarding, so the scan runs without a second prompt. That spends
+ * whatever LLM transport the operator configured, unattended — accepted for
+ * the preview, and the reason this entry lives here rather than being folded
+ * into the manual Scan route, which keeps its estimate gate.
  *
  * Progress reaches the client through the two channels the manual Scan already
- * uses, so no new plumbing exists for it: the socket spec tracker (`spec:progress`
- * in the repo's room) and the sessions store's own `run.json`, whose every write
- * the repo's runs watcher pushes out as `session:runs-changed`. `onRunStarted`
- * means the run record exists — and so is listable and tailable — from the first
- * moment.
+ * uses, so no new plumbing exists for it: the socket spec tracker
+ * (`spec:progress` in the repo's room) and the sessions store's own `run.json`
+ * — keyed by the repo IDENTITY, not the throwaway clone, so the repo's runs
+ * watcher sees every write and the transcripts outlive the clone.
  *
  * Nothing here ever throws or rejects: every failure lands in the run record
  * (`curateInProcess` finishes it `failed`), the server log, and a terminal
@@ -32,17 +32,24 @@
  * route alike, since both claim the same slot — runs under an `AbortSignal` we
  * keep, so {@link cancelSpecScan} can stop it and wait for it to settle. That
  * is what makes disconnecting a repository possible while its own onboarding
- * scan is still writing into it: the disconnect IS the answer to whether the
- * scan is still wanted. A scan another process owns has no such signal, and
- * still blocks the disconnect.
+ * scan is still running: the disconnect IS the answer to whether the scan is
+ * still wanted. The work tree is disposed on every exit, cancellation included.
  */
 
-import path from 'node:path';
 import { log } from '@truecourse/core/lib/logger';
-import { isGitRepo, NOT_A_GIT_REPO_MESSAGE } from '@truecourse/core/lib/git';
 import { listSessionRuns } from '@truecourse/core/lib/sessions-store';
-import { curateInProcess, CURATE_STEPS } from '@truecourse/core/commands/spec-in-process';
+import { resolveCommitSha } from '@truecourse/core/lib/repo-ref';
+import { saveSpec, specsMaterializeInPlace } from '@truecourse/core/lib/spec-store';
+import {
+  curateInProcess,
+  getDecisions,
+  CURATE_STEPS,
+  type CurateInProcessOptions,
+  type SpecCurateInProcessResult,
+} from '@truecourse/core/commands/spec-in-process';
+import { writeDecisions, resolveRepoIdentity } from '@truecourse/spec-consolidator';
 import { ensureLlmTransport } from './llm-transport.service.js';
+import { acquireWorkTree } from './work-tree.service.js';
 import {
   createSocketSpecTracker,
   emitSpecComplete,
@@ -59,11 +66,11 @@ interface ScanClaim {
 
 /**
  * Repos whose scan THIS PROCESS started and has not finished — the onboarding
- * scan or the manual Scan route, which share this guard. The store's own
- * `running` records cover a scan started by anything else (a CLI run, an
- * earlier server process); this map covers the window between "started" and
- * "the run record exists", which the store cannot see. (For the manual scan
- * that window includes the whole estimate-confirm wait.)
+ * scan or the manual Scan route, which share this guard. Keyed by the repo
+ * identity (`owner/repo`). The store's own `running` records cover a scan
+ * started by an earlier server process; this map covers the window between
+ * "started" and "the run record exists", which the store cannot see. (For the
+ * manual scan that window includes the whole estimate-confirm wait.)
  *
  * It is also the CANCELLATION REGISTRY: a scan of ours can be stopped, which
  * is what lets a repository be disconnected while its onboarding scan is still
@@ -75,20 +82,20 @@ const inFlight = new Map<string, ScanClaim>();
 const CANCEL_TIMEOUT_MS = 30_000;
 
 /** Is a spec scan already running for this repo — here or anywhere else? */
-export function isSpecScanRunning(repoPath: string): boolean {
-  if (inFlight.has(path.resolve(repoPath))) return true;
+export function isSpecScanRunning(repoKey: string): boolean {
+  if (inFlight.has(repoKey)) return true;
   try {
     // listSessionRuns sweeps dead-pid runs as it reads, so `running` here means
     // a live process, not a corpse left by a crash.
-    return listSessionRuns(repoPath, 'spec-scan').some((run) => run.status === 'running');
+    return listSessionRuns(repoKey, 'spec-scan').some((run) => run.status === 'running');
   } catch {
-    return false; // no store yet (a fresh clone) — nothing is running
+    return false; // no store yet — nothing is running
   }
 }
 
 /** Is the scan running for this repo OURS — i.e. one we can stop? */
-export function ownsSpecScan(repoPath: string): boolean {
-  return inFlight.has(path.resolve(repoPath));
+export function ownsSpecScan(repoKey: string): boolean {
+  return inFlight.has(repoKey);
 }
 
 /** A claimed scan slot: the signal to run under, and the release that frees it. */
@@ -104,36 +111,33 @@ export interface SpecScanClaim {
  * already running (here or anywhere else). Check-and-claim is synchronous, so
  * two concurrent requests cannot both get a slot.
  */
-export function beginSpecScan(repoPath: string): SpecScanClaim | null {
-  if (isSpecScanRunning(repoPath)) return null;
-  const key = path.resolve(repoPath);
+export function beginSpecScan(repoKey: string): SpecScanClaim | null {
+  if (isSpecScanRunning(repoKey)) return null;
   let settle!: () => void;
   const done = new Promise<void>((resolve) => (settle = resolve));
   const claim: ScanClaim = { controller: new AbortController(), done, settle };
-  inFlight.set(key, claim);
+  inFlight.set(repoKey, claim);
   return {
     signal: claim.controller.signal,
     release: () => {
       // Drop the slot BEFORE waking anyone waiting on `done`, so a canceller
       // that resumes sees a free repo rather than its own scan still listed.
-      if (inFlight.get(key) === claim) inFlight.delete(key);
+      if (inFlight.get(repoKey) === claim) inFlight.delete(repoKey);
       claim.settle();
     },
   };
 }
 
 /**
- * Stop the scan THIS process is running for `repoPath` and wait for it to
- * settle. `true` once the slot is free; `false` when we own no scan there (a
- * CLI run in the same tree is nobody's to abort) or when it did not stop
- * within `timeoutMs` — in both cases the caller must not touch the tree.
+ * Stop the scan THIS process is running for `repoKey` and wait for it to
+ * settle. `true` once the slot is free; `false` when we own no scan there or
+ * when it did not stop within `timeoutMs`.
  */
 export async function cancelSpecScan(
-  repoPath: string,
+  repoKey: string,
   timeoutMs = CANCEL_TIMEOUT_MS,
 ): Promise<boolean> {
-  const key = path.resolve(repoPath);
-  const claim = inFlight.get(key);
+  const claim = inFlight.get(repoKey);
   if (!claim) return false;
   claim.controller.abort();
   let timer: NodeJS.Timeout | undefined;
@@ -144,7 +148,58 @@ export async function cancelSpecScan(
     }),
   ]);
   if (timer) clearTimeout(timer);
-  return stopped && !inFlight.has(key);
+  return stopped && !inFlight.has(repoKey);
+}
+
+/** The estimate/progress hooks a caller may thread into the shared pipeline. */
+export type StoredSpecScanOptions = Pick<
+  CurateInProcessOptions,
+  'tracker' | 'signal' | 'source' | 'onLlmEstimate' | 'onEstimatePhase' | 'onRunStarted'
+>;
+
+/**
+ * The whole spec scan of a connected repository: acquire an ephemeral work
+ * tree, curate against it, persist the corpus server-side under the tree's
+ * commit, dispose the tree. The caller owns the scan slot and the transport
+ * check; this owns everything between clone and store.
+ */
+export async function runStoredSpecScan(
+  repoKey: string,
+  options: StoredSpecScanOptions = {},
+): Promise<SpecCurateInProcessResult> {
+  const tree = await acquireWorkTree(repoKey);
+  try {
+    // The user's resolutions (relations / manual areas / includes) live in the
+    // server store keyed by repoKey — NOT in this fresh clone. Load them and
+    // fold them into curate, else a re-scan re-detects already-resolved
+    // conflicts. Empty on the first (connect) scan.
+    const decisions = await getDecisions(repoKey);
+    // Persist them into the clone too, so a follow-on generate over this same
+    // tree reads them from `decisions.json`. Transient: the clone is discarded.
+    writeDecisions(tree.dir, decisions);
+    // State who this repo IS to the relevance classifier — the tree is a clone
+    // in a scratch-named temp dir, so resolving identity from it would offer
+    // that scratch name as the product's identity.
+    const repoIdentity = resolveRepoIdentity({ repoFullName: repoKey });
+    const result = await curateInProcess(tree.dir, {
+      // Fresh shallow checkout → skipGit (doc dating falls back to file mtime).
+      skipGit: true,
+      decisions,
+      repoIdentity,
+      sessionsKey: repoKey,
+      ...options,
+    });
+    // The run wrote `corpus.json` into the (throwaway) tree; persist it under
+    // the tree's commit so it outlives the clone. An in-place store already IS
+    // the tree — nothing separate to persist.
+    if (!specsMaterializeInPlace()) {
+      const commitSha = await resolveCommitSha(tree.dir);
+      await saveSpec({ repoKey, commitSha }, 'corpus', result.curate.corpus);
+    }
+    return result;
+  } finally {
+    tree.dispose();
+  }
 }
 
 /**
@@ -152,14 +207,14 @@ export async function cancelSpecScan(
  * `false` means a scan for this repo is already running and this call was a
  * no-op. Never throws.
  */
-export function startOnboardingScan(repoId: string, repoPath: string): boolean {
+export function startOnboardingScan(repoId: string, repoKey: string): boolean {
   try {
-    const claim = beginSpecScan(repoPath);
+    const claim = beginSpecScan(repoKey);
     if (!claim) {
       log.info(`[onboarding] spec scan already running for ${repoId} — not starting a second`);
       return false;
     }
-    void runScan(repoId, repoPath, claim.signal).finally(claim.release);
+    void runScan(repoId, repoKey, claim.signal).finally(claim.release);
     return true;
   } catch (err) {
     log.error(`[onboarding] could not start the spec scan for ${repoId}: ${messageOf(err)}`);
@@ -168,16 +223,15 @@ export function startOnboardingScan(repoId: string, repoPath: string): boolean {
 }
 
 /** The scan itself. Resolves in every case — failures are reported, not thrown. */
-async function runScan(repoId: string, repoPath: string, signal: AbortSignal): Promise<void> {
+async function runScan(repoId: string, repoKey: string, signal: AbortSignal): Promise<void> {
   try {
-    if (!(await isGitRepo(repoPath))) throw new Error(NOT_A_GIT_REPO_MESSAGE);
     // Refresh the saved LLM selection (a `stat` when unchanged). An unusable API
-    // config — or none at all — fails HERE, before the run record exists, which
-    // is why the failure is reported on the socket as well as the log.
+    // config — or none at all — fails HERE, before the clone exists, which is
+    // why the failure is reported on the socket as well as the log.
     ensureLlmTransport();
 
     const tracker = createSocketSpecTracker(repoId, CURATE_STEPS.map((s) => ({ ...s })));
-    await curateInProcess(repoPath, {
+    await runStoredSpecScan(repoKey, {
       tracker,
       source: 'dashboard',
       signal,

@@ -93,6 +93,13 @@ interface PreviewStateValue {
   markAllRead: () => void;
   /** The real runs in flight, then the fixture jobs. */
   jobs: JobChain[];
+  /**
+   * The initial reads behind `jobs` are in (real repo list + each repo's runs).
+   * Until then `jobs` is provably incomplete, and "already in flight when the
+   * page loaded" cannot be told apart from "just started" — the toast surface
+   * waits on this before it snapshots what to stay silent about.
+   */
+  jobsReady: boolean;
   /** Coverage versions regenerated in this session (a PR version that got its scenarios). */
   generatedVersions: ReadonlySet<string>;
   regenerateVersion: (repo: Repo, versionId: string, label: string) => void;
@@ -123,6 +130,7 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
   const [workspaceId, setWorkspaceId] = useState(ACTIVE_WORKSPACE_ID);
   const [repos, setRepos] = useState<Repo[]>(REPOS);
   const [realRepos, setRealRepos] = useState<Repo[]>([]);
+  const [realReposLoaded, setRealReposLoaded] = useState(false);
   const [connections, setConnections] = useState<ProviderConnection[]>(PROVIDER_CONNECTIONS);
   const [notifications, setNotifications] = useState<PreviewNotification[]>(NOTIFICATIONS);
   const [jobs, setJobs] = useState<JobChain[]>(JOBS_IN_FLIGHT);
@@ -160,7 +168,9 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let live = true;
     void fetchRealRepos().then((found) => {
-      if (live) setRealRepos(found);
+      if (!live) return;
+      setRealRepos(found);
+      setRealReposLoaded(true);
     });
     return () => {
       live = false;
@@ -263,7 +273,7 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
   }, [connectableRepos]);
 
   // The real repositories' runs, followed live. Inert without a server.
-  const realRuns = useRealRunStream(realRepos);
+  const realRuns = useRealRunStream(realRepos, realReposLoaded);
 
   const markRead = useCallback(
     (id: string) => {
@@ -320,6 +330,7 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
       markAllRead,
       // Real jobs first: they are the ones actually happening.
       jobs: [...realRuns.jobs, ...jobs],
+      jobsReady: realRuns.ready,
       generatedVersions,
       regenerateVersion,
     };

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  CreateRepoSchema,
+
   AnalyzeRepoSchema,
   GenerateViolationsSchema,
 } from '../../packages/shared/src/schemas/index';
@@ -43,23 +43,6 @@ const validLocation = {
 // ---------------------------------------------------------------------------
 // API Schemas
 // ---------------------------------------------------------------------------
-
-describe('CreateRepoSchema', () => {
-  it('accepts { path: "/some/path" }', () => {
-    const result = CreateRepoSchema.safeParse({ path: '/some/path' });
-    expect(result.success).toBe(true);
-  });
-
-  it('rejects { path: "" } (min 1)', () => {
-    const result = CreateRepoSchema.safeParse({ path: '' });
-    expect(result.success).toBe(false);
-  });
-
-  it('rejects {} (missing path)', () => {
-    const result = CreateRepoSchema.safeParse({});
-    expect(result.success).toBe(false);
-  });
-});
 
 describe('AnalyzeRepoSchema', () => {
   it('accepts { mode: "full" }', () => {

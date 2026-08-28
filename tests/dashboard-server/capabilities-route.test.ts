@@ -32,7 +32,7 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
   };
 });
 
-import { createApp } from '../../apps/dashboard/server/src/app';
+import { createTestApp } from '../helpers/test-app';
 
 describe('GET /api/capabilities', () => {
   it("reports edition 'community' regardless of the environment", async () => {
@@ -43,7 +43,7 @@ describe('GET /api/capabilities', () => {
     vi.stubEnv('WORKOS_API_KEY', 'sk_test_dummy');
     vi.stubEnv('WORKOS_CLIENT_ID', 'client_test_dummy');
 
-    const app = createApp({ serveStatic: false, authVerifier: null, github: null });
+    const app = createTestApp();
     const res = await request(app).get('/api/capabilities');
 
     expect(res.status).toBe(200);
@@ -52,7 +52,7 @@ describe('GET /api/capabilities', () => {
   });
 
   it('reports the community capability set', async () => {
-    const app = createApp({ serveStatic: false, authVerifier: null, github: null });
+    const app = createTestApp();
     const res = await request(app).get('/api/capabilities');
 
     expect(res.status).toBe(200);

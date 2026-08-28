@@ -5,6 +5,7 @@
  * analysis/drift), so there's exactly one pool and one migration ledger.
  */
 
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Pool } from 'pg';
@@ -12,11 +13,19 @@ import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { schema } from './schema/index.js';
 
-/** Generated migrations live at the package root (`drizzle/`), one level up from src|dist. */
-export const MIGRATIONS_DIR = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '../drizzle',
-);
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Generated migrations live at the package root (`drizzle/`), one level up
+ * from src|dist — except in the published bundle, where this module is inlined
+ * into `server.mjs` at the package root itself and the build copies the
+ * migrations to a sibling `drizzle/` dir. Probe both so the same code boots
+ * from a source checkout and from an npm install.
+ */
+export const MIGRATIONS_DIR =
+  [path.resolve(HERE, '../drizzle'), path.resolve(HERE, 'drizzle')].find((p) =>
+    fs.existsSync(path.join(p, 'meta', '_journal.json')),
+  ) ?? path.resolve(HERE, '../drizzle');
 
 export type Db = NodePgDatabase<typeof schema>;
 

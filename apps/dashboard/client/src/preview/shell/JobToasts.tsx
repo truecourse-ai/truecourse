@@ -21,7 +21,7 @@ import { PREVIEW_BASE } from './PreviewShell';
 const slugOf = (fullName: string): string => fullName.split('/').slice(-1)[0] ?? fullName;
 
 export function JobToasts() {
-  const { jobs } = usePreviewState();
+  const { jobs, jobsReady } = usePreviewState();
   const navigate = useNavigate();
   // Only jobs that START while the page is open announce (e.g. a repository
   // just connected). Jobs already in flight on arrival — fixtures seeded into
@@ -30,6 +30,10 @@ export function JobToasts() {
   const announced = useRef<Set<string> | null>(null);
 
   useEffect(() => {
+    // The "already in flight on arrival" snapshot is only honest once the
+    // async real-run reads are in — seeded any earlier it would hold just the
+    // fixtures, and a scan resumed across a reload would announce itself.
+    if (!jobsReady) return;
     if (announced.current === null) {
       announced.current = new Set(jobs.map((job) => job.id));
       return;
@@ -42,7 +46,7 @@ export function JobToasts() {
       const to = job.href ?? `${PREVIEW_BASE}/repos/${slugOf(job.repoFullName)}/activity`;
       announceJob(job, () => navigate(to));
     }
-  }, [jobs, navigate]);
+  }, [jobs, jobsReady, navigate]);
 
   return null;
 }

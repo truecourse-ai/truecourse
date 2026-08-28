@@ -30,7 +30,7 @@ Both store their results under `.truecourse/` and surface them in a shared [dash
 
 Jump to: **[Install](#install)** · **[1. Analyze](#1-analyze--code-intelligence)** · **[2. Spec → Guard](#2-spec--guard--business-logic-drift)** · **[Dashboard](#dashboard-web-ui)**
 
-No setup step and no database: TrueCourse creates `.truecourse/` in your repo on first use and stores everything there as plain JSON files. For LLM-powered work it uses the [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) by default, or a **provider API with your own key** — your first `truecourse` command asks which, and [`truecourse config llm setup`](#llm-transport-claude-code-or-api) changes it later. With neither available, deterministic analysis still runs and LLM-dependent features are skipped.
+The CLI has no setup step and no database: `truecourse analyze` and friends create `.truecourse/` in your repo on first use and store everything there as plain JSON files. The [dashboard](#dashboard-web-ui) is different — it is an authenticated, Postgres-backed server (`DATABASE_URL` + WorkOS auth required, see [Development](#development)) that stores repo state in the database and clones connected repositories per run. For LLM-powered work TrueCourse uses the [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) by default, or a **provider API with your own key** — your first `truecourse` command asks which, and [`truecourse config llm setup`](#llm-transport-claude-code-or-api) changes it later. With neither available, deterministic analysis still runs and LLM-dependent features are skipped.
 
 ---
 
@@ -997,6 +997,8 @@ offers it as `View · Story · YAML`; the terminal prints the same words with
 
 One web UI for both capabilities — browse code findings and business-logic drift side by side, with the architecture graph, analytics, and the spec-curation + guard workflow.
 
+The dashboard server is authenticated and Postgres-backed: it needs `DATABASE_URL` and the `WORKOS_*` variables to boot (migrations apply automatically), and repositories arrive by connecting them through the TrueCourse GitHub App (`GITHUB_APP_*`, optional — without it the server boots with an empty repo list). See [Development](#development) for the variable tables. Repo state lives in the database; runs clone the repository ephemerally and clean up after themselves.
+
 ```bash
 truecourse dashboard                  # Start + open the dashboard
 truecourse dashboard --reconfigure    # Re-prompt for console vs background service mode
@@ -1286,7 +1288,7 @@ Connecting repositories through the TrueCourse GitHub App is optional — the se
 | `GITHUB_APP_WEBHOOK_SECRET` | Shared secret; the webhook receiver at `POST /api/github/webhook` verifies every delivery against it. |
 | `GITHUB_APP_SLUG` | The `github.com/apps/<slug>` handle, used to build the install URL. |
 
-Connecting a repository (`POST /api/github/repos/link`) clones it into `~/.truecourse/clones/<owner>__<repo>` with an installation token, registers the clone as a project, and starts its spec scan in the background. Disconnecting it (`DELETE /api/github/repos/link`) unregisters the project and deletes that clone.
+Connecting a repository (`POST /api/github/repos/link`) writes the link row — the row is the connection — and starts its spec scan in the background. There is no persistent clone: each run (spec scan today, guard runs later) shallow-clones the repo with an installation token into an ephemeral per-workspace directory under `~/.truecourse/run-clones/`, persists its results to Postgres, and deletes the clone when it settles. Disconnecting (`DELETE /api/github/repos/link`) cancels any running scan, drops the repo's session transcripts, and deletes the row.
 
 `pnpm dev` also expects a `.truecourse/` folder at the repo root — created automatically on the first `truecourse analyze` against the repo (or simply `mkdir -p .truecourse`).
 

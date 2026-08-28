@@ -3,8 +3,11 @@
  *
  * `@truecourse/scm-github` owns the protocol — the webhook receiver, the connect
  * API, the link store. This module owns what connecting a repository MEANS here:
- * clone it with an installation token, register the clone as a project, start
- * its onboarding scan; and on disconnect, undo all three.
+ * the `gh_repos` row IS the connection. Nothing is cloned at connect time — the
+ * work-tree provider installed here clones per run (spec scan now; guard runs
+ * later) and the clone is deleted when the run settles. Linking starts the
+ * onboarding scan; unlinking cancels any scan of ours and drops the repo's
+ * persistent session transcripts.
  *
  * The factory reads its configuration from the environment and returns `null`
  * when the App is not configured, so a server with no GITHUB_APP_* still boots
@@ -14,10 +17,9 @@
  * real mount with no network, no database and no LLM.
  */
 
-import path from 'node:path';
 import type { Router } from 'express';
 import { log } from '@truecourse/core/lib/logger';
-import { getProjectByPath, registerProject } from '@truecourse/core/config/registry';
+import { slugify } from '@truecourse/core/config/registry';
 import {
   createConnectRouter,
   createGithubAuth,
@@ -27,16 +29,16 @@ import {
   installationOctokit,
   loadGithubAppConfig,
   PostgresGateStore,
-  repoWebUrl,
   type GateStore,
   type GithubAuth,
   type OctokitClient,
   type RepoLinkRecord,
 } from '@truecourse/scm-github';
 import { getDb } from '../db.js';
-import { cloneDirName, cloneGithubRepo, getClonesDir } from '../services/repo-clone.service.js';
+import { createRunClone } from '../services/run-clone.service.js';
+import { setWorkTreeProvider, type WorkTreeProvider } from '../services/work-tree.service.js';
 import { startOnboardingScan } from '../services/onboarding-scan.service.js';
-import { removeProject } from '../services/repo-removal.service.js';
+import { removeRepoRunState } from '../services/repo-removal.service.js';
 
 /** The routers app.ts mounts, plus the store the repo list scopes itself with. */
 export interface GithubMount {
@@ -57,10 +59,10 @@ export interface GithubConnectionOverrides {
   lookupInstallationAccount?: (
     installationId: number,
   ) => Promise<{ accountLogin: string; accountType: string } | null>;
-  /** Clone a connected repo, returning the path. Default: token clone into the managed dir. */
-  clone?: (link: RepoLinkRecord) => Promise<string>;
+  /** Per-run work trees. Default: a token clone into the workspace's run dir. */
+  workTree?: WorkTreeProvider;
   /** Start a repo's onboarding scan. Default: the in-process background scan. */
-  scan?: (repoId: string, repoPath: string) => boolean;
+  scan?: (repoId: string, repoKey: string) => boolean;
 }
 
 export function createGithubConnection(
@@ -75,15 +77,23 @@ export function createGithubConnection(
   const scan = overrides.scan ?? startOnboardingScan;
 
   // App auth is built on first use: the private key is only parsed when a token
-  // is actually minted, so a test that injects `clone` never needs a real one.
+  // is actually minted, so a test that injects `workTree` never needs a real one.
   let auth: GithubAuth | null = null;
-  const clone =
-    overrides.clone ??
-    (async (link: RepoLinkRecord): Promise<string> => {
+  const workTree: WorkTreeProvider =
+    overrides.workTree ??
+    (async (repoKey: string) => {
+      const link = await store.getRepo(repoKey);
+      if (!link) {
+        throw new Error(`${repoKey} is not a connected repository`);
+      }
       auth ??= createGithubAuth(cfg);
       const token = await getInstallationToken(auth, link.installationId);
-      return cloneGithubRepo(link.repoFullName, token);
+      return createRunClone(repoKey, token, {
+        workspaceOrgId: link.workspaceOrgId,
+        defaultBranch: link.defaultBranch,
+      });
     });
+  setWorkTreeProvider(workTree);
 
   const webhook = createWebhookRouter({
     secret: cfg.webhookSecret,
@@ -96,31 +106,21 @@ export function createGithubConnection(
   const connect = createConnectRouter({
     store,
     appSlug: cfg.appSlug,
-    appUrl: process.env.WORKOS_APP_URL ?? 'http://localhost:3000',
+    appUrl: process.env.WORKOS_APP_URL || 'http://localhost:3000',
     // Back to the connect dialog, so the new installation is pickable at once.
     setupRedirectPath: '/preview?connect=1',
     octokitFor,
     lookupInstallationAccount:
       overrides.lookupInstallationAccount ??
       ((installationId: number) => fetchInstallationAccount(cfg, installationId)),
-    onRepoLinked: async (link) => {
-      const clonePath = await clone(link);
-      const entry = await registerProject(clonePath, link.repoFullName, {
-        remoteUrl: repoWebUrl(link.repoFullName),
-      });
-      scan(entry.slug, entry.path);
+    onRepoLinked: async (link: RepoLinkRecord) => {
+      // The row is the connection — no clone, no registration. The onboarding
+      // scan acquires (and disposes) its own ephemeral work tree.
+      scan(slugify(link.repoFullName, []), link.repoFullName);
     },
-    onRepoUnlinked: async (link) => {
-      // The project this repo was registered as, found where the clone lives:
-      // the managed directory name is derived from the full name and is the
-      // registry's primary key, so no string has to be rebuilt and matched.
-      const clonePath = path.join(getClonesDir(), cloneDirName(link.repoFullName));
-      const entry = await getProjectByPath(clonePath);
-      if (!entry) {
-        log.info(`[github] ${link.repoFullName} was not registered — nothing to clean up`);
-        return;
-      }
-      await removeProject(entry);
+    onRepoUnlinked: async (link: RepoLinkRecord) => {
+      await removeRepoRunState(link.repoFullName);
+      log.info(`[github] ${link.repoFullName} disconnected`);
     },
   });
 

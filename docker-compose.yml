@@ -54,9 +54,10 @@ services:
       WORKOS_COOKIE_PASSWORD: ${WORKOS_COOKIE_PASSWORD:-}
       WORKOS_REDIRECT_URI: ${WORKOS_REDIRECT_URI:-}
       WORKOS_APP_URL: ${WORKOS_APP_URL:-}
-      # GitHub App PR gate. These `:?` guards are vestigial on this branch — the
-      # GitHub App moves into the base product in the next PR, which is when they
-      # get revisited. Left as-is so the hosted image keeps its current contract.
+      # GitHub App connect. The server itself treats these as optional (it boots
+      # and answers /api/github with a 503 naming them), but the hosted image
+      # exists to serve connected repos, so the compose contract requires all
+      # four up front rather than shipping a container that can't connect.
       GITHUB_APP_ID: ${GITHUB_APP_ID:?set the GitHub App id}
       GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:?set the GitHub App private key}
       GITHUB_APP_WEBHOOK_SECRET: ${GITHUB_APP_WEBHOOK_SECRET:?set the GitHub App webhook secret}

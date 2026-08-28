@@ -5,7 +5,9 @@ import { setupSocket } from './socket/index.js';
 import { createApp } from './app.js';
 import { createAuth } from './auth/index.js';
 import { createGithubConnection } from './github/index.js';
-import { closeDb, initDb } from './db.js';
+import { closeDb, getDbHandle, initDb } from './db.js';
+import { installDbStores } from './stores.js';
+import { sweepStaleRunClones } from './services/run-clone.service.js';
 import { stopAllWatchers } from './services/watcher.service.js';
 import { stopAllRunTails } from './services/session-tailer.service.js';
 import { installLlmTransportAtBoot } from './services/llm-transport.service.js';
@@ -44,6 +46,10 @@ async function main() {
   }
   await initDb(databaseUrl);
   log.info('[Server] db ready (Postgres, migrations applied)');
+  // Swap the file storage seams for Postgres before anything reads or writes
+  // repo state, and clear run-clone debris a crashed process left behind.
+  installDbStores(getDbHandle());
+  sweepStaleRunClones();
 
   // 3. WorkOS session auth. Throws if the WORKOS_* env is incomplete — the
   //    server boots authenticated or not at all.

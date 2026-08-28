@@ -3,15 +3,17 @@
  *
  * Three things are pinned here. WHERE the routers sit: the webhook receiver
  * above the auth gate (GitHub has no session — its HMAC signature is its auth),
- * the connect API below it. WHAT CONNECTING A REPO DOES: clone it with an
- * installation token, register the clone as a project, start its onboarding
- * scan — and the reverse on disconnect. And WHAT AN UNCONFIGURED SERVER
- * ANSWERS: 503 with the env vars to set, never a silent 404.
+ * the connect API below it. WHAT CONNECTING A REPO DOES: write the link row —
+ * the row IS the connection — and start the onboarding scan, which acquires
+ * its own ephemeral work tree; nothing is cloned inside the request, and the
+ * registry every route resolves against is a live view of the link store. And
+ * WHAT AN UNCONFIGURED SERVER ANSWERS: 503 with the env vars to set, never a
+ * silent 404.
  *
  * The GitHub side is faked throughout (an in-memory link store, an injected
- * clone), so nothing here reaches the network or a database. The one real git
- * assertion is on the clone ARGV: the token must ride an `http.*.extraheader`
- * flag, never the URL.
+ * work-tree provider), so nothing here reaches the network or a database. The
+ * one real git assertion is on the clone ARGV of the run-clone service: the
+ * token must ride an `http.*.extraheader` flag, never the URL.
  */
 
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
@@ -52,15 +54,15 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
   };
 });
 
-// The onboarding scan's entry point. Stubbed so the link path is exercised
-// without an LLM, an agent session, or a run store — and so a test can hold the
-// scan open and watch the response come back anyway.
+// The scan engine. Stubbed so the link path is exercised without an LLM, an
+// agent session, or a run store — and so a test can hold the scan open and
+// watch the response come back anyway.
 const scan = vi.hoisted(() => ({
   calls: [] as string[],
-  impl: (async () => ({})) as (
-    repoRoot: string,
-    options?: { signal?: AbortSignal },
-  ) => Promise<unknown>,
+  impl: (async () => ({
+    noChanges: false,
+    curate: { corpus: {}, stats: {} },
+  })) as (repoRoot: string, options?: { signal?: AbortSignal }) => Promise<unknown>,
 }));
 
 vi.mock('@truecourse/core/commands/spec-in-process', async (importOriginal) => {
@@ -80,30 +82,43 @@ vi.mock('@truecourse/core/commands/spec-in-process', async (importOriginal) => {
 import { createApp } from '../../apps/dashboard/server/src/app';
 import { createGithubConnection } from '../../apps/dashboard/server/src/github/index';
 import {
-  cloneGithubRepo,
-  getClonesDir,
+  createRunClone,
+  getRunClonesDir,
+  sweepStaleRunClones,
   type GitRunner,
-} from '../../apps/dashboard/server/src/services/repo-clone.service';
+} from '../../apps/dashboard/server/src/services/run-clone.service';
+import {
+  setWorkTreeProvider,
+  type WorkTreeProvider,
+} from '../../apps/dashboard/server/src/services/work-tree.service';
 import {
   isSpecScanRunning,
   startOnboardingScan,
 } from '../../apps/dashboard/server/src/services/onboarding-scan.service';
+// Seam state must be set on the SAME module instance the server code reads, so
+// these come in via the package specifiers (dist) the server itself imports —
+// a source-path import here would install the stores on a parallel copy.
 import {
-  readRegistry,
-  registerProject,
-  unregisterProject,
-} from '../../packages/core/src/config/registry';
-import { createSessionRun } from '../../packages/core/src/lib/sessions-store';
-import type {
-  OctokitClient,
-} from '../../packages/scm-github/src/octokit';
-import type { RepoLinkRecord } from '../../packages/scm-github/src/store/types';
+  setRegistryStore,
+  resetRegistryStore,
+  slugify,
+  type RegistryEntry,
+  type RegistryStore,
+} from '@truecourse/core/config/registry';
+import {
+  createSessionRun,
+  sessionsDir,
+  setSessionsRootResolver,
+  resetSessionsRootResolver,
+} from '@truecourse/core/lib/sessions-store';
+import type { OctokitClient } from '../../packages/scm-github/src/octokit';
 import { MemoryGateStore } from '../scm-github/memory-store';
 
 const ORG = 'org_A';
 const OTHER_ORG = 'org_B';
 const INSTALLATION_ID = 42;
 const REPO = 'acme/widgets';
+const REPO_SLUG = slugify(REPO, []);
 const WEBHOOK_SECRET = 'shhh';
 
 const APP_ENV = {
@@ -116,7 +131,7 @@ const APP_ENV = {
 const tmpDirs: string[] = [];
 
 function makeTmpDir(prefix: string): string {
-  // realpath: macOS /tmp is a symlink, and the registry stores resolved paths.
+  // realpath: macOS /tmp is a symlink, and paths get compared resolved.
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
   tmpDirs.push(dir);
   return dir;
@@ -125,10 +140,9 @@ function makeTmpDir(prefix: string): string {
 const git = (cwd: string, ...args: string[]): string =>
   execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim();
 
-/** A git repo where a clone would land — what the injected clone produces. */
-function fakeClonedRepo(repoFullName: string): string {
-  const dir = path.join(getClonesDir(), repoFullName.replace('/', '__'));
-  fs.mkdirSync(dir, { recursive: true });
+/** A git repo standing in for a fresh ephemeral clone. */
+function fakeWorkTree(): string {
+  const dir = makeTmpDir('tc-worktree-');
   git(dir, 'init', '--initial-branch=main');
   // The suite hides the developer's global git config, so identity is per-repo.
   git(dir, 'config', 'user.name', 'Test');
@@ -149,9 +163,40 @@ const verify: AuthVerifier = async (cookieHeader) => {
   return { user: { id: `u_${organizationId}`, email: 'u@acme.test', organizationId } } satisfies AuthResult;
 };
 
+/**
+ * The registry as production runs it: a live view of the link store, exactly
+ * what GhReposRegistryStore derives from gh_repos. Mutations are no-ops.
+ */
+function derivedRegistry(gate: MemoryGateStore): RegistryStore {
+  const toEntry = (repoFullName: string, defaultBranch: string): RegistryEntry => ({
+    slug: slugify(repoFullName, []),
+    name: repoFullName,
+    path: repoFullName,
+    defaultBranch,
+    remoteUrl: `https://github.com/${repoFullName}`,
+  });
+  const all = async (): Promise<RegistryEntry[]> =>
+    (await gate.listRepos()).map((r) => toEntry(r.repoFullName, r.defaultBranch));
+  return {
+    readRegistry: all,
+    pruneStaleProjects: all,
+    getProjectBySlug: async (slug) => (await all()).find((e) => e.slug === slug) ?? null,
+    getProjectByPath: async (p) => (await all()).find((e) => e.path === p) ?? null,
+    registerProject: async (repoPath) =>
+      (await all()).find((e) => e.path === repoPath) ?? {
+        slug: slugify(repoPath, []),
+        name: repoPath,
+        path: repoPath,
+      },
+    unregisterProject: async () => true,
+    touchProject: async () => {},
+    setLastAnalyzed: async () => {},
+  };
+}
+
 interface MountOptions {
-  clone?: (link: RepoLinkRecord) => Promise<string>;
-  scan?: (repoId: string, repoPath: string) => boolean;
+  workTree?: WorkTreeProvider;
+  scan?: (repoId: string, repoKey: string) => boolean;
   lookupInstallationAccount?: (
     installationId: number,
   ) => Promise<{ accountLogin: string; accountType: string } | null>;
@@ -177,14 +222,20 @@ function signed(body: unknown): { payload: string; signature: string } {
 }
 
 beforeAll(() => {
-  // The registry and the managed clones root both hang off TRUECOURSE_HOME;
-  // point them at a throwaway dir. Both are read lazily, per call.
   process.env.TRUECOURSE_HOME = makeTmpDir('tc-github-home-');
   Object.assign(process.env, APP_ENV);
+  // The production sessions layout: transcripts keyed by repo identity under
+  // the global dir, so they exist independent of any work tree.
+  setSessionsRootResolver((key) =>
+    path.isAbsolute(key)
+      ? path.join(key, '.truecourse', 'sessions')
+      : path.join(process.env.TRUECOURSE_HOME!, 'sessions', key.replace('/', '__')),
+  );
 });
 
 beforeEach(async () => {
   store = new MemoryGateStore();
+  setRegistryStore(derivedRegistry(store));
   await store.saveInstallation({
     installationId: INSTALLATION_ID,
     accountLogin: 'acme',
@@ -194,15 +245,17 @@ beforeEach(async () => {
     updatedAt: '2026-01-01T00:00:00.000Z',
   });
   scan.calls.length = 0;
-  scan.impl = async () => ({});
+  scan.impl = async () => ({ noChanges: false, curate: { corpus: {}, stats: {} } });
 });
 
-afterEach(async () => {
-  for (const entry of await readRegistry()) await unregisterProject(entry.slug);
-  fs.rmSync(getClonesDir(), { recursive: true, force: true });
+afterEach(() => {
+  resetRegistryStore();
+  setWorkTreeProvider(null);
+  fs.rmSync(path.join(process.env.TRUECOURSE_HOME!, 'sessions'), { recursive: true, force: true });
 });
 
 afterAll(() => {
+  resetSessionsRootResolver();
   for (const key of Object.keys(APP_ENV)) delete process.env[key];
   for (const dir of tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -313,82 +366,58 @@ describe('an installation the webhook never announced', () => {
 // Linking a repo
 // ---------------------------------------------------------------------------
 
+const linkRepo = (app: Express, org = ORG) =>
+  request(app)
+    .post('/api/github/repos/link')
+    .set('Cookie', `tc_session=${org}`)
+    .send({ repoFullName: REPO, installationId: INSTALLATION_ID, defaultBranch: 'main' });
+
 describe('linking a repository', () => {
-  it('clones it, registers the clone, and starts its onboarding scan', async () => {
-    const cloned: RepoLinkRecord[] = [];
+  it('writes the row, starts the scan, and clones nothing in the request', async () => {
     const started: Array<[string, string]> = [];
     const app = buildApp({
-      clone: async (link) => {
-        cloned.push(link);
-        return fakeClonedRepo(link.repoFullName);
-      },
-      scan: (repoId, repoPath) => {
-        started.push([repoId, repoPath]);
+      scan: (repoId, repoKey) => {
+        started.push([repoId, repoKey]);
         return true;
       },
     });
 
-    await request(app)
-      .post('/api/github/repos/link')
+    await linkRepo(app).expect(201);
+
+    // The row IS the connection, and the registry is its live view.
+    expect(await store.getRepo(REPO)).toMatchObject({
+      repoFullName: REPO,
+      workspaceOrgId: ORG,
+    });
+    const detail = await request(app)
+      .get(`/api/repos/${REPO_SLUG}`)
       .set('Cookie', `tc_session=${ORG}`)
-      .send({ repoFullName: REPO, installationId: INSTALLATION_ID, defaultBranch: 'main' })
-      .expect(201);
-
-    expect(cloned).toHaveLength(1);
-    expect(cloned[0]).toMatchObject({ repoFullName: REPO, installationId: INSTALLATION_ID });
-
-    const registry = await readRegistry();
-    expect(registry).toHaveLength(1);
-    expect(registry[0]).toMatchObject({
+      .expect(200);
+    expect(detail.body).toMatchObject({
       name: REPO,
-      path: path.join(getClonesDir(), 'acme__widgets'),
+      defaultBranch: 'main',
       // The preview reads `remoteUrl` to tell a real repository from a fixture.
       remoteUrl: `https://github.com/${REPO}`,
     });
 
-    expect(started).toEqual([[registry[0]!.slug, registry[0]!.path]]);
-  });
-
-  it('refuses the connection when the clone fails, leaving no link behind', async () => {
-    const app = buildApp({
-      clone: async () => {
-        throw new Error('github unreachable');
-      },
-      scan: () => true,
-    });
-
-    const res = await request(app)
-      .post('/api/github/repos/link')
-      .set('Cookie', `tc_session=${ORG}`)
-      .send({ repoFullName: REPO, installationId: INSTALLATION_ID, defaultBranch: 'main' })
-      .expect(502);
-    expect(res.body.error).toContain('github unreachable');
-
-    // Here the hook IS the connection, so a half-connected repo — a link row the
-    // dialog renders as connected, with no clone under it — is worse than none.
-    expect(await store.getRepo(REPO)).toBeNull();
-    expect(await readRegistry()).toHaveLength(0);
+    // The scan was pointed at the repo IDENTITY; no clone dir exists.
+    expect(started).toEqual([[REPO_SLUG, REPO]]);
+    expect(fs.existsSync(getRunClonesDir())).toBe(false);
   });
 
   it('refuses to connect the same repository twice', async () => {
-    let clones = 0;
+    let scans = 0;
     const app = buildApp({
-      clone: async (link) => {
-        clones += 1;
-        return fakeClonedRepo(link.repoFullName);
+      scan: () => {
+        scans += 1;
+        return true;
       },
-      scan: () => true,
     });
-    const connect = () =>
-      request(app)
-        .post('/api/github/repos/link')
-        .set('Cookie', `tc_session=${ORG}`)
-        .send({ repoFullName: REPO, installationId: INSTALLATION_ID, defaultBranch: 'main' });
 
-    await connect().expect(201);
-    // A second link would re-clone over the live working copy.
-    await connect().expect(409);
-    expect(clones).toBe(1);
+    await linkRepo(app).expect(201);
+    // A second link would re-fire the onboarding scan on a live repo.
+    await linkRepo(app).expect(409);
+    expect(scans).toBe(1);
   });
 });
 
@@ -397,18 +426,13 @@ describe('linking a repository', () => {
 // ---------------------------------------------------------------------------
 
 describe('disconnecting a repository', () => {
-  it('unregisters the project and deletes the managed clone', async () => {
-    const app = buildApp({
-      clone: async (link) => fakeClonedRepo(link.repoFullName),
-      scan: () => true,
-    });
-    await request(app)
-      .post('/api/github/repos/link')
-      .set('Cookie', `tc_session=${ORG}`)
-      .send({ repoFullName: REPO, installationId: INSTALLATION_ID, defaultBranch: 'main' })
-      .expect(201);
-    const clone = (await readRegistry())[0]!.path;
-    expect(fs.existsSync(clone)).toBe(true);
+  it('drops the row and the repo’s session transcripts', async () => {
+    const app = buildApp({ scan: () => true });
+    await linkRepo(app).expect(201);
+
+    // Transcripts a scan left behind, keyed by identity.
+    createSessionRun(REPO, { command: 'spec-scan', gitRef: 'abc' }).finish('completed');
+    expect(fs.existsSync(sessionsDir(REPO))).toBe(true);
 
     await request(app)
       .delete('/api/github/repos/link')
@@ -417,33 +441,19 @@ describe('disconnecting a repository', () => {
       .expect(200);
 
     expect(await store.getRepo(REPO)).toBeNull();
-    expect(await readRegistry()).toHaveLength(0);
-    expect(fs.existsSync(clone)).toBe(false);
+    expect(fs.existsSync(sessionsDir(REPO))).toBe(false);
   });
 
   it('drops the link row when the repo is disconnected from Home', async () => {
-    const app = buildApp({
-      clone: async (link) => fakeClonedRepo(link.repoFullName),
-      scan: () => true,
-    });
-    await request(app)
-      .post('/api/github/repos/link')
-      .set('Cookie', `tc_session=${ORG}`)
-      .send({ repoFullName: REPO, installationId: INSTALLATION_ID, defaultBranch: 'main' })
-      .expect(201);
-    const entry = (await readRegistry())[0]!;
+    const app = buildApp({ scan: () => true });
+    await linkRepo(app).expect(201);
 
-    // Home's disconnect. It removes the same three things the unlink hook does,
-    // so it has to remove the link too — otherwise the connect dialog reports the
-    // repo connected forever and refuses to add it back.
     await request(app)
-      .delete(`/api/repos/${entry.slug}`)
+      .delete(`/api/repos/${REPO_SLUG}`)
       .set('Cookie', `tc_session=${ORG}`)
       .expect(204);
 
     expect(await store.getRepo(REPO)).toBeNull();
-    expect(await readRegistry()).toHaveLength(0);
-    expect(fs.existsSync(entry.path)).toBe(false);
 
     const status = await request(app)
       .get('/api/github/status')
@@ -458,86 +468,60 @@ describe('disconnecting a repository', () => {
 // ---------------------------------------------------------------------------
 
 describe('a slug that belongs to another workspace', () => {
-  /** Connect REPO to ORG and register a path repo owned by nobody. */
-  async function twoRepos(app: Express): Promise<{ connected: string; local: string }> {
-    await request(app)
-      .post('/api/github/repos/link')
-      .set('Cookie', `tc_session=${ORG}`)
-      .send({ repoFullName: REPO, installationId: INSTALLATION_ID, defaultBranch: 'main' })
-      .expect(201);
-    const localPath = makeTmpDir('tc-github-local-');
-    const local = await request(app)
-      .post('/api/repos')
-      .set('Cookie', `tc_session=${OTHER_ORG}`)
-      .send({ path: localPath })
-      .expect(201);
-    const connected = (await readRegistry()).find((e) => e.name === REPO)!.slug;
-    return { connected, local: (local.body as { id: string }).id };
-  }
-
-  const app = (): Express =>
-    buildApp({ clone: async (link) => fakeClonedRepo(link.repoFullName), scan: () => true });
+  const app = (): Express => buildApp({ scan: () => true });
 
   it('404s the repo detail route — not 403, which would confirm it exists', async () => {
     const server = app();
-    const { connected, local } = await twoRepos(server);
+    await linkRepo(server).expect(201);
 
     await request(server)
-      .get(`/api/repos/${connected}`)
+      .get(`/api/repos/${REPO_SLUG}`)
       .set('Cookie', `tc_session=${OTHER_ORG}`)
       .expect(404);
-    // The owner still reads it, and a path-registered repo has no owner at all.
     await request(server)
-      .get(`/api/repos/${connected}`)
-      .set('Cookie', `tc_session=${ORG}`)
-      .expect(200);
-    await request(server)
-      .get(`/api/repos/${local}`)
+      .get(`/api/repos/${REPO_SLUG}`)
       .set('Cookie', `tc_session=${ORG}`)
       .expect(200);
   });
 
   it('404s a project-scoped router behind the resolver', async () => {
     const server = app();
-    const { connected } = await twoRepos(server);
+    await linkRepo(server).expect(201);
 
     await request(server)
-      .get(`/api/repos/${connected}/sessions/runs`)
+      .get(`/api/repos/${REPO_SLUG}/sessions/runs`)
       .set('Cookie', `tc_session=${OTHER_ORG}`)
       .expect(404);
     await request(server)
-      .get(`/api/repos/${connected}/sessions/runs`)
+      .get(`/api/repos/${REPO_SLUG}/sessions/runs`)
       .set('Cookie', `tc_session=${ORG}`)
       .expect(200);
   });
 
   it('404s the per-repo config route', async () => {
     const server = app();
-    const { connected } = await twoRepos(server);
+    await linkRepo(server).expect(201);
 
     await request(server)
-      .get(`/api/repos/${connected}/config`)
+      .get(`/api/repos/${REPO_SLUG}/config`)
       .set('Cookie', `tc_session=${OTHER_ORG}`)
       .expect(404);
     await request(server)
-      .get(`/api/repos/${connected}/config`)
+      .get(`/api/repos/${REPO_SLUG}/config`)
       .set('Cookie', `tc_session=${ORG}`)
       .expect(200);
   });
 
-  it('refuses to DELETE it — the clone and the link both survive', async () => {
+  it('refuses to DELETE it — the link survives', async () => {
     const server = app();
-    const { connected } = await twoRepos(server);
-    const clonePath = (await readRegistry()).find((e) => e.name === REPO)!.path;
+    await linkRepo(server).expect(201);
 
     await request(server)
-      .delete(`/api/repos/${connected}`)
+      .delete(`/api/repos/${REPO_SLUG}`)
       .set('Cookie', `tc_session=${OTHER_ORG}`)
       .expect(404);
 
-    expect(fs.existsSync(clonePath)).toBe(true);
     expect(await store.getRepo(REPO)).not.toBeNull();
-    expect((await readRegistry()).some((e) => e.name === REPO)).toBe(true);
   });
 });
 
@@ -546,54 +530,34 @@ describe('a slug that belongs to another workspace', () => {
 // ---------------------------------------------------------------------------
 
 describe('GET /api/repos with a link store', () => {
-  it("hides another workspace's connected repository, and no one's local repos", async () => {
-    const app = buildApp({
-      clone: async (link) => fakeClonedRepo(link.repoFullName),
-      scan: () => true,
-    });
-    await request(app)
-      .post('/api/github/repos/link')
-      .set('Cookie', `tc_session=${ORG}`)
-      .send({ repoFullName: REPO, installationId: INSTALLATION_ID, defaultBranch: 'main' })
-      .expect(201);
-
-    // A repo registered by local path has no link row and therefore no owner.
-    const local = makeTmpDir('tc-github-local-');
-    await request(app)
-      .post('/api/repos')
-      .set('Cookie', `tc_session=${OTHER_ORG}`)
-      .send({ path: local })
-      .expect(201);
+  it("hides another workspace's connected repository", async () => {
+    const app = buildApp({ scan: () => true });
+    await linkRepo(app).expect(201);
 
     const mine = await request(app)
       .get('/api/repos')
       .set('Cookie', `tc_session=${ORG}`)
       .expect(200);
-    expect((mine.body as Array<{ name: string }>).map((r) => r.name).sort()).toEqual(
-      [REPO, path.basename(local)].sort(),
-    );
+    expect((mine.body as Array<{ name: string }>).map((r) => r.name)).toEqual([REPO]);
 
     const theirs = await request(app)
       .get('/api/repos')
       .set('Cookie', `tc_session=${OTHER_ORG}`)
       .expect(200);
-    expect((theirs.body as Array<{ name: string }>).map((r) => r.name)).toEqual([
-      path.basename(local),
-    ]);
+    expect(theirs.body).toEqual([]);
   });
 });
 
 // ---------------------------------------------------------------------------
-// The clone argv
+// The run-clone argv
 // ---------------------------------------------------------------------------
 
-describe('cloneGithubRepo', () => {
-  /** Records the argv and materializes whatever directory the clone targets. */
+describe('createRunClone', () => {
+  /** Records the argv; the clone target already exists (mkdtemp creates it). */
   function recordingGit(): { calls: Array<{ args: string[]; cwd?: string }>; run: GitRunner } {
     const calls: Array<{ args: string[]; cwd?: string }> = [];
     const run: GitRunner = async (args, cwd) => {
       calls.push({ args, cwd });
-      if (args.includes('clone')) fs.mkdirSync(args[args.length - 1] as string, { recursive: true });
     };
     return { calls, run };
   }
@@ -601,10 +565,15 @@ describe('cloneGithubRepo', () => {
   it('carries the token in an extraheader flag, never in the URL', async () => {
     const { calls, run } = recordingGit();
 
-    const target = await cloneGithubRepo(REPO, 'ghs_secret_token', run);
+    const clone = await createRunClone(REPO, 'ghs_secret_token', {
+      workspaceOrgId: ORG,
+      defaultBranch: 'main',
+      run,
+    });
 
-    expect(target).toBe(path.join(getClonesDir(), 'acme__widgets'));
-    expect(fs.existsSync(target)).toBe(true);
+    // A fresh per-run dir under the workspace's own run-clones dir.
+    expect(clone.dir.startsWith(path.join(getRunClonesDir(), 'org_a') + path.sep)).toBe(true);
+    expect(path.basename(clone.dir).startsWith('tc-run-')).toBe(true);
 
     const cloneArgs = calls[0]!.args;
     const basic = Buffer.from('x-access-token:ghs_secret_token').toString('base64');
@@ -612,59 +581,69 @@ describe('cloneGithubRepo', () => {
     // The credential appears exactly once, as the value of a `-c` flag.
     expect(cloneArgs.filter((a) => a.includes(basic))).toEqual([header]);
     expect(cloneArgs[cloneArgs.indexOf(header) - 1]).toBe('-c');
-    // The remote is the bare https URL.
+    // The remote is the bare https URL, pinned to the default branch.
     expect(cloneArgs).toContain(`https://github.com/${REPO}.git`);
     expect(cloneArgs).toContain('--depth');
+    expect(cloneArgs).toContain('--branch');
+    expect(cloneArgs[cloneArgs.indexOf('--branch') + 1]).toBe('main');
+
+    clone.dispose();
+    expect(fs.existsSync(clone.dir)).toBe(false);
   });
 
-  it('refuses to clone over a DIFFERENT repo occupying the same directory', async () => {
-    const { calls, run } = recordingGit();
-    // `acme/.widgets` and `acme/widgets` sanitize to one directory name, so the
-    // clone target is already someone else's clone — with its `.truecourse/` in it.
-    const target = path.join(getClonesDir(), 'acme__widgets');
-    fs.mkdirSync(target, { recursive: true });
-    fs.writeFileSync(path.join(target, 'their-work'), 'not mine');
-    await registerProject(target, 'acme/.widgets', {
-      remoteUrl: 'https://github.com/acme/.widgets',
-    });
+  it('unsets the persisted auth header, tolerating an already-absent key', async () => {
+    const calls: Array<{ args: string[]; cwd?: string }> = [];
+    const run: GitRunner = async (args, cwd) => {
+      calls.push({ args, cwd });
+      // git exits non-zero when the key is absent — that must not throw away
+      // a finished multi-minute clone.
+      if (args[0] === 'config') throw new Error('exit 5');
+    };
 
-    await expect(cloneGithubRepo(REPO, 'ghs_secret_token', run)).rejects.toThrow(
-      /acme\/\.widgets/,
-    );
-    // Nothing was deleted and git was never run.
-    expect(fs.existsSync(path.join(target, 'their-work'))).toBe(true);
-    expect(calls).toEqual([]);
-  });
+    const clone = await createRunClone(REPO, 'ghs_secret_token', { workspaceOrgId: ORG, run });
 
-  it('clears an orphan directory no project claims', async () => {
-    const { run } = recordingGit();
-    const target = path.join(getClonesDir(), 'acme__widgets');
-    fs.mkdirSync(target, { recursive: true });
-    // Debris of an earlier failed attempt: on disk, in no registry.
-    fs.writeFileSync(path.join(target, 'half-cloned'), '');
-
-    expect(await cloneGithubRepo(REPO, 'ghs_secret_token', run)).toBe(target);
-    expect(fs.existsSync(path.join(target, 'half-cloned'))).toBe(false);
-  });
-
-  it('unsets the persisted auth header before the clone is published', async () => {
-    const { calls, run } = recordingGit();
-
-    await cloneGithubRepo(REPO, 'ghs_secret_token', run);
-
-    const unset = calls[1]!;
-    expect(unset.args).toEqual([
+    expect(calls[1]!.args).toEqual([
       'config',
       '--unset-all',
       'http.https://github.com/.extraheader',
     ]);
-    // Run in the temp clone, i.e. before it is renamed into place.
-    expect(unset.cwd).toBe(calls[0]!.args[calls[0]!.args.length - 1]);
+    expect(calls[1]!.cwd).toBe(clone.dir);
+    clone.dispose();
+  });
+
+  it('removes the dir and reports 502 with git’s last stderr line on failure', async () => {
+    const run: GitRunner = async (args) => {
+      if (args[0] === 'clone') {
+        const err = new Error('git failed') as Error & { stderr: string };
+        err.stderr = 'Cloning...\nfatal: repository not found\n';
+        throw err;
+      }
+    };
+
+    await expect(
+      createRunClone(REPO, 'ghs_secret_token', { workspaceOrgId: ORG, run }),
+    ).rejects.toThrow(/repository not found/);
+    // No half-clone left behind.
+    const tenantRoot = path.join(getRunClonesDir(), 'org_a');
+    expect(fs.existsSync(tenantRoot) ? fs.readdirSync(tenantRoot) : []).toEqual([]);
+  });
+
+  it('sweeps stale run clones and keeps fresh ones', async () => {
+    const { run } = recordingGit();
+    const fresh = await createRunClone(REPO, 't', { workspaceOrgId: ORG, run });
+    const stale = await createRunClone(REPO, 't', { workspaceOrgId: OTHER_ORG, run });
+    const oldTime = (Date.now() - 2 * 60 * 60 * 1000) / 1000;
+    fs.utimesSync(stale.dir, oldTime, oldTime);
+
+    expect(sweepStaleRunClones()).toBe(1);
+    expect(fs.existsSync(fresh.dir)).toBe(true);
+    expect(fs.existsSync(stale.dir)).toBe(false);
+    fresh.dispose();
   });
 });
 
 // ---------------------------------------------------------------------------
-// The onboarding scan (the real seam, with the scan entry stubbed)
+// The onboarding scan (the real seam, with the scan engine stubbed)
 // ---------------------------------------------------------------------------
 
 interface Deferred {
@@ -676,7 +655,7 @@ interface Deferred {
 function heldScan(): Deferred {
   let resolve!: () => void;
   const promise = new Promise<unknown>((res) => {
-    resolve = () => res({});
+    resolve = () => res({ noChanges: false, curate: { corpus: {}, stats: {} } });
   });
   // Nothing awaits this promise but the service; a rejection there is handled.
   promise.catch(() => {});
@@ -685,7 +664,7 @@ function heldScan(): Deferred {
 
 const settle = (ms = 50): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-/** Wait for a background effect, rather than guessing how long git will take. */
+/** Wait for a background effect, rather than guessing how long it will take. */
 async function until(predicate: () => boolean, timeoutMs = 5000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!predicate() && Date.now() < deadline) await settle(10);
@@ -693,28 +672,36 @@ async function until(predicate: () => boolean, timeoutMs = 5000): Promise<void> 
 
 describe('connecting a repository starts its spec scan', () => {
   const held: Deferred[] = [];
+  const disposed: string[] = [];
+  let workTreeDir: string;
 
-  /** The mount with its REAL scan seam — only the clone and the LLM are faked. */
-  const appWithRealScan = (): Express =>
-    buildApp({ clone: async (link) => fakeClonedRepo(link.repoFullName) });
-
-  const linkRepo = (app: Express) =>
-    request(app)
-      .post('/api/github/repos/link')
-      .set('Cookie', `tc_session=${ORG}`)
-      .send({ repoFullName: REPO, installationId: INSTALLATION_ID, defaultBranch: 'main' });
+  /** The mount with its REAL scan seam — only the work tree and LLM are faked. */
+  function appWithRealScan(): Express {
+    workTreeDir = fakeWorkTree();
+    return buildApp({
+      workTree: async () => ({
+        dir: workTreeDir,
+        dispose: () => disposed.push(workTreeDir),
+      }),
+    });
+  }
 
   afterEach(async () => {
-    // Release anything still held so the service's in-flight set clears.
+    // Release anything still held so the service's in-flight set clears, and
+    // only then drop the dispose log — the release itself disposes a tree.
     for (const d of held.splice(0)) d.resolve();
     await settle();
+    disposed.length = 0;
   });
 
-  it('runs the scan on the clone, in the background of the 201', async () => {
+  it('runs the scan on the acquired work tree, in the background of the 201', async () => {
     await linkRepo(appWithRealScan()).expect(201);
 
     await until(() => scan.calls.length > 0);
-    expect(scan.calls).toEqual([path.join(getClonesDir(), 'acme__widgets')]);
+    expect(scan.calls).toEqual([workTreeDir]);
+    // The tree is disposed once the scan settles.
+    await until(() => disposed.length > 0);
+    expect(disposed).toEqual([workTreeDir]);
   });
 
   it('answers before the scan finishes — a held scan does not hold the response', async () => {
@@ -725,10 +712,11 @@ describe('connecting a repository starts its spec scan', () => {
     // Only passes if the link never awaits the scan: this one never settles.
     await linkRepo(appWithRealScan()).expect(201);
 
-    const clone = path.join(getClonesDir(), 'acme__widgets');
     await until(() => scan.calls.length > 0);
-    expect(scan.calls).toEqual([clone]);
-    expect(isSpecScanRunning(clone)).toBe(true);
+    expect(scan.calls).toEqual([workTreeDir]);
+    // The in-flight guard is keyed by identity, and the tree is still live.
+    expect(isSpecScanRunning(REPO)).toBe(true);
+    expect(disposed).toEqual([]);
   });
 
   it('a scan that fails leaves the link response alone and rejects nothing', async () => {
@@ -741,32 +729,33 @@ describe('connecting a repository starts its spec scan', () => {
     try {
       await linkRepo(appWithRealScan()).expect(201);
 
-      const clone = path.join(getClonesDir(), 'acme__widgets');
       await until(() => scan.calls.length > 0);
-      await until(() => !isSpecScanRunning(clone));
+      await until(() => !isSpecScanRunning(REPO));
       expect(scan.calls).toHaveLength(1);
       expect(unhandled).toEqual([]);
-      // The failure released the repo: a later scan is not blocked by it.
-      expect(isSpecScanRunning(clone)).toBe(false);
+      // The failure released the repo AND disposed its tree.
+      expect(isSpecScanRunning(REPO)).toBe(false);
+      expect(disposed).toEqual([workTreeDir]);
     } finally {
       process.off('unhandledRejection', onUnhandled);
     }
   });
 
   it('does not start a second scan while one is running', async () => {
-    const repo = fakeClonedRepo('acme/twice');
+    const tree = fakeWorkTree();
+    setWorkTreeProvider(async () => ({ dir: tree, dispose: () => {} }));
     const pending = heldScan();
     held.push(pending);
     scan.impl = () => pending.promise;
 
-    expect(startOnboardingScan('twice', repo)).toBe(true);
-    expect(startOnboardingScan('twice', repo)).toBe(false);
+    expect(startOnboardingScan('twice', 'acme/twice')).toBe(true);
+    expect(startOnboardingScan('twice', 'acme/twice')).toBe(false);
 
     await until(() => scan.calls.length > 0);
-    expect(scan.calls).toEqual([repo]);
+    expect(scan.calls).toEqual([tree]);
   });
 
-  it('unlinking mid-scan cancels the scan and takes the clone with it', async () => {
+  it('unlinking mid-scan cancels the scan and disposes its work tree', async () => {
     // A scan that ends only when it is cancelled: without cancellation the
     // unlink hook has nothing to do but refuse.
     let reached = false;
@@ -780,9 +769,8 @@ describe('connecting a repository starts its spec scan', () => {
 
     const app = appWithRealScan();
     await linkRepo(app).expect(201);
-    const clone = path.join(getClonesDir(), 'acme__widgets');
     await until(() => reached);
-    expect(isSpecScanRunning(clone)).toBe(true);
+    expect(isSpecScanRunning(REPO)).toBe(true);
 
     await request(app)
       .delete('/api/github/repos/link')
@@ -790,21 +778,20 @@ describe('connecting a repository starts its spec scan', () => {
       .set('Cookie', `tc_session=${ORG}`)
       .expect(200);
 
-    expect(isSpecScanRunning(clone)).toBe(false);
-    expect(await readRegistry()).toHaveLength(0);
-    expect(fs.existsSync(clone)).toBe(false);
+    expect(isSpecScanRunning(REPO)).toBe(false);
+    expect(await store.getRepo(REPO)).toBeNull();
+    expect(disposed).toEqual([workTreeDir]);
   });
 
   it('sees a scan another process started, through the sessions store', async () => {
-    const repo = fakeClonedRepo('acme/elsewhere');
-    expect(isSpecScanRunning(repo)).toBe(false);
+    expect(isSpecScanRunning('acme/elsewhere')).toBe(false);
 
-    // A run record left `running` by a live process — what a CLI `spec scan` in
-    // the same clone looks like from here.
-    createSessionRun(repo, { command: 'spec-scan', gitRef: 'HEAD' });
+    // A run record left `running` by a live process — what a scan owned by an
+    // earlier server process looks like from here.
+    createSessionRun('acme/elsewhere', { command: 'spec-scan', gitRef: 'HEAD' });
 
-    expect(isSpecScanRunning(repo)).toBe(true);
-    expect(startOnboardingScan('elsewhere', repo)).toBe(false);
+    expect(isSpecScanRunning('acme/elsewhere')).toBe(true);
+    expect(startOnboardingScan('elsewhere', 'acme/elsewhere')).toBe(false);
     await settle();
     expect(scan.calls).toEqual([]);
   });

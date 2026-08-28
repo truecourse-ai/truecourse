@@ -68,7 +68,7 @@ import { guardGenerateInProcess } from '@truecourse/core/commands/guard-in-proce
 import { curateInProcess } from '@truecourse/core/commands/spec-in-process';
 import { analyzeInProcess } from '@truecourse/core/commands/analyze-in-process';
 import { getFlowFromLatest, enrichFlowWithLLM } from '@truecourse/core/services/flow';
-import { createApp } from '../../apps/dashboard/server/src/app';
+import { createTestApp } from '../helpers/test-app';
 import { installLlmTransportAtBoot } from '../../apps/dashboard/server/src/services/llm-transport.service';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 
@@ -108,7 +108,7 @@ describe('Dashboard server LLM transport install', () => {
 
     fixture = await setupTestFixture();
     execFileSync('git', ['init'], { cwd: fixture.repoPath, stdio: 'ignore' });
-    app = createApp({ serveStatic: false, authVerifier: null, github: null });
+    app = createTestApp();
   });
 
   afterEach(async () => {

@@ -302,6 +302,7 @@ export function createSocketStashConfirmHandler(repoId: string):
  */
 export function createSocketSpecEstimateHandler(
   repoId: string,
+  signal?: AbortSignal,
 ): (estimate: LlmEstimate) => Promise<boolean> {
   return (estimate) =>
     new Promise<boolean>((resolve) => {
@@ -317,6 +318,16 @@ export function createSocketSpecEstimateHandler(
         resolve(false);
       }, 600_000);
 
+      // The scan was cancelled while the confirm was open (disconnecting the
+      // repository is the usual way): answer "don't proceed" and tell the room,
+      // so any open estimate modal closes instead of dangling on a dead scan.
+      const onAbort = (): void => {
+        cleanup();
+        io.to(room).emit('analysis:llm-resolved', { repoId, proceed: false });
+        resolve(false);
+      };
+      signal?.addEventListener('abort', onAbort, { once: true });
+
       function onProceed(data: { repoId: string; proceed: boolean }) {
         if (data.repoId !== repoId) return;
         cleanup();
@@ -326,6 +337,7 @@ export function createSocketSpecEstimateHandler(
 
       function cleanup() {
         clearTimeout(timeout);
+        signal?.removeEventListener('abort', onAbort);
         for (const [, socket] of io.sockets.sockets) {
           socket.removeListener('analysis:llm-proceed', onProceed);
         }

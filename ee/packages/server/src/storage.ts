@@ -75,8 +75,11 @@ export function installEeStores({ db, lockPool }: DbHandle): EeStoreHandles {
   return { traceStore };
 }
 
-// Prefixes our clone temp dirs use: the gate runners → `tc-gate-*`.
-const TEMP_PREFIXES = ['tc-gate-'];
+// Prefix every materialize/clone temp dir uses (`tc-gate-*`, `tc-guard-*`,
+// `tc-ws-*`, ...). Matching the shared `tc-` stem keeps the sweep covering new
+// runners automatically — the guard-side prefixes were silently missed when
+// this listed `tc-gate-` alone.
+const TEMP_PREFIXES = ['tc-'];
 const STALE_MS = 60 * 60 * 1000; // 1 hour
 
 /**

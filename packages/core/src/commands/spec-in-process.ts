@@ -75,6 +75,27 @@ export class EstimateDeclined extends Error {
   }
 }
 
+/**
+ * Await a confirm that may block on a human, or throw {@link ScanAbortedError}
+ * the moment `signal` aborts — whichever comes first. The abandoned confirm is
+ * left to settle on its own (its handler owns its cleanup/backstop); its late
+ * answer just resolves a promise nobody holds.
+ */
+async function raceAbort<T>(confirm: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return confirm;
+  if (signal.aborted) throw new ScanAbortedError();
+  let onAbort!: () => void;
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(new ScanAbortedError());
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([confirm, aborted]);
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+  }
+}
+
 import {
   infer,
   writeInferred,
@@ -431,6 +452,13 @@ export interface CurateInProcessOptions {
    */
   onRunStarted?: (info: SessionRunStartedInfo) => void;
   /**
+   * Where the run record + transcripts are keyed — the repo IDENTITY when
+   * `repoRoot` is an ephemeral clone that is deleted after the run (the
+   * dashboard's per-run work trees). Defaults to `repoRoot`: for a persistent
+   * checkout the sessions belong to the tree being scanned.
+   */
+  sessionsKey?: string;
+  /**
    * Test seam / EE injection: run the sessions on THIS driver instead of the
    * configured one. Tests pass a scripted driver; production passes none.
    */
@@ -468,13 +496,18 @@ export async function curateInProcess(
   // Decline → abort. The estimate models SESSIONS: it probes the same scan
   // caches (same key builders, instructions fingerprint included) the run
   // reads, so estimate and run agree on what is actually spent.
+  //
+  // The confirm can wait on a human for minutes, so it must observe `signal`:
+  // a scan cancelled while parked here (disconnecting the repository closes
+  // the estimate's audience) ends NOW as aborted, instead of surviving the
+  // cancel and dying confusingly whenever the stale confirm finally answers.
   if (options.onLlmEstimate) {
     const prices = await getModelPrices();
     const estimate = await withEstimatePhase(options.onEstimatePhase, () =>
       estimateScanTokens(repoRoot, prices, { identity: options.repoIdentity, mode, only: options.only }),
     );
     if ((estimate.stages?.length ?? 0) > 0) {
-      const proceed = await options.onLlmEstimate(estimate);
+      const proceed = await raceAbort(options.onLlmEstimate(estimate), options.signal);
       if (!proceed) throw new EstimateDeclined('scan');
     }
   }
@@ -482,7 +515,7 @@ export async function curateInProcess(
   // The sessions run + transcript store: `sessions/spec-scan/<runId>/`.
   // Created after the estimate gate, so a declined scan leaves no run record.
   const gitRef = await resolveCommitSha(repoRoot);
-  const run = createSessionRun(repoRoot, { command: 'spec-scan', gitRef });
+  const run = createSessionRun(options.sessionsKey ?? repoRoot, { command: 'spec-scan', gitRef });
   options.onRunStarted?.({ command: 'spec-scan', runId: run.runId, dir: run.dir });
   // Mirror the step checklist into the run record as the run's own display:
   // the CLI renders the tracker locally, but the dashboard can only see what

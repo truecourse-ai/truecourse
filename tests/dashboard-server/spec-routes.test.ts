@@ -48,7 +48,7 @@ vi.mock('@truecourse/core/commands/spec-in-process', async (importOriginal) => {
   };
 });
 
-import { createApp } from '../../apps/dashboard/server/src/app';
+import { createTestApp } from '../helpers/test-app';
 import { curateInProcess, recurateStoredCorpus } from '@truecourse/core/commands/spec-in-process';
 import {
   setBackgroundTaskRunner,
@@ -141,7 +141,7 @@ describe('GET /api/repos/:id/spec/decisions', () => {
 
   beforeEach(async () => {
     fixture = await setupTestFixture();
-    app = createApp({ serveStatic: false, authVerifier: null, github: null });
+    app = createTestApp();
   });
 
   afterEach(async () => {
@@ -189,7 +189,7 @@ describe('corpus routes (spec-scan redesign)', () => {
     fixture = await setupTestFixture();
     gitInit(fixture.repoPath); // include/exclude re-curate → route guards require git
     vi.mocked(curateInProcess).mockClear();
-    app = createApp({ serveStatic: false, authVerifier: null, github: null });
+    app = createTestApp();
   });
   afterEach(async () => {
     setBackgroundTaskRunner(null);
@@ -405,7 +405,7 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
     memSpec = makeMemSpecStore();
     setSpecStore(memSpec);
     vi.mocked(recurateStoredCorpus).mockReset();
-    app = createApp({ serveStatic: false, authVerifier: null, github: null });
+    app = createTestApp();
   });
   afterEach(async () => {
     resetSpecStore();
@@ -630,7 +630,7 @@ describe('spec docs-content staleness', () => {
   beforeEach(async () => {
     fixture = await setupTestFixture();
     gitInit(fixture.repoPath);
-    app = createApp({ serveStatic: false, authVerifier: null, github: null });
+    app = createTestApp();
   });
   afterEach(async () => {
     setBackgroundTaskRunner(null);
@@ -761,7 +761,7 @@ describe('conflict-resolution routes', () => {
     fixture = await setupTestFixture();
     gitInit(fixture.repoPath);
     vi.mocked(curateInProcess).mockClear();
-    app = createApp({ serveStatic: false, authVerifier: null, github: null });
+    app = createTestApp();
   });
   afterEach(async () => {
     setBackgroundTaskRunner(null);
@@ -839,7 +839,7 @@ describe('web source routes', () => {
     fixture = await setupTestFixture();
     site = await startDocsSite();
     vi.mocked(emitSpecComplete).mockClear();
-    app = createApp({ serveStatic: false, authVerifier: null, github: null });
+    app = createTestApp();
   });
   afterEach(async () => {
     await site.close();

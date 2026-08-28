@@ -1,9 +1,4 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
-import { CreateRepoSchema, BrowseDirQuerySchema } from '@truecourse/shared';
-import { getCapabilities } from '../capabilities.js';
 import { createAppError } from '@truecourse/core/lib/errors';
 import { getGit } from '@truecourse/core/lib/git';
 import { readProjectConfig, updateProjectConfig } from '@truecourse/core/config/project-config';
@@ -13,18 +8,19 @@ import { getRules } from '@truecourse/core/services/rules';
 import {
   readRegistry,
   getProjectBySlug,
-  registerProject,
   type RegistryEntry,
 } from '@truecourse/core/config/registry';
-import { removeProject } from '../services/repo-removal.service.js';
+import { removeRepoRunState } from '../services/repo-removal.service.js';
 import { isVisibleTo, type RepoOwnershipLookup } from '../middleware/project.js';
 
 /**
- * The GitHub link store, as this router uses it: who owns a connected
- * repository, and the ability to disconnect one. Structural, so the real
- * `GateStore` satisfies it without this module depending on the GitHub package.
+ * The GitHub link store, as this router uses it: which repos a workspace
+ * connected, who owns one, and the ability to disconnect one. Structural, so
+ * the real `GateStore` satisfies it without this module depending on the
+ * GitHub package.
  */
 export interface RepoLinkStore extends RepoOwnershipLookup {
+  listReposForWorkspace(workspaceOrgId: string): Promise<{ repoFullName: string }[]>;
   unlinkRepo(repoFullName: string): Promise<void>;
 }
 
@@ -35,8 +31,7 @@ export interface ReposRouterDeps {
 
 /**
  * The entry this slug names, if this caller may act on it. A slug another
- * workspace's repository owns reads as "not found" — see `isVisibleTo`, and the
- * known gap it documents for path-registered repos.
+ * workspace's repository owns reads as "not found" — see `isVisibleTo`.
  */
 async function requireVisibleEntry(
   deps: ReposRouterDeps,
@@ -50,17 +45,21 @@ async function requireVisibleEntry(
   return entry;
 }
 
-/** The registry rows this caller may see. */
+/**
+ * The registry rows this caller may see: exactly the repos their workspace
+ * connected, from one query. No link store (GitHub App unconfigured) means no
+ * connected repos and an empty home — never everyone's rows.
+ */
 async function visibleTo(
   deps: ReposRouterDeps,
   req: Request,
   entries: RegistryEntry[],
 ): Promise<RegistryEntry[]> {
-  if (!deps.githubLinks) return entries;
-  const decided = await Promise.all(
-    entries.map(async (e) => ((await isVisibleTo(deps.githubLinks, req, e)) ? e : null)),
-  );
-  return decided.filter((e): e is RegistryEntry => e !== null);
+  const links = deps.githubLinks;
+  const org = req.user?.organizationId;
+  if (!links || !org) return [];
+  const mine = new Set((await links.listReposForWorkspace(org)).map((r) => r.repoFullName));
+  return entries.filter((e) => mine.has(e.name));
 }
 
 export function createReposRouter(deps: ReposRouterDeps = {}): Router {
@@ -68,40 +67,12 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
   const requireEntry = (req: Request): Promise<RegistryEntry> =>
     requireVisibleEntry(deps, req, req.params.id as string);
 
-  // POST /api/repos - Register a new repo
-  router.post('/', async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const parsed = CreateRepoSchema.safeParse(req.body);
-      if (!parsed.success) {
-        throw createAppError('Invalid request body: path is required', 400);
-      }
-
-      const repoPath = parsed.data.path;
-      if (!fs.existsSync(repoPath)) {
-        throw createAppError(`Path does not exist: ${repoPath}`, 400);
-      }
-      if (!fs.statSync(repoPath).isDirectory()) {
-        throw createAppError(`Path is not a directory: ${repoPath}`, 400);
-      }
-
-      const entry = await registerProject(repoPath);
-      res.status(201).json({
-        id: entry.slug,
-        name: entry.name,
-        path: entry.path,
-        lastAnalyzed: null,
-      });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  // GET /api/repos - List all registered projects (home page).
+  // GET /api/repos - The caller's workspace's connected repos (home page).
   // `lastAnalyzed` comes straight from the registry so unanalyzed projects don't
   // surface a fake date. `latestEvent` is the repo's most recent lifecycle event
   // (analyze / spec scan / contracts generate / verify / guard generate|run)
-  // composed from the per-repo stores' own timestamps — tolerant of missing,
-  // corrupt, or unreadable repos (`resolveLatestEvent` never throws).
+  // composed from the per-repo stores' own timestamps — tolerant of missing or
+  // unreadable state (`resolveLatestEvent` never throws).
   router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const entries = await visibleTo(deps, req, await readRegistry());
@@ -121,124 +92,17 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
     }
   });
 
-  // The app-level CORS config reflects any origin with credentials and community
-  // mode has no auth, so /browse — a general filesystem-read primitive, unlike the
-  // other GETs which only expose registered-repo data — needs its own origin gate:
-  // any website open in the user's browser could otherwise read arbitrary directory
-  // listings cross-origin. Trusted: no Origin at all (same-origin GETs, curl), a
-  // loopback hostname on any port (dev client on :3000 → server on :3001), or an
-  // Origin host matching the request's own Host (same-site on a LAN IP).
-  function isTrustedBrowseOrigin(origin: string | undefined, host: string | undefined): boolean {
-    if (!origin) return true;
-    let parsed: URL;
-    try {
-      parsed = new URL(origin);
-    } catch {
-      return false; // malformed Origin — reject
-    }
-    // WHATWG URL keeps the brackets on an IPv6 hostname ('[::1]').
-    if (['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname)) return true;
-    return host !== undefined && parsed.host === host;
-  }
-
-  // GET /api/repos/browse?path=<abs> — list subdirectories for the directory picker.
-  // LOCAL-ONLY: gated on the 'local-filesystem' capability (see ../capabilities.ts
-  // — an install without a per-user disk would not carry it) and on a trusted
-  // Origin (see isTrustedBrowseOrigin above). MUST be declared before GET '/:id'
-  // so 'browse' is not captured as a project id.
-  router.get('/browse', async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      // Origin gate — reject cross-origin reads before anything else.
-      if (!isTrustedBrowseOrigin(req.headers.origin, req.headers.host)) {
-        throw createAppError('Cross-origin requests are not allowed', 403);
-      }
-
-      // Capability gate — hidden entirely (404) when local-filesystem is off.
-      if (!getCapabilities().includes('local-filesystem')) {
-        throw createAppError('Not found', 404);
-      }
-
-      const parsed = BrowseDirQuerySchema.safeParse(req.query);
-      if (!parsed.success) {
-        throw createAppError('Invalid query: path must be a string', 400);
-      }
-
-      const raw = parsed.data.path;
-      // Reject a relative path BEFORE resolving (realpath would resolve it against
-      // the server cwd, silently browsing somewhere the caller didn't ask for).
-      if (raw && raw.length > 0 && !path.isAbsolute(raw)) {
-        throw createAppError('Path must be absolute', 400);
-      }
-      const target = raw && raw.length > 0 ? raw : os.homedir();
-
-      // Resolve symlinks and stat in one guarded block — the dir can vanish or
-      // become unreadable between the two calls; map fs errors to 4xx, never let
-      // them surface as a 500.
-      let resolved: string;
-      let stat: fs.Stats;
-      try {
-        resolved = fs.realpathSync(target);
-        stat = fs.statSync(resolved);
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code;
-        if (code === 'ENOENT' || code === 'ELOOP' || code === 'ENOTDIR') {
-          throw createAppError(`Path does not exist: ${target}`, 404);
-        }
-        if (code === 'EACCES' || code === 'EPERM') {
-          throw createAppError(`Permission denied: ${target}`, 403);
-        }
-        throw err; // unexpected — let the error handler 500 it
-      }
-
-      if (!stat.isDirectory()) {
-        throw createAppError(`Path is not a directory: ${target}`, 400);
-      }
-
-      let dirents: fs.Dirent[];
-      try {
-        dirents = fs.readdirSync(resolved, { withFileTypes: true });
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code;
-        if (code === 'EACCES' || code === 'EPERM') {
-          throw createAppError(`Permission denied: ${resolved}`, 403);
-        }
-        throw err;
-      }
-
-      const entries = dirents
-        .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
-        .map((d) => {
-          const childPath = path.join(resolved, d.name);
-          let isRepo = false;
-          try {
-            isRepo = fs.statSync(path.join(childPath, '.git')).isDirectory();
-          } catch {
-            isRepo = false; // no .git, or unreadable
-          }
-          return { name: d.name, path: childPath, isRepo };
-        })
-        .sort((a, b) => a.name.localeCompare(b.name));
-
-      const parentPath = path.dirname(resolved);
-      const parent = parentPath === resolved ? null : parentPath;
-
-      res.json({ path: resolved, parent, entries });
-    } catch (error) {
-      next(error);
-    }
-  });
-
   // GET /api/repos/:id - Project details. Prefers the registry's cached
   // `lastAnalyzed`, falling back to the persisted analysis timestamp when the
-  // registry doesn't track one (the hosted gh_repos-derived registry).
+  // registry doesn't track one (the gh_repos-derived registry).
   router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const entry = await requireEntry(req);
       let branches: string[] = [];
-      // The hosted registry tracks the default branch from gh_repos and has no local
-      // checkout, so only shell out to git when a registry didn't supply it (OSS
-      // local repos). Otherwise simple-git fails on the non-path repo identity and
-      // logs "git unavailable" on every load.
+      // The registry tracks the default branch from gh_repos and has no local
+      // checkout, so only shell out to git when a registry didn't supply it.
+      // Otherwise simple-git fails on the non-path repo identity and logs
+      // "git unavailable" on every load.
       let defaultBranch = entry.defaultBranch;
       let isGitRepo = true;
       if (!defaultBranch) {
@@ -254,10 +118,8 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
       }
       // `lastAnalyzed` drives the dashboard's `hasAnalysis` gate (the Violations /
       // Analytics views render an empty "No analysis yet" state when it's null).
-      // OSS file registries cache it on the entry; the hosted registry (a derived
-      // view of gh_repos) doesn't, so fall back to the timestamp of the actual
-      // persisted analysis — the source of truth — otherwise an analyzed hosted
-      // repo looks "never analyzed" and hides its violations.
+      // The derived registry doesn't cache it, so fall back to the timestamp of
+      // the actual persisted analysis — the source of truth.
       const lastAnalyzed =
         entry.lastAnalyzed ?? (await readLatest(entry.path))?.analysis.createdAt ?? null;
       res.json({
@@ -290,21 +152,17 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
     }
   });
 
-  // DELETE /api/repos/:id - Unregister the project and clean up its disk
-  // footprint (see removeProject — a managed clone goes whole, a path-registered
-  // repo loses only `.truecourse/`). 409 while a spec scan is still writing.
-  //
-  // This is the SAME disconnect the GitHub unlink hook performs, reached from
-  // Home instead of the connect dialog, so it drops the link row too: leaving it
-  // behind would have the connect dialog call the repo connected forever, with
-  // nothing left to disconnect and no way to add it back.
+  // DELETE /api/repos/:id - Disconnect: stop the repo's running scan, drop its
+  // server-side run state, then drop the link row. 409 while a scan we cannot
+  // stop is still running. Run-state cleanup precedes the row delete for the
+  // same reason the unlink hook orders it that way: a cleanup failure must
+  // keep the repo connected (and retryable), never orphan its state behind a
+  // deleted link.
   router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const entry = await requireEntry(req);
-      const links = deps.githubLinks;
-      const linked = links ? await links.getRepo(entry.name) : null;
-      await removeProject(entry);
-      if (links && linked) await links.unlinkRepo(entry.name);
+      await removeRepoRunState(entry.path);
+      await deps.githubLinks?.unlinkRepo(entry.name);
       res.status(204).send();
     } catch (error) {
       next(error);
@@ -335,7 +193,7 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
     }
   });
 
-  // GET /api/repos/:id/config - Read per-repo config.json
+  // GET /api/repos/:id/config - Read per-repo config
   router.get('/:id/config', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const entry = await requireEntry(req);

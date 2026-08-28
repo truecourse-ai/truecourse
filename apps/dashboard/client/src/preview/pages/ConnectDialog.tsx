@@ -1,5 +1,5 @@
-// PREVIEW: the GitHub path here is REAL (it links through the App and clones on
-// the server); GitLab and Azure beside it are mocks.
+// PREVIEW: the GitHub path here is REAL (it links through the App); GitLab and
+// Azure beside it are mocks.
 
 /**
  * Connect a repository: pick a provider (a provider with nothing connected
@@ -10,9 +10,10 @@
  * GITHUB IS THE REAL ONE. The row reads `/api/github/status`: the App's
  * installations on this workspace and the repositories already linked. An
  * installation lists what it can see; connecting posts one repository at a time
- * to `/api/github/repos/link`, and the server clones inside that request — hence
- * the pending button and the per-repository outcome, and hence a failure that
- * leaves the dialog standing rather than swallowing the rest of the batch.
+ * to `/api/github/repos/link` — the row is the connection (the onboarding scan
+ * clones for itself in the background), so each request is quick, but the
+ * per-repository outcome still matters: a failure leaves the dialog standing
+ * rather than swallowing the rest of the batch.
  * Installing the App is a top-level navigation to GitHub; its setup redirect
  * lands back on `/preview?connect=1`, so a new installation is pickable at once.
  *
@@ -180,10 +181,12 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   };
 
   /**
-   * The real one: one link request per repository, in order, each cloning on the
-   * server before it answers. A refusal is kept against its repository and the
-   * batch carries on; the dialog only closes when every one landed. What did
-   * land drops out of the selection, so a retry never re-clones it.
+   * The real one: one link request per repository, in order — each a quick row
+   * write (the onboarding scan clones for itself in the background). A refusal
+   * is kept against its repository and the batch carries on; the dialog only
+   * closes when every one landed. What did land drops out of the selection AND
+   * into `github.linked`, so after a partial failure the landed repositories
+   * render connected/disabled instead of inviting a duplicate link.
    */
   const connectGithub = async () => {
     if (github.kind !== 'ready' || installationId === null || linking !== null) return;
@@ -202,9 +205,15 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
         failures[repo.fullName] = reasonOf(error);
       }
     }
+    const landed = targets.map((r) => r.fullName).filter((name) => !failures[name]);
     setLinking(null);
     setLinkErrors(failures);
     setPicked((prev) => prev.filter((name) => failures[name]));
+    setGithub((prev) =>
+      prev.kind === 'ready' && landed.length > 0
+        ? { ...prev, linked: [...prev.linked, ...landed.filter((n) => !prev.linked.includes(n))] }
+        : prev,
+    );
     // Whatever landed is a real repository now, failures beside it or not.
     await refreshRealRepos();
     if (Object.keys(failures).length === 0) onOpenChange(false);
@@ -261,8 +270,17 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
     };
   };
 
+  // A batch in flight owns the dialog: Escape/overlay/X must not close it —
+  // closing resets the state the loop is still writing, and reopening would
+  // let a second batch race the first. The footer buttons are already
+  // disabled; this closes the three other doors.
+  const guardedOpenChange = (next: boolean) => {
+    if (!next && linking !== null) return;
+    onOpenChange(next);
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={guardedOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Connect a repository</DialogTitle>
@@ -447,7 +465,7 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
             </ul>
             {isGithub && (
               <p className="mt-2 text-[11px] text-muted-foreground">
-                Each repository is cloned as it is connected, which takes a few minutes.
+                Onboarding starts in the background as each repository is connected.
               </p>
             )}
           </div>

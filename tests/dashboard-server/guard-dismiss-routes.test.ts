@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import request from 'supertest';
 import { type Express } from 'express';
-import { createApp } from '../../apps/dashboard/server/src/app';
+import { createTestApp } from '../helpers/test-app';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 
 /**
@@ -28,7 +28,7 @@ describe('Guard dismiss + finding-evidence routes', () => {
   beforeEach(async () => {
     fixture = await setupTestFixture();
     root = fixture.repoPath;
-    app = createApp({ serveStatic: false, authVerifier: null, github: null });
+    app = createTestApp();
   });
   afterEach(async () => {
     await teardownTestFixture(fixture.project.slug);

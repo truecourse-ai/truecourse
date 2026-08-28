@@ -24,7 +24,7 @@ import { setSpecStore, resetSpecStore } from '@truecourse/core/lib/spec-store';
 import { setRepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
 import { setGuardGatePendingLookup } from '@truecourse/core/lib/guard-gate-pending';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
-import { createApp } from '../../apps/dashboard/server/src/app';
+import { createTestApp } from '../helpers/test-app';
 import { writeLatest } from '@truecourse/core/lib/analysis-store';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 import type { GuardLatest } from '../../packages/shared/src/index';
@@ -93,7 +93,7 @@ const url = (suffix: string) => `/api/repos/${fixture.project.slug}/guard/${suff
 
 beforeEach(async () => {
   fixture = await setupTestFixture();
-  app = createApp({ serveStatic: false, authVerifier: null, github: null });
+  app = createTestApp();
   // The hosted store keys by the SAME canonical path the route resolves (the Pg
   // store matches keys by exact string, unlike the FS store's symlink-following).
   repoKey = (await resolveProjectForRequest(fixture.project.slug)).path;

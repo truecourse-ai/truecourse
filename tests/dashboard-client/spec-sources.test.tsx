@@ -568,16 +568,18 @@ describe('the corpus tree (sources moved out)', () => {
     expect(calls.some(isList)).toBe(false);
   });
 
-  it('points the pre-scan note at the Sources page in ONE quiet line', async () => {
+  it('points the pre-scan note at the Sources page in ONE quiet line (with a local checkout)', async () => {
     const onOpenSources = vi.fn();
     render(
-      <SpecCorpusView
-        repoId="r1"
-        corpus={state({ data: null })}
-        activeKey={null}
-        onOpen={vi.fn()}
-        onOpenSources={onOpenSources}
-      />,
+      <AppProvider initial={{ edition: 'community', capabilities: ['local-filesystem'] as never }}>
+        <SpecCorpusView
+          repoId="r1"
+          corpus={state({ data: null })}
+          activeKey={null}
+          onOpen={vi.fn()}
+          onOpenSources={onOpenSources}
+        />
+      </AppProvider>,
     );
 
     expect(screen.getByText('No corpus yet')).toBeInTheDocument();
@@ -638,9 +640,13 @@ describe('the coverage pane (the doc viewer an OSS repo actually opens)', () => 
       call.url.includes('/spec/doc') ? json({ ref, content: '# Installation' }) : undefined,
     );
     return render(
-      <MemoryRouter initialEntries={[`/repos/r1?guard=${encodeURIComponent(ref)}`]}>
-        <Pane corpus={corpus} />
-      </MemoryRouter>,
+      // Granting `local-filesystem` here keeps the pane's scan CTA on — the
+      // gate itself (hidden without the capability) is covered elsewhere.
+      <AppProvider initial={{ edition: 'community', capabilities: ['local-filesystem'] as never }}>
+        <MemoryRouter initialEntries={[`/repos/r1?guard=${encodeURIComponent(ref)}`]}>
+          <Pane corpus={corpus} />
+        </MemoryRouter>
+      </AppProvider>,
     );
   }
 

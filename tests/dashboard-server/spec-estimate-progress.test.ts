@@ -55,7 +55,7 @@ vi.mock('@truecourse/core/commands/spec-in-process', async (importOriginal) => {
   };
 });
 
-import { createApp } from '../../apps/dashboard/server/src/app';
+import { createTestApp } from '../helpers/test-app';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 
 describe('spec scan route — estimate progress', () => {
@@ -65,7 +65,7 @@ describe('spec scan route — estimate progress', () => {
   beforeEach(async () => {
     fixture = await setupTestFixture();
     execSync('git init -q', { cwd: fixture.repoPath });
-    app = createApp({ serveStatic: false, authVerifier: null, github: null });
+    app = createTestApp();
     progress.length = 0;
   });
   afterEach(async () => {

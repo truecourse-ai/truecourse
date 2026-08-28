@@ -191,6 +191,13 @@ export interface RealRunStream {
   notifications: PreviewNotification[];
   /** Per repo id: the onboarding marker and the honest last check. */
   repoState: ReadonlyMap<string, RealRepoRunState>;
+  /**
+   * The initial reads are in: the repo list arrived AND every listed repo's
+   * runs have been read once. What `jobs` holds at this moment was already in
+   * flight on arrival — the distinction the toast surface needs, since it must
+   * stay silent for those and announce only what starts later.
+   */
+  ready: boolean;
   markRead: (id: string) => void;
   markAllRead: () => void;
 }
@@ -199,11 +206,18 @@ export interface RealRunStream {
  * Follow the runs of every real repository. Re-subscribes when the real repo
  * list changes (a connect adds a row) and never throws: the reads are guarded
  * and the socket calls are inert when there is nothing to connect to.
+ *
+ * `reposLoaded` says the CALLER's repo fetch has settled — `repos` being empty
+ * is ambiguous on its own (not fetched yet vs. genuinely none), and `ready`
+ * must not report an empty world as a loaded one.
  */
-export function useRealRunStream(repos: Repo[]): RealRunStream {
+export function useRealRunStream(repos: Repo[], reposLoaded = true): RealRunStream {
   const [runsByRepo, setRunsByRepo] = useState<ReadonlyMap<string, PublicSessionRun[]>>(
     () => new Map(),
   );
+  // Repo ids whose runs have been read at least once (success or failure) —
+  // with `reposLoaded`, the two halves of `ready`.
+  const [readRepoIds, setReadRepoIds] = useState<ReadonlySet<string>>(() => new Set());
   const [readIds, setReadIds] = useState<ReadonlySet<string>>(() => new Set());
   // A clock, not an animation: re-read the wording every 30s so "just now"
   // becomes "4 minutes ago" without a socket event to prompt it.
@@ -247,6 +261,12 @@ export function useRealRunStream(repos: Repo[]): RealRunStream {
         setRunsByRepo((prev) => new Map(prev).set(repoId, runs));
       } catch {
         // No server, or a repository it no longer knows: nothing to show.
+      } finally {
+        // Read once, however it went — a failed read is still an answered one
+        // for readiness (there is nothing more to wait for).
+        if (alive.current) {
+          setReadRepoIds((prev) => (prev.has(repoId) ? prev : new Set(prev).add(repoId)));
+        }
       }
     };
 
@@ -324,6 +344,8 @@ export function useRealRunStream(repos: Repo[]): RealRunStream {
     setReadIds((prev) => new Set([...prev, ...derived.notifications.map((n) => n.id)]));
   }, [derived.notifications]);
 
+  const ready = reposLoaded && repoRefs.every((r) => readRepoIds.has(r.id));
+
   return useMemo(
     () => ({
       jobs: derived.jobs,
@@ -331,9 +353,10 @@ export function useRealRunStream(repos: Repo[]): RealRunStream {
         ({ sortAt: _sortAt, ...n }): PreviewNotification => ({ ...n, read: readIds.has(n.id) }),
       ),
       repoState: derived.repoState,
+      ready,
       markRead,
       markAllRead,
     }),
-    [derived, readIds, markRead, markAllRead],
+    [derived, readIds, ready, markRead, markAllRead],
   );
 }

@@ -27,8 +27,31 @@ import {
 import { getRepoTruecourseDir } from '../config/paths.js';
 import { atomicWriteJson } from './atomic-write.js';
 
+/**
+ * Where a repo's sessions live. The default is the repo tree
+ * (`<repo>/.truecourse/sessions`); a server whose repos are opaque identities
+ * rather than checked-out paths (the DB-backed dashboard, where the working
+ * tree is an ephemeral per-run clone) installs a resolver that maps the repo
+ * key to a persistent server-side directory instead — transcripts must outlive
+ * the clone, and the run watcher needs a stable path to tail.
+ */
+export type SessionsRootResolver = (repoDirOrKey: string) => string;
+
+const defaultSessionsRoot: SessionsRootResolver = (repoDir) =>
+  path.join(getRepoTruecourseDir(repoDir), 'sessions');
+
+let activeSessionsRoot: SessionsRootResolver = defaultSessionsRoot;
+
+export function setSessionsRootResolver(resolver: SessionsRootResolver): void {
+  activeSessionsRoot = resolver;
+}
+
+export function resetSessionsRootResolver(): void {
+  activeSessionsRoot = defaultSessionsRoot;
+}
+
 export function sessionsDir(repoDir: string): string {
-  return path.join(getRepoTruecourseDir(repoDir), 'sessions');
+  return activeSessionsRoot(repoDir);
 }
 
 /**

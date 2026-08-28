@@ -27,7 +27,7 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
   };
 });
 
-import { createApp } from '../../apps/dashboard/server/src/app';
+import { createTestApp } from '../helpers/test-app';
 import {
   setupTestFixture,
   teardownTestFixture,
@@ -334,7 +334,7 @@ describe('dashboard routes (seeded store)', () => {
     fixture = await setupTestFixture();
     seed = await seedStore(fixture.repoPath);
     await setLastAnalyzed(fixture.project.slug, seed.violations[0].createdAt);
-    app = createApp({ serveStatic: false, authVerifier: null, github: null });
+    app = createTestApp();
   });
 
   afterEach(async () => {
@@ -390,25 +390,24 @@ describe('dashboard routes (seeded store)', () => {
       await request(app).get('/api/repos/no-such-slug/config').expect(404);
     });
 
-    it('POST /api/repos rejects a non-existent path with 400', async () => {
-      await request(app)
+    it('POST /api/repos no longer registers local paths', async () => {
+      const res = await request(app)
         .post('/api/repos')
-        .send({ path: '/definitely/not/a/real/path/xyz' })
-        .expect(400);
+        .send({ path: fixture.repoPath });
+      expect(res.status).toBeGreaterThanOrEqual(400);
+      expect((await request(app).get('/api/repos')).body).toHaveLength(1);
     });
 
-    it('POST /api/repos rejects a missing body with 400', async () => {
-      await request(app).post('/api/repos').send({}).expect(400);
-    });
-
-    it('DELETE /api/repos/:id 204 + removes .truecourse', async () => {
+    it('DELETE /api/repos/:id 204 + disconnects without touching the tree', async () => {
       const tcDir = getRepoTruecourseDir(fixture.repoPath);
       expect(fs.existsSync(tcDir)).toBe(true);
 
       await request(app).delete(`/api/repos/${fixture.project.slug}`).expect(204);
 
+      // The link (and with it the derived registry entry) is gone; the repo's
+      // own tree is not the server's to delete — durable state lives in the DB.
       expect(await getProjectBySlug(fixture.project.slug)).toBeNull();
-      expect(fs.existsSync(tcDir)).toBe(false);
+      expect(fs.existsSync(tcDir)).toBe(true);
     });
 
     it('GET /api/repos/:id/config returns the project config', async () => {
@@ -675,7 +674,7 @@ describe('dashboard routes (no analysis yet)', () => {
 
   beforeEach(async () => {
     fixture = await setupTestFixture();
-    app = createApp({ serveStatic: false, authVerifier: null, github: null });
+    app = createTestApp();
     clearLatestCache();
   });
 

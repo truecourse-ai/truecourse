@@ -50,7 +50,8 @@ export async function fetchInstallationRepos(
   return body.repos;
 }
 
-/** Link one repository. Slow by design: the server clones it before answering. */
+/** Link one repository. The row is the connection — the onboarding scan clones
+ *  for itself in the background, so this returns as soon as the row is written. */
 export async function linkGithubRepo(link: {
   repoFullName: string;
   installationId: number;

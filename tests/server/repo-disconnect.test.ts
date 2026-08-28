@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterEach, afterAll, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -34,9 +34,9 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
   };
 });
 
-// The onboarding scan's entry point, stubbed so a test can hold a scan open and
-// watch the disconnect cancel it. The stub gets the real options, `signal`
-// included — cancellation is what a disconnect under a scan relies on.
+// The scan engine, stubbed so a test can hold a scan open and watch the
+// disconnect cancel it. The stub gets the real options, `signal` included —
+// cancellation is what a disconnect under a scan relies on.
 const scan = vi.hoisted(() => ({
   impl: (async () => ({})) as (
     repoRoot: string,
@@ -54,24 +54,23 @@ vi.mock('@truecourse/core/commands/spec-in-process', async (importOriginal) => {
   };
 });
 
-import { createApp } from '../../apps/dashboard/server/src/app';
-import { readRegistry, unregisterProject } from '../../packages/core/src/config/registry';
-import { getClonesDir } from '../../apps/dashboard/server/src/services/repo-clone.service';
+import { createTestApp } from '../helpers/test-app';
 import {
-  isSpecScanRunning,
-  startOnboardingScan,
-} from '../../apps/dashboard/server/src/services/onboarding-scan.service';
-import { createSessionRun } from '../../packages/core/src/lib/sessions-store';
+  readRegistry,
+  registerProject,
+  unregisterProject,
+} from '@truecourse/core/config/registry';
+import { createSessionRun } from '@truecourse/core/lib/sessions-store';
+import { startOnboardingScan, isSpecScanRunning } from '../../apps/dashboard/server/src/services/onboarding-scan.service';
 
 /**
- * Registering a repository by local path, and disconnecting it again.
+ * Disconnecting a repository (`DELETE /api/repos/:id`).
  *
- * Connect-by-URL is gone — repositories arrive through the GitHub App now (see
- * tests/dashboard-server/github-mount.test.ts, which owns the managed-clone
- * half of disconnect). What is left here is the local-path half: the source
- * tree survives, only `.truecourse/` goes, a spec scan THIS process is running
- * is cancelled to let the disconnect through, and one another process owns
- * still blocks it.
+ * There is no working copy to clean up — durable state lives in the stores and
+ * runs clone ephemerally — so what disconnect owns is the RUNNING SCAN: one
+ * this process started is cancelled to let the disconnect through; one another
+ * process owns still blocks it. The GitHub-unlink half of disconnect lives in
+ * tests/dashboard-server/github-mount.test.ts.
  */
 
 const tmpDirs: string[] = [];
@@ -86,7 +85,7 @@ function makeTmpDir(prefix: string): string {
 const git = (cwd: string, ...args: string[]): string =>
   execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim();
 
-/** A git repo — what the spec scan insists on before it does anything. */
+/** A git repo standing in for the scan's work tree. */
 function makeGitRepo(prefix: string): string {
   const repo = makeTmpDir(prefix);
   git(repo, 'init', '--initial-branch=main');
@@ -111,12 +110,11 @@ let app: Express;
 beforeAll(() => {
   // The registry hangs off TRUECOURSE_HOME; point it at a throwaway dir.
   process.env.TRUECOURSE_HOME = makeTmpDir('tc-disconnect-home-');
-  app = createApp({ serveStatic: false, authVerifier: null, github: null });
+  app = createTestApp();
 });
 
 afterEach(async () => {
   for (const entry of await readRegistry()) await unregisterProject(entry.slug);
-  fs.rmSync(getClonesDir(), { recursive: true, force: true });
   scan.impl = async () => ({});
 });
 
@@ -136,24 +134,9 @@ describe('POST /api/repos/connect', () => {
 });
 
 describe('DELETE /api/repos/:id', () => {
-  it('leaves a path-registered repo on disk, removing only .truecourse', async () => {
-    const local = makeTmpDir('tc-disconnect-local-');
-    fs.writeFileSync(path.join(local, 'source.ts'), 'export const x = 1\n');
-
-    const res = await request(app).post('/api/repos').send({ path: local }).expect(201);
-    expect(res.body.remoteUrl).toBeUndefined();
-    expect(fs.existsSync(path.join(local, '.truecourse'))).toBe(true);
-
-    await request(app).delete(`/api/repos/${res.body.id}`).expect(204);
-
-    expect(fs.existsSync(local)).toBe(true);
-    expect(fs.existsSync(path.join(local, 'source.ts'))).toBe(true);
-    expect(fs.existsSync(path.join(local, '.truecourse'))).toBe(false);
-  });
-
   it('cancels the scan THIS process is running and disconnects anyway', async () => {
     const local = makeGitRepo('tc-disconnect-scanning-');
-    const res = await request(app).post('/api/repos').send({ path: local }).expect(201);
+    const entry = await registerProject(local);
 
     // A scan that ends only when it is cancelled — the disconnect's job.
     let reached = false;
@@ -165,26 +148,28 @@ describe('DELETE /api/repos/:id', () => {
         else options?.signal?.addEventListener('abort', stop, { once: true });
       });
 
-    expect(startOnboardingScan(res.body.id, local)).toBe(true);
+    expect(startOnboardingScan(entry.slug, local)).toBe(true);
     await until(() => reached);
+    expect(isSpecScanRunning(local)).toBe(true);
 
     // Disconnecting IS the answer to "is this scan still wanted": it is not.
-    await request(app).delete(`/api/repos/${res.body.id}`).expect(204);
+    await request(app).delete(`/api/repos/${entry.slug}`).expect(204);
 
     expect(isSpecScanRunning(local)).toBe(false);
+    // The source tree is not the server's to delete.
     expect(fs.existsSync(local)).toBe(true);
-    expect(fs.existsSync(path.join(local, '.truecourse'))).toBe(false);
+    expect(await readRegistry()).toHaveLength(0);
   });
 
   it('refuses while ANOTHER process is scanning — that scan is not ours to stop', async () => {
     const local = makeGitRepo('tc-disconnect-foreign-');
-    const res = await request(app).post('/api/repos').send({ path: local }).expect(201);
+    const entry = await registerProject(local);
     // A run record left `running` by a live process: a CLI `spec scan` in the
-    // same tree. Nothing here can abort it, so the tree must stay put.
+    // same tree. Nothing here can abort it, so the repo must stay connected.
     createSessionRun(local, { command: 'spec-scan', gitRef: 'HEAD' });
 
-    const refused = await request(app).delete(`/api/repos/${res.body.id}`).expect(409);
+    const refused = await request(app).delete(`/api/repos/${entry.slug}`).expect(409);
     expect(refused.body.error).toMatch(/another process/i);
-    expect(fs.existsSync(path.join(local, '.truecourse'))).toBe(true);
+    expect((await readRegistry()).map((e) => e.slug)).toEqual([entry.slug]);
   });
 });
