@@ -25,6 +25,18 @@ export function useRepo() {
     fetchRepos();
   }, [fetchRepos]);
 
+  const addRepo = useCallback(async (path: string) => {
+    try {
+      const repo = await api.addRepo(path);
+      setRepos((prev) => [...prev, repo]);
+      return repo;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to add repo';
+      setError(message);
+      throw err;
+    }
+  }, []);
+
   const deleteRepo = useCallback(async (id: string) => {
     try {
       await api.deleteRepo(id);
@@ -50,6 +62,7 @@ export function useRepo() {
     repos,
     isLoading,
     error,
+    addRepo,
     deleteRepo,
     analyzeRepo,
     refetch: fetchRepos,
