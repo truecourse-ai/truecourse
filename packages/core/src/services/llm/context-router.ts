@@ -1,5 +1,6 @@
 import type { AnalysisRule, FileAnalysis, ContextRequirement, ContextTier, FileFilter, FunctionFilter } from '@truecourse/shared';
 import { DATABASE_IMPORT_MAP, getAllTestPatterns } from '@truecourse/analyzer';
+import type { CodeSourceScope } from './provider.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -12,6 +13,8 @@ export interface ContextBatch {
   fileCount: number;
   functionCount?: number;
   estimatedTokens: number;
+  /** Exact source ranges represented by this batch. */
+  sourceScopes: CodeSourceScope[];
   /** Real file paths included in this batch (full-file/legacy tiers only). */
   filePaths?: string[];
 }
@@ -188,8 +191,8 @@ function extractTargetedFunctions(
 
 type MetadataField = NonNullable<ContextRequirement['metadataFields']>[number];
 
-function buildMetadataSummary(fa: FileAnalysis, fields: MetadataField[]): string {
-  const parts: string[] = [`=== ${fa.filePath} ===`];
+function buildMetadataSummary(fa: FileAnalysis, fields: MetadataField[], lineCount: number): string {
+  const parts: string[] = [`=== ${fa.filePath} (lines 1-${Math.max(1, lineCount)}) ===`];
 
   for (const field of fields) {
     switch (field) {
@@ -312,7 +315,7 @@ function buildMetadataContent(
   group: { rules: RuleDto[]; requirement: ContextRequirement },
   fileAnalyses: FileAnalysis[],
   fileContents: Map<string, { content: string; lineCount: number }>,
-): { content: string; fileCount: number } {
+): { content: string; fileCount: number; sourceScopes: CodeSourceScope[] } {
   const matching = fileAnalyses.filter((fa) => {
     if (!group.requirement.fileFilter) return true;
     const fc = fileContents.get(fa.filePath);
@@ -320,19 +323,26 @@ function buildMetadataContent(
   });
 
   const fields = (group.requirement.metadataFields || ['functions', 'imports', 'exports']) as MetadataField[];
-  const summaries = matching.map((fa) => buildMetadataSummary(fa, fields));
+  const summaries = matching.map((fa) =>
+    buildMetadataSummary(fa, fields, fileContents.get(fa.filePath)?.lineCount ?? 1),
+  );
+  const sourceScopes = matching.map((fa) => ({
+    path: fa.filePath,
+    ranges: [{ lineStart: 1, lineEnd: Math.max(1, fileContents.get(fa.filePath)?.lineCount ?? 1) }],
+  }));
 
-  return { content: summaries.join('\n\n'), fileCount: matching.length };
+  return { content: summaries.join('\n\n'), fileCount: matching.length, sourceScopes };
 }
 
 function buildTargetedContent(
   group: { rules: RuleDto[]; requirement: ContextRequirement },
   fileAnalyses: FileAnalysis[],
   fileContents: Map<string, { content: string; lineCount: number }>,
-): { content: string; fileCount: number; functionCount: number } {
+): { content: string; fileCount: number; functionCount: number; sourceScopes: CodeSourceScope[] } {
   const filter = group.requirement.functionFilter || {};
   let totalFunctions = 0;
   const parts: string[] = [];
+  const sourceScopes: CodeSourceScope[] = [];
 
   for (const fa of fileAnalyses) {
     const fc = fileContents.get(fa.filePath);
@@ -355,18 +365,23 @@ function buildTargetedContent(
       fileParts.push(`--- ${fn.name} (lines ${fn.startLine}-${fn.endLine}) ---\n${numbered}`);
     }
     parts.push(fileParts.join('\n'));
+    sourceScopes.push({
+      path: fa.filePath,
+      ranges: extracted.map((fn) => ({ lineStart: fn.startLine, lineEnd: fn.endLine })),
+    });
   }
 
-  return { content: parts.join('\n\n'), fileCount: parts.length, functionCount: totalFunctions };
+  return { content: parts.join('\n\n'), fileCount: parts.length, functionCount: totalFunctions, sourceScopes };
 }
 
 function buildFullFileContent(
   group: { rules: RuleDto[]; requirement: ContextRequirement },
   fileAnalyses: FileAnalysis[],
   fileContents: Map<string, { content: string; lineCount: number }>,
-): { content: string; fileCount: number; filePaths: string[] } {
+): { content: string; fileCount: number; filePaths: string[]; sourceScopes: CodeSourceScope[] } {
   const parts: string[] = [];
   const filePaths: string[] = [];
+  const sourceScopes: CodeSourceScope[] = [];
 
   for (const fa of fileAnalyses) {
     const fc = fileContents.get(fa.filePath);
@@ -382,9 +397,13 @@ function buildFullFileContent(
       .join('\n');
     parts.push(`=== ${fa.filePath} ===\n${numbered}`);
     filePaths.push(fa.filePath);
+    sourceScopes.push({
+      path: fa.filePath,
+      ranges: [{ lineStart: 1, lineEnd: Math.max(1, fc.lineCount) }],
+    });
   }
 
-  return { content: parts.join('\n\n'), fileCount: parts.length, filePaths };
+  return { content: parts.join('\n\n'), fileCount: parts.length, filePaths, sourceScopes };
 }
 
 // ---------------------------------------------------------------------------
@@ -396,6 +415,7 @@ function splitIntoBatches(
   rules: RuleDto[],
   content: string,
   fileCount: number,
+  sourceScopes: CodeSourceScope[],
   functionCount?: number,
   filePaths?: string[],
 ): ContextBatch[] {
@@ -411,6 +431,7 @@ function splitIntoBatches(
       fileCount,
       functionCount,
       estimatedTokens,
+      sourceScopes,
       filePaths,
     }];
   }
@@ -421,6 +442,7 @@ function splitIntoBatches(
   let currentContent = '';
   let currentFileCount = 0;
   let currentFilePaths: string[] = [];
+  let currentSourceScopes: CodeSourceScope[] = [];
 
   for (let si = 0; si < sections.length; si++) {
     const section = sections[si];
@@ -431,15 +453,18 @@ function splitIntoBatches(
         content: currentContent,
         fileCount: currentFileCount,
         estimatedTokens: Math.ceil(currentContent.length / CHARS_PER_TOKEN),
+        sourceScopes: currentSourceScopes,
         filePaths: currentFilePaths.length > 0 ? currentFilePaths : undefined,
       });
       currentContent = '';
       currentFileCount = 0;
       currentFilePaths = [];
+      currentSourceScopes = [];
     }
     currentContent += (currentContent ? '\n\n' : '') + section;
     currentFileCount++;
     if (filePaths && filePaths[si]) currentFilePaths.push(filePaths[si]);
+    if (sourceScopes[si]) currentSourceScopes.push(sourceScopes[si]);
   }
 
   if (currentContent.length > 0) {
@@ -449,6 +474,7 @@ function splitIntoBatches(
       content: currentContent,
       fileCount: currentFileCount,
       estimatedTokens: Math.ceil(currentContent.length / CHARS_PER_TOKEN),
+      sourceScopes: currentSourceScopes,
       filePaths: currentFilePaths.length > 0 ? currentFilePaths : undefined,
     });
   }
@@ -626,25 +652,25 @@ function routeContextInner(
 
   // Metadata batches
   for (const group of grouped.metadata) {
-    const { content, fileCount } = buildMetadataContent(group, fileAnalyses, fileContents);
+    const { content, fileCount, sourceScopes } = buildMetadataContent(group, fileAnalyses, fileContents);
     if (fileCount > 0) {
-      batches.push(...splitIntoBatches('metadata', group.rules, content, fileCount));
+      batches.push(...splitIntoBatches('metadata', group.rules, content, fileCount, sourceScopes));
     }
   }
 
   // Targeted batches
   for (const group of grouped.targeted) {
-    const { content, fileCount, functionCount } = buildTargetedContent(group, fileAnalyses, fileContents);
+    const { content, fileCount, functionCount, sourceScopes } = buildTargetedContent(group, fileAnalyses, fileContents);
     if (fileCount > 0) {
-      batches.push(...splitIntoBatches('targeted', group.rules, content, fileCount, functionCount));
+      batches.push(...splitIntoBatches('targeted', group.rules, content, fileCount, sourceScopes, functionCount));
     }
   }
 
   // Full-file batches
   for (const group of grouped.fullFile) {
-    const { content, fileCount, filePaths } = buildFullFileContent(group, fileAnalyses, fileContents);
+    const { content, fileCount, filePaths, sourceScopes } = buildFullFileContent(group, fileAnalyses, fileContents);
     if (fileCount > 0) {
-      batches.push(...splitIntoBatches('full-file', group.rules, content, fileCount, undefined, filePaths));
+      batches.push(...splitIntoBatches('full-file', group.rules, content, fileCount, sourceScopes, undefined, filePaths));
     }
   }
 

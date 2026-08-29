@@ -119,8 +119,8 @@ export const CodeViolationOutputSchema = z.object({
     z.object({
       ruleKey: z.string().describe('The exact key from the rules list'),
       filePath: z.string().describe('The exact file path from the files list'),
-      lineStart: z.number().describe('The starting line number of the violation'),
-      lineEnd: z.number().describe('The ending line number of the violation'),
+      lineStart: z.number().int().positive().describe('The starting line number of the violation'),
+      lineEnd: z.number().int().positive().describe('The ending line number of the violation'),
       severity: z.enum(['low', 'medium', 'high', 'critical']),
       title: z.string().describe('A concise title for the violation'),
       content: z.string().describe('A detailed description of the issue and why it matters'),
@@ -136,8 +136,8 @@ export const CodeViolationLifecycleOutputSchema = z.object({
     z.object({
       ruleKey: z.string().describe('The exact key from the rules list'),
       filePath: z.string().describe('The exact file path from the files list'),
-      lineStart: z.number().describe('The starting line number of the violation'),
-      lineEnd: z.number().describe('The ending line number of the violation'),
+      lineStart: z.number().int().positive().describe('The starting line number of the violation'),
+      lineEnd: z.number().int().positive().describe('The ending line number of the violation'),
       severity: z.enum(['low', 'medium', 'high', 'critical']),
       title: z.string().describe('A concise title for the violation'),
       content: z.string().describe('A detailed description of the issue and why it matters'),

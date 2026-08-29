@@ -78,6 +78,94 @@ interface CLIUsage {
   costUsd?: string;
 }
 
+function certifyCodeResultOwnership(
+  context: CodeViolationContext,
+  violations: CodeViolationRaw[],
+): void {
+  const allowedRules = new Set(context.llmRules.map((rule) => rule.key));
+  const allowedSources = new Map<string, CodeViolationContext['sourceScopes'][number]['ranges']>();
+  for (const scope of context.sourceScopes) {
+    const ranges = allowedSources.get(scope.path) ?? [];
+    ranges.push(...scope.ranges);
+    allowedSources.set(scope.path, ranges);
+  }
+  const seenFindings = new Set<string>();
+
+  for (const violation of violations) {
+    if (!allowedRules.has(violation.ruleKey)) {
+      throw new Error(
+        `Code result rule "${violation.ruleKey}" is not owned by the originating batch`,
+      );
+    }
+
+    const ranges = allowedSources.get(violation.filePath);
+    if (!ranges) {
+      throw new Error(
+        `Code result source "${violation.filePath}" is not owned by the originating batch`,
+      );
+    }
+
+    const rangeIsOwned = violation.lineEnd >= violation.lineStart && ranges.some((range) =>
+      context.tier === 'metadata'
+        ? violation.lineStart === range.lineStart && violation.lineEnd === range.lineEnd
+        : violation.lineStart >= range.lineStart && violation.lineEnd <= range.lineEnd,
+    );
+    if (!rangeIsOwned) {
+      throw new Error(
+        `Code result range ${violation.lineStart}-${violation.lineEnd} for "${violation.filePath}" is not owned by the originating batch`,
+      );
+    }
+
+    const findingKey = `${violation.ruleKey}\0${violation.filePath}\0${violation.lineStart}\0${violation.lineEnd}\0${violation.title}`;
+    if (seenFindings.has(findingKey)) {
+      throw new Error('Code result cannot contain the same new finding more than once');
+    }
+    seenFindings.add(findingKey);
+  }
+}
+
+function certifyNoPriorCodeCollision(
+  context: CodeViolationContext,
+  newViolations: CodeViolationRaw[],
+): void {
+  const priorKeys = new Set((context.existingViolations ?? []).map((violation) =>
+    context.tier === 'metadata'
+      ? `${violation.ruleKey}\0${violation.filePath}\0${violation.title}`
+      : `${violation.ruleKey}\0${violation.filePath}\0${violation.lineStart}\0${violation.lineEnd}\0${violation.title}`,
+  ));
+
+  for (const violation of newViolations) {
+    const key = context.tier === 'metadata'
+      ? `${violation.ruleKey}\0${violation.filePath}\0${violation.title}`
+      : `${violation.ruleKey}\0${violation.filePath}\0${violation.lineStart}\0${violation.lineEnd}\0${violation.title}`;
+    if (priorKeys.has(key)) {
+      throw new Error(
+        'Code lifecycle result cannot classify a previous finding and reintroduce the same finding as new',
+      );
+    }
+  }
+}
+
+function certifyCodeLifecyclePartition(
+  resolvedViolationIds: string[],
+  unchangedViolationIds: string[],
+  idMap: PromptIdMap,
+): void {
+  const expectedIds = new Set(idMap.keys());
+  const classifiedIds = [...resolvedViolationIds, ...unchangedViolationIds];
+  const classifiedSet = new Set(classifiedIds);
+  const isExactPartition =
+    classifiedIds.length === expectedIds.size &&
+    classifiedSet.size === expectedIds.size &&
+    classifiedIds.every((id) => expectedIds.has(id));
+
+  if (!isExactPartition) {
+    throw new Error(
+      'Code lifecycle result must be an exact partition of the originating batch previous IDs',
+    );
+  }
+}
+
 export abstract class BaseCLIProvider implements LLMProvider {
   abstract get binaryName(): string;
   abstract get baseArgs(): string[];
@@ -770,6 +858,13 @@ export abstract class BaseCLIProvider implements LLMProvider {
       const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, CodeViolationLifecycleOutputSchema, {
         extraArgs: codeExtraArgs, label: 'code-lifecycle', timeoutMs: codeTimeoutMs, onStart: opts?.onStart,
       });
+      certifyCodeResultOwnership(context, object.newViolations);
+      certifyCodeLifecyclePartition(
+        object.resolvedViolationIds,
+        object.unchangedViolationIds,
+        idMap,
+      );
+      certifyNoPriorCodeCollision(context, object.newViolations);
       const dur = Date.now() - t0;
       log.info(`[CLI] Code violations call done in ${dur}ms — new: ${object.newViolations.length}, resolved: ${object.resolvedViolationIds.length}, unchanged: ${object.unchangedViolationIds.length}`);
       this.collectUsage('code', cliUsage, dur);
@@ -784,6 +879,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
           title: v.title,
           content: v.content,
           fixPrompt: v.fixPrompt ?? null,
+          sourceTier: context.tier ?? 'full-file',
         })),
         resolvedViolationIds: resolveIds(object.resolvedViolationIds, idMap),
         unchangedViolationIds: resolveIds(object.unchangedViolationIds, idMap),
@@ -793,6 +889,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
     const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, CodeViolationOutputSchema, {
       extraArgs: codeExtraArgs, label: 'code', timeoutMs: codeTimeoutMs, onStart: opts?.onStart,
     });
+    certifyCodeResultOwnership(context, object.violations);
     const dur = Date.now() - t0;
     log.info(`[CLI] Code violations call done in ${dur}ms — ${object.violations.length} violations`);
     this.collectUsage('code', cliUsage, dur);
@@ -807,6 +904,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
         title: v.title,
         content: v.content,
         fixPrompt: v.fixPrompt ?? null,
+        sourceTier: context.tier ?? 'full-file',
       })),
     };
   }
