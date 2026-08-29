@@ -83,7 +83,7 @@ The pre-flight LLM estimate (spec scan and guard generate) is **token + ceiling-
 
 - **No workarounds.** Always find and fix the root cause. Do not use hacks, fallbacks, or temporary patches to bypass issues. If something isn't working, investigate why and fix it properly.
 - **Dev servers.** Do not start, stop, or restart dev servers. The user manages `pnpm dev` from their terminal. If a restart is needed (e.g. `.env` change), tell the user.
-- **Storage.** The store is file-based. Writes go through `packages/core/src/lib/analysis-store.ts` via `atomicWriteJson` (write-to-tmp + rename for atomicity). Reads are mtime-cached on `LATEST.json`. Concurrent analyses are prevented by `.analyze.lock` (O_EXCL).
+- **Storage.** The store is file-based. Small documents (`history.json`, config) write through `atomicWriteJson` (write-to-tmp + rename for atomicity). The large snapshots — `LATEST.json`, `analyses/*.json`, `diff.json` — write/read through `packages/core/src/lib/streaming-json.ts` (`writeJsonStreaming`/`readJsonStreaming`), which keeps the same tmp+rename atomicity but never materializes the whole document as a single JS string, so results past V8's ~512 MB max-string-length (`RangeError: Invalid string length`) still serialize and load. Reads are mtime-cached on `LATEST.json`. Concurrent analyses are prevented by `.analyze.lock` (O_EXCL).
 - **No Claude Code session details in commits/PRs/issues.** Never put a `Claude-Session:` trailer or any `https://claude.ai/code/session…` URL into a commit message, PR body, or issue body — strip them before committing or opening the PR/issue. Default commit/PR formatting is otherwise fine.
 
 ## Releasing

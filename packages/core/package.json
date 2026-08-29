@@ -294,6 +294,7 @@
     "p-limit": "^7.3.0",
     "posthog-node": "^4.0.0",
     "simple-git": "^3.27.0",
+    "stream-json": "^1.9.1",
     "zod": "^3.23.8",
     "zod-to-json-schema": "^3.25.1"
   },
@@ -302,6 +303,7 @@
     "@types/dagre": "^0.7.52",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.0.0",
+    "@types/stream-json": "^1.7.8",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   }
