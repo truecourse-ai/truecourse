@@ -84,17 +84,52 @@ export function computeFileViolationLifecycle(
   const resolved: ViolationRecord[] = [];
   const resolvedRefs: ResolvedViolationRef[] = [];
 
-  const currentKeys = new Set(currentViolations.map((v) => `${v.ruleKey}::${v.filePath}`));
-  const previousByKey = new Map<string, ActiveViolation>();
+  const previousByKey = new Map<string, ActiveViolation[]>();
   for (const prev of previousViolations) {
-    if (prev.filePath) previousByKey.set(`${prev.ruleKey}::${prev.filePath}`, prev);
+    if (!prev.filePath) continue;
+    const key = `${prev.ruleKey}::${prev.filePath}`;
+    const group = previousByKey.get(key) ?? [];
+    group.push(prev);
+    previousByKey.set(key, group);
+  }
+
+  const previousForCurrent = new Map<FileViolationInput, ActiveViolation>();
+  const matchedPreviousIds = new Set<string>();
+
+  // Reserve exact source-span matches first so a newly inserted occurrence
+  // cannot consume the prior row belonging to a later unchanged occurrence.
+  for (const current of currentViolations) {
+    const key = `${current.ruleKey}::${current.filePath}`;
+    const candidates = previousByKey.get(key);
+    if (!candidates?.length) continue;
+    const exactIndex = candidates.findIndex((previous) =>
+      previous.lineStart === current.lineStart
+      && previous.lineEnd === current.lineEnd
+      && previous.columnStart === current.columnStart
+      && previous.columnEnd === current.columnEnd,
+    );
+    if (exactIndex < 0) continue;
+    const [matched] = candidates.splice(exactIndex, 1);
+    previousForCurrent.set(current, matched);
+    matchedPreviousIds.add(matched.id);
+  }
+
+  // Preserve the historical rule+file identity across source movement by
+  // pairing any remaining occurrences one-to-one in stable input order.
+  for (const current of currentViolations) {
+    if (previousForCurrent.has(current)) continue;
+    const key = `${current.ruleKey}::${current.filePath}`;
+    const candidates = previousByKey.get(key);
+    const matched = candidates?.shift();
+    if (!matched) continue;
+    previousForCurrent.set(current, matched);
+    matchedPreviousIds.add(matched.id);
   }
 
   // Previous file-level violations not in current → resolved
   for (const prev of previousViolations) {
     if (!prev.filePath) continue;
-    const key = `${prev.ruleKey}::${prev.filePath}`;
-    if (!currentKeys.has(key)) {
+    if (!matchedPreviousIds.has(prev.id)) {
       const row: ViolationRecord = {
         id: randomUUID(),
         type: 'code',
@@ -132,8 +167,7 @@ export function computeFileViolationLifecycle(
 
   // Current file-level violations
   for (const cv of currentViolations) {
-    const key = `${cv.ruleKey}::${cv.filePath}`;
-    const prev = previousByKey.get(key);
+    const prev = previousForCurrent.get(cv);
 
     const base: ViolationRecord = {
       id: randomUUID(),
