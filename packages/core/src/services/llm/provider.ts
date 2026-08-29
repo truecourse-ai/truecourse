@@ -147,6 +147,8 @@ export interface DiffViolationItem {
   targetServiceId: string | null;
   targetModuleId: string | null;
   targetMethodId: string | null;
+  targetDatabaseId?: string | null;
+  targetTable?: string | null;
   targetServiceName: string | null;
   targetModuleName: string | null;
   targetMethodName: string | null;
@@ -156,7 +158,23 @@ export interface DiffViolationItem {
 
 export interface DiffViolationsResult {
   resolvedViolationIds: string[];
+  unchangedViolationIds: string[];
   newViolations: DiffViolationItem[];
+}
+
+export interface DatabaseViolationsLifecycleResult {
+  resolvedViolationIds: string[];
+  unchangedViolationIds: string[];
+  newViolations: Array<{
+    type: 'database';
+    title: string;
+    content: string;
+    severity: string;
+    targetDatabaseId: string | null;
+    targetTable: string | null;
+    fixPrompt: string | null;
+    ruleKey: string;
+  }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -206,6 +224,7 @@ export interface AllViolationsResult {
 /** Result when existing violations are provided — lifecycle mode */
 export interface AllViolationsLifecycleResult {
   resolvedViolationIds: string[];
+  unchangedViolationIds: string[];
   newViolations: DiffViolationItem[];
   serviceDescriptions: ServiceDescription[];
 }
@@ -237,6 +256,10 @@ export interface LLMProvider {
     context: DatabaseViolationContext,
     opts?: { onStart?: () => void },
   ): Promise<DatabaseViolationsResult>;
+  generateDatabaseViolationsWithLifecycle(
+    context: DatabaseViolationContext,
+    opts?: { onStart?: () => void },
+  ): Promise<DatabaseViolationsLifecycleResult>;
   generateModuleViolations(
     context: ModuleViolationContext,
     opts?: { onStart?: () => void },

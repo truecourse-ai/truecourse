@@ -146,6 +146,39 @@ function createLlmTracker(
   };
 }
 
+/**
+ * Lifecycle prompts require every supplied prior finding to be classified
+ * exactly once. Treat an omitted, duplicated, conflicting, or foreign ID as
+ * a failed batch so malformed output cannot mutate the completed baseline.
+ */
+function hasExactDatabaseLifecyclePartition(
+  batch: { existingViolations?: readonly { id: string; title: string }[] },
+  result: {
+    resolvedViolationIds?: string[];
+    unchangedViolationIds?: string[];
+    newViolations?: readonly { title: string }[];
+  },
+): boolean {
+  const expectedIds = batch.existingViolations?.map((violation) => violation.id) ?? [];
+  const returnedIds = [
+    ...(result.resolvedViolationIds ?? []),
+    ...(result.unchangedViolationIds ?? []),
+  ];
+  const expectedSet = new Set(expectedIds);
+  const returnedSet = new Set(returnedIds);
+  const hasExactIds = expectedSet.size === expectedIds.length
+    && returnedSet.size === returnedIds.length
+    && returnedIds.length === expectedIds.length
+    && returnedIds.every((id) => expectedSet.has(id));
+  if (!hasExactIds) return false;
+
+  const newTitles = new Set(
+    (result.newViolations ?? []).map((violation) => violation.title.toLowerCase().trim()),
+  );
+  return !(batch.existingViolations ?? []).some(
+    (violation) => newTitles.has(violation.title.toLowerCase().trim()),
+  );
+}
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -1059,6 +1092,8 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   });
 
   const llmOnlyPreviousViolations = previousActiveViolations.filter((v) => v.ruleKey.includes('/llm/'));
+  const previousDatabaseLlmViolations = llmOnlyPreviousViolations.filter((v) => v.type === 'database');
+  const previousAggregateLlmViolations = llmOnlyPreviousViolations.filter((v) => v.type !== 'database');
   const existingServiceViolations = llmOnlyPreviousViolations
     .filter((v) => v.type === 'service')
     .map((v) => ({ id: v.id, type: v.type, title: v.title, content: v.content, severity: v.severity }));
@@ -1069,7 +1104,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     .filter((v) => v.type === 'module' || v.type === 'function')
     .map((v) => ({ id: v.id, type: v.type, title: v.title, content: v.content, severity: v.severity }));
 
-  const hasLlmOnlyExistingViolations = llmOnlyPreviousViolations.length > 0;
+  const hasAggregateLlmExistingViolations = previousAggregateLlmViolations.length > 0;
 
   const dbSchemaContext = (dbSchemaLlmRules.length > 0 && result.databaseResult?.databases.length)
     ? {
@@ -1098,7 +1133,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
           })),
         })),
         llmRules: dbSchemaLlmRules,
-        existingViolations: hasLlmOnlyExistingViolations ? existingDatabaseViolations : undefined,
+        existingViolations: existingDatabaseViolations.length > 0 ? existingDatabaseViolations : undefined,
       }
     : undefined;
 
@@ -1118,9 +1153,9 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       calleeModule: d.calleeModule,
       callCount: d.callCount,
     })),
-    existingServiceViolations: hasLlmOnlyExistingViolations ? existingServiceViolations : undefined,
+    existingServiceViolations: existingServiceViolations.length > 0 ? existingServiceViolations : undefined,
     existingDatabaseViolations: undefined,
-    existingModuleViolations: hasLlmOnlyExistingViolations ? existingModuleViolations : undefined,
+    existingModuleViolations: existingModuleViolations.length > 0 ? existingModuleViolations : undefined,
   };
 
   // ---------- Build LLM trackers (one shared instance per tracker key) ----------
@@ -1197,7 +1232,22 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
   }
 
   // Database schema LLM (separate from code batches)
-  let dbSchemaViolations: ViolationRecord[] = [];
+  const dbSchemaViolations: ViolationRecord[] = [];
+  let databaseSchemaFailed = false;
+  const carryPreviousDatabaseViolationsForward = () => {
+    const lifecycle = computeViolationLifecycle({
+      analysisId,
+      now,
+      newViolations: [],
+      resolvedViolationIds: [],
+      previousActiveViolations: previousDatabaseLlmViolations,
+      databaseNameToId: dbIdMap,
+    });
+    unchanged.push(...lifecycle.unchanged);
+  };
+  if ((!dbSchemaContext || llmSkipped) && previousDatabaseLlmViolations.length > 0) {
+    carryPreviousDatabaseViolationsForward();
+  }
   if (dbSchemaContext && !llmSkipped) {
     // Shared tracker exists only when schema is the sole database LLM path.
     // When code batches also exist, the code-batch tracker dominates and
@@ -1209,58 +1259,96 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
       const t0 = Date.now();
       let started = false;
       try {
-        const dbResult = await provider.generateDatabaseViolations(dbSchemaContext, {
-          onStart: () => { started = true; schemaLl?.onCallStart(); },
-        });
-        schemaLl?.onCallDone(started);
-        const dur = Date.now() - t0;
-        log.info(`[LLM] database-schema: done in ${dur}ms — ${dbResult.violations.length} violations`);
-
-        for (const v of dbResult.violations) {
-          dbSchemaViolations.push({
-            id: randomUUID(),
-            type: 'database',
-            category: 'rule',
-            subcategory: null,
-            title: v.title,
-            content: v.content,
-            severity: v.severity as ViolationRecord['severity'],
-            status: 'new',
+        const hasLifecycle = Boolean(dbSchemaContext.existingViolations?.length);
+        let databaseViolationCount: number;
+        if (hasLifecycle) {
+          const dbResult = await provider.generateDatabaseViolationsWithLifecycle(
+            dbSchemaContext,
+            { onStart: () => { started = true; schemaLl?.onCallStart(); } },
+          );
+          if (!hasExactDatabaseLifecyclePartition(dbSchemaContext, dbResult)) {
+            throw new Error('Database lifecycle returned an invalid prior-finding partition');
+          }
+          databaseViolationCount = dbResult.newViolations.length
+            + dbResult.unchangedViolationIds.length;
+          const newDatabaseViolations = dbResult.newViolations.map((violation) => ({
+            ...violation,
             targetServiceId: null,
-            targetDatabaseId: v.targetDatabaseId || null,
             targetModuleId: null,
             targetMethodId: null,
-            targetTable: v.targetTable || null,
-            relatedServiceId: null,
-            relatedModuleId: null,
-            fixPrompt: v.fixPrompt || null,
-            ruleKey: v.ruleKey || 'unknown',
-            firstSeenAnalysisId: analysisId,
-            firstSeenAt: now,
-            previousViolationId: null,
-            resolvedAt: null,
-            filePath: null,
-            lineStart: null,
-            lineEnd: null,
-            columnStart: null,
-            columnEnd: null,
-            snippet: null,
-            createdAt: now,
+            targetServiceName: null,
+            targetModuleName: null,
+            targetMethodName: null,
+          }));
+          const lifecycle = computeViolationLifecycle({
+            analysisId,
+            now,
+            newViolations: newDatabaseViolations,
+            resolvedViolationIds: dbResult.resolvedViolationIds,
+            previousActiveViolations: previousDatabaseLlmViolations,
+            databaseNameToId: dbIdMap,
           });
+          added.push(...lifecycle.added);
+          unchanged.push(...lifecycle.unchanged);
+          resolved.push(...lifecycle.resolved);
+          resolvedRefs.push(...lifecycle.resolvedRefs);
+        } else {
+          const dbResult = await provider.generateDatabaseViolations(dbSchemaContext, {
+            onStart: () => { started = true; schemaLl?.onCallStart(); },
+          });
+          databaseViolationCount = dbResult.violations.length;
+          for (const v of dbResult.violations) {
+            dbSchemaViolations.push({
+              id: randomUUID(),
+              type: 'database',
+              category: 'rule',
+              subcategory: null,
+              title: v.title,
+              content: v.content,
+              severity: v.severity as ViolationRecord['severity'],
+              status: 'new',
+              targetServiceId: null,
+              targetDatabaseId: v.targetDatabaseId || null,
+              targetModuleId: null,
+              targetMethodId: null,
+              targetTable: v.targetTable || null,
+              relatedServiceId: null,
+              relatedModuleId: null,
+              fixPrompt: v.fixPrompt || null,
+              ruleKey: v.ruleKey || 'unknown',
+              firstSeenAnalysisId: analysisId,
+              firstSeenAt: now,
+              previousViolationId: null,
+              resolvedAt: null,
+              filePath: null,
+              lineStart: null,
+              lineEnd: null,
+              columnStart: null,
+              columnEnd: null,
+              snippet: null,
+              createdAt: now,
+            });
+          }
         }
+        schemaLl?.onCallDone(started);
+        const dur = Date.now() - t0;
+        log.info(`[LLM] database-schema: done in ${dur}ms — ${databaseViolationCount} violations`);
 
         if (!domainCodeBatches.has('database')) {
           const detCount = violationsByDomain.get('database') ?? 0;
-          const total = detCount + dbResult.violations.length;
+          const total = detCount + databaseViolationCount;
           tracker?.done('database', total > 0 ? `${total} violations` : 'Clean');
         }
 
         return { domain: 'database-schema', violations: [], resolvedIds: [], unchangedIds: [] };
       } catch (err) {
         schemaLl?.onCallDone(started);
+        databaseSchemaFailed = true;
         const dur = Date.now() - t0;
         log.warn(`[LLM] database-schema: failed in ${dur}ms — ${err instanceof Error ? err.message : String(err)}`);
-        if (!domainCodeBatches.has('database')) tracker?.error('database', `Schema LLM failed`);
+        if (dbSchemaContext.existingViolations?.length) {
+          carryPreviousDatabaseViolationsForward();
+        }
         return { domain: 'database-schema', violations: [], resolvedIds: [], unchangedIds: [] };
       }
     })());
@@ -1283,7 +1371,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     const archOnCallDone = (key: 'service' | 'database' | 'module') => {
       archLl?.onCallDone(archStarted.has(key));
     };
-    if (hasLlmOnlyExistingViolations) {
+    if (hasAggregateLlmExistingViolations) {
       const archResult = await generateViolationsWithLifecycle(
         violationInput,
         undefined,
@@ -1308,7 +1396,7 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
         now,
         newViolations: archResult.newViolations,
         resolvedViolationIds: archResult.resolvedViolationIds,
-        previousActiveViolations: llmOnlyPreviousViolations,
+        previousActiveViolations: previousAggregateLlmViolations,
         serviceNameToId,
         moduleNameToId: moduleNameToIdLocal,
         methodNameToId,
@@ -1378,6 +1466,9 @@ export async function runViolationPipeline(input: ViolationPipelineInput): Promi
     const msg = llmResult.reason instanceof Error ? llmResult.reason.message : String(llmResult.reason);
     log.error(`[Violations] LLM architecture analysis failed: ${msg}`);
     tracker?.error('architecture', `LLM failed: ${msg.slice(0, 80)}`);
+  }
+  if (databaseSchemaFailed) {
+    tracker?.error('database', 'Schema LLM failed');
   }
 
   // Merge database schema LLM violations into the main lists.
