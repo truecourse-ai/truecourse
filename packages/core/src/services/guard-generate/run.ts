@@ -586,7 +586,7 @@ export function createGuardGenerateSessionSeams(
     }
     const fidelityTally = emptyFidelityTally()
     const byTask = new Map<string, FlowWorkerSessionResult>()
-    const total = input.tasks.length + input.epicTasks.length
+    const total = input.tasks.length + input.epicTasks.length + input.mutatorTasks.length
     let done = 0
     input.onTask?.(0, total)
     // Each tick carries the task's outcome kind so the engine can render a live
@@ -594,7 +594,7 @@ export function createGuardGenerateSessionSeams(
     const tick = (kind?: GuardFlowWorkerOutcome['kind'] | 'failed'): void => input.onTask?.(++done, total, kind)
     const sha256Hex = (text: string): string => createHash('sha256').update(text).digest('hex')
 
-    const runWave = async (wave: readonly FlowWorkerTask[]): Promise<void> => {
+    const runWave = async (wave: readonly FlowWorkerTask[], waveConcurrency?: number): Promise<void> => {
       if (wave.length === 0) return
       const misses: FlowWorkerTask[] = []
       for (const task of wave) {
@@ -678,7 +678,11 @@ export function createGuardGenerateSessionSeams(
         briefing: (t) => [briefings.get(t.workItem)!],
         driver,
         persistence,
-        ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
+        ...(waveConcurrency !== undefined
+          ? { concurrency: waveConcurrency }
+          : opts.concurrency !== undefined
+            ? { concurrency: opts.concurrency }
+            : {}),
         ...(opts.onSessionEvent ? { onSessionEvent: opts.onSessionEvent } : {}),
         fold: async (task, outcome) => {
           summary.ran++
@@ -741,6 +745,10 @@ export function createGuardGenerateSessionSeams(
     // The epic wave starts only after the first has fully folded — the barrier
     // that lets epic briefings carry members' settled scenarios read-only.
     await runWave(input.epicTasks)
+    // The mutator wave runs LAST and SERIALIZED: a destructive draft (a
+    // password change, an account deletion) executes only against a world no
+    // sibling is still reading, one session at a time.
+    await runWave(input.mutatorTasks, 1)
 
     note(summary)
     const fidelitySummary: GuardSessionSummary | undefined =

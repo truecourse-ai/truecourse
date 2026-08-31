@@ -32,6 +32,7 @@ import {
   type GuardSessionSummary,
   type InterfaceProvider,
   type MatchRunner,
+  type WorldClassifyRunner,
   type RawGeneratedApiScenario,
   type RawGeneratedCliScenario,
   type RawGeneratedScenario,
@@ -74,12 +75,16 @@ export function writeRecipe(
     entry?: string[]
     /** The web driver's preparation layer — present when a case authors web. */
     web?: { serve: string[]; cwd?: string; healthPath?: string; build?: string }
+    /** The api block, verbatim — e.g. an `api.seed` whose fixture catalog a
+     *  briefing test expects advertised. */
+    api?: Record<string, unknown>
   } = {},
 ): void {
   const recipe = {
     ...(overrides.install ? { install: overrides.install } : {}),
     build: overrides.build ?? 'true',
     entry: overrides.entry ?? ['node', FIXTURE_BIN],
+    ...(overrides.api ? { api: overrides.api } : {}),
     ...(overrides.web ? { web: overrides.web } : {}),
   }
   const target = path.join(repo, '.truecourse', 'scenarios', 'recipe.json')
@@ -445,13 +450,14 @@ export function flowWorkerSessionOf(
   handler: (task: FlowWorkerTask) => Promise<FlowWorkerSessionResult | undefined>,
   over: { summary?: Partial<GuardSessionSummary>; fidelitySummary?: GuardSessionSummary } = {},
 ): FlowWorkerSessionSeam {
-  return async ({ tasks, epicTasks, onTask }) => {
+  return async ({ tasks, epicTasks, mutatorTasks, onTask }) => {
     const byTask = new Map<string, FlowWorkerSessionResult>()
-    const all = [...tasks, ...epicTasks]
+    const all = [...tasks, ...epicTasks, ...mutatorTasks]
     let done = 0
     onTask?.(0, all.length)
-    // Two WAVES, like the real seam: every non-epic settles before an epic starts.
-    for (const wave of [tasks, epicTasks]) {
+    // Three WAVES, like the real seam: non-epics, then epics, then the
+    // serialized world-mutator tail.
+    for (const wave of [tasks, epicTasks, mutatorTasks]) {
       for (const task of wave) {
         const result = await handler(task)
         if (result) byTask.set(task.workItem, result)
@@ -692,6 +698,7 @@ export function flowStageSeams(repo: string): {
   flowsEpicSession: FlowsEpicSessionSeam
   flowWorkerSession: FlowWorkerSessionSeam
   matchRunner: MatchRunner
+  worldClassifyRunner: WorldClassifyRunner
 } {
   return {
     interfaces: DEFAULT_INTERFACES(repo),
@@ -700,6 +707,9 @@ export function flowStageSeams(repo: string): {
     flowsEpicSession: noEpicSessions,
     flowWorkerSession: noWorkerSessions,
     matchRunner: matchAll(),
+    // No flow is destructive unless a test says so — the default keeps every
+    // existing case's scheduling (and its `errors: []` assertions) unchanged.
+    worldClassifyRunner: async () => ({ mutators: [] }),
   }
 }
 

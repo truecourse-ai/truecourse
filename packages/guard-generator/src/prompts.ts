@@ -483,6 +483,29 @@ The noun makes it countable across flows; the entity names what a seed would hav
 create. Data the flow can create for itself through the API's own endpoints is NOT
 this — author those steps.
 
+# One shared world — declare your blast radius
+Every scenario of a run executes against ONE application world, side by side. So:
+CREATE what you need through the app's own endpoints under identities you mint
+(embed \${unique}), and never mutate state you did not create. The seeded fixtures
+and credentials are SHARED — log in with them, read them, build on them, but a
+scenario that would change a seeded principal's password or email, revoke its
+sessions or tokens, delete its account, or flip global/instance configuration must
+either (a) first create ITS OWN principal/record through the API and mutate that,
+or — when the claim is genuinely about shared/global state no scenario can own —
+(b) declare \`"world": "mutates"\` at the scenario's top level. A declared mutator
+runs LAST, serialized, against a world the runner restores afterwards; an
+UNDECLARED mutation poisons every scenario that runs after it (one delete-account
+scenario once cost a run 452 sign-in failures). The engine ENFORCES the
+declaration: \`run_scenario\` and \`submit_scenario\` refuse to execute a mutates
+draft outside that final wave (the refusal tells you what to do — usually the
+engine re-runs your flow there), and refuse it entirely when the recipe declares
+no \`api.services.reset\`, because a mutation nobody can repair must never run —
+then end the session blocked, naming the missing reset as the capability. When
+the listed FIXTURES include a SACRIFICIAL principal (one whose name or notes mark
+it disposable, e.g. \`sacrificialUser\`), prefer a third way: burn THAT principal
+for credential mutations instead of declaring a shared mutation — the seed
+restores it on the next boot.
+
 # Ground every request in the app's own surface, never in a guess
 The user prompt states, from the app's OWN source, which operations exist, what each
 one reads off the request, and how the app builds the requests it sends UPSTREAM.
@@ -730,14 +753,31 @@ collide.
 
 # World-state capabilities
 \`setup\` declares the WORLD a test needs — never code, never shell. The sandbox is
-otherwise bare: no network egress beyond the surface under test, no credentials, no
-external systems. When the flow needs world-state neither \`setup\` nor the app's own
-UI can produce — an authenticated session no supplied credential opens, a screen the
-recipe's web block does not serve, a third-party service, pre-existing DATA no
-screen can create — author NOTHING: omit \`scenario\` AND name the missing capability
-in \`blockedOn\`. An honest blocked flow is right; a scenario that fakes the missing
-world is wrong. NAME the blocker with the right noun: \`"credentials"\` for a missing
-secret or login, the SERVICE ITSELF for a third party (\`"stripe"\`), the unlocatable
+otherwise bare: no network egress beyond the surface under test, no ambient
+credentials, no external systems. What IS provided is the SEED: when the user prompt
+lists FIXTURES, that data — principals included — already exists in the served app's
+database, and a SIGNED-IN world is reached by navigating the login page and filling
+the seeded login fields, never by blocking. Every scenario of a run executes against
+ONE shared world: create what you need through the app's own screens and endpoints
+under identities you mint (embed \${unique}), and never mutate state you did not
+create — a scenario that would change a seeded principal's password or email, revoke
+its sessions, delete its account, or flip global configuration must first create ITS
+OWN principal and mutate that (a fixture named as SACRIFICIAL, e.g.
+\`sacrificialUser\`, is the one seeded principal credential mutations MAY burn — the
+seed restores it), or (when the claim is genuinely about shared state no scenario
+can own) declare \`"world": "mutates"\` at the scenario's top level so the runner
+schedules it last against a world it restores afterwards — the engine enforces
+this: a mutates draft is refused outside that final wave (the refusal says what to
+do), and refused entirely when the recipe declares no \`api.services.reset\` (end
+the session blocked, naming the missing reset). When the flow needs
+world-state neither
+\`setup\`, the seed, nor the app's own UI can produce — an authenticated session no
+seeded or supplied credential opens, a screen the recipe's web block does not serve,
+a third-party service, pre-existing DATA no screen can create — author NOTHING: omit
+\`scenario\` AND name the missing capability in \`blockedOn\`. An honest blocked flow
+is right; a scenario that fakes the missing world is wrong. NAME the blocker with
+the right noun: \`"credentials"\` for a missing secret or login NO listed fixture
+provides, the SERVICE ITSELF for a third party (\`"stripe"\`), the unlocatable
 element when no user-perceivable handle reaches it, and \`"missing-data"\` plus a
 second entry naming the entity when pre-existing data is what is missing.
 
@@ -930,10 +970,12 @@ export interface AuthorUserContext {
    */
   credentials?: { name: string; header: string; description?: string }[]
   /**
-   * api batches: the seed stage's fixture CATALOG — each fixture's name + the field
-   * names it exposes (never runtime values). Advertises the `{{fixture:<name>.<field>}}`
-   * placeholders available; present only when the recipe declares a seed stage, so a
-   * seed-less repo's prompt stays byte-identical. Ignored on cli batches.
+   * api and web batches: the seed stage's fixture CATALOG — each fixture's name +
+   * the field names it exposes (never runtime values). Advertises the
+   * `{{fixture:<name>.<field>}}` placeholders available; on web it is also how a
+   * scenario learns a seeded LOGIN principal exists (the fill-the-login-form
+   * channel). Present only when the recipe declares a seed stage, so a seed-less
+   * repo's prompt stays byte-identical. Ignored on cli batches.
    */
   fixtures?: { name: string; fields: string[] }[]
   /**
@@ -1230,6 +1272,32 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       'known user) is authorable through these fixtures. A flow that needs data NOT listed',
       'above — and that the API cannot create through its own endpoints — is blocked on',
       'DATA: omit `scenario` and return `"blockedOn": ["missing-data", "<the entity>"]`.',
+    )
+  }
+  // The same catalog for the WEB batch, in the browser's terms: the seed's login
+  // principal is how a web scenario reaches a signed-in world at all. Without this
+  // block every auth-gated web flow blocks on the bare word "credentials" while the
+  // seeded user sits in the served app's database — the briefing, not the world,
+  // is what was missing (documenso 2026-08-28: 114 of 119 web flows).
+  if (ctx.driver === 'web' && ctx.fixtures && ctx.fixtures.length > 0) {
+    lines.push(
+      '',
+      'FIXTURES AVAILABLE — the seed created this data (rows AND principals) in the',
+      "served app's database before your scenario runs; the values are chosen at run",
+      'time and never shown to you. Reference a field with `{{fixture:<name>.<field>}}`',
+      'in any authored string of any step — a `navigate` path, a `fill` value, a',
+      'locator, an expected text:',
+    )
+    for (const f of ctx.fixtures) {
+      lines.push(`- ${f.name}: fields ${f.fields.map((x) => `\`${x}\``).join(', ')}`)
+    }
+    lines.push(
+      'A SIGNED-IN world is reached through these: when a fixture carries login fields',
+      '(an email/username and a password), navigate to the login page and `fill` them —',
+      'that IS this surface\'s credential. Block on `"credentials"` only when NO listed',
+      'fixture can sign the needed principal in; a flow that needs seeded data not',
+      'listed above (and that no screen can create) is blocked on `"missing-data"`',
+      'plus the entity.',
     )
   }
   // Detected third parties: what this repo actually integrates
@@ -1679,6 +1747,22 @@ Concretely:
     api.serve argument and every api.env value at start time (e.g.
     "serve": ["uvicorn","app.main:app","--port","\${PORT}"], or
     "env": { "ASPNETCORE_URLS": "http://127.0.0.1:\${PORT}" }).
+- web (browser apps) is how to START the browser surface. When the repository
+  ships a browser app (a next/remix/react-router app — the workspace list names
+  each app's framework), declare it: web.serve (for a fullstack app usually the
+  SAME argv as api.serve — one process serves the endpoints and the screens),
+  web.healthPath naming a page that RENDERS for an anonymous visitor (a login or
+  sign-in page beats "/", which often redirects), web.env for whatever the app
+  needs to address itself (\${PORT} substituted, e.g.
+  "APP_URL": "http://127.0.0.1:\${PORT}"), "cwd": "repo" for a
+  workspace-mediated serve, and — in a monorepo — web.app naming the served
+  workspace app's directory. A proposal with no web block for a repo that ships
+  a browser app is refused statically.
+- api.services (when the server needs a datastore) declares the repo's OWN
+  bring-up and teardown. A compose-managed up REQUIRES reset — the full wipe,
+  volumes included ("docker compose -f <same file> down -v"); without it the
+  runner cannot restore the world after a world-mutating test and the proposal
+  is refused statically.
 - When the repository is a workspace/monorepo that ships MORE THAN ONE HTTP service
   (a web app and a separate API service), declare them ALL under api.servers, one
   named entry per service, plus api.defaultServer. Each entry carries its own serve,
@@ -2297,6 +2381,52 @@ export interface FlowDigest {
 }
 
 /** The epic pass's engine feedback for its ONE corrective re-ask. */
+/** What the world classifier is shown per flow — identity + the words that give
+ *  its blast radius away. */
+export interface WorldClassifyFlowInput {
+  id: string
+  title: string
+  /** The flow's milestone claim titles, in order. */
+  milestones: string[]
+}
+
+export const WORLD_CLASSIFY_SYSTEM_PROMPT = `You classify test flows by BLAST RADIUS against one shared application world.
+
+A flow MUTATES the shared world when exercising it changes or destroys state other
+tests depend on: changing or resetting a password, revoking or invalidating
+sessions or tokens, deleting or deactivating an account, changing an email or
+username, flipping global/instance configuration, disabling a feature or sign-in
+method at runtime. Creating NEW things (users, documents, records) is NOT mutation
+— additive flows are the default. SELF-SCOPED LIFECYCLE IS ADDITIVE TOO: a flow
+that creates a record and then updates, sends, or deletes THAT SAME record
+("create a draft, edit it, delete it", "create a template and duplicate it")
+touches nothing any sibling depends on — tests mint their own records, so classify
+\`mutates\` ONLY for state the flow cannot have created itself: the seeded
+principal's credentials/sessions/tokens, the seeded fixtures, instance or global
+configuration, another account's records. When a flow both creates its own record
+AND touches such shared state, it mutates. Judge by what the flow would DO, not by
+the words alone: "reset password" mutates; "shows the reset-password page" does
+not; "delete the draft you created" does not. Over-classifying serializes half the
+run for nothing — a documenso board once ran 41 of 52 flows single-file because
+every create-then-delete lifecycle was read as destruction.
+
+Return EXACTLY ONE JSON object: { "mutators": ["<flow id>", …] } — the ids of the
+listed flows that mutate, empty array when none do. No prose, no fences.`
+
+/** Folded into the classify CACHE key: a doctrine change must re-classify —
+ *  the cached verdicts are the doctrine's output, and a key on the flow set
+ *  alone would pin an old doctrine's scheduling forever. */
+export const WORLD_CLASSIFY_PROMPT_FINGERPRINT = fingerprint(WORLD_CLASSIFY_SYSTEM_PROMPT)
+
+export function buildWorldClassifyUserPrompt(flows: readonly WorldClassifyFlowInput[]): string {
+  const lines = ['FLOWS (classify each; return only the world-mutating ids):', '']
+  for (const f of flows) {
+    lines.push(`- id: ${f.id}`, `  title: ${f.title}`)
+    for (const m of f.milestones) lines.push(`  * ${m}`)
+  }
+  return lines.join('\n')
+}
+
 export const MATCH_SYSTEM_PROMPT = `\
 You decide HOW a spec FLOW could be walked on ONE of an application's surfaces. You
 are given the flow — a user goal and an ordered list of MILESTONES — and that

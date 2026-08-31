@@ -80,8 +80,15 @@ describe('flowGenerationInputsHash — the frozen retirement salt', () => {
    * would have re-authored every committed flow in every user's repo for no
    * behavioral reason. If this case ever goes red, the salt moved and every
    * committed corpus is about to be re-worked.
+   *
+   * MOVED ONCE, DELIBERATELY, with the blast-radius cut: the canonical cli/api
+   * scenario schemas gained `world` and the author doctrine gained the
+   * shared-world/self-mint contract, both of which the corpus is MEANT to
+   * re-author under — the old corpora were written with no blast-radius
+   * discipline at all (a committed delete-account scenario deleted the seeded
+   * principal mid-run).
    */
-  const GOLDEN = 'sha256:61e6310564ffd5c9cb092bb0840c92dfacc016514cc3740275f96ff1dd57bfca'
+  const GOLDEN = 'sha256:9403ee4cf224fd488980f0442bba14a1fdc155fe4347ba79c5d10e541e8914ba'
 
   it('is byte-identical to what the pre-retirement code produced', () => {
     expect(

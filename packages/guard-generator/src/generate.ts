@@ -45,6 +45,8 @@
  */
 
 import { createHash } from 'node:crypto'
+import fs from 'node:fs'
+import path from 'node:path'
 import pLimit from 'p-limit'
 import os from 'node:os'
 import {
@@ -58,6 +60,8 @@ import {
 import {
   writeManifest,
   readManifest,
+  guardWorldDirtyMarkerPath,
+  loadScenarios,
   readGuardDecisions,
   readGuardAutoResolutions,
   writeGuardAutoResolutions,
@@ -67,6 +71,7 @@ import {
   readMergedInterfaceCatalog,
   manifestPath,
   runBuild,
+  DEFAULT_BUILD_TIMEOUT_MS,
   runInstall,
   resolveEntry,
   resolveApiServers,
@@ -161,6 +166,7 @@ import { parseOpenApiSpec } from '@truecourse/shared/openapi'
 import {
   buildAuthorUserPrompt,
   buildFidelityUserPrompt,
+  WORLD_CLASSIFY_PROMPT_FINGERPRINT,
   type AuthorMilestone,
   type AuthorUserContext,
   type InterfaceContractHint,
@@ -168,12 +174,15 @@ import {
   type ExternalServiceHint,
   type FidelityUserContext,
 } from './prompts.js'
-import { type RawGeneratedScenario } from './schemas.js'
+import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
+import { WorldClassifySchema, type RawGeneratedScenario } from './schemas.js'
 import {
   spawnRecipeRunner,
   spawnMatchRunner,
+  spawnWorldClassifyRunner,
   type RecipeRunner,
   type MatchRunner,
+  type WorldClassifyRunner,
 } from './runners.js'
 import {
   isSystemicSessionLoss,
@@ -241,6 +250,48 @@ import {
 
 /** Sentinel anchor for the single entry-preflight error — it belongs to no section. */
 const ENTRY_PREFLIGHT_ANCHOR = '(entry preflight)'
+
+/** One world-classify call covers at most this many flows — a single batched
+ *  call over a whole corpus is the call most likely to time out, and a lost
+ *  classification degrades the run's blast-radius protection. */
+const WORLD_CLASSIFY_CHUNK_SIZE = 40
+
+/** Phrases that mark a flow as a SUSPECT world-mutator when the classifier is
+ *  unavailable — deliberately coarse (a false positive only serializes a flow;
+ *  a false negative lets it poison the shared world). Matched against the
+ *  flow's title and milestone titles, lowercased. */
+const WORLD_MUTATION_SUSPECT_PHRASES = [
+  'password',
+  'credential',
+  'revoke',
+  'revoked',
+  'deactivate',
+  'delete account',
+  'delete a user',
+  'delete user',
+  'deletes a user',
+  'delete the account',
+  'deletes the account',
+  'remove user',
+  'remove member',
+  'change email',
+  'changes email',
+  'change username',
+  'two-factor',
+  '2fa',
+  'sign-in method',
+  'signin method',
+  'instance config',
+  'global config',
+  'disable',
+] as const
+
+/** The fail-closed fallback for a lost classifier chunk: does the flow LOOK
+ *  world-mutating? Exported for tests. */
+export function looksWorldMutating(flow: { title: string; milestones: readonly string[] }): boolean {
+  const text = [flow.title, ...flow.milestones].join(' ').toLowerCase()
+  return WORLD_MUTATION_SUSPECT_PHRASES.some((phrase) => text.includes(phrase))
+}
 
 // ---------------------------------------------------------------------------
 // Result + option types
@@ -579,6 +630,9 @@ export interface GenerateGuardsOptions {
   // none; an injected runner bypasses the transport) ---
   recipeRunner?: RecipeRunner
   matchRunner?: MatchRunner
+  /** Test seam for the batched world classification; production spawns it on
+   *  the shared transport (see {@link spawnWorldClassifyRunner}). */
+  worldClassifyRunner?: WorldClassifyRunner
   // --- progress hooks ---
   onPlan?: (total: number, work: number) => void
   /** Extraction progress, ticking per settled doc session (cache hits included). */
@@ -778,6 +832,14 @@ export type FlowWorkerSessionResult =
 export type FlowWorkerSessionSeam = (input: {
   tasks: readonly FlowWorkerTask[]
   epicTasks: readonly FlowWorkerTask[]
+  /**
+   * Wave 3: the flows the world classifier judged WORLD-MUTATING (credential
+   * changes, account deletion, session revocation, global config). Run LAST and
+   * SERIALIZED — one session at a time — so a destructive draft executes only
+   * after every shared-world sibling has settled; the engine restores the world
+   * after the wave.
+   */
+  mutatorTasks: readonly FlowWorkerTask[]
   /** The run's doc universe — the fidelity child's `read_claim_section` set. */
   docs: readonly GuardDoc[]
   /** Ticks once per settled task (cache hits included), carrying the task's
@@ -911,6 +973,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const matchRunner =
     options.matchRunner ??
     spawnMatchRunner({ transport, model: options.models?.match, fallbackModel: options.models?.fallback })
+  const worldClassifyRunner =
+    options.worldClassifyRunner ??
+    spawnWorldClassifyRunner({ transport, model: options.models?.match, fallbackModel: options.models?.fallback })
 
   const coverageGaps: GuardCoverageGap[] = []
   const errors: GuardGenerateError[] = []
@@ -1344,6 +1409,14 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
 
   const priorFlows = new Map((readManifest(repoRoot)?.flows ?? []).map((f) => [f.flowId, f]))
 
+  // C-LITE ARRANGE REUSE: the committed corpus's PASSING scenarios, indexed by
+  // the interfaces they walk. A worker's briefing injects up to
+  // SIBLING_BRIEFING_MAX of them (by interface overlap with its own plan) so
+  // arranging is copy-and-parameterize from proven neighbours — the sign-in
+  // that works, the record-creation calls that work — instead of per-session
+  // rediscovery. Green-only: a failing scenario's verbs prove nothing.
+  const siblingIndex = buildSiblingIndex(repoRoot, priorFlows)
+
   // The flows stop — the internal `stopAfterFlows` test seam and single-step
   // mode's `--only-flows` share it: everything spec-side ran, nothing was
   // written (single-step mode also suppressed the `flows.json` write above).
@@ -1635,6 +1708,73 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
 
   const changedWorks = works.filter((w) => w.changed)
   flowsReport.skipped = works.length - changedWorks.length
+
+  // WORLD CLASSIFICATION (blast-radius scheduling, the generate side): batched,
+  // cached calls decide which changed flows MUTATE the shared world — credential
+  // changes, account deletion, session revocation, global config. Their workers
+  // run as the pool's serialized third wave, after every shared-world sibling
+  // settled, and the world is restored once they finish (one committed
+  // delete-account scenario once cost a documenso run 452 sign-in failures
+  // because nothing scheduled around it). Chunked because one call over every
+  // changed flow is the call most likely to time out — and when it did, the
+  // fail-open fallback removed all protection at the moment it mattered most
+  // (a 300s timeout let a password rewrite run mid-pool). So a chunk that is
+  // still lost after a retry fails CLOSED: its flows go through the
+  // deterministic keyword fallback, and suspects join the tail. Worst case a
+  // flow runs serialized that didn't need to — slow, never poisonous.
+  const destructiveFlowIds = new Set<string>()
+  if (changedWorks.length > 0) {
+    const classifyInputs = changedWorks.map((w) => ({
+      id: w.flow.id,
+      title: w.flow.title,
+      milestones: w.flow.milestones.map((m) => m.claimTitle),
+    }))
+    const WORLD_CLASSIFY_CACHE_NAME = 'guard/world-classify'
+    const chunks: (typeof classifyInputs)[] = []
+    for (let i = 0; i < classifyInputs.length; i += WORLD_CLASSIFY_CHUNK_SIZE) {
+      chunks.push(classifyInputs.slice(i, i + WORLD_CLASSIFY_CHUNK_SIZE))
+    }
+    for (const chunk of chunks) {
+      const chunkKey = createHash('sha256')
+        .update(`${WORLD_CLASSIFY_PROMPT_FINGERPRINT}\0${JSON.stringify(chunk)}`)
+        .digest('hex')
+      const cached = WorldClassifySchema.safeParse(
+        await getCacheEntry(repoRoot, WORLD_CLASSIFY_CACHE_NAME, chunkKey),
+      )
+      if (cached.success) {
+        for (const id of cached.data.mutators) destructiveFlowIds.add(id)
+        continue
+      }
+      const known = new Set(chunk.map((f) => f.id))
+      let settled = false
+      let lastError = 'invalid reply'
+      for (let attempt = 0; attempt < 2 && !settled; attempt++) {
+        try {
+          const raw = await worldClassifyRunner(chunk)
+          const parsed = WorldClassifySchema.safeParse(raw)
+          if (parsed.success) {
+            const mutators = parsed.data.mutators.filter((id) => known.has(id))
+            await setCacheEntry(repoRoot, WORLD_CLASSIFY_CACHE_NAME, chunkKey, { mutators })
+            for (const id of mutators) destructiveFlowIds.add(id)
+            settled = true
+          }
+        } catch (e) {
+          lastError = (e as Error).message
+        }
+      }
+      if (!settled) {
+        const suspects = chunk.filter(looksWorldMutating).map((f) => f.id)
+        for (const id of suspects) destructiveFlowIds.add(id)
+        errors.push({
+          doc: '',
+          anchor: '',
+          message:
+            `world classification lost a chunk of ${chunk.length} flow(s) (${lastError}) — ` +
+            `the deterministic fallback scheduled ${suspects.length} suspect flow(s) into the serialized mutator tail`,
+        })
+      }
+    }
+  }
   // Announce the settle denominator before the first (slow) authoring/birth phase,
   // so the live counter is never a bare count without context.
   options.onFlowSettled?.(0, changedWorks.length)
@@ -1882,6 +2022,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // Failures the auto-resolve loop RETIRED this run (no committed row) — the
   // flow still re-attempts, so persist unsettles it.
   const autoRetiredRefs = new Set<string>()
+  // True once the pool planned a mutator wave — the world is restored (and the
+  // dirty marker cleared) after the last execution, before persist.
+  let mutatorPhasePlanned = false
   // The worker path's fidelity children lost EVERY dispatch — the carve-out's
   // loud row, mirrored from the transport-audit predicate the one-shot uses.
   let workerFidelityLoss: GuardSessionSummary | null = null
@@ -2023,6 +2166,53 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           return `step ${badRe.step} ${badRe.where}: /${badRe.pattern}/ is not a valid regular expression — ${badRe.error}`
         }
         return null
+      }
+
+      // Tasks whose worker drafted a `world: mutates` scenario OUTSIDE the
+      // serialized mutator tail — the tool refused the execution, and the pool
+      // re-dispatches each one into a second, tail-only invocation after the
+      // waves finish (unless the session settled anyway with a rewrite that
+      // does not mutate).
+      const deferredMutatorRefs = new Set<string>()
+
+      /**
+       * The DETERMINISTIC mutator gate, enforced where execution happens — the
+       * classifier only advises scheduling, but a draft that DECLARES
+       * `world: mutates` states the fact itself, and this run proved workers
+       * declare honestly while a timed-out classifier scheduled nothing (a
+       * password rewrite then ran mid-pool and cost the run 431 sign-in
+       * failures). Returns the refusal report, or null to let the run proceed.
+       * Two rules, both fail-closed:
+       *  - no `api.services.reset` in the recipe ⇒ a mutation nobody can
+       *    repair never runs, anywhere;
+       *  - outside the mutator tail ⇒ deferred, and the pool re-runs the flow
+       *    in a serialized tail-only invocation this same generate.
+       */
+      const mutatorDraftGate = (task: AuthorTask, raw: RawGeneratedScenario): FlowWorkerToolReport | null => {
+        if (raw.world !== 'mutates') return null
+        if (!recipe.api?.services?.reset) {
+          return {
+            content:
+              'not executed — this draft declares `world: mutates`, but the recipe declares no `api.services.reset`, ' +
+              'and the engine refuses to run a mutation it cannot repair. If the claim can be tested WITHOUT mutating ' +
+              'shared state (mint your own principal or record with ${unique} and mutate that), rewrite the scenario ' +
+              'that way and run it. Otherwise end the session with outcome kind "blocked" and the capability ' +
+              '"a recipe api.services.reset command (world-mutating tests are barred until the recipe can restore the world)".',
+            isError: true,
+          }
+        }
+        if (destructiveFlowIds.has(task.work.flow.id)) return null
+        deferredMutatorRefs.add(taskKey(task))
+        return {
+          content:
+            'not executed — this draft declares `world: mutates`, and mutating drafts execute only in the run\'s ' +
+            'serialized final wave, after every shared-world sibling has settled. If the claim can be tested WITHOUT ' +
+            'mutating shared state (mint your own principal or record with ${unique} and mutate that), rewrite the ' +
+            'scenario that way and run it here. Otherwise end the session with outcome kind "blocked" and the ' +
+            'capability "deferred to the serialized mutator wave" — the engine re-runs this flow there before this ' +
+            'generate ends.',
+          isError: true,
+        }
       }
 
       const buildCandidate = (
@@ -2318,6 +2508,14 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                 for (const m of members) lines.push('', `--- member flow ${m.flowId} (${m.surface})`, m.yaml)
               }
             }
+            const siblings = settledSiblings(siblingIndex, task)
+            if (siblings.length > 0) {
+              lines.push(
+                '',
+                'SETTLED SIBLING SCENARIOS (read-only — committed GREEN tests that already walk interfaces your flow shares; REUSE their proven arrange verbs — the sign-in they perform, the records they create, the endpoints and field shapes that verifiably work — never copy their assertions, and mint your own ${unique} identities):',
+              )
+              for (const s of siblings) lines.push('', `--- sibling ${s.id}`, s.yaml)
+            }
             lines.push(
               '',
               'Work the loop: draft the scenario as YAML, `run_scenario` it, revise on the evidence, then `submit_scenario`; end the session with the outcome object.',
@@ -2329,6 +2527,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             if ('error' in parsed) return { content: parsed.error, isError: true }
             const defect = preflightDefect(task, parsed.raw)
             if (defect) return { content: `pre-flight defect (not executed): ${defect}`, isError: true }
+            const gate = mutatorDraftGate(task, parsed.raw)
+            if (gate) return gate
             const built = buildCandidate(state, parsed.raw)
             if ('error' in built) return { content: `the scenario does not build: ${built.error}`, isError: true }
             const run = await executeOnce(built.candidate, task)
@@ -2343,6 +2543,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             if ('error' in parsed) return { content: parsed.error, isError: true }
             const defect = preflightDefect(task, parsed.raw)
             if (defect) return { content: `pre-flight defect (not executed): ${defect}`, isError: true }
+            const gate = mutatorDraftGate(task, parsed.raw)
+            if (gate) return gate
             const built = buildCandidate(state, parsed.raw)
             if ('error' in built) return { content: `the scenario does not build: ${built.error}`, isError: true }
             const run = await executeOnce(built.candidate, task)
@@ -2367,6 +2569,16 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             // stands only when its verdict still reproduces.
             const scenario = parseScenarioYaml(scenarioYaml)
             if (!scenario) return false
+            // A cached MUTATOR must not execute outside the serialized tail
+            // (or at all without a declared reset) — a confirmation run is an
+            // execution like any other. Treated as a miss: the session runs,
+            // and the draft gate rules there.
+            if (
+              scenario.world === 'mutates' &&
+              (!recipe.api?.services?.reset || !destructiveFlowIds.has(task.work.flow.id))
+            ) {
+              return false
+            }
             usedIds.add(scenario.id)
             const candidate: BirthCandidate = {
               flow: task.work.flow,
@@ -2415,16 +2627,43 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       }
 
       const workerStates = [...states.values()]
+      const isMutatorState = (s: WorkerTaskState): boolean =>
+        destructiveFlowIds.has(s.task.work.flow.id)
       const waveTasks = workerStates
-        .filter((s) => s.task.work.flow.composedOf.length === 0)
+        .filter((s) => s.task.work.flow.composedOf.length === 0 && !isMutatorState(s))
         .map(makeWorkerTask)
       const epicTasks = workerStates
-        .filter((s) => s.task.work.flow.composedOf.length > 0)
+        .filter((s) => s.task.work.flow.composedOf.length > 0 && !isMutatorState(s))
         .map(makeWorkerTask)
+      // The serialized third wave: destructive flows (epics included — their
+      // members settled in the earlier waves). The dirty marker outlives a
+      // crash mid-wave so the next world boot resets before building on the
+      // damage; the reset after persist clears it.
+      const mutatorTasks = workerStates.filter(isMutatorState).map(makeWorkerTask)
+      if (mutatorTasks.length > 0) {
+        mutatorPhasePlanned = true
+        fs.mkdirSync(path.dirname(guardWorldDirtyMarkerPath(repoRoot)), { recursive: true })
+        fs.writeFileSync(guardWorldDirtyMarkerPath(repoRoot), 'guard-generate\n')
+      }
 
-      const { byTask, summary, fidelitySummary } = await options.flowWorkerSession({
+      const mergeSummaries = (a: GuardSessionSummary, b: GuardSessionSummary): GuardSessionSummary => ({
+        kind: a.kind,
+        ran: a.ran + b.ran,
+        fromCache: a.fromCache + b.fromCache,
+        failed: a.failed + b.failed,
+        allTransport: a.allTransport && b.allTransport,
+        spent: {
+          turns: a.spent.turns + b.spent.turns,
+          tokens: a.spent.tokens + b.spent.tokens,
+          costUsd: a.spent.costUsd + b.spent.costUsd,
+        },
+        ...(a.firstError ?? b.firstError ? { firstError: a.firstError ?? b.firstError } : {}),
+      })
+
+      const phaseA = await options.flowWorkerSession({
         tasks: waveTasks,
         epicTasks,
+        mutatorTasks,
         docs,
         onTask: (done, total, outcome) => {
           if (outcome === 'settled') workerSettledCount++
@@ -2432,6 +2671,47 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           options.onWorkerProgress?.({ done, total, settled: workerSettledCount, blocked: workerBlockedCount })
         },
       })
+      const byTask = phaseA.byTask
+      let summary = phaseA.summary
+      let fidelitySummary = phaseA.fidelitySummary
+
+      // THE DEFERRED-MUTATOR RE-DISPATCH: tasks whose worker drafted a
+      // `world: mutates` scenario mid-wave (the tool refused the execution)
+      // re-run in a SECOND, tail-only seam invocation — serialized by the
+      // seam's mutator-wave contract — unless the session settled anyway with
+      // a rewrite that does not mutate. The gate opens for them by adding
+      // their flow ids to `destructiveFlowIds` first.
+      const deferredStates = [...states.values()].filter((s) => {
+        if (!deferredMutatorRefs.has(taskKey(s.task))) return false
+        const result = byTask.get(`flow:${s.task.work.flow.id}:${s.task.surface}`)
+        return !(result?.kind === 'outcome' && result.outcome.kind === 'settled')
+      })
+      if (deferredStates.length > 0 && !anomalyLatch && !runRefusal) {
+        for (const s of deferredStates) destructiveFlowIds.add(s.task.work.flow.id)
+        if (!mutatorPhasePlanned) {
+          mutatorPhasePlanned = true
+          fs.mkdirSync(path.dirname(guardWorldDirtyMarkerPath(repoRoot)), { recursive: true })
+          fs.writeFileSync(guardWorldDirtyMarkerPath(repoRoot), 'guard-generate\n')
+        }
+        const phaseB = await options.flowWorkerSession({
+          tasks: [],
+          epicTasks: [],
+          mutatorTasks: deferredStates.map(makeWorkerTask),
+          docs,
+          onTask: (done, total, outcome) => {
+            if (outcome === 'settled') workerSettledCount++
+            else if (outcome === 'blocked') workerBlockedCount++
+            options.onWorkerProgress?.({ done, total, settled: workerSettledCount, blocked: workerBlockedCount })
+          },
+        })
+        for (const [workItem, result] of phaseB.byTask) byTask.set(workItem, result)
+        summary = mergeSummaries(summary, phaseB.summary)
+        if (phaseB.fidelitySummary) {
+          fidelitySummary = fidelitySummary
+            ? mergeSummaries(fidelitySummary, phaseB.fidelitySummary)
+            : phaseB.fidelitySummary
+        }
+      }
       recordSessionSummary(summary)
       if (fidelitySummary) {
         recordSessionSummary(fidelitySummary)
@@ -2701,6 +2981,14 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // so the write phase can never race a live compose project (and a refused or
   // clean run alike leaves the host swept; crashes fall to the item-94 channel).
   await sharedWorld.shutdown()
+
+  // The mutator wave ran against that world: restore it so its damage (a changed
+  // password, a deleted account) reaches no later run. A recipe with no `reset`
+  // leaves the marker standing — the honest record that the world is dirty.
+  if (mutatorPhasePlanned && recipe.api?.services?.reset) {
+    const reset = await runBuild(repoRoot, recipe.api.services.reset, recipe.env, DEFAULT_BUILD_TIMEOUT_MS)
+    if (reset.ok) fs.rmSync(guardWorldDirtyMarkerPath(repoRoot), { force: true })
+  }
 
   // 8. Persist — INDEPENDENTLY, per scenario, whatever its confirmation run said.
   // A test that passed is written; a test that FAILED is written too, with its
@@ -3630,12 +3918,20 @@ function buildAuthorCtx(
 /** The web batch's preparation framing: how the surface is served and probed, plus
  *  the cli entrypoint when the repo has one (a web scenario's seeding `run` steps
  *  append to it). Defaults come from `resolveWebSurface` — the ONE place the web
- *  block's defaults exist — so the prompt can never disagree with the runner. */
-function webPreparationCtx(recipe: Recipe): Pick<AuthorUserContext, 'recipeServe' | 'recipeHealthPath' | 'recipeEntry'> {
+ *  block's defaults exist — so the prompt can never disagree with the runner.
+ *  The seed's FIXTURE catalog rides here too: it is how a web scenario learns a
+ *  login principal exists at all — without it every auth-gated flow blocks on
+ *  the word "credentials" while the seeded user sits in the database (documenso
+ *  2026-08-28: 114 of 119 web flows). */
+function webPreparationCtx(
+  recipe: Recipe,
+): Pick<AuthorUserContext, 'recipeServe' | 'recipeHealthPath' | 'recipeEntry' | 'fixtures'> {
   const web = resolveWebSurface(recipe)
+  const fixtures = recipeFixtureCatalog(recipe)
   return {
     ...(web ? { recipeServe: [...web.serve], recipeHealthPath: web.healthPath } : {}),
     ...(recipe.entry ? { recipeEntry: recipe.entry } : {}),
+    ...(fixtures.length > 0 ? { fixtures } : {}),
   }
 }
 
@@ -3962,5 +4258,57 @@ function scenarioBehavior(scenario: GuardScenario): string {
     steps: scenario.steps,
     normalize: scenario.normalize ?? [],
   })
+}
+
+// --- C-lite sibling briefings ------------------------------------------------
+
+/** How many green siblings a worker briefing carries, and how big one may be —
+ *  grounding for the arrange verbs, never a second corpus. */
+const SIBLING_BRIEFING_MAX = 3
+const SIBLING_YAML_MAX_CHARS = 6_000
+
+interface SiblingScenario {
+  id: string
+  flowId?: string
+  interfaces: readonly string[]
+  yaml: string
+}
+
+/** The committed corpus's PASSING scenarios with the interfaces they walk —
+ *  what a worker may copy proven arrange verbs from. */
+function buildSiblingIndex(
+  repoRoot: string,
+  priorFlows: ReadonlyMap<string, GuardManifestFlow>,
+): SiblingScenario[] {
+  const status = new Map<string, string>()
+  for (const flow of priorFlows.values()) {
+    for (const s of flow.scenarios) status.set(s.id, s.status)
+  }
+  const out: SiblingScenario[] = []
+  for (const scenario of loadScenarios(repoRoot).scenarios) {
+    if (status.get(scenario.id) !== 'passing') continue
+    const interfaces = scenario.interface?.path ?? []
+    if (interfaces.length === 0) continue
+    const yamlText = serializeScenarioYaml(scenario)
+    if (yamlText.length > SIBLING_YAML_MAX_CHARS) continue
+    out.push({
+      id: scenario.id,
+      ...(scenario.flow ? { flowId: scenario.flow.id } : {}),
+      interfaces,
+      yaml: yamlText,
+    })
+  }
+  return out
+}
+
+/** The task's best-overlapping green siblings, most shared interfaces first. */
+function settledSiblings(index: readonly SiblingScenario[], task: AuthorTask): SiblingScenario[] {
+  const wanted = new Set(task.plan.interfaces.map((j) => j.id))
+  return index
+    .map((s) => ({ s, overlap: s.interfaces.filter((id) => wanted.has(id)).length }))
+    .filter((o) => o.overlap > 0 && o.s.flowId !== task.work.flow.id)
+    .sort((a, b) => b.overlap - a.overlap || a.s.id.localeCompare(b.s.id))
+    .slice(0, SIBLING_BRIEFING_MAX)
+    .map((o) => o.s)
 }
 

@@ -27,23 +27,28 @@
  */
 
 import { cliTransport, extractJsonValue, jsonSchemaHint, type LlmTransport } from '@truecourse/shared/llm'
-import { RealizationMatchSchema, RecipeProposalSchema } from './schemas.js'
+import { RealizationMatchSchema, RecipeProposalSchema, WorldClassifySchema } from './schemas.js'
 import {
   RECIPE_SYSTEM_PROMPT,
   buildRecipeUserPrompt,
   MATCH_SYSTEM_PROMPT,
   buildMatchUserPrompt,
+  WORLD_CLASSIFY_SYSTEM_PROMPT,
+  buildWorldClassifyUserPrompt,
   type RecipeDiscoveryInput,
   type MatchUserContext,
+  type WorldClassifyFlowInput,
 } from './prompts.js'
 
 /** The response schema each stage sends on its request — one per reply contract,
  *  rendered once at module load from the engine's own Zod source. */
 const MATCH_RESPONSE_SCHEMA = jsonSchemaHint(RealizationMatchSchema)
 const RECIPE_RESPONSE_SCHEMA = jsonSchemaHint(RecipeProposalSchema)
+const WORLD_CLASSIFY_RESPONSE_SCHEMA = jsonSchemaHint(WorldClassifySchema)
 
 export type RecipeRunner = (input: RecipeDiscoveryInput) => Promise<unknown>
 export type MatchRunner = (input: MatchUserContext) => Promise<unknown>
+export type WorldClassifyRunner = (flows: readonly WorldClassifyFlowInput[]) => Promise<unknown>
 
 interface SpawnOptions {
   transport?: LlmTransport
@@ -67,6 +72,27 @@ export function spawnMatchRunner(opts: SpawnOptions = {}): MatchRunner {
       user: buildMatchUserPrompt(ctx),
       responseFormat: 'json',
       schema: MATCH_RESPONSE_SCHEMA,
+      timeoutMs,
+    })
+    return JSON.parse(extractJsonValue(raw))
+  }
+}
+
+/** World classification — ONE batched call per generate over the changed flows,
+ *  deciding which workers the pool schedules into the mutator tail. */
+export function spawnWorldClassifyRunner(opts: SpawnOptions = {}): WorldClassifyRunner {
+  const transport = opts.transport ?? cliTransport()
+  const timeoutMs = opts.timeoutMs ?? 300_000
+  return async (flows) => {
+    const raw = await transport({
+      id: 'guard.world-classify',
+      stage: 'guard.world-classify',
+      model: opts.model,
+      fallbackModel: opts.fallbackModel,
+      system: WORLD_CLASSIFY_SYSTEM_PROMPT,
+      user: buildWorldClassifyUserPrompt(flows),
+      responseFormat: 'json',
+      schema: WORLD_CLASSIFY_RESPONSE_SCHEMA,
       timeoutMs,
     })
     return JSON.parse(extractJsonValue(raw))

@@ -32,7 +32,7 @@ import {
   type GuardDriverId,
   type GuardWebStep,
 } from '@truecourse/shared'
-import { isNoOpEntry, NO_OP_ENTRY_MESSAGE } from '@truecourse/guard-runner'
+import { isNoOpEntry, NO_OP_ENTRY_MESSAGE, RecipeWebSchema } from '@truecourse/guard-runner'
 
 /** The per-section classification summary recorded in the manifest, derived from
  *  extraction (kept shape — the dashboard renders it as a coverage verdict). */
@@ -94,7 +94,12 @@ export const RecipeApiProposalSchema = z
      * why it may not hide inside `build`. Shared across every declared server.
      */
     services: z
-      .object({ up: z.string().min(1), down: z.string().min(1).optional() })
+      .object({
+        up: z.string().min(1),
+        down: z.string().min(1).optional(),
+        /** Full-wipe restore (volumes included) — see the runner schema's `reset`. */
+        reset: z.string().min(1).optional(),
+      })
       .strict()
       .optional(),
     /**
@@ -155,6 +160,14 @@ export const RecipeProposalSchema = z
       .optional(),
     env: z.record(z.string(), z.string()).optional(),
     api: RecipeApiProposalSchema.optional(),
+    /**
+     * The BROWSER surface — the runner's own `web` block, verbatim (serve argv,
+     * healthPath, env, `app` naming the served workspace app in a monorepo).
+     * Proposed, not hand-authored: a workspace that ships a browser app without
+     * a `web` block leaves every screen-driven claim untestable, and the static
+     * rules refuse exactly that.
+     */
+    web: RecipeWebSchema.optional(),
     /**
      * The product's OWN hostnames (`cal.com`, `api.cal.com`) — what keeps
      * detection from minting the app itself as a third-party external service.
@@ -318,6 +331,14 @@ const AuthoredCliStepSchema = GuardStepObjectSchema.extend({ run: z.array(z.stri
 export const RawGeneratedCliScenarioSchema = z
   .object({
     title: z.string().min(1),
+    /**
+     * The scenario's BLAST RADIUS. Omit (= `shared`) when the scenario only
+     * ADDS state it creates itself; declare `mutates` when it mutates or
+     * destroys state it did not mint — the seeded principal's credentials or
+     * sessions, account deletion, global configuration — so the runner
+     * schedules it last against a world it restores afterwards.
+     */
+    world: z.enum(['shared', 'mutates']).optional(),
     setup: GuardSetupSchema.optional(),
     steps: z.array(AuthoredCliStepSchema).min(1),
     normalize: z.array(GuardNormalizerSchema).optional(),
@@ -328,6 +349,14 @@ export type RawGeneratedCliScenario = z.infer<typeof RawGeneratedCliScenarioSche
 export const RawGeneratedApiScenarioSchema = z
   .object({
     title: z.string().min(1),
+    /**
+     * The scenario's BLAST RADIUS. Omit (= `shared`) when the scenario only
+     * ADDS state it creates itself; declare `mutates` when it mutates or
+     * destroys state it did not mint — the seeded principal's credentials or
+     * sessions, account deletion, global configuration — so the runner
+     * schedules it last against a world it restores afterwards.
+     */
+    world: z.enum(['shared', 'mutates']).optional(),
     setup: GuardSetupSchema.optional(),
     steps: z.array(GuardApiStepSchema).min(1),
     normalize: z.array(GuardNormalizerSchema).optional(),
@@ -362,6 +391,14 @@ const AuthoredWebStepSchema: z.ZodType<AuthoredWebStep, z.ZodTypeDef, unknown> =
 export const RawGeneratedWebScenarioObjectSchema = z
   .object({
     title: z.string().min(1),
+    /**
+     * The scenario's BLAST RADIUS. Omit (= `shared`) when the scenario only
+     * ADDS state it creates itself; declare `mutates` when it mutates or
+     * destroys state it did not mint — the seeded principal's credentials or
+     * sessions, account deletion, global configuration — so the runner
+     * schedules it last against a world it restores afterwards.
+     */
+    world: z.enum(['shared', 'mutates']).optional(),
     setup: GuardSetupSchema.optional(),
     steps: z.array(AuthoredWebStepSchema).min(1),
     normalize: z.array(GuardNormalizerSchema).optional(),
@@ -601,6 +638,22 @@ export type RealizationStep = z.infer<typeof RealizationStepSchema>
  * both, or neither, is malformed and earns the corrective re-ask, so "this surface
  * cannot do it" is always a STATED answer rather than an empty plan.
  */
+
+/**
+ * The world-classify reply: which of the listed flows MUTATE shared world state
+ * (credential changes, account deletion, session revocation, global config) —
+ * their workers are scheduled last so a destructive draft cannot poison the
+ * shared generate world for every sibling still authoring. One batched call per
+ * generate, cached on the flow set.
+ */
+export const WorldClassifySchema = z
+  .object({
+    /** Flow ids judged world-mutating; every other listed flow is additive. */
+    mutators: z.array(z.string()),
+  })
+  .strict()
+export type WorldClassify = z.infer<typeof WorldClassifySchema>
+
 export const RealizationMatchSchema = z
   .object({
     plan: z.array(RealizationStepSchema).optional(),

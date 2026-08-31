@@ -213,9 +213,12 @@ describe('flowWorkerSessionDef', () => {
     // These literals are the author-cache keys of every committed cli/api corpus.
     // A prompt edit that moves one re-authors EVERY such flow; fail here first,
     // loudly, so the roll is a decision rather than an accident. The web arm was
-    // added with both of these unchanged.
-    expect(FLOW_WORKER_CLI_PROMPT_FINGERPRINT).toBe('461564a482560dca')
-    expect(FLOW_WORKER_API_PROMPT_FINGERPRINT).toBe('c3f27b81e0bab9b9')
+    // added with both unchanged; both then moved ONCE, deliberately, with the
+    // blast-radius cut: the canonical scenario schema gained `world` and the
+    // doctrine gained the shared-world/self-mint contract (a committed
+    // delete-account scenario had deleted the seeded principal mid-run).
+    expect(FLOW_WORKER_CLI_PROMPT_FINGERPRINT).toBe('585bda824f89eaad')
+    expect(FLOW_WORKER_API_PROMPT_FINGERPRINT).toBe('5ea39e8a0e7fe72b')
   })
 
   it('routes both tools to the task’s engine closures', async () => {
@@ -320,7 +323,7 @@ describe('the flow-worker pool’s cache', () => {
       scenarioYaml: YAML,
     })
 
-    const { byTask, summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], docs: docsOf(r) })
+    const { byTask, summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], mutatorTasks: [], docs: docsOf(r) })
 
     expect(summary).toMatchObject({ ran: 0, fromCache: 1, failed: 0 })
     expect(byTask.get(task.workItem)).toEqual({
@@ -342,7 +345,7 @@ describe('the flow-worker pool’s cache', () => {
     await setCacheEntry(r, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task), stale)
     sessionScript = settleScript
 
-    const { summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], docs: docsOf(r) })
+    const { summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], mutatorTasks: [], docs: docsOf(r) })
 
     expect(summary).toMatchObject({ ran: 1, fromCache: 0, failed: 0 })
     expect(constructions).toBe(1)
@@ -373,7 +376,7 @@ describe('the flow-worker pool’s cache', () => {
     await setCacheEntry(r, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task), blocked)
     sessionScript = settleScript
 
-    const { byTask, summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], docs: docsOf(r) })
+    const { byTask, summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], mutatorTasks: [], docs: docsOf(r) })
 
     expect(summary).toMatchObject({ ran: 1, fromCache: 0 })
     const res = byTask.get(task.workItem)
@@ -394,7 +397,7 @@ describe('the flow-worker pool’s cache', () => {
       return outcome({ kind: 'blocked', perMilestone: [{ order: 1, capability: 'stripe sandbox account' }] })
     }
 
-    const { byTask, summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], docs: docsOf(r) })
+    const { byTask, summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], mutatorTasks: [], docs: docsOf(r) })
     expect(summary).toMatchObject({ ran: 1, failed: 0 })
     expect(byTask.get(task.workItem)).toMatchObject({ kind: 'outcome' })
     expect(await getCacheEntry(r, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task))).toBeNull()
@@ -409,7 +412,7 @@ describe('the flow-worker pool’s cache', () => {
     })
     sessionScript = settleScript
 
-    const { summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], docs: docsOf(r) })
+    const { summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], mutatorTasks: [], docs: docsOf(r) })
 
     expect(summary).toMatchObject({ ran: 1, fromCache: 0 })
     expect(calls.confirm).toEqual([])
@@ -421,7 +424,7 @@ describe('the flow-worker pool’s cache', () => {
     const { task } = fakeTask()
     sessionScript = settleScript
 
-    await workerSeam(r)({ tasks: [task], epicTasks: [], docs: docsOf(r) })
+    await workerSeam(r)({ tasks: [task], epicTasks: [], mutatorTasks: [], docs: docsOf(r) })
 
     expect(await getCacheEntry(r, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task))).toEqual({
       outcome: { kind: 'settled', scenarioYamlSha: sha256(YAML), expectedReds: [] },
@@ -440,7 +443,7 @@ describe('the flow-worker pool’s cache', () => {
       return outcome({ kind: 'settled', scenarioYamlSha: 'f'.repeat(64), expectedReds: [] })
     }
 
-    const { byTask, summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], docs: docsOf(r) })
+    const { byTask, summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], mutatorTasks: [], docs: docsOf(r) })
 
     expect(summary).toMatchObject({ ran: 1, failed: 1, allTransport: false })
     const result = byTask.get(task.workItem)!
@@ -457,7 +460,7 @@ describe('the flow-worker pool’s cache', () => {
     const { task } = fakeTask({ stashedYaml: () => undefined, hasStash: () => true })
     sessionScript = settleScript
 
-    const { byTask, summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], docs: docsOf(r) })
+    const { byTask, summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], mutatorTasks: [], docs: docsOf(r) })
 
     expect(summary).toMatchObject({ ran: 1, failed: 0 })
     expect(byTask.get(task.workItem)).toMatchObject({ kind: 'outcome' })
@@ -472,7 +475,7 @@ describe('the flow-worker pool’s cache', () => {
       return outcome({ kind: 'retired', attempts: 2, lastEvidence: 'no faithful scenario' })
     }
 
-    const { summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], docs: docsOf(r) })
+    const { summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], mutatorTasks: [], docs: docsOf(r) })
     expect(summary).toMatchObject({ ran: 1, failed: 0 })
     expect(await getCacheEntry(r, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task))).toBeNull()
   })
@@ -485,7 +488,7 @@ describe('the flow-worker pool’s cache', () => {
       failure: { kind: 'transport', detail: 'gone', class: 'provider', retryability: 'none' },
     })
 
-    const { byTask, summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], docs: docsOf(r) })
+    const { byTask, summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], mutatorTasks: [], docs: docsOf(r) })
     expect(summary).toMatchObject({ ran: 1, failed: 1, allTransport: true })
     expect(byTask.get(task.workItem)).toMatchObject({ kind: 'failed' })
     expect(await getCacheEntry(r, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task))).toBeNull()
@@ -493,11 +496,12 @@ describe('the flow-worker pool’s cache', () => {
 })
 
 describe('the flow-worker pool’s waves and progress', () => {
-  it('runs every non-epic task before any epic one, and ticks per settled task', async () => {
+  it('runs non-epics, then epics, then the serialized mutator wave — ticking per settled task', async () => {
     const r = docRepo()
     const order: string[] = []
     const member = fakeTask({}, 'member')
     const epic = fakeTask({ epic: true, workItem: 'flow:epic:cli', flowId: 'epic' }, 'epic')
+    const mutator = fakeTask({ workItem: 'flow:mutator:cli', flowId: 'mutator' }, 'mutator')
     sessionScript = async (call) => {
       order.push(call.briefing)
       await callTool(call, 'run_scenario', { yaml: YAML })
@@ -510,19 +514,22 @@ describe('the flow-worker pool’s waves and progress', () => {
     const { summary } = await workerSeam(r)({
       tasks: [member.task],
       epicTasks: [epic.task],
+      mutatorTasks: [mutator.task],
       docs: docsOf(r),
       onTask: (done, total, kind) => ticks.push({ done, total, ...(kind ? { kind } : {}) }),
     })
 
-    expect(order).toEqual(['BRIEFING for member', 'BRIEFING for epic'])
-    expect(summary.ran).toBe(2)
+    expect(order).toEqual(['BRIEFING for member', 'BRIEFING for epic', 'BRIEFING for mutator'])
+    expect(summary.ran).toBe(3)
     expect(ticks).toEqual([
-      { done: 0, total: 2 },
-      { done: 1, total: 2, kind: 'settled' },
-      { done: 2, total: 2, kind: 'settled' },
+      { done: 0, total: 3 },
+      { done: 1, total: 3, kind: 'settled' },
+      { done: 2, total: 3, kind: 'settled' },
+      { done: 3, total: 3, kind: 'settled' },
     ])
-    // The epic's briefing is prepared only after the first wave folded.
+    // Each later wave's briefing is prepared only after the previous fully folded.
     expect(epic.calls.prepare).toBe(1)
+    expect(mutator.calls.prepare).toBe(1)
   })
 
   it('an unconstructible driver fails every miss transport-class instead of throwing', async () => {
@@ -535,7 +542,7 @@ describe('the flow-worker pool’s waves and progress', () => {
       },
     })
 
-    const { byTask, summary } = await seams.flowWorkerSession({ tasks: [task], epicTasks: [], docs: docsOf(r) })
+    const { byTask, summary } = await seams.flowWorkerSession({ tasks: [task], epicTasks: [], mutatorTasks: [], docs: docsOf(r) })
 
     expect(summary).toMatchObject({ ran: 1, failed: 1, allTransport: true })
     expect(summary.firstError).toContain('TRUECOURSE_API_KEY is not set')
@@ -557,7 +564,7 @@ describe('the flow-worker pool’s waves and progress', () => {
       return outcome({ kind: 'retired', attempts: 1, lastEvidence: 'ran, then gave up' })
     }
 
-    const { byTask, summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], docs: docsOf(r) })
+    const { byTask, summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], mutatorTasks: [], docs: docsOf(r) })
 
     expect(summary).toMatchObject({ ran: 1, failed: 0 })
     expect(byTask.get(task.workItem)).toEqual({
@@ -576,7 +583,7 @@ describe('the flow-worker pool’s waves and progress', () => {
     const { persistence, events } = memoryPersistence()
     const seams = createGuardGenerateSessionSeams({ repoRoot: r, driver: async () => ({ driver, persistence }) })
 
-    const { summary } = await seams.flowWorkerSession({ tasks: [task], epicTasks: [], docs: docsOf(r) })
+    const { summary } = await seams.flowWorkerSession({ tasks: [task], epicTasks: [], mutatorTasks: [], docs: docsOf(r) })
 
     expect(summary).toMatchObject({ ran: 1, failed: 0 })
     expect([...events.values()].flat().some((e) => e.type === 'session-start')).toBe(true)
@@ -757,7 +764,7 @@ describe('judgeWorkerFidelity', () => {
       return outcome({ kind: 'settled', scenarioYamlSha: sha, expectedReds: [] })
     }
 
-    const { summary, fidelitySummary } = await workerSeam(r)({ tasks: [task], epicTasks: [], docs: docsOf(r) })
+    const { summary, fidelitySummary } = await workerSeam(r)({ tasks: [task], epicTasks: [], mutatorTasks: [], docs: docsOf(r) })
 
     expect(summary).toMatchObject({ kind: FLOW_WORKER_SESSION_KIND, ran: 1, failed: 0 })
     expect(fidelitySummary).toMatchObject({ kind: FIDELITY_SESSION_KIND, ran: 1, failed: 0 })
@@ -767,7 +774,7 @@ describe('judgeWorkerFidelity', () => {
     const r = docRepo()
     const { task } = fakeTask()
     sessionScript = settleScript
-    const { fidelitySummary } = await workerSeam(r)({ tasks: [task], epicTasks: [], docs: docsOf(r) })
+    const { fidelitySummary } = await workerSeam(r)({ tasks: [task], epicTasks: [], mutatorTasks: [], docs: docsOf(r) })
     expect(fidelitySummary).toBeUndefined()
   })
 })

@@ -658,8 +658,9 @@ describe('guard-generator prompts', () => {
     // both drivers' prompts move together — and re-authoring is the point: a claim
     // about a CHANGE could previously only be written as an absolute number, which
     // tests the fixture rather than the promise.
-    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('07ba2c83da82d869')
-    expect(GENERATE_PROMPT_FINGERPRINT).toBe('07ba2c83da82d869')
+    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('0fb6f80b67e16d03')
+    // Moved once with the blast-radius cut: the canonical schema gained `world`.
+    expect(GENERATE_PROMPT_FINGERPRINT).toBe('0fb6f80b67e16d03')
   })
 
   it('the authored cli step vocabulary is the `run` step — a runner-only kind never leaks in', () => {
@@ -898,8 +899,10 @@ describe('guard-generator prompts', () => {
     // of the comparison. Every text and json matcher's `compare` can now shift its
     // comparand, which is what makes "one fewer seat than before" a verdict instead
     // of an absolute number that only tests the fixture.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('70755b107ca66f2a')
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('70755b107ca66f2a')
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('c023641899c98f89')
+    // Moved once with the blast-radius cut: `world` in the schema + the
+    // shared-world/self-mint doctrine block.
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('c023641899c98f89')
   })
 
   it('the api authoring prompt teaches the cookie jar and captureHeaders', () => {
@@ -1298,7 +1301,31 @@ describe('GENERATE_WEB_SYSTEM_PROMPT — the third authoring arm', () => {
 
   it('GENERATE_WEB_PROMPT_FINGERPRINT is pinned — and the cli/api pins did not move with the arm', () => {
     expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe(fingerprint(GENERATE_WEB_SYSTEM_PROMPT))
-    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('3127dad6dc678368')
+    // Moved once deliberately: the seeded-principal doctrine (a signed-in world
+    // is reached by filling the seeded login fixture, never by blocking on
+    // "credentials") replaced the bare "no credentials" line.
+    // …and again with the blast-radius cut (`world` + shared-world doctrine).
+    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('5ae8cec6f69fdc62')
+  })
+
+  it('a web batch advertises the seed fixture catalog as the sign-in channel', () => {
+    const p = buildAuthorUserPrompt(
+      authorCtx({
+        driver: 'web',
+        recipeServe: ['node', 'web.js'],
+        recipeHealthPath: '/health',
+        fixtures: [{ name: 'webUser', fields: ['email', 'password'] }],
+      }),
+    )
+    expect(p).toContain('FIXTURES AVAILABLE')
+    expect(p).toContain('- webUser: fields `email`, `password`')
+    expect(p).toContain('{{fixture:<name>.<field>}}')
+    expect(p).toMatch(/SIGNED-IN world/)
+    // The block is seed-gated: without a catalog the web prompt renders as before.
+    const bare = buildAuthorUserPrompt(
+      authorCtx({ driver: 'web', recipeServe: ['node', 'web.js'], recipeHealthPath: '/health' }),
+    )
+    expect(bare).not.toContain('FIXTURES AVAILABLE')
   })
 
   it('buildAuthorUserPrompt opens a web batch on the web preparation framing', () => {

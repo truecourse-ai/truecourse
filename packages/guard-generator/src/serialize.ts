@@ -102,6 +102,7 @@ export function buildFlowScenario(opts: {
     },
     binds: flow.bindings.map((b) => ({ doc: b.doc, section: b.anchor, fingerprint: b.fingerprint })),
     ...(surface === 'api' && server && server !== defaultServer ? { server } : {}),
+    ...(raw.world ? { world: raw.world } : {}),
     ...(raw.setup ? { setup: raw.setup } : {}),
     steps: raw.steps,
     normalize: raw.normalize ?? [],

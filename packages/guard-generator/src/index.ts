@@ -9,6 +9,7 @@
 
 export {
   generateGuards,
+  looksWorldMutating,
   workerCacheKey,
   // Single-step mode (the CLI's `--only-<step>` flags): the pipeline's session
   // steps in order. `@truecourse/core` enforces the cache-only replay of the
@@ -148,6 +149,7 @@ export {
   verifyProposal,
   recipeCacheKey,
   staticProposalComplaints,
+  browserAppEvidence,
   RECIPE_CACHE_NAME,
   type RecipeDiscoveryResult,
   type RecipeDiscoverySource,
@@ -342,8 +344,10 @@ export {
 export {
   spawnRecipeRunner,
   spawnMatchRunner,
+  spawnWorldClassifyRunner,
   type RecipeRunner,
   type MatchRunner,
+  type WorldClassifyRunner,
 } from './runners.js'
 
 export {
