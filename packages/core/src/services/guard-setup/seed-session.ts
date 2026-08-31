@@ -70,6 +70,7 @@ import {
   buildCredentialRedactor,
   guardSetupFindingsPath,
   loadDependencyCatalog,
+  PORT_PLACEHOLDER,
   preflightApiServer,
   recipePath,
   resolveApiServers,
@@ -112,6 +113,54 @@ const DB_QUERY_TIMEOUT_MS = 20_000;
  * token passed every static check and would have 401'd at guard run).
  * Session-side verification only — probes never enter the committed recipe.
  */
+/**
+ * Proof that the LOGIN CHANNEL works — the request the web scenarios' sign-in
+ * form ultimately makes, driven with the PUBLISHED fixture fields. The session
+ * cookie proves a signed-in page renders; only this proves the password the
+ * fixture advertises actually mints a session (documenso 2026-08-28: the
+ * cookie and api probes both passed while the stored hash no longer matched
+ * the published password, and 102 web flows then watched the login form
+ * bounce).
+ */
+export const SeedLoginProbeSchema = z
+  .object({
+    /** POST target — the app's OWN credential-login endpoint (read its code). */
+    path: z.string().min(1).regex(/^\//, 'a login path starts with `/`'),
+    /**
+     * JSON body template; values may reference the published fixtures as
+     * `{{fixture:<name>.<field>}}` (e.g. the login email and password), resolved
+     * from the manifest at probe time. The engine sends it as application/json.
+     */
+    body: z.record(z.string(), z.string()),
+    /**
+     * The body key the CONTROL request corrupts to prove the endpoint refuses a
+     * wrong secret; defaults to `password` when the body has that key.
+     */
+    controlField: z.string().min(1).optional(),
+    /**
+     * The CSRF two-step, for a login endpoint that pairs the body token with a
+     * cookie (the double-submit pattern — documenso's `/api/auth/csrf` +
+     * `authorize`): before EACH login POST the engine GETs `path`, keeps the
+     * cookies it sets, reads the token out of the JSON reply, and injects it
+     * into the login body. A static token in the body template can never pass
+     * such an endpoint — the token must be minted in the same exchange as the
+     * cookie it is compared against.
+     */
+    csrf: z
+      .object({
+        /** GET path that mints the token (and sets its paired cookie). */
+        path: z.string().min(1).regex(/^\//, 'a csrf path starts with `/`'),
+        /** JSON field of the GET reply carrying the token. Default `csrfToken`. */
+        responseField: z.string().min(1).optional(),
+        /** Login-body key the token is injected into. Default `csrfToken`. */
+        bodyField: z.string().min(1).optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type SeedLoginProbe = z.infer<typeof SeedLoginProbeSchema>;
+
 export const SeedCredentialProbeSchema = z
   .object({
     /** HTTP method; GET when omitted. */
@@ -127,8 +176,17 @@ export const SeedCredentialProbeSchema = z
      * refusal is 401/403 OR a redirect to its login page.
      */
     surface: z.enum(['api', 'web']).optional(),
+    /**
+     * Web probes only: the login proof (see {@link SeedLoginProbeSchema}).
+     * REQUIRED on the probe that satisfies a web principal requirement — a web
+     * principal is only proven when the login itself is.
+     */
+    login: SeedLoginProbeSchema.optional(),
   })
-  .strict();
+  .strict()
+  .refine((p) => p.login === undefined || p.surface === 'web', {
+    message: 'a `login` proof belongs on a `surface: "web"` probe — it drives the web surface',
+  });
 export type SeedCredentialProbe = z.infer<typeof SeedCredentialProbeSchema>;
 
 /**
@@ -260,9 +318,11 @@ export function requiredPrincipalSurfaces(
   return out;
 }
 
-/** Whether a probe drives the given surface (`api` is the default). */
-const probesSurface = (probe: SeedCredentialProbe, surface: 'api' | 'web'): boolean =>
-  (probe.surface ?? 'api') === surface;
+/** Whether a probe SATISFIES the given surface's principal requirement: it
+ *  drives that surface (`api` is the default), and a web probe also carries
+ *  the login proof — a web principal is only proven when the login itself is. */
+const probeSatisfiesSurface = (probe: SeedCredentialProbe, surface: 'api' | 'web'): boolean =>
+  (probe.surface ?? 'api') === surface && (surface !== 'web' || probe.login !== undefined);
 
 /**
  * The required surfaces a declaration leaves without a probed principal.
@@ -277,12 +337,13 @@ export function missingPrincipalSurfaces(
 ): { surface: 'api' | 'web'; reason: string }[] {
   const names = Object.keys(provides.credentials ?? {});
   return required
-    .filter((r) => !names.some((name) => probes?.[name] && probesSurface(probes[name], r.surface)))
+    .filter((r) => !names.some((name) => probes?.[name] && probeSatisfiesSurface(probes[name], r.surface)))
     .map((r) => ({
       surface: r.surface,
       reason:
         `the ${r.surface} surface requires an authenticated principal (${r.why}), ` +
-        `but the seed declares no credential with a ${r.surface} probe`,
+        `but the seed declares no credential with a ${r.surface} probe` +
+        (r.surface === 'web' ? ' carrying its `login` proof' : ''),
     }));
 }
 
@@ -477,7 +538,8 @@ function requiredSurfaceLines(input: GuardSetupSeedSessionInput): string[] {
         `- **web** — ${r.why}, and the recipe prepares a web surface (\`${(input.recipe.web?.serve ?? []).join(' ')}\`). Mint a principal that can SIGN IN to the web UI:`,
         `  1. create the user with a KNOWN password and publish the login fields as a FIXTURE (e.g. \`webUser\` with \`email\` + \`password\`) — web scenarios fill the login form with \`{{fixture:webUser.email}}\` / \`{{fixture:webUser.password}}\`;`,
         `  2. mint a DURABLE browser session the app's own validator accepts (a session row/token that survives the seed process) and publish its full Cookie header value as a credential (\`header: "Cookie"\`);`,
-        `  3. probe it with \`{"surface": "web", "path": "/<page that requires a signed-in user>"}\` — the engine boots the web surface and proves the authenticated page load succeeds while the anonymous one is refused (401/403 or a redirect to the login page).`,
+        `  3. probe it with \`{"surface": "web", "path": "/<page that requires a signed-in user>", "login": {"path": "/<the app's JSON login endpoint>", "body": {"email": "{{fixture:webUser.email}}", "password": "{{fixture:webUser.password}}"}}\` — the engine proves the LOGIN first (a POST with the PUBLISHED fixture values must be accepted and the same body with a corrupted password refused; read the app's auth routes for the endpoint), then the authenticated page load (accepted with the cookie, refused anonymously with 401/403 or a redirect to the login page);`,
+        `  4. when the login endpoint pairs a body token with a cookie (a CSRF double-submit — the login route compares \`body.csrfToken\` to a cookie a mint route set), add \`"csrf": {"path": "/<the csrf mint route>"}\` to the \`login\` block — the engine GETs it fresh before each login POST, carries its cookies, and injects the token into the body. NEVER publish a csrf token as a fixture: it is minted per exchange, and a static one can never validate.`,
       );
     }
   }
@@ -536,6 +598,164 @@ const RunSeedDraftInputSchema = z
 /** Wall clock for one probe request. */
 const PROBE_TIMEOUT_MS = 15_000;
 
+/**
+ * Resolve `{{fixture:<name>.<field>}}` references in a login-body template from
+ * the manifest's fixtures. A value that IS one reference keeps the fixture
+ * field's native JSON type; a reference the manifest does not provide is the
+ * refusal — the login proof exists to test the PUBLISHED values, never others.
+ */
+function resolveLoginBody(
+  body: Record<string, string>,
+  fixtures: ReadonlyMap<string, Record<string, unknown>>,
+): { ok: true; body: Record<string, unknown> } | { ok: false; reason: string } {
+  const out: Record<string, unknown> = {};
+  for (const [key, template] of Object.entries(body)) {
+    const whole = /^\{\{fixture:([^.}]+)\.([^}]+)\}\}$/.exec(template);
+    if (whole) {
+      const value = fixtures.get(whole[1])?.[whole[2]];
+      if (value === undefined) {
+        return {
+          ok: false,
+          reason: `login body field "${key}" references {{fixture:${whole[1]}.${whole[2]}}}, which the manifest does not provide`,
+        };
+      }
+      out[key] = value;
+      continue;
+    }
+    let unresolved: string | null = null;
+    out[key] = template.replace(/\{\{fixture:([^.}]+)\.([^}]+)\}\}/g, (_, name: string, field: string) => {
+      const value = fixtures.get(name)?.[field];
+      if (value === undefined) {
+        unresolved = `{{fixture:${name}.${field}}}`;
+        return '';
+      }
+      return String(value);
+    });
+    if (unresolved) {
+      return {
+        ok: false,
+        reason: `login body field "${key}" references ${unresolved}, which the manifest does not provide`,
+      };
+    }
+  }
+  return { ok: true, body: out };
+}
+
+/**
+ * Run one credential's LOGIN proof against the booted web surface: POST the
+ * app's own login endpoint with the PUBLISHED fixture values and expect 2xx
+ * (the JSON login endpoint, not a redirecting form action), then the same body
+ * with one corrupted secret and expect a refusal — an endpoint that accepts a
+ * wrong secret gates nothing.
+ */
+async function probeLogin(opts: {
+  baseUrl: string;
+  name: string;
+  login: SeedLoginProbe;
+  fixtures: ReadonlyMap<string, Record<string, unknown>>;
+  signal?: AbortSignal;
+}): Promise<{ ok: true; line: string } | { ok: false; reason: string }> {
+  const { name, login } = opts;
+  const resolved = resolveLoginBody(login.body, opts.fixtures);
+  if (!resolved.ok) return { ok: false, reason: `login probe for "${name}": ${resolved.reason}` };
+  const controlField = login.controlField ?? ('password' in login.body ? 'password' : undefined);
+  if (!controlField || !(controlField in resolved.body)) {
+    return {
+      ok: false,
+      reason:
+        `login probe for "${name}" names no \`controlField\` (and its body has no "password" key) — ` +
+        `the control corrupts one body field to prove a wrong secret is refused`,
+    };
+  }
+  const url = new URL(login.path, opts.baseUrl).toString();
+  const timed = async (run: (signal: AbortSignal) => Promise<Response>): Promise<Response> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+    const onAbort = (): void => controller.abort();
+    opts.signal?.addEventListener('abort', onAbort, { once: true });
+    try {
+      return await run(controller.signal);
+    } finally {
+      clearTimeout(timer);
+      opts.signal?.removeEventListener('abort', onAbort);
+    }
+  };
+  // The CSRF two-step, run fresh before EACH login POST (a token and its
+  // paired cookie may be single-use): GET the mint path, keep its cookies,
+  // inject the token into the body, send the cookies with the POST.
+  const post = async (body: Record<string, unknown>): Promise<number> => {
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    let sent = body;
+    if (login.csrf) {
+      const csrf = login.csrf;
+      const mintUrl = new URL(csrf.path, opts.baseUrl).toString();
+      const mint = await timed((signal) => fetch(mintUrl, { redirect: 'manual', signal }));
+      if (mint.status < 200 || mint.status >= 300) {
+        throw new Error(`the csrf mint GET ${csrf.path} answered HTTP ${mint.status}`);
+      }
+      const cookies = mint.headers
+        .getSetCookie()
+        .map((c) => c.split(';')[0])
+        .filter((c) => c.includes('='));
+      if (cookies.length > 0) headers.cookie = cookies.join('; ');
+      const field = csrf.responseField ?? 'csrfToken';
+      let token: unknown;
+      try {
+        const reply = (await mint.json()) as Record<string, unknown> | null;
+        token = reply?.[field];
+      } catch {
+        token = undefined;
+      }
+      if (typeof token !== 'string' || token.length === 0) {
+        throw new Error(`the csrf mint GET ${csrf.path} returned no "${field}" string in its JSON reply`);
+      }
+      sent = { ...body, [csrf.bodyField ?? 'csrfToken']: token };
+    }
+    const response = await timed((signal) =>
+      fetch(url, {
+        method: 'POST',
+        redirect: 'manual',
+        headers,
+        body: JSON.stringify(sent),
+        signal,
+      }),
+    );
+    return response.status;
+  };
+  let accepted: number;
+  let control: number;
+  try {
+    accepted = await post(resolved.body);
+    control = await post({ ...resolved.body, [controlField]: `${String(resolved.body[controlField])}-wrong` });
+  } catch (error) {
+    return { ok: false, reason: `login probe POST ${login.path} for "${name}" failed: ${message(error)}` };
+  }
+  if (accepted < 200 || accepted >= 300) {
+    return {
+      ok: false,
+      reason:
+        `the login endpoint refused the PUBLISHED fixture credentials: POST ${login.path} → HTTP ${accepted}. ` +
+        (accepted >= 300 && accepted < 400
+          ? `A redirecting form action cannot be judged — target the app's JSON login endpoint instead. `
+          : `The secret the world stores does not match what the seed publishes — CONVERGE it in the script (the exists path must verify and update the secret, never skip it). `) +
+        `If the endpoint pairs a body token with a cookie (a CSRF double-submit), declare \`login.csrf\` ` +
+        `({"path": "/<the app's csrf mint route>"}) — the engine GETs it fresh before each login POST, carries its ` +
+        `cookies, and injects the token into the body. A static token published as a fixture can never pass one.`,
+    };
+  }
+  if (control >= 200 && control < 300) {
+    return {
+      ok: false,
+      reason:
+        `POST ${login.path} answers HTTP ${control} with a corrupted \`${controlField}\` — it does not verify the secret, so it proves nothing about "${name}". Target the endpoint that actually checks the login.`,
+    };
+  }
+  return {
+    ok: true,
+    line: `${name}: login POST ${login.path} → ${accepted} with the published fixture, ${control} with a corrupted ${controlField}`,
+  };
+}
+
 /** The declared credential names a `probes` record fails to cover. */
 function uncoveredCredentials(
   provides: SeedProvidesProposal,
@@ -558,14 +778,35 @@ async function probeCredentials(opts: {
   surface: 'api' | 'web';
   probes: Record<string, SeedCredentialProbe>;
   credentials: ReadonlyMap<string, ResolvedCredential>;
+  /** The manifest's fixtures — what a web probe's `login` body resolves from. */
+  fixtures: ReadonlyMap<string, Record<string, unknown>>;
   signal?: AbortSignal;
 }): Promise<{ ok: true; lines: string[] } | { ok: false; reason: string }> {
   const lines: string[] = [];
-  const refused = (status: number): boolean =>
-    status === 401 || status === 403 || (opts.surface === 'web' && status >= 300 && status < 400);
+  // The login-proof semantics, mirrored: the CREDENTIALED request must be
+  // ACCEPTED (2xx — a 3xx on web is the login redirect, a 5xx is not an
+  // authenticated answer), and the anonymous control must NOT be — any non-2xx
+  // counts as the refusal, because apps answer "no session" with more shapes
+  // than 401/403 (documenso 2026-08-30: HTTP 500 with an UNAUTHORIZED body on
+  // every session route, which the old 401/403-only rule could never pass).
+  const accepted = (status: number): boolean => status >= 200 && status < 300;
   for (const [name, cred] of opts.credentials) {
     const probe = opts.probes[name];
     if (!probe) continue; // Coverage is the caller's refusal; here we prove what is declared.
+    // The LOGIN proof first — it is the deeper claim (the published password
+    // mints a session at all); the page-load pair below then proves the minted
+    // session opens a signed-in page.
+    if (probe.login) {
+      const login = await probeLogin({
+        baseUrl: opts.baseUrl,
+        name,
+        login: probe.login,
+        fixtures: opts.fixtures,
+        ...(opts.signal ? { signal: opts.signal } : {}),
+      });
+      if (!login.ok) return login;
+      lines.push(login.line);
+    }
     const method = probe.method ?? 'GET';
     const url = new URL(probe.path, opts.baseUrl).toString();
     const request = async (withCredential: boolean): Promise<number> => {
@@ -594,7 +835,7 @@ async function probeCredentials(opts: {
     } catch (error) {
       return { ok: false, reason: `probe ${method} ${probe.path} for "${name}" failed: ${message(error)}` };
     }
-    if (refused(authed)) {
+    if (!accepted(authed)) {
       return {
         ok: false,
         reason:
@@ -603,7 +844,7 @@ async function probeCredentials(opts: {
             : `credential "${name}" was refused (HTTP ${authed}) at ${method} ${probe.path} — the minted value, sent verbatim in the ${cred.header} header, does not authenticate. Fix the value (or its shape: prefix, casing) in the script.`,
       };
     }
-    if (!refused(control)) {
+    if (accepted(control)) {
       return {
         ok: false,
         reason:
@@ -664,6 +905,7 @@ async function bootAndProbe(
   world: SeedSessionWorld,
   probes: Record<string, SeedCredentialProbe>,
   credentials: ReadonlyMap<string, ResolvedCredential>,
+  fixtures: ReadonlyMap<string, Record<string, unknown>>,
   signal?: AbortSignal,
 ): Promise<{ ok: true; lines: string[] } | { ok: false; reason: string }> {
   const bySurface: Record<'api' | 'web', Record<string, SeedCredentialProbe>> = { api: {}, web: {} };
@@ -684,6 +926,7 @@ async function bootAndProbe(
           surface,
           probes: subset,
           credentials,
+          fixtures,
           ...(signal ? { signal } : {}),
         });
       },
@@ -785,7 +1028,7 @@ function runSeedDraftTool(world: SeedSessionWorld): SessionTool {
         // the draft mints none — nothing to prove, no boot to pay for).
         let probeLines: string[] = [];
         if (result.credentials.size > 0 && args.probes) {
-          const probed = await bootAndProbe(world, args.probes, result.credentials, toolCtx.signal);
+          const probed = await bootAndProbe(world, args.probes, result.credentials, result.fixtures, toolCtx.signal);
           if (!probed.ok) {
             return { content: `the seed ran and its manifest matched, but the credential probe refused it:\n${probed.reason}`, isError: true };
           }
@@ -843,7 +1086,7 @@ function dbQueryTool(world: SeedSessionWorld): SessionTool {
           [...client.argv.slice(1), args.sql],
           {
             timeout: DB_QUERY_TIMEOUT_MS,
-            env: { ...process.env, ...world.server.env },
+            env: { ...process.env, ...withoutPortPlaceholders(world.server.env) },
             ...(toolCtx.signal ? { signal: toolCtx.signal } : {}),
           },
           (error, stdout, stderr) => {
@@ -967,6 +1210,18 @@ function servicesController(repoRoot: string, recipe: Recipe, signal?: AbortSign
  * where the fresh-world proof is exactly what makes a stale cached script
  * refuse itself instead of landing.
  */
+/**
+ * The server env for the `db_query` child: no port exists there, so entries
+ * whose value carries the `${PORT}` placeholder are DROPPED rather than passed
+ * through raw — a raw placeholder is poison in a child that runs an app's own
+ * env wrapper (dotenv-expand loops forever on `PORT=${PORT}`). `runSeed`
+ * applies the same rule itself; server boots keep the placeholder for
+ * `substitutePortInSpawn` to resolve.
+ */
+function withoutPortPlaceholders(env: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(Object.entries(env).filter(([, value]) => !value.includes(PORT_PLACEHOLDER)));
+}
+
 export function buildSeedSession(
   context: GuardSetupSessionContext,
   opts: BuildSeedSessionOptions = {},
@@ -1243,7 +1498,7 @@ async function foldSeedOutcome(
     // through a real server boot — the same check the session iterated against.
     if (proof.credentials.size > 0 && output.probes) {
       input.onPhase?.('probing the minted credentials against the booted server', 'credential probes');
-      const probed = await bootAndProbe(world, output.probes, proof.credentials, world.signal);
+      const probed = await bootAndProbe(world, output.probes, proof.credentials, proof.fixtures, world.signal);
       if (!probed.ok) {
         restore();
         return { reason: `the fresh-world credential probe refused the seed: ${probed.reason}` };
@@ -1289,7 +1544,9 @@ Data and auth are ONE artifact on purpose: a login token cannot be minted withou
 - The manifest: the engine sets GUARD_SEED_OUT to a file path; write ONE JSON object there — {"credentials": {"<name>": {"value": "<minted secret>"}}, "fixtures": {"<name>": {"<field>": <any JSON value>}}} — matching \`provides\` EXACTLY. Values keep their native JSON type.
 - PRINCIPALS FIRST, FIXTURES SECOND: mint and probe every principal the briefing's "Runnable surfaces" section requires in your FIRST draft, with only the rows they need; grow fixtures afterwards. \`run_seed_draft\` refuses a draft that omits a required principal, so nothing without them can verify — a budget death before they exist salvages nothing, while one after keeps them.
 - Principals: one per role the app actually distinguishes; mint the secret the way the APP would (its own token issuance, or the same signing secret and algorithm it verifies with); the value must survive the seed process (stateless token or a session row — a secret held in memory authenticates nothing); the header value is injected VERBATIM ("Bearer <token>" ONLY if that is what the API's own verifier expects — read the verifier, do not assume the prefix).
-- A WEB SURFACE AUTHENTICATES BY SESSION, NOT HEADER: when the briefing requires a web principal, create the user with a known password and publish the login fields as a FIXTURE (scenarios fill the login form from them), mint a DURABLE session the app's own validator accepts, publish its full Cookie header value as a credential, and probe it with \`{"surface": "web", "path": …}\` — an authenticated page load against the booted web surface, refused anonymously (401/403 or a login redirect).
+- A WEB SURFACE AUTHENTICATES BY SESSION, NOT HEADER: when the briefing requires a web principal, create the user with a known password and publish the login fields as a FIXTURE (scenarios fill the login form from them), mint a DURABLE session the app's own validator accepts, publish its full Cookie header value as a credential, and probe it with \`{"surface": "web", "path": …, "login": {…}}\` — the engine proves the LOGIN (the app's own JSON login endpoint must accept the published fixture values and refuse a corrupted password) and then the authenticated page load, refused anonymously (401/403 or a login redirect). The login proof is what catches a secret the world stored under an earlier run: a cookie that validates proves nothing about the password the fixture advertises. A login endpoint that pairs a body token with a cookie (CSRF double-submit) takes \`"csrf": {"path": "/<mint route>"}\` inside \`login\` — the engine runs the two-step itself; never publish a csrf token as a fixture, a static one can never validate.
+- IDEMPOTENCE CONVERGES SECRETS: an exists path that merely skips creation leaves an OLDER run's password live while your manifest publishes a new one — look up AND update the secret (with the app's own hashing) so the published value is always the live one; the login probe refuses exactly this drift.
+- MINT A SACRIFICIAL PRINCIPAL when the app cannot mint sign-in-capable accounts at RUNTIME (signup behind email verification, invite-only, admin-created accounts): one extra credential-bearing user beside the role principals, published as the fixture \`sacrificialUser\` with the same login fields as the primary web principal and its own stable email, its description stating it is DISPOSABLE. Credential-mutation tests (password change, session revocation, account deletion) burn IT instead of a shared principal, and your converging exists path restores it every run — without one, those tests have only the shared principal to mutate, and one such mutation once locked an entire run out of sign-in. No credential or probe needed: it is a fixture, and scenarios log in through the form.
 - CREDENTIALS PROVE THEMSELVES LIVE: every \`run_seed_draft\` (and the outcome) that mints credentials must declare \`probes\` — per credential, one endpoint that REQUIRES it. The engine boots the credential's surface, sends the minted value verbatim, and refuses the draft if the request is rejected OR if the same request succeeds without the credential (an ungated endpoint proves nothing). Probe endpoints are a LOOKUP, not a search: the briefing lists spec-derived candidates whose security requires a scheme — confirm one; do not spend turns hunting the route surface.
 
 # Your tools
@@ -1301,4 +1558,4 @@ Data and auth are ONE artifact on purpose: a login token cannot be minted withou
 
 # The outcome
 
-\`{script, command, provides, probes, findings}\` — the script's full source, the one shell command (repo root) that runs it AT THE TARGET PATH the briefing names, the provides declaration, the credential probes (required for every declared credential; omit the field only when no credentials are minted), and any code-vs-docs contradictions you established (verbatim, two named sides; usually empty). The fold writes the files, then proves the outcome in a FRESH world (services down → up → run → probe) — an outcome that only worked against your session's warmed-up state will be refused, which is why pristine-state discipline matters. Never write repository files yourself; the fold owns every write.`;
+\`{script, command, provides, probes, findings}\` — the script's full source, the one shell command (repo root) that runs it AT THE TARGET PATH the briefing names — invoke the runtime DIRECTLY (\`node …\`, \`npx tsx …\`, \`python …\`), never through the app's own env-wrapper scripts (\`npm run with:env\`, dotenv-cli wrappers): the engine already runs your command with the full server env, and a wrapper that re-expands the process env can corrupt values carrying \`$\` or spin forever on a self-reference — the provides declaration, the credential probes (required for every declared credential; omit the field only when no credentials are minted), and any code-vs-docs contradictions you established (verbatim, two named sides; usually empty). The fold writes the files, then proves the outcome in a FRESH world (services down → up → run → probe) — an outcome that only worked against your session's warmed-up state will be refused, which is why pristine-state discipline matters. Never write repository files yourself; the fold owns every write.`;

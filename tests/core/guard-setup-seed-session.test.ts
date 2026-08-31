@@ -681,16 +681,18 @@ describe('buildSeedSession — every authenticating surface must get a probed pr
 // ---------------------------------------------------------------------------
 
 /** Mints a user (login fields → fixture) and a durable session (cookie →
- *  credential). `emitted` lets a test drift the manifest from the store. */
-function webMintingScript(stored = 'session=tok-web-1', emitted = stored): string {
+ *  credential). `emitted` lets a test drift the manifest cookie from the store;
+ *  `storedPassword` drifts the STORED secret from the published one — the
+ *  stale-world shape the login probe exists to refuse. */
+function webMintingScript(stored = 'session=tok-web-1', emitted = stored, storedPassword = 'pw-guard-1'): string {
   return [
     '// Idempotent: the store is one JSON document, rewritten wholesale.',
     "import fs from 'node:fs'",
-    'const user = { id: 7, email: "owner@acme.test", password: "pw-guard-1" }',
+    `const user = { id: 7, email: "owner@acme.test", password: ${JSON.stringify(storedPassword)} }`,
     'const org = { id: 42, slug: "acme" }',
     `fs.writeFileSync(process.env.SEED_STORE, JSON.stringify({ orgs: [org], users: [user], sessions: [${JSON.stringify(stored)}] }))`,
     'fs.writeFileSync(process.env.GUARD_SEED_OUT, JSON.stringify({',
-    '  fixtures: { org: { id: org.id, slug: org.slug }, webUser: { email: user.email, password: user.password } },',
+    '  fixtures: { org: { id: org.id, slug: org.slug }, webUser: { email: user.email, password: "pw-guard-1" } },',
     `  credentials: { webSession: { value: ${JSON.stringify(emitted)} } },`,
     '}))',
     '',
@@ -701,7 +703,11 @@ const WEB_PROVIDES = {
   fixtures: { org: ['id', 'slug'], webUser: ['email', 'password'] },
   credentials: { webSession: { header: 'Cookie', description: 'signed-in browser session' } },
 };
-const WEB_PROBES = { webSession: { surface: 'web', path: '/dashboard' } };
+const WEB_LOGIN = {
+  path: '/api/login',
+  body: { email: '{{fixture:webUser.email}}', password: '{{fixture:webUser.password}}' },
+};
+const WEB_PROBES = { webSession: { surface: 'web', path: '/dashboard', login: WEB_LOGIN } };
 
 describe('buildSeedSession — web principals prove themselves by an authenticated page load', () => {
   it('proves the session cookie against the booted web surface, in-session and at the fold', async () => {
@@ -717,6 +723,8 @@ describe('buildSeedSession — web principals prove themselves by an authenticat
       expect(verdict.isError).toBeUndefined();
       expect(verdict.content).toMatch(/probes passed/);
       expect(verdict.content).toMatch(/dashboard/);
+      // The login proof ran first, with the published fixture values.
+      expect(verdict.content).toMatch(/login POST \/api\/login → 200/);
       return outcome({ script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes: WEB_PROBES, findings: [] });
     });
 
@@ -729,6 +737,173 @@ describe('buildSeedSession — web principals prove themselves by an authenticat
       credentials: ['webSession'],
       fixtures: ['org', 'webUser'],
     });
+  }, 60_000);
+
+  // The documenso idiom: session routes answer an ANONYMOUS request with HTTP
+  // 500 (an UNAUTHORIZED body), not 401/403 or a redirect — any non-2xx is the
+  // anonymous refusal when the credentialed request was accepted.
+  it('accepts a gate whose anonymous refusal is a 500, not 401/403', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, webBlock(r));
+    const probes = { webSession: { surface: 'web', path: '/dashboard-500', login: WEB_LOGIN } };
+    const stub = stubDriver(async (call) => {
+      const verdict = await callTool(call.input, 'run_seed_draft', {
+        script: webMintingScript(),
+        command: COMMAND,
+        provides: WEB_PROVIDES,
+        probes,
+      });
+      expect(verdict.isError).toBeUndefined();
+      expect(verdict.content).toMatch(/dashboard-500 → 200 with the credential, 500 without/);
+      return outcome({ script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes, findings: [] });
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(
+      seedInput(r, { database: PRINCIPAL_DATABASE }),
+    );
+    expect(result).toMatchObject({ status: 'ok', credentials: ['webSession'] });
+  }, 60_000);
+
+  // The documenso shape (2026-08-30): the login route compares body.csrfToken
+  // to a cookie the mint route set — a static token can never pass, the engine
+  // must run the two-step itself, fresh, before each POST.
+  it('runs the declared csrf two-step — mint, cookie, injected token — before each login POST', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, webBlock(r));
+    const csrfLogin = { ...WEB_LOGIN, path: '/api/login-csrf', csrf: { path: '/api/csrf' } };
+    const probes = { webSession: { surface: 'web', path: '/dashboard', login: csrfLogin } };
+    const stub = stubDriver(async (call) => {
+      const verdict = await callTool(call.input, 'run_seed_draft', {
+        script: webMintingScript(),
+        command: COMMAND,
+        provides: WEB_PROVIDES,
+        probes,
+      });
+      expect(verdict.isError).toBeUndefined();
+      // The accepted POST carried a fresh minted token; the control's fresh
+      // token still rode along, so the 401 is the PASSWORD refusal, not csrf.
+      expect(verdict.content).toMatch(/login POST \/api\/login-csrf → 200/);
+      expect(verdict.content).toMatch(/401 with a corrupted password/);
+      return outcome({ script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes, findings: [] });
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(
+      seedInput(r, { database: PRINCIPAL_DATABASE }),
+    );
+    expect(result).toMatchObject({ status: 'ok', credentials: ['webSession'] });
+  }, 60_000);
+
+  it('a csrf-guarded endpoint without the declaration is refused, steering to `login.csrf`', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, webBlock(r));
+    const bare = { ...WEB_LOGIN, path: '/api/login-csrf' };
+    const stub = stubDriver(async (call) => {
+      const verdict = await callTool(call.input, 'run_seed_draft', {
+        script: webMintingScript(),
+        command: COMMAND,
+        provides: WEB_PROVIDES,
+        probes: { webSession: { surface: 'web', path: '/dashboard', login: bare } },
+      });
+      expect(verdict.isError).toBe(true);
+      expect(verdict.content).toMatch(/HTTP 500/);
+      expect(verdict.content).toMatch(/login\.csrf/);
+      return outcome({
+        script: webMintingScript(),
+        command: COMMAND,
+        provides: WEB_PROVIDES,
+        probes: { webSession: { surface: 'web', path: '/dashboard', login: { ...bare, csrf: { path: '/api/csrf' } } } },
+        findings: [],
+      });
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(
+      seedInput(r, { database: PRINCIPAL_DATABASE }),
+    );
+    expect(result.status).toBe('ok');
+  }, 60_000);
+
+  it('refuses a published password the login endpoint rejects (the stale-world drift)', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, webBlock(r));
+    const stub = stubDriver(async (call) => {
+      // The store holds an OLDER run's password; the manifest publishes the new
+      // one. The cookie still validates — only the login probe can catch this.
+      const refusal = await callTool(call.input, 'run_seed_draft', {
+        script: webMintingScript('session=tok-web-1', 'session=tok-web-1', 'stale-pw'),
+        command: COMMAND,
+        provides: WEB_PROVIDES,
+        probes: WEB_PROBES,
+      });
+      expect(refusal.isError).toBe(true);
+      expect(refusal.content).toMatch(/refused the PUBLISHED fixture credentials/);
+      expect(refusal.content).toMatch(/CONVERGE/);
+      await callTool(call.input, 'run_seed_draft', {
+        script: webMintingScript(),
+        command: COMMAND,
+        provides: WEB_PROVIDES,
+        probes: WEB_PROBES,
+      });
+      return outcome({ script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes: WEB_PROBES, findings: [] });
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(
+      seedInput(r, { database: PRINCIPAL_DATABASE }),
+    );
+    expect(result.status).toBe('ok');
+  }, 60_000);
+
+  it('refuses a login endpoint that accepts a corrupted secret', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, webBlock(r));
+    const stub = stubDriver(async (call) => {
+      const refusal = await callTool(call.input, 'run_seed_draft', {
+        script: webMintingScript(),
+        command: COMMAND,
+        provides: WEB_PROVIDES,
+        probes: { webSession: { surface: 'web', path: '/dashboard', login: { ...WEB_LOGIN, path: '/api/login-always' } } },
+      });
+      expect(refusal.isError).toBe(true);
+      expect(refusal.content).toMatch(/corrupted/);
+      await callTool(call.input, 'run_seed_draft', {
+        script: webMintingScript(),
+        command: COMMAND,
+        provides: WEB_PROVIDES,
+        probes: WEB_PROBES,
+      });
+      return outcome({ script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes: WEB_PROBES, findings: [] });
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(
+      seedInput(r, { database: PRINCIPAL_DATABASE }),
+    );
+    expect(result.status).toBe('ok');
+  }, 60_000);
+
+  it('refuses a required web principal whose probe carries no login proof, before running', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r, {}, webBlock(r));
+    const stub = stubDriver(async (call) => {
+      const refusal = await callTool(call.input, 'run_seed_draft', {
+        script: webMintingScript(),
+        command: COMMAND,
+        provides: WEB_PROVIDES,
+        probes: { webSession: { surface: 'web', path: '/dashboard' } },
+      });
+      expect(refusal.isError).toBe(true);
+      expect(refusal.content).toMatch(/login/);
+      await callTool(call.input, 'run_seed_draft', {
+        script: webMintingScript(),
+        command: COMMAND,
+        provides: WEB_PROVIDES,
+        probes: WEB_PROBES,
+      });
+      return outcome({ script: webMintingScript(), command: COMMAND, provides: WEB_PROVIDES, probes: WEB_PROBES, findings: [] });
+    });
+
+    const result = await buildSeedSession(harness(stub.driver).context)(
+      seedInput(r, { database: PRINCIPAL_DATABASE }),
+    );
+    expect(result.status).toBe('ok');
   }, 60_000);
 
   it('refuses a session value the web surface redirects to the login page', async () => {
@@ -766,7 +941,7 @@ describe('buildSeedSession — web principals prove themselves by an authenticat
         script: webMintingScript(),
         command: COMMAND,
         provides: WEB_PROVIDES,
-        probes: { webSession: { surface: 'web', path: '/signin' } },
+        probes: { webSession: { surface: 'web', path: '/signin', login: WEB_LOGIN } },
       });
       expect(refusal.isError).toBe(true);
       expect(refusal.content).toMatch(/does not gate/);
@@ -1106,7 +1281,7 @@ describe('requiredPrincipalSurfaces — which surfaces demand a probed principal
     expect(requiredPrincipalSurfaces(seedInput(r))).toEqual([]);
   });
 
-  it('missingPrincipalSurfaces is satisfied only by a credential probed on the required surface', () => {
+  it('missingPrincipalSurfaces is satisfied only by a web probe carrying its login proof', () => {
     const required = [{ surface: 'web' as const, why: 'the schema holds login principals (User)' }];
     const provides = {
       fixtures: { org: ['id'] },
@@ -1116,9 +1291,28 @@ describe('requiredPrincipalSurfaces — which surfaces demand a probed principal
     const missing = missingPrincipalSurfaces(provides, { webSession: { path: '/me' } }, required);
     expect(missing).toHaveLength(1);
     expect(missing[0].reason).toMatch(/web surface requires an authenticated principal/);
-    // …a web probe does.
+    // …nor does a web probe with no login proof (the cookie proves a page, not
+    // that the published password mints a session)…
+    const loginless = missingPrincipalSurfaces(
+      provides,
+      { webSession: { surface: 'web', path: '/dashboard' } },
+      required,
+    );
+    expect(loginless).toHaveLength(1);
+    expect(loginless[0].reason).toMatch(/login/);
+    // …a web probe WITH its login proof does.
     expect(
-      missingPrincipalSurfaces(provides, { webSession: { surface: 'web', path: '/dashboard' } }, required),
+      missingPrincipalSurfaces(
+        provides,
+        {
+          webSession: {
+            surface: 'web',
+            path: '/dashboard',
+            login: { path: '/api/login', body: { email: 'x', password: 'y' } },
+          },
+        },
+        required,
+      ),
     ).toEqual([]);
   });
 });
