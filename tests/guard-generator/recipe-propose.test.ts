@@ -556,7 +556,11 @@ describe('compose services', () => {
       'docker-compose.yml': 'services:\n  db:\n    image: postgres:16\n  api:\n    build: .\n',
     })
 
-    expect(proposal(repo).recipe.api?.services).toEqual({ up: 'docker compose up -d --wait', down: 'docker compose down' })
+    expect(proposal(repo).recipe.api?.services).toEqual({
+      up: 'docker compose up -d --wait',
+      down: 'docker compose down',
+      reset: 'docker compose down -v',
+    })
   })
 
   it('proposes nothing for a compose file with no datastore image', () => {

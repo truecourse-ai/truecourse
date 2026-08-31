@@ -818,7 +818,9 @@ function normalizeRoutePath(routePath: string): string {
  * file `--wait` blocks until the datastore is healthy; without one it costs nothing
  * (it waits for `running`, which `up -d` already reached).
  */
-export function detectComposeServices(repoRoot: string): { up: string; down: string } | undefined {
+export function detectComposeServices(
+  repoRoot: string,
+): { up: string; down: string; reset?: string } | undefined {
   const file = COMPOSE_FILES.map((f) => path.join(repoRoot, f)).find((f) => fs.existsSync(f))
   if (!file) return undefined
   let doc: unknown
@@ -834,7 +836,11 @@ export function detectComposeServices(repoRoot: string): { up: string; down: str
     const base = image.split('@')[0].split(':')[0].split('/').pop() ?? ''
     return DATABASE_IMAGES.has(base.toLowerCase())
   })
-  return hasDatabase ? { up: 'docker compose up -d --wait', down: 'docker compose down' } : undefined
+  // `reset` wipes the volumes so a `world: mutates` tail cannot leak damage into
+  // the next run; `down` deliberately preserves them (stopping is not forgetting).
+  return hasDatabase
+    ? { up: 'docker compose up -d --wait', down: 'docker compose down', reset: 'docker compose down -v' }
+    : undefined
 }
 
 /**

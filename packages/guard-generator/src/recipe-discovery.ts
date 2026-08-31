@@ -40,6 +40,8 @@ import {
   buildRouteManifest,
   DEFAULT_API_HEALTH_PATH,
   DEFAULT_API_READY_TIMEOUT_MS,
+  DEFAULT_WEB_HEALTH_PATH,
+  DEFAULT_WEB_READY_TIMEOUT_MS,
   BUILD_PASSTHROUGH,
   type Recipe,
   type RouteManifestApp,
@@ -85,7 +87,7 @@ export type RecipeDiscoverySource = 'deterministic' | 'llm'
 /** The steps verification runs, in order — each one names itself in its diagnostic
  *  and in the progress phase, so a reader never has to guess which one is running.
  *  `static` is stage zero: the free refusal rules, rejected before anything runs. */
-export type RecipeVerifyStage = 'static' | 'install' | 'build' | 'entry probe' | 'services' | 'server boot'
+export type RecipeVerifyStage = 'static' | 'install' | 'build' | 'entry probe' | 'services' | 'server boot' | 'web boot'
 
 /**
  * What discovery is doing RIGHT NOW. Everything here is minutes-long (an install, a
@@ -403,6 +405,7 @@ export async function discoverRecipe(
       ...(repaired.proposal.entry ? { entry: repaired.proposal.entry } : {}),
       ...(repaired.proposal.env ? { env: repaired.proposal.env } : {}),
       ...(repaired.proposal.api ? { api: repaired.proposal.api } : {}),
+      ...(repaired.proposal.web ? { web: repaired.proposal.web } : {}),
       ...(repaired.proposal.ownHosts ? { ownHosts: repaired.proposal.ownHosts } : {}),
     }
     return {
@@ -476,6 +479,7 @@ export async function discoverRecipe(
     // written through as-is; the richer fields (credentials, seed) are never
     // model-proposed.
     ...(proposal.api ? { api: proposal.api } : {}),
+    ...(proposal.web ? { web: proposal.web } : {}),
     ...(proposal.ownHosts ? { ownHosts: proposal.ownHosts } : {}),
   }
   return {
@@ -553,10 +557,21 @@ export type VerifiableProposal = {
       string,
       { serve: readonly string[]; healthPath?: string; env?: Record<string, string>; cwd?: 'sandbox' | 'repo' }
     >
-    /** The datastore bring-up/tear-down the deterministic proposer derives from a
-     *  compose file. Never model-proposed — `RecipeApiProposalSchema` has no
-     *  `services` — but verification runs whatever the proposal carries. */
-    services?: { up: string; down?: string }
+    /** The datastore bring-up/tear-down (compose-derived or model-proposed);
+     *  verification runs whatever the proposal carries. `reset` is not run here —
+     *  it is the runner's post-mutator restore, and a wipe has no place in a
+     *  verification pass. */
+    services?: { up: string; down?: string; reset?: string }
+  }
+  /** The browser surface — booted and health-polled like any server. */
+  web?: {
+    build?: string
+    serve: readonly string[]
+    cwd?: 'sandbox' | 'repo'
+    healthPath?: string
+    readyTimeoutMs?: number
+    env?: Record<string, string>
+    app?: string
   }
 }
 
@@ -720,6 +735,45 @@ export async function verifyProposal(
     if (!probe.ok) return { ok: false, stage: 'entry probe', reason: probe.reason }
   }
 
+  // The web half's boot, run while any declared services are still up (a
+  // fullstack web serve needs the same datastore the api serve does). The same
+  // preflight the api servers go through — the web surface is an HTTP server
+  // whose health answer happens to be a page — with the web defaults applied
+  // exactly as `resolveWebSurface` applies them for the runner.
+  const verifyWebBoot = async (): Promise<ProposalVerdict | null> => {
+    const web = proposal.web
+    if (!web) return null
+    if (web.build) {
+      context.onPhase?.({ stage: 'web boot' })
+      const webBuild = await runBuild(repoRoot, web.build, proposal.env, BUILD_TIMEOUT_MS)
+      if (!webBuild.ok) {
+        const tail = webBuild.output.trimEnd().split('\n').slice(-5).join(' / ')
+        return {
+          ok: false,
+          stage: 'web boot',
+          reason: `web build \`${web.build}\` failed${webBuild.timedOut ? ' (timed out)' : ''}: ${tail}`,
+        }
+      }
+    }
+    context.onPhase?.({ stage: 'web boot' })
+    const healthPath = web.healthPath ?? DEFAULT_WEB_HEALTH_PATH
+    const boot = await preflightApiServer({
+      resolvedServe: resolveEntry(repoRoot, web.serve),
+      displayServe: web.serve,
+      ...(web.cwd === 'repo' ? { cwd: repoRoot } : {}),
+      recipeEnv: { ...(proposal.env ?? {}), ...(web.env ?? {}) },
+      healthPath,
+      readyTimeoutMs: web.readyTimeoutMs ?? DEFAULT_WEB_READY_TIMEOUT_MS,
+      label: 'web',
+    })
+    if (boot.ok) return null
+    return {
+      ok: false,
+      stage: 'web boot',
+      reason: `web surface \`${web.serve.join(' ')}\` did not answer ${healthPath}: ${boot.stderr}`,
+    }
+  }
+
   // The api half — the server's analog of the entry probe: the proposal's own
   // datastore bring-up (exactly as `run.ts` runs it: the repo's command, through
   // `runBuild`, in the repo root, with the recipe env), then boot the proposed
@@ -800,6 +854,10 @@ export async function verifyProposal(
         }
         return { ok: false, stage: 'server boot', reason: bootReason }
       }
+      // The web surface boots inside the same services scope: a fullstack web
+      // serve dies without the datastore the api half brought up.
+      const webFailure = await verifyWebBoot()
+      if (webFailure) return webFailure
     } finally {
       // Teardown is best-effort and NEVER a verdict — a datastore that will not
       // stop is a warning, not a reason to reject a recipe that booted.
@@ -813,6 +871,11 @@ export async function verifyProposal(
         }
       }
     }
+  }
+  // A web-only proposal (no api block) still proves its boot.
+  if (!proposal.api) {
+    const webFailure = await verifyWebBoot()
+    if (webFailure) return webFailure
   }
   const warnings = proposalWarnings(proposal)
   return warnings.length > 0 ? { ok: true, warnings } : { ok: true }
@@ -1182,7 +1245,82 @@ export function staticProposalComplaints(
       )
     }
   }
+  // The browser-app rule, the web analog of the inventory rule above: a repo
+  // that ships a browser app and a proposal with no `web` block leaves every
+  // screen-driven claim untestable — and until this rule existed, the web block
+  // was the ONE recipe piece setup never authored (documenso 2026-08-30: a
+  // from-scratch setup produced an api-only recipe and silently dropped the web
+  // surface). Held here so every proposal path — deterministic, session,
+  // one-shot, cache — is forced through it, not just prompted.
+  if (!proposal.web) {
+    const browserApps = browserAppEvidence(apps, repoRoot)
+    if (browserApps.length > 0) {
+      complaints.push(
+        `this repository ships a browser app (${browserApps.join('; ')}) and the proposal declares no \`web\` ` +
+        `block — every screen-driven claim lands untestable. Declare \`web\`: a \`serve\` argv (for a fullstack ` +
+        `app this is often the same server the \`api\` block boots), a \`healthPath\` naming a page that actually ` +
+        `RENDERS (a login or sign-in page beats \`/\`, which often redirects), any env the app needs to address ` +
+        `itself (\`\${PORT}\` is substituted at boot), and — in a monorepo — \`app\` naming the served workspace ` +
+        `app's directory.`,
+      )
+    }
+  }
+  // The reset rule: a `services.up` that manages a datastore through docker
+  // compose without a `reset` leaves the runner unable to restore the world
+  // after a `world: mutates` tail — and the engine bars world-mutating tests
+  // outright without one, so the omission silently blocks every credential/
+  // deletion/config flow. `down -v` with the SAME compose file is the wipe.
+  if (services?.up && /(?<![\w-])docker(?:\s+|-)compose\b/.test(services.up) && !services.reset) {
+    const composeFile = /-f\s+(\S+)/.exec(services.up)?.[1]
+    const suggested = composeFile ? `docker compose -f ${composeFile} down -v` : 'docker compose down -v'
+    complaints.push(
+      `\`api.services.up\` manages docker compose services but declares no \`reset\` — without one the runner ` +
+      `cannot restore the world after a \`world: mutates\` test, so every world-mutating scenario (credential ` +
+      `changes, account deletion, global config) is barred. Declare \`api.services.reset\` as the full wipe, ` +
+      `volumes included: \`${suggested}\`.`,
+    )
+  }
   return complaints
+}
+
+/**
+ * The deterministic "a browser app exists" signal the web rule keys on: a
+ * `next`/`remix` workspace app in the route-manifest inventory, or — for a
+ * single-package repo the inventory cannot see — a browser framework in the
+ * root package.json's dependencies. Returns human-readable evidence strings,
+ * empty when nothing browser-shaped is found.
+ */
+export function browserAppEvidence(
+  apps: readonly RecipeAppInventoryEntry[] | undefined,
+  repoRoot?: string,
+): string[] {
+  const evidence: string[] = []
+  for (const app of apps ?? []) {
+    if (app.framework === 'next' || app.framework === 'remix') {
+      evidence.push(`${app.dir} — ${app.framework}`)
+    }
+  }
+  if (evidence.length > 0 || repoRoot === undefined) return evidence
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf-8')) as {
+      workspaces?: unknown
+      dependencies?: Record<string, string>
+      devDependencies?: Record<string, string>
+    }
+    // Single-package repos ONLY: a workspace root's dependencies are hoisted
+    // noise (a react-router in the root of a monorepo says nothing about which
+    // app ships it) — there the route-manifest inventory above is the signal.
+    if (pkg.workspaces !== undefined || fs.existsSync(path.join(repoRoot, 'pnpm-workspace.yaml'))) {
+      return evidence
+    }
+    const deps = { ...pkg.dependencies, ...pkg.devDependencies }
+    for (const name of ['next', '@remix-run/react', 'react-router', 'react-router-dom']) {
+      if (deps[name]) return [`root package.json depends on ${name}`]
+    }
+  } catch {
+    // No readable root package.json — no browser evidence from it.
+  }
+  return evidence
 }
 
 function readDiscoveryInputs(repoRoot: string): {

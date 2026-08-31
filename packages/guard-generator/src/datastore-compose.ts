@@ -59,7 +59,7 @@ export interface ComposePlan {
   /** The full file text, header comment included. */
   content: string
   /** The recipe's `api.services`, referencing the file by path. */
-  services: { up: string; down: string }
+  services: { up: string; down: string; reset: string }
   /** Recipe `api.env` entries — EMPTY when the app's own defaults already reach
    *  the generated containers. */
   env: Record<string, string>
@@ -189,6 +189,8 @@ export function deriveGuardCompose(refs: readonly DatastoreUrlRef[]): ComposeDer
       services: {
         up: `docker compose -f ${GUARD_COMPOSE_FILE} up -d --wait`,
         down: `docker compose -f ${GUARD_COMPOSE_FILE} down`,
+        // Volumes included: the world restore a `world: mutates` tail runs after.
+        reset: `docker compose -f ${GUARD_COMPOSE_FILE} down -v`,
       },
       env,
       notes,

@@ -146,7 +146,7 @@ describe('staticProposalComplaints — compose-in-build and host mutations', () 
         api: {
           serve: ['node', 'server.mjs'],
           healthPath: '/health',
-          services: { up: 'docker compose -f docker/testing/compose.yml up -d --wait database', down: 'docker compose -f docker/testing/compose.yml stop' },
+          services: { up: 'docker compose -f docker/testing/compose.yml up -d --wait database', down: 'docker compose -f docker/testing/compose.yml stop', reset: 'docker compose -f docker/testing/compose.yml down -v' },
         },
       },
       undefined,
@@ -213,6 +213,7 @@ describe('staticProposalComplaints — the compose NAMESPACE rule (cal.diy 2026-
           services: {
             up: "sed -e '/container_name: database/d' docker/development/compose.yml | docker compose -p acme-truecourse -f - up -d --wait database",
             down: "sed -e '/container_name: database/d' docker/development/compose.yml | docker compose -p acme-truecourse -f - stop database",
+            reset: "sed -e '/container_name: database/d' docker/development/compose.yml | docker compose -p acme-truecourse -f - down -v",
           },
         },
       },
@@ -254,9 +255,11 @@ describe('staticProposalComplaints — the workspace inventory rule', () => {
       { build: 'yarn workspace @calcom/app-store-cli build', entry: ['node', 'packages/app-store-cli/dist/cli.js'] },
       APPS,
     )
-    expect(complaints).toHaveLength(1)
-    expect(complaints[0]).toContain('apps/api/v2')
-    expect(complaints[0]).toContain('no `api` block')
+    const apiComplaints = complaints.filter((c) => c.includes('no `api` block'))
+    expect(apiComplaints).toHaveLength(1)
+    expect(apiComplaints[0]).toContain('apps/api/v2')
+    // The browser-app rule fires beside it: the inventory ships a next app too.
+    expect(complaints.some((c) => c.includes('no `web` block'))).toBe(true)
   })
 
   it('never refuses partial coverage — declaring ONE of several routed apps is a valid recipe', () => {
@@ -264,7 +267,7 @@ describe('staticProposalComplaints — the workspace inventory rule', () => {
       { build: 'true', api: { serve: ['node', 'dist/main.js'], healthPath: '/health' } },
       APPS,
     )
-    expect(complaints).toEqual([])
+    expect(complaints.filter((c) => c.includes('no `api` block'))).toEqual([])
   })
 
   it('says nothing for a genuinely CLI-only workspace (no routed apps) or without an inventory', () => {
