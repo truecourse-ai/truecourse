@@ -96,6 +96,13 @@ export const GuardRunEnvelopeSchema = z.preprocess(
      * pre-change snapshots keep parsing.
      */
       corpusFingerprint: z.string().optional(),
+      /**
+       * True when this run executed `world: mutates` scenarios and the recipe
+       * declares no `api.services.reset` to restore the world afterwards — the
+       * shared state the tail mutated is still live, and the next run inherits
+       * it. The honest warning, on the record a reader actually opens.
+       */
+      worldLeftDirty: z.boolean().optional(),
     })
     .strict(),
 )

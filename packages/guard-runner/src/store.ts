@@ -138,6 +138,18 @@ export function guardSetupFindingsPath(repoRoot: string): string {
 }
 
 /**
+ * THE WORLD-DIRTY MARKER (`guard/.world-dirty`, gitignored, derived): written
+ * before a `world: mutates` tail runs — by `guard run` and by generate's
+ * mutator wave alike — and cleared by a successful `api.services.reset`. A
+ * marker that survives (a crash mid-tail, a recipe with no reset) means the
+ * world still carries the tail's damage; the next world boot resets before
+ * `up` when it can.
+ */
+export function guardWorldDirtyMarkerPath(repoRoot: string): string {
+  return path.join(guardDir(repoRoot), '.world-dirty')
+}
+
+/**
  * The ADJUDICATION FINDINGS LEDGER — where `guard adjudicate`'s sessions append
  * the code-vs-docs discrepancies they read while classifying failures (the
  * outcome's `findings`, plan 05 step 21). Committed for the same reason its two

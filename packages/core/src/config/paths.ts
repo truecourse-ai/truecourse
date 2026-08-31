@@ -58,6 +58,7 @@ export const GITIGNORE_CONTENTS = [
   'guard/evidence/',
   'guard/interfaces.json',
   'guard/auto-resolutions.json',
+  'guard/.world-dirty',
   'scenarios/externals.local.json',
   'scenarios/dependencies.local.json',
   'sessions/',

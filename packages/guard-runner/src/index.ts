@@ -366,6 +366,7 @@ export {
   guardAuthoredInterfacesPath,
   guardInterfaceFindingsPath,
   guardSetupFindingsPath,
+  guardWorldDirtyMarkerPath,
   guardAdjudicateFindingsPath,
   guardFindingsReportPath,
   scenariosDir,

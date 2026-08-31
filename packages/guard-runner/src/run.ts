@@ -81,6 +81,7 @@ import { containsFixtureReference } from './api/vars.js'
 import { runCredentialRequests, CredentialRequestError } from './api/credential-request.js'
 import {
   appendGuardHistory,
+  guardWorldDirtyMarkerPath,
   readGuardLatest,
   readMergedInterfaceCatalog,
   recipePath,
@@ -856,6 +857,20 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
         | { ok: false; stop: RunGuardResult }
       const bootWorld = async (): Promise<WorldBoot> => {
         if (api.services) {
+          // A prior run's mutator tail left the world dirty (a crash mid-tail,
+          // or a reset that was not declared then): restore before booting on
+          // top of the damage. A failed reset falls through to `up` — the up's
+          // own failure, or the run's results, are the honest signal.
+          if (api.services.reset && fs.existsSync(guardWorldDirtyMarkerPath(repoRoot))) {
+            const reset = await runBuild(
+              repoRoot,
+              api.services.reset,
+              loaded.recipe.env,
+              opts.buildTimeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
+              cancel.signal,
+            )
+            if (reset.ok) fs.rmSync(guardWorldDirtyMarkerPath(repoRoot), { force: true })
+          }
           const up = await runBuild(
             repoRoot,
             api.services.up,
@@ -1225,11 +1240,24 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     // takes the rest of the budget. `orderReadBeforeWrite` still runs read-only api
     // scenarios ahead of mutating ones WITHIN the api pool (its ordering only ever
     // mattered for the api set — sandboxes are isolated).
+    // THE WORLD-MUTATOR TAIL (blast-radius scheduling): a scenario declaring
+    // `world: mutates` may destroy state every shared-world sibling depends on —
+    // the seeded principal's password, its sessions, the account itself (one
+    // committed delete-account scenario cost a documenso run 452 sign-in
+    // failures) — so the tail runs LAST, serialized, after every shared scenario
+    // settled, and the world is restored afterwards (`api.services.reset`) so
+    // the damage cannot reach the next run either.
+    const isWorldMutator = ({ scenario }: (typeof runnable)[number]): boolean =>
+      scenario.world === 'mutates'
+    const mainRunnable = runnable.filter((x) => !isWorldMutator(x))
+    const tailRunnable = runnable.filter(
+      (x) => isWorldMutator(x) && !externalBlockedIds.has(x.scenario.id),
+    )
     const apiRunnable = orderReadBeforeWrite(
-      runnable.filter((x) => isApiServerScenario(x.scenario) && !externalBlockedIds.has(x.scenario.id)),
+      mainRunnable.filter((x) => isApiServerScenario(x.scenario) && !externalBlockedIds.has(x.scenario.id)),
     )
     const servedIds = new Set(servedExec.map((p) => p.scenario.id))
-    const sandboxRunnable = runnable.filter((x) => !isApiServerScenario(x.scenario))
+    const sandboxRunnable = mainRunnable.filter((x) => !isApiServerScenario(x.scenario))
     const servedRunnable = sandboxRunnable.filter((x) => servedIds.has(x.scenario.id))
     const plainRunnable = sandboxRunnable.filter((x) => !servedIds.has(x.scenario.id))
     // The pools share ONE budget so their combined in-flight count never exceeds
@@ -1257,7 +1285,37 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       mapWithConcurrency(servedRunnable, servedWidth, runOne),
       mapWithConcurrency(plainRunnable, plainWidth, runOne),
     ])
-    const executed = [...apiResults, ...servedResults, ...plainResults].filter(
+    // The mutator tail: serialized, and only once every shared scenario is done.
+    // The dirty marker is written BEFORE the first mutator so a crash mid-tail
+    // still tells the next run's world boot to reset before building on the
+    // damage; a successful reset clears it (and leaves the finally's `down`
+    // nothing to stop — the reset took the world with it).
+    let worldLeftDirty = false
+    let tailResults: (GuardScenarioResult | null)[] = []
+    if (tailRunnable.length > 0 && !cancel.signal.aborted) {
+      fs.mkdirSync(path.dirname(guardWorldDirtyMarkerPath(repoRoot)), { recursive: true })
+      fs.writeFileSync(guardWorldDirtyMarkerPath(repoRoot), `${runId}\n`)
+      tailResults = await mapWithConcurrency(tailRunnable, 1, runOne)
+      if (!cancel.signal.aborted) {
+        if (api?.services?.reset) {
+          const reset = await runBuild(
+            repoRoot,
+            api.services.reset,
+            loaded.recipe.env,
+            opts.buildTimeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
+          )
+          if (reset.ok) {
+            fs.rmSync(guardWorldDirtyMarkerPath(repoRoot), { force: true })
+            servicesUp = false
+          } else {
+            worldLeftDirty = true
+          }
+        } else {
+          worldLeftDirty = true
+        }
+      }
+    }
+    const executed = [...apiResults, ...servedResults, ...plainResults, ...tailResults].filter(
       (r): r is GuardScenarioResult => r !== null,
     )
     const stop = cancelled('run')
@@ -1272,6 +1330,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
         branch: opts.branch ?? null,
         commit: opts.commit ?? null,
         recipeFingerprint: loaded.fingerprint,
+        ...(worldLeftDirty ? { worldLeftDirty: true } : {}),
       },
       summary: summarizeResults(results),
       scenarios: results,

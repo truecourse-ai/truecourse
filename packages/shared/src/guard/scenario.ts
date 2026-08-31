@@ -530,6 +530,21 @@ const envelope = {
    * what every pre-multi-server scenario means.
    */
   server: z.string().min(1).optional(),
+  /**
+   * The scenario's BLAST RADIUS — what it does to world state it did not mint.
+   * `shared` (the meaning of absence): additive-only — the scenario creates
+   * what it needs through the app's own paths under unique identities and
+   * mutates nothing it did not create, so it may run beside every other shared
+   * scenario against one world. `mutates`: it mutates or destroys state others
+   * depend on — the seeded principal's credentials or sessions, account
+   * deletion, global configuration — so the runner schedules it LAST,
+   * serialized, and restores the world after the tail (`api.services.reset`).
+   * Declared by the author, which knows what its flow does; a committed
+   * delete-account scenario once deleted the seeded principal mid-run and
+   * every sign-in after it failed — this field is what makes that scenario
+   * legal instead of a poison. Additive and optional.
+   */
+  world: z.enum(['shared', 'mutates']).optional(),
   setup: GuardSetupSchema.optional(),
   normalize: z.array(GuardNormalizerSchema).default([]),
 }

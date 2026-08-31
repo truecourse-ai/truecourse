@@ -367,7 +367,21 @@ export const RecipeApiSchema = z
      * (e.g. `docker compose up -d db`).
      */
     services: z
-      .object({ up: z.string().min(1), down: z.string().min(1).optional() })
+      .object({
+        up: z.string().min(1),
+        down: z.string().min(1).optional(),
+        /**
+         * Wipe the world's PERSISTED state entirely — datastore volumes included
+         * — so the next `up` starts pristine (e.g. `docker compose -f … down -v`).
+         * Distinct from `down`, which deliberately preserves data (stopping is
+         * not forgetting). The runner invokes it after the `world: mutates` tail
+         * (a scenario that destroys shared state must not leave its damage for
+         * the next run) and, when a prior run left the world dirty, before the
+         * next `up`. Optional: without it a run that executed mutators ends with
+         * a loud "world left dirty" warning instead.
+         */
+        reset: z.string().min(1).optional(),
+      })
       .strict()
       .optional(),
     /**
