@@ -7550,3 +7550,263 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     Related: [135] (the arm this gates), [137]/[138] (the same incident's seed
     half), [77] (setup as the home of environment facts — a future setup row
     could surface the browser earlier still).
+
+
+140. **The web briefing hid the seed's principals — 114 of 119 web flows blocked
+    on the word "credentials" while the seeded login sat in the database
+    (documenso, 2026-08-28).** STATUS: BUILT (2026-08-28). The first web run
+    with a browser AND a seeded web principal ([137]/[139] both in place)
+    still produced only 2 settled web scenarios: the credential catalog and
+    the fixture catalog in the author prompt were both gated
+    `ctx.driver === 'api'`, and the web SYSTEM prompt flatly said the sandbox
+    has "no credentials" and to block with `"credentials"` — so no web session
+    could learn `webUser`/`webSession` existed. One session even tried to mint
+    its own account through /signup and was stopped by the signature pad. The
+    same declaration-gap class as [137], one stage downstream: minted, declared,
+    runnable — and unadvertised.
+    FIX: `webPreparationCtx` now carries `recipeFixtureCatalog(recipe)`; the
+    user prompt renders a web-phrased FIXTURES AVAILABLE block
+    (`{{fixture:<name>.<field>}}` resolves in any authored string of any web
+    step — `resolveWebStep` toks navigate paths, fill values, locators and
+    matchers) stating that a SIGNED-IN world is reached by filling the seeded
+    login fields; the web system prompt's "no credentials" line became "no
+    AMBIENT credentials … what IS provided is the SEED", and `"credentials"`
+    is only a legitimate block when no listed fixture can sign the principal
+    in. Header credentials (`{{cred:…}}`) stay api-only — a browser logs in
+    through the form, not a header. `GENERATE_WEB_PROMPT_FINGERPRINT` moved
+    once, deliberately (pin updated: `22534b35f137646c`); the api pin did not.
+    Tests: `generate-web-briefing.test.ts` (the briefing carries the catalog)
+    + the prompt-render cases in `prompts.test.ts`.
+    CAVEAT (corrected 2026-08-30: `flowGenerationInputsHash` freezes only the
+    RETIRED prompt fingerprints and folds none for the web arm — the live
+    cli/api author fingerprints ARE folded): the 114 already-blocked WEB flows
+    settled with their hashes recorded, and a WEB-prompt fix moves no flow
+    input — so they did not re-attempt on a bare generate. Harvesting this fix on an existing store
+    means nulling `generationInputsHash` on the web-blocked manifest rows (a
+    one-time migration of verdicts computed under the briefing bug), or moving
+    the recipe fingerprint.
+    Related: [137]/[138]/[139] (the same incident's other links), [135].
+
+
+141. **The web probe proved the SESSION, nobody proved the LOGIN — a stale
+    stored password passed every check and bounced 102 web flows off /signin
+    (documenso, 2026-08-28).** STATUS: BUILT (2026-08-28). With [140] in place
+    the web workers finally attempted real sign-ins — and the server answered
+    "The email or password provided is incorrect" on every one. The seeded
+    user's stored bcrypt hash predated the current script (the world's DB
+    volume persists across runs, and the script's exists path `if (!user)`
+    never converges the password), while both existing probes passed: the
+    cookie probe bypasses the password, the api probe bypasses the user. The
+    one channel scenarios actually use — the PUBLISHED fixture password
+    through the login form — was the one channel never live-proven.
+    FIX (seed-session.ts): a web credential probe now carries a `login` proof
+    (`SeedLoginProbeSchema`: the app's own JSON login endpoint + a body whose
+    values resolve `{{fixture:<name>.<field>}}` from the manifest). The engine
+    POSTs the PUBLISHED values and requires 2xx, then the same body with one
+    corrupted secret (`controlField`, default `password`) and requires a
+    refusal — an endpoint that accepts a wrong secret gates nothing. Run
+    before the page-load pair, in-session and at the fold's fresh-world proof
+    alike. BINDING: `missingPrincipalSurfaces` only counts a web probe that
+    carries `login`, so a required web principal without the proof is refused
+    before a draft ever runs. Doctrine added: IDEMPOTENCE CONVERGES SECRETS —
+    the exists path must verify and update the secret with the app's own
+    hashing, never skip it; the refusal message says exactly that.
+    KNOWN LIMIT (RESOLVED 2026-08-30): the proof was one JSON POST — and the
+    scoped documenso restart met the app it could not pass the same day: the
+    `authorize` route compares `body.csrfToken` to a cookie `GET
+    /api/auth/csrf` sets (double-submit), so the login proof 500'd forever and
+    the seed session tried to publish a STATIC csrf token as a fixture.
+    `SeedLoginProbeSchema` now takes `login.csrf` ({path, responseField?,
+    bodyField?}): before EACH login POST (control included) the engine GETs
+    the mint route fresh, carries its cookies, reads the token out of the JSON
+    reply and injects it into the body. Doctrine + the refusal steer to the
+    declaration and forbid publishing csrf tokens as fixtures; the fixture
+    server grew the documenso-shaped `/api/csrf` + `/api/login-csrf` pair.
+    Form-encoded logins remain future work.
+    Same day, the credential-probe PREDICATE was aligned with the login
+    control's semantics: the CREDENTIALED request must be 2xx (previously a
+    500 with the credential slipped through as "not refused"), and ANY non-2xx
+    counts as the anonymous refusal (documenso answers HTTP 500 with an
+    UNAUTHORIZED body on every session route, so the 401/403-only rule was
+    unpassable there and cost a session its whole budget).
+    Bench note: the documenso world's stale row itself was fixed by resetting
+    the `documenso-test` database volume — a fresh world lets the existing
+    script's create path converge (editing the committed seed script would
+    have moved the recipe fingerprint and re-authored the whole corpus).
+    Related: [137] (the probe this completes), [138] (the binding check this
+    extends), [140] (the briefing fix that exposed it).
+
+
+142. **Scenarios declare their BLAST RADIUS — `world: shared | mutates`
+    (documenso, 2026-08-28: the corpus ate its own principal).** STATUS: BUILT
+    (2026-08-30). The audit log of the post-[141] run showed the mechanism the
+    whole 137-141 chain kept re-hitting: committed scenarios themselves mutate
+    the shared world — `delete-an-account…` deletes the seeded principal by
+    `{{fixture:webUser.id}}`, `view-and-revoke-sessions…` revokes the seeded
+    cookie, something rewrote the seeded password 74s into the run — and 452
+    sign-ins after them failed. One shared world per run means one destructive
+    scenario poisons every scenario after it.
+    FIX: `GuardScenario` (and the three authored raw schemas — the canonical
+    prompt schemas) gain optional `world: 'shared' | 'mutates'`; absence means
+    shared/additive. `buildFlowScenario` carries the authored value into the
+    committed file. Doctrine (api + web system prompts): one shared world —
+    self-mint through app paths under `${unique}` identities, never mutate
+    state you did not create; a flow genuinely about shared state declares
+    `world: mutates`. The deterministic LINT (+ its birth refusal for a
+    flagged-but-undeclared scenario) is DEFERRED as its own item.
+    DELIBERATE CORPUS ROLL: the schema + doctrine moved the cli/api author and
+    flow-worker prompt fingerprints, which `flowGenerationInputsHash` folds
+    live — every committed cli/api corpus re-authors at its next generate,
+    under the contract it is meant to re-author under (the old corpora carry
+    zero blast-radius discipline). The retirement golden and all pins were
+    re-pinned with the incident cited.
+    Related: [143]/[144] (the scheduling that consumes the declaration),
+    [137]-[141] (the chain this ends).
+
+
+143. **`api.services.reset` + the world-mutator tail in `guard run`.** STATUS:
+    BUILT (2026-08-30). The recipe's `services` gains `reset` — a full wipe,
+    volumes included (`docker compose … down -v`), distinct from `down`, which
+    deliberately preserves data. Compose-shaped proposals (detected and
+    guard-derived alike) now propose it. `guard run` splits the runnable set:
+    `world: mutates` scenarios run LAST, serialized, after every shared
+    scenario settled across all three pools; `guard/.world-dirty` (gitignored)
+    is written before the tail and cleared by a successful `reset` (which also
+    stands down the world, so the finally's `down` is skipped); a surviving
+    marker makes the NEXT world boot reset before `up`. No `reset` declared ⇒
+    the tail still runs last (within-run safety) and the run record carries
+    `worldLeftDirty: true` — the loud warning, on the artifact a reader opens.
+    Tests: `tests/guard-runner/run-world-mutators.test.ts`.
+    Related: [142], [144], the m-groups design discussion (m collapsed to ~2:
+    the shared bulk needs zero restores; one after the destructive tail).
+
+
+144. **Generate schedules by blast radius too: the LLM world classifier, the
+    serialized mutator wave, and C-lite sibling briefings.** STATUS: BUILT
+    (2026-08-30). Three pieces:
+    - CLASSIFIER: one batched call per generate (`guard.world-classify`,
+      `spawnWorldClassifyRunner`, cached in `.cache/guard/world-classify` on
+      the changed-flow set) names the flows whose milestones mutate shared
+      state. (Was fail-soft — a lost/invalid reply scheduled nothing; [146]
+      made it chunked and fail-CLOSED after the 2026-08-30 timeout let a
+      password rewrite run mid-pool.)
+    - THE WAVE: `FlowWorkerSessionSeam` gains `mutatorTasks` — wave 3, run
+      after non-epics and epics, at concurrency 1 — so a destructive draft
+      executes only against a world no sibling is still reading. The dirty
+      marker is written before the wave; after `sharedWorld.shutdown()` the
+      engine runs `services.reset` and clears it (no reset ⇒ marker stands).
+    - C-LITE (the arrange one-shot, per the pure-scenario-seed discussion):
+      every worker briefing carries up to 3 committed PASSING scenarios
+      sharing its plan's interfaces (`SETTLED SIBLING SCENARIOS`, full YAML,
+      6K cap each) — proven arrange verbs to copy-and-parameterize, selected
+      by interface overlap, own flow excluded. Generalizes the epic
+      member-scenario channel.
+    Tests: `tests/guard-generator/generate-world.test.ts` + the third-wave
+    case in `tests/core/guard-generate-worker-seam.test.ts`.
+    OPEN (follow-ups): the deterministic mutation lint + birth refusal ([142]'s
+    deferred half); estimate coverage for the classifier call; T0 seed shrink
+    and the full arrange library (C-proper) once C-lite proves out on the
+    validation repos.
+
+
+145. **The deterministic mutator gate at the tool seam (documenso 2026-08-30:
+    the classifier timed out and the password rewrite recurred).** STATUS:
+    BUILT (2026-08-30). The first [142]-[144] run proved two things at once:
+    workers DECLARE honestly (the bcrypt-truncation draft carried
+    `world: mutates` when it executed) and the classifier is a single point of
+    failure (its one call timed out, fail-open scheduled nothing, and the
+    declared mutator ran mid-pool at 09:08 — 431 sign-in failures to the end
+    of the run). The classifier only ADVISES scheduling; the draft states the
+    fact itself, so the gate lives where execution happens.
+    FIX (generate.ts, `mutatorDraftGate` in the worker tool closures): a draft
+    declaring `world: mutates` is refused by `run_scenario`/`submit_scenario`
+    before any sandbox is spent —
+    - recipe declares no `api.services.reset` ⇒ refused EVERYWHERE (a mutation
+      nobody can repair never runs); the refusal steers the worker to a
+      self-scoped rewrite or a `blocked` outcome naming the missing reset.
+    - reset declared but the flow is outside the mutator tail ⇒ DEFERRED: the
+      refusal invites the self-scoped rewrite first, and every deferred task
+      whose session did not settle re-runs in a SECOND, tail-only seam
+      invocation (serialized by the seam's mutator-wave contract) before the
+      generate ends — dirty marker written first, summaries merged.
+    `confirmCached` applies the same rule to a CACHED mutator yaml (treated as
+    a miss instead of executing mid-wave). Doctrine added to the api + web
+    author prompts; ANOTHER DELIBERATE ROLL (GENERATE_API `c023641899c98f89`,
+    GENERATE_WEB `5ae8cec6f69fdc62`, worker api `5ea39e8a0e7fe72b`, retirement
+    golden `sha256:9403ee4c…`).
+    Tests: the gate + defer + rewrite cases in
+    `tests/guard-generator/generate-world.test.ts`.
+    OPEN: the UNDECLARED-mutation lint ([142]'s deferred half) — the gate only
+    sees what a draft admits.
+    Related: [142] (the declaration), [144] (the wave), [146] (the classifier
+    hardening beside it).
+
+
+146. **World classification is chunked, retried, and fails CLOSED.** STATUS:
+    BUILT (2026-08-30). The 2026-08-30 documenso run sent ONE call over all
+    278 changed flows with their milestones; it timed out at 300s, and the
+    fail-open fallback removed the run's whole blast-radius defense at the
+    moment it mattered most.
+    FIX (generate.ts): calls cover at most `WORLD_CLASSIFY_CHUNK_SIZE` (40)
+    flows, cached per chunk (same `guard/world-classify` cache, chunk-keyed),
+    each chunk retried once; a chunk still lost falls back to
+    `looksWorldMutating` — a deliberately coarse keyword screen (password,
+    credential, revoke, delete account, …) whose suspects join the mutator
+    tail, with one error row naming the fallback and the count. A false
+    positive costs serialization; a false negative is what [145]'s gate
+    catches when the draft declares.
+    Tests: retry + fallback + keyword cases in
+    `tests/guard-generator/generate-world.test.ts`.
+
+
+147. **Seed doctrine: the SACRIFICIAL principal.** STATUS: BUILT (2026-08-30)
+    — doctrine only; it takes effect at each repo's next seed authoring. The
+    deepest cause of the 09:08 rewrite: documenso signup cannot produce a
+    sign-in-capable user (UNVERIFIED_EMAIL), so the shared principal was the
+    only password in the world — a password-change test HAD nothing else to
+    mutate. The seed-session system prompt now instructs: when the app cannot
+    mint credential-bearing principals at runtime, mint one extra disposable
+    user published as the fixture `sacrificialUser` (same login fields as the
+    primary web principal, stable email, description marking it disposable, no
+    credential/probe needed), restored every run by the converging exists path
+    ([141]). The api + web author doctrine steers credential mutations at it
+    when present, turning the whole class from shared-mutators into
+    self-scoped scenarios. Re-authoring a repo's seed rolls its recipe
+    fingerprint — batch it with the [145]/[146] prompt roll (one corpus
+    re-author, not two).
+    Related: [141] (convergence), [142] (the doctrine it extends), [145] (the
+    gate it makes rarely needed).
+
+
+148. **Hands-off recipes: setup authors the `web` block and enforces
+    `services.reset` (documenso 2026-08-30: a from-scratch setup produced an
+    api-only recipe).** STATUS: BUILT (2026-08-30). The scoped-corpus restart
+    exposed two silent recipe holes: the repair doctrine literally said "the
+    web browser surface is authored later by hand" (and `RecipeProposalSchema`
+    had no `web` field, so a session could not propose one even if it tried),
+    and no proposal path beyond the two deterministic compose derivations ever
+    produced `services.reset` — the old bench recipe had both only because
+    they were hand-written, and a restart threw them away.
+    FIX, enforced at stage zero so every proposal path (deterministic, repair
+    session, one-shot, cache) passes through it:
+    - `RecipeProposalSchema` gains `web` (the runner's `RecipeWebSchema`
+      verbatim), and `verifyProposal` gains the `web boot` stage: the declared
+      web surface boots through the same `preflightApiServer` the api servers
+      use — inside the services scope, so a fullstack serve sees its datastore
+      — and polls its healthPath; `web.build` runs first when declared.
+    - STATIC RULE (browser app): a proposal with no `web` block is refused
+      when the repo ships one — a `next`/`remix` app in the route-manifest
+      inventory, or (single-package repos only; a workspace root's hoisted
+      dependencies prove nothing) a browser framework in the root
+      package.json (`browserAppEvidence`).
+    - STATIC RULE (reset): a compose-managed `services.up` without `reset` is
+      refused, the complaint naming the exact wipe (`down -v` with the same
+      `-f` file) — [143]'s runner contract, now enforced at authoring time.
+    - Doctrine in both the repair session prompt (web-surface section, reset
+      requirement) and the one-shot recipe prompt.
+    Tests: `tests/guard-generator/recipe-web-and-reset.test.ts` (+ the
+    static-complaints suite updated for the new rules).
+    Related: [143] (the reset contract), [145] (why a missing reset bars
+    mutators), [107] (`web.app` and the place derivation the block feeds),
+    [137]/[147] (the seed step's web principals arm only when web is
+    runnable — this is what makes them arm hands-off).
