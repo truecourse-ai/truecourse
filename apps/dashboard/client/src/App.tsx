@@ -154,7 +154,7 @@ export default function App() {
               title: 'font-semibold leading-tight',
               description: 'mt-0.5 text-xs leading-snug opacity-90',
               actionButton:
-                'rounded-md bg-primary px-2 py-1 text-xs text-primary-foreground hover:opacity-90',
+                'shrink-0 self-center whitespace-nowrap rounded-md bg-primary px-2 py-1 text-xs text-primary-foreground hover:opacity-90',
               cancelButton:
                 'rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted',
               closeButton:
