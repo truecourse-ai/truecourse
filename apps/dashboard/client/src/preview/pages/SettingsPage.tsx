@@ -8,15 +8,18 @@
  * the whole point of one edition with plan-gated features.
  */
 
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Lock, Plus } from 'lucide-react';
+import { LLM_PROVIDER_KINDS } from '@truecourse/shared';
+import type { LlmConfigResponse, LlmConfigUpdate, LlmProviderKind } from '@truecourse/shared';
 import { Badge } from '@/components/ui/badge';
 import { EntityList } from '@/preview/ui/entity-list';
 import { StatusWord } from '@/preview/ui/status-word';
 import { Capsule, Facts, ProviderIcon, PROVIDER_NAME, PageHeader, SideMenu } from '@/preview/ui/bits';
-import { ENTITLEMENTS, MEMBERS, MODELS_CONFIG } from '@/preview/data';
-import type { Member, ModelsConfig, ProviderId } from '@/preview/data/types';
+import { ENTITLEMENTS, MEMBERS } from '@/preview/data';
+import { fetchLlmConfig, saveLlmConfig } from '@/preview/data/llm-config';
+import type { Member, ProviderId } from '@/preview/data/types';
 import { usePreviewState } from '@/preview/shell/preview-state';
 import { PREVIEW_BASE } from '@/preview/shell/PreviewShell';
 
@@ -205,79 +208,227 @@ function ProvidersTab() {
   );
 }
 
+const PROVIDER_LABEL: Record<LlmProviderKind, string> = {
+  anthropic: 'Anthropic API',
+  openai: 'OpenAI',
+  bedrock: 'AWS Bedrock',
+  copilot: 'GitHub Copilot',
+};
+
+const MODEL_PLACEHOLDER: Record<LlmProviderKind, string> = {
+  anthropic: 'claude-opus-5',
+  openai: 'gpt-5.6',
+  bedrock: 'anthropic.claude-opus-5',
+  copilot: 'gpt-5.6',
+};
+
+const FIELD =
+  'mt-1 w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary';
+const FIELD_MONO = `${FIELD} font-mono`;
+
+/**
+ * The workspace's LLM provider, for real. Saving is a live provider TEST: the
+ * server probes the candidate before it stores anything, so a refusal comes
+ * back in the provider's own words and is shown as it arrived — the whole
+ * point of the button is to find out what the provider says.
+ *
+ * The stored key never comes back, only its masked tail, so an empty key field
+ * means "keep the one you have" (same provider only — switching needs a key).
+ */
 function ModelsTab() {
-  const [config, setConfig] = useState<ModelsConfig>(MODELS_CONFIG);
-  const [tested, setTested] = useState(false);
+  const { refreshLlmProvider } = usePreviewState();
+  const [data, setData] = useState<LlmConfigResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const [provider, setProvider] = useState<LlmProviderKind>('anthropic');
+  const [model, setModel] = useState('');
+  const [fallbackModel, setFallbackModel] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [accessKeyId, setAccessKeyId] = useState('');
+  const [baseURL, setBaseURL] = useState('');
+  const [region, setRegion] = useState('');
+
+  const apply = useCallback((next: LlmConfigResponse) => {
+    setData(next);
+    if (!next.config) return;
+    setProvider(next.config.provider);
+    setModel(next.config.model);
+    setFallbackModel(next.config.fallbackModel ?? '');
+    setAccessKeyId(next.config.accessKeyId ?? '');
+    setBaseURL(next.config.baseURL ?? '');
+    setRegion(next.config.region ?? '');
+  }, []);
+
+  useEffect(() => {
+    let live = true;
+    void fetchLlmConfig()
+      .then((next) => {
+        if (live) apply(next);
+      })
+      .catch((e: unknown) => {
+        if (live) setError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      live = false;
+    };
+  }, [apply]);
+
+  const current = data?.config ?? null;
+  const isBedrock = provider === 'bedrock';
+  const keyIsForThisProvider = current?.hasKey && current.provider === provider;
+  const keyPlaceholder = keyIsForThisProvider
+    ? `${current?.keyMask ?? '••••'}, leave blank to keep`
+    : isBedrock
+      ? 'AWS secret access key, or blank to use the IAM role'
+      : 'Paste the provider API key';
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    setSaved(false);
+    const update: LlmConfigUpdate = {
+      provider,
+      model: model.trim(),
+      ...(fallbackModel.trim() ? { fallbackModel: fallbackModel.trim() } : {}),
+      ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+      ...(accessKeyId.trim() ? { accessKeyId: accessKeyId.trim() } : {}),
+      ...(baseURL.trim() ? { baseURL: baseURL.trim() } : {}),
+      ...(region.trim() ? { region: region.trim() } : {}),
+    };
+    void saveLlmConfig(update)
+      .then((next) => {
+        apply(next);
+        setApiKey('');
+        setSaved(true);
+        // The shell's needs-setup surfaces answer to this read, not to the form.
+        return refreshLlmProvider();
+      })
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(false));
+  };
 
   return (
     <div className="space-y-4">
+      {current && (
+        <Card title="Active provider">
+          <Facts
+            rows={[
+              { label: 'Provider', value: PROVIDER_LABEL[current.provider] },
+              { label: 'Model', value: <span className="font-mono">{current.model}</span> },
+              { label: 'Key', value: current.hasKey ? (current.keyMask ?? 'stored') : 'no stored key' },
+              { label: 'Updated', value: new Date(current.updatedAt).toLocaleString() },
+            ]}
+          />
+        </Card>
+      )}
+
       <Card
         title="LLM provider"
         description="The engine calls the model from the hosted product only. The CLI never makes an LLM call."
       >
-        <div className="flex flex-wrap items-center gap-1">
-          {(['anthropic', 'openai', 'bedrock'] as const).map((p) => (
-            <button
-              key={p}
-              type="button"
-              aria-pressed={config.provider === p}
-              onClick={() => {
-                setConfig((c) => ({ ...c, provider: p }));
-                setTested(false);
-              }}
-              className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
-                config.provider === p ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground'
-              }`}
+        <form onSubmit={submit} className="space-y-2">
+          <label className="block text-[11px] font-medium text-muted-foreground">
+            Provider
+            <select
+              value={provider}
+              onChange={(e) => setProvider(e.target.value as LlmProviderKind)}
+              className={FIELD}
             >
-              {p}
-            </button>
-          ))}
-        </div>
-        <div className="mt-3 space-y-2">
+              {(data?.providers ?? LLM_PROVIDER_KINDS).map((p) => (
+                <option key={p} value={p}>
+                  {PROVIDER_LABEL[p]}
+                </option>
+              ))}
+            </select>
+          </label>
+
           <label className="block text-[11px] font-medium text-muted-foreground">
             Model
             <input
-              value={config.model}
-              onChange={(e) => setConfig((c) => ({ ...c, model: e.target.value }))}
-              className="mt-1 w-full rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              required
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder={MODEL_PLACEHOLDER[provider]}
+              className={FIELD_MONO}
             />
           </label>
-          <label className="block text-[11px] font-medium text-muted-foreground">
-            API key
-            <input
-              value={config.maskedKey}
-              onChange={(e) => setConfig((c) => ({ ...c, maskedKey: e.target.value }))}
-              className="mt-1 w-full rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-            />
-          </label>
-        </div>
-        <div className="mt-3 flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => setTested(true)}
-            className="rounded border border-border px-2 py-1 text-[11px] font-medium text-foreground hover:bg-muted/60"
-          >
-            Test connection
-          </button>
-          {tested && <StatusWord tone="success" word="Connected" />}
-        </div>
-      </Card>
 
-      <Card
-        title="Metered allowance"
-        description="A workspace either brings its own key or spends the product allowance. This one has both."
-      >
-        <div className="flex flex-wrap items-center gap-4 text-[11px]">
-          <span className="text-foreground">
-            Used <span className="font-mono">{config.allowanceUsed}</span>
-          </span>
-          <span className="text-foreground">
-            Remaining <span className="font-mono">{config.allowanceLeft}</span>
-          </span>
-          <Badge variant="outline" className="h-4 px-1.5 text-[10px]">
-            {config.allowancePlan}
-          </Badge>
-        </div>
+          <label className="block text-[11px] font-medium text-muted-foreground">
+            Fallback model
+            <input
+              value={fallbackModel}
+              onChange={(e) => setFallbackModel(e.target.value)}
+              placeholder="Tried only if the primary model errors"
+              className={FIELD_MONO}
+            />
+          </label>
+
+          <label className="block text-[11px] font-medium text-muted-foreground">
+            {isBedrock ? 'AWS secret access key' : 'API key'}
+            <input
+              type="password"
+              autoComplete="off"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder={keyPlaceholder}
+              className={FIELD_MONO}
+            />
+          </label>
+
+          {isBedrock ? (
+            <>
+              <label className="block text-[11px] font-medium text-muted-foreground">
+                AWS region
+                <input
+                  value={region}
+                  onChange={(e) => setRegion(e.target.value)}
+                  placeholder="us-east-1"
+                  className={FIELD_MONO}
+                />
+              </label>
+              <label className="block text-[11px] font-medium text-muted-foreground">
+                AWS access key id
+                <input
+                  value={accessKeyId}
+                  onChange={(e) => setAccessKeyId(e.target.value)}
+                  placeholder="Leave blank to use the instance IAM role"
+                  className={FIELD_MONO}
+                />
+              </label>
+            </>
+          ) : (
+            <label className="block text-[11px] font-medium text-muted-foreground">
+              Custom base URL
+              <input
+                value={baseURL}
+                onChange={(e) => setBaseURL(e.target.value)}
+                placeholder={
+                  provider === 'copilot'
+                    ? 'Defaults to the GitHub Copilot endpoint'
+                    : 'For a gateway, proxy or self-hosted endpoint'
+                }
+                className={FIELD_MONO}
+              />
+            </label>
+          )}
+
+          <div className="flex flex-wrap items-center gap-3 pt-1">
+            <button
+              type="submit"
+              disabled={busy}
+              className="rounded bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+            >
+              {busy ? 'Testing…' : 'Test & save'}
+            </button>
+            {saved && !error && <StatusWord tone="success" word="Verified and saved" />}
+            {/* The provider's own refusal, verbatim: paraphrasing it would
+                throw away the only thing that says what to change. */}
+            {error && <span className="text-[11px] text-destructive">{error}</span>}
+          </div>
+        </form>
       </Card>
     </div>
   );

@@ -425,8 +425,10 @@ describe('Activity is real on a connected repository', () => {
 
     renderAt('/preview/repos/linkwarden/activity');
 
-    // The real view's own empty copy, which names the CLI command that fills it.
-    expect(await screen.findByText(/No agentic runs yet\. Start one with/)).toBeInTheDocument();
+    // The real view's own empty state, which on this surface offers the first
+    // scan rather than naming a CLI command.
+    expect(await screen.findByText('No agentic runs yet.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start scan' })).toBeInTheDocument();
     await waitFor(() =>
       expect(
         fetchMock.mock.calls.some(([input]) =>

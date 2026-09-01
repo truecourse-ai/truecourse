@@ -80,6 +80,7 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
     privateRepoLimit,
     repos,
     refreshRealRepos,
+    llmProvider,
   } = usePreviewState();
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [provider, setProvider] = useState<ProviderId>('github');
@@ -463,9 +464,13 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
                 </li>
               ))}
             </ul>
+            {/* Only promise the scan when there is a provider to run it: with
+                none, connecting writes the row and stops there. */}
             {isGithub && (
               <p className="mt-2 text-[11px] text-muted-foreground">
-                Onboarding starts in the background as each repository is connected.
+                {llmProvider === 'missing'
+                  ? 'Connecting links the repository. No scan runs until an LLM provider is set in Settings.'
+                  : 'Onboarding starts in the background as each repository is connected.'}
               </p>
             )}
           </div>

@@ -448,6 +448,10 @@ export function installPreviewFetch(): void {
     // to the server — and a repository the server does not know simply 404s,
     // which is what the callers already expect.
     if (rest === 'sessions' || rest.startsWith('sessions/')) return real(input, init);
+    // So is starting a scan: a connected repository's Activity starts a real
+    // run through the server, and no fixture could stand in for the answer —
+    // it is where "this workspace has no provider" is found out.
+    if (rest === 'spec/corpus/scan') return real(input, init);
     const method = (init?.method ?? 'GET').toUpperCase();
     let body: Record<string, unknown> = {};
     if (typeof init?.body === 'string') {

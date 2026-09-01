@@ -51,8 +51,9 @@ import {
   WORKSPACES,
 } from '@/preview/data';
 import { disconnectRealRepo, fetchRealRepos } from '@/preview/data/real-repos';
+import { fetchLlmConfig } from '@/preview/data/llm-config';
 import { useAuth } from '@/ee/AuthContext';
-import { useRealRunStream } from './real-runs';
+import { useRealRunStream, type RunFailure } from './real-runs';
 import type {
   ConnectableRepo,
   JobChain,
@@ -100,10 +101,22 @@ interface PreviewStateValue {
    * waits on this before it snapshots what to stay silent about.
    */
   jobsReady: boolean;
+  /** The real runs that ended badly, newest first. */
+  runFailures: RunFailure[];
+  /**
+   * What the workspace's Models setting says. `unknown` while the read is in
+   * flight AND when there is no server to ask: nothing may claim a workspace
+   * has no provider on the strength of an unanswered read.
+   */
+  llmProvider: LlmProviderState;
+  /** Re-read it. Called once the Models tab saves one. */
+  refreshLlmProvider: () => Promise<void>;
   /** Coverage versions regenerated in this session (a PR version that got its scenarios). */
   generatedVersions: ReadonlySet<string>;
   regenerateVersion: (repo: Repo, versionId: string, label: string) => void;
 }
+
+export type LlmProviderState = 'unknown' | 'configured' | 'missing';
 
 const PreviewStateContext = createContext<PreviewStateValue | null>(null);
 
@@ -135,6 +148,7 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
   const [notifications, setNotifications] = useState<PreviewNotification[]>(NOTIFICATIONS);
   const [jobs, setJobs] = useState<JobChain[]>(JOBS_IN_FLIGHT);
   const [generatedVersions, setGeneratedVersions] = useState<ReadonlySet<string>>(() => new Set());
+  const [llmProvider, setLlmProvider] = useState<LlmProviderState>('unknown');
 
   const regenerateVersion = useCallback((repo: Repo, versionId: string, label: string) => {
     setGeneratedVersions((prev) => new Set([...prev, versionId]));
@@ -176,6 +190,22 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
       live = false;
     };
   }, []);
+
+  // The workspace's provider, read beside the registry. A refused or
+  // unreachable read stays `unknown` — the needs-setup surfaces are a claim
+  // about the workspace, not about this read.
+  const refreshLlmProvider = useCallback(async () => {
+    try {
+      const { config } = await fetchLlmConfig();
+      setLlmProvider(config ? 'configured' : 'missing');
+    } catch {
+      setLlmProvider('unknown');
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshLlmProvider();
+  }, [refreshLlmProvider]);
 
   const updateRepo = useCallback((id: string, patch: Partial<Repo>) => {
     setRealRepos((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
@@ -331,6 +361,9 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
       // Real jobs first: they are the ones actually happening.
       jobs: [...realRuns.jobs, ...jobs],
       jobsReady: realRuns.ready,
+      runFailures: realRuns.failures,
+      llmProvider,
+      refreshLlmProvider,
       generatedVersions,
       regenerateVersion,
     };
@@ -343,6 +376,8 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
     connections,
     notifications,
     jobs,
+    llmProvider,
+    refreshLlmProvider,
     generatedVersions,
     regenerateVersion,
     updateRepo,

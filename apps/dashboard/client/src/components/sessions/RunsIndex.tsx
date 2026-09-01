@@ -15,12 +15,13 @@ import {
   STEP_DOT,
   RUN_STATUS_META,
   commandLabel,
-  progressSentence,
   runChecklist,
   runDuration,
+  runStory,
   shortRef,
   startedLabel,
   waitingCount,
+  type RunStarter,
   type RunStatus,
 } from './run-model';
 
@@ -35,6 +36,7 @@ export function RunsIndex({
   error,
   notFound,
   onOpen,
+  starter,
 }: {
   /** null while the first read is in flight — a spinner, not "no runs". */
   runs: PublicSessionRun[] | null;
@@ -42,6 +44,9 @@ export function RunsIndex({
   /** A `?run=` deep link that matched nothing in the store. */
   notFound: boolean;
   onOpen: (runId: string) => void;
+  /** Given when this surface can start a run itself; an empty store then
+   *  offers the first one instead of naming a CLI command. */
+  starter?: RunStarter;
 }) {
   const [kinds, setKinds] = useState<string[]>([]);
   const [statuses, setStatuses] = useState<string[]>([]);
@@ -126,9 +131,14 @@ export function RunsIndex({
           ) : runs === null ? (
             <p className="px-6 py-8 text-center text-xs text-muted-foreground">Reading runs…</p>
           ) : all.length === 0 ? (
-            <p className="px-6 py-8 text-center text-xs text-muted-foreground">
-              No agentic runs yet. Start one with `truecourse spec scan` (or any guard command).
-            </p>
+            <div className="flex flex-col items-center gap-2 px-6 py-8">
+              <p className="text-center text-xs text-muted-foreground">
+                {starter?.first
+                  ? 'No agentic runs yet.'
+                  : 'No agentic runs yet. Start one with `truecourse spec scan` (or any guard command).'}
+              </p>
+              {starter && <StartFirstRun starter={starter} />}
+            </div>
           ) : shown.length === 0 ? (
             <p className="px-6 py-8 text-center text-xs text-muted-foreground">
               No run matches these filters.
@@ -139,6 +149,22 @@ export function RunsIndex({
         </div>
       </div>
     </div>
+  );
+}
+
+/** The one offer an empty store carries: start the run that comes first. */
+function StartFirstRun({ starter }: { starter: RunStarter }) {
+  const first = starter.first;
+  if (!first) return null;
+  return (
+    <button
+      type="button"
+      disabled={starter.pending}
+      onClick={() => starter.start(first.command)}
+      className="rounded border border-border px-2 py-1 text-[11px] font-medium text-foreground hover:bg-muted/60 disabled:opacity-50"
+    >
+      {starter.pending ? 'Starting…' : first.label}
+    </button>
   );
 }
 
@@ -175,8 +201,10 @@ function RunRow({ run, onOpen }: { run: PublicSessionRun; onOpen: (runId: string
             />
           ))}
         </span>
-        <span className="min-w-0 truncate text-[11px] text-muted-foreground">
-          {progressSentence(steps, run.status)}
+        <span
+          className={`min-w-0 truncate text-[11px] ${run.error ? 'text-red-400' : 'text-muted-foreground'}`}
+        >
+          {runStory(run, steps)}
         </span>
       </span>
 

@@ -35,6 +35,7 @@ import {
   startedLabel,
   timeLabel,
   waitingCount,
+  type RunStarter,
   type StreamStep,
 } from './run-model';
 
@@ -48,6 +49,7 @@ export function RunConversation({
   openSessionId,
   onOpenSession,
   onBack,
+  starter,
 }: {
   repoId: string;
   run: PublicSessionRun;
@@ -57,10 +59,17 @@ export function RunConversation({
   openSessionId: string | null;
   onOpenSession: (sessionId: string | null) => void;
   onBack: () => void;
+  /** Given when this surface can start a run itself. */
+  starter?: RunStarter;
 }) {
   const meta = RUN_STATUS_META[run.status];
   const waiting = waitingCount(run);
   const { steps, next, notes } = useMemo(() => buildRunStream(run), [run]);
+  // A run that ended badly can be had again, when its command knows how to
+  // start. The new run is its own row, so the click hands the index back.
+  const canRerun =
+    (run.status === 'failed' || run.status === 'interrupted') &&
+    (starter?.supports(run.command) ?? false);
 
   // A step card is open while its step is; a landed one compacts to its
   // header row until its chevron says otherwise. The override survives the
@@ -102,12 +111,37 @@ export function RunConversation({
         </span>
         <span className="shrink-0 font-mono text-muted-foreground">{shortRef(run.gitRef)}</span>
         <span className="shrink-0 tabular-nums text-muted-foreground">{runDuration(run)}</span>
-        {waiting > 0 && (
-          <span className="ml-auto shrink-0 text-[11px] text-sky-400">
-            {waiting} question{waiting === 1 ? '' : 's'} need{waiting === 1 ? 's' : ''} you
+        {(waiting > 0 || canRerun) && (
+          <span className="ml-auto flex shrink-0 items-center gap-3">
+            {waiting > 0 && (
+              <span className="text-[11px] text-sky-400">
+                {waiting} question{waiting === 1 ? '' : 's'} need{waiting === 1 ? 's' : ''} you
+              </span>
+            )}
+            {canRerun && starter && (
+              <button
+                type="button"
+                disabled={starter.pending}
+                onClick={() => {
+                  starter.start(run.command);
+                  onBack();
+                }}
+                className="rounded border border-border px-2 py-0.5 text-[11px] font-medium text-foreground hover:bg-muted/60 disabled:opacity-50"
+              >
+                {starter.pending ? 'Starting…' : 'Run again'}
+              </button>
+            )}
           </span>
         )}
       </div>
+
+      {/* Why it ended badly, in the record's own words. The row above says the
+          status; this says the reason, which is the part a reader came for. */}
+      {run.error && (
+        <div className="shrink-0 border-b border-red-500/30 px-6 py-2 text-[11px] text-red-400">
+          {meta.word} · {run.error.message}
+        </div>
+      )}
 
       <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-6 pb-3 pt-5">
         <div className={`${STREAM} flex flex-col gap-4`}>
