@@ -1,6 +1,7 @@
-# Boot the image locally (app + Postgres) to validate the build before it ships
-# to Azure Container Apps. Every credential comes from the environment — nothing
-# is hardcoded here. Put values in a gitignored .env (compose auto-loads it) or
+# Self-host TrueCourse: app + Postgres in one `docker compose up --build`.
+# Every credential comes from the environment — nothing is hardcoded here.
+# Bring a WorkOS environment (session auth) and a GitHub App (repo connect +
+# webhooks); put values in a gitignored .env (compose auto-loads it) or
 # export them inline:
 #
 #   POSTGRES_PASSWORD=$(openssl rand -hex 16) \
@@ -55,9 +56,9 @@ services:
       WORKOS_REDIRECT_URI: ${WORKOS_REDIRECT_URI:-}
       WORKOS_APP_URL: ${WORKOS_APP_URL:-}
       # GitHub App connect. The server itself treats these as optional (it boots
-      # and answers /api/github with a 503 naming them), but the hosted image
-      # exists to serve connected repos, so the compose contract requires all
-      # four up front rather than shipping a container that can't connect.
+      # and answers /api/github with a 503 naming them), but the image exists to
+      # serve connected repos, so the compose contract requires all four up
+      # front rather than shipping a container that can't connect.
       GITHUB_APP_ID: ${GITHUB_APP_ID:?set the GitHub App id}
       GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:?set the GitHub App private key}
       GITHUB_APP_WEBHOOK_SECRET: ${GITHUB_APP_WEBHOOK_SECRET:?set the GitHub App webhook secret}
