@@ -37,6 +37,7 @@ import {
   unregisterAnalysis,
 } from '@truecourse/core/services/analysis-registry';
 import { createLLMProvider, type LLMProvider } from '@truecourse/core/services/llm/provider';
+import type { LlmTransport } from '@truecourse/shared/llm';
 import { getDiffResult } from '@truecourse/core/services/violation-query';
 import {
   deleteAnalysis as deleteAnalysisFile,
@@ -52,7 +53,12 @@ import {
 } from '@truecourse/core/lib/analysis-store';
 import type { LatestSnapshot } from '@truecourse/core/types/snapshot';
 import { log, popLogger, pushLogger } from '@truecourse/core/lib/logger';
-import { ensureLlmTransport } from '../services/llm-transport.service.js';
+import {
+  LlmNotConfiguredError,
+  LlmProbeFailedError,
+  orgOf,
+  startWorkspaceLlm,
+} from '../services/workspace-llm.service.js';
 import { acquireWorkTree } from '../services/work-tree.service.js';
 import type { RunClone } from '../services/run-clone.service.js';
 
@@ -94,12 +100,26 @@ router.post('/:id/analyses', async (req: Request, res: Response, next: NextFunct
     const effectiveCategories = projectConfig.enabledCategories ?? undefined;
     const effectiveLlmRules = projectConfig.enableLlmRules ?? true;
 
-    // LLM rules mean this run reaches the model: refresh the saved selection
-    // (mtime-cached — a `stat` when unchanged), so a `config llm setup` since boot
-    // needs no restart. Before the 202, like the diff-baseline check — an unusable
-    // API config answers the POST instead of leaving the client on sockets that
-    // never come.
-    if (effectiveLlmRules) ensureLlmTransport();
+    // LLM rules mean this run reaches the model: load and prove the asking
+    // workspace's provider BEFORE the 202, like the diff-baseline check — an
+    // unset or unusable one answers the POST instead of leaving the client on
+    // sockets that never come.
+    let transport: LlmTransport | undefined;
+    if (effectiveLlmRules && mode === 'full') {
+      try {
+        transport = (await startWorkspaceLlm(orgOf(req))).transport();
+      } catch (e) {
+        if (e instanceof LlmNotConfiguredError) {
+          res.status(409).json({ error: e.code, message: e.message });
+          return;
+        }
+        if (e instanceof LlmProbeFailedError) {
+          res.status(502).json({ error: e.code, message: e.message });
+          return;
+        }
+        throw e;
+      }
+    }
 
     // Register before the 202 so POST /analyses/cancel can find this run.
     const abortController = registerAnalysis(id, 'pending');
@@ -127,6 +147,7 @@ router.post('/:id/analyses', async (req: Request, res: Response, next: NextFunct
           skipGit,
           effectiveCategories,
           effectiveLlmRules,
+          transport,
           tracker,
           signal: abortController.signal,
           codeDir: workTree?.dir,
@@ -312,6 +333,8 @@ interface StartRunOptions {
   skipGit?: boolean;
   effectiveCategories?: string[];
   effectiveLlmRules: boolean;
+  /** The workspace transport the LLM rules run on. Absent when they're off. */
+  transport?: LlmTransport;
   tracker: StepTracker;
   signal: AbortSignal;
   /** The ephemeral clone to read code from, when `repo.path` is an identity. */
@@ -356,7 +379,9 @@ async function runFullAnalyze(id: string, repo: RegistryEntry, opts: StartRunOpt
     return;
   }
 
-  const provider: LLMProvider | undefined = opts.effectiveLlmRules ? createLLMProvider() : undefined;
+  const provider: LLMProvider | undefined = opts.effectiveLlmRules
+    ? createLLMProvider(opts.transport)
+    : undefined;
   if (provider) {
     provider.setRepoId(id);
     provider.setRepoPath(opts.codeDir ?? repo.path);

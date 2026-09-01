@@ -16,5 +16,7 @@ export { PgSpecStore } from './spec-store.js';
 export { PgGuardStore } from './guard-store.js';
 export { PgInferredActionStore } from './inferred-action-store.js';
 export { PgKvCacheStore } from './cache-store.js';
+export { PgLlmConfigStore } from './llm-config-store.js';
+export { encryptSecret, decryptSecret, maskKey } from './crypto.js';
 export { PgAnalyzeLock } from './analyze-lock.js';
 export { purgeRepoData } from './repo-purge.js';

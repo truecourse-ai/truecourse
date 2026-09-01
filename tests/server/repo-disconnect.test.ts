@@ -54,7 +54,7 @@ vi.mock('@truecourse/core/commands/spec-in-process', async (importOriginal) => {
   };
 });
 
-import { createTestApp } from '../helpers/test-app';
+import { createTestApp, TEST_ORG } from '../helpers/test-app';
 import {
   readRegistry,
   registerProject,
@@ -148,7 +148,7 @@ describe('DELETE /api/repos/:id', () => {
         else options?.signal?.addEventListener('abort', stop, { once: true });
       });
 
-    expect(startOnboardingScan(entry.slug, local)).toBe(true);
+    expect(startOnboardingScan(entry.slug, local, TEST_ORG)).toBe(true);
     await until(() => reached);
     expect(isSpecScanRunning(local)).toBe(true);
 

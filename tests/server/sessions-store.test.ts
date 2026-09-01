@@ -110,6 +110,44 @@ describe('sessions store', () => {
     expect(finished.endpoint).toBeUndefined();
   });
 
+  it('records WHY a run failed, and keeps it through reopen and serialization', () => {
+    const run = createSessionRun(repo, { command: 'spec-scan', gitRef: 'main' });
+    run.finish('failed', { error: { message: 'provider returned 401', kind: 'llm-probe' } });
+
+    const reopened = openSessionRun(repo, 'spec-scan', run.runId);
+    expect(reopened.record()).toMatchObject({
+      status: 'failed',
+      error: { message: 'provider returned 401', kind: 'llm-probe' },
+    });
+    // The browser view strips the endpoint + pid; the reason is the point of it.
+    expect(toPublicRunRecord(reopened.record()).error).toEqual({
+      message: 'provider returned 401',
+      kind: 'llm-probe',
+    });
+  });
+
+  it('stamps a reason onto a run that has already finished', () => {
+    const run = createSessionRun(repo, { command: 'spec-scan', gitRef: 'main' });
+    run.finish('failed');
+    expect(run.record().error).toBeUndefined();
+
+    openSessionRun(repo, 'spec-scan', run.runId).setError({ message: 'the clone died' });
+    expect(openSessionRun(repo, 'spec-scan', run.runId).record().error).toEqual({
+      message: 'the clone died',
+    });
+  });
+
+  it('reads a record written before the reason field existed', () => {
+    const run = createSessionRun(repo, { command: 'spec-scan', gitRef: 'main' });
+    run.finish('failed');
+    const runJson = path.join(sessionRunDir(repo, 'spec-scan', run.runId), 'run.json');
+    const legacy = JSON.parse(fs.readFileSync(runJson, 'utf-8'));
+    delete legacy.error;
+    fs.writeFileSync(runJson, JSON.stringify(legacy));
+
+    expect(openSessionRun(repo, 'spec-scan', run.runId).record().error).toBeUndefined();
+  });
+
   it('persists the run-level display blocks and serves them to browsers', () => {
     const run = createSessionRun(repo, { command: 'spec-scan', gitRef: 'main' });
     run.setChecklist([

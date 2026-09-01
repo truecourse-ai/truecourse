@@ -177,6 +177,12 @@ export interface GuardGenerateInProcessOptions {
   llm?: 'cli' | 'agent' | 'api';
   io?: string;
   /**
+   * Run on THIS transport instead of resolving one. The dashboard server passes
+   * the transport it built from the asking workspace's stored provider config —
+   * credentials travel with the run, not through a process-wide default.
+   */
+  transport?: LlmTransport;
+  /**
    * Pre-flight LLM cost estimate gate. Called with the token estimate before any
    * LLM work; return `false` to abort (throws {@link EstimateDeclined}). Skipped
    * when nothing changed (the estimate has no stages).
@@ -246,7 +252,9 @@ function resolveGuardModels(repoRoot: string, mode: LlmTransportMode): GuardGene
  * direct-API transport from the user's global config (throws when it isn't
  * configured); `cli` → `claude -p`, forcing Claude Code even when an API
  * transport is the installed default; unset → the installed default, else
- * `undefined` so each runner falls back to its built-in cli transport.
+ * `undefined` so each runner falls back to its built-in cli transport. An
+ * explicit `transport` instance short-circuits all of it — it already carries
+ * the credentials its caller chose.
  *
  * {@link effectiveLlmMode} moves the STAGE MODELS the same way, so a `cli` flag
  * never hands an api-configured model to `claude -p`.
@@ -254,7 +262,11 @@ function resolveGuardModels(repoRoot: string, mode: LlmTransportMode): GuardGene
 function resolveTransport(options: {
   llm?: 'cli' | 'agent' | 'api';
   io?: string;
+  transport?: LlmTransport;
 }): LlmTransport | undefined {
+  // An explicit instance is the whole answer — it already carries the
+  // credentials the caller chose for this run.
+  if (options.transport) return options.transport;
   if (options.llm === 'agent') {
     if (!options.io) {
       throw new Error('--llm agent requires --io <dir> (the request/response mailbox directory)');
@@ -276,8 +288,10 @@ export async function guardGenerateInProcess(
 ): Promise<GuardGenerateInProcessResult> {
   const { tracker } = options;
   // The transport this run actually uses decides the models — never the saved
-  // selection a `--llm-transport` flag just overrode.
-  const mode = effectiveLlmMode(options.llm);
+  // selection a `--llm-transport` flag just overrode. An explicit transport IS
+  // the selection: it was built from a stored provider block, so the run is in
+  // api mode whatever the local config file says.
+  const mode = options.transport ? 'api' : effectiveLlmMode(options.llm);
 
   // Hard-fail on unresolved spec conflicts BEFORE the estimate — never ask to
   // spend, then fail. Extracting both sides of an open overlap births noise.

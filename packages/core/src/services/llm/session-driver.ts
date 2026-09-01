@@ -24,7 +24,11 @@ import {
 import type { SessionDriver, SessionLlm } from '@truecourse/agent-loop';
 import { resolveClaudeBinary } from '@truecourse/shared';
 import { effectiveLlmMode, readApiLlmConfig } from '../../config/global-config.js';
-import type { LlmTransportFlag, LlmTransportMode } from '../../config/global-config.js';
+import type {
+  GlobalApiLlmConfig,
+  LlmTransportFlag,
+  LlmTransportMode,
+} from '../../config/global-config.js';
 import { buildProviderConfig, priceCall } from './install-transport.js';
 
 /** The model claude-code mode runs every session on. */
@@ -56,6 +60,19 @@ export interface SessionDriverOptions {
 }
 
 /**
+ * Build the api-mode session driver from an EXPLICIT provider block — the entry
+ * for a caller that holds the credentials itself (the dashboard server threads
+ * its workspace's stored config per run) rather than reading the user's file.
+ * Throws `LlmApiConfigError` when the block is unusable.
+ */
+export function createApiSessionDriverFor(
+  api: GlobalApiLlmConfig | undefined,
+): ConfiguredSessionDriver {
+  const driver = createApiSessionDriver(buildProviderConfig(api), { pricing: priceCall });
+  return { driver, mode: 'api', attribution: driver.attribution };
+}
+
+/**
  * Build the session driver for this run. Throws `LlmApiConfigError` in api mode
  * when the API block is missing or unusable — the same one-liner
  * `createConfiguredApiTransport` throws, pointing at `truecourse config llm setup`.
@@ -64,11 +81,7 @@ export function createConfiguredSessionDriver(
   opts: SessionDriverOptions = {},
 ): ConfiguredSessionDriver {
   const mode = effectiveLlmMode(opts.transport);
-  if (mode === 'api') {
-    const cfg = buildProviderConfig(readApiLlmConfig());
-    const driver = createApiSessionDriver(cfg, { pricing: priceCall });
-    return { driver, mode, attribution: driver.attribution };
-  }
+  if (mode === 'api') return createApiSessionDriverFor(readApiLlmConfig());
   const driver = createClaudeAgentSessionDriver({
     pathToClaudeCodeExecutable: resolveClaudeBinary(),
     model: SESSION_MODEL_CLAUDE_CODE,

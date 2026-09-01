@@ -55,9 +55,15 @@ import {
 } from '@truecourse/core/commands/spec-in-process';
 import { estimateStepPhase } from '@truecourse/core/progress';
 import { baselineCommit } from './diff-base.js';
-import { ensureLlmTransport } from '../services/llm-transport.service.js';
+import {
+  LlmNotConfiguredError,
+  LlmProbeFailedError,
+  orgOf,
+  startWorkspaceLlm,
+} from '../services/workspace-llm.service.js';
 import {
   beginSpecScan,
+  recordFailedScanRun,
   runStoredSpecScan,
   type SpecScanClaim,
 } from '../services/onboarding-scan.service.js';
@@ -314,21 +320,46 @@ router.get(
         res.status(409).json({ error: 'A spec scan is already running for this repository.' });
         return;
       }
-      // Refresh the saved LLM selection (mtime-cached — a `stat` when unchanged),
-      // so a `config llm setup` since boot needs no restart. An unusable API
-      // config fails here, before any spend, and surfaces like any scan failure.
-      ensureLlmTransport();
+      // The asking workspace's provider, loaded and proved before any spend.
+      // Unconfigured is not an error to debug — it's a setting to fill in — so
+      // it answers with the machine-readable code the client routes on.
+      let llm;
+      try {
+        llm = await startWorkspaceLlm(orgOf(req));
+      } catch (e) {
+        if (e instanceof LlmNotConfiguredError) {
+          res.status(409).json({ error: e.code, message: e.message });
+          return;
+        }
+        if (e instanceof LlmProbeFailedError) {
+          // The run exists only to carry the failure, so Activity shows a failed
+          // scan rather than nothing at all.
+          recordFailedScanRun(repo.path, { message: e.message, kind: 'llm-probe' });
+          res.status(502).json({ error: e.code, message: e.message });
+          return;
+        }
+        throw e;
+      }
       const tracker = createSocketSpecTracker(repoIdForCleanup, CURATE_STEPS.map((s) => ({ ...s })));
+      // `?confirm=none` runs without the estimate gate — the caller has already
+      // said yes (the preview's start/restart IS the confirmation), the way the
+      // onboarding scan does. Everything else keeps the socket confirm.
+      const gated = req.query.confirm !== 'none';
       const result = await runStoredSpecScan(repo.path, {
         tracker,
         source: 'dashboard',
         // Same slot, same cancellation: disconnecting the repository stops a
         // manual scan exactly as it stops an onboarding one.
         signal: scanClaim.signal,
-        // The popup replaces in place, so the estimate rides the checklist here as
-        // a leading step (the terminal renders it as its own line instead).
-        onEstimatePhase: estimateStepPhase(tracker),
-        onLlmEstimate: createSocketSpecEstimateHandler(repoIdForCleanup, scanClaim.signal),
+        driver: llm.driver(),
+        ...(gated
+          ? {
+              // The popup replaces in place, so the estimate rides the checklist
+              // here as a leading step (the terminal renders its own line).
+              onEstimatePhase: estimateStepPhase(tracker),
+              onLlmEstimate: createSocketSpecEstimateHandler(repoIdForCleanup, scanClaim.signal),
+            }
+          : {}),
       });
       emitSpecComplete(repoIdForCleanup, 'scan');
       res.json({ ...(await corpusPayload(repo.path)), noChanges: result.noChanges });

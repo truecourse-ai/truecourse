@@ -71,6 +71,13 @@
       "when": 1784239769917,
       "tag": "0009_stale_mister_fear",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788275745910,
+      "tag": "0010_workspace_llm_config",
+      "breakpoints": true
     }
   ]
 }

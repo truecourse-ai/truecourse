@@ -46,6 +46,15 @@ export const SessionIndexEntrySchema = z.object({
 });
 export type SessionIndexEntry = z.infer<typeof SessionIndexEntrySchema>;
 
+/** Why a run ended badly. `kind` is an open string so a new failure class
+ *  costs no schema change; `llm-config` and `llm-probe` are the ones the
+ *  dashboard's start-time checks stamp today. */
+export const RunErrorSchema = z.object({
+  message: z.string(),
+  kind: z.string().optional(),
+});
+export type RunError = z.infer<typeof RunErrorSchema>;
+
 const RunRecordFieldsSchema = z.object({
   command: SessionCommandSchema,
   runId: z.string(),
@@ -85,6 +94,12 @@ const RunRecordFieldsSchema = z.object({
       fallbackModel: z.string().optional(),
     })
     .optional(),
+  /**
+   * Why the run ended badly, in the record itself — the only place a surface
+   * that never saw the process can read it. Optional: a run that finished
+   * cleanly, or one written before the field existed, has none.
+   */
+  error: RunErrorSchema.optional(),
   sessions: z.array(SessionIndexEntrySchema),
 });
 

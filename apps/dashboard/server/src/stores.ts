@@ -34,14 +34,25 @@ import {
   PgUiStateStore,
   GhReposRegistryStore,
   PgKvCacheStore,
+  PgLlmConfigStore,
   PgAnalyzeLock,
   purgeRepoData,
 } from '@truecourse/data-store';
+import { setShowResolvedStageModel } from '@truecourse/core/commands/spec-in-process';
+import { setWorkspaceLlmConfigStore } from './services/workspace-llm.service.js';
 import { repoDirName } from './services/run-clone.service.js';
 import { setRepoDataPurge } from './services/repo-removal.service.js';
 
+export interface InstallDbStoresOptions {
+  /** Master secret the workspace's provider key is encrypted with (32+ chars). */
+  masterSecret: string;
+}
+
 /** Swap every core/llm storage seam for its Postgres impl. */
-export function installDbStores({ db, lockPool }: DbHandle): void {
+export function installDbStores(
+  { db, lockPool }: DbHandle,
+  { masterSecret }: InstallDbStoresOptions,
+): void {
   setAnalysisStore(new PgAnalysisStore(db));
   setSpecStore(new PgSpecStore(db));
   // Guard run store + scenario corpus + dismissedClaims decisions.
@@ -56,6 +67,14 @@ export function installDbStores({ db, lockPool }: DbHandle): void {
   // Content-addressed LLM-stage cache → Postgres. This is what keeps re-runs
   // cheap now that every run's clone (and any file cache in it) is discarded.
   setKvCacheStore(new PgKvCacheStore(db));
+  // The workspace's LLM provider, encrypted at rest. Not a core seam: nothing
+  // in the pipeline reads a provider by itself — the routes load the asking
+  // workspace's and thread it into the run.
+  setWorkspaceLlmConfigStore(new PgLlmConfigStore(db, masterSecret));
+  // Each workspace names ONE model, and its transport ignores the per-stage
+  // hint, so the per-stage tiers the OSS progress lines show would be a lie.
+  setShowResolvedStageModel(false);
+
   // Cross-process analyze serialization → session-level `pg_advisory_lock` on a
   // DEDICATED pool (a lockfile on a throwaway clone can't serialize two runs of
   // the same repo; the dedicated pool keeps held locks from starving the store

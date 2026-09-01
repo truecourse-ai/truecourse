@@ -13,10 +13,10 @@
  *
  * NO CONFIRMATION GATE for the onboarding scan. `curateInProcess`'s estimate
  * hooks are deliberately not passed: connecting a repository IS the request
- * for onboarding, so the scan runs without a second prompt. That spends
- * whatever LLM transport the operator configured, unattended — accepted for
- * the preview, and the reason this entry lives here rather than being folded
- * into the manual Scan route, which keeps its estimate gate.
+ * for onboarding, so the scan runs without a second prompt. That spends on the
+ * workspace's own provider, unattended — accepted for the preview, and the
+ * reason this entry lives here rather than being folded into the manual Scan
+ * route, whose estimate gate is opt-out rather than absent.
  *
  * Progress reaches the client through the two channels the manual Scan already
  * uses, so no new plumbing exists for it: the socket spec tracker
@@ -36,8 +36,13 @@
  * still wanted. The work tree is disposed on every exit, cancellation included.
  */
 
+import type { RunError } from '@truecourse/agent-loop';
 import { log } from '@truecourse/core/lib/logger';
-import { listSessionRuns } from '@truecourse/core/lib/sessions-store';
+import {
+  createSessionRun,
+  listSessionRuns,
+  openSessionRun,
+} from '@truecourse/core/lib/sessions-store';
 import { resolveCommitSha } from '@truecourse/core/lib/repo-ref';
 import { saveSpec, specsMaterializeInPlace } from '@truecourse/core/lib/spec-store';
 import {
@@ -49,7 +54,11 @@ import {
   type SpecCurateInProcessResult,
 } from '@truecourse/core/commands/spec-in-process';
 import { writeDecisions, resolveRepoIdentity } from '@truecourse/spec-consolidator';
-import { ensureLlmTransport } from './llm-transport.service.js';
+import {
+  LlmNotConfiguredError,
+  LlmProbeFailedError,
+  startWorkspaceLlm,
+} from './workspace-llm.service.js';
 import { acquireWorkTree } from './work-tree.service.js';
 import {
   createSocketSpecTracker,
@@ -152,22 +161,38 @@ export async function cancelSpecScan(
   return stopped && !inFlight.has(repoKey);
 }
 
-/** The estimate/progress hooks a caller may thread into the shared pipeline. */
+/**
+ * What a caller threads into the shared pipeline: the estimate/progress hooks,
+ * and the session driver built from the asking workspace's provider config —
+ * the run's credentials travel with it, never through a process-wide default.
+ */
 export type StoredSpecScanOptions = Pick<
   CurateInProcessOptions,
-  'tracker' | 'signal' | 'source' | 'onLlmEstimate' | 'onEstimatePhase' | 'onRunStarted'
+  | 'tracker'
+  | 'signal'
+  | 'source'
+  | 'onLlmEstimate'
+  | 'onEstimatePhase'
+  | 'onRunStarted'
+  | 'driver'
 >;
 
 /**
  * The whole spec scan of a connected repository: acquire an ephemeral work
  * tree, curate against it, persist the corpus server-side under the tree's
- * commit, dispose the tree. The caller owns the scan slot and the transport
+ * commit, dispose the tree. The caller owns the scan slot and the provider
  * check; this owns everything between clone and store.
+ *
+ * Whatever goes wrong in here lands ON THE RUN RECORD before it is rethrown —
+ * Activity shows runs, not this process's log, so a run that died with no
+ * reason on it is a run nobody can explain.
  */
 export async function runStoredSpecScan(
   repoKey: string,
   options: StoredSpecScanOptions = {},
 ): Promise<SpecCurateInProcessResult> {
+  // The run curate creates, so a failure can be explained on it.
+  let runId: string | null = null;
   const tree = await acquireWorkTree(repoKey);
   try {
     // The user's resolutions (relations / manual areas / includes) live in the
@@ -189,6 +214,10 @@ export async function runStoredSpecScan(
       repoIdentity,
       sessionsKey: repoKey,
       ...options,
+      onRunStarted: (info) => {
+        runId = info.runId;
+        options.onRunStarted?.(info);
+      },
     });
     // The run wrote `corpus.json` into the (throwaway) tree; persist it under
     // the tree's commit so it outlives the clone. An in-place store already IS
@@ -204,6 +233,13 @@ export async function runStoredSpecScan(
       await saveDecisions(repoKey, result.curate.decisions);
     }
     return result;
+  } catch (err) {
+    // A cancelled scan is not a failed one — it stopped because the caller said
+    // so, and the record already says `interrupted`.
+    if (runId && !options.signal?.aborted) {
+      stampRunError(repoKey, runId, { message: messageOf(err) });
+    }
+    throw err;
   } finally {
     tree.dispose();
   }
@@ -214,14 +250,14 @@ export async function runStoredSpecScan(
  * `false` means a scan for this repo is already running and this call was a
  * no-op. Never throws.
  */
-export function startOnboardingScan(repoId: string, repoKey: string): boolean {
+export function startOnboardingScan(repoId: string, repoKey: string, orgId: string): boolean {
   try {
     const claim = beginSpecScan(repoKey);
     if (!claim) {
       log.info(`[onboarding] spec scan already running for ${repoId} — not starting a second`);
       return false;
     }
-    void runScan(repoId, repoKey, claim.signal).finally(claim.release);
+    void runScan(repoId, repoKey, orgId, claim.signal).finally(claim.release);
     return true;
   } catch (err) {
     log.error(`[onboarding] could not start the spec scan for ${repoId}: ${messageOf(err)}`);
@@ -230,18 +266,25 @@ export function startOnboardingScan(repoId: string, repoKey: string): boolean {
 }
 
 /** The scan itself. Resolves in every case — failures are reported, not thrown. */
-async function runScan(repoId: string, repoKey: string, signal: AbortSignal): Promise<void> {
+async function runScan(
+  repoId: string,
+  repoKey: string,
+  orgId: string,
+  signal: AbortSignal,
+): Promise<void> {
   try {
-    // Refresh the saved LLM selection (a `stat` when unchanged). An unusable API
-    // config — or none at all — fails HERE, before the clone exists, which is
-    // why the failure is reported on the socket as well as the log.
-    ensureLlmTransport();
+    // The workspace's provider, loaded and proved BEFORE the clone exists. A
+    // workspace with no provider configured simply has no scan: there is
+    // nothing to start it with, so nothing is started and nothing is recorded
+    // as failed — the client learns it from GET /api/llm/config.
+    const llm = await startWorkspaceLlm(orgId);
 
     const tracker = createSocketSpecTracker(repoId, CURATE_STEPS.map((s) => ({ ...s })));
     await runStoredSpecScan(repoKey, {
       tracker,
       source: 'dashboard',
       signal,
+      driver: llm.driver(),
       onRunStarted: (info) =>
         log.info(`[onboarding] spec scan ${info.runId} started for ${repoId}`),
     });
@@ -254,11 +297,45 @@ async function runScan(repoId: string, repoKey: string, signal: AbortSignal): Pr
       log.info(`[onboarding] spec scan cancelled for ${repoId}`);
       return;
     }
+    if (err instanceof LlmNotConfiguredError) {
+      log.info(`[onboarding] no LLM provider configured for ${repoId} — no scan started`);
+      return;
+    }
     const message = messageOf(err);
     log.error(`[onboarding] spec scan failed for ${repoId}: ${message}`);
-    // The run record already carries the failure when one was created; this is
-    // what a client sees when the scan died before there was a run to fail.
+    // A probe failure died before there was a run to fail — create one, so the
+    // repository shows a failed scan instead of no scan at all. Everything else
+    // already carries its reason (runStoredSpecScan stamped it).
+    if (err instanceof LlmProbeFailedError) {
+      recordFailedScanRun(repoKey, { message, kind: 'llm-probe' });
+    }
+    // The run record carries the failure; this is what a client watching the
+    // repo sees while it is still on the page.
     safely(() => emitSpecProgress(repoId, { step: 'error', percent: 100, detail: message }));
+  }
+}
+
+/**
+ * A spec-scan run that exists only to carry its own failure — the pre-flight
+ * died before `curateInProcess` could create one. Best-effort: a store that
+ * cannot be written must not turn one failure into two.
+ */
+export function recordFailedScanRun(repoKey: string, error: RunError): void {
+  try {
+    createSessionRun(repoKey, { command: 'spec-scan', gitRef: 'unknown' }).finish('failed', {
+      error,
+    });
+  } catch (err) {
+    log.warn(`[onboarding] could not record the failed scan for ${repoKey}: ${messageOf(err)}`);
+  }
+}
+
+/** Stamp the reason onto a run that already exists (and already finished). */
+function stampRunError(repoKey: string, runId: string, error: RunError): void {
+  try {
+    openSessionRun(repoKey, 'spec-scan', runId).setError(error);
+  } catch (err) {
+    log.warn(`[onboarding] could not stamp the scan failure for ${repoKey}: ${messageOf(err)}`);
   }
 }
 

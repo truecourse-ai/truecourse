@@ -14,6 +14,12 @@ import { readRegistry, unregisterProject } from '@truecourse/core/config/registr
 import { createApp, type CreateAppOptions } from '../../apps/dashboard/server/src/app';
 import type { GithubMount } from '../../apps/dashboard/server/src/github/index';
 import { setWorkTreeProvider } from '../../apps/dashboard/server/src/services/work-tree.service';
+import {
+  resetWorkspaceLlmBackend,
+  resetWorkspaceLlmConfigStore,
+  setWorkspaceLlmBackend,
+  setWorkspaceLlmConfigStore,
+} from '../../apps/dashboard/server/src/services/workspace-llm.service';
 
 export const TEST_ORG = 'org_test';
 
@@ -42,11 +48,44 @@ export function testGithubMount(orgId: string = TEST_ORG): GithubMount {
   return { webhook: Router(), connect: Router(), store: store as unknown as GithubMount['store'] };
 }
 
-/** `createApp` wired for route tests: authenticated as TEST_ORG, all repos visible.
+/** The provider a test workspace is configured with. */
+export const TEST_LLM_CONFIG = {
+  provider: 'anthropic' as const,
+  model: 'claude-test',
+  apiKey: 'sk-test',
+};
+
+/**
+ * Give every workspace a provider that answers its pre-flight probe, so a route
+ * test that is not ABOUT the provider reaches the pipeline. Nothing here builds
+ * a real driver or transport — the seam hands back inert stand-ins. Tests that
+ * ARE about the provider install their own store/backend afterwards.
+ */
+export function installTestWorkspaceLlm(): void {
+  setWorkspaceLlmConfigStore({
+    getConfig: async () => ({ ...TEST_LLM_CONFIG }),
+    getView: async () => null,
+    save: async () => {},
+  });
+  setWorkspaceLlmBackend({
+    probe: async () => {},
+    driver: () => ({}) as never,
+    transport: (async () => '{}') as never,
+  });
+}
+
+export function resetTestWorkspaceLlm(): void {
+  resetWorkspaceLlmConfigStore();
+  resetWorkspaceLlmBackend();
+}
+
+/** `createApp` wired for route tests: authenticated as TEST_ORG, all repos visible,
+ *  and the workspace's LLM provider configured and answering.
  *  Runs "clone" in place: the fixture repos ARE local paths, so the work-tree
  *  provider hands the registered path back with a no-op dispose. */
 export function createTestApp(overrides: Partial<CreateAppOptions> = {}) {
   setWorkTreeProvider(async (repoKey) => ({ dir: repoKey, dispose: () => {} }));
+  installTestWorkspaceLlm();
   return createApp({
     serveStatic: false,
     authVerifier: testAuthVerifier(),

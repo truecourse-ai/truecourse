@@ -62,7 +62,7 @@ export interface GithubConnectionOverrides {
   /** Per-run work trees. Default: a token clone into the workspace's run dir. */
   workTree?: WorkTreeProvider;
   /** Start a repo's onboarding scan. Default: the in-process background scan. */
-  scan?: (repoId: string, repoKey: string) => boolean;
+  scan?: (repoId: string, repoKey: string, orgId: string) => boolean;
 }
 
 export function createGithubConnection(
@@ -121,8 +121,9 @@ export function createGithubConnection(
       ((installationId: number) => fetchInstallationAccount(cfg, installationId)),
     onRepoLinked: async (link: RepoLinkRecord) => {
       // The row is the connection — no clone, no registration. The onboarding
-      // scan acquires (and disposes) its own ephemeral work tree.
-      scan(slugify(link.repoFullName, []), link.repoFullName);
+      // scan acquires (and disposes) its own ephemeral work tree, and spends on
+      // the provider of the workspace that just connected the repository.
+      scan(slugify(link.repoFullName, []), link.repoFullName, link.workspaceOrgId);
     },
     onRepoUnlinked: async (link: RepoLinkRecord) => {
       await removeRepoRunState(link.repoFullName);

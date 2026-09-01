@@ -17,6 +17,7 @@ import {
   RunRecordSchema,
   type ChecklistItem,
   type DisplayBlock,
+  type RunError,
   type RunRecord,
   type RunStatus,
   type SessionCommand,
@@ -110,8 +111,14 @@ export interface SessionRunStore {
    * seen through the record.
    */
   setChecklist(items: ChecklistItem[]): void;
+  /**
+   * Why the run is failing. Stamped by whoever knows — the start-time LLM
+   * checks stamp theirs before the first session exists, so a run that never
+   * got off the ground still says why.
+   */
+  setError(error: RunError): void;
   /** Terminal write: stamps `finishedAt` and drops the dead endpoint. */
-  finish(status: Exclude<RunStatus, 'running'>): void;
+  finish(status: Exclude<RunStatus, 'running'>, opts?: { error?: RunError }): void;
 }
 
 export function createSessionRun(
@@ -192,8 +199,13 @@ function openRun(dir: string, record: RunRecord): SessionRunStore {
       };
       write();
     },
-    finish(status) {
+    setError(error) {
+      record.error = error;
+      write();
+    },
+    finish(status, opts) {
       record.status = status;
+      if (opts?.error) record.error = opts.error;
       record.finishedAt = new Date().toISOString();
       delete record.endpoint;
       write();

@@ -170,16 +170,35 @@ export function priceCall(
 // ---------------------------------------------------------------------------
 
 /**
+ * Build the API transport from an EXPLICIT provider block — the entry for a
+ * caller that holds the credentials itself (the dashboard server threads its
+ * workspace's stored config per run) rather than reading the user's file.
+ * Throws `LlmApiConfigError` when the block is unusable.
+ */
+export function createApiTransportFor(
+  api: GlobalApiLlmConfig | undefined,
+  opts: { honorRequestModel?: boolean } = {},
+): LlmTransport {
+  const cfg = buildProviderConfig(api);
+  primePriceTable();
+  // Per-stage model overrides (`TRUECOURSE_MODEL_<STAGE>` / `llm.stages`) arrive
+  // as `req.model`; honoring them is what keeps those overrides alive in API mode.
+  // A caller whose config IS the whole selection (the dashboard's per-workspace
+  // block) turns that off: the stage tiers it would otherwise inherit are Claude
+  // CLI aliases, meaningless to a raw provider API.
+  return createApiTransport(cfg, {
+    pricing: priceCall,
+    honorRequestModel: opts.honorRequestModel ?? true,
+  });
+}
+
+/**
  * Build the API transport from the saved global config. Throws
  * `LlmApiConfigError` when the API block is missing or unusable — the CLI turns
  * that into a one-liner pointing at the setup command.
  */
 export function createConfiguredApiTransport(): LlmTransport {
-  const cfg = buildProviderConfig(readApiLlmConfig());
-  primePriceTable();
-  // Per-stage model overrides (`TRUECOURSE_MODEL_<STAGE>` / `llm.stages`) arrive
-  // as `req.model`; honoring them is what keeps those overrides alive in API mode.
-  return createApiTransport(cfg, { pricing: priceCall, honorRequestModel: true });
+  return createApiTransportFor(readApiLlmConfig());
 }
 
 /** The transport this module installed, so it never clears anyone else's. */

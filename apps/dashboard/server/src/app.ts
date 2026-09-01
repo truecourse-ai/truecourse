@@ -20,6 +20,7 @@ import guardRouter from './routes/guard.js';
 import guardActionsRouter from './routes/guard-actions.js';
 import sessionsRouter from './routes/sessions.js';
 import capabilitiesRouter from './routes/capabilities.js';
+import llmRouter from './routes/llm.js';
 import { createAuthGate } from './middleware/auth.js';
 import type { GithubMount } from './github/index.js';
 import type { AuthVerifier } from '@truecourse/shared';
@@ -122,6 +123,10 @@ export function createApp(opts: CreateAppOptions): express.Express {
   // Which workspace owns a connected repository — the one thing every
   // slug-resolving route needs, so another workspace's repo reads as absent.
   const githubLinks = opts.github?.store ?? null;
+
+  // The workspace's Models settings — workspace-scoped, not repo-scoped, so it
+  // sits beside the registry routes rather than behind the project resolver.
+  app.use('/api/llm', llmRouter);
 
   // Home page / registry routes run without a project.
   app.use('/api/repos', createReposRouter({ githubLinks }));

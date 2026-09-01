@@ -95,6 +95,12 @@ import {
   isSpecScanRunning,
   startOnboardingScan,
 } from '../../apps/dashboard/server/src/services/onboarding-scan.service';
+import {
+  resetWorkspaceLlmBackend,
+  resetWorkspaceLlmConfigStore,
+  setWorkspaceLlmBackend,
+  setWorkspaceLlmConfigStore,
+} from '../../apps/dashboard/server/src/services/workspace-llm.service';
 // Seam state must be set on the SAME module instance the server code reads, so
 // these come in via the package specifiers (dist) the server itself imports —
 // a source-path import here would install the stores on a parallel copy.
@@ -246,10 +252,21 @@ beforeEach(async () => {
   });
   scan.calls.length = 0;
   scan.impl = async () => ({ noChanges: false, curate: { corpus: {}, stats: {} } });
+  // The onboarding scan runs on the connecting workspace's provider — give the
+  // workspace one, and answer its pre-flight probe without a network call.
+  setWorkspaceLlmConfigStore({
+    getConfig: async (orgId) =>
+      orgId === ORG ? { provider: 'anthropic', model: 'claude-x', apiKey: 'sk-test' } : null,
+    getView: async () => null,
+    save: async () => {},
+  });
+  setWorkspaceLlmBackend({ probe: async () => {}, driver: () => ({}) as never });
 });
 
 afterEach(() => {
   resetRegistryStore();
+  resetWorkspaceLlmConfigStore();
+  resetWorkspaceLlmBackend();
   setWorkTreeProvider(null);
   fs.rmSync(path.join(process.env.TRUECOURSE_HOME!, 'sessions'), { recursive: true, force: true });
 });
@@ -374,10 +391,10 @@ const linkRepo = (app: Express, org = ORG) =>
 
 describe('linking a repository', () => {
   it('writes the row, starts the scan, and clones nothing in the request', async () => {
-    const started: Array<[string, string]> = [];
+    const started: Array<[string, string, string]> = [];
     const app = buildApp({
-      scan: (repoId, repoKey) => {
-        started.push([repoId, repoKey]);
+      scan: (repoId, repoKey, orgId) => {
+        started.push([repoId, repoKey, orgId]);
         return true;
       },
     });
@@ -401,7 +418,8 @@ describe('linking a repository', () => {
     });
 
     // The scan was pointed at the repo IDENTITY; no clone dir exists.
-    expect(started).toEqual([[REPO_SLUG, REPO]]);
+    // The scan spends on the provider of the workspace that connected it.
+    expect(started).toEqual([[REPO_SLUG, REPO, ORG]]);
     expect(fs.existsSync(getRunClonesDir())).toBe(false);
   });
 
@@ -748,8 +766,8 @@ describe('connecting a repository starts its spec scan', () => {
     held.push(pending);
     scan.impl = () => pending.promise;
 
-    expect(startOnboardingScan('twice', 'acme/twice')).toBe(true);
-    expect(startOnboardingScan('twice', 'acme/twice')).toBe(false);
+    expect(startOnboardingScan('twice', 'acme/twice', ORG)).toBe(true);
+    expect(startOnboardingScan('twice', 'acme/twice', ORG)).toBe(false);
 
     await until(() => scan.calls.length > 0);
     expect(scan.calls).toEqual([tree]);

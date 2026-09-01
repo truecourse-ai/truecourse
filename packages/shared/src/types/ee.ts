@@ -545,7 +545,7 @@ export const LLM_PROVIDER_KINDS = [
 
 export type LlmProviderKind = (typeof LLM_PROVIDER_KINDS)[number]
 
-/** Masked, secret-free view of the instance LLM provider config. */
+/** Masked, secret-free view of a workspace's LLM provider config. */
 export interface LlmProviderConfigView {
   provider: LlmProviderKind
   model: string
@@ -560,13 +560,13 @@ export interface LlmProviderConfigView {
   updatedAt: string
 }
 
-/** Response of GET /api/ee/llm/config. */
+/** Response of GET /api/llm/config (and the enterprise /api/ee/llm/config). */
 export interface LlmConfigResponse {
   config: LlmProviderConfigView | null
   providers: LlmProviderKind[]
 }
 
-/** Body of PATCH /api/ee/llm/config. */
+/** Body of PATCH /api/llm/config (and the enterprise /api/ee/llm/config). */
 export interface LlmConfigUpdate {
   provider: LlmProviderKind
   model: string

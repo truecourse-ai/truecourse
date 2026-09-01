@@ -1,6 +1,7 @@
 /**
- * Instance-wide LLM provider config (single row `id = 'default'`). The API key
- * is stored encrypted (see ee-server's crypto.ts).
+ * The LLM provider config, one row per workspace (`org_id` is the WorkOS
+ * organization). The API key is stored encrypted — see the data-store's
+ * `crypto.ts`.
  */
 
 import { pgTable, text, timestamp, jsonb } from 'drizzle-orm/pg-core';
@@ -8,7 +9,7 @@ import { pgTable, text, timestamp, jsonb } from 'drizzle-orm/pg-core';
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'string' });
 
 export const llmProviderConfig = pgTable('llm_provider_config', {
-  id: text('id').primaryKey(),
+  orgId: text('org_id').primaryKey(),
   provider: text('provider').notNull(),
   model: text('model').notNull(),
   fallbackModel: text('fallback_model'),

@@ -10,7 +10,6 @@ import { installDbStores } from './stores.js';
 import { sweepStaleRunClones } from './services/run-clone.service.js';
 import { stopAllWatchers } from './services/watcher.service.js';
 import { stopAllRunTails } from './services/session-tailer.service.js';
-import { installLlmTransportAtBoot } from './services/llm-transport.service.js';
 import { wipeLegacyPostgresData, getLogDir } from '@truecourse/core/config/paths';
 import { closeLogger, configureLogger, log } from '@truecourse/core/lib/logger';
 
@@ -44,22 +43,29 @@ async function main() {
         'Set DATABASE_URL to a Postgres connection string (e.g. postgres://user:pass@localhost:5432/truecourse).',
     );
   }
+  // TRUECOURSE_SECRET_KEY derives the AES key the workspace's LLM provider key
+  // is encrypted with, so — like DATABASE_URL — it is REQUIRED. A missing or
+  // weak secret fails boot rather than running half-secure.
+  const masterSecret = process.env.TRUECOURSE_SECRET_KEY;
+  if (!masterSecret || masterSecret.length < 32) {
+    throw new Error(
+      'TRUECOURSE_SECRET_KEY (32+ characters) is required: the dashboard server stores each ' +
+        "workspace's LLM provider key encrypted in Postgres. Set TRUECOURSE_SECRET_KEY to a strong secret.",
+    );
+  }
+
   await initDb(databaseUrl);
   log.info('[Server] db ready (Postgres, migrations applied)');
   // Swap the file storage seams for Postgres before anything reads or writes
   // repo state, and clear run-clone debris a crashed process left behind.
-  installDbStores(getDbHandle());
+  installDbStores(getDbHandle(), { masterSecret });
   sweepStaleRunClones();
 
   // 3. WorkOS session auth. Throws if the WORKOS_* env is incomplete — the
   //    server boots authenticated or not at all.
   const auth = createAuth();
 
-  // 4. Install the LLM transport the CLI config selects. Never fatal: an
-  //    unusable API config warns and the pipeline routes surface it.
-  installLlmTransportAtBoot();
-
-  // 5. GitHub App connection. Optional: without GITHUB_APP_* the server still
+  // 4. GitHub App connection. Optional: without GITHUB_APP_* the server still
   //    boots, and /api/github answers 503 with the vars to set.
   const github = createGithubConnection();
   if (github) {
@@ -68,12 +74,12 @@ async function main() {
     log.info('[Server] GitHub connect disabled — set GITHUB_APP_* to enable');
   }
 
-  // 6. Setup Express app + socket.io
+  // 5. Setup Express app + socket.io
   const app = createApp({ authVerifier: auth.verify, authRouter: auth.router, github });
   const httpServer = createServer(app);
   setupSocket(httpServer);
 
-  // 7. Start listening
+  // 6. Start listening
   await new Promise<void>((resolve, reject) => {
     httpServer.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRINUSE') {
