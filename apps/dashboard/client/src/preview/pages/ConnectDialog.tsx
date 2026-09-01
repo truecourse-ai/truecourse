@@ -22,6 +22,7 @@
  */
 
 import { useEffect, useState, type ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import {
   Dialog,
@@ -40,6 +41,7 @@ import {
   linkGithubRepo,
 } from '@/preview/data/real-repos';
 import { usePreviewState } from '@/preview/shell/preview-state';
+import { toastNoLlmProvider } from '@/preview/shell/use-run-trigger';
 
 const PROVIDER_OPTIONS: ProviderId[] = ['github', 'gitlab', 'azure'];
 
@@ -82,6 +84,7 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
     refreshRealRepos,
     llmProvider,
   } = usePreviewState();
+  const navigate = useNavigate();
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [provider, setProvider] = useState<ProviderId>('github');
   const [connectionId, setConnectionId] = useState<string | null>(null);
@@ -217,6 +220,16 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
     );
     // Whatever landed is a real repository now, failures beside it or not.
     await refreshRealRepos();
+    // Connected but unscannable must not pass silently: the row landed, the
+    // onboarding scan did not start, and the toast names the remedy.
+    if (landed.length > 0 && llmProvider === 'missing') {
+      toastNoLlmProvider(
+        navigate,
+        landed.length === 1
+          ? `${landed[0]} is connected, but its scan cannot start until a provider is set.`
+          : `${landed.length} repositories are connected, but their scans cannot start until a provider is set.`,
+      );
+    }
     if (Object.keys(failures).length === 0) onOpenChange(false);
   };
 

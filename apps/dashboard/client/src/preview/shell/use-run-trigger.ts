@@ -25,6 +25,21 @@ import { PREVIEW_BASE } from './base';
 /** A repository with nothing on it starts with the scan: everything else needs a corpus. */
 const FIRST_OFFER = { command: FIRST_RUN_COMMAND, label: 'Start scan' } as const;
 
+/**
+ * The one no-provider error toast, shared by every surface that hits the wall:
+ * a refused start and a connect whose onboarding cannot begin say it the same
+ * way, with the remedy attached.
+ */
+export function toastNoLlmProvider(navigate: (to: string) => void, description: string): void {
+  toast.error('No LLM provider configured', {
+    description,
+    action: {
+      label: 'Open Models',
+      onClick: () => navigate(`${PREVIEW_BASE}/settings/models`),
+    },
+  });
+}
+
 export function useRunTrigger(repoId: string): RunStarter {
   const navigate = useNavigate();
   const [pending, setPending] = useState(false);
@@ -44,13 +59,7 @@ export function useRunTrigger(repoId: string): RunStarter {
             case 'started':
               return;
             case 'not-configured':
-              toast.error('No LLM provider configured', {
-                description: outcome.message,
-                action: {
-                  label: 'Open Models',
-                  onClick: () => navigate(`${PREVIEW_BASE}/settings/models`),
-                },
-              });
+              toastNoLlmProvider(navigate, outcome.message);
               return;
             case 'probe-failed':
               toast.error(`Provider check failed: ${outcome.message}`);

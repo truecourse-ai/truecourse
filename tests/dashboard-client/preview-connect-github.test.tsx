@@ -20,6 +20,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { Toaster } from 'sonner';
 import type {
   GithubConnectStatusResponse,
   GithubInstallableRepo,
@@ -100,6 +101,8 @@ interface Backend {
   installationRepos?: Record<number, GithubInstallableRepo[]>;
   /** Async so a test can hold a link open and watch the button say so. */
   link?: (body: LinkBody) => Response | Promise<Response>;
+  /** `/api/llm/config`; unanswered it 404s and the provider state stays unknown. */
+  llm?: () => Response;
 }
 
 /** A server answering the registry and the GitHub connect routes; everything else 404s. */
@@ -110,6 +113,7 @@ function serve(backend: Backend = {}) {
     const { pathname } = new URL(href, window.location.origin);
     const method = (init?.method ?? 'GET').toUpperCase();
     if (pathname === '/api/repos' && method === 'GET') return json(backend.registry ?? []);
+    if (pathname === '/api/llm/config' && backend.llm) return backend.llm();
     if (pathname === '/api/github/status') return backend.status?.() ?? json(status());
     const listing = /^\/api\/github\/installations\/(\d+)\/repos$/.exec(pathname);
     if (listing) {
@@ -135,6 +139,7 @@ function renderAt(path: string) {
       <Routes>
         <Route path="/preview/*" element={<PreviewApp />} />
       </Routes>
+      <Toaster />
     </MemoryRouter>,
   );
 }
@@ -260,6 +265,29 @@ describe('connecting a repository through the GitHub App', () => {
       { repoFullName: 'linkwarden/docs', installationId: 42, defaultBranch: 'trunk' },
     ]);
     expect(await screen.findByText('linkwarden/linkwarden')).toBeInTheDocument();
+  });
+
+  it('toasts the no-provider remedy when a repository lands without one', async () => {
+    serve({
+      registry: [],
+      llm: () => json({ config: null, providers: ['anthropic'] }),
+      installationRepos: {
+        42: [{ fullName: 'linkwarden/linkwarden', defaultBranch: 'main', private: false }],
+      },
+    });
+
+    const dialog = await openGithubRepos();
+    await userEvent.click(await screen.findByLabelText('linkwarden/linkwarden'));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Connect and start onboarding' }));
+
+    expect(await screen.findByText('No LLM provider configured')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        'linkwarden/linkwarden is connected, but its scan cannot start until a provider is set.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open Models' })).toBeInTheDocument();
   });
 
   it('says which clone it is waiting on while the server clones', async () => {
