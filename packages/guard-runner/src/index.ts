@@ -187,7 +187,13 @@ export {
   loadDependenciesLocal,
   resolveDependencies,
   resolveDependency,
+  scenarioDependencyNames,
+  dependencyBlockFor,
+  suppliedInstancesFor,
   materializeSupplied,
+  applySupplied,
+  applySuppliedEnv,
+  omitsOptionalPair,
   externalServiceStates,
   SUPPLIED_DIR,
 } from './dependencies.js'
@@ -196,8 +202,10 @@ export type {
   DependencyRequirement,
   ResolvedDependency,
   ResolvedDependencies,
+  DependencyBlock,
   SuppliedInstance,
   SuppliedValues,
+  SuppliedOmissions,
 } from './dependencies.js'
 
 export { constructChildEnv, overlayStepEnv, BUILD_PASSTHROUGH } from './child-env.js'
@@ -262,6 +270,10 @@ export {
   guardResultPath,
   guardSetupPath,
   guardJourneysPath,
+  guardInterfacesPath,
+  guardAuthoredInterfacesPath,
+  guardInterfaceFindingsPath,
+  guardWorldDirtyMarkerPath,
   guardSetupFindingsPath,
   scenariosDir,
   recipePath,
@@ -287,8 +299,17 @@ export {
   readGuardAutoResolutions,
   writeGuardAutoResolutions,
   readJourneyCatalog,
+  readInterfaceCatalog,
+  readAuthoredInterfaceCatalog,
+  readMergedInterfaceCatalog,
+  readInterfaceCatalogRaw,
+  mergeInterfaceCatalogs,
+  mergeInterfaceLists,
+  mergeRegistries,
+  staleAuthoredPlaceDiagnostics,
   atomicWriteJson,
 } from './store.js'
+export type { InterfaceMergeDiagnostic } from './store.js'
 
 export {
   buildDocSectionIndex,
@@ -312,6 +333,7 @@ export type {
 } from './section-index.js'
 
 export { isJourneyDrifted } from './journey-drift.js'
+export { isInterfaceDrifted } from './interface-drift.js'
 
 export { corpusKeptDocs, indexRepoDocs, nodeRefContext } from './doc-index.js'
 export type { RepoDocIndexes } from './doc-index.js'

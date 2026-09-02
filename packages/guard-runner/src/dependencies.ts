@@ -27,10 +27,13 @@ import {
   GuardDependenciesFileSchema,
   GuardDependenciesLocalSchema,
   rollUpRequirement,
+  suppliedNamesIn,
+  suppliedTokenRefs,
   type GuardDependenciesFile,
   type GuardDependenciesLocal,
   type GuardDependencyEntry,
   type GuardDependencyNeed,
+  type GuardScenario,
 } from '@truecourse/shared'
 import { RecipeError, secretBullets } from './recipe.js'
 import { dependenciesLocalPath, dependenciesPath } from './store.js'
@@ -363,6 +366,90 @@ export function externalServiceStates(
 }
 
 // ---------------------------------------------------------------------------
+// What a scenario binds
+// ---------------------------------------------------------------------------
+
+/**
+ * The supplied dependencies a scenario BINDS — its declared `needs` plus every name
+ * a `${supplied:…}` token references anywhere in it (steps, setup, expectations).
+ *
+ * Both halves count, and neither is redundant: a token-free binding (an
+ * authenticated HOME the program finds by itself) is only visible in `needs`, while
+ * a token the author wrote without listing the name is still a real binding and
+ * must gate the run rather than land on disk verbatim.
+ */
+export function scenarioDependencyNames(scenario: GuardScenario): string[] {
+  // DECLARED order first, then the token-discovered rest: the author's ordering is
+  // the meaningful one when a scenario binds several (it decides which dependency a
+  // blocked result names), and only deduplication is imposed on top of it.
+  const names = new Set<string>(scenario.needs ?? [])
+  const { needs: _needs, ...rest } = scenario as GuardScenario & { needs?: string[] }
+  for (const name of suppliedNamesIn(rest)) names.add(name)
+  return [...names]
+}
+
+/** Why a scenario cannot run: the dependency, and what registering it must satisfy. */
+export interface DependencyBlock {
+  dependency: string
+  requirement: string
+  needs: GuardDependencyNeed[]
+  /** Absolute path of the overlay file an instance is registered in. */
+  registerIn: string
+  /** The unresolved requirements' reasons, joined — the "what exactly is missing". */
+  detail: string
+}
+
+/**
+ * The FIRST binding that holds a scenario back, or `null` when every one of them is
+ * provided. First rather than all: a scenario blocks on the first thing missing,
+ * and naming one actionable dependency beats a list a reader has to triage.
+ *
+ * A name no catalog entry declares also blocks — an authoring defect
+ * (`${supplied:whatever.path}` against an empty catalog) must be as loud as a
+ * missing instance, never a token that quietly reaches a child process.
+ */
+export function dependencyBlockFor(
+  scenario: GuardScenario,
+  resolved: ResolvedDependencies,
+): DependencyBlock | null {
+  const byName = new Map(resolved.dependencies.map((d) => [d.name, d]))
+  for (const name of scenarioDependencyNames(scenario)) {
+    const dep = byName.get(name)
+    if (!dep) {
+      return {
+        dependency: name,
+        requirement: `no catalog entry named "${name}"`,
+        needs: [],
+        registerIn: resolved.catalogPath,
+        detail: `the scenario binds "${name}", which \`scenarios/dependencies.json\` does not declare`,
+      }
+    }
+    if (dep.state === null) {
+      // A step-creatable / seedable entry is not a binding: the scenario creates or
+      // the runner seeds that state. Naming one is harmless, and never a block.
+      continue
+    }
+    if (dep.state === 'provided') continue
+    return {
+      dependency: dep.name,
+      requirement: dep.requirement,
+      needs: dep.needs,
+      registerIn: resolved.localPath,
+      detail: [
+        ...dep.requirements
+          .filter((r) => !r.resolved && !r.optional)
+          .map((r) => r.reason ?? `\`${r.field}\` is not registered`),
+        // An instance written in the previous registration shape is why an overlay
+        // that LOOKS filled in still reads as unregistered — say so here, where the
+        // reader is already asking what is missing.
+        ...(dep.staleInstance ? [dep.staleInstance] : []),
+      ].join('; '),
+    }
+  }
+  return null
+}
+
+// ---------------------------------------------------------------------------
 // Materialization
 // ---------------------------------------------------------------------------
 
@@ -390,9 +477,70 @@ export interface SuppliedInstance {
   optionalUnset?: string[]
 }
 
+/**
+ * The instances a scenario's bindings materialize into its sandbox. Called only
+ * after {@link dependencyBlockFor} returned `null`, so every entry here is
+ * `provided` — an unprovided one never gets this far.
+ */
+export function suppliedInstancesFor(
+  scenario: GuardScenario,
+  resolved: ResolvedDependencies,
+): SuppliedInstance[] {
+  const byName = new Map(resolved.dependencies.map((d) => [d.name, d]))
+  const out: SuppliedInstance[] = []
+  for (const name of scenarioDependencyNames(scenario)) {
+    const dep = byName.get(name)
+    if (!dep || dep.state !== 'provided' || !dep.entry.registration) continue
+    const registration = dep.entry.registration
+    if (registration.kind === 'env') {
+      const optionalUnset = dep.requirements
+        .filter((r) => r.optional && !r.resolved)
+        .map((r) => r.field)
+      out.push({
+        name,
+        kind: 'env',
+        env: dep.env,
+        ...(optionalUnset.length > 0 ? { optionalUnset } : {}),
+      })
+    } else if (registration.kind === 'path') {
+      out.push({ name, kind: 'path', hostPath: dep.hostPath! })
+    } else {
+      out.push({
+        name,
+        kind: 'config-dir',
+        hostPath: dep.hostPath!,
+        homePath: registration.homePath,
+      })
+    }
+  }
+  return out
+}
+
 /** What each supplied instance resolved to inside the sandbox, per dependency:
  *  `{ path }` for a copied-in tree, the registered variables for an env shape. */
 export type SuppliedValues = Record<string, Record<string, string>>
+
+/**
+ * The `<name>.<field>` refs a registration DECLARES OPTIONAL and this machine left
+ * blank — the only refs that legitimately resolve to NOTHING.
+ *
+ * They are not values and never become any: `${supplied:…}` still throws on them
+ * everywhere a value is required. Their one use is the omittable argv pair (see
+ * `GuardOptionalArgSchema`), which drops both of its halves rather than asking the
+ * program for an endpoint nobody named.
+ */
+export type SuppliedOmissions = ReadonlySet<string>
+
+/**
+ * True when this pair's value names an unregistered OPTIONAL field, so the flag and
+ * the value both drop out of the argv. False for every other token — a registered
+ * field resolves, a required one blocked the scenario long before here, and a field
+ * no registration declares is still the loud error {@link applySupplied} raises.
+ */
+export function omitsOptionalPair(value: string, omissions: SuppliedOmissions): boolean {
+  return suppliedTokenRefs(value).some((ref) => omissions.has(`${ref.name}.${ref.field}`))
+}
+
 
 /**
  * Copy every provided instance into the sandbox and return both the values the
@@ -406,12 +554,14 @@ export type SuppliedValues = Record<string, Record<string, string>>
 export function materializeSupplied(
   instances: readonly SuppliedInstance[],
   sandbox: { cwd: string; home: string },
-): { values: SuppliedValues; env: Record<string, string> } {
+): { values: SuppliedValues; env: Record<string, string>; omissions: Set<string> } {
   const values: SuppliedValues = {}
   const env: Record<string, string> = {}
+  const omissions = new Set<string>()
   for (const instance of instances) {
     if (instance.kind === 'env') {
       values[instance.name] = { ...instance.env }
+      for (const field of instance.optionalUnset ?? []) omissions.add(`${instance.name}.${field}`)
       // A registered NAME that is a legal environment identifier is also exported to
       // the child — that is what makes an external-account registration work without
       // the program being told anything (it reads `ANTHROPIC_API_KEY` itself). A name
@@ -429,7 +579,7 @@ export function materializeSupplied(
     copySelfContained(instance.hostPath!, dest, path.resolve(instance.hostPath!))
     values[instance.name] = { path: dest }
   }
-  return { values, env }
+  return { values, env, omissions }
 }
 
 /**
@@ -491,4 +641,43 @@ function copySelfContained(src: string, dest: string, root: string): void {
     return
   }
   fs.copyFileSync(src, dest)
+}
+
+// ---------------------------------------------------------------------------
+// The `${supplied:…}` token
+// ---------------------------------------------------------------------------
+
+/** {@link applySupplied} across an env overlay's VALUES (the names are literal). */
+export function applySuppliedEnv(
+  env: Record<string, string>,
+  values: SuppliedValues,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(env).map(([name, value]) => [name, applySupplied(value, values)]),
+  )
+}
+
+/**
+ * Resolve every `${supplied:<name>.<field>}` in a scenario-authored string. Same
+ * surgical-replacement rule as `${unique}`: a literal substring swap, never a
+ * parser, and never applied to the recipe-owned entrypoint.
+ *
+ * An unknown name/field THROWS rather than passing the literal token through: by
+ * the time this runs the scenario's bindings are all provided, so the only way to
+ * get here is a field the registration does not declare — a defect that must be a
+ * loud infrastructure error, not a `${supplied:…}` string handed to a program.
+ */
+export function applySupplied(text: string, values: SuppliedValues): string {
+  if (!text.includes('${supplied:')) return text
+  let out = text
+  for (const ref of suppliedTokenRefs(text)) {
+    const value = values[ref.name]?.[ref.field]
+    if (value === undefined) {
+      throw new DependencyCatalogError(
+        `\${supplied:${ref.name}.${ref.field}} has no value — the registration for "${ref.name}" declares no \`${ref.field}\``,
+      )
+    }
+    out = out.split(`\${supplied:${ref.name}.${ref.field}}`).join(value)
+  }
+  return out
 }

@@ -88,6 +88,7 @@ run('pnpm --filter @truecourse/spec-consolidator build');
 run('pnpm --filter @truecourse/contract-verifier build');
 run('pnpm --filter @truecourse/contract-extractor build');
 run('pnpm --filter @truecourse/guard-runner build');
+run('pnpm --filter @truecourse/interface-mapper build');
 run('pnpm --filter @truecourse/guard-generator build');
 run('pnpm --filter @truecourse/core build');
 run('pnpm --filter @truecourse/data-store build');

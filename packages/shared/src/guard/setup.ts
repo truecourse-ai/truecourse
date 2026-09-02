@@ -8,7 +8,7 @@
  *  1. DETECTION IS EXPENSIVE-ISH AND SHARED. The externals view used to read the
  *     detected third-party list out of `guard/result.json` — i.e. it could only
  *     answer "what does this repo talk to" AFTER a full generate. Setup detects the
- *     same list for free (one `mapJourneys` pass) and records it here, so the
+ *     same list for free (one interface-mapping pass) and records it here, so the
  *     External APIs surfaces work before the first generate. `result.json` stays
  *     generate's own artifact.
  *  2. `guard status` needs a first-class setup row — what ran, what passed, and what
@@ -17,6 +17,7 @@
 
 import { z } from 'zod'
 import { DetectedExternalServiceSchema } from '../external-services.js'
+import { MapperDiagnosticSchema } from '../interfaces.js'
 import { DatastoreUrlRefSchema } from '../types/analysis.js'
 
 /** How a single setup step ended. `skipped` always carries a `reason`. */
@@ -29,11 +30,18 @@ export type GuardSetupStepStatus = z.infer<typeof GuardSetupStepStatusSchema>
 
 /**
  * The setup taxonomy, in run order. `externals` folded INTO `catalog` (the
- * skeleton write runs inside that step); `auth` is a new step of the rebuilt
- * setup. The legacy top-level `recipe`/`externals`/`seed` report fields stay
+ * skeleton write runs inside that step); `interfaces` and `auth` are new steps of
+ * the rebuilt setup. The legacy top-level `recipe`/`externals`/`seed` report fields stay
  * populated for back-compat — the `steps` array is the new spine.
  */
-export const GuardSetupTaxonomyKeySchema = z.enum(['recipe', 'detect', 'catalog', 'seed', 'auth'])
+export const GuardSetupTaxonomyKeySchema = z.enum([
+  'recipe',
+  'detect',
+  'catalog',
+  'interfaces',
+  'seed',
+  'auth',
+])
 export type GuardSetupTaxonomyKey = z.infer<typeof GuardSetupTaxonomyKeySchema>
 
 /**
@@ -45,6 +53,23 @@ export type GuardSetupTaxonomyKey = z.infer<typeof GuardSetupTaxonomyKeySchema>
  * `blocked` is legal ONLY on `auth` (a supplied credential waiting on a user
  * registration) — loud, actionable, and never a reason to fail setup.
  */
+/**
+ * One reconcile-session resolution as the interfaces step row records it —
+ * WHOSE claim observation confirmed for one disputed subject. Structurally the
+ * shape core's reconcile session produces (shared cannot import core, so the
+ * record schema lives with the record).
+ */
+export const GuardSetupInterfaceResolutionSchema = z
+  .object({
+    /** The diagnostic's `subject`, verbatim. */
+    subject: z.string().min(1),
+    resolution: z.enum(['tree-right', 'probe-right', 'both', 'unknown']),
+    /** What was observed — quoted program output, or why nothing could be. */
+    evidence: z.string().min(1),
+  })
+  .strict()
+export type GuardSetupInterfaceResolution = z.infer<typeof GuardSetupInterfaceResolutionSchema>
+
 export const GuardSetupTaxonomyStepSchema = z
   .object({
     key: GuardSetupTaxonomyKeySchema,
@@ -60,6 +85,17 @@ export const GuardSetupTaxonomyStepSchema = z
     reason: z.string().optional(),
     /** The sessions-store run that carried this step's agent sessions, if any. */
     sessionRunId: z.string().optional(),
+    /**
+     * INTERFACES step only: what the derivations (and the catalog merge)
+     * disagreed about this run — the cli tree-vs-probe disputes plus any
+     * authored-place-not-derived reports. Run reporting: diagnostics never
+     * enter `interfaces.json` or a fingerprint; this row is where they land.
+     */
+    diagnostics: z.array(MapperDiagnosticSchema).optional(),
+    /** INTERFACES step only: the reconcile session's per-subject verdicts. */
+    resolutions: z.array(GuardSetupInterfaceResolutionSchema).optional(),
+    /** INTERFACES step only: the catalog edits the resolutions produced, one line each. */
+    changes: z.array(z.string()).optional(),
   })
   .strict()
   .superRefine((step, ctx) => {
@@ -187,7 +223,7 @@ export const GuardSetupReportSchema = z
       .strict()
       .optional(),
     /**
-     * THE DETECTION SNAPSHOT (step 2) — one `mapJourneys` pass, deterministic and
+     * THE DETECTION SNAPSHOT (step 2) — one interface-mapping pass, deterministic and
      * free. `readGuardExternalsView` reads its detected list from here.
      */
     detection: z

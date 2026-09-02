@@ -973,6 +973,22 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  packages/interface-mapper:
+    dependencies:
+      '@truecourse/guard-runner':
+        specifier: workspace:*
+        version: link:../guard-runner
+      '@truecourse/shared':
+        specifier: workspace:*
+        version: link:../shared
+    devDependencies:
+      '@types/node':
+        specifier: ^22.19.15
+        version: 22.19.15
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   packages/jobs:
     dependencies:
       '@truecourse/core':

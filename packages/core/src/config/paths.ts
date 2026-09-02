@@ -14,9 +14,12 @@ const TRUECOURSE_DIR = '.truecourse';
 // `contracts/result.json` — the last-generate run result (transient run output
 // the dashboard reads back; the rest of `contracts/` stays tracked) — and the
 // guard run store: `guard/runs/` snapshots, `guard/result.json` (last-generate
-// report), `guard/evidence/` transcripts, `guard/journeys.json` (the journey
-// catalog, re-derived from the working tree on every mapping — what travels with
-// the repo are the journey fingerprints embedded in scenarios),
+// report), `guard/evidence/` transcripts, `guard/journeys.json` and
+// `guard/interfaces.json` (the surface catalogs, re-derived from the working tree
+// on every mapping — what travels with the repo are the fingerprints embedded in
+// scenarios, plus the hand-authored `guard/interfaces.authored.json` no derivation
+// writes), `guard/.world-dirty` (the transient marker of a world a mutating tail
+// left dirty),
 // `guard/auto-resolutions.json` (the auto-resolve ledger + flow-taint set —
 // transient run memory), and `guard/history.json` (covered by the
 // unanchored `history.json` rule). `guard/LATEST.json` stays committable, same
@@ -55,7 +58,9 @@ export const GITIGNORE_CONTENTS = [
   'guard/setup.json',
   'guard/evidence/',
   'guard/journeys.json',
+  'guard/interfaces.json',
   'guard/auto-resolutions.json',
+  'guard/.world-dirty',
   'scenarios/externals.local.json',
   'scenarios/dependencies.local.json',
   'sessions/',

@@ -22,7 +22,14 @@ import { DEFAULT_BUILD_TIMEOUT_MS, type BuildResult } from './build.js'
 import { armChildKill } from './child-kill.js'
 import { constructChildEnv, sandboxXdgDirs, DETERMINISM_PINS, overlayStepEnv, BUILD_PASSTHROUGH } from './child-env.js'
 import { executeStep, type StepCapture } from './executor.js'
-import { materializeSupplied, SUPPLIED_DIR, type SuppliedInstance, type SuppliedValues } from './dependencies.js'
+import {
+  materializeSupplied,
+  SUPPLIED_DIR,
+  type SuppliedInstance,
+  type SuppliedOmissions,
+  type SuppliedValues,
+} from './dependencies.js'
+import { resolveEntry } from './recipe.js'
 
 // Re-exported for existing importers (evidence `envPins`, index barrel).
 export { DETERMINISM_PINS }
@@ -36,6 +43,10 @@ export interface Sandbox {
   env: NodeJS.ProcessEnv
   /** What each supplied instance resolved to (a copied-in path, the exported env), by name. */
   supplied: SuppliedValues
+  /** The declared-optional fields this machine left blank. See {@link SuppliedOmissions}. */
+  suppliedOmissions: SuppliedOmissions
+  /** The shim dir on PATH, when the recipe exposes anything; else `null`. */
+  shimDir: string | null
   cleanup(): void
 }
 
@@ -45,6 +56,10 @@ export interface SandboxOptions {
   recipeEnv?: Record<string, string>
   scenarioEnv?: Record<string, string>
   setupFiles?: Record<string, string>
+  /** The recipe's `expose` map — programs to put on PATH under their real names. */
+  expose?: Record<string, string | string[]>
+  /** Repo root, needed to resolve an `expose` entry's built entry path. */
+  repoRoot?: string
   /** Provided supplied instances to copy in before anything runs. */
   supplied?: readonly SuppliedInstance[]
 }
@@ -63,7 +78,13 @@ export function createSandbox(opts: SandboxOptions = {}): Sandbox {
 
   // Supplied instances land BEFORE anything else can name them: copy-in, never a
   // reference to the host original, and their declared env is exported below.
-  const { values: supplied, env: suppliedEnv } = materializeSupplied(opts.supplied ?? [], { cwd, home })
+  const {
+    values: supplied,
+    env: suppliedEnv,
+    omissions: suppliedOmissions,
+  } = materializeSupplied(opts.supplied ?? [], { cwd, home })
+
+  const shimDir = opts.expose ? writeShims(opts.expose, root, opts.repoRoot ?? process.cwd()) : null
 
   // Allowlist, built from scratch — nothing else from the host reaches the child.
   const env = constructChildEnv({
@@ -72,6 +93,7 @@ export function createSandbox(opts: SandboxOptions = {}): Sandbox {
     // own env (below the scenario's, which may still override it deliberately).
     recipeEnv: { ...opts.recipeEnv, ...suppliedEnv },
     scenarioEnv: opts.scenarioEnv,
+    ...(shimDir ? { pathPrefix: [shimDir] } : {}),
   })
 
   if (opts.setupFiles) seedFiles(cwd, opts.setupFiles)
@@ -81,10 +103,49 @@ export function createSandbox(opts: SandboxOptions = {}): Sandbox {
     root,
     env,
     supplied,
+    suppliedOmissions,
+    shimDir,
     cleanup() {
       fs.rmSync(root, { recursive: true, force: true })
     },
   }
+}
+
+/**
+ * The directory the recipe's `expose` shims are written into, INSIDE the sandbox
+ * root and above the scenario cwd — so it never shows up in the working tree a
+ * scenario asserts on, and it dies with the sandbox.
+ *
+ * It is named `node_modules/.bin` for one concrete reason, and it is not an
+ * ecosystem assumption: PATH is the contract (that is what makes `expose` work for
+ * a Makefile, a shell script, or a git hook in any language), but node's package
+ * managers do NOT consult PATH — `npx <name>` walks UP from the working directory
+ * looking for `node_modules/.bin/<name>` and, failing that, installs a published
+ * copy from the registry. A shim dir that is only on PATH would therefore lose to a
+ * download for exactly the case `expose` exists to fix. One directory, discovered
+ * two ways, no global mutation.
+ */
+const SHIM_DIR_REL = path.join('node_modules', '.bin')
+
+/** Write one executable shim per `expose` entry; returns the directory. */
+function writeShims(
+  expose: Record<string, string | string[]>,
+  root: string,
+  repoRoot: string,
+): string {
+  const dir = path.join(root, SHIM_DIR_REL)
+  fs.mkdirSync(dir, { recursive: true })
+  for (const [name, target] of Object.entries(expose)) {
+    const argv = resolveEntry(repoRoot, typeof target === 'string' ? [target] : target)
+    const script = `#!/bin/sh\nexec ${argv.map(shellQuote).join(' ')} "$@"\n`
+    fs.writeFileSync(path.join(dir, name), script, { mode: 0o755 })
+  }
+  return dir
+}
+
+/** POSIX single-quote quoting — the shim is a `/bin/sh` script, not an argv array. */
+function shellQuote(arg: string): string {
+  return `'${arg.split("'").join(`'\\''`)}'`
 }
 
 /**

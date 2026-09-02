@@ -168,6 +168,13 @@ export const GuardScenarioResultSchema = z
      */
     journeyDrifted: z.boolean().optional(),
     /**
+     * Interface-drift ANNOTATION — the same statement as `journeyDrifted` above,
+     * computed against the merged interface catalog (`guard/interfaces.json` plus
+     * its committed authored half). Both fields are written while consumers move
+     * from one catalog to the other.
+     */
+    interfaceDrifted: z.boolean().optional(),
+    /**
      * Blocked-precondition ANNOTATION (always `true` when present): the step that
      * failed carries NO milestone — it only prepared the world (a seeding POST, a
      * login) — while the scenario DOES realize milestones elsewhere. The specified

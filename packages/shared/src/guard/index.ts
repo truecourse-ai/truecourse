@@ -1,6 +1,7 @@
 export * from './auto-resolutions.js'
 export * from './doc-chunks.js'
 export * from './drivers.js'
+export * from './web-steps.js'
 export * from './excerpts.js'
 export * from './flows.js'
 export * from './scenario.js'

@@ -170,29 +170,8 @@ export const JourneysFileSchema = z
   .strict()
 export type JourneysFile = z.infer<typeof JourneysFileSchema>
 
-/**
- * Canonical form of a route path template: params in `{name}` regardless of the
- * framework that declared them — `/todos/:id` (Express), `/todos/<int:id>` (Flask),
- * `/todos/{id}` (OpenAPI/ASP.NET) all become `/todos/{id}`. One identity per
- * operation, so the code route and its OpenAPI declaration converge on ONE journey
- * whichever side the mapper saw first; leading `/` ensured, trailing `/` dropped.
- */
-export function canonicalRoutePath(routePath: string): string {
-  const withLead = routePath.startsWith('/') ? routePath : `/${routePath}`
-  const canonical = withLead
-    .split('/')
-    .map((segment) => {
-      if (segment.startsWith(':')) return `{${segment.slice(1)}}`
-      const angled = segment.match(/^<(?:[^:>]+:)?([^>]+)>$/)
-      if (angled) return `{${angled[1]}}`
-      const braced = segment.match(/^\{([^}:]+)(?::[^}]*)?\}$/)
-      if (braced) return `{${braced[1]}}`
-      return segment
-    })
-    .join('/')
-  const trimmed = canonical.replace(/\/+$/, '')
-  return trimmed || '/'
-}
+// `canonicalRoutePath` now lives in `interfaces.ts`, re-exported from the package
+// root beside this module.
 
 /** Whitespace-normalized token — the section-fingerprint rule, per field. */
 function normalizeToken(text: string): string {

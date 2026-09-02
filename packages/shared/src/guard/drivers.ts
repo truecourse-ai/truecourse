@@ -36,6 +36,13 @@ export interface GuardDriverDef {
   label: string
   /** Authorable AND executable today; false = recorded-only until the driver ships. */
   runnable: boolean
+  /**
+   * The recipe block that PREPARES this driver — the key `guard generate` checks
+   * before it authors anything for the surface, and the noun a blocked-on gap
+   * names. Keeping it HERE is what makes the registry's promise true: a driver
+   * lands by adding one row, not by finding every `driver === 'cli'` branch.
+   */
+  recipeKey?: 'entry' | 'api' | 'web'
   /** UI copy for a section awaiting this (non-runnable) driver. */
   waitingLabel?: string
 }
@@ -45,8 +52,8 @@ export interface GuardDriverDef {
  * rest are recorded for coverage honesty. ADD A ROW to introduce a driver — every
  * derived array, schema, status, and label below picks it up automatically.
  *
- * A registry row also names a JOURNEY TYPE — the surface a journey is mapped for
- * maps 1:1 to the driver that would execute its scenarios. A journey on a
+ * A registry row also names an INTERFACE TYPE — the surface an interface is mapped
+ * for maps 1:1 to the driver that would execute its scenarios. An interface on a
  * non-runnable driver still EXISTS: it grounds coverage accounting ("this flow is
  * realizable on web — awaiting the web driver").
  *
@@ -56,9 +63,9 @@ export interface GuardDriverDef {
  * append at the end.
  */
 export const GUARD_DRIVERS = [
-  { id: 'cli', label: 'CLI', runnable: true },
-  { id: 'api', label: 'API', runnable: true },
-  { id: 'web', label: 'Web', runnable: false, waitingLabel: 'Needs web driver' },
+  { id: 'cli', label: 'CLI', runnable: true, recipeKey: 'entry' },
+  { id: 'api', label: 'API', runnable: true, recipeKey: 'api' },
+  { id: 'web', label: 'Web', runnable: false, recipeKey: 'web', waitingLabel: 'Needs web driver' },
   { id: 'tui', label: 'TUI', runnable: false, waitingLabel: 'Needs TUI driver' },
   { id: 'library', label: 'Library', runnable: false, waitingLabel: 'Needs library driver' },
   { id: 'desktop', label: 'Desktop', runnable: false, waitingLabel: 'Needs desktop driver' },
@@ -68,6 +75,9 @@ export const GUARD_DRIVERS = [
 /** Every driver id (`cli | api | web | tui | library | desktop | mobile`), derived
  *  from the registry rows. */
 export type GuardDriverId = (typeof GUARD_DRIVERS)[number]['id']
+
+/** The recipe blocks a driver can be prepared by (`entry` = cli, `api`, `web`). */
+export type GuardDriverRecipeKey = NonNullable<GuardDriverDef['recipeKey']>
 
 /** The non-runnable ("awaiting") driver ids — sections wait on these. */
 export type GuardAwaitingDriverId = Extract<(typeof GUARD_DRIVERS)[number], { runnable: false }>['id']
@@ -96,6 +106,19 @@ export function guardDriver(id: string): GuardDriverDef | undefined {
 /** True when a driver's scenarios can be authored + run today. */
 export function isRunnableDriver(id: GuardDriverId): boolean {
   return runnableDriverIds.includes(id)
+}
+
+/**
+ * The recipe key a driver's row names — `undefined` for a driver whose runner has
+ * not shipped, which is exactly the "cannot be prepared" answer callers want. The
+ * single source for "is this surface prepared?", so generate, its gap nouns, and
+ * the pre-flight estimate cannot drift apart.
+ */
+export function driverRecipeKey(id: GuardDriverId): GuardDriverRecipeKey | undefined {
+  // Widened to the row INTERFACE: `as const satisfies` narrows each row to its own
+  // literal shape, and the rows without a key have no such property to read.
+  const row: GuardDriverDef | undefined = GUARD_DRIVERS.find((d) => d.id === id)
+  return row?.recipeKey
 }
 
 /** Narrows a driver id to the awaiting (non-runnable) subset. */

@@ -11,12 +11,16 @@ import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import {
+  applySupplied,
   DependencyCatalogError,
+  dependencyBlockFor,
   loadDependencyCatalog,
   materializeSupplied,
   resolveDependencies,
+  scenarioDependencyNames,
+  suppliedInstancesFor,
 } from '@truecourse/guard-runner'
-import { makeTempRepo, rmrf, writeRecipe } from './helpers.js'
+import { makeTempRepo, rmrf, writeRecipe, scenario } from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -234,6 +238,65 @@ describe('resolveDependencies — declaration ∪ instance overlay', () => {
       expect(dep.state).toBe('provided')
       expect(dep.staleInstance).toBeUndefined()
     })
+  })
+})
+
+describe('what a scenario binds', () => {
+  const s = scenario({
+    id: 'x',
+    needs: ['claude-login'],
+    setup: { env: { KEY: '${supplied:llm-api-credentials.api-key}' } },
+    steps: [{ run: ['show', '${supplied:analysis-target.path}'] }],
+  })
+
+  it('counts the declared needs AND every token reference, declared order first', () => {
+    expect(scenarioDependencyNames(s)).toEqual([
+      'claude-login',
+      'analysis-target',
+      'llm-api-credentials',
+    ])
+  })
+
+  // A token against an empty catalog is an authoring defect, and it must block as
+  // loudly as a missing instance — never reach a child as a literal string.
+  it('blocks on a name the catalog does not declare', () => {
+    const r = repo()
+    const block = dependencyBlockFor(s, resolveDependencies(r))
+    expect(block).toMatchObject({ dependency: 'claude-login' })
+    expect(block!.detail).toMatch(/does not declare/)
+  })
+
+  // step-creatable / seedable state is obtained by the scenario or the runner, so
+  // naming one is not a binding and never gates anything.
+  it('does not block on a step-creatable entry', () => {
+    const r = repo()
+    writeCatalog(r, [{ name: 'a-repo', class: 'step-creatable', summary: 'a git repo', obtain: '`git init`' }])
+    const named = scenario({ id: 'y', needs: ['a-repo'], steps: [{ run: ['version'] }] })
+    expect(dependencyBlockFor(named, resolveDependencies(r))).toBeNull()
+  })
+
+  it('materializes only the instances a registered binding resolves to', () => {
+    const r = repo()
+    writeCatalog(r, [TARGET])
+    const fixture = path.join(r, 'fixture-project')
+    fs.mkdirSync(fixture, { recursive: true })
+    writeLocal(r, { 'analysis-target': { path: fixture } })
+    const bound = scenario({
+      id: 'z',
+      steps: [{ run: ['show', '${supplied:analysis-target.path}'] }],
+    })
+    expect(suppliedInstancesFor(bound, resolveDependencies(r))).toEqual([
+      { name: 'analysis-target', kind: 'path', hostPath: fixture },
+    ])
+  })
+})
+
+describe('applySupplied', () => {
+  it('throws on a field the registration never declared, rather than passing the token through', () => {
+    expect(() => applySupplied('${supplied:target.secret}', { target: { path: '/tmp/x' } })).toThrow(
+      DependencyCatalogError,
+    )
+    expect(applySupplied('at ${supplied:target.path}', { target: { path: '/tmp/x' } })).toBe('at /tmp/x')
   })
 })
 
