@@ -970,6 +970,14 @@ export interface LoadedRecipe {
 /**
  * Files whose contents inform recipe discovery; the fingerprint hashes those present.
  *
+ * Lockfiles (`yarn.lock`, `pnpm-lock.yaml`, `package-lock.json`) are deliberately
+ * NOT here. They move on most upstream commits for reasons unrelated to the API
+ * surface, and because this fingerprint keys every flow's generation-inputs hash,
+ * folding them re-authored the whole corpus at each new lockfile state even when
+ * no spec section or interface had moved. Authoring never reads dependency
+ * versions; `guard run` executes every scenario against the installed deps, so a
+ * dependency bump that changes behavior still surfaces as a run-time flip.
+ *
  * `docker-compose.guard.yml` is the datastore guard GENERATES and the
  * recipe's `api.services` runs: its contents decide which engine, which database,
  * and which credentials the scenarios ran against, so editing it changes the world
@@ -985,9 +993,6 @@ export interface LoadedRecipe {
  */
 export const FINGERPRINT_INPUTS: readonly string[] = [
   'package.json',
-  'pnpm-lock.yaml',
-  'package-lock.json',
-  'yarn.lock',
   'turbo.json',
   'docker-compose.guard.yml',
 ]

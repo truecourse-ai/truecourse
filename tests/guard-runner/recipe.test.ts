@@ -136,6 +136,17 @@ describe('computeRecipeFingerprint', () => {
     expect(computeRecipeFingerprint(r)).not.toBe(a)
   })
 
+  it('ignores lockfiles so a dependency-only commit does not re-author the corpus', () => {
+    const r = repo()
+    const a = computeRecipeFingerprint(r)
+    fs.writeFileSync(path.join(r, 'yarn.lock'), '# yarn lockfile v1\n"left-pad@^1.0.0":\n  version "1.3.0"\n')
+    fs.writeFileSync(path.join(r, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n')
+    fs.writeFileSync(path.join(r, 'package-lock.json'), JSON.stringify({ lockfileVersion: 3 }))
+    expect(computeRecipeFingerprint(r)).toBe(a)
+    fs.writeFileSync(path.join(r, 'yarn.lock'), '# yarn lockfile v1\n"left-pad@^1.0.0":\n  version "1.3.1"\n')
+    expect(computeRecipeFingerprint(r)).toBe(a)
+  })
+
   it('folds the recipe file itself so a recipe edit invalidates the fingerprint', () => {
     const r = repo()
     writeRawRecipe(r, { build: 'true', entry: ['node', 'cli.js'] })
