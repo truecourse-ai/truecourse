@@ -528,16 +528,21 @@ function buildMcpTool(
     signal,
     dispatchChild: () => Promise.reject(new Error('dispatchChild is shell-provided')),
   };
-  const shape =
-    tool.inputSchema instanceof z.ZodObject
-      ? (tool.inputSchema as z.AnyZodObject).shape
-      : // The SDK's tool() takes a raw shape; a non-object schema rides a
-        // single `input` field. Session tools should prefer z.object roots.
-        { input: tool.inputSchema };
-  return sdk.tool(tool.name, tool.description, shape, async (args) => {
+  // The SDK's tool() takes a raw object shape. A refined object (`.refine`,
+  // `.superRefine`) is still an object to the model, so its shape is what the
+  // SDK advertises; the loop validates the call against the FULL schema,
+  // refinements included. Only a schema with no object root rides a single
+  // `input` field — and then the call is unwrapped before validation, so the
+  // model never has to satisfy two shapes at once.
+  const root = objectRoot(tool.inputSchema);
+  const shape = root ? root.shape : { input: tool.inputSchema };
+  const unwrap = (args: unknown): unknown =>
+    root ? args : (args as { input?: unknown } | undefined)?.input;
+  return sdk.tool(tool.name, tool.description, shape, async (rawArgs) => {
     // The tool_use part of the turn has been delivered; its buffered turn
     // must precede this call's result in the transcript.
     flushTurn();
+    const args = unwrap(rawArgs);
     try {
       const result = await tool.execute(args, driverCtx);
       onEvent({
@@ -559,6 +564,13 @@ function buildMcpTool(
       return toMcpResult(message, true);
     }
   });
+}
+
+/** The object at the root of a tool schema, seen through any refinements; null when there is none. */
+function objectRoot(schema: unknown): z.AnyZodObject | null {
+  let current = schema;
+  while (current instanceof z.ZodEffects) current = current.innerType();
+  return current instanceof z.ZodObject ? (current as z.AnyZodObject) : null;
 }
 
 function toMcpResult(text: string, isError: boolean): SdkMcpToolResult {
