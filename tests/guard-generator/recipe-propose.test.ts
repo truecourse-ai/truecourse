@@ -137,6 +137,20 @@ describe('proposeRecipe — JS/TS', () => {
     expect(proposal(repo).recipe.entry).toEqual(['node', 'dist/cli.js'])
   })
 
+  it('a `start` that runs the package\'s own bin is the cli again, never an api server', () => {
+    const repo = repoOf({
+      'package.json': json({
+        name: 'filecli',
+        bin: { filecli: './dist/cli.js' },
+        scripts: { build: 'tsc', start: 'node dist/cli.js' },
+      }),
+    })
+
+    const out = proposal(repo)
+    expect(out.recipe.entry).toEqual(['node', './dist/cli.js'])
+    expect(out.recipe.api).toBeUndefined()
+  })
+
   it('bails on several `bin` entries — which one a scenario drives is not deterministic', () => {
     const repo = repoOf({ 'package.json': json({ name: 'tools', bin: { a: 'a.js', b: 'b.js' } }) })
 

@@ -316,10 +316,15 @@ function detectJs(repoRoot: string, inputs: ProposeRecipeInputs = {}): RecipeSig
   // single-command invocation of something this repo produces. A workspace ROOT's
   // `start` is not one app's — it is whatever the root wires up — so it is never
   // read as a serve argv; the member's cli is all the ambiguity check cleared.
+  // A `start` that runs the package's own `bin` is the cli again, not a server:
+  // a tool's `start` is a convenience alias for its entry, and booting it as an
+  // api server only prints its usage and exits.
   const start = !workspaceRoot && typeof scripts.start === 'string' ? scripts.start : ''
   if (start.trim()) {
     const argv = tokenizeCommand(start)
-    if (argv && (hasBuild || argvFilesExist(repoRoot, argv))) signals.serve = argv
+    if (argv && !runsProgram(argv, signals.entry) && (hasBuild || argvFilesExist(repoRoot, argv))) {
+      signals.serve = argv
+    }
   }
 
   const looksLikeServer =
@@ -487,6 +492,13 @@ function splitTokens(command: string): string[] | null {
 /** Every repo-relative FILE-looking argument of an argv exists on disk. Applied
  *  only when the recipe has no build step: with a build, the artifact is produced
  *  by it, and `verifyProposal` checks after the build runs. */
+/** Does `argv` run the same `node <file>` program as `entry` (paths normalized)? */
+function runsProgram(argv: readonly string[], entry: readonly string[] | undefined): boolean {
+  if (!entry || argv.length !== 2 || entry.length !== 2) return false
+  if (argv[0] !== 'node' || entry[0] !== 'node') return false
+  return path.normalize(argv[1]!) === path.normalize(entry[1]!)
+}
+
 function argvFilesExist(repoRoot: string, argv: readonly string[]): boolean {
   const candidates = argv.slice(1).filter((a) => !a.startsWith('-') && /[./]/.test(a))
   return candidates.every((a) => existsFile(repoRoot, a))
