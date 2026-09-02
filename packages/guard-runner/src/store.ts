@@ -36,7 +36,6 @@ import {
   GuardSetupReportSchema,
   InterfacesFileSchema,
   InterfacesFragmentSchema,
-  JourneysFileSchema,
   type GuardAutoResolutions,
   type GuardGenerateReport,
   type GuardHistory,
@@ -45,7 +44,6 @@ import {
   type GuardSetupReport,
   type Interface,
   type InterfacesFile,
-  type JourneysFile,
   type MapperDiagnostic,
 } from '@truecourse/shared'
 
@@ -59,7 +57,6 @@ const HISTORY_FILE = 'history.json'
 const RESULT_FILE = 'result.json'
 const SETUP_FILE = 'setup.json'
 const AUTO_RESOLUTIONS_FILE = 'auto-resolutions.json'
-const JOURNEYS_FILE = 'journeys.json'
 const INTERFACES_FILE = 'interfaces.json'
 const AUTHORED_INTERFACES_FILE = 'interfaces.authored.json'
 const INTERFACE_FINDINGS_FILE = 'interfaces.findings.md'
@@ -99,11 +96,6 @@ export function guardResultPath(repoRoot: string): string {
 /** The last `guard setup` record — derived, gitignored, may be absent. */
 export function guardSetupPath(repoRoot: string): string {
   return path.join(guardDir(repoRoot), SETUP_FILE)
-}
-
-/** The journey catalog the last mapping wrote — derived, gitignored, may be absent. */
-export function guardJourneysPath(repoRoot: string): string {
-  return path.join(guardDir(repoRoot), JOURNEYS_FILE)
 }
 
 /** The interface catalog the last mapping wrote — derived, gitignored, may be absent. */
@@ -302,16 +294,6 @@ export function writeGuardSetup(repoRoot: string, report: GuardSetupReport): str
  */
 export function readGuardSetup(repoRoot: string): GuardSetupReport | null {
   return readJsonOr(guardSetupPath(repoRoot), GuardSetupReportSchema, null)
-}
-
-/**
- * Read the journey catalog the last mapping wrote, or `null` when it is absent or
- * unparseable. The catalog is derived and gitignored, so a missing/corrupt one is
- * simply "no journey knowledge" — it never fails a run, it only means the drift
- * annotation has nothing to compare against.
- */
-export function readJourneyCatalog(repoRoot: string): JourneysFile | null {
-  return readJsonOr(guardJourneysPath(repoRoot), JourneysFileSchema, null)
 }
 
 /**

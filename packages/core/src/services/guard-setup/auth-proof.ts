@@ -214,6 +214,7 @@ function runEntryTool(input: {
     async execute(args, toolCtx) {
       const sandbox = createWorkingSandbox({
         ...(input.recipe.env ? { recipeEnv: input.recipe.env } : {}),
+        repoRoot: input.repoRoot,
         supplied: [input.item.instance],
       });
       try {

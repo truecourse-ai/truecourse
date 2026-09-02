@@ -44,6 +44,14 @@
       "types": "./dist/commands/guard-seed.d.ts",
       "import": "./dist/commands/guard-seed.js"
     },
+    "./commands/guard-interfaces": {
+      "types": "./dist/commands/guard-interfaces.d.ts",
+      "import": "./dist/commands/guard-interfaces.js"
+    },
+    "./commands/guard-dependencies": {
+      "types": "./dist/commands/guard-dependencies.d.ts",
+      "import": "./dist/commands/guard-dependencies.js"
+    },
     "./commands/guard-externals": {
       "types": "./dist/commands/guard-externals.d.ts",
       "import": "./dist/commands/guard-externals.js"
@@ -220,9 +228,13 @@
       "types": "./dist/services/flow.service.d.ts",
       "import": "./dist/services/flow.service.js"
     },
-    "./services/journey": {
-      "types": "./dist/services/journey.service.d.ts",
-      "import": "./dist/services/journey.service.js"
+    "./services/interface": {
+      "types": "./dist/services/interface.service.d.ts",
+      "import": "./dist/services/interface.service.js"
+    },
+    "./services/interface-author": {
+      "types": "./dist/services/interface-author/index.d.ts",
+      "import": "./dist/services/interface-author/index.js"
     },
     "./services/violation-query": {
       "types": "./dist/services/violation-query.service.d.ts",
@@ -289,7 +301,7 @@
     "@truecourse/contract-verifier": "workspace:*",
     "@truecourse/guard-generator": "workspace:*",
     "@truecourse/guard-runner": "workspace:*",
-    "@truecourse/journey-mapper": "workspace:*",
+    "@truecourse/interface-mapper": "workspace:*",
     "@truecourse/llm": "workspace:*",
     "@truecourse/llm-api": "workspace:*",
     "@truecourse/llm-claude-agent": "workspace:*",

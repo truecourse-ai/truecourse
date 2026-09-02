@@ -789,7 +789,7 @@ export interface ExternalServiceHint {
  * request. `required: 'unknown'` is a real answer — the field is read, and nothing
  * in the source says whether it may be absent.
  */
-export interface JourneyContractHint {
+export interface InterfaceContractHint {
   method: string
   path: string
   bodyFields?: { name: string; required: boolean | 'unknown' }[]
@@ -877,7 +877,7 @@ export interface AuthorUserContext {
    * claim is reached. Empty/absent (no api journeys, a degraded mapping, cli) keeps
    * the prompt byte-identical. USER-prompt only.
    */
-  journeyContracts?: JourneyContractHint[]
+  journeyContracts?: InterfaceContractHint[]
   /**
    * api scenarios: the REST of the app's operations — everything the api catalog
    * offers that THIS flow's journeys do not walk. A flow's SETUP steps
@@ -886,7 +886,7 @@ export interface AuthorUserContext {
    * rendering and same verbatim-path rule as {@link journeyContracts}; empty/absent
    * keeps the prompt byte-identical. USER-prompt only.
    */
-  otherOperations?: JourneyContractHint[]
+  otherOperations?: InterfaceContractHint[]
   /** How many other operations the cap dropped, so the block can say so. */
   otherOperationsOverflow?: number
   /**
@@ -974,7 +974,7 @@ export interface AuthorUserContext {
  * requiredness the source does not state — never rendered as "optional", which
  * would be a claim the analysis did not make.
  */
-function contractSummary(hint: JourneyContractHint): string {
+function contractSummary(hint: InterfaceContractHint): string {
   const parts: string[] = []
   for (const [label, fields] of [
     ['body', hint.bodyFields],
@@ -2443,7 +2443,7 @@ export interface MatchMilestoneLine {
  * a one-line summary per step. Never file paths, symbols, or source: the matcher
  * reads what a USER can reach, exactly like the journey fingerprint.
  */
-export interface JourneyDigest {
+export interface InterfaceDigest {
   id: string
   title: string
   /** The entry descriptor as the surface declares it (a command path, a route). */
@@ -2454,7 +2454,7 @@ export interface JourneyDigest {
 
 /** What the engine tells the matcher on its ONE corrective re-ask. */
 export interface MatchIssues {
-  /** Journey ids the plan named that are not in the catalog. */
+  /** Interface ids the plan named that are not in the catalog. */
   unknownJourneys: string[]
   /** Milestone numbers the plan never covered. */
   uncoveredMilestones: number[]
@@ -2470,7 +2470,7 @@ export interface MatchUserContext {
   /** The surface being matched (a driver-registry id, e.g. `cli`). */
   surface: string
   /** The surface's whole journey catalog, as digests. */
-  journeys: JourneyDigest[]
+  journeys: InterfaceDigest[]
   /** On a re-ask after engine validation, exactly what was wrong. */
   issues?: MatchIssues
   /** On a re-ask after invalid output, the prior output quoted back. */

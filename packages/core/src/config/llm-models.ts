@@ -63,6 +63,8 @@ export type StageId =
   | 'guard.triage'
   | 'guard.recipe'
   | 'guard.seed'
+  // --- guard interfaces (the authored web surface) ---
+  | 'guard.stateReconcile'
   | 'rules.violationGen';
 
 /**
@@ -133,6 +135,11 @@ export const STAGE_DEFAULTS: Record<StageId, string> = {
   // must satisfy the FK closure and every non-nullable column — the authoring tier's
   // task, not the recipe proposer's structured fill-in. Opus, and it is one call.
   'guard.seed': 'opus',
+  // One call over the WHOLE state registry, deciding which sentences name the
+  // same world. Top tier because a wrong merge conflates two worlds and every
+  // task chaining through either inherits the conflation silently, while the
+  // one-call-per-run shape keeps the spend negligible whatever the app's size.
+  'guard.stateReconcile': 'opus',
   'rules.violationGen': 'opus',
 };
 

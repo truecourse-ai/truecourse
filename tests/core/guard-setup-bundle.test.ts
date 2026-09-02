@@ -31,6 +31,9 @@ afterEach(() => {
 function seedRepo(repoRoot: string): void {
   write(repoRoot, '.truecourse/guard/setup.json', '{"steps":[{"step":"recipe"}]}');
   write(repoRoot, '.truecourse/guard/setup.findings.md', '# findings\n- one\n');
+  write(repoRoot, '.truecourse/guard/interfaces.json', '{"version":2,"interfaces":[]}');
+  write(repoRoot, '.truecourse/guard/interfaces.authored.json', '{"version":2,"interfaces":[]}');
+  write(repoRoot, '.truecourse/guard/interfaces.findings.md', '# interface findings\n');
   write(
     repoRoot,
     '.truecourse/scenarios/recipe.json',
@@ -40,8 +43,7 @@ function seedRepo(repoRoot: string): void {
   write(repoRoot, '.truecourse/scenarios/dependencies.settle.json', '{"catalogSessionFingerprint":"f"}');
   write(repoRoot, 'docker-compose.guard.yml', 'services: {}\n');
   write(repoRoot, 'scripts/seed.ts', 'export const seed = 1;\n');
-  // Not the bundle's: re-derived, cached, or a secrets overlay.
-  write(repoRoot, '.truecourse/guard/journeys.json', '{}');
+  // Not the bundle's: cached, or a secrets overlay.
   write(repoRoot, '.truecourse/.cache/guard/recipe/x.json', '{}');
   write(repoRoot, '.truecourse/scenarios/dependencies.local.json', '{"secret":1}');
   write(repoRoot, '.truecourse/scenarios/externals.local.json', '{"key":1}');
@@ -54,6 +56,9 @@ describe('collectGuardSetupBundle', () => {
     const files = collectGuardSetupBundle(root);
 
     expect(Object.keys(files).sort()).toEqual([
+      '.truecourse/guard/interfaces.authored.json',
+      '.truecourse/guard/interfaces.findings.md',
+      '.truecourse/guard/interfaces.json',
       '.truecourse/guard/setup.findings.md',
       '.truecourse/guard/setup.json',
       '.truecourse/scenarios/dependencies.json',

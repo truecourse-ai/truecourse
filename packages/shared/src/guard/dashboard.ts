@@ -32,6 +32,15 @@ import type { GuardScenarioStory } from './describe.js'
 import { GuardNeedsSetupSchema } from './needs-setup.js'
 import type { GuardNeedsSetup } from './needs-setup.js'
 import { JourneyCatalogSourceSchema, JourneyEntrySchema, JourneyStepSchema } from '../journeys.js'
+import {
+  InterfaceCatalogSourceSchema,
+  InterfaceContractSchema,
+  InterfaceEntrySchema,
+  InterfaceOriginSchema,
+  InterfaceResourceSchema,
+  InterfaceStateSchema,
+  InterfaceStepSchema,
+} from '../interfaces.js'
 
 /**
  * A live doc section's coverage status — the single value the coverage view
@@ -886,3 +895,205 @@ export const GuardJourneysViewSchema = z
   })
   .strict()
 export type GuardJourneysView = z.infer<typeof GuardJourneysViewSchema>
+
+/**
+ * ONE entity's own slice of the JSON store file that holds it — the RAW half of
+ * the two readings an artifact-backed entity offers (View + the artifact).
+ * Pretty-printed server-side from the real file, so the pane shows what is
+ * actually stored rather than a re-serialization of the view model.
+ */
+export interface GuardArtifactSource {
+  /** The entity's id, echoed back — what the slice was selected by. */
+  id: string
+  /** Repo-relative path of the store file the slice came out of. */
+  file: string
+  /** The entity's entry, pretty-printed JSON. */
+  content: string
+}
+
+// ---------------------------------------------------------------------------
+// Interfaces tab — the code-side catalog (the free Map action's read surface).
+// ---------------------------------------------------------------------------
+
+/**
+ * One flow that USES an interface — the reverse-index entry.
+ *
+ * `realized: false` is the case a plain scenario-derived index cannot see: the
+ * flow's realization plan walked this interface, but no scenario was written for
+ * that surface (authoring was blocked on setup the repo hasn't declared). The
+ * spec DOES reach the code path; it just cannot be exercised yet, and `gap` says
+ * what it is waiting on.
+ */
+export const GuardInterfaceFlowRefSchema = z
+  .object({
+    flowId: z.string(),
+    /** The flow's title; its id when no flows corpus names it (hand-written work). */
+    title: z.string(),
+    /** True when a committed scenario of this flow grounds on the interface. */
+    realized: z.boolean(),
+    /** Why an unrealized usage produced no scenario. Absent when realized. */
+    gap: GuardFlowGapSchema.optional(),
+  })
+  .strict()
+export type GuardInterfaceFlowRef = z.infer<typeof GuardInterfaceFlowRefSchema>
+
+/** One interface row: the catalog entry plus the reverse index onto the flows. */
+export const GuardInterfaceRowSchema = z
+  .object({
+    id: z.string(),
+    /** The surface — a driver-registry id. */
+    type: GuardDriverIdSchema,
+    title: z.string(),
+    /**
+     * The FAMILY this entry belongs to (the `rules` command tree, the `analyses`
+     * route family) — passed through from the catalog verbatim and scoped to
+     * `type`, so the panel can show the tree the per-entry granularity dissolved.
+     * Absent where the derivation established no family.
+     */
+    group: z.string().optional(),
+    entry: InterfaceEntrySchema,
+    steps: z.array(InterfaceStepSchema),
+    /** The state the task starts from, as its area's state ID — passed through
+     *  from the catalog verbatim (the registry that describes it lives there). */
+    startingState: z.string().optional(),
+    /** The observable state the task leaves behind, as a state id — verbatim. */
+    endState: z.string().optional(),
+    /** The resource the task acts ON, as its area's resource id — verbatim
+     *  (the registry describing the place travels on the VIEW, so the panel can
+     *  group by place and the pane can render the place's readables). */
+    at: z.string().optional(),
+    /** The resource the task leaves the user at, when it moves them — verbatim. */
+    to: z.string().optional(),
+    /** The place that OWNS this invocable — the command group it is registered
+     *  in, the REST noun its path names — verbatim, resolving in the same
+     *  registry `at`/`to` do. Absent where the catalog established no places. */
+    resource: z.string().optional(),
+    fingerprint: z.string(),
+    /**
+     * Flows that use this interface — realized (a scenario grounds on it) or merely
+     * planned (matched, then blocked). EMPTY is the only honest "the spec never
+     * mentions this code path", and the single source for the row's flow count.
+     */
+    flows: z.array(GuardInterfaceFlowRefSchema),
+    /** The scenarios that ground on it. */
+    scenarioIds: z.array(z.string()),
+    /**
+     * How this surface's catalog was derived (`tree` | `probes`) — absent for a
+     * surface no derivation produced, which is exactly what `origin` names.
+     */
+    source: InterfaceCatalogSourceSchema.optional(),
+    /**
+     * WHERE THIS ROW CAME FROM — `derived` (a mapping read it off the tree) or
+     * `authored` (a human wrote it in `guard/interfaces.authored.json`). Stamped
+     * by the merge that joins the catalog's two halves, so it is a fact about
+     * this ENTRY rather than about its area: an authored operation shadowing a
+     * derived one sits inside a `tree`-derived surface and still says so, which
+     * no per-area `source` value could ever express.
+     */
+    origin: InterfaceOriginSchema.optional(),
+    /** Declared in an OpenAPI doc, but no route registration serves it. */
+    specOnly: z.literal(true).optional(),
+    /**
+     * The full public contract, in this entry's OWN surface vocabulary — a cli
+     * command's grammar and io, or an api operation's request/consumes/produces.
+     * Passed through from the catalog verbatim; absent where the derivation
+     * established the surface's shape only, which is exactly what the view
+     * renders as "no contract derived yet".
+     */
+    contract: InterfaceContractSchema.optional(),
+    /**
+     * The api interfaces this entry's steps CALL, by id — the UI-to-API relation,
+     * passed through from the catalog verbatim. Ids, not shapes: a reader joins
+     * them against the catalog's own api rows (the pane mints `noun.method()`
+     * from the joined entry, and shows the raw id when nothing resolves).
+     *
+     * The absence rule of the catalog holds here too and both halves are real
+     * answers: OMITTED = the derivation established nothing, `[]` = it
+     * established NONE (an interaction that reaches no server at all).
+     */
+    apiEffects: z.array(z.string()).optional(),
+  })
+  .strict()
+export type GuardInterfaceRow = z.infer<typeof GuardInterfaceRowSchema>
+
+/**
+ * One chip of the detected-surface banner: a driver-registry row with what the
+ * mapping found for it. `detected` answers "does TrueCourse think my app has this
+ * surface"; `runnable` answers "can we run scenarios on it today".
+ */
+export const GuardInterfaceSurfaceSchema = z
+  .object({
+    surface: GuardDriverIdSchema,
+    label: z.string(),
+    runnable: z.boolean(),
+    /** UI copy for a non-runnable surface ("Needs web driver"). */
+    waitingLabel: z.string().optional(),
+    /** Interfaces mapped for this surface. */
+    interfaces: z.number().int().nonnegative(),
+    /**
+     * PLACES mapped for this surface — the registry's entries for this area.
+     *
+     * Counted beside the interfaces because since the web derivation landed the
+     * two can disagree: the `web` surface derives its places off the routing tree
+     * and its tasks not at all, so a mapped web app is N places and ZERO
+     * interfaces. Reading the row by its interface count alone would report that
+     * repo as "no web surface found", which is the opposite of what happened.
+     */
+    resources: z.number().int().nonnegative(),
+    /** Did the mapping find this surface AT ALL — either half of it. */
+    detected: z.boolean(),
+    source: InterfaceCatalogSourceSchema.optional(),
+  })
+  .strict()
+export type GuardInterfaceSurface = z.infer<typeof GuardInterfaceSurfaceSchema>
+
+/**
+ * The Interfaces-tab payload. `mapped: false` is the clean empty state (no
+ * `guard/interfaces.json` yet) — every list is empty and the banner still carries a
+ * row per registry driver, so the tab renders its Map CTA without a null check.
+ */
+export const GuardInterfacesViewSchema = z
+  .object({
+    /** False when no catalog snapshot exists — the client renders the Map CTA. */
+    mapped: z.boolean(),
+    generatedAt: z.string().nullable(),
+    /** The recipe fingerprint the mapping ran against. */
+    recipeFingerprint: z.string().nullable(),
+    interfaces: z.array(GuardInterfaceRowSchema),
+    /**
+     * The RESOURCE REGISTRY, per area — the catalog's own, verbatim: the places
+     * the rows' `at`/`to` name, each with its kind, title and readables. On the
+     * view (not per row) because a place is defined ONCE and many rows point at
+     * it; the panel joins ids to titles, the pane renders the open row's place.
+     * Absent where the catalog names none (cli/api-only catalogs).
+     */
+    resources: z.record(z.string(), z.array(InterfaceResourceSchema)).optional(),
+    /**
+     * The STATE REGISTRY, per area — the catalog's own, verbatim: the worlds the
+     * rows' `startingState`/`endState` name, each with the one line that says
+     * what it is. On the view for the same reason `resources` is: a state is
+     * defined ONCE and many rows reference it. Absent where the catalog names
+     * none, and a row whose state id the registry does not carry still renders
+     * its id — the id is the fact, the description is the gloss.
+     */
+    states: z.record(z.string(), z.array(InterfaceStateSchema)).optional(),
+    /** One row per driver-registry surface (the banner), registry order. */
+    surfaces: z.array(GuardInterfaceSurfaceSchema),
+    totals: z
+      .object({
+        interfaces: z.number().int().nonnegative(),
+        detectedSurfaces: z.number().int().nonnegative(),
+        /** Interfaces at least one flow uses (realized or planned-but-blocked). */
+        grounded: z.number().int().nonnegative(),
+        /** Interfaces NO flow references at all — the future infer signal. */
+        ungrounded: z.number().int().nonnegative(),
+      })
+      .strict(),
+    /**
+     * Why the catalog is unavailable, when it is: `no-working-tree` (a hosted repo
+     * has no tree to map). Absent when the read succeeded (mapped or simply empty).
+     */
+    unavailable: z.enum(['no-working-tree']).optional(),
+  })
+  .strict()
+export type GuardInterfacesView = z.infer<typeof GuardInterfacesViewSchema>

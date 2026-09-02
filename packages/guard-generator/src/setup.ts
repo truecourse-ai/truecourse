@@ -17,13 +17,17 @@
  *                                                    session or the one-shot LLM →
  *                                                    verify by running) plus a live
  *                                                    endpoint probe per declared server.
- *   2    detect                                    — one `mapJourneys` pass; free.
+ *   2    detect                                    — one `mapInterfaces` pass; free.
  *   3    the catalog                               — SOFT. The externals declaration
  *                                                    skeleton (det) + the
  *                                                    dependency-catalog session seam.
- *   4    the one seed (data AND auth)              — SOFT, never blocks. The seed
+ *   4    interfaces                                — SOFT. The cli reconcile session
+ *                                                    over the union's disputes, then
+ *                                                    the web-task authoring run
+ *                                                    (both behind `authorInterfaces`).
+ *   5    the one seed (data AND auth)              — SOFT, never blocks. The seed
  *                                                    authoring session (`seedSession`).
- *   5    auth                                      — SOFT; the one step that may end
+ *   6    auth                                      — SOFT; the one step that may end
  *                                                    `blocked`. The auth-proof
  *                                                    session (`verifyAuth`).
  * The credential↔spec `satisfies` check is reported here too, where fixing it costs
@@ -55,8 +59,10 @@ import {
   loadResolvedExternals,
   computeRecipeFingerprint,
   dependenciesPath,
+  guardAuthoredInterfacesPath,
   hashableRecipeText,
   readGuardSetup,
+  readInterfaceCatalog,
   resolveSeedScript,
   FINGERPRINT_INPUTS,
   RecipeSchema,
@@ -68,16 +74,18 @@ import type {
   DatastoreUrlRef,
   DetectedExternalService,
   GuardSetupExternalsStep,
+  GuardSetupInterfaceResolution,
   GuardSetupRecipeStep,
   GuardSetupReport,
   GuardSetupSeedStep,
   GuardSetupServerProbe,
   GuardSetupTaxonomyKey,
   GuardSetupTaxonomyStep,
-  Journey,
+  Interface,
+  MapperDiagnostic,
 } from '@truecourse/shared'
 import { discoverRecipe, type RecipeDiscoveryPhase, type RecipeRepairFn } from './recipe-discovery.js'
-import { detectEcosystems, routesFromJourneys, type ApiRouteRef } from './recipe-propose.js'
+import { detectEcosystems, routesFromInterfaces, type ApiRouteRef } from './recipe-propose.js'
 import { probeApiServers } from './endpoint-probe.js'
 import { deriveExternalsSkeleton } from './externals-skeleton.js'
 import {
@@ -93,7 +101,7 @@ import {
   validateCredentialSatisfies,
   type ProbeCandidate,
 } from './openapi-security.js'
-import type { JourneyProvider } from './generate.js'
+import type { InterfaceProvider } from './generate.js'
 import type { RecipeRunner } from './runners.js'
 
 /** How many spec docs the seed draft is shown, and how much of each. */
@@ -105,12 +113,12 @@ const SPEC_EXCERPT_CHARS = 1500
 // ---------------------------------------------------------------------------
 
 /**
- * The setup steps that may spend an LLM session, in spine order — the four the
+ * The setup steps that may spend an LLM session, in spine order — the five the
  * `--only-<step>` flags select from. `detect` is NOT one of them: it is one
- * deterministic `mapJourneys` pass whose in-memory output every later step
+ * deterministic `mapInterfaces` pass whose in-memory output every later step
  * reads, so it always runs and the detection snapshot is always this run's.
  */
-export const GUARD_SETUP_ONLY_STEPS = ['recipe', 'catalog', 'seed', 'auth'] as const
+export const GUARD_SETUP_ONLY_STEPS = ['recipe', 'catalog', 'interfaces', 'seed', 'auth'] as const
 export type GuardSetupOnlyStep = (typeof GUARD_SETUP_ONLY_STEPS)[number]
 
 /**
@@ -135,11 +143,14 @@ export class SetupStepNotReadyError extends Error {
 
 export interface GuardSetupOptions {
   repoRoot: string
-  /** Journey mapping seam — the same one generate uses; see {@link GuardSetupJourneyProvider}. */
-  journeys?: GuardSetupJourneyProvider
+  /** Interface mapping seam — generate's provider shape, optionally extended
+   *  with the mapping's run diagnostics; see {@link GuardSetupInterfaceProvider}. */
+  interfaces?: GuardSetupInterfaceProvider
   recipeRunner: RecipeRunner
   /** Re-derive the recipe and re-draft the seed even when both already exist. */
   refresh?: boolean
+  /** Interfaces step: re-author places that already carry authored tasks. */
+  replace?: boolean
   /**
    * Single-step mode: run ONLY this step. Steps BEFORE it replay from what they
    * left on disk — the recipe from `recipe.json` (no discovery, no repair
@@ -190,6 +201,12 @@ export interface GuardSetupOptions {
    */
   catalogSession?: GuardSetupCatalogSession
   /**
+   * The interfaces step body: the cli reconcile session over the mapping's
+   * diagnostics, then the web-task authoring run. Absent ⇒ the step reports a
+   * `skipped` placeholder row.
+   */
+  authorInterfaces?: GuardSetupInterfacesStep
+  /**
    * The seed authoring session. Replaces the one-shot
    * `draftSeed`; absent ⇒ the seed step reports a `skipped` placeholder row
    * (the gate and the replace-confirmation still run first, here).
@@ -207,12 +224,13 @@ export interface GuardSetupOptions {
 }
 
 /** Stable step taxonomy, shared by the CLI tracker and the dashboard —
- *  the spine: recipe → detect → catalog → seed → auth
+ *  the spine: recipe → detect → catalog → interfaces → seed → auth
  *  (the old externals step folded INTO catalog). */
 export const GUARD_SETUP_STEPS = [
   { key: 'recipe', label: 'Deriving the recipe' },
   { key: 'detect', label: 'Detecting dependencies' },
   { key: 'catalog', label: 'Cataloguing dependencies' },
+  { key: 'interfaces', label: 'Authoring the interface catalog' },
   { key: 'seed', label: 'Preparing data + principals' },
   { key: 'auth', label: 'Verifying supplied auth' },
 ] as const
@@ -249,9 +267,46 @@ export type GuardSetupCatalogSession = (
 
 /**
  * The provider the setup engine maps the tree with — generate's
- * {@link JourneyProvider} shape, so every existing provider fits as it is.
+ * {@link InterfaceProvider} shape plus the mapping's run DIAGNOSTICS (the cli
+ * union's tree-vs-probe disputes). Structural and optional, so every existing
+ * provider (which simply omits the field) still fits, and the field never
+ * enters the snapshot — it is run reporting the interfaces step consumes.
  */
-export type GuardSetupJourneyProvider = JourneyProvider
+export type GuardSetupInterfaceProvider = () => Promise<
+  Awaited<ReturnType<InterfaceProvider>> & { diagnostics?: MapperDiagnostic[] }
+>
+
+/** The interfaces step's seam: reconcile the disputes, then author. */
+export interface GuardSetupInterfacesStepInput {
+  repoRoot: string
+  fingerprint: string
+  refresh: boolean
+  /** Re-author places that already carry authored tasks (`--replace`). */
+  replace: boolean
+  /** The recipe as it stands on disk when the step runs. */
+  recipe: Recipe
+  /** The memoized mapping's in-memory catalog — what resolutions edit BEFORE
+   *  the corrected snapshot is written back. */
+  interfaces: readonly Interface[]
+  /** EVERY diagnostic the mapping reported; the seam filters down to the kinds
+   *  its session can answer (the cli `*-missing-*` disputes). */
+  diagnostics: readonly MapperDiagnostic[]
+}
+export type GuardSetupInterfacesStepResult = {
+  status: 'ok' | 'skipped' | 'failed'
+  reason?: string
+  sessionRunId?: string
+  /** What this run disputed/noticed — recorded on the step row, never stored
+   *  in the catalog. */
+  diagnostics?: MapperDiagnostic[]
+  /** The reconcile session's per-subject verdicts, when one ran. */
+  resolutions?: GuardSetupInterfaceResolution[]
+  /** The catalog edits the resolutions produced, one line each. */
+  changes?: string[]
+}
+export type GuardSetupInterfacesStep = (
+  input: GuardSetupInterfacesStepInput,
+) => Promise<GuardSetupInterfacesStepResult>
 
 /** What the seed authoring session is briefed on — today's
  *  draftSeed inputs, gathered by the engine so the session module stays free
@@ -370,7 +425,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   const mapOnce = (): ReturnType<typeof mapSafely> => {
     if (!mappedOnce) {
       phases.enter({ running: 'analyzing the repository', done: 'analysis' })
-      mappedOnce = mapSafely(opts.journeys)
+      mappedOnce = mapSafely(opts.interfaces)
     }
     return mappedOnce
   }
@@ -414,7 +469,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     const discovery = await discoverRecipe(repoRoot, opts.recipeRunner, {
       ...(opts.refresh ? { ignoreExisting: true } : {}),
       ...(opts.repair ? { repair: opts.repair } : {}),
-      routes: async () => routesFromJourneys((await mapOnce()).journeys),
+      routes: async () => routesFromInterfaces((await mapOnce()).interfaces),
       database: async () => {
         const db = (await mapOnce()).database
         return db ? { type: db.type, driver: db.driver } : null
@@ -652,12 +707,68 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     }
   }
 
+  // ---- Step 4: interfaces — reconcile the cli disputes, author the web tasks.
+  // SOFT: an authoring failure fails the STEP, never setup — the derived half of
+  // the catalog is already on disk, and generate runs on whatever authored half
+  // exists. Skip-when-settled needs BOTH halves settled: an unchanged place set
+  // with the authored file missing (deleted, or a fresh clone that never
+  // authored) is work, not a skip; `--replace` is an explicit re-author and
+  // never skips either.
+  if (enter('interfaces')) {
+    const interfacesFp = interfacesFingerprint(repoRoot)
+    const authoredExists = fs.existsSync(guardAuthoredInterfacesPath(repoRoot))
+    if (replayed('interfaces')) {
+      // Prior step: the merged catalog on disk — the derived half detect just
+      // re-wrote, plus whatever authored half is committed — is what the later
+      // steps read. No reconcile session, no authoring run.
+      if (!ranBefore('interfaces')) {
+        throw new SetupStepNotReadyError('interfaces', 'no interfaces row in guard/setup.json')
+      }
+      opts.onStepDone?.('interfaces', 'replayed — the authored catalog stands as it is')
+    } else if (settled('interfaces') === interfacesFp && authoredExists && opts.replace !== true) {
+      steps.push({ key: 'interfaces', status: 'skipped', reason: 'unchanged', inputFingerprint: interfacesFp })
+      opts.onStepDone?.('interfaces', 'unchanged')
+    } else if (opts.authorInterfaces) {
+      const result = await opts.authorInterfaces({
+        repoRoot,
+        fingerprint: interfacesFp,
+        refresh: opts.refresh === true,
+        replace: opts.replace === true,
+        recipe: reloadRecipe(repoRoot) ?? recipe,
+        interfaces: mapped.interfaces,
+        diagnostics: mapped.diagnostics,
+      })
+      steps.push({
+        key: 'interfaces',
+        status: result.status,
+        ...(result.reason ? { reason: result.reason } : {}),
+        inputFingerprint: interfacesFingerprint(repoRoot),
+        ...(result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}),
+        // The step row is where run reporting lands — diagnostics are never
+        // stored in the catalog itself.
+        ...(result.diagnostics && result.diagnostics.length > 0 ? { diagnostics: result.diagnostics } : {}),
+        ...(result.resolutions && result.resolutions.length > 0 ? { resolutions: result.resolutions } : {}),
+        ...(result.changes && result.changes.length > 0 ? { changes: result.changes } : {}),
+      })
+      opts.onStepDone?.('interfaces', result.reason ?? result.status)
+    } else {
+      steps.push({
+        key: 'interfaces',
+        status: 'skipped',
+        reason:
+          'interface authoring is not wired into this run — run `truecourse guard interfaces author`, or inject the `authorInterfaces` seam (production does)',
+        inputFingerprint: interfacesFp,
+      })
+      opts.onStepDone?.('interfaces', 'not wired into this run')
+    }
+  }
+
   // The recipe on disk may have changed under the catalog step (the skeleton is a
   // real write), so the seed drafts against the RELOADED one — its fingerprint has
   // already moved.
   const current = reloadRecipe(repoRoot) ?? recipe
 
-  // ---- Step 4: the one seed — data AND auth. SOFT. -------------------------
+  // ---- Step 5: the one seed — data AND auth. SOFT. -------------------------
   const seedFpOf = (): string =>
     seedFingerprint(computeRecipeFingerprint(repoRoot), dependenciesFileContent(repoRoot))
   let seedStep: GuardSetupSeedStep | undefined
@@ -688,7 +799,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         opts,
         recipe: current,
         database,
-        routes: routesFromJourneys(mapped.journeys),
+        routes: routesFromInterfaces(mapped.interfaces),
         schemes: collectSecuritySchemes(openApiDocs),
         probeCandidates: collectProbeCandidates(openApiDocs),
         fingerprint: seedFpPre,
@@ -708,7 +819,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     }
   }
 
-  // ---- Step 5: auth — the supplied-state proof. ----------------------------
+  // ---- Step 6: auth — the supplied-state proof. ----------------------------
   // The ONE step that may end `blocked` (a supplied credential waiting on a user
   // registration) without demoting the run.
   if (enter('auth')) {
@@ -867,6 +978,19 @@ function writeCatalogSettle(repoRoot: string, fingerprint: string): void {
     `${JSON.stringify({ catalogSessionFingerprint: fingerprint }, null, 2)}\n`,
     'utf-8',
   )
+}
+
+/** Sorted derived web place `(id, address)` pairs :: the recipe fingerprint —
+ *  the interfaces step re-runs when a screen appeared, moved, or vanished.
+ *  Exported for the pre-flight estimate's settled check. */
+export function interfacesFingerprint(repoRoot: string): string {
+  const catalog = readInterfaceCatalog(repoRoot)
+  const pairs = (catalog?.resources?.['web'] ?? [])
+    .map((place) => `${place.id}\x00${place.address ?? ''}`)
+    .sort()
+  return createHash('sha256')
+    .update(`${pairs.join('\n')}::${computeRecipeFingerprint(repoRoot)}`)
+    .digest('hex')
 }
 
 function seedFingerprint(recipeFingerprint: string, depsContent: string): string {
@@ -1361,22 +1485,30 @@ function failed(
   }
 }
 
-/** The journey mapping, degraded to "nothing detected" rather than a failed setup. */
-async function mapSafely(provider?: GuardSetupJourneyProvider): Promise<{
-  journeys: Journey[]
+/** The interface mapping, degraded to "nothing detected" rather than a failed setup. */
+async function mapSafely(provider?: GuardSetupInterfaceProvider): Promise<{
+  interfaces: Interface[]
   externalServices: DetectedExternalService[]
   database: SeedDraftDatabase | null
   datastoreUrls: DatastoreUrlRef[]
+  diagnostics: MapperDiagnostic[]
 }> {
-  const empty = { journeys: [], externalServices: [], database: null, datastoreUrls: [] }
+  const empty = {
+    interfaces: [],
+    externalServices: [],
+    database: null,
+    datastoreUrls: [],
+    diagnostics: [],
+  }
   if (!provider) return empty
   try {
     const mapped = await provider()
     return {
-      journeys: mapped.journeys,
+      interfaces: mapped.interfaces,
       externalServices: mapped.externalServices ?? [],
       database: mapped.database ?? null,
       datastoreUrls: mapped.datastoreUrls ?? [],
+      diagnostics: mapped.diagnostics ?? [],
     }
   } catch {
     return empty

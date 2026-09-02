@@ -21,7 +21,7 @@ export {
   type GuardGenerateError,
   type GuardExtractionFailure,
   type AuthorFailure,
-  type JourneyProvider,
+  type InterfaceProvider,
 } from './generate.js'
 
 export {
@@ -42,7 +42,7 @@ export {
   planFlowMatching,
   readCachedMatch,
   buildSurfaceCatalogs,
-  journeyDigest,
+  interfaceDigest,
   realizationLines,
   matchCacheKey,
   MATCH_CACHE_NAME,
@@ -139,7 +139,7 @@ export {
 
 export {
   proposeRecipe,
-  routesFromJourneys,
+  routesFromInterfaces,
   rankHealthPath,
   credentialStubs,
   credentialEnvName,
@@ -162,7 +162,7 @@ export {
 
 export { enrichBlockedOn, isGenericExternalNoun } from './external-blocked.js'
 export {
-  buildJourneyContractHints,
+  buildInterfaceContractHints,
   buildOutboundRequestHints,
   outboundOverflow,
   MAX_OUTBOUND_REQUESTS,
@@ -223,7 +223,11 @@ export {
   type GuardSetupCatalogSession,
   type GuardSetupCatalogSessionInput,
   type GuardSetupCatalogSessionResult,
-  type GuardSetupJourneyProvider,
+  type GuardSetupInterfaceProvider,
+  type GuardSetupInterfacesStep,
+  type GuardSetupInterfacesStepInput,
+  type GuardSetupInterfacesStepResult,
+  interfacesFingerprint,
   type GuardSetupSeedSession,
   type GuardSetupSeedSessionInput,
   type GuardSetupSeedSessionResult,
@@ -289,7 +293,7 @@ export {
   buildFlowsUserPrompt,
   buildFlowsEpicUserPrompt,
   type AuthorUserContext,
-  type JourneyContractHint,
+  type InterfaceContractHint,
   type OutboundRequestHint,
   type AuthorMilestone,
   type BirthRetryContext,
@@ -297,7 +301,7 @@ export {
   type FidelityMilestone,
   type MatchUserContext,
   type MatchMilestoneLine,
-  type JourneyDigest,
+  type InterfaceDigest,
   type FlowsUserContext,
   type FlowsEpicUserContext,
   type FlowClaimLine,

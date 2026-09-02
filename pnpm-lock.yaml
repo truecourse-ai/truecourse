@@ -768,9 +768,9 @@ importers:
       '@truecourse/guard-runner':
         specifier: workspace:*
         version: link:../guard-runner
-      '@truecourse/journey-mapper':
+      '@truecourse/interface-mapper':
         specifier: workspace:*
-        version: link:../journey-mapper
+        version: link:../interface-mapper
       '@truecourse/llm':
         specifier: workspace:*
         version: link:../llm
@@ -1031,22 +1031,6 @@ importers:
       '@types/pg':
         specifier: ^8.11.10
         version: 8.20.0
-      typescript:
-        specifier: ^5.7.0
-        version: 5.9.3
-
-  packages/journey-mapper:
-    dependencies:
-      '@truecourse/guard-runner':
-        specifier: workspace:*
-        version: link:../guard-runner
-      '@truecourse/shared':
-        specifier: workspace:*
-        version: link:../shared
-    devDependencies:
-      '@types/node':
-        specifier: ^22.19.15
-        version: 22.19.15
       typescript:
         specifier: ^5.7.0
         version: 5.9.3

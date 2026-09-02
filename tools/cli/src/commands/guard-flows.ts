@@ -442,7 +442,11 @@ function journeyIds(repoRoot: string, entry: GuardManifestFlow | undefined): str
   const ids: string[] = [];
   for (const scenario of loadScenarios(repoRoot).scenarios) {
     if (!wanted.has(scenario.id)) continue;
-    for (const id of scenario.journey?.path ?? []) if (!ids.includes(id)) ids.push(id);
+    // Either spelling: a scenario committed before the interface rename carries
+    // its grounding ref as `journey`.
+    for (const id of (scenario.interface ?? scenario.journey)?.path ?? []) {
+      if (!ids.includes(id)) ids.push(id);
+    }
   }
   return ids;
 }

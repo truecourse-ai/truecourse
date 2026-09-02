@@ -43,7 +43,7 @@ import {
   type RouteManifestApp,
 } from '@truecourse/guard-runner'
 import { parseOpenApiSpec, parseSecuritySchemes, type SecurityScheme } from '@truecourse/shared/openapi'
-import type { DatastoreUrlRef, Journey } from '@truecourse/shared'
+import type { DatastoreUrlRef, Interface } from '@truecourse/shared'
 import { deriveGuardCompose, GUARD_COMPOSE_FILE, type ComposePlan } from './datastore-compose.js'
 
 /** One operation of the derived api surface — all the health ranking needs. */
@@ -187,7 +187,7 @@ export function proposeRecipe(repoRoot: string, inputs: ProposeRecipeInputs = {}
  * operation-rooted journey. Lets a caller that already mapped journeys hand the
  * surface over without a second analysis pass.
  */
-export function routesFromJourneys(journeys: readonly Journey[]): ApiRouteRef[] {
+export function routesFromInterfaces(journeys: readonly Interface[]): ApiRouteRef[] {
   const routes: ApiRouteRef[] = []
   for (const j of journeys) {
     const entry = j.entry as { method?: string; path?: string }

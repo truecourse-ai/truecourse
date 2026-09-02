@@ -9,9 +9,13 @@
  * every step would re-run from scratch. Collect them after a run, materialize
  * them into the next clone before one, and setup behaves as it does locally.
  *
- * Deliberately NOT members: `guard/journeys.json` (re-derived every run), the
- * `.cache/` KV caches (their own store seam), and the gitignored secrets
- * overlays `dependencies.local.json` / `externals.local.json`.
+ * The interface catalog travels too — both halves plus its findings ledger —
+ * because the Interfaces view has no working tree to read in DB mode and the
+ * interfaces step's settle check needs the authored half to exist.
+ *
+ * Deliberately NOT members: the `.cache/` KV caches (their own store seam) and
+ * the gitignored secrets overlays `dependencies.local.json` /
+ * `externals.local.json`.
  */
 
 import fs from 'node:fs';
@@ -19,6 +23,9 @@ import path from 'node:path';
 import { GuardSetupReportSchema, type GuardSetupReport } from '@truecourse/shared';
 import {
   dependenciesPath,
+  guardAuthoredInterfacesPath,
+  guardInterfaceFindingsPath,
+  guardInterfacesPath,
   guardSetupFindingsPath,
   guardSetupPath,
   recipePath,
@@ -55,6 +62,9 @@ export function collectGuardSetupBundle(repoRoot: string): Record<string, string
   const members = [
     guardSetupPath(repoRoot),
     guardSetupFindingsPath(repoRoot),
+    guardInterfacesPath(repoRoot),
+    guardAuthoredInterfacesPath(repoRoot),
+    guardInterfaceFindingsPath(repoRoot),
     recipePath(repoRoot),
     dependenciesPath(repoRoot),
     path.join(scenariosDir(repoRoot), 'dependencies.settle.json'),
@@ -78,6 +88,14 @@ export function collectGuardSetupBundle(repoRoot: string): Record<string, string
 
   return files;
 }
+
+/** The bundle keys the interface catalog's two halves travel under — what a
+ *  DB-mode reader looks them up by, since there is no tree to path into. */
+export const GUARD_SETUP_INTERFACES_FILE = relOf(BUNDLE_ROOT, guardInterfacesPath(BUNDLE_ROOT));
+export const GUARD_SETUP_AUTHORED_INTERFACES_FILE = relOf(
+  BUNDLE_ROOT,
+  guardAuthoredInterfacesPath(BUNDLE_ROOT),
+);
 
 /**
  * The setup report a stored bundle carries, parsed — null when the bundle has

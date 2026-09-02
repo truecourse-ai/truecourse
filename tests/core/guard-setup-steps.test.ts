@@ -29,6 +29,7 @@ import { setDefaultTransport } from '@truecourse/shared/llm';
 import type {
   GuardSetupAuthStep,
   GuardSetupCatalogSession,
+  GuardSetupInterfacesStep,
   GuardSetupSeedSession,
 } from '@truecourse/guard-generator';
 import {
@@ -99,8 +100,8 @@ function writeRecipe(r: string, over: Record<string, unknown> = {}): void {
 }
 
 /** The one analysis pass, stubbed: one external service and a one-table schema. */
-const journeys = () => async () => ({
-  journeys: [],
+const interfaces = () => async () => ({
+  interfaces: [],
   externalServices: [
     { service: 'stripe', category: 'payment' as const, evidence: [], baseUrlEnv: 'STRIPE_BASE_URL' },
   ],
@@ -122,6 +123,7 @@ const neverCalled = async (): Promise<never> => {
 function seams(): {
   reached: string[];
   catalogSession: GuardSetupCatalogSession;
+  authorInterfaces: GuardSetupInterfacesStep;
   seedSession: GuardSetupSeedSession;
   verifyAuth: GuardSetupAuthStep;
 } {
@@ -131,6 +133,10 @@ function seams(): {
     catalogSession: async () => {
       reached.push('catalog');
       return { status: 'ok', added: [], findings: [] };
+    },
+    authorInterfaces: async () => {
+      reached.push('interfaces');
+      return { status: 'ok' };
     },
     seedSession: async () => {
       reached.push('seed');
@@ -157,7 +163,7 @@ describe('--only-recipe', () => {
 
     const { report } = await guardSetupInProcess(r, {
       only: 'recipe',
-      journeys: journeys(),
+      interfaces: interfaces(),
       recipeRunner: neverCalled,
       ...s,
     });
@@ -186,7 +192,7 @@ describe('--only-catalog', () => {
 
     const { report } = await guardSetupInProcess(r, {
       only: 'catalog',
-      journeys: journeys(),
+      interfaces: interfaces(),
       recipeRunner: neverCalled,
       ...s,
     });
@@ -206,7 +212,7 @@ describe('--only-catalog', () => {
 
     const error = await guardSetupInProcess(r, {
       only: 'catalog',
-      journeys: journeys(),
+      interfaces: interfaces(),
       recipeRunner: neverCalled,
       ...s,
     }).catch((e: unknown) => e);
@@ -232,7 +238,7 @@ describe('a prior step not yet run', () => {
 
     const error = await guardSetupInProcess(r, {
       only: 'seed',
-      journeys: journeys(),
+      interfaces: interfaces(),
       recipeRunner: neverCalled,
       ...s,
     }).catch((e: unknown) => e);
@@ -254,7 +260,7 @@ describe('the persisted report', () => {
     writeRecipe(r);
     const whole = seams();
     await guardSetupInProcess(r, {
-      journeys: journeys(),
+      interfaces: interfaces(),
       recipeRunner: neverCalled,
       ...whole,
     });
@@ -263,17 +269,18 @@ describe('the persisted report', () => {
       'recipe',
       'detect',
       'catalog',
+      'interfaces',
       'seed',
       'auth',
     ]);
-    expect(whole.reached).toEqual(['catalog', 'seed', 'auth']);
+    expect(whole.reached).toEqual(['catalog', 'interfaces', 'seed', 'auth']);
 
     // One step, forced: --refresh with --only-<step> re-runs that step alone.
     const single = seams();
     await guardSetupInProcess(r, {
       only: 'seed',
       refresh: true,
-      journeys: journeys(),
+      interfaces: interfaces(),
       recipeRunner: neverCalled,
       ...single,
     });
@@ -285,6 +292,7 @@ describe('the persisted report', () => {
       'recipe',
       'detect',
       'catalog',
+      'interfaces',
       'seed',
       'auth',
     ]);
@@ -312,7 +320,15 @@ describe('estimateGuardSetupCost({ only })', () => {
 
     expect((whole.stages ?? []).length).toBeGreaterThan(1);
     expect((seedOnly.stages ?? []).map((s) => s.stage)).toEqual(['guard-setup.seed']);
-    const catalogOnly = await estimateGuardSetupCost(r, { only: 'catalog' });
-    expect((catalogOnly.stages ?? []).map((s) => s.stage)).toEqual(['guard-setup.dependency-catalog']);
+    // The interfaces step owns TWO kinds — the reconcile session and the
+    // authoring run (this fixture has no screens, so only the first is quoted)
+    // — and no other step's kind may appear.
+    const interfacesOnly = await estimateGuardSetupCost(r, { only: 'interfaces', replace: true });
+    expect((interfacesOnly.stages ?? []).length).toBeGreaterThan(0);
+    for (const stage of interfacesOnly.stages ?? []) {
+      expect(['guard-setup.reconcile-interfaces', 'guard-interfaces.web-tasks']).toContain(
+        stage.stage,
+      );
+    }
   });
 });

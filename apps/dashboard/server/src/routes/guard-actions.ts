@@ -18,7 +18,7 @@
  *                              as a background job; 202 { jobId }, 409 when the
  *                              repository is already working.
  *   POST /:id/guard/map        derive the journey catalog from the working tree
- *                              (analyzer + journey-mapper: deterministic, free,
+ *                              (analyzer + interface-mapper: deterministic, free,
  *                              no LLM — so no estimate modal, ever).
  *   POST /:id/guard/dismiss    dismiss a finding's claim (write decisions.json).
  *   POST /:id/guard/undismiss  reverse a dismissal.
@@ -54,10 +54,10 @@ import {
   dismissGuardFlow,
   undismissGuardFlow,
   getGuardDecisions,
-  readGuardJourneys,
+  readGuardInterfaces,
   readGuardResultForView,
 } from '@truecourse/core/commands/guard-read';
-import { mapJourneys } from '@truecourse/core/services/journey';
+import { mapInterfaces } from '@truecourse/core/services/interface';
 import { guardsMaterializeInPlace } from '@truecourse/core/lib/guard-store';
 import { getGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { getGuardPrRegenEnqueue } from '@truecourse/core/lib/guard-pr-regen-enqueue';
@@ -354,9 +354,9 @@ router.post('/:id/guard/run', async (req: Request, res: Response, next: NextFunc
 });
 
 // POST — map the repo's surfaces to journeys (the Journeys tab's action). The
-// analyzer + journey-mapper are deterministic and LLM-free, so this action has NO
-// estimate gate and costs nothing; it rewrites `guard/journeys.json` and answers
-// with the fresh catalog view (the same shape `GET /guard/journeys` returns), so
+// analyzer + interface-mapper are deterministic and LLM-free, so this action has NO
+// estimate gate and costs nothing; it rewrites `guard/interfaces.json` and answers
+// with the fresh catalog view (the same shape `GET /guard/interfaces` returns), so
 // the tab re-renders from the response without a follow-up fetch. It shares the
 // per-repo job guard with generate/run: they all write the guard store, so a
 // trigger while one is in flight is a 409. Mapping reads the WORKING TREE, so a
@@ -378,8 +378,8 @@ router.post('/:id/guard/map', async (req: Request, res: Response, next: NextFunc
     guardJobs.add(repoId);
     held = true;
 
-    await mapJourneys(repo.path);
-    res.json(await readGuardJourneys(repo.path));
+    await mapInterfaces(repo.path);
+    res.json(await readGuardInterfaces(repo.path));
   } catch (e) {
     next(e);
   } finally {

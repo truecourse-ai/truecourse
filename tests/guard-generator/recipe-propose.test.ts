@@ -19,7 +19,7 @@ import {
   credentialStubs,
   credentialEnvName,
   tokenizeCommand,
-  routesFromJourneys,
+  routesFromInterfaces,
   type ApiRouteRef,
 } from '@truecourse/guard-generator'
 
@@ -546,7 +546,7 @@ describe('health-path ranking', () => {
   })
 
   it('reads the surface off operation-rooted journeys', () => {
-    const routes = routesFromJourneys([
+    const routes = routesFromInterfaces([
       { id: 'api/get-health', title: 'GET /healthz', type: 'api', entry: { method: 'GET', path: '/healthz' }, steps: [], fingerprint: 'f1' },
       { id: 'cli/tool', title: 'tool', type: 'cli', entry: { command: ['tool'] }, steps: [], fingerprint: 'f2' },
     ] as never)

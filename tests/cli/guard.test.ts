@@ -476,7 +476,7 @@ describe('guardGenerateInProcess — an early abort ticks no phase that never ra
 
     const { guard } = await guardGenerateInProcess(r, {
       tracker,
-      journeys: async () => ({ journeys: [] }),
+      interfaces: async () => ({ interfaces: [] }),
       extractRunner: async () => {
         throw new Error('extraction must not run — the recipe was rejected')
       },

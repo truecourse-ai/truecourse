@@ -14,9 +14,9 @@ import {
   extractBy,
   authorBy,
   runGenerate,
-  journeysOf,
-  cliJourney,
-  apiJourney,
+  interfacesOf,
+  cliInterface,
+  apiInterface,
   raw,
   rawApi,
   stampMilestones,
@@ -60,7 +60,7 @@ describe('generateGuards — api surface authoring + birth', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, apiJourney('GET', '/todos')),
+      interfaces: interfacesOf(r, apiInterface('GET', '/todos')),
       extractRunner: listExtract,
       generateRunner: authorBy({ list: rawApi('GET /todos answers 200 with the empty list', PASSING_API_STEPS) }),
     })
@@ -117,7 +117,7 @@ describe('generateGuards — api surface authoring + birth', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, apiJourney('GET', '/todos')),
+      interfaces: interfacesOf(r, apiInterface('GET', '/todos')),
       extractRunner: listExtract,
       generateRunner: authorBy({
         list: rawApi('the todos server comes up', PASSING_API_STEPS, {
@@ -144,7 +144,7 @@ describe('generateGuards — api surface authoring + birth', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, apiJourney('GET', '/boom')),
+      interfaces: interfacesOf(r, apiInterface('GET', '/boom')),
       extractRunner: extractBy({
         list: [{ driver: 'api', claim: 'GET /boom answers 200', reason: 'HTTP status' }],
         version: { untestable: 'covered elsewhere' },
@@ -203,7 +203,7 @@ describe('generateGuards — api surface authoring + birth', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, cliJourney(['relkit']), apiJourney('GET', '/todos')),
+      interfaces: interfacesOf(r, cliInterface(['relkit']), apiInterface('GET', '/todos')),
       extractRunner: listExtract,
       generateRunner: perSurface,
     })
@@ -237,7 +237,7 @@ describe('generateGuards — api surface authoring + birth', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, cliJourney(['relkit'])), // cli only
+      interfaces: interfacesOf(r, cliInterface(['relkit'])), // cli only
       extractRunner: listExtract,
       generateRunner: authorBy({ list: raw('relkit --version exits 0', PASSING_STEPS) }),
     })

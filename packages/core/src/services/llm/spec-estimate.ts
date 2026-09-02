@@ -105,6 +105,7 @@ import {
   sectionInputsKey,
   flowGenerationInputsHash,
   flowAreaIdForDoc,
+  interfacesFingerprint,
   EXTRACT_SYSTEM_PROMPT as GUARD_EXTRACT_SYSTEM_PROMPT,
   GENERATE_SYSTEM_PROMPT,
   RECIPE_SYSTEM_PROMPT,
@@ -129,7 +130,10 @@ import {
   computeRecipeFingerprint,
   loadDependencyCatalog,
   loadRecipe,
-  readJourneyCatalog,
+  readAuthoredInterfaceCatalog,
+  readInterfaceCatalog,
+  readMergedInterfaceCatalog,
+  staleAuthoredPlaceDiagnostics,
   readManifest as readGuardManifest,
   recipePath,
   type Recipe,
@@ -141,11 +145,18 @@ import {
   DEPENDENCY_CATALOG_SESSION_KIND,
   RECIPE_REPAIR_BUDGET,
   RECIPE_REPAIR_SESSION_KIND,
+  RECONCILE_INTERFACES_BUDGET,
+  RECONCILE_INTERFACES_SESSION_KIND,
   SEED_SESSION_BUDGET,
   SEED_SESSION_KIND,
   SeedSessionOutcomeSchema,
   seedSessionCacheKey,
 } from '../guard-setup/index.js';
+import {
+  INTERFACE_AUTHOR_BUDGET,
+  INTERFACE_AUTHOR_SESSION_KIND,
+  planWorkItems,
+} from '../interface-author/index.js';
 import type { RepoIdentity } from '@truecourse/spec-consolidator';
 import type { LlmEstimate } from '../../commands/analyze-core.js';
 import type { LlmTransportMode } from '../../config/global-config.js';
@@ -167,6 +178,8 @@ const STAGE_LABELS: Record<string, string> = {
   // guard setup (session kinds)
   [RECIPE_REPAIR_SESSION_KIND]: 'Repairing the recipe',
   [DEPENDENCY_CATALOG_SESSION_KIND]: 'Classifying dependencies',
+  [RECONCILE_INTERFACES_SESSION_KIND]: 'Reconciling cli interfaces',
+  [INTERFACE_AUTHOR_SESSION_KIND]: 'Authoring web tasks',
   [SEED_SESSION_KIND]: 'Preparing data + principals',
   [AUTH_PROOF_SESSION_KIND]: 'Verifying supplied auth',
   // guard generate
@@ -193,6 +206,8 @@ const EXPECTED_TURNS: Record<string, number> = {
   [OVERLAP_SESSION_KIND]: 8,
   [RECIPE_REPAIR_SESSION_KIND]: 8,
   [DEPENDENCY_CATALOG_SESSION_KIND]: 6,
+  [RECONCILE_INTERFACES_SESSION_KIND]: 5,
+  [INTERFACE_AUTHOR_SESSION_KIND]: 15,
   [SEED_SESSION_KIND]: 12,
   [AUTH_PROOF_SESSION_KIND]: 3,
 };
@@ -209,6 +224,8 @@ const SESSION_OUTPUT_TOKENS: Record<string, number> = {
   [OVERLAP_SESSION_KIND]: 400,
   [RECIPE_REPAIR_SESSION_KIND]: 300,
   [DEPENDENCY_CATALOG_SESSION_KIND]: 500,
+  [RECONCILE_INTERFACES_SESSION_KIND]: 300,
+  [INTERFACE_AUTHOR_SESSION_KIND]: 800,
   [SEED_SESSION_KIND]: 3000, // the outcome carries the whole script
   [AUTH_PROOF_SESSION_KIND]: 150,
 };
@@ -530,7 +547,7 @@ const GUARD_FLOWS_AREA_CHARS = 6000;
 const GUARD_FLOWS_OUTPUT_TOKENS = 1200; // ~an area's flows + no-flow reasons
 // Matching reads one flow's milestones + one surface's catalog DIGEST (ids, entries,
 // step summaries — never code); a digest line is short by construction.
-const GUARD_JOURNEY_DIGEST_CHARS = 220; // ~one journey's digest block
+const GUARD_INTERFACE_DIGEST_CHARS = 220; // ~one interface's digest block
 const GUARD_MATCH_CATALOG_CHARS = 12_000; // cold-cache fallback for a catalog digest
 const GUARD_MATCH_OUTPUT_TOKENS = 300; // ~a plan over a handful of milestones
 // A flow's authoring prompt carries every milestone's section text once; sections
@@ -640,7 +657,7 @@ interface GuardRealizationPlan {
   surfaces: number;
   /** Chars one surface's catalog digest carries. */
   catalogChars: number;
-  /** True when the flow set AND the journey catalog were known offline. */
+  /** True when the flow set AND the interface catalog were known offline. */
   exact: boolean;
 }
 
@@ -648,7 +665,7 @@ interface GuardRealizationPlan {
  * Plan `guard.match` + `guard.generate` — the two stages whose work count is an
  * earlier stage's OUTPUT. Exact whenever the flow corpus is settled (every area's
  * synthesis cached, so `scenarios/flows.json` IS what the run will use) AND the
- * journey snapshot exists: matching then probes the SAME `.cache/guard/match`
+ * interface snapshot exists: matching then probes the SAME `.cache/guard/match`
  * entries the run reads, and authoring counts the flows whose composition moved
  * since the manifest. Otherwise both fall back to the honest ceiling — flows ≤
  * runnable claims, one authoring call per (flow, surface).
@@ -662,16 +679,16 @@ async function planGuardRealizationStages(
   flowStage: GuardFlowStagePlan,
 ): Promise<GuardRealizationPlan> {
   const surfaces = preparedSurfaces(repoRoot);
-  const catalog = readJourneyCatalog(repoRoot);
-  const catalogs = catalog ? buildSurfaceCatalogs(catalog.journeys) : null;
-  // Only surfaces with journeys reach the matcher; without a snapshot we cannot
+  const catalog = readMergedInterfaceCatalog(repoRoot);
+  const catalogs = catalog ? buildSurfaceCatalogs(catalog.interfaces) : null;
+  // Only surfaces with interfaces reach the matcher; without a snapshot we cannot
   // know which do, so every prepared surface counts (a ceiling, never a shortfall).
   const matchable: SurfaceCatalog[] = catalogs
     ? surfaces.map((s) => catalogs.get(s)).filter((c): c is SurfaceCatalog => c !== undefined && c.journeys.length > 0)
     : [];
   const catalogChars = catalogs
     ? Math.max(
-        ...[...catalogs.values()].map((c) => c.journeys.length * GUARD_JOURNEY_DIGEST_CHARS),
+        ...[...catalogs.values()].map((c) => c.journeys.length * GUARD_INTERFACE_DIGEST_CHARS),
         0,
       )
     : GUARD_MATCH_CATALOG_CHARS;
@@ -760,7 +777,7 @@ async function planGuardRealizationStages(
  * pure over the working tree (manifests, lockfiles, scripts — no LLM, no analysis
  * pass, no process), so it costs nothing here and predicts the recipe the run will
  * most likely write. The route surface is deliberately NOT supplied: deriving it
- * means a full journey-mapping pass, and it only ranks the health path — never
+ * means a full interface-mapping pass, and it only ranks the health path — never
  * which surfaces exist. When the proposer refuses to decide, the model could
  * propose either surface, so the estimate quotes EVERY runnable one — the ceiling
  * convention the whole realization plan is priced at (never a shortfall).
@@ -798,7 +815,7 @@ function preparedSurfaces(repoRoot: string): GuardDriverId[] {
  *  - SYNTHESIS shares `planFlowSynthesis` (one call per area whose claim inventory
  *    isn't already synthesized, plus at most one epic pass).
  *  - MATCHING shares `planFlowMatching` whenever the flow corpus is settled and the
- *    journey snapshot exists; otherwise it quotes the claim-derived flow bound.
+ *    interface snapshot exists; otherwise it quotes the claim-derived flow bound.
  *  - AUTHORING is one call per (changed flow, surface), priced at the ceiling of
  *    every flow on every prepared surface — the bill a prompt change would produce.
  *  - FIDELITY reviews one scenario per authoring call; the evidence RETRY is at most
@@ -812,6 +829,8 @@ function preparedSurfaces(repoRoot: string): GuardDriverId[] {
 const SETUP_KIND_CHARS: Record<string, { system: number; briefing: number }> = {
   [RECIPE_REPAIR_SESSION_KIND]: { system: 2_600, briefing: 4_500 },
   [DEPENDENCY_CATALOG_SESSION_KIND]: { system: 3_200, briefing: 4_000 },
+  [RECONCILE_INTERFACES_SESSION_KIND]: { system: 2_700, briefing: 1_500 },
+  [INTERFACE_AUTHOR_SESSION_KIND]: { system: 8_000, briefing: 12_000 },
   [SEED_SESSION_KIND]: { system: 5_500, briefing: GUARD_SEED_BODY_CHARS + 9_000 },
   [AUTH_PROOF_SESSION_KIND]: { system: 1_800, briefing: 1_200 },
 };
@@ -841,10 +860,16 @@ const SETUP_KIND_CHARS: Record<string, { system: number; briefing: number }> = {
 export async function estimateGuardSetup(
   repoRoot: string,
   prices?: PriceTable,
-  opts: { refresh?: boolean; mode?: LlmTransportMode; only?: GuardSetupOnlyStep } = {},
+  opts: {
+    refresh?: boolean;
+    replace?: boolean;
+    mode?: LlmTransportMode;
+    only?: GuardSetupOnlyStep;
+  } = {},
 ): Promise<LlmEstimate> {
   const model = sessionModel(opts.mode);
   const refresh = opts.refresh === true;
+  const replace = opts.replace === true;
   let recipe: Recipe | undefined;
   try {
     recipe = loadRecipe(repoRoot, recipePath(repoRoot))?.recipe;
@@ -877,6 +902,20 @@ export async function estimateGuardSetup(
   // A settled row zeroes the ceiling too — same convention as the seed's cache
   // probe: a detection snapshot that moves between estimate and run is unpriced.
   const catalogMax = catalogSettledRow ? 0 : 1;
+
+  // ---- interfaces: reconcile + authoring, both off the on-disk halves -------
+  const derivedCatalog = readInterfaceCatalog(repoRoot);
+  const authoredCatalog = readAuthoredInterfaceCatalog(repoRoot);
+  const interfacesSettled =
+    !replace && authoredCatalog !== null && settled('interfaces') === interfacesFingerprint(repoRoot);
+  const staleAuthoredIds = new Set(
+    staleAuthoredPlaceDiagnostics(derivedCatalog, authoredCatalog).map((d) => d.subject),
+  );
+  const authorable = planWorkItems(derivedCatalog, authoredCatalog).filter(
+    (item) => !staleAuthoredIds.has(item.place.id) && (replace || item.existing.length === 0),
+  );
+  const authorItems = interfacesSettled ? 0 : authorable.length;
+  const reconcileMax = interfacesSettled ? 0 : 1;
 
   // ---- seed: real cache key when the step will run --------------------------
   const seedGateOpen =
@@ -948,6 +987,22 @@ export async function estimateGuardSetup(
         : 'one classification session over the whole detection',
     }),
     setupStage({
+      kind: RECONCILE_INTERFACES_SESSION_KIND,
+      budget: RECONCILE_INTERFACES_BUDGET,
+      items: 0,
+      maxItems: reconcileMax,
+      bound: 'runs only when the cli tree and probe derivations disagree — usually never',
+    }),
+    setupStage({
+      kind: INTERFACE_AUTHOR_SESSION_KIND,
+      budget: INTERFACE_AUTHOR_BUDGET,
+      items: authorItems,
+      maxItems: authorItems,
+      bound: interfacesSettled
+        ? 'unchanged places + an authored catalog — skipped'
+        : `one session per unauthored screen (${authorable.length} today)`,
+    }),
+    setupStage({
       kind: SEED_SESSION_KIND,
       budget: SEED_SESSION_BUDGET,
       items: seedItems,
@@ -962,14 +1017,18 @@ export async function estimateGuardSetup(
       bound: 'one proof per supplied catalog entry; never cached (proof-class)',
     }),
   ];
-  // Single-step mode prices the chosen step's kind and nothing else.
-  const SETUP_STEP_KINDS: Record<GuardSetupOnlyStep, string> = {
-    recipe: RECIPE_REPAIR_SESSION_KIND,
-    catalog: DEPENDENCY_CATALOG_SESSION_KIND,
-    seed: SEED_SESSION_KIND,
-    auth: AUTH_PROOF_SESSION_KIND,
+  // Single-step mode prices the chosen step's kinds and nothing else. The
+  // interfaces step owns TWO (the reconcile session and the authoring run).
+  const SETUP_STEP_KINDS: Record<GuardSetupOnlyStep, readonly string[]> = {
+    recipe: [RECIPE_REPAIR_SESSION_KIND],
+    catalog: [DEPENDENCY_CATALOG_SESSION_KIND],
+    interfaces: [RECONCILE_INTERFACES_SESSION_KIND, INTERFACE_AUTHOR_SESSION_KIND],
+    seed: [SEED_SESSION_KIND],
+    auth: [AUTH_PROOF_SESSION_KIND],
   };
-  const included = opts.only ? stages.filter((s) => s.stage === SETUP_STEP_KINDS[opts.only!]) : stages;
+  const included = opts.only
+    ? stages.filter((s) => SETUP_STEP_KINDS[opts.only!].includes(s.stage))
+    : stages;
   return estimateStageTokens(withLabels(included), 'preparation', prices);
 }
 
@@ -1040,8 +1099,8 @@ export async function estimateGuardTokens(
         : 'flows ≤ runnable claims — flow count is a synthesis output',
     },
     {
-      // Matching: one call per (flow, surface with journeys). Exact when the flow
-      // corpus is settled and the journey snapshot exists — it probes the same
+      // Matching: one call per (flow, surface with interfaces). Exact when the flow
+      // corpus is settled and the interface snapshot exists — it probes the same
       // match cache the run reads; otherwise the claim-derived ceiling.
       stage: 'guardMatch',
       model: resolveModel('guard.match', undefined, repoRoot, opts.mode),

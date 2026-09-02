@@ -341,22 +341,38 @@ describe('the guard setup job', () => {
         runSetup: (repoRoot, options) =>
           guardSetupInProcess(repoRoot, {
             ...options,
-            journeys: async () => ({
-              journeys: [],
-              externalServices: [],
-              database: {
-                type: 'sqlite',
-                driver: 'prisma',
-                tables: [{ name: 'Org', columns: [{ name: 'id', type: 'Int', isPrimaryKey: true }] }],
-                relations: [],
-                appImports: [],
-              },
-              datastoreUrls: [],
-            }),
+            interfaces: async () => {
+              // The real mapping snapshots the derived catalog; the bundle
+              // collects that file, so the stub writes it too.
+              const snapshot = path.join(repoRoot, '.truecourse', 'guard', 'interfaces.json');
+              fs.mkdirSync(path.dirname(snapshot), { recursive: true });
+              fs.writeFileSync(
+                snapshot,
+                JSON.stringify({
+                  version: 2,
+                  generatedAt: '2026-09-02T00:00:00.000Z',
+                  recipeFingerprint: '',
+                  interfaces: [],
+                }),
+              );
+              return {
+                interfaces: [],
+                externalServices: [],
+                database: {
+                  type: 'sqlite',
+                  driver: 'prisma',
+                  tables: [{ name: 'Org', columns: [{ name: 'id', type: 'Int', isPrimaryKey: true }] }],
+                  relations: [],
+                  appImports: [],
+                },
+                datastoreUrls: [],
+              };
+            },
             catalogSession: async () => {
               catalogCalls.push(repoRoot);
               return { status: 'ok', added: [], findings: [] };
             },
+            authorInterfaces: async () => ({ status: 'skipped', reason: 'stubbed in this suite' }),
             seedSession: async () => ({ status: 'skipped', reason: 'stubbed in this suite' }),
             verifyAuth: async () => ({ status: 'skipped', reason: 'stubbed in this suite' }),
           }),
@@ -379,6 +395,9 @@ describe('the guard setup job', () => {
     const bundle = await loadGuardSetupBundle(REPO);
     expect(Object.keys(bundle ?? {})).toContain('.truecourse/guard/setup.json');
     expect(Object.keys(bundle ?? {})).toContain('.truecourse/scenarios/recipe.json');
+    // The interface catalog travels too, so the Interfaces view has something to
+    // read in DB mode and the interfaces step can settle on a later commit.
+    expect(Object.keys(bundle ?? {})).toContain('.truecourse/guard/interfaces.json');
     expect(disposed).toEqual([clone]);
     expect(fs.existsSync(clone)).toBe(false);
 
@@ -386,7 +405,14 @@ describe('the guard setup job', () => {
     // carries the provider it ran on, and mirrors the step checklist.
     const [run] = listSessionRuns(REPO, 'guard-setup');
     expect(run).toMatchObject({ status: 'completed', llm: { mode: 'api', provider: 'test' } });
-    expect(checklistKeys(run)).toEqual(['recipe', 'detect', 'catalog', 'seed', 'auth']);
+    expect(checklistKeys(run)).toEqual([
+      'recipe',
+      'detect',
+      'catalog',
+      'interfaces',
+      'seed',
+      'auth',
+    ]);
   }, 60_000);
 
   it('replays the settled steps on a second run, from the stored bundle', async () => {

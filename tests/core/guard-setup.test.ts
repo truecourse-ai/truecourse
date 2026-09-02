@@ -24,6 +24,8 @@ import {
   readGuardSetup,
   writeGuardSetup,
   dependenciesPath,
+  guardAuthoredInterfacesPath,
+  guardInterfacesPath,
 } from '@truecourse/guard-runner';
 import { setDefaultTransport, noProviderTransport } from '@truecourse/shared/llm';
 import { setCacheEntry } from '@truecourse/llm';
@@ -31,12 +33,13 @@ import {
   proposeRecipe,
   recipeCacheKey,
   RECIPE_CACHE_NAME,
+  interfacesFingerprint,
   computeSeedStepFingerprint,
   authFingerprint,
   ecosystemFingerprint,
   type GuardSetupSeedSession,
 } from '@truecourse/guard-generator';
-import type { GuardSetupReport } from '@truecourse/shared';
+import type { GuardSetupReport, InterfacesFile } from '@truecourse/shared';
 
 // The API transport, stubbed one step short of the provider: the saved config is
 // still validated by the real builder (an unusable one throws exactly as it does in
@@ -210,8 +213,8 @@ function writeRecipe(r: string, over: Record<string, unknown> = {}): void {
   fs.writeFileSync(target, JSON.stringify(recipe, null, 2) + '\n');
 }
 
-const journeys = () => async () => ({
-  journeys: [],
+const interfaces = () => async () => ({
+  interfaces: [],
   externalServices: [
     { service: 'stripe', category: 'payment' as const, evidence: [], baseUrlEnv: 'STRIPE_BASE_URL' },
   ],
@@ -231,6 +234,7 @@ const neverCalled = async (): Promise<never> => {
 
 /** The seed/auth seams stubbed out: those sessions are covered by their own lanes. */
 const inertSeams = {
+  authorInterfaces: async () => ({ status: 'skipped' as const, reason: 'stubbed in this test' }),
   seedSession: (async () => ({ status: 'skipped', reason: 'stubbed in this test' })) as GuardSetupSeedSession,
   verifyAuth: async () => ({ status: 'skipped' as const, reason: 'stubbed in this test' }),
 };
@@ -309,7 +313,11 @@ describe('estimateGuardSetupCost', () => {
     // The retired one-shot stage ids are gone for good; every stage is a SESSION kind.
     expect(stages.guardRecipe).toBeUndefined();
     expect(stages.guardSeed).toBeUndefined();
-    expect(Object.keys(stages).every((k) => k.startsWith('guard-setup.'))).toBe(true);
+    expect(
+      Object.keys(stages).every(
+        (k) => k.startsWith('guard-setup.') || k === 'guard-interfaces.web-tasks',
+      ),
+    ).toBe(true);
   });
 
   // A repo with no recipe pays for the seed session; the repair session is priced
@@ -371,6 +379,20 @@ describe('estimateGuardSetupCost', () => {
     expect(Object.keys(stages).sort()).toContain('guard-setup.seed');
   });
 
+  // `--replace` re-authors places that already carry tasks, so the work item count
+  // is EVERY screen, not just the unauthored ones.
+  it('--replace prices every screen, not just the unauthored ones', async () => {
+    const r = settledRepo();
+
+    const plain = await estimateGuardSetupCost(r);
+    const replaced = await estimateGuardSetupCost(r, { replace: true });
+
+    const authoring = (e: Awaited<ReturnType<typeof estimateGuardSetupCost>>): number =>
+      (e.stages ?? []).find((s) => s.stage === 'guard-interfaces.web-tasks')?.calls ?? 0;
+    expect(authoring(plain)).toBe(0);
+    expect(authoring(replaced)).toBeGreaterThan(0);
+  });
+
   // ONE MODEL for every session: in API mode the configured flagship, in
   // Claude Code mode the pinned tier — never the old per-stage tier mix.
   it('prices one model for every session — the configured one in API mode', async () => {
@@ -399,12 +421,41 @@ describe('estimateGuardSetupCost', () => {
 
 /**
  * A repo where every step is already done AND recorded as settled: a committed
- * recipe with a seed, and a `guard/setup.json` whose rows carry the fingerprints
- * this tree computes.
+ * recipe with a seed, both interface halves, and a `guard/setup.json` whose rows
+ * carry the fingerprints this tree computes.
  */
 function settledRepo(): string {
   const r = fixtureRepo();
   writeRecipe(r, { seed: { command: 'node mine.mjs', provides: { fixtures: { org: ['id'] } } } });
+  const derived: InterfacesFile = {
+    version: 2,
+    generatedAt: '2026-08-19T00:00:00.000Z',
+    recipeFingerprint: 'sha256:recipe',
+    interfaces: [],
+    resources: { web: [{ id: 'root', kind: 'screen', title: '/', address: '/' }] },
+    source: { web: 'tree' },
+  };
+  fs.mkdirSync(path.dirname(guardInterfacesPath(r)), { recursive: true });
+  fs.writeFileSync(guardInterfacesPath(r), JSON.stringify(derived));
+  fs.writeFileSync(
+    guardAuthoredInterfacesPath(r),
+    JSON.stringify({
+      version: 2,
+      generatedAt: '2026-08-19T00:00:00.000Z',
+      recipeFingerprint: 'sha256:recipe',
+      interfaces: [
+        {
+          id: 'web/open-root',
+          type: 'web',
+          title: 'Open the root screen',
+          entry: { method: 'GET', path: '/' },
+          steps: [{ kind: 'activate', target: 'button "Open"' }],
+          at: 'root',
+          fingerprint: 'sha256:web',
+        },
+      ],
+    }),
+  );
   const report: GuardSetupReport = {
     ranAt: '2026-08-19T00:00:00.000Z',
     status: 'ok',
@@ -415,6 +466,7 @@ function settledRepo(): string {
       // The catalog fingerprint folds the detection snapshot, which only an
       // analysis pass can produce — the estimate only asks whether a row settled.
       { key: 'catalog', status: 'ok', inputFingerprint: 'settled-catalog' },
+      { key: 'interfaces', status: 'ok', inputFingerprint: interfacesFingerprint(r) },
       { key: 'seed', status: 'ok', inputFingerprint: computeSeedStepFingerprint(r) },
       { key: 'auth', status: 'ok', inputFingerprint: authFingerprint(r) },
     ],
@@ -436,7 +488,7 @@ describe('guardSetupInProcess', () => {
     scriptCatalogSession();
 
     const { report, reportPath } = await guardSetupInProcess(r, {
-      journeys: journeys(),
+      interfaces: interfaces(),
       ...inertSeams,
     });
 
@@ -452,6 +504,7 @@ describe('guardSetupInProcess', () => {
       'recipe',
       'detect',
       'catalog',
+      'interfaces',
       'seed',
       'auth',
     ]);
@@ -464,7 +517,7 @@ describe('guardSetupInProcess', () => {
     writeRecipe(r);
     scriptCatalogSession();
 
-    const { report } = await guardSetupInProcess(r, { journeys: journeys(), ...inertSeams });
+    const { report } = await guardSetupInProcess(r, { interfaces: interfaces(), ...inertSeams });
 
     // Nothing one-shot ran: the whole spend is sessions.
     expect(report.usage?.calls).toBe(0);
@@ -488,12 +541,12 @@ describe('guardSetupInProcess', () => {
   it('omits `usage` from a settled re-run, and builds no driver for it', async () => {
     const r = settledRepo();
     scriptCatalogSession();
-    const first = await guardSetupInProcess(r, { journeys: journeys(), ...inertSeams });
+    const first = await guardSetupInProcess(r, { interfaces: interfaces(), ...inertSeams });
     expect(first.report.usage?.sessions?.count).toBe(1);
     sessionDriver.built.length = 0;
     sessionDriver.script = null;
 
-    const { report } = await guardSetupInProcess(r, { journeys: journeys(), ...inertSeams });
+    const { report } = await guardSetupInProcess(r, { interfaces: interfaces(), ...inertSeams });
 
     expect(report.steps.find((s) => s.key === 'catalog')).toMatchObject({
       status: 'skipped',
@@ -514,7 +567,7 @@ describe('guardSetupInProcess', () => {
     scriptCatalogSession();
     const { tracker, details } = detailRecorder();
 
-    await guardSetupInProcess(r, { tracker, journeys: journeys(), ...inertSeams });
+    await guardSetupInProcess(r, { tracker, interfaces: interfaces(), ...inertSeams });
 
     // Step 1 reuses the committed recipe, so what it spends its time on is the
     // live probe: booting the server and calling a real route on it.
@@ -531,7 +584,7 @@ describe('guardSetupInProcess', () => {
     writeRecipe(r, { serve: ['node', path.join(r, 'missing.mjs')], readyTimeoutMs: 4000 });
 
     const { report } = await guardSetupInProcess(r, {
-      journeys: journeys(),
+      interfaces: interfaces(),
       recipeRunner: neverCalled,
       ...inertSeams,
     });
@@ -547,7 +600,7 @@ describe('guardSetupInProcess', () => {
 
     await expect(
       guardSetupInProcess(r, {
-        journeys: journeys(),
+        interfaces: interfaces(),
         ...inertSeams,
         onLlmEstimate: async () => false,
       }),
@@ -597,7 +650,7 @@ describe('guardSetupInProcess — the transport the sessions run on', () => {
     useApiMode();
     scriptCatalogSession();
 
-    const { report } = await guardSetupInProcess(r, { journeys: journeys(), ...inertSeams });
+    const { report } = await guardSetupInProcess(r, { interfaces: interfaces(), ...inertSeams });
 
     expect(report.status).toBe('ok');
     expect(sessionDriver.built).toEqual([{ transport: undefined, mode: 'api', model: 'gpt-5.5' }]);
@@ -640,7 +693,7 @@ describe('guardSetupInProcess — the transport the sessions run on', () => {
 
     const { report } = await guardSetupInProcess(r, {
       llm: 'api',
-      journeys: journeys(),
+      interfaces: interfaces(),
       ...inertSeams,
     });
 
@@ -664,7 +717,7 @@ describe('guardSetupInProcess — the transport the sessions run on', () => {
     try {
       const { report } = await guardSetupInProcess(r, {
         llm: 'cli',
-        journeys: journeys(),
+        interfaces: interfaces(),
         ...inertSeams,
       });
 
@@ -689,7 +742,7 @@ describe('guardSetupInProcess — the transport the sessions run on', () => {
 
     const run = guardSetupInProcess(r, {
       llm: 'cli',
-      journeys: journeys(),
+      interfaces: interfaces(),
       recipeRunner: neverCalled,
       ...inertSeams,
       onLlmEstimate: async () => {
@@ -745,7 +798,7 @@ describe('guardSetupInProcess — hosted injection', () => {
       transport: async () => 'ok',
       transportMode: 'api',
       sessionsKey: key,
-      journeys: journeys(),
+      interfaces: interfaces(),
       ...inertSeams,
     });
 
@@ -778,7 +831,7 @@ describe('guardSetupInProcess — hosted injection', () => {
       sessionsKey: key,
       eagerRun: true,
       tracker,
-      journeys: journeys(),
+      interfaces: interfaces(),
       ...inertSeams,
     });
 
@@ -790,7 +843,14 @@ describe('guardSetupInProcess — hosted injection', () => {
     expect(run.llm).toEqual({ mode: 'claude-code', provider: 'test', model: 'scripted' });
     // The checklist the terminal renders, mirrored for a surface that can only
     // read run.json: the step that died carries the error, later steps never ran.
-    expect(checklistOf(run).map((i) => i.key)).toEqual(['recipe', 'detect', 'catalog', 'seed', 'auth']);
+    expect(checklistOf(run).map((i) => i.key)).toEqual([
+      'recipe',
+      'detect',
+      'catalog',
+      'interfaces',
+      'seed',
+      'auth',
+    ]);
     expect(checklistOf(run)[0].status).toBe('error');
     expect(checklistOf(run)[1].status).toBe('pending');
   }, 60_000);

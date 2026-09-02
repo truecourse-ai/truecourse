@@ -65,7 +65,6 @@ import { runSeed, SeedError } from './api/seed.js'
 import { runCredentialRequests, CredentialRequestError } from './api/credential-request.js'
 import {
   appendGuardHistory,
-  readJourneyCatalog,
   readMergedInterfaceCatalog,
   recipePath,
   writeGuardLatest,
@@ -81,7 +80,6 @@ import {
   type DocSectionIndex,
   type ScenarioBindingVerdict,
 } from './section-index.js'
-import { isJourneyDrifted } from './journey-drift.js'
 import { isInterfaceDrifted } from './interface-drift.js'
 import { readManifest } from './manifest.js'
 import { newRunNonce, scenarioUnique } from './unique.js'
@@ -376,24 +374,21 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   // the mapping snapshot (absent snapshot ⇒ no annotation anywhere). It never gates
   // execution: a scenario whose surface moved still runs its frozen steps.
   //
-  // Both catalogs are read while scenarios carry both spellings of the grounding
-  // ref. The interface baseline is the MERGED catalog, both halves of it:
-  // `isInterfaceDrifted` reads an id it cannot find as drift, and the mapper derives
-  // `cli`/`api` only — every web surface lives in the committed authored file, so
-  // the derived snapshot alone would stamp drift on every web-grounded scenario on
-  // every run with nothing having moved.
-  const journeyCatalog = readJourneyCatalog(repoRoot)
+  // The baseline is the MERGED catalog, both halves of it: `isInterfaceDrifted`
+  // reads an id it cannot find as drift, and the mapper derives `cli`/`api` only —
+  // every web surface lives in the committed authored file, so the derived snapshot
+  // alone would stamp drift on every web-grounded scenario on every run with
+  // nothing having moved. A scenario committed before the interface rename carries
+  // its grounding under `journey`, so either spelling is compared.
   const interfaceCatalog = readMergedInterfaceCatalog(repoRoot)
   const drifted = new Set(
-    selected.filter((s) => isJourneyDrifted(s, journeyCatalog)).map((s) => s.id),
+    selected
+      .filter((s) => isInterfaceDrifted({ interface: s.interface ?? s.journey }, interfaceCatalog))
+      .map((s) => s.id),
   )
-  const interfaceDrifted = new Set(
-    selected.filter((s) => isInterfaceDrifted(s, interfaceCatalog)).map((s) => s.id),
-  )
-  const annotate = (scenario: GuardScenario): { journeyDrifted?: true; interfaceDrifted?: true } => ({
-    ...(drifted.has(scenario.id) ? { journeyDrifted: true as const } : {}),
-    ...(interfaceDrifted.has(scenario.id) ? { interfaceDrifted: true as const } : {}),
-  })
+  // Both spellings are stamped while readers still look for the older one.
+  const annotate = (scenario: GuardScenario): { journeyDrifted?: true; interfaceDrifted?: true } =>
+    drifted.has(scenario.id) ? { journeyDrifted: true as const, interfaceDrifted: true as const } : {}
 
   // Per-driver preparation: a cli scenario needs the recipe `entry`; an api
   // scenario needs the `api` block. A scenario whose preparation is missing

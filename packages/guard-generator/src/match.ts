@@ -28,17 +28,17 @@ import { createHash } from 'node:crypto'
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import {
   GUARD_FORMAT_VERSION,
-  journeyEntryLabel,
-  journeyFingerprint,
+  interfaceEntryLabel,
+  interfaceFingerprint,
   type GuardDriverId,
   type GuardFlow,
-  type Journey,
-  type JourneyStep,
+  type Interface,
+  type InterfaceStep,
 } from '@truecourse/shared'
 import { RealizationMatchSchema, type RealizationStep } from './schemas.js'
 import {
   MATCH_PROMPT_FINGERPRINT,
-  type JourneyDigest,
+  type InterfaceDigest,
   type MatchIssues,
   type MatchUserContext,
 } from './prompts.js'
@@ -54,7 +54,7 @@ export const MATCH_CACHE_NAME = 'guard/match'
 /** One surface's journeys plus the fingerprint over that set (the cache key half). */
 export interface SurfaceCatalog {
   surface: GuardDriverId
-  journeys: Journey[]
+  journeys: Interface[]
   /** `sha256:…` over the surface's sorted journey fingerprints. */
   fingerprint: string
 }
@@ -65,8 +65,8 @@ export interface SurfaceCatalog {
  * fingerprints, sorted — so the value depends on the SET of surfaces a user can
  * reach, never on derivation order.
  */
-export function buildSurfaceCatalogs(journeys: readonly Journey[]): Map<GuardDriverId, SurfaceCatalog> {
-  const byType = new Map<GuardDriverId, Journey[]>()
+export function buildSurfaceCatalogs(journeys: readonly Interface[]): Map<GuardDriverId, SurfaceCatalog> {
+  const byType = new Map<GuardDriverId, Interface[]>()
   for (const journey of journeys) {
     const list = byType.get(journey.type)
     if (list) list.push(journey)
@@ -75,7 +75,7 @@ export function buildSurfaceCatalogs(journeys: readonly Journey[]): Map<GuardDri
   const out = new Map<GuardDriverId, SurfaceCatalog>()
   for (const [surface, list] of byType) {
     const body = list
-      .map((j) => j.fingerprint || journeyFingerprint(j))
+      .map((j) => j.fingerprint || interfaceFingerprint(j))
       .sort()
       .join('\n')
     out.set(surface, {
@@ -93,17 +93,17 @@ export function buildSurfaceCatalogs(journeys: readonly Journey[]): Map<GuardDri
  * No file paths, no symbols, no source: the same surface-visible shape the journey
  * fingerprint hashes.
  */
-export function journeyDigest(journey: Journey): JourneyDigest {
+export function interfaceDigest(journey: Interface): InterfaceDigest {
   return {
     id: journey.id,
     title: journey.title,
-    entry: journeyEntryLabel(journey.entry),
+    entry: interfaceEntryLabel(journey.entry),
     steps: journey.steps.map(stepSummary),
   }
 }
 
 /** One step as a single digest line — kind plus its surface-visible payload. */
-function stepSummary(step: JourneyStep): string {
+function stepSummary(step: InterfaceStep): string {
   switch (step.kind) {
     case 'invoke':
       return `invoke: ${step.command.join(' ')}${step.flags.length > 0 ? `  flags: ${step.flags.join(' ')}` : ''}`
@@ -131,11 +131,11 @@ function stepSummary(step: JourneyStep): string {
  * terms) rather than vanishing: a silently thinned realization would read to the
  * author as "this journey does less than it does".
  */
-export function realizationLines(journey: Journey, driver: GuardDriverId): string[] {
+export function realizationLines(journey: Interface, driver: GuardDriverId): string[] {
   return journey.steps.map((step) => `${driverVerb(step, driver)}   (journey ${journey.id})`)
 }
 
-function driverVerb(step: JourneyStep, driver: GuardDriverId): string {
+function driverVerb(step: InterfaceStep, driver: GuardDriverId): string {
   switch (step.kind) {
     case 'invoke': {
       const flags = step.flags.length > 0 ? `   accepts: ${step.flags.join(' ')}` : ''
@@ -255,16 +255,16 @@ export async function planFlowMatching(
 /** One milestone's realization: the journeys chosen for it, in plan order. */
 export interface RealizedMilestone {
   milestone: number
-  journeys: Journey[]
+  journeys: Interface[]
 }
 
 /** A flow's realization on ONE surface — the plan the authoring call is given. */
 export interface RealizationPlan {
   surface: GuardDriverId
   /** The plan entries in the model's order, validated against flow + catalog. */
-  steps: { journey: Journey; milestone: number; note?: string }[]
+  steps: { journey: Interface; milestone: number; note?: string }[]
   /** The distinct journeys the plan walks, in first-use order — the scenario's `journey.path`. */
-  journeys: Journey[]
+  journeys: Interface[]
 }
 
 /** A flow's verdict on one surface: a plan, a stated refusal, or a stage failure. */
@@ -275,7 +275,7 @@ export type MatchOutcome =
 
 /** Validation of one raw match reply against the flow and the surface's catalog. */
 interface MatchValidation {
-  steps: { journey: Journey; milestone: number; note?: string }[]
+  steps: { journey: Interface; milestone: number; note?: string }[]
   issues: MatchIssues
 }
 
@@ -287,7 +287,7 @@ function validateMatch(
   const byId = new Map(catalog.journeys.map((j) => [j.id, j]))
   const milestoneOrders = new Set(flow.milestones.map((m) => m.order))
   const issues: MatchIssues = { unknownJourneys: [], uncoveredMilestones: [], unknownMilestones: [] }
-  const steps: { journey: Journey; milestone: number; note?: string }[] = []
+  const steps: { journey: Interface; milestone: number; note?: string }[] = []
   const covered = new Set<number>()
 
   for (const entry of raw) {
@@ -316,9 +316,9 @@ function hasIssues(issues: MatchIssues): boolean {
 }
 
 /** The plan's distinct journeys in first-use order — the scenario's journey path. */
-function pathOf(steps: readonly { journey: Journey }[]): Journey[] {
+function pathOf(steps: readonly { journey: Interface }[]): Interface[] {
   const seen = new Set<string>()
-  const out: Journey[] = []
+  const out: Interface[] = []
   for (const s of steps) {
     if (seen.has(s.journey.id)) continue
     seen.add(s.journey.id)
@@ -343,7 +343,7 @@ function buildContext(flow: GuardFlow, catalog: SurfaceCatalog): MatchUserContex
       .sort((a, b) => a.order - b.order)
       .map((m) => ({ order: m.order, claim: m.claimTitle, ...(m.note ? { note: m.note } : {}) })),
     surface: catalog.surface,
-    journeys: catalog.journeys.map(journeyDigest),
+    journeys: catalog.journeys.map(interfaceDigest),
   }
 }
 

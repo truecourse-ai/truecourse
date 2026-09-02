@@ -269,7 +269,6 @@ export {
   guardHistoryPath,
   guardResultPath,
   guardSetupPath,
-  guardJourneysPath,
   guardInterfacesPath,
   guardAuthoredInterfacesPath,
   guardInterfaceFindingsPath,
@@ -298,7 +297,6 @@ export {
   guardAutoResolutionsPath,
   readGuardAutoResolutions,
   writeGuardAutoResolutions,
-  readJourneyCatalog,
   readInterfaceCatalog,
   readAuthoredInterfaceCatalog,
   readMergedInterfaceCatalog,
@@ -332,7 +330,6 @@ export type {
   SectionText,
 } from './section-index.js'
 
-export { isJourneyDrifted } from './journey-drift.js'
 export { isInterfaceDrifted } from './interface-drift.js'
 
 export { corpusKeptDocs, indexRepoDocs, nodeRefContext } from './doc-index.js'

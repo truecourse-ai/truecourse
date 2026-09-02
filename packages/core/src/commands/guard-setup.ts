@@ -9,9 +9,10 @@
  * provider configured — a CONFIG question, which the engine package deliberately
  * has no dependency on), model + transport resolution, the pre-flight cost
  * estimate, usage accounting, persisting `guard/setup.json`, and the AGENT-SESSION
- * seams: the recipe-repair, dependency-catalog, seed and auth-proof sessions are
- * built here (they need the configured session driver + the sessions store) and
- * injected into the engine, which stays core-free.
+ * seams: the recipe-repair, dependency-catalog, interfaces (reconcile + web-task
+ * authoring), seed and auth-proof sessions are built here (they need the
+ * configured session driver + the sessions store) and injected into the engine,
+ * which stays core-free.
  *
  * Working-tree only, by design: setup writes files inside the repo. A hosted
  * caller runs it against a clone it materialized, and injects what a server owns
@@ -26,7 +27,8 @@ import {
   type GuardSetupOnlyStep,
   type GuardSetupAuthStep,
   type GuardSetupCatalogSession,
-  type GuardSetupJourneyProvider,
+  type GuardSetupInterfaceProvider,
+  type GuardSetupInterfacesStep,
   type GuardSetupResult,
   type GuardSetupSeedSession,
   type GuardSetupStepKey,
@@ -60,15 +62,17 @@ import { effectiveLlmMode, type LlmTransportMode } from '../config/global-config
 import { resolveFallbackModel, resolveModel } from '../config/llm-models.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
 import { estimateGuardSetup } from '../services/llm/spec-estimate.js';
-import { mapJourneys } from '../services/journey.service.js';
+import { mapInterfaces } from '../services/interface.service.js';
 import { sessionRunDir, type SessionRunStartedInfo } from '../lib/sessions-store.js';
 import {
   buildAuthProof,
   buildCatalogSession,
+  buildInterfacesStep,
   buildRecipeRepair,
   buildSeedSession,
   createGuardSetupSessionContext,
 } from '../services/guard-setup/index.js';
+import { runGuardInterfaceAuthoring } from './guard-interfaces.js';
 import type { LlmEstimate } from './analyze-core.js';
 import { EstimateDeclined } from './spec-in-process.js';
 import type { StepTracker } from '../progress.js';
@@ -132,10 +136,13 @@ export interface GuardSetupInProcessOptions {
   eagerRun?: boolean;
   /** Re-derive the recipe and re-draft the seed even when both already exist. */
   refresh?: boolean;
+  /** Interfaces step: re-author places that already carry authored tasks. */
+  replace?: boolean;
   /**
-   * A sessions-store run record just came into being — setup's own, on its
-   * first session (or at once under `eagerRun`) — so the CLI can print a
-   * "watch live" deep link. A lazy run spending no session never fires it.
+   * A sessions-store run record just came into being — setup's own (on its first
+   * session, or at once under `eagerRun`) and the nested interfaces step's alike,
+   * so the CLI can print a "watch live" deep link for each. A lazy run spending
+   * no session never fires it.
    */
   onRunStarted?: (info: SessionRunStartedInfo) => void;
   /**
@@ -156,11 +163,13 @@ export interface GuardSetupInProcessOptions {
   signal?: AbortSignal;
   // --- test seams (production spawns the transport / builds the sessions) ---
   recipeRunner?: RecipeRunner;
-  journeys?: GuardSetupJourneyProvider;
+  interfaces?: GuardSetupInterfaceProvider;
   /** Test seam for the recipe-repair session. */
   repair?: RecipeRepairFn;
   /** Test seam for the dependency-catalog session. */
   catalogSession?: GuardSetupCatalogSession;
+  /** Test seam for the interfaces step (reconcile + authoring). */
+  authorInterfaces?: GuardSetupInterfacesStep;
   /** Test seam for the seed session. */
   seedSession?: GuardSetupSeedSession;
   /** Test seam for the auth-proof step. */
@@ -173,7 +182,8 @@ export interface GuardSetupInProcessResult {
   reportPath: string;
   /**
    * The sessions-store run dirs this run opened — `sessions/guard-setup/<runId>/`
-   * when any session ran. Empty when nothing spent a session. Named for
+   * and, when the interfaces step authored, the `sessions/guard-interfaces/<runId>/`
+   * its own engine opened. Empty when nothing spent a session. Named for
    * stepwise runs, whose point is reading the transcripts afterwards.
    */
   sessionsRunDirs: string[];
@@ -268,6 +278,7 @@ export async function estimateGuardSetupCost(
   repoRoot: string,
   opts: {
     refresh?: boolean;
+    replace?: boolean;
     mode?: LlmTransportMode;
     /** Single-step mode: price ONLY this step's sessions. */
     only?: GuardSetupOnlyStep;
@@ -312,6 +323,7 @@ export async function guardSetupInProcess(
     const estimate = await estimateGuardSetupCost(repoRoot, {
       mode,
       ...(options.refresh ? { refresh: true } : {}),
+      ...(options.replace ? { replace: true } : {}),
       ...(options.only ? { only: options.only } : {}),
     });
     if ((estimate.stages?.length ?? 0) > 0) {
@@ -350,6 +362,11 @@ export async function guardSetupInProcess(
           transportMode: mode,
         })
       : createGuardSetupSessionContext(sessionContextOptions);
+  const transportFlag = options.llm === 'cli' || options.llm === 'api' ? options.llm : undefined;
+  // The interfaces step's authoring half runs under `guard interfaces author`'s
+  // OWN sessions-store run, so its transcripts live somewhere else than setup's;
+  // a stepwise run has to be told where.
+  let interfacesRunId: string | undefined;
   const repair =
     options.repair ??
     (sessionContext
@@ -361,6 +378,37 @@ export async function guardSetupInProcess(
     options.catalogSession ??
     (sessionContext
       ? buildCatalogSession(sessionContext, {
+          ...(options.signal ? { signal: options.signal } : {}),
+        })
+      : undefined);
+  const authorInterfaces =
+    options.authorInterfaces ??
+    (sessionContext
+      ? buildInterfacesStep(sessionContext, {
+          // The authoring engine of `guard interfaces author`, verbatim — its
+          // own sessions-store run (`sessions/guard-interfaces/…`), its context
+          // pass, its findings ledger and closing reconciliation.
+          author: async (authorOpts) => {
+            const run = await runGuardInterfaceAuthoring({
+              repoRoot: authorOpts.repoRoot,
+              replace: authorOpts.replace,
+              ...(options.sessionsKey ? { sessionsKey: options.sessionsKey } : {}),
+              ...(options.driver ? { driver: options.driver, transportMode: mode } : {}),
+              ...(transportFlag ? { transport: transportFlag } : {}),
+              ...(options.signal ? { signal: options.signal } : {}),
+              ...(options.onRunStarted ? { onRunStarted: options.onRunStarted } : {}),
+              onStatus: (message) => tracker?.detail('interfaces', message),
+            });
+            interfacesRunId = run.runId;
+            return {
+              runId: run.runId,
+              authored: run.authored,
+              skipped: run.skipped,
+              places: run.places.map((place) => ({ status: place.status })),
+              diagnostics: run.diagnostics,
+              spent: run.spent,
+            };
+          },
           ...(options.signal ? { signal: options.signal } : {}),
         })
       : undefined);
@@ -379,12 +427,15 @@ export async function guardSetupInProcess(
         })
       : undefined);
 
-  /** Where this run's transcripts landed — setup's own run, when one opened. */
+  /** Where this run's transcripts landed — setup's own run, then the interfaces
+   *  step's, in the order they open. */
   const sessionsRunDirs = (): string[] => {
+    const key = options.sessionsKey ?? repoRoot;
     const setupRunId = sessionContext?.runId();
-    return setupRunId
-      ? [sessionRunDir(options.sessionsKey ?? repoRoot, 'guard-setup', setupRunId)]
-      : [];
+    return [
+      ...(setupRunId ? [sessionRunDir(key, 'guard-setup', setupRunId)] : []),
+      ...(interfacesRunId ? [sessionRunDir(key, 'guard-interfaces', interfacesRunId)] : []),
+    ];
   };
 
   const steps = GUARD_SETUP_STEPS.map((s) => s.key as GuardSetupStepKey);
@@ -411,13 +462,13 @@ export async function guardSetupInProcess(
           model: resolveModel('guard.recipe', undefined, repoRoot, mode),
           fallbackModel: resolveFallbackModel(repoRoot, mode) ?? undefined,
         }),
-      journeys:
-        options.journeys ??
+      interfaces:
+        options.interfaces ??
         (async () => {
           // ONE working-tree analysis feeds every step, exactly as generate does it.
-          const mapped = await mapJourneys(repoRoot);
+          const mapped = await mapInterfaces(repoRoot);
           return {
-            journeys: mapped.catalog.journeys,
+            interfaces: mapped.catalog.interfaces,
             externalServices: mapped.externalServices,
             database: mapped.database,
             datastoreUrls: mapped.datastoreUrls,
@@ -425,9 +476,11 @@ export async function guardSetupInProcess(
         }),
       ...(repair ? { repair } : {}),
       ...(catalogSession ? { catalogSession } : {}),
+      ...(authorInterfaces ? { authorInterfaces } : {}),
       ...(seedSession ? { seedSession } : {}),
       ...(verifyAuth ? { verifyAuth } : {}),
       ...(options.refresh ? { refresh: true } : {}),
+      ...(options.replace ? { replace: true } : {}),
       ...(options.only ? { only: options.only } : {}),
       ...(options.confirmSeedReplace ? { confirmSeedReplace: options.confirmSeedReplace } : {}),
       ...(options.signal ? { signal: options.signal } : {}),

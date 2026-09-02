@@ -55,6 +55,11 @@ import { runGuardSetup } from "./commands/guard-setup.js";
 import { runGuardRecipe } from "./commands/guard-recipe.js";
 import { runGuardExternals } from "./commands/guard-externals.js";
 import { runGuardSeed } from "./commands/guard-seed.js";
+import {
+  runGuardInterfaces,
+  runGuardInterfacesAuthor,
+  runGuardInterfacesReconcile,
+} from "./commands/guard-interfaces.js";
 import { runConfigLlmShow, runConfigLlmTest, runConfigLlmUse } from "./commands/config.js";
 import { runConfigLlmSetup, runLlmFirstRun } from "./commands/config-llm-setup.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
@@ -78,6 +83,11 @@ function llmTransportOption(): Option {
     "--llm-transport <mode>",
     "How to reach the LLM for this run: 'cli' (spawn claude -p), 'agent' (filesystem mailbox), or 'api' (the provider in ~/.truecourse/config.json)",
   ).choices(["cli", "agent", "api"]);
+}
+
+/** Accumulate repeatable `--header k=v` values. */
+function collectPlace(value: string, previous: string[]): string[] {
+  return [...previous, value];
 }
 
 /** Accumulate repeatable `--header k=v` values. */
@@ -406,15 +416,17 @@ guardCmd
   .command("setup")
   .description("Prepare the repo for guard: recipe, external APIs, and the data + auth seed")
   .option("--refresh", "Re-derive the recipe and re-draft the seed even when both exist")
+  .option("--replace", "Interfaces step: re-author web tasks on places that already carry them")
   .option("-y, --yes", "Skip the cost confirm (and, with --refresh, consent to replacing the seed)")
   .addOption(llmTransportOption())
   .option("--io <dir>", "Request/response mailbox dir for --llm-transport agent")
-  // Single-step mode: run one of setup's four LLM-bearing steps in isolation.
+  // Single-step mode: run one of setup's five LLM-bearing steps in isolation.
   // Prior steps replay from what they left on disk (a step nobody ran fails
   // loud), later steps never start; the free `detect` pass always runs, and
   // guard/setup.json is merged so the untouched steps keep their record.
   .option("--only-recipe", "Run only the recipe step (derive, verify and probe the recipe; nothing downstream)")
   .option("--only-catalog", "Run only the dependency-catalog step (recipe replayed from recipe.json)")
+  .option("--only-interfaces", "Run only the interface-authoring step (earlier steps replayed from disk)")
   .option("--only-seed", "Run only the seed step (earlier steps replayed from disk)")
   .option("--only-auth", "Run only the auth-proof step (earlier steps replayed from disk)")
   .action(async (options) => {
@@ -422,6 +434,7 @@ guardCmd
       [
         ["recipe", options.onlyRecipe],
         ["catalog", options.onlyCatalog],
+        ["interfaces", options.onlyInterfaces],
         ["seed", options.onlySeed],
         ["auth", options.onlyAuth],
       ] as const
@@ -434,6 +447,7 @@ guardCmd
     }
     await runGuardSetup({
       refresh: !!options.refresh,
+      replace: !!options.replace,
       yes: !!options.yes,
       llmTransport: options.llmTransport,
       io: options.io,
@@ -456,6 +470,47 @@ guardCmd
   .option("--init", "Removed — `truecourse guard setup` drafts the seed")
   .action(async (options) => {
     await runGuardSeed({ init: !!options.init });
+  });
+
+// The interface catalog: the derived half is read off the tree by `guard setup`;
+// the web TASKS are authored, one agent session per place.
+const guardInterfacesCmd = guardCmd
+  .command("interfaces")
+  .description("Show the interface catalog's places and the tasks authored on them (read-only)")
+  .action(async () => {
+    await runGuardInterfaces({});
+  });
+
+guardInterfacesCmd
+  .command("author")
+  .description("Author the web tasks no derivation produces — one agent session per place")
+  .option("--place <id>", "Author only this place (repeatable)", collectPlace, [])
+  .option("--replace", "Re-author places that already carry tasks")
+  .option("--limit <n>", "Author at most N places", parseInt)
+  .option("--concurrency <n>", "Run N sessions at once (default: min(cpus, 4))", parseInt)
+  .option("-y, --yes", "Skip the pre-flight confirmation")
+  .addOption(llmTransportOption())
+  .action(async (options) => {
+    await runGuardInterfacesAuthor({
+      place: options.place,
+      replace: !!options.replace,
+      limit: options.limit,
+      concurrency: options.concurrency,
+      yes: !!options.yes,
+      llmTransport: options.llmTransport,
+    });
+  });
+
+guardInterfacesCmd
+  .command("reconcile")
+  .description("Collapse the state registry's synonyms — one LLM call, no authoring")
+  .option("-y, --yes", "Skip the pre-flight confirmation")
+  .addOption(llmTransportOption())
+  .action(async (options) => {
+    await runGuardInterfacesReconcile({
+      yes: !!options.yes,
+      llmTransport: options.llmTransport,
+    });
   });
 
 guardCmd

@@ -26,7 +26,7 @@
 import path from "node:path";
 import * as p from "@clack/prompts";
 import { StepTracker } from "@truecourse/core/progress";
-import type { GuardSetupJourneyProvider, RecipeRunner } from "@truecourse/guard-generator";
+import type { GuardSetupInterfaceProvider, RecipeRunner } from "@truecourse/guard-generator";
 import type { GuardSetupReport } from "@truecourse/shared";
 import {
   guardSetupInProcess,
@@ -49,6 +49,8 @@ export interface RunGuardSetupOptions {
   cwd?: string;
   /** Re-derive the recipe and re-draft the seed even when both already exist. */
   refresh?: boolean;
+  /** Interfaces step: re-author places that already carry authored tasks. */
+  replace?: boolean;
   /**
    * Single-step mode (`--only-<step>`): run one step in isolation — prior steps
    * replay from what they left on disk (a step nobody ran aborts loudly), later
@@ -62,7 +64,7 @@ export interface RunGuardSetupOptions {
   io?: string;
   /** Test seams (production spawns the transport / analyzes the tree). */
   recipeRunner?: RecipeRunner;
-  journeys?: GuardSetupJourneyProvider;
+  interfaces?: GuardSetupInterfaceProvider;
   /** Test seam / explicit override for whether the terminal can prompt. */
   interactive?: boolean;
 }
@@ -110,10 +112,12 @@ export async function runGuardSetup(opts: RunGuardSetupOptions = {}): Promise<vo
       llm: opts.llmTransport,
       io: opts.io,
       ...(opts.refresh ? { refresh: true } : {}),
+      ...(opts.replace ? { replace: true } : {}),
       ...(opts.only ? { only: opts.only } : {}),
       ...(opts.recipeRunner ? { recipeRunner: opts.recipeRunner } : {}),
-      ...(opts.journeys ? { journeys: opts.journeys } : {}),
-      // Fires when setup's (lazy) run record opens — the exact-run deep link.
+      ...(opts.interfaces ? { interfaces: opts.interfaces } : {}),
+      // Fires per run record this invocation opens (setup's own and the nested
+      // interfaces step's) — each gets its exact-run deep link.
       onRunStarted: (info) => printWatchLive(dashboardUrl, project.slug, info.runId),
       onLlmEstimate: async (estimate) => {
         // ONE LINE, deliberately: setup is bounded at two calls, so the staged modal
@@ -224,6 +228,7 @@ export async function runGuardSetup(opts: RunGuardSetupOptions = {}): Promise<vo
 const SETUP_STEP_LABEL: Record<GuardSetupOnlyStep, string> = {
   recipe: "recipe",
   catalog: "dependency catalog",
+  interfaces: "interface authoring",
   seed: "seed",
   auth: "auth proof",
 };

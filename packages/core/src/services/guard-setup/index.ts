@@ -6,6 +6,9 @@
  *    path of recipe discovery;
  *  - dependency catalog (`guard-setup.dependency-catalog`) — classify/condition
  *    the catalog after the deterministic skeleton;
+ *  - the interfaces step (`interfaces-step.ts`) — the
+ *    `guard-setup.reconcile-interfaces` session over the cli union's disputes
+ *    (`reconcile-interfaces.ts`), then the web-task authoring run;
  *  - the seed session (`guard-setup.seed`) — prove-by-execution seed authoring
  *    against the live services;
  *  - the auth proof (`guard-setup.auth-proof`) — supplied-state verification;
@@ -42,6 +45,20 @@ export {
   type CatalogFoldResult,
   type BuildCatalogSessionOptions,
 } from './dependency-catalog.js';
+export {
+  RECONCILE_INTERFACES_SESSION_KIND,
+  RECONCILE_INTERFACES_BUDGET,
+  applyReconcileResolutions,
+  runReconcileInterfacesSession,
+  validateResolutions,
+  type InterfaceResolution,
+} from './reconcile-interfaces.js';
+export {
+  buildInterfacesStep,
+  type BuildInterfacesStepOptions,
+  type InterfacesAuthorFn,
+  type InterfacesAuthorRun,
+} from './interfaces-step.js';
 export {
   SEED_SESSION_KIND,
   SEED_SESSION_BUDGET,

@@ -11,7 +11,7 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 import {
-  buildJourneyContractHints,
+  buildInterfaceContractHints,
   buildOtherOperationHints,
   buildOutboundRequestHints,
   outboundOverflow,
@@ -21,7 +21,7 @@ import {
   MAX_RESPONSE_FIELDS,
 } from '../../packages/guard-generator/src/grounding';
 import { buildAuthorUserPrompt, type AuthorUserContext } from '../../packages/guard-generator/src/prompts';
-import type { ApiRequestContract, DetectedExternalService, Journey, OutboundRequest } from '../../packages/shared/src';
+import type { ApiRequestContract, DetectedExternalService, Interface, OutboundRequest } from '../../packages/shared/src';
 import {
   makeTempRepo,
   rmrf,
@@ -31,8 +31,8 @@ import {
   extractBy,
   authorBy,
   runGenerate,
-  journeysOf,
-  apiJourney as helperApiJourney,
+  interfacesOf,
+  apiInterface as helperApiJourney,
   withCodeTruth,
   rawApi,
   PASSING_API_STEPS,
@@ -40,7 +40,7 @@ import {
 
 const LOCATION = { filePath: '/repo/src/upstream/forecast.ts', startLine: 1, endLine: 1, startColumn: 0, endColumn: 1 };
 
-function apiJourney(method: string, path: string): Journey {
+function apiInterface(method: string, path: string): Interface {
   return {
     id: `api/${method.toLowerCase()}${path.replace(/\W+/g, '-')}`,
     type: 'api',
@@ -48,7 +48,7 @@ function apiJourney(method: string, path: string): Journey {
     entry: { method, path },
     steps: [{ kind: 'request', method, path }],
     fingerprint: `fp-${method}-${path}`,
-  } as Journey;
+  } as Interface;
 }
 
 const FORECAST: OutboundRequest = {
@@ -80,7 +80,7 @@ function ctx(extra: Partial<AuthorUserContext> = {}): AuthorUserContext {
   };
 }
 
-describe('buildJourneyContractHints', () => {
+describe('buildInterfaceContractHints', () => {
   const contracts: ApiRequestContract[] = [
     {
       method: 'POST',
@@ -94,19 +94,19 @@ describe('buildJourneyContractHints', () => {
   ];
 
   it('carries the contract onto the operation the plan walks', () => {
-    const [hint] = buildJourneyContractHints([apiJourney('POST', '/v1/auth/signup')], contracts);
+    const [hint] = buildInterfaceContractHints([apiInterface('POST', '/v1/auth/signup')], contracts);
     expect(hint.bodyFields).toEqual(contracts[0].bodyFields);
   });
 
   it('still lists an operation with NO contract — the exact path is itself the grounding', () => {
-    const hints = buildJourneyContractHints([apiJourney('GET', '/v1/favorites')], contracts);
+    const hints = buildInterfaceContractHints([apiInterface('GET', '/v1/favorites')], contracts);
     expect(hints).toEqual([{ method: 'GET', path: '/v1/favorites' }]);
   });
 
   it('ignores non-api journeys and collapses a repeated operation', () => {
-    const cli = { ...apiJourney('GET', '/x'), type: 'cli', entry: { command: ['x'] } } as unknown as Journey;
-    const hints = buildJourneyContractHints(
-      [apiJourney('POST', '/v1/auth/signup'), apiJourney('POST', '/v1/auth/signup'), cli],
+    const cli = { ...apiInterface('GET', '/x'), type: 'cli', entry: { command: ['x'] } } as unknown as Interface;
+    const hints = buildInterfaceContractHints(
+      [apiInterface('POST', '/v1/auth/signup'), apiInterface('POST', '/v1/auth/signup'), cli],
       contracts,
     );
     expect(hints).toHaveLength(1);
@@ -118,13 +118,13 @@ describe('buildOtherOperationHints — the setup surface', () => {
     { method: 'POST', path: '/v1/auth/signup', bodyFields: [{ name: 'email', required: true }] },
   ];
   const catalog = [
-    apiJourney('POST', '/v1/auth/signup'),
-    apiJourney('POST', '/v1/auth/signin'),
-    apiJourney('GET', '/v1/favorites'),
+    apiInterface('POST', '/v1/auth/signup'),
+    apiInterface('POST', '/v1/auth/signin'),
+    apiInterface('GET', '/v1/favorites'),
   ];
 
   it('offers the rest of the surface, with contracts, minus what the flow walks', () => {
-    const own = buildJourneyContractHints([apiJourney('GET', '/v1/favorites')], contracts);
+    const own = buildInterfaceContractHints([apiInterface('GET', '/v1/favorites')], contracts);
     const { operations, overflow } = buildOtherOperationHints(catalog, contracts, own);
     expect(operations).toEqual([
       { method: 'POST', path: '/v1/auth/signup', bodyFields: [{ name: 'email', required: true }] },
@@ -134,12 +134,12 @@ describe('buildOtherOperationHints — the setup surface', () => {
   });
 
   it('is empty when the flow already walks the whole surface', () => {
-    const own = buildJourneyContractHints(catalog, contracts);
+    const own = buildInterfaceContractHints(catalog, contracts);
     expect(buildOtherOperationHints(catalog, contracts, own).operations).toEqual([]);
   });
 
   it('caps the list and counts what it dropped', () => {
-    const many = Array.from({ length: MAX_OTHER_OPERATIONS + 4 }, (_, i) => apiJourney('GET', `/v1/r${i}`));
+    const many = Array.from({ length: MAX_OTHER_OPERATIONS + 4 }, (_, i) => apiInterface('GET', `/v1/r${i}`));
     const { operations, overflow } = buildOtherOperationHints(many, [], []);
     expect(operations).toHaveLength(MAX_OTHER_OPERATIONS);
     expect(overflow).toBe(4);
@@ -300,7 +300,7 @@ describe('generateGuards — the grounding rides the SAME provider the journeys 
 
     await runGenerate({
       repoRoot: r,
-      journeys: withCodeTruth(journeysOf(r, helperApiJourney('GET', '/todos')), {
+      interfaces: withCodeTruth(interfacesOf(r, helperApiJourney('GET', '/todos')), {
         requestContracts: [
           { method: 'GET', path: '/todos', queryFields: [{ name: 'limit', required: 'unknown' }] },
           // An operation this flow does NOT walk must not leak into its prompt.
@@ -339,8 +339,8 @@ describe('generateGuards — the grounding rides the SAME provider the journeys 
 
     await runGenerate({
       repoRoot: r,
-      journeys: withCodeTruth(
-        journeysOf(r, helperApiJourney('GET', '/todos'), helperApiJourney('POST', '/signup')),
+      interfaces: withCodeTruth(
+        interfacesOf(r, helperApiJourney('GET', '/todos'), helperApiJourney('POST', '/signup')),
         {
           requestContracts: [
             { method: 'POST', path: '/signup', bodyFields: [{ name: 'email', required: true }] },
