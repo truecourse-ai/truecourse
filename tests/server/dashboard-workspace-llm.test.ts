@@ -258,6 +258,52 @@ describe('a configured, answering provider', () => {
   });
 });
 
+describe("operator mode — the server's own Claude Code", () => {
+  const claudeDriver = { attribution: { provider: 'claude-code', model: 'opus' } } as unknown as SessionDriver;
+  const claudeTransport = (async () => '{}') as LlmTransport;
+  let claudeProbe: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.stubEnv('TRUECOURSE_LLM_TRANSPORT', 'claude-code');
+    claudeProbe = vi.fn(async () => {});
+    // No workspace has a provider — operator mode must never need one.
+    setWorkspaceLlmConfigStore(configStore({}));
+    setWorkspaceLlmBackend({
+      probe: probe as never,
+      claudeCode: { probe: claudeProbe as never, driver: () => claudeDriver, transport: () => claudeTransport },
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('runs the spec scan on the Claude Code driver, with no workspace provider', async () => {
+    await start('spec scan').expect(200);
+
+    expect(claudeProbe).toHaveBeenCalledTimes(1);
+    expect(probe).not.toHaveBeenCalled();
+    expect(vi.mocked(curateInProcess).mock.calls[0][1]).toMatchObject({ driver: claudeDriver });
+  });
+
+  it('runs guard generate on `claude -p`, in claude-code mode so the tier aliases stay', async () => {
+    await start('guard generate').expect(200);
+
+    expect(vi.mocked(guardGenerateInProcess).mock.calls[0][1]).toMatchObject({
+      transport: claudeTransport,
+      transportMode: 'claude-code',
+    });
+  });
+
+  it('answers a logged-out `claude` with the probe failure, before any spend', async () => {
+    claudeProbe.mockRejectedValue(new Error('Not logged in · run claude login'));
+
+    const res = await start('spec scan').expect(502);
+    expect(res.body).toMatchObject({ error: 'llm-probe-failed', message: 'Not logged in · run claude login' });
+    expect(vi.mocked(curateInProcess)).not.toHaveBeenCalled();
+  });
+});
+
 describe('the manual scan’s estimate gate', () => {
   it('asks for confirmation by default', async () => {
     await start('spec scan').expect(200);

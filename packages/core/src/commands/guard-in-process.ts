@@ -183,6 +183,13 @@ export interface GuardGenerateInProcessOptions {
    */
   transport?: LlmTransport;
   /**
+   * The mode an explicit `transport` runs in, which decides the stage models:
+   * `claude-code` keeps the tier aliases `claude -p` understands, `api` (the
+   * default) substitutes the one configured API model. Ignored without
+   * `transport`.
+   */
+  transportMode?: LlmTransportMode;
+  /**
    * Pre-flight LLM cost estimate gate. Called with the token estimate before any
    * LLM work; return `false` to abort (throws {@link EstimateDeclined}). Skipped
    * when nothing changed (the estimate has no stages).
@@ -289,9 +296,10 @@ export async function guardGenerateInProcess(
   const { tracker } = options;
   // The transport this run actually uses decides the models — never the saved
   // selection a `--llm-transport` flag just overrode. An explicit transport IS
-  // the selection: it was built from a stored provider block, so the run is in
-  // api mode whatever the local config file says.
-  const mode = options.transport ? 'api' : effectiveLlmMode(options.llm);
+  // the selection, and its caller says which mode it runs in (a stored
+  // provider block is api mode whatever the local config file says; the
+  // operator's Claude Code keeps the tier aliases).
+  const mode = options.transport ? (options.transportMode ?? 'api') : effectiveLlmMode(options.llm);
 
   // Hard-fail on unresolved spec conflicts BEFORE the estimate — never ask to
   // spend, then fail. Extracting both sides of an open overlap births noise.

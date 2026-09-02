@@ -82,13 +82,26 @@ export function createConfiguredSessionDriver(
 ): ConfiguredSessionDriver {
   const mode = effectiveLlmMode(opts.transport);
   if (mode === 'api') return createApiSessionDriverFor(readApiLlmConfig());
+  return createClaudeCodeSessionDriver(opts);
+}
+
+/**
+ * Build the claude-code session driver outright — the Agent SDK on the
+ * `claude` login of whoever runs this process. The CLI reaches it through the
+ * saved selection above; the dashboard server reaches it directly when the
+ * operator runs the instance on their own Claude Code
+ * (`TRUECOURSE_LLM_TRANSPORT=claude-code`).
+ */
+export function createClaudeCodeSessionDriver(
+  opts: Pick<SessionDriverOptions, 'cwd' | 'providerStateDir'> = {},
+): ConfiguredSessionDriver {
   const driver = createClaudeAgentSessionDriver({
     pathToClaudeCodeExecutable: resolveClaudeBinary(),
     model: SESSION_MODEL_CLAUDE_CODE,
     ...(opts.cwd ? { cwd: opts.cwd } : {}),
     ...(opts.providerStateDir ? { sessionStore: providerSessionStore(opts.providerStateDir) } : {}),
   });
-  return { driver, mode, attribution: driver.attribution };
+  return { driver, mode: 'claude-code', attribution: driver.attribution };
 }
 
 /**

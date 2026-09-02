@@ -163,3 +163,32 @@ describe('PATCH /api/llm/config', () => {
     await request(memberApp).patch('/api/llm/config').send(body).expect(200);
   });
 });
+
+describe("operator mode — the server's own Claude Code", () => {
+  beforeEach(() => {
+    vi.stubEnv('TRUECOURSE_LLM_TRANSPORT', 'claude-code');
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('GET says so beside the (unused) stored config', async () => {
+    const res = await request(app).get('/api/llm/config').expect(200);
+    expect(res.body).toEqual({
+      config: null,
+      providers: [...LLM_PROVIDER_KINDS],
+      operator: { provider: 'claude-code', model: 'opus' },
+    });
+  });
+
+  it('PATCH is refused — nothing saved here would be used', async () => {
+    const res = await request(app)
+      .patch('/api/llm/config')
+      .send({ provider: 'anthropic', model: 'claude-x', apiKey: 'sk-secret99' })
+      .expect(409);
+    expect(res.body.error).toMatch(/operator's Claude Code/);
+    expect(probe).not.toHaveBeenCalled();
+    expect(await store.getConfig(TEST_ORG)).toBeNull();
+  });
+});

@@ -275,6 +275,22 @@ function ModelsTab() {
     };
   }, [apply]);
 
+  // An instance on its operator's Claude Code: the form would save a provider
+  // no run ever reads, so there is none — only what the runs use.
+  if (data?.operator) {
+    return (
+      <Card title="Active provider">
+        <Facts
+          rows={[
+            { label: 'Provider', value: 'Claude Code (operator)' },
+            { label: 'Model', value: <span className="font-mono">{data.operator.model}</span> },
+            { label: 'Set by', value: <span className="font-mono">TRUECOURSE_LLM_TRANSPORT=claude-code</span> },
+          ]}
+        />
+      </Card>
+    );
+  }
+
   const current = data?.config ?? null;
   const isBedrock = provider === 'bedrock';
   const keyIsForThisProvider = current?.hasKey && current.provider === provider;

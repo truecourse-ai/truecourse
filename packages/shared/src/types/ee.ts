@@ -560,10 +560,22 @@ export interface LlmProviderConfigView {
   updatedAt: string
 }
 
+/**
+ * The provider an instance runs on when its operator set
+ * `TRUECOURSE_LLM_TRANSPORT=claude-code`: the server's own `claude` login,
+ * for every workspace. The Models page is read-only while it is set.
+ */
+export interface LlmOperatorProvider {
+  provider: 'claude-code'
+  model: string
+}
+
 /** Response of GET /api/llm/config (and the enterprise /api/ee/llm/config). */
 export interface LlmConfigResponse {
   config: LlmProviderConfigView | null
   providers: LlmProviderKind[]
+  /** Present only on an instance running on its operator's Claude Code. */
+  operator?: LlmOperatorProvider
 }
 
 /** Body of PATCH /api/llm/config (and the enterprise /api/ee/llm/config). */

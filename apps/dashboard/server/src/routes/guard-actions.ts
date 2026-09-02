@@ -208,6 +208,7 @@ router.post('/:id/guard/generate', async (req: Request, res: Response, next: Nex
     const { guard } = await guardGenerateInProcess(repo.path, {
       tracker,
       transport: llm.transport(),
+      transportMode: llm.mode,
       // The popup replaces in place, so the estimate rides the checklist here as
       // a leading step (the terminal renders it as its own line instead).
       onEstimatePhase: estimateStepPhase(tracker),

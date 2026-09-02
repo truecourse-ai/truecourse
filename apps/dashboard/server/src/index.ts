@@ -7,6 +7,7 @@ import { createAuth } from './auth/index.js';
 import { createGithubConnection } from './github/index.js';
 import { closeDb, getDbHandle, initDb } from './db.js';
 import { installDbStores } from './stores.js';
+import { operatorClaudeCode } from './services/workspace-llm.service.js';
 import { sweepStaleRunClones } from './services/run-clone.service.js';
 import { stopAllWatchers } from './services/watcher.service.js';
 import { stopAllRunTails } from './services/session-tailer.service.js';
@@ -60,6 +61,9 @@ async function main() {
   // repo state, and clear run-clone debris a crashed process left behind.
   installDbStores(getDbHandle(), { masterSecret });
   sweepStaleRunClones();
+  if (operatorClaudeCode()) {
+    log.info("[LLM] operator mode — every workspace runs on this process's Claude Code login");
+  }
 
   // 3. WorkOS session auth. Throws if the WORKOS_* env is incomplete — the
   //    server boots authenticated or not at all.

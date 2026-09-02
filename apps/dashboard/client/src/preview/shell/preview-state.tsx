@@ -196,8 +196,8 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
   // about the workspace, not about this read.
   const refreshLlmProvider = useCallback(async () => {
     try {
-      const { config } = await fetchLlmConfig();
-      setLlmProvider(config ? 'configured' : 'missing');
+      const { config, operator } = await fetchLlmConfig();
+      setLlmProvider(config || operator ? 'configured' : 'missing');
     } catch {
       setLlmProvider('unknown');
     }
