@@ -78,6 +78,13 @@
       "when": 1788275745910,
       "tag": "0010_workspace_llm_config",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788351838318,
+      "tag": "0011_guard_setup_sets",
+      "breakpoints": true
     }
   ]
 }

@@ -113,7 +113,7 @@ import {
 } from '../../packages/core/src/commands/guard-setup.js';
 import { StepTracker } from '../../packages/core/src/progress.js';
 import { listSessionRuns } from '../../packages/core/src/lib/sessions-store.js';
-import { outcome, toolResult } from './spec-scan-session-stub.js';
+import { forbiddenDriver, outcome, stubDriver, toolResult } from './spec-scan-session-stub.js';
 
 /** One assistant turn, priced — what the loop counts `spent.turns`/tokens off. */
 const assistantTurn = (text: string, tokens = 1_000): { type: 'assistant-turn'; text: string; usage: Record<string, unknown> } => ({
@@ -704,4 +704,94 @@ describe('guardSetupInProcess — the transport the sessions run on', () => {
     expect(asked).toBe(false);
     expect(readGuardSetup(r)).toBeNull();
   });
+});
+
+// ---------------------------------------------------------------------------
+// Hosted injection — a caller that owns the driver, the transport and the key
+// ---------------------------------------------------------------------------
+
+describe('guardSetupInProcess — hosted injection', () => {
+  // A hosted run answers the provider question itself: nothing is installed
+  // process-wide and no global config is read.
+  beforeEach(() => setDefaultTransport(undefined));
+
+  /** Where a hosted run's sessions are keyed — never the (ephemeral) work tree. */
+  function sessionsHome(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-core-setup-key-'));
+    repos.push(dir);
+    return dir;
+  }
+
+  const checklistOf = (run: { display?: { blocks: { kind: string }[] } }): { key: string; status: string }[] => {
+    const block = run.display?.blocks.find((b) => b.kind === 'checklist');
+    return (block as { items: { key: string; status: string }[] } | undefined)?.items ?? [];
+  };
+
+  it('runs the sessions on the injected driver, under the caller\'s sessions key', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    const key = sessionsHome();
+    const { driver } = stubDriver(async (call) => {
+      await call.emit(assistantTurn('checking the draft'));
+      await call.emit(toolResult('check_catalog', 'The draft is valid.'));
+      return outcome({
+        entries: [{ name: 'app-database', class: 'seedable', evidence: 'schema.prisma' }],
+        findings: [],
+      });
+    });
+
+    const { report, sessionsRunDirs } = await guardSetupInProcess(r, {
+      driver,
+      transport: async () => 'ok',
+      transportMode: 'api',
+      sessionsKey: key,
+      journeys: journeys(),
+      ...inertSeams,
+    });
+
+    expect(report.status).toBe('ok');
+    // The configured-driver seam was never reached — the caller's driver ran.
+    expect(sessionDriver.built).toEqual([]);
+    expect(report.usage?.sessions?.count).toBe(1);
+    // The run lives under the KEY; the work tree keeps no sessions at all.
+    const runs = listSessionRuns(key, 'guard-setup');
+    expect(runs).toHaveLength(1);
+    expect(listSessionRuns(r)).toEqual([]);
+    expect(sessionsRunDirs[0].startsWith(key)).toBe(true);
+    // …and the record quotes the injected driver's own attribution.
+    expect(runs[0].llm).toEqual({ mode: 'api', provider: 'test', model: 'scripted' });
+    expect(runs[0].status).toBe('completed');
+  }, 120_000);
+
+  // An eager run is VISIBLE from the moment it starts — including one that dies
+  // before any session exists, which the lazy CLI shape leaves unrecorded.
+  it('opens the run eagerly with the step checklist, and closes it failed with the reason', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r, { serve: ['node', path.join(r, 'missing.mjs')], readyTimeoutMs: 4000 });
+    const key = sessionsHome();
+    const { tracker } = detailRecorder();
+
+    const { report } = await guardSetupInProcess(r, {
+      driver: forbiddenDriver('the recipe gate fails before any session'),
+      transport: neverCalled,
+      transportMode: 'claude-code',
+      sessionsKey: key,
+      eagerRun: true,
+      tracker,
+      journeys: journeys(),
+      ...inertSeams,
+    });
+
+    expect(report.status).toBe('failed');
+    const [run] = listSessionRuns(key, 'guard-setup');
+    expect(run.sessions).toEqual([]);
+    expect(run.status).toBe('failed');
+    expect(run.error).toEqual({ message: report.reason, kind: 'setup' });
+    expect(run.llm).toEqual({ mode: 'claude-code', provider: 'test', model: 'scripted' });
+    // The checklist the terminal renders, mirrored for a surface that can only
+    // read run.json: the step that died carries the error, later steps never ran.
+    expect(checklistOf(run).map((i) => i.key)).toEqual(['recipe', 'detect', 'catalog', 'seed', 'auth']);
+    expect(checklistOf(run)[0].status).toBe('error');
+    expect(checklistOf(run)[1].status).toBe('pending');
+  }, 60_000);
 });

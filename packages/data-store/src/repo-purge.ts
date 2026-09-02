@@ -22,6 +22,7 @@ import {
   guardRuns,
   guardResults,
   guardScenarioSets,
+  guardSetupSets,
   decisions,
   content,
   ghInferredActions,
@@ -46,6 +47,7 @@ export async function purgeRepoData(db: Db, repoKey: string): Promise<void> {
     await tx.delete(guardRuns).where(eq(guardRuns.repoKey, repoKey));
     await tx.delete(guardResults).where(eq(guardResults.repoKey, repoKey));
     await tx.delete(guardScenarioSets).where(eq(guardScenarioSets.repoKey, repoKey));
+    await tx.delete(guardSetupSets).where(eq(guardSetupSets.repoKey, repoKey));
     // The decisions ledger: the repo row, its PR overlays, and the guard scopes.
     await tx.delete(decisions).where(
       or(

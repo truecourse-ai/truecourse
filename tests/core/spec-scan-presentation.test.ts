@@ -394,6 +394,7 @@ describe('spec scan run record — the checklist block', () => {
       skipCorpusWrite: true,
       tracker,
       driver,
+      transportMode: 'api',
       decisions: {
         version: 2,
         manualIncludes: [],
@@ -419,6 +420,9 @@ describe('spec scan run record — the checklist block', () => {
     )
     // No bespoke run-level field: the checklist is one block among whatever
     // else the run chooses to say.
+    // An injected driver states what it ran on too: a hosted run whose record
+    // named no provider at all was the record lying about a real one.
+    expect(record.llm).toEqual({ mode: 'api', provider: 'test', model: 'scripted' })
     const block = KnownDisplayBlockSchema.parse(record.display?.blocks[0])
     if (block.kind !== 'checklist') throw new Error('the run stamped no checklist block')
     expect(block.items.map((item) => [item.key, item.sessionKinds])).toEqual([

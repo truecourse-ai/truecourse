@@ -459,10 +459,17 @@ export interface CurateInProcessOptions {
    */
   sessionsKey?: string;
   /**
-   * Test seam / EE injection: run the sessions on THIS driver instead of the
-   * configured one. Tests pass a scripted driver; production passes none.
+   * Test seam / hosted injection: run the sessions on THIS driver instead of the
+   * configured one. Tests pass a scripted driver; a hosted run passes the one it
+   * built from the asking workspace's provider config.
    */
   driver?: SessionDriver;
+  /**
+   * The mode an injected `driver` runs in — the run record's attribution needs
+   * it and the driver itself carries none. Unset, the saved selection (as a
+   * `--llm` flag may have overridden it) answers.
+   */
+  transportMode?: LlmTransportMode;
 }
 
 /**
@@ -535,8 +542,23 @@ export async function curateInProcess(
   // that cannot construct a driver offline still re-scans for free), and the
   // run record learns what it ran on the moment the first session needs it.
   let configured: ConfiguredSessionDriver | null = null;
+  let injectedStamped = false;
   const driver = async (): Promise<SessionDriver> => {
-    if (options.driver) return options.driver;
+    if (options.driver) {
+      // An injected driver states what it calls too — a hosted run that showed
+      // no provider at all was the record lying about a real one.
+      if (!injectedStamped) {
+        injectedStamped = true;
+        const { provider, model, fallbackModel } = options.driver.attribution;
+        run.setLlm({
+          mode: options.transportMode ?? mode,
+          provider,
+          model,
+          ...(fallbackModel ? { fallbackModel } : {}),
+        });
+      }
+      return options.driver;
+    }
     if (!configured) {
       configured = createConfiguredSessionDriver({
         ...(options.llm && options.llm !== 'agent' ? { transport: options.llm } : {}),

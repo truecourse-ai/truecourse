@@ -37,7 +37,7 @@ import {
 } from './jobs.js';
 import { llmTraces } from './traces.js';
 import { workspaceSettings } from './settings.js';
-import { guardRuns, guardResults, guardScenarioSets } from './guard.js';
+import { guardRuns, guardResults, guardScenarioSets, guardSetupSets } from './guard.js';
 
 export const schema = {
   ghInstallations,
@@ -70,4 +70,5 @@ export const schema = {
   guardRuns,
   guardResults,
   guardScenarioSets,
+  guardSetupSets,
 };

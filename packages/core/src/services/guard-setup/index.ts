@@ -16,6 +16,7 @@ export {
   createGuardSetupSessionContext,
   describeSessionFailure,
   type GuardSetupSessionContext,
+  type GuardSetupSessionContextOptions,
 } from './session-context.js';
 export {
   RECIPE_REPAIR_SESSION_KIND,

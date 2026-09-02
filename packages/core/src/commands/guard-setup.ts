@@ -13,9 +13,10 @@
  * built here (they need the configured session driver + the sessions store) and
  * injected into the engine, which stays core-free.
  *
- * Working-tree only, by design: setup writes files inside the repo. A hosted store
- * has no working tree, which is exactly why hosted `guard generate` keeps deriving
- * its own recipe rather than depending on this stage.
+ * Working-tree only, by design: setup writes files inside the repo. A hosted
+ * caller runs it against a clone it materialized, and injects what a server owns
+ * that a checkout does not — the workspace's transport and session driver, and
+ * the repo identity its run record is keyed by.
  */
 
 import {
@@ -46,6 +47,7 @@ import {
   type LlmTransport,
 } from '@truecourse/shared/llm';
 import { resolveClaudeBinary } from '@truecourse/shared';
+import type { RunError, SessionDriver } from '@truecourse/agent-loop';
 import type { GuardSetupReport } from '@truecourse/shared';
 import {
   LlmApiConfigError,
@@ -97,12 +99,43 @@ export interface GuardSetupInProcessOptions {
    */
   llm?: 'cli' | 'agent' | 'api';
   io?: string;
+  /**
+   * Run the ONE-SHOT calls on THIS transport instead of resolving one. The
+   * dashboard server passes the transport it built from the asking workspace's
+   * stored provider config — credentials travel with the run, never through a
+   * process-wide default — and step 0 is answered by its existence.
+   */
+  transport?: LlmTransport;
+  /**
+   * The mode an explicit `transport`/`driver` runs in, which decides the stage
+   * models and the run record's attribution. Unset, the saved selection (as a
+   * `--llm` flag may have overridden it) answers.
+   */
+  transportMode?: LlmTransportMode;
+  /**
+   * Run the SESSIONS on THIS driver instead of the configured one. Passing it
+   * means passing `transportMode` too — the driver states what it calls, not
+   * which mode selected it.
+   */
+  driver?: SessionDriver;
+  /**
+   * Where the run record and transcripts are keyed — the repo IDENTITY when
+   * `repoRoot` is an ephemeral clone deleted after the run. Defaults to
+   * `repoRoot`.
+   */
+  sessionsKey?: string;
+  /**
+   * Open the run record up front rather than on the first session, so a hosted
+   * run is watchable from the moment it starts — including one that fails
+   * before any session exists, or spends none at all.
+   */
+  eagerRun?: boolean;
   /** Re-derive the recipe and re-draft the seed even when both already exist. */
   refresh?: boolean;
   /**
-   * A sessions-store run record just came into being — setup's own, lazy, on
-   * its first session — so the CLI can print a "watch live" deep link. Never
-   * fires on a run spending no sessions.
+   * A sessions-store run record just came into being — setup's own, on its
+   * first session (or at once under `eagerRun`) — so the CLI can print a
+   * "watch live" deep link. A lazy run spending no session never fires it.
    */
   onRunStarted?: (info: SessionRunStartedInfo) => void;
   /**
@@ -198,7 +231,14 @@ export function assertLlmProviderConfigured(
  * converse is {@link effectiveLlmMode}: a `cli` flag moves model resolution off
  * the API config too, so the two never disagree.
  */
-function resolveTransport(options: { llm?: 'cli' | 'agent' | 'api'; io?: string }): ResolvedSetupTransport {
+function resolveTransport(options: {
+  llm?: 'cli' | 'agent' | 'api';
+  io?: string;
+  transport?: LlmTransport;
+}): ResolvedSetupTransport {
+  // A caller that built its own transport has already answered every question
+  // this function asks — including step 0's, since the object exists.
+  if (options.transport) return { transport: options.transport };
   if (options.llm === 'agent') {
     if (!options.io) {
       throw new Error('--llm agent requires --io <dir> (the request/response mailbox directory)');
@@ -266,7 +306,7 @@ export async function guardSetupInProcess(
   });
   // The transport this run actually uses decides the models — never the saved
   // selection a `--llm-transport` flag just overrode.
-  const mode = effectiveLlmMode(options.llm);
+  const mode = options.transportMode ?? effectiveLlmMode(options.llm);
 
   if (options.onLlmEstimate) {
     const estimate = await estimateGuardSetupCost(repoRoot, {
@@ -288,17 +328,28 @@ export async function guardSetupInProcess(
   // THE SESSION SEAMS. Production wires the real agent
   // sessions; a run with an injected one-shot recipe runner (the test seam)
   // keeps the legacy path those tests drive, and the `agent` mailbox transport
-  // has no session driver at all. The context is LAZY throughout — a run whose
+  // has no session driver at all. The context is LAZY by default — a run whose
   // deterministic paths settle everything never creates a run record and never
-  // builds a driver.
+  // builds a driver — until a hosted caller asks for an eager one, which has a
+  // watcher from the first second and must be visible even when it spends nothing.
   const sessionsAvailable = options.llm !== 'agent' && options.recipeRunner === undefined;
-  const sessionContext = sessionsAvailable
-    ? createGuardSetupSessionContext({
-        repoRoot,
-        ...(options.llm === 'cli' || options.llm === 'api' ? { transport: options.llm } : {}),
-        ...(options.onRunStarted ? { onRunStarted: options.onRunStarted } : {}),
-      })
-    : null;
+  const sessionContextOptions = {
+    repoRoot,
+    ...(options.sessionsKey ? { sessionsKey: options.sessionsKey } : {}),
+    ...(options.tracker ? { tracker: options.tracker } : {}),
+    ...(options.eagerRun ? { eager: true } : {}),
+    ...(options.llm === 'cli' || options.llm === 'api' ? { transport: options.llm } : {}),
+    ...(options.onRunStarted ? { onRunStarted: options.onRunStarted } : {}),
+  };
+  const sessionContext = !sessionsAvailable
+    ? null
+    : options.driver
+      ? createGuardSetupSessionContext({
+          ...sessionContextOptions,
+          driver: options.driver,
+          transportMode: mode,
+        })
+      : createGuardSetupSessionContext(sessionContextOptions);
   const repair =
     options.repair ??
     (sessionContext
@@ -331,7 +382,9 @@ export async function guardSetupInProcess(
   /** Where this run's transcripts landed — setup's own run, when one opened. */
   const sessionsRunDirs = (): string[] => {
     const setupRunId = sessionContext?.runId();
-    return setupRunId ? [sessionRunDir(repoRoot, 'guard-setup', setupRunId)] : [];
+    return setupRunId
+      ? [sessionRunDir(options.sessionsKey ?? repoRoot, 'guard-setup', setupRunId)]
+      : [];
   };
 
   const steps = GUARD_SETUP_STEPS.map((s) => s.key as GuardSetupStepKey);
@@ -342,6 +395,11 @@ export async function guardSetupInProcess(
     current = next;
     tracker?.start(key);
   };
+
+  // Why the run record closes `failed` — a report the engine refused is the run
+  // failing, whatever its sessions did. Hoisted because the `finally` that closes
+  // the record cannot see the report.
+  let closingFailure: RunError | null = null;
 
   try {
     const result: GuardSetupResult = await runGuardSetup({
@@ -388,6 +446,7 @@ export async function guardSetupInProcess(
     // every later one stays PENDING, so the terminal never ticks work that never ran.
     if (result.report.status === 'failed') {
       tracker?.error(steps[current], firstLine(result.report.reason) ?? 'aborted');
+      closingFailure = { message: result.report.reason ?? 'guard setup failed', kind: 'setup' };
     } else {
       // A single-step run closes the checklist at the step it was asked for:
       // everything past it never started, so nothing past it may tick.
@@ -406,7 +465,7 @@ export async function guardSetupInProcess(
     throw e;
   } finally {
     // Close the sessions-store run, when any session actually ran under it.
-    sessionContext?.finish(options.signal?.aborted === true);
+    sessionContext?.finish(options.signal?.aborted === true, closingFailure ?? undefined);
     if (llmLog) {
       setLlmCallSink(undefined);
       llmLog.finish(Date.now() - startedAt);

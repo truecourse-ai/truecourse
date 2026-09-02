@@ -1,5 +1,5 @@
 /**
- * Postgres implementation of core's `GuardStore`. Three homes:
+ * Postgres implementation of core's `GuardStore`. Four homes:
  *
  *   - RUN STATE (`guard_runs`, one row per repo+commit):
  *     `writeGuardLatest` marks the default-branch baseline, `writeGuardRun` writes
@@ -32,6 +32,14 @@
  *     optional commit and fall back to the newest stored set. The generate report
  *     (`guard_results`) is keyed the same way.
  *
+ *   - SETUP BUNDLE (`guard_setup_sets`) — the same shape and the same content
+ *     scope for what `guard setup` leaves behind (`guard/setup.json`, the findings
+ *     ledger, the recipe, the dependency catalog + settle record, the seed script,
+ *     the generated compose file). A hosted setup runs in an ephemeral clone, so
+ *     this is what carries its per-step settle spine from commit to commit: the
+ *     job materializes the newest bundle before running and saves the clone's
+ *     result under its commit after.
+ *
  *   - DECISIONS — the mutable `dismissedClaims` ledger reuses the generic
  *     `decisions` table under a `guard:<repo>` scope (`#pr/<n>` for a PR overlay),
  *     mirroring how `PgSpecStore` routes its decisions scopes. An absent row reads
@@ -50,6 +58,7 @@ import {
   guardRuns,
   guardResults,
   guardScenarioSets,
+  guardSetupSets,
   decisions,
   type Db,
 } from '@truecourse/db';
@@ -543,6 +552,93 @@ export class PgGuardStore implements GuardStore {
       .where(
         and(eq(guardScenarioSets.repoKey, ref.repoKey), eq(guardScenarioSets.commitSha, ref.commitSha)),
       )
+      .limit(1);
+    return rows[0] ? (rows[0].manifest as Manifest) : null;
+  }
+
+  // --- Setup bundle ---------------------------------------------------------
+
+  async saveGuardSetupBundle(ref: RepoRef, files: Record<string, string>): Promise<void> {
+    const commitSha = requireCommit(ref, 'saveGuardSetupBundle');
+    const manifest: Record<string, string> = {};
+    const uniqueBytes = new Map<string, Buffer>();
+    for (const [rel, body] of Object.entries(files)) {
+      assertSafeRel(rel);
+      const bytes = Buffer.from(body, 'utf-8');
+      const sha = sha256(bytes);
+      manifest[rel] = sha;
+      if (!uniqueBytes.has(sha)) uniqueBytes.set(sha, bytes);
+    }
+
+    const scope = contentScope.guard(ref.repoKey);
+    await mapLimit([...uniqueBytes.keys()], OBJECT_CONCURRENCY, async (sha) => {
+      await this.content.put(scope, sha, uniqueBytes.get(sha)!.toString('utf-8'));
+    });
+
+    const sortedFiles = sortKeys(manifest);
+    const manifestHash = sha256(Buffer.from(JSON.stringify(sortedFiles)));
+    const payload: Manifest = { v: 1, files: sortedFiles };
+    const fileCount = Object.keys(sortedFiles).length;
+    const now = new Date().toISOString();
+    await this.db
+      .insert(guardSetupSets)
+      .values({
+        repoKey: ref.repoKey,
+        commitSha,
+        manifest: payload,
+        manifestHash,
+        fileCount,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [guardSetupSets.repoKey, guardSetupSets.commitSha],
+        set: { manifest: payload, manifestHash, fileCount, updatedAt: now },
+      });
+  }
+
+  async loadGuardSetupBundle(
+    repoKey: string,
+    commitSha?: string,
+  ): Promise<Record<string, string> | null> {
+    const manifest = commitSha
+      ? await this.setupManifest({ repoKey, commitSha })
+      : await this.latestSetupManifest(repoKey);
+    if (!manifest) return null;
+
+    const scope = contentScope.guard(repoKey);
+    const files: Record<string, string> = {};
+    await mapLimit(Object.entries(manifest.files ?? {}), OBJECT_CONCURRENCY, async ([rel, sha]) => {
+      // The manifest is stored data; a caller materializes these paths into a
+      // working tree, so they are re-checked on the way out too.
+      assertSafeRel(rel);
+      const body = await this.content.get(scope, sha);
+      if (body == null) {
+        throw new Error(
+          `[data-store] missing guard setup object ${sha} for ${rel} (${repoKey}@${commitSha ?? 'latest'})`,
+        );
+      }
+      files[rel] = body;
+    });
+    return files;
+  }
+
+  /** Manifest of the most-recently-stored bundle (the one a new clone inherits). */
+  private async latestSetupManifest(repoKey: string): Promise<Manifest | null> {
+    const rows = await this.db
+      .select({ manifest: guardSetupSets.manifest })
+      .from(guardSetupSets)
+      .where(eq(guardSetupSets.repoKey, repoKey))
+      .orderBy(desc(guardSetupSets.createdAt))
+      .limit(1);
+    return rows[0] ? (rows[0].manifest as Manifest) : null;
+  }
+
+  private async setupManifest(ref: RepoRef): Promise<Manifest | null> {
+    const rows = await this.db
+      .select({ manifest: guardSetupSets.manifest })
+      .from(guardSetupSets)
+      .where(and(eq(guardSetupSets.repoKey, ref.repoKey), eq(guardSetupSets.commitSha, ref.commitSha)))
       .limit(1);
     return rows[0] ? (rows[0].manifest as Manifest) : null;
   }
