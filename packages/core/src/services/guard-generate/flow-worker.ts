@@ -91,10 +91,23 @@ NOT answer with one JSON object. You work a LOOP against the real program:
      fix it instead of declaring it.
 4. On acceptance the engine stashes your yaml under a sha and tells you so.
 
+# Editing committed scenarios
+When the briefing carries a PRIOR SCENARIOS block, this flow is already covered
+and you EDIT that coverage: \`submit_scenario\` with \`replaces: "<prior id>"\`
+keeps the scenario's id (resubmitting it unchanged is right when nothing moved
+under it); omit \`replaces\` only for a genuinely new obligation; \`drop_scenario\`
+deletes a prior scenario whose obligation VANISHED from the spec — the reason
+must name it, and a scenario you merely rewrote is replaced, never dropped.
+At least one scenario must be accepted for a \`settled\` outcome; if none can
+be, end \`blocked\` or \`retired\` and the committed scenarios stay as they are.
+Without that block there is nothing to edit: never pass \`replaces\`.
+
 # The outcome — how the session MUST end
 Produce exactly one of these objects (nothing else ends the session):
 - { "kind": "settled", "scenarioYamlSha": "<the sha the acceptance named, verbatim>",
-    "expectedReds": [ ...exactly what you submitted, [] on a green ] }
+    "expectedReds": [ ...exactly what you submitted, [] on a green ],
+    "additionalScenarios": [ { "scenarioYamlSha", "expectedReds" } … ]   — ONLY when you had several accepted (edit mode); omit otherwise,
+    "droppedScenarios": [ { "id", "reason" } … ]   — ONLY the drop_scenario calls the engine accepted; omit otherwise }
 - { "kind": "blocked", "perMilestone": [ { "order": <milestone>, "capability": "<what the sandbox cannot provide>" } ] }
   — when the flow needs world-state or a third party the sandbox cannot offer.
   Name the capability precisely (the service, the credential, the fixture).
@@ -156,6 +169,10 @@ export function flowWorkerCacheKey(task: FlowWorkerTask): string {
     m.sectionKeys,
     m.interfaceFingerprints,
     m.recipeFingerprint,
+    // Edit mode folds the briefed priors in: a from-scratch task keys exactly
+    // as before, so every committed entry survives; an edit never serves a
+    // scratch hit and vice versa.
+    m.mode === 'edit' ? { priorShas: m.priorShas } : undefined,
   )
 }
 
@@ -169,10 +186,19 @@ export function flowWorkerCacheKey(task: FlowWorkerTask): string {
 export const CachedWorkerEntrySchema = z
   .object({
     outcome: GuardFlowWorkerOutcomeSchema,
+    /** The single accepted yaml — the legacy one-scenario entry. */
     scenarioYaml: z.string().min(1).optional(),
+    /** Every accepted yaml, index-aligned with `settledScenariosOf(outcome)` —
+     *  written by edit-mode settles; a legacy entry reads as a one-element list. */
+    scenarioYamls: z.array(z.string().min(1)).optional(),
   })
   .strict()
 export type CachedWorkerEntry = z.infer<typeof CachedWorkerEntrySchema>
+
+/** The cached yamls, primary first — one list for legacy and edit-mode entries. */
+export function cachedScenarioYamls(entry: CachedWorkerEntry): string[] {
+  return entry.scenarioYamls ?? (entry.scenarioYaml ? [entry.scenarioYaml] : [])
+}
 
 /**
  * Which completed outcomes enter the cache: ONLY `settled` — the one shape
@@ -219,10 +245,32 @@ const submitScenarioTool = (
       .object({
         yaml: z.string().min(1),
         expectedReds: z.array(GuardExpectedRedSchema).default([]),
+        /** Edit mode: the prior scenario this submission replaces (keeps its id). */
+        replaces: z.string().min(1).optional(),
       })
       .strict(),
     async execute(args, ctx) {
-      return task.submitScenario(args.yaml, args.expectedReds, judgeWith(ctx))
+      return task.submitScenario(args.yaml, args.expectedReds, judgeWith(ctx), args.replaces)
+    },
+  })
+
+const dropScenarioTool = (task: FlowWorkerTask): SessionTool =>
+  defineSessionTool({
+    name: 'drop_scenario',
+    description:
+      'Edit mode only: delete a PRIOR scenario (by the id the PRIOR SCENARIOS block names) whose obligation VANISHED from the current spec text. The reason must name the vanished obligation. A scenario you merely rewrote is replaced via `submit_scenario` with `replaces`, never dropped.',
+    kind: 'drop-scenario',
+    // Records an intent the engine applies at persist; nothing is deleted here.
+    readOnly: true,
+    destructive: false,
+    inputSchema: z
+      .object({
+        id: z.string().min(1),
+        reason: z.string().min(1),
+      })
+      .strict(),
+    async execute(args) {
+      return task.dropScenario(args.id, args.reason)
     },
   })
 
@@ -238,7 +286,7 @@ export function flowWorkerSessionDef(input: FlowWorkerSessionInput): SessionDef<
   return {
     kind: FLOW_WORKER_SESSION_KIND,
     systemPrompt: flowWorkerSystemPrompt(task.surface),
-    tools: [runScenarioTool(task), submitScenarioTool(task, input.judgeWith)],
+    tools: [runScenarioTool(task), submitScenarioTool(task, input.judgeWith), dropScenarioTool(task)],
     outcomeSchema: GuardFlowWorkerOutcomeSchema,
     budget: FLOW_WORKER_BUDGET,
     // The structural half of "run before you conclude" (01 step 2k): an

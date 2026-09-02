@@ -901,6 +901,28 @@ export const GuardGenerateReportSchema = z
     sectionsTotal: z.number().int().nonnegative(),
     sectionsChanged: z.number().int().nonnegative(),
     skippedUnchanged: z.number().int().nonnegative(),
+    /** Of `sectionsChanged`, the sections whose edit the claim-diff gate judged
+     *  cosmetic: their prior extraction was reused and no flow re-authored for
+     *  them. Absent on reports written before the gate existed. */
+    cosmeticSections: z.number().int().nonnegative().optional(),
+    /** Live claim-diff gate calls this run made (cache hits excluded). */
+    claimDiffCalls: z.number().int().nonnegative().optional(),
+    /** Prior scenarios editing workers deliberately dropped this run, each with
+     *  the vanished obligation it named. Absent on reports that predate
+     *  incremental authoring. */
+    retiredScenarios: z
+      .array(
+        z
+          .object({
+            flowId: z.string().min(1),
+            id: z.string().min(1),
+            surface: z.string().min(1),
+            reason: z.string().min(1),
+            replacedBy: z.array(z.string().min(1)).optional(),
+          })
+          .strict(),
+      )
+      .optional(),
     /** True when nothing changed — the confirm/run was a no-op. */
     noChanges: z.boolean(),
     written: z.array(GuardWrittenScenarioSchema),

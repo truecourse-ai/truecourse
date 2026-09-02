@@ -126,6 +126,25 @@ export const GuardManifestFlowInterfacesSchema = z
   .strict()
 export type GuardManifestFlowInterfaces = z.infer<typeof GuardManifestFlowInterfacesSchema>
 
+/**
+ * A prior scenario the flow's worker DROPPED while editing (incremental
+ * authoring): its obligation vanished from the spec, so the file was deleted
+ * on purpose. Recorded so the surface counts as accounted for by the settle
+ * invariant — a deliberate deletion is not a coverage hole — and so reports
+ * can say what left and why. `replacedBy` names the scenarios committed on the
+ * same surface in that run, when any.
+ */
+export const GuardManifestRetiredScenarioSchema = z
+  .object({
+    id: z.string().min(1),
+    surface: GuardDriverIdSchema,
+    /** The vanished obligation, as the worker named it. */
+    reason: z.string().min(1),
+    replacedBy: z.array(z.string().min(1)).optional(),
+  })
+  .strict()
+export type GuardManifestRetiredScenario = z.infer<typeof GuardManifestRetiredScenarioSchema>
+
 export const GuardManifestFlowSchema = z
   .object({
     /** The flow's id in `scenarios/flows.json`. */
@@ -147,6 +166,10 @@ export const GuardManifestFlowSchema = z
     generationInputsHash: z.string().nullable().default(null),
     /** Per-surface gaps: why a surface has no scenario. */
     gaps: z.array(GuardManifestGapSchema).default([]),
+    /** Prior scenarios an editing worker deliberately dropped (see
+     *  {@link GuardManifestRetiredScenarioSchema}). Defaults to `[]` so
+     *  manifests written before incremental authoring still parse. */
+    retiredScenarios: z.array(GuardManifestRetiredScenarioSchema).default([]),
     /**
      * True when no synthesized flow claims this entry any more — the flow left
      * `scenarios/flows.json`, but its committed scenarios are real coverage, so
@@ -192,6 +215,23 @@ export const GuardManifestGapSectionSchema = z
   .strict()
 export type GuardManifestGapSection = z.infer<typeof GuardManifestGapSectionSchema>
 
+/**
+ * One spec document as the last completed generate extracted it. `contentHash`
+ * is the sha256 of the document's bytes — the same input the extraction
+ * session's cache key folds — so the next generate can find the PRIOR
+ * extraction outcome of an edited document and ask the claim-diff gate whether
+ * the edit changed any obligation before paying to re-extract and re-author.
+ */
+export const GuardManifestDocSchema = z
+  .object({
+    /** Repo-relative path of the spec document. */
+    doc: z.string(),
+    /** Hex sha256 over the document's content at the extracting generate. */
+    contentHash: z.string(),
+  })
+  .strict()
+export type GuardManifestDoc = z.infer<typeof GuardManifestDocSchema>
+
 export const GuardManifestSchema = z.preprocess(
   dropLegacyVersion,
   z
@@ -199,6 +239,9 @@ export const GuardManifestSchema = z.preprocess(
       flows: z.array(GuardManifestFlowSchema),
       /** Absent on manifests written before the field existed — treated as empty. */
       gapSections: z.array(GuardManifestGapSectionSchema).optional(),
+      /** Absent on manifests written before the claim-diff gate existed — the
+       *  gate then has no prior to compare against and every doc edit re-extracts. */
+      docs: z.array(GuardManifestDocSchema).optional(),
     })
     .strict(),
 )
@@ -217,6 +260,9 @@ export function unaccountedSurfaces(flow: GuardManifestFlow): GuardDriverId[] {
   const accounted = new Set<GuardDriverId>([
     ...flow.scenarios.flatMap((s) => s.drivers),
     ...flow.gaps.map((g) => g.surface),
+    // A deliberately dropped scenario states why its surface has no test.
+    // (Tolerant of an entry built before the field existed.)
+    ...(flow.retiredScenarios ?? []).map((r) => r.surface),
   ])
   return flow.interfaces.map((j) => j.surface).filter((surface) => !accounted.has(surface))
 }

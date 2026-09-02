@@ -323,6 +323,8 @@ export interface RunGuardGenerateOptions {
    * later steps never start. Only `worker` writes anything durable.
    */
   only?: GenerateStep;
+  /** `--from-scratch`: re-author changed flows instead of editing their committed scenarios. */
+  fromScratch?: boolean;
 }
 
 /** Human name of each `--only-<step>` generate step, for prose lines. */
@@ -396,6 +398,7 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
       llm: opts.llmTransport,
       io: opts.io,
       ...(opts.only ? { only: opts.only } : {}),
+      ...(opts.fromScratch ? { fromScratch: true } : {}),
       // Fires when the (lazily created) run record exists — never on a
       // fully-cached run, which opens none.
       onRunStarted: (info) => printWatchLive(dashboardUrl, project.slug, info.runId),
@@ -522,7 +525,7 @@ export async function runGuardGenerate(opts: RunGuardGenerateOptions = {}): Prom
         `Nothing to run — the ${GENERATE_STEP_LABEL[guard.stoppedAfter]} step is already settled (its inputs are unchanged).`,
       );
     } else if (guard.stoppedAfter === "extract") {
-      p.log.step(`sections    ${guard.sectionsChanged} of ${guard.sectionsTotal} changed`);
+      p.log.step(`sections    ${guard.sectionsChanged} of ${guard.sectionsTotal} changed${cosmeticTag(guard)}`);
       p.log.step(`claims      ${guard.coverageGaps.length} gap${guard.coverageGaps.length === 1 ? "" : "s"} settled at extraction`);
       if (guard.extractionFailures.length > 0) {
         p.log.warn(`${guard.extractionFailures.length} document${guard.extractionFailures.length === 1 ? "" : "s"} failed extraction — re-run this step to retry`);
@@ -643,6 +646,12 @@ export interface GuardGenerateSummaryOptions {
   estimatedCostUsd?: number;
 }
 
+/** ` · N cosmetic (prior claims reused)` when the claim-diff gate absorbed any
+ *  changed section this run; empty otherwise (and on reports that predate it). */
+function cosmeticTag(r: Pick<GuardGenerateReport, "cosmeticSections">): string {
+  return r.cosmeticSections ? ` · ${r.cosmeticSections} cosmetic (prior claims reused)` : "";
+}
+
 /**
  * The closing summary for `guard generate` — FLOW-LED, since the flow is the
  * generation unit: settled/unsettled flows, the scenarios they were realized as,
@@ -665,6 +674,14 @@ export function printGuardGenerateSummary(
     if (f.dismissed > 0) parts.push(`${f.dismissed} dismissed`);
     if (f.orphaned > 0) parts.push(`${f.orphaned} orphaned`);
     p.log.step(`flows       ${parts.join(" · ")}`);
+    if (report.cosmeticSections) {
+      p.log.step(`sections    ${report.sectionsChanged} changed${cosmeticTag(report)}`);
+    }
+    // One line per scenario an editing worker dropped: the deletion is
+    // deliberate and its reason is the review output.
+    for (const r of report.retiredScenarios ?? []) {
+      p.log.step(`retired     ${r.id} (${r.surface}) — ${r.reason}${r.replacedBy?.length ? ` · replaced by ${r.replacedBy.join(", ")}` : ""}`);
+    }
   } else {
     // A report from before flow-keyed generation: fall back to the section split
     // it does carry (changed → settled/unsettled) rather than inventing flows.

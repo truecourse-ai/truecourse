@@ -498,6 +498,26 @@ export type WorkerSpec =
   | { blocked: { order: number; capability: string }[] }
   | { journeyDefect: { interfaceId: string; detail: string } }
   | { retired: { attempts: number; lastEvidence: string } }
+  /**
+   * Incremental authoring: replace briefed priors by id, add new scenarios,
+   * drop priors with a reason — the settled outcome then carries the first
+   * accepted sha as primary, the rest as `additionalScenarios`, and the
+   * accepted drops as `droppedScenarios`.
+   */
+  | {
+      edit: { replaces: string; scenario: RawGeneratedScenario }[]
+      add?: RawGeneratedScenario[]
+      drop?: { id: string; reason: string }[]
+    }
+
+/** What an honest worker passes as `replaces` when it is briefed with exactly
+ *  one prior scenario and re-authors it: that prior's id, so the scenario keeps
+ *  its place in the corpus. Undefined outside edit mode (or with several
+ *  priors, where the spec must name one). */
+export function keepsPriorId(task: FlowWorkerTask): string | undefined {
+  const priors = task.prior?.scenarios ?? []
+  return priors.length === 1 ? priors[0]!.id : undefined
+}
 
 /** The `actual:` line of the engine's condensed run report — what a worker
  *  copies into `predictedActual`. */
@@ -558,10 +578,47 @@ export function submitWorkerSessions(
     if ('journeyDefect' in spec) return { kind: 'outcome', outcome: { kind: 'journey-defect', report: spec.journeyDefect } }
     if ('retired' in spec) return { kind: 'outcome', outcome: { kind: 'retired', ...spec.retired } }
     const judge = opts.judge ?? faithfulJudge
+    if ('edit' in spec) {
+      const milestones = opts.milestones?.(task) ?? task.milestoneCount
+      const accepted: { scenarioYamlSha: string; expectedReds: GuardExpectedRed[] }[] = []
+      for (const e of spec.edit) {
+        const report = await task.submitScenario(scenarioYaml(stampMilestones(e.scenario, milestones)), [], judge, e.replaces)
+        opts.onSubmit?.(task, report)
+        const sha = acceptedSha(report)
+        if (sha === null) return refused(`the edit of ${e.replaces} was not accepted: ${report.content}`)
+        accepted.push({ scenarioYamlSha: sha, expectedReds: [] })
+      }
+      for (const raw of spec.add ?? []) {
+        const report = await task.submitScenario(scenarioYaml(stampMilestones(raw, milestones)), [], judge)
+        opts.onSubmit?.(task, report)
+        const sha = acceptedSha(report)
+        if (sha === null) return refused(`the added scenario was not accepted: ${report.content}`)
+        accepted.push({ scenarioYamlSha: sha, expectedReds: [] })
+      }
+      const dropped: { id: string; reason: string }[] = []
+      for (const d of spec.drop ?? []) {
+        const report = task.dropScenario(d.id, d.reason)
+        opts.onSubmit?.(task, report)
+        if (report.isError) return refused(`the drop of ${d.id} was refused: ${report.content}`)
+        dropped.push(d)
+      }
+      const [primary, ...rest] = accepted
+      if (!primary) return refused('an edit spec must accept at least one scenario')
+      return {
+        kind: 'outcome',
+        outcome: {
+          kind: 'settled',
+          scenarioYamlSha: primary.scenarioYamlSha,
+          expectedReds: primary.expectedReds,
+          ...(rest.length > 0 ? { additionalScenarios: rest } : {}),
+          ...(dropped.length > 0 ? { droppedScenarios: dropped } : {}),
+        },
+      }
+    }
     if ('red' in spec) {
       const yamlText = scenarioYaml(stampMilestones(spec.red, opts.milestones?.(task) ?? task.milestoneCount))
       // Round 1 observes the failure; round 2 declares it, as the gate requires.
-      const probe = await task.submitScenario(yamlText, [], judge)
+      const probe = await task.submitScenario(yamlText, [], judge, keepsPriorId(task))
       const expectedReds: GuardExpectedRed[] = [
         {
           step: observedStep(probe),
@@ -570,7 +627,7 @@ export function submitWorkerSessions(
           brief: spec.brief ?? 'the doc and the code disagree',
         },
       ]
-      const report = await task.submitScenario(yamlText, expectedReds, judge)
+      const report = await task.submitScenario(yamlText, expectedReds, judge, keepsPriorId(task))
       opts.onSubmit?.(task, report)
       const sha = acceptedSha(report)
       if (sha === null) return refused(`the red submission was not accepted: ${report.content}`)
@@ -579,7 +636,7 @@ export function submitWorkerSessions(
     const raw = 'scenario' in spec ? spec.scenario : spec
     const expectedReds = 'expectedReds' in spec ? spec.expectedReds : []
     const yamlText = scenarioYaml(stampMilestones(raw, opts.milestones?.(task) ?? task.milestoneCount))
-    const report = await task.submitScenario(yamlText, expectedReds, judge)
+    const report = await task.submitScenario(yamlText, expectedReds, judge, keepsPriorId(task))
     opts.onSubmit?.(task, report)
     const sha = acceptedSha(report)
     if (sha === null) return refused(`the submission was not accepted: ${report.content}`)

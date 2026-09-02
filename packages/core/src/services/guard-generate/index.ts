@@ -13,6 +13,8 @@ export {
   EXTRACT_SESSION_SYSTEM_PROMPT,
   EXTRACT_SESSION_PROMPT_FINGERPRINT,
   extractSessionCacheKey,
+  extractSessionCacheKeyForContentHash,
+  extractDocContentHash,
   extractSessionWorkItem,
   extractSessionDef,
   extractSessionBriefing,

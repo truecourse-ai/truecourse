@@ -37,7 +37,12 @@ import type {
   SessionPersistence,
 } from '@truecourse/agent-loop'
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
-import { ExtractOutcomeSchema, type ExtractOutcome, type GuardFlowWorkerOutcome } from '@truecourse/shared'
+import {
+  ExtractOutcomeSchema,
+  settledScenariosOf,
+  type ExtractOutcome,
+  type GuardFlowWorkerOutcome,
+} from '@truecourse/shared'
 import {
   GENERATE_SESSION_STEPS,
   checkEpicSet,
@@ -48,6 +53,7 @@ import {
   FlowSetSchema,
   type ExtractResult,
   type ExtractSessionSeam,
+  type ReuseExtractionSeam,
   type FlowsAreaSessionResult,
   type FlowsAreaSessionSeam,
   type FlowsEpicSessionResult,
@@ -73,6 +79,7 @@ import {
   EXTRACT_SESSION_KIND,
   extractSessionBriefing,
   extractSessionCacheKey,
+  extractSessionCacheKeyForContentHash,
   extractSessionDef,
   extractSessionWorkItem,
 } from './extract.js'
@@ -92,6 +99,7 @@ import {
 } from './flows.js'
 import {
   CachedWorkerEntrySchema,
+  cachedScenarioYamls,
   FLOW_WORKER_CACHE_NAME,
   FLOW_WORKER_SESSION_KIND,
   cacheableWorkerOutcome,
@@ -139,6 +147,8 @@ export class GenerateStepNotReadyError extends Error {
 
 export interface GuardGenerateSessionSeams {
   extractSession: ExtractSessionSeam
+  /** The claim-diff gate's access to the extract cache (prior-outcome lookup + reuse). */
+  reuseExtraction: ReuseExtractionSeam
   flowsAreaSession: FlowsAreaSessionSeam
   flowsEpicSession: FlowsEpicSessionSeam
   /** The flow-worker pool (plan 04 steps 17 + 18) — waves, cache, fidelity children. */
@@ -606,24 +616,29 @@ export function createGuardGenerateSessionSeams(
         if (hit !== null) {
           const parsed = CachedWorkerEntrySchema.safeParse(hit)
           if (parsed.success) {
-            const { outcome, scenarioYaml } = parsed.data
+            const { outcome } = parsed.data
             // A legacy `blocked` entry parses but is a MISS: a block is a
             // world claim with no re-verification path (unlike settled's
             // confirmCached), and replayed infra-blocks permanently skipped
             // live flows (the documenso 13-worker bench). The session re-runs
             // and, since blocked is no longer cacheable, overwrites nothing.
-            if (
+            // Every accepted scenario (one for a legacy entry, several for an
+            // edit-mode settle) must ride the entry with its yaml matching
+            // the outcome's sha, index-aligned.
+            const accepted = settledScenariosOf(outcome)
+            const yamls = cachedScenarioYamls(parsed.data)
+            const aligned =
               outcome.kind === 'settled' &&
-              scenarioYaml !== undefined &&
-              sha256Hex(scenarioYaml) === outcome.scenarioYamlSha
-            ) {
+              accepted.length > 0 &&
+              yamls.length === accepted.length &&
+              accepted.every((s, i) => sha256Hex(yamls[i]!) === s.scenarioYamlSha)
+            if (aligned) {
               // The cached-settled VERIFICATION (mirror of recipe-cache-
-              // verifies): one fresh, deterministic confirmation run before
-              // the hit stands — it catches world drift the key cannot see.
-              // Drift means the entry is a MISS and the session runs. The `!`
-              // stands on the flattened outcome schema's superRefine: a parsed
-              // `settled` always carries `expectedReds`.
-              if (await task.confirmCached(scenarioYaml, outcome.expectedReds!)) {
+              // verifies): one fresh, deterministic confirmation run per
+              // scenario before the hit stands — it catches world drift the
+              // key cannot see. Drift on any means the entry is a MISS and the
+              // session runs.
+              if (await task.confirmCached(accepted.map((s, i) => ({ yaml: yamls[i]!, expectedReds: s.expectedReds })))) {
                 summary.fromCache++
                 byTask.set(task.workItem, { kind: 'outcome', outcome, fromCache: true })
                 tick('settled')
@@ -697,7 +712,7 @@ export function createGuardGenerateSessionSeams(
           if (
             settled.status === 'completed' &&
             settled.output.kind === 'settled' &&
-            !task.hasStash(settled.output.scenarioYamlSha!)
+            settledScenariosOf(settled.output).some((s) => !task.hasStash(s.scenarioYamlSha))
           ) {
             settled = {
               status: 'failed',
@@ -723,12 +738,17 @@ export function createGuardGenerateSessionSeams(
             // retired, journey-defect and failures are per-run events — never
             // cached (see cacheableWorkerOutcome).
             if (cacheableWorkerOutcome(settled.output)) {
-              const scenarioYaml =
-                settled.output.kind === 'settled' ? task.stashedYaml(settled.output.scenarioYamlSha!) : undefined
-              if (settled.output.kind !== 'settled' || scenarioYaml !== undefined) {
+              // Every accepted yaml rides the entry (an unreviewed green
+              // returns no yaml, and then NOTHING is written — the
+              // lost-review rule, kept). `scenarioYaml` stays the primary for
+              // readers that predate edit mode; `scenarioYamls` is the full,
+              // index-aligned list.
+              const yamls = settledScenariosOf(settled.output).map((s) => task.stashedYaml(s.scenarioYamlSha))
+              if (yamls.length > 0 && yamls.every((y): y is string => y !== undefined)) {
                 const entry: CachedWorkerEntry = {
                   outcome: settled.output,
-                  ...(scenarioYaml !== undefined ? { scenarioYaml } : {}),
+                  scenarioYaml: yamls[0]!,
+                  ...(yamls.length > 1 ? { scenarioYamls: yamls } : {}),
                 }
                 await setCacheEntry(opts.repoRoot, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task), entry).catch(
                   () => undefined,
@@ -767,8 +787,37 @@ export function createGuardGenerateSessionSeams(
     return { byTask, summary, ...(fidelitySummary ? { fidelitySummary } : {}) }
   }
 
+  // The claim-diff gate's view of the extract cache. `lookup` reads the raw
+  // outcome cached for the doc's PRIOR content; `reuse` copies it under the
+  // doc's CURRENT key so the pool above hits without a session. Both address
+  // the cache through the same key recipe the pool uses, so a prompt edit
+  // (which re-keys every doc) naturally finds no prior and re-extracts.
+  const reuseExtraction: ReuseExtractionSeam = {
+    async lookup(doc, priorContentHash) {
+      const cached = await getCacheEntry(
+        opts.repoRoot,
+        EXTRACT_SESSION_CACHE_NAME,
+        extractSessionCacheKeyForContentHash(priorContentHash, doc.suppressedQuotes),
+      ).catch(() => null)
+      const parsed = ExtractOutcomeSchema.safeParse(cached)
+      return parsed.success ? parsed.data : null
+    },
+    async reuse(doc, priorContentHash) {
+      const cached = await getCacheEntry(
+        opts.repoRoot,
+        EXTRACT_SESSION_CACHE_NAME,
+        extractSessionCacheKeyForContentHash(priorContentHash, doc.suppressedQuotes),
+      ).catch(() => null)
+      if (cached === null) return
+      await setCacheEntry(opts.repoRoot, EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey(doc), cached).catch(
+        () => undefined,
+      )
+    },
+  }
+
   return {
     extractSession,
+    reuseExtraction,
     flowsAreaSession,
     flowsEpicSession,
     flowWorkerSession,

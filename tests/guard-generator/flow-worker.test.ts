@@ -1032,10 +1032,13 @@ describe('confirmCached', () => {
       repoRoot: r,
       extractSession: extractSessionBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
-        mispredicted = await task.confirmCached(firstAccepted, [
-          { step: 1, predictedActual: 'never happens', verdict: 'code-drift', brief: 'b' },
+        mispredicted = await task.confirmCached([
+          {
+            yaml: firstAccepted,
+            expectedReds: [{ step: 1, predictedActual: 'never happens', verdict: 'code-drift', brief: 'b' }],
+          },
         ])
-        confirmed = await task.confirmCached(firstAccepted, [])
+        confirmed = await task.confirmCached([{ yaml: firstAccepted, expectedReds: [] }])
         const sha = yamlSha(firstAccepted)
         expect(task.hasStash(sha)).toBe(true)
         return { kind: 'outcome', outcome: { kind: 'settled', scenarioYamlSha: sha, expectedReds: [] } }

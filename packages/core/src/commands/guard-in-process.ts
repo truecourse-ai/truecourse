@@ -23,6 +23,7 @@ import {
   type GuardGenerateResult,
   type GuardGenerateModels,
   type ExtractSessionSeam,
+  type ReuseExtractionSeam,
   type RecipeRunner,
   type FlowsAreaSessionSeam,
   type FlowsEpicSessionSeam,
@@ -161,7 +162,9 @@ export const GUARD_GENERATE_STEPS = [
  */
 const GUARD_STEP_STAGES: Record<string, StageId[]> = {
   index: ['guard.recipe'],
-  extract: [],
+  // The claim-diff gate spends here: one call per edited section before the
+  // (session-based) extraction decides whether to re-run for the doc.
+  extract: ['guard.claimDiff'],
   interfaces: [],
   flows: [],
   match: ['guard.match'],
@@ -202,6 +205,10 @@ export interface GuardGenerateInProcessOptions {
    * refused up front unless every seam is injected.
    */
   extractSession?: ExtractSessionSeam;
+  /** The claim-diff gate's extract-cache access; unset, production wires the
+   *  cache-backed seam beside `extractSession`. Absent entirely (an injected
+   *  `extractSession` with no `reuseExtraction`), the gate is skipped. */
+  reuseExtraction?: ReuseExtractionSeam;
   flowsAreaSession?: FlowsAreaSessionSeam;
   flowsEpicSession?: FlowsEpicSessionSeam;
   flowWorkerSession?: FlowWorkerSessionSeam;
@@ -228,6 +235,8 @@ export interface GuardGenerateInProcessOptions {
    * The estimate gate prices only the chosen step.
    */
   only?: GenerateStep;
+  /** Re-author changed flows from scratch instead of editing their committed scenarios. */
+  fromScratch?: boolean;
 }
 
 /**
@@ -408,6 +417,11 @@ export async function guardGenerateInProcess(
           ...(options.only ? { only: options.only } : {}),
         });
   const extractSession = options.extractSession ?? sessionSeams!.extractSession;
+  // An injected extraction seam owns no cache, so the production reuse seam
+  // would address entries the injected seam never wrote: the gate only rides
+  // with the seam it was injected beside, or with production extraction.
+  const reuseExtraction =
+    options.reuseExtraction ?? (options.extractSession ? undefined : sessionSeams?.reuseExtraction);
   const flowsAreaSession = options.flowsAreaSession ?? sessionSeams!.flowsAreaSession;
   const flowsEpicSession = options.flowsEpicSession ?? sessionSeams!.flowsEpicSession;
   const flowWorkerSession = options.flowWorkerSession ?? sessionSeams!.flowWorkerSession;
@@ -426,6 +440,7 @@ export async function guardGenerateInProcess(
       recipeRunner: options.recipeRunner,
       matchRunner: options.matchRunner,
       extractSession,
+      ...(reuseExtraction ? { reuseExtraction } : {}),
       flowsAreaSession,
       flowsEpicSession,
       flowWorkerSession,
@@ -450,6 +465,7 @@ export async function guardGenerateInProcess(
         }),
       ...(options.stopAfterFlows ? { stopAfterFlows: true } : {}),
       ...(options.only ? { only: options.only } : {}),
+      ...(options.fromScratch ? { fromScratch: true } : {}),
       onPlan: (total, work) => {
         // Indexing is an instant deterministic pass — mark it done with its result
         // detail immediately (recipe-discovery usage rides its tag), never a live phase.

@@ -215,6 +215,7 @@ describe('guard manifest v2 (flow-keyed)', () => {
         gaps: [
           { surface: 'web' as const, kind: 'awaiting-driver' as const, reason: 'no web driver', driver: 'web' as const },
         ],
+        retiredScenarios: [],
       },
     ],
   }

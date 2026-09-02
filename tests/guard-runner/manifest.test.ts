@@ -28,6 +28,7 @@ describe('GuardManifestSchema', () => {
           interfaces: [{ surface: 'cli', interfaceIds: ['cli/tasks-add'] }],
           generationInputsHash: null,
           gaps: [],
+          retiredScenarios: [],
         },
       ],
     }
@@ -42,6 +43,7 @@ describe('GuardManifestSchema', () => {
     expect(parsed.flows[0].generationInputsHash).toBeNull()
     expect(parsed.flows[0].gaps).toEqual([])
     expect(parsed.flows[0].interfaces).toEqual([])
+    expect(parsed.flows[0].retiredScenarios).toEqual([])
   })
 
   it('carries a test committed FAILING at birth, and defaults a status-less entry to passing', () => {
@@ -103,6 +105,7 @@ describe('rebuildManifestFromScenarios', () => {
       interfaces: [{ surface: 'cli', interfaceIds: ['cli/tasks-list'] }],
       generationInputsHash: null,
       gaps: [],
+      retiredScenarios: [],
     })
   })
 

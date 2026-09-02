@@ -654,6 +654,20 @@ export const WorldClassifySchema = z
   .strict()
 export type WorldClassify = z.infer<typeof WorldClassifySchema>
 
+/**
+ * The claim-diff gate's reply for ONE edited section: `cosmetic` when the
+ * current text still guarantees every previously extracted claim and adds no
+ * observable behavior, `changed` otherwise. Cached per (prompt, new section
+ * fingerprint, prior claims), so the same edit is judged once per repo.
+ */
+export const ClaimDiffSchema = z
+  .object({
+    verdict: z.enum(['cosmetic', 'changed']),
+    reason: z.string().min(1),
+  })
+  .strict()
+export type ClaimDiff = z.infer<typeof ClaimDiffSchema>
+
 export const RealizationMatchSchema = z
   .object({
     plan: z.array(RealizationStepSchema).optional(),

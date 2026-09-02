@@ -123,9 +123,20 @@ export const EXTRACT_SESSION_PROMPT_FINGERPRINT = promptFingerprint(EXTRACT_SESS
  * key, by decision.
  */
 export function extractSessionCacheKey(doc: Pick<GuardDoc, 'content' | 'suppressedQuotes'>): string {
-  const contentHash = createHash('sha256').update(doc.content).digest('hex')
+  return extractSessionCacheKeyForContentHash(extractDocContentHash(doc.content), doc.suppressedQuotes)
+}
+
+/** The doc-content half of the extract cache key — hex sha256 over the bytes.
+ *  The manifest records it per doc so the claim-diff gate can address the
+ *  PRIOR extraction of a document whose content has since moved. */
+export function extractDocContentHash(content: string): string {
+  return createHash('sha256').update(content).digest('hex')
+}
+
+/** {@link extractSessionCacheKey} from an already-computed content hash. */
+export function extractSessionCacheKeyForContentHash(contentHash: string, suppressedQuotes: readonly string[]): string {
   const base = `${EXTRACT_SESSION_PROMPT_FINGERPRINT}::${contentHash}`
-  const suppression = suppressionKey(doc.suppressedQuotes)
+  const suppression = suppressionKey(suppressedQuotes)
   return createHash('sha256').update(suppression ? `${base}::${suppression}` : base).digest('hex')
 }
 

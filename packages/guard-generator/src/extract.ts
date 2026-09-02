@@ -92,6 +92,24 @@ export type ExtractSessionSeam = (input: {
   onDoc?: (done: number, total: number) => void
 }) => Promise<{ byDoc: Map<string, ExtractResult>; summary: GuardSessionSummary }>
 
+/** The prior extraction of a document as the claim-diff gate reads it: the raw
+ *  session outcome (model anchors, un-snapped — the gate snaps it against the
+ *  live sections exactly as the extraction fold does). */
+export type PriorExtraction = DocClaims
+
+/**
+ * The extraction-reuse seam behind the claim-diff gate. `lookup` returns the
+ * outcome the extraction session cached for the document at `priorContentHash`
+ * (null when none is cached); `reuse` makes the upcoming extraction of `doc` —
+ * whose content moved — resolve to that same outcome without a session, so a
+ * cosmetic edit keeps its claims byte-identical. The implementation (in
+ * `@truecourse/core`) owns the session cache's key recipe; tests inject a map.
+ */
+export interface ReuseExtractionSeam {
+  lookup(doc: GuardDoc, priorContentHash: string): Promise<PriorExtraction | null>
+  reuse(doc: GuardDoc, priorContentHash: string): Promise<void>
+}
+
 // ---------------------------------------------------------------------------
 // Anchor snapping + dedupe
 // ---------------------------------------------------------------------------

@@ -61,6 +61,9 @@ export type StageId =
   // there is no per-stage tier for them, so declaring the ids would advertise
   // overrides nothing reads.
   | 'guard.match'
+  // The claim-diff gate: one call per edited section, deciding whether the edit
+  // changed an obligation before the flows bound to it re-author.
+  | 'guard.claimDiff'
   // --- guard run (the one LLM call a run can make) ---
   | 'guard.visualJudge'
   | 'guard.recipe'
@@ -102,6 +105,10 @@ export const STAGE_DEFAULTS: Record<StageId, string> = {
   // weakness that moved `spec.areaTag` off it), and a wrong plan births a
   // scenario that tests the wrong path.
   'guard.match': 'sonnet',
+  // Same tier as matching: a judgement over one section's text against its
+  // prior claims, made once per edit per repo. In API mode every stage runs on
+  // the one configured model anyway.
+  'guard.claimDiff': 'sonnet',
   // READING A SCREENSHOT of a failed web step — the only LLM call `guard run`
   // makes, and only ever about a failure. Vision comprehension of a real UI is the
   // top tier's work (a weaker model confidently mis-reads a rendered page, and the

@@ -129,6 +129,8 @@ function fakeTask(over: Partial<FlowWorkerTask> = {}, flowId = 'create-a-task'):
       sectionKeys: ['docs/tasks.md#tasks/creating-tasks:abc'],
       interfaceFingerprints: ['iface-1'],
       recipeFingerprint: 'recipe-1',
+      mode: 'scratch',
+      priorShas: [],
     },
     prepare: async () => {
       calls.prepare++
@@ -146,8 +148,10 @@ function fakeTask(over: Partial<FlowWorkerTask> = {}, flowId = 'create-a-task'):
     },
     hasStash: (sha) => stash.has(sha),
     stashedYaml: (sha) => stash.get(sha),
-    confirmCached: async (yaml, expectedReds) => {
-      calls.confirm.push({ yaml, expectedReds })
+    dropScenario: () => ({ content: 'not accepted — nothing to edit', isError: true }),
+    droppedIds: () => [],
+    confirmCached: async (scenarios) => {
+      for (const s of scenarios) calls.confirm.push({ yaml: s.yaml, expectedReds: s.expectedReds })
       return true
     },
     ...over,
@@ -185,7 +189,7 @@ describe('flowWorkerSessionDef', () => {
     expect(d.budget).toEqual({ turns: 25, maxResumes: 1, tokenCeiling: 200_000 })
     expect(FLOW_WORKER_BUDGET).toEqual(d.budget)
     // EXACTLY two tools — no filesystem surface: the briefing is the grounding.
-    expect(d.tools.map((t) => t.name)).toEqual(['run_scenario', 'submit_scenario'])
+    expect(d.tools.map((t) => t.name)).toEqual(['run_scenario', 'submit_scenario', 'drop_scenario'])
   })
 
   it('refuses an outcome produced before anything was run', () => {
@@ -217,8 +221,12 @@ describe('flowWorkerSessionDef', () => {
     // blast-radius cut: the canonical scenario schema gained `world` and the
     // doctrine gained the shared-world/self-mint contract (a committed
     // delete-account scenario had deleted the seeded principal mid-run).
-    expect(FLOW_WORKER_CLI_PROMPT_FINGERPRINT).toBe('585bda824f89eaad')
-    expect(FLOW_WORKER_API_PROMPT_FINGERPRINT).toBe('5ea39e8a0e7fe72b')
+    // Moved again for incremental authoring: the addendum gained the edit
+    // contract (`replaces`, `drop_scenario`, multi-scenario settled). Only a
+    // flow that is WORK consults the worker cache, so the roll costs one miss
+    // per re-authoring flow, never a corpus-wide re-author.
+    expect(FLOW_WORKER_CLI_PROMPT_FINGERPRINT).toBe('5406c21dc97e4407')
+    expect(FLOW_WORKER_API_PROMPT_FINGERPRINT).toBe('e56a653332160975')
   })
 
   it('routes both tools to the task’s engine closures', async () => {
@@ -356,6 +364,123 @@ describe('the flow-worker pool’s cache', () => {
       outcome: { kind: 'settled', scenarioYamlSha: sha256(YAML), expectedReds: [] },
       scenarioYaml: YAML,
     })
+  })
+
+  // Edit mode (incremental authoring): a settle may accept SEVERAL scenarios.
+  const YAML2 = YAML.replace('title:', 'title: (second)')
+  const editTask = (over: Partial<FlowWorkerTask> = {}) =>
+    fakeTask({
+      prior: { scenarios: [{ id: 'create-a-task', yaml: 'prior yaml' }] },
+      cacheMaterial: {
+        flowFingerprint: 'fp-create-a-task',
+        sectionKeys: ['docs/tasks.md#tasks/creating-tasks:abc'],
+        interfaceFingerprints: ['iface-1'],
+        recipeFingerprint: 'recipe-1',
+        mode: 'edit',
+        priorShas: [sha256('prior yaml')],
+      },
+      ...over,
+    })
+
+  it('an edit-mode task keys differently from the scratch task for the same flow', () => {
+    expect(flowWorkerCacheKey(editTask().task)).not.toBe(flowWorkerCacheKey(fakeTask().task))
+  })
+
+  it('a two-scenario cached settle is CONFIRMED as a whole and serves the task', async () => {
+    const r = docRepo()
+    const { task, calls } = editTask()
+    const outcomeCached = {
+      kind: 'settled' as const,
+      scenarioYamlSha: sha256(YAML),
+      expectedReds: [],
+      additionalScenarios: [{ scenarioYamlSha: sha256(YAML2), expectedReds: [] }],
+    }
+    await setCacheEntry(r, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task), {
+      outcome: outcomeCached,
+      scenarioYaml: YAML,
+      scenarioYamls: [YAML, YAML2],
+    })
+
+    const { byTask, summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], mutatorTasks: [], docs: docsOf(r) })
+    expect(summary).toMatchObject({ ran: 0, fromCache: 1, failed: 0 })
+    expect(byTask.get(task.workItem)).toEqual({ kind: 'outcome', outcome: outcomeCached, fromCache: true })
+    // Both scenarios were re-run in the one confirmation.
+    expect(calls.confirm).toEqual([
+      { yaml: YAML, expectedReds: [] },
+      { yaml: YAML2, expectedReds: [] },
+    ])
+    expect(calls.prepare).toBe(0)
+  })
+
+  it('a two-scenario entry whose yamls do not line up with the outcome is a miss', async () => {
+    const r = docRepo()
+    const { task, calls } = editTask()
+    await setCacheEntry(r, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task), {
+      outcome: {
+        kind: 'settled' as const,
+        scenarioYamlSha: sha256(YAML),
+        expectedReds: [],
+        additionalScenarios: [{ scenarioYamlSha: sha256(YAML2), expectedReds: [] }],
+      },
+      // One yaml for two accepted shas: nothing can be confirmed.
+      scenarioYaml: YAML,
+    })
+    sessionScript = settleScript
+
+    const { summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], mutatorTasks: [], docs: docsOf(r) })
+    expect(summary).toMatchObject({ ran: 1, fromCache: 0 })
+    expect(calls.confirm).toEqual([])
+  })
+
+  it('a fresh two-scenario settle caches BOTH yamls, primary first', async () => {
+    const r = docRepo()
+    const { task } = editTask()
+    sessionScript = async (call) => {
+      await callTool(call, 'run_scenario', { yaml: YAML })
+      const first = await callTool(call, 'submit_scenario', { yaml: YAML, expectedReds: [], replaces: 'create-a-task' })
+      const second = await callTool(call, 'submit_scenario', { yaml: YAML2, expectedReds: [] })
+      const sha = (c: { content: string }) => /under sha ([0-9a-f]{64})/.exec(c.content)![1]
+      return outcome({
+        kind: 'settled',
+        scenarioYamlSha: sha(first),
+        expectedReds: [],
+        additionalScenarios: [{ scenarioYamlSha: sha(second), expectedReds: [] }],
+      })
+    }
+
+    const { summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], mutatorTasks: [], docs: docsOf(r) })
+    expect(summary).toMatchObject({ ran: 1, failed: 0 })
+    expect(await getCacheEntry(r, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task))).toEqual({
+      outcome: {
+        kind: 'settled',
+        scenarioYamlSha: sha256(YAML),
+        expectedReds: [],
+        additionalScenarios: [{ scenarioYamlSha: sha256(YAML2), expectedReds: [] }],
+      },
+      scenarioYaml: YAML,
+      scenarioYamls: [YAML, YAML2],
+    })
+  })
+
+  it('a settle naming a sha the engine never stashed is malformed, even as an additional scenario', async () => {
+    const r = docRepo()
+    const { task } = editTask()
+    sessionScript = async (call) => {
+      await callTool(call, 'run_scenario', { yaml: YAML })
+      const first = await callTool(call, 'submit_scenario', { yaml: YAML, expectedReds: [], replaces: 'create-a-task' })
+      const sha = /under sha ([0-9a-f]{64})/.exec(first.content)![1]
+      return outcome({
+        kind: 'settled',
+        scenarioYamlSha: sha,
+        expectedReds: [],
+        additionalScenarios: [{ scenarioYamlSha: sha256('never submitted'), expectedReds: [] }],
+      })
+    }
+
+    const { byTask, summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], mutatorTasks: [], docs: docsOf(r) })
+    expect(summary).toMatchObject({ ran: 1, failed: 1 })
+    expect(byTask.get(task.workItem)).toMatchObject({ kind: 'failed' })
+    expect(await getCacheEntry(r, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task))).toBeNull()
   })
 
   it('a legacy cached BLOCKED entry is a MISS — the session re-attempts the flow (the P1017 replay incident)', async () => {

@@ -229,11 +229,35 @@ const FLOW_WORKER_PAYLOAD_FIELDS = {
  *  `settled` and `retired` stay closed: settled carries its accepted scenario,
  *  and retired REQUIRES both fields already. */
 const FLOW_WORKER_OPTIONAL_FIELDS = {
-  settled: [],
+  // Incremental authoring: a worker editing a flow's committed scenarios may
+  // accept MORE than one (`additionalScenarios`, beyond the primary the required
+  // fields carry) and may drop a prior scenario whose obligation vanished
+  // (`droppedScenarios`). Both absent on a from-scratch author — the legacy
+  // one-scenario shape stays byte-identical, so old cache entries still parse.
+  settled: ['additionalScenarios', 'droppedScenarios'],
   blocked: ['lastEvidence', 'attempts'],
   'journey-defect': ['lastEvidence', 'attempts'],
   retired: [],
 } as const satisfies Record<keyof typeof FLOW_WORKER_PAYLOAD_FIELDS, readonly string[]>
+
+/** One accepted scenario beyond the primary: its stashed sha + declared reds. */
+export const GuardSettledScenarioSchema = z
+  .object({
+    scenarioYamlSha: z.string().min(1),
+    expectedReds: z.array(GuardExpectedRedSchema),
+  })
+  .strict()
+export type GuardSettledScenario = z.infer<typeof GuardSettledScenarioSchema>
+
+/** A prior scenario the worker deliberately dropped, with the vanished
+ *  obligation named — persisted on the manifest as a retired scenario. */
+export const GuardDroppedScenarioSchema = z
+  .object({
+    id: z.string().min(1),
+    reason: z.string().min(1),
+  })
+  .strict()
+export type GuardDroppedScenario = z.infer<typeof GuardDroppedScenarioSchema>
 
 /**
  * The `guard-generate.flow-worker` session's outcome (plan 04 step 17) —
@@ -278,12 +302,18 @@ export const GuardFlowWorkerOutcomeSchema = z
     /** retired: the last run's evidence — why no faithful scenario could be produced.
      *  blocked MAY carry it too: the run evidence behind the block. */
     lastEvidence: z.string().min(1).optional(),
+    /** settled (edit mode): scenarios accepted beyond the primary, each by its stashed sha. */
+    additionalScenarios: z.array(GuardSettledScenarioSchema).optional(),
+    /** settled (edit mode): prior scenarios the worker dropped, each with the vanished obligation. */
+    droppedScenarios: z.array(GuardDroppedScenarioSchema).optional(),
   })
   .strict()
   .superRefine((value, ctx) => {
     const wanted: readonly string[] = FLOW_WORKER_PAYLOAD_FIELDS[value.kind]
     const allowed: readonly string[] = FLOW_WORKER_OPTIONAL_FIELDS[value.kind]
-    const allFields = Object.values(FLOW_WORKER_PAYLOAD_FIELDS).flat()
+    const allFields = [
+      ...new Set([...Object.values(FLOW_WORKER_PAYLOAD_FIELDS).flat(), ...Object.values(FLOW_WORKER_OPTIONAL_FIELDS).flat()]),
+    ]
     for (const field of allFields) {
       const present = value[field as keyof typeof value] !== undefined
       if (wanted.includes(field) && !present) {
@@ -302,6 +332,19 @@ export const GuardFlowWorkerOutcomeSchema = z
     }
   })
 export type GuardFlowWorkerOutcome = z.infer<typeof GuardFlowWorkerOutcomeSchema>
+
+/**
+ * Every scenario a `settled` outcome accepted, primary first — the one list
+ * each reader walks, so a legacy one-scenario outcome and an edit-mode
+ * multi-scenario one flow through the same code. Empty for any other kind.
+ */
+export function settledScenariosOf(outcome: GuardFlowWorkerOutcome): GuardSettledScenario[] {
+  if (outcome.kind !== 'settled' || !outcome.scenarioYamlSha) return []
+  return [
+    { scenarioYamlSha: outcome.scenarioYamlSha, expectedReds: outcome.expectedReds ?? [] },
+    ...(outcome.additionalScenarios ?? []),
+  ]
+}
 
 /** `.truecourse/scenarios/flows.json` — the synthesized flow corpus. */
 export const GuardFlowsFileSchema = z

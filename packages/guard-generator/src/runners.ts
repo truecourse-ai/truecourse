@@ -27,7 +27,7 @@
  */
 
 import { cliTransport, extractJsonValue, jsonSchemaHint, type LlmTransport } from '@truecourse/shared/llm'
-import { RealizationMatchSchema, RecipeProposalSchema, WorldClassifySchema } from './schemas.js'
+import { ClaimDiffSchema, RealizationMatchSchema, RecipeProposalSchema, WorldClassifySchema } from './schemas.js'
 import {
   RECIPE_SYSTEM_PROMPT,
   buildRecipeUserPrompt,
@@ -35,9 +35,12 @@ import {
   buildMatchUserPrompt,
   WORLD_CLASSIFY_SYSTEM_PROMPT,
   buildWorldClassifyUserPrompt,
+  CLAIM_DIFF_SYSTEM_PROMPT,
+  buildClaimDiffUserPrompt,
   type RecipeDiscoveryInput,
   type MatchUserContext,
   type WorldClassifyFlowInput,
+  type ClaimDiffSectionInput,
 } from './prompts.js'
 
 /** The response schema each stage sends on its request — one per reply contract,
@@ -45,10 +48,12 @@ import {
 const MATCH_RESPONSE_SCHEMA = jsonSchemaHint(RealizationMatchSchema)
 const RECIPE_RESPONSE_SCHEMA = jsonSchemaHint(RecipeProposalSchema)
 const WORLD_CLASSIFY_RESPONSE_SCHEMA = jsonSchemaHint(WorldClassifySchema)
+const CLAIM_DIFF_RESPONSE_SCHEMA = jsonSchemaHint(ClaimDiffSchema)
 
 export type RecipeRunner = (input: RecipeDiscoveryInput) => Promise<unknown>
 export type MatchRunner = (input: MatchUserContext) => Promise<unknown>
 export type WorldClassifyRunner = (flows: readonly WorldClassifyFlowInput[]) => Promise<unknown>
+export type ClaimDiffRunner = (section: ClaimDiffSectionInput) => Promise<unknown>
 
 interface SpawnOptions {
   transport?: LlmTransport
@@ -93,6 +98,27 @@ export function spawnWorldClassifyRunner(opts: SpawnOptions = {}): WorldClassify
       user: buildWorldClassifyUserPrompt(flows),
       responseFormat: 'json',
       schema: WORLD_CLASSIFY_RESPONSE_SCHEMA,
+      timeoutMs,
+    })
+    return JSON.parse(extractJsonValue(raw))
+  }
+}
+
+/** Claim-diff gate — one call per EDITED section whose doc has a prior
+ *  extraction, deciding whether the edit changed any obligation. */
+export function spawnClaimDiffRunner(opts: SpawnOptions = {}): ClaimDiffRunner {
+  const transport = opts.transport ?? cliTransport()
+  const timeoutMs = opts.timeoutMs ?? 120_000
+  return async (section) => {
+    const raw = await transport({
+      id: 'guard.claimDiff',
+      stage: 'guard.claimDiff',
+      model: opts.model,
+      fallbackModel: opts.fallbackModel,
+      system: CLAIM_DIFF_SYSTEM_PROMPT,
+      user: buildClaimDiffUserPrompt(section),
+      responseFormat: 'json',
+      schema: CLAIM_DIFF_RESPONSE_SCHEMA,
       timeoutMs,
     })
     return JSON.parse(extractJsonValue(raw))

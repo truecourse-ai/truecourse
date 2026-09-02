@@ -102,6 +102,8 @@ export {
   type ExtractResult,
   type ExtractedClaimWithNeeds,
   type ExtractSessionSeam,
+  type PriorExtraction,
+  type ReuseExtractionSeam,
   type GuardSessionSummary,
 } from './extract.js'
 
@@ -328,6 +330,10 @@ export {
   type SeedRetryContext,
   type SeedSchemaTable,
   type RecipeAppInventoryEntry,
+  CLAIM_DIFF_SYSTEM_PROMPT,
+  CLAIM_DIFF_PROMPT_FINGERPRINT,
+  buildClaimDiffUserPrompt,
+  type ClaimDiffSectionInput,
 } from './prompts.js'
 
 // Example mining (D3) — the doc's own examples run verbatim.
@@ -345,10 +351,23 @@ export {
   spawnRecipeRunner,
   spawnMatchRunner,
   spawnWorldClassifyRunner,
+  spawnClaimDiffRunner,
   type RecipeRunner,
   type MatchRunner,
   type WorldClassifyRunner,
+  type ClaimDiffRunner,
 } from './runners.js'
+
+export {
+  reuseCosmeticExtractions,
+  rememberDocTexts,
+  claimDiffCacheKey,
+  docContentHash,
+  CLAIM_DIFF_CACHE_NAME,
+  DOC_TEXT_CACHE_NAME,
+  EMPTY_CLAIM_DIFF_GATE,
+  type ClaimDiffGateResult,
+} from './claim-diff.js'
 
 export {
   TestabilityVerdictSchema,
@@ -397,6 +416,8 @@ export {
   type SynthesizedFlow,
   type SynthesizedMilestone,
   type SynthesizedEpicFlow,
+  ClaimDiffSchema,
+  type ClaimDiff,
 } from './schemas.js'
 
 // The app↔server join — which recipe server serves a flow's paths, and

@@ -432,6 +432,10 @@ guardCmd
   .option("--only-extract", "Run only the claim-extraction sessions (nothing is written)")
   .option("--only-flows", "Run only the flow-synthesis sessions (extraction replayed from cache; nothing is written)")
   .option("--only-worker", "Run only the flow-worker sessions (earlier steps replayed from cache) and write the scenarios")
+  .option(
+    "--from-scratch",
+    "Re-author every changed flow from scratch instead of editing its committed scenarios (the default edits them)",
+  )
   .action(async (options) => {
     const only = (
       [
@@ -451,6 +455,7 @@ guardCmd
       llmTransport: options.llmTransport,
       io: options.io,
       ...(only[0] ? { only: only[0] } : {}),
+      ...(options.fromScratch ? { fromScratch: true } : {}),
     });
   });
 

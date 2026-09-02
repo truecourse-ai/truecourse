@@ -131,6 +131,8 @@ import {
   type GuardManifestFlow,
   type GuardManifestGap,
   type GuardManifestScenario,
+  type GuardManifestRetiredScenario,
+  settledScenariosOf,
   type GuardOrphanedDismissal,
   type GuardOrphanedFlowDismissal,
   type GuardRunRefusal,
@@ -176,19 +178,23 @@ import {
 } from './prompts.js'
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import { WorldClassifySchema, type RawGeneratedScenario } from './schemas.js'
+import { EMPTY_CLAIM_DIFF_GATE, docContentHash, rememberDocTexts, reuseCosmeticExtractions } from './claim-diff.js'
 import {
   spawnRecipeRunner,
   spawnMatchRunner,
   spawnWorldClassifyRunner,
+  spawnClaimDiffRunner,
   type RecipeRunner,
   type MatchRunner,
   type WorldClassifyRunner,
+  type ClaimDiffRunner,
 } from './runners.js'
 import {
   isSystemicSessionLoss,
   type DocClaims,
   type ExtractResult,
   type ExtractSessionSeam,
+  type ReuseExtractionSeam,
   type GuardSessionSummary,
 } from './extract.js'
 import {
@@ -245,6 +251,7 @@ import {
   parseRawScenarioYaml,
   parseScenarioYaml,
   deleteScenarioFiles,
+  scenarioFileIndex,
   existingScenarioIds,
 } from './serialize.js'
 
@@ -390,6 +397,15 @@ export interface GuardGenerateResult {
   /** Sections whose text moved since the last generate, plus sections no flow binds. */
   sectionsChanged: number
   skippedUnchanged: number
+  /** Of `sectionsChanged`, the sections whose edit the claim-diff gate judged
+   *  cosmetic: their document's prior extraction was reused and no flow
+   *  re-authored for them. Absent on the abort results. */
+  cosmeticSections?: number
+  /** Live claim-diff gate calls this run made (cache hits excluded). */
+  claimDiffCalls?: number
+  /** Prior scenarios editing workers deliberately dropped this run, with the
+   *  vanished obligation each named (also persisted on the manifest flow). */
+  retiredScenarios?: (GuardManifestRetiredScenario & { flowId: string })[]
   /** True when no flow needed work and none was removed — the confirm/run was a no-op. */
   noChanges: boolean
   /** Every test committed this run, passing and failing alike. */
@@ -633,6 +649,24 @@ export interface GenerateGuardsOptions {
   /** Test seam for the batched world classification; production spawns it on
    *  the shared transport (see {@link spawnWorldClassifyRunner}). */
   worldClassifyRunner?: WorldClassifyRunner
+  /** Test seam for the claim-diff gate's verdict call; production spawns it on
+   *  the shared transport (see {@link spawnClaimDiffRunner}). */
+  claimDiffRunner?: ClaimDiffRunner
+  /**
+   * The claim-diff gate's access to the extract cache (prior-outcome lookup +
+   * reuse). Absent, the gate is skipped and every edited document re-extracts
+   * and re-authors as before — the seam belongs to whoever owns the extraction
+   * cache (core's session seams), so an injected `extractSession` with no
+   * matching seam runs gate-less.
+   */
+  reuseExtraction?: ReuseExtractionSeam
+  /**
+   * The incremental-authoring escape hatch: re-author every changed flow from
+   * scratch instead of briefing its committed scenarios for editing. Flows whose
+   * milestone composition changed, and tainted flows, author from scratch
+   * regardless.
+   */
+  fromScratch?: boolean
   // --- progress hooks ---
   onPlan?: (total: number, work: number) => void
   /** Extraction progress, ticking per settled doc session (cache hits included). */
@@ -687,6 +721,7 @@ export function workerCacheKey(
   sectionKeys: readonly string[],
   interfaceFingerprints: readonly string[],
   recipeFingerprint: string,
+  edit?: { priorShas: readonly string[] },
 ): string {
   const parts = [
     promptFingerprint,
@@ -696,6 +731,9 @@ export function workerCacheKey(
     [...sectionKeys].sort().join('~'),
     [...interfaceFingerprints].sort().join('~'),
   ]
+  // Edit mode appends the briefed priors; absent, the key is byte-identical to
+  // the from-scratch recipe, so committed entries keep hitting.
+  if (edit) parts.push('edit', [...edit.priorShas].sort().join('~'))
   return createHash('sha256').update(parts.join('::')).digest('hex')
 }
 
@@ -757,6 +795,11 @@ export interface FlowWorkerCacheMaterial {
   sectionKeys: readonly string[]
   interfaceFingerprints: readonly string[]
   recipeFingerprint: string
+  /** `edit` when the briefing carries the flow's committed scenarios to edit;
+   *  `scratch` otherwise (the key then matches every pre-edit-mode entry). */
+  mode: 'scratch' | 'edit'
+  /** sha256 of each briefed prior yaml (edit mode; empty for scratch). */
+  priorShas: readonly string[]
 }
 
 /** One (flow, surface) work unit of the worker pool — engine closures inside. */
@@ -778,6 +821,10 @@ export interface FlowWorkerTask {
    *  cache read (the entry still holds the rejected scenario) and the briefing
    *  already carries the mismatch as `priorFlag`. */
   taint?: { title: string; mismatch: string }
+  /** Edit mode: the flow's committed scenarios on this surface, briefed for
+   *  editing (`submit_scenario` with `replaces`, `drop_scenario`). Absent on a
+   *  from-scratch author. */
+  prior?: { scenarios: readonly { id: string; yaml: string }[] }
   cacheMaterial: FlowWorkerCacheMaterial
   /**
    * Render the briefing — today's `buildAuthorCtx` payload through
@@ -798,7 +845,17 @@ export interface FlowWorkerTask {
     yaml: string,
     expectedReds: readonly GuardExpectedRed[],
     judge: WorkerFidelityJudge,
+    /** Edit mode: the prior scenario id this submission replaces (keeps the id);
+     *  omitted ⇒ a new scenario. Refused outside edit mode. */
+    replaces?: string,
   ): Promise<FlowWorkerToolReport>
+  /** The `drop_scenario` engine half (edit mode): record that a briefed prior
+   *  scenario's obligation vanished; persist deletes it and the manifest
+   *  retires it with the reason. Refused for an id the briefing did not carry. */
+  dropScenario(id: string, reason: string): FlowWorkerToolReport
+  /** The ids `dropScenario` accepted so far — the fold cross-checks the
+   *  outcome's `droppedScenarios` against them. */
+  droppedIds(): string[]
   /** Whether an accepted submission with this sha is in the engine stash — the
    *  reject gate for a `settled` outcome referencing nothing. */
   hasStash(sha: string): boolean
@@ -811,10 +868,12 @@ export interface FlowWorkerTask {
    * Verify a CACHED settled outcome against the live world: parse the cached
    * yaml, re-run it once in a fresh sandbox, and check the outcome against the
    * cached `expectedReds` (green ⇔ none declared; a red must reproduce every
-   * prediction). True re-stashes the candidate so the fold finds it; false
-   * means world drift — core treats the entry as a MISS and runs the session.
+   * prediction). True re-stashes every candidate so the fold finds them; false
+   * means world drift on ANY of them — core treats the entry as a MISS and
+   * runs the session. One element for a legacy entry; several for an edit-mode
+   * settle.
    */
-  confirmCached(scenarioYaml: string, expectedReds: readonly GuardExpectedRed[]): Promise<boolean>
+  confirmCached(scenarios: readonly { yaml: string; expectedReds: readonly GuardExpectedRed[] }[]): Promise<boolean>
 }
 
 /** One task's result as the seam reports it back for the engine's routing. */
@@ -976,6 +1035,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const worldClassifyRunner =
     options.worldClassifyRunner ??
     spawnWorldClassifyRunner({ transport, model: options.models?.match, fallbackModel: options.models?.fallback })
+  const claimDiffRunner =
+    options.claimDiffRunner ??
+    spawnClaimDiffRunner({ transport, model: options.models?.match, fallbackModel: options.models?.fallback })
 
   const coverageGaps: GuardCoverageGap[] = []
   const errors: GuardGenerateError[] = []
@@ -1038,6 +1100,27 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // carries needs the WHOLE document (schemes + the doc-level `security` fallback).
   const docText = new Map(docs.map((d) => [d.doc, d.content]))
   const sectionByKey = new Map(plan.sections.map((s) => [flowSectionKey(s.doc, s.anchor), s]))
+
+  // THE CLAIM-DIFF GATE: an edited document whose every changed section still
+  // states the same obligations keeps its PRIOR extraction (copied under its
+  // new cache key, so the pool below hits) — no session, no reworded claims, and
+  // the flows bound to those sections are spared a re-author further down (the
+  // per-flow gate substitutes the prior fingerprints). Fail closed: no seam, no
+  // recorded prior, a new or vanished section, or one `changed` verdict leaves
+  // the document to extraction exactly as before.
+  // Every document's text, remembered under its content hash: the next
+  // generate's gate reads an edited document's OLD text from here.
+  await rememberDocTexts(repoRoot, docs)
+  const claimDiff = options.reuseExtraction
+    ? await reuseCosmeticExtractions({
+        repoRoot,
+        docs,
+        priorManifest: readManifest(repoRoot),
+        seam: options.reuseExtraction,
+        runner: claimDiffRunner,
+      })
+    : EMPTY_CLAIM_DIFF_GATE
+  for (const message of claimDiff.errors) errors.push({ doc: '', anchor: '', message })
 
   // A credential's `satisfies` naming a scheme NO OpenAPI doc in
   // the corpus declares can never bind — the matcher would silently fall through to
@@ -1523,9 +1606,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       const s = sectionByKey.get(flowSectionKey(m.doc, m.anchor))
       if (s) sections.set(m.order, s)
     }
-    const sectionKeys = [...new Set(flow.bindings.map((b) => sectionByKey.get(flowSectionKey(b.doc, b.anchor))))]
-      .filter((s): s is SectionInput => s !== undefined)
-      .map(sectionInputsKey)
+    const boundSections = [...new Set(flow.bindings.map((b) => sectionByKey.get(flowSectionKey(b.doc, b.anchor))))].filter(
+      (s): s is SectionInput => s !== undefined,
+    )
+    const sectionKeys = boundSections.map(sectionInputsKey)
 
     const plans = new Map<GuardDriverId, RealizationPlan>()
     const gaps: GuardManifestGap[] = []
@@ -1631,7 +1715,34 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     // A settled entry that leaves a planned surface unaccounted for (no test, no
     // gap) is a hole nothing can heal: its hash skips the flow forever. Its hash is
     // DISREGARDED, so the flow re-runs here and settles honestly — no migration.
-    const changed = !prior || prior.generationInputsHash !== inputsHash || violatesSettleInvariant(prior)
+    let changed = !prior || prior.generationInputsHash !== inputsHash || violatesSettleInvariant(prior)
+    // THE PER-FLOW CLAIM-DIFF GATE: when the only inputs that moved are bound
+    // sections the gate judged cosmetic (their prior extraction was reused, so
+    // the claims — and this flow's fingerprint — are byte-identical), the hash
+    // recomputed over the sections' PRIOR fingerprints equals the committed one
+    // and the flow stays unchanged. The unchanged branch re-stamps the NEW hash,
+    // so the next generate is a genuine no-op. A settle-invariant violation
+    // still wins: an unaccounted surface must re-run regardless.
+    if (changed && prior && prior.generationInputsHash !== null && !violatesSettleInvariant(prior) && claimDiff.cosmetic.size > 0) {
+      let substituted = false
+      const priorSectionKeys = boundSections.map((s) => {
+        const priorFingerprint = claimDiff.cosmetic.get(flowSectionKey(s.doc, s.anchor))
+        if (priorFingerprint === undefined) return sectionInputsKey(s)
+        substituted = true
+        return sectionInputsKey({ ...s, fingerprint: priorFingerprint })
+      })
+      if (
+        substituted &&
+        flowGenerationInputsHash({
+          flowFingerprint: flow.fingerprint,
+          sectionKeys: priorSectionKeys,
+          interfaceFingerprints,
+          recipeFingerprint,
+        }) === prior.generationInputsHash
+      ) {
+        changed = false
+      }
+    }
     if (!changed && prior) {
       // Unchanged ⇒ authoring does not run, so the gaps the AUTHOR stage settled last
       // time (a refusal: "blocked on world-state the sandbox cannot provide") cannot
@@ -1954,6 +2065,15 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   for (const w of changedWorks) {
     for (const id of w.prior?.scenarios.map((s) => s.id) ?? []) usedIds.delete(id)
   }
+  // Edit mode's priors: the committed corpus as it stands BEFORE persist
+  // deletes anything, indexed by id — the yaml a worker is briefed to edit and
+  // the interface fingerprints the moved-inputs summary compares against.
+  const priorYamlById: PriorScenarioIndex = new Map(
+    loadScenarios(repoRoot).scenarios.map((s) => [s.id, { yaml: serializeScenarioYaml(s), scenario: s }]),
+  )
+  // `drop_scenario` calls the fold accepted, per (flow, surface) — persist
+  // deletes those files and the manifest retires them with their reasons.
+  const dropsByRef = new Map<string, { id: string; reason: string }[]>()
 
   // The "test is wrong" verdicts — the two classes withheld from the
   // corpus: a fidelity rejection on a green candidate, and a worker RETIREMENT
@@ -2123,6 +2243,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         /** The stable engine-assigned scenario id every attempt builds with. */
         id: string
         acceptedSha?: string
+        /** Edit mode: the briefed prior scenarios (id → yaml) the worker may
+         *  replace or drop; empty in scratch mode. */
+        priors: Map<string, string>
+        /** The `drop_scenario` calls accepted so far (edit mode). */
+        drops: { id: string; reason: string }[]
         /** Fidelity flags drawn so far — the first HIGH-confidence one is the
          *  in-loop self-heal; any later flag is a rejection. */
         fidelityFlags: number
@@ -2132,9 +2257,30 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       }
       const states = new Map<string, WorkerTaskState>()
       for (const task of runnable) {
+        // EDIT MODE resolution, deterministic: the flow has a committed entry
+        // with the SAME milestone composition, it is not tainted (a rejected
+        // prior is authored away from, never edited), `--from-scratch` was not
+        // asked, and this surface owns at least one prior whose file still
+        // loads. Anything else authors from scratch exactly as before.
+        const tainted = priorLedger.tainted[autoResolutionKey(task.work.flow.id, task.surface)] !== undefined
+        const owned = priorScenariosBySurface(task.work).get(task.surface) ?? []
+        const priors = new Map<string, string>()
+        if (
+          !options.fromScratch &&
+          !tainted &&
+          task.work.prior &&
+          task.work.prior.flowFingerprint === task.work.flow.fingerprint
+        ) {
+          for (const s of owned) {
+            const prior = priorYamlById.get(s.id)
+            if (prior) priors.set(s.id, prior.yaml)
+          }
+        }
         states.set(taskKey(task), {
           task,
           id: assignScenarioId(task.work.flow.id, task.surface, usedIds),
+          priors,
+          drops: [],
           fidelityFlags: 0,
         })
       }
@@ -2238,6 +2384,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       const buildCandidate = (
         state: WorkerTaskState,
         raw: RawGeneratedScenario,
+        id: string = state.id,
       ): { candidate: BirthCandidate } | { error: string } => {
         const task = state.task
         try {
@@ -2245,7 +2392,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             flow: task.work.flow,
             interfaces: task.plan.interfaces,
             raw,
-            id: state.id,
+            id,
             surface: task.surface,
             ...(task.server ? { server: task.server } : {}),
             defaultServer: defaultApiServer,
@@ -2483,6 +2630,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         const ref = taskKey(task)
         const taint = priorLedger.tainted[autoResolutionKey(task.work.flow.id, task.surface)]
         const epic = task.work.flow.composedOf.length > 0
+        const priorScenarios = [...state.priors.entries()].map(([id, yaml]) => ({ id, yaml }))
+        const editMode = priorScenarios.length > 0
         return {
           workItem: `flow:${task.work.flow.id}:${task.surface}`,
           flowId: task.work.flow.id,
@@ -2490,11 +2639,14 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           epic,
           milestoneCount: new Set(task.plan.steps.map((s) => s.milestone)).size,
           ...(taint ? { taint: { title: taint.title, mismatch: taint.mismatch } } : {}),
+          ...(editMode ? { prior: { scenarios: priorScenarios } } : {}),
           cacheMaterial: {
             flowFingerprint: task.work.flow.fingerprint,
             sectionKeys: task.work.sectionKeys,
             interfaceFingerprints: task.plan.interfaces.map((j) => j.fingerprint),
             recipeFingerprint,
+            mode: editMode ? 'edit' : 'scratch',
+            priorShas: priorScenarios.map((p) => sha256Hex(p.yaml)),
           },
           prepare: async () => {
             const probes =
@@ -2516,6 +2668,21 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                 serverIndex,
               }),
               ...(taint ? { priorFlag: { title: taint.title, mismatch: taint.mismatch } } : {}),
+              // Edit mode and the taint are exclusive by construction (a tainted
+              // task never resolves to edit mode above), so the two blocks never
+              // contradict each other in one briefing.
+              ...(editMode
+                ? {
+                    priorScenarios,
+                    movedInputs: {
+                      sections: movedSectionsFor(task.work),
+                      interfaces: movedInterfacesFor(
+                        task.plan,
+                        priorScenarios.flatMap((p) => priorYamlById.get(p.id)?.scenario ?? []),
+                      ),
+                    },
+                  }
+                : {}),
             }
             const lines = [buildAuthorUserPrompt(ctx)]
             if (epic) {
@@ -2558,14 +2725,38 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               ...(run.result.outcome === 'pass' ? {} : { isError: true }),
             }
           },
-          submitScenario: async (yamlText, expectedReds, judge) => {
+          submitScenario: async (yamlText, expectedReds, judge, replaces) => {
+            // Id resolution. Scratch mode: the pre-assigned id, every attempt
+            // (`replaces` is meaningless there). Edit mode: `replaces` keeps a
+            // briefed prior's id; omitted, the submission is a NEW scenario
+            // and takes the next free id — strictly, so "add one and drop the
+            // old one" stays expressible and a kept prior is always named.
+            let id = state.id
+            if (state.priors.size > 0) {
+              if (replaces !== undefined) {
+                if (!state.priors.has(replaces)) {
+                  return {
+                    content: `not accepted — \`replaces\` names "${replaces}", which is not a prior scenario of this flow on this surface (briefed: ${[...state.priors.keys()].join(', ')})`,
+                    isError: true,
+                  }
+                }
+                if (state.drops.some((d) => d.id === replaces)) {
+                  return { content: `not accepted — "${replaces}" was dropped earlier in this session; drop OR replace a prior, not both`, isError: true }
+                }
+                id = replaces
+              } else {
+                id = assignScenarioId(task.work.flow.id, task.surface, usedIds)
+              }
+            } else if (replaces !== undefined) {
+              return { content: 'not accepted — `replaces` is for editing committed scenarios, and this flow has none to edit', isError: true }
+            }
             const parsed = parseRawScenarioYaml(yamlText, task.surface)
             if ('error' in parsed) return { content: parsed.error, isError: true }
             const defect = preflightDefect(task, parsed.raw)
             if (defect) return { content: `pre-flight defect (not executed): ${defect}`, isError: true }
             const gate = mutatorDraftGate(task, parsed.raw)
             if (gate) return gate
-            const built = buildCandidate(state, parsed.raw)
+            const built = buildCandidate(state, parsed.raw, id)
             if ('error' in built) return { content: `the scenario does not build: ${built.error}`, isError: true }
             const run = await executeOnce(built.candidate, task)
             if ('report' in run) return run.report
@@ -2583,64 +2774,102 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             // it for real — the one-shot path's lost-review rule, kept.
             return entry.fidelityUnreviewed ? undefined : entry.yaml
           },
-          confirmCached: async (scenarioYaml, expectedReds) => {
+          dropScenario: (id, reason) => {
+            if (state.priors.size === 0) {
+              return { content: 'not accepted — `drop_scenario` is for editing committed scenarios, and this flow has none to edit', isError: true }
+            }
+            if (!state.priors.has(id)) {
+              return {
+                content: `not accepted — "${id}" is not a prior scenario of this flow on this surface (briefed: ${[...state.priors.keys()].join(', ')})`,
+                isError: true,
+              }
+            }
+            if (state.drops.some((d) => d.id === id)) {
+              return { content: `not accepted — "${id}" is already dropped in this session`, isError: true }
+            }
+            if ([...stash.values()].some((e) => e.candidate.ref === ref && e.candidate.scenario.id === id)) {
+              return { content: `not accepted — "${id}" was already replaced by an accepted submission in this session; a scenario is replaced OR dropped, not both`, isError: true }
+            }
+            state.drops.push({ id, reason: reason.trim() })
+            return {
+              content:
+                `recorded — "${id}" will be deleted at persist and retired with that reason. ` +
+                `List it under "droppedScenarios" in your settled outcome. At least one scenario must still be accepted.`,
+            }
+          },
+          droppedIds: () => state.drops.map((d) => d.id),
+          confirmCached: async (cached) => {
             // World drift check for a cache hit (the recipe-cache-verifies
-            // mirror): the cached scenario re-runs once, fresh, and the hit
-            // stands only when its verdict still reproduces.
-            const scenario = parseScenarioYaml(scenarioYaml)
-            if (!scenario) return false
-            // A cached MUTATOR must not execute outside the serialized tail
-            // (or at all without a declared reset) — a confirmation run is an
-            // execution like any other. Treated as a miss: the session runs,
-            // and the draft gate rules there.
-            if (
-              scenario.world === 'mutates' &&
-              (!recipe.api?.services?.reset || !destructiveFlowIds.has(task.work.flow.id))
-            ) {
-              return false
-            }
-            usedIds.add(scenario.id)
-            const candidate: BirthCandidate = {
-              flow: task.work.flow,
-              surface: task.surface,
-              section: task.work.primary,
-              scenario,
-              ref,
-            }
-            const run = await executeOnce(candidate, task)
-            if ('report' in run) {
-              // Refusal/anomaly: the world (not the entry) is broken — count
-              // the hit so no session is spent chasing it; routing unsettles
-              // refused tasks and an anomaly aborts before persist.
-              if (runRefusal || anomalyLatch) {
-                stash.set(sha256Hex(scenarioYaml), {
+            // mirror): every cached scenario re-runs once, fresh, and the hit
+            // stands only when each verdict still reproduces. One element for
+            // a legacy entry; several for an edit-mode settle.
+            if (cached.length === 0) return false
+            const stashed: { sha: string; entry: WorkerStashEntry }[] = []
+            for (const { yaml: scenarioYaml, expectedReds } of cached) {
+              const scenario = parseScenarioYaml(scenarioYaml)
+              if (!scenario) return false
+              // A cached MUTATOR must not execute outside the serialized tail
+              // (or at all without a declared reset) — a confirmation run is an
+              // execution like any other. Treated as a miss: the session runs,
+              // and the draft gate rules there.
+              if (
+                scenario.world === 'mutates' &&
+                (!recipe.api?.services?.reset || !destructiveFlowIds.has(task.work.flow.id))
+              ) {
+                return false
+              }
+              const candidate: BirthCandidate = {
+                flow: task.work.flow,
+                surface: task.surface,
+                section: task.work.primary,
+                scenario,
+                ref,
+              }
+              const run = await executeOnce(candidate, task)
+              if ('report' in run) {
+                // Refusal/anomaly: the world (not the entry) is broken — count
+                // the hit so no session is spent chasing it; routing unsettles
+                // refused tasks and an anomaly aborts before persist.
+                if (runRefusal || anomalyLatch) {
+                  stashed.push({
+                    sha: sha256Hex(scenarioYaml),
+                    entry: {
+                      candidate,
+                      yaml: scenarioYaml,
+                      result: {
+                        id: scenario.id,
+                        title: scenario.title,
+                        binds: scenario.binds[0],
+                        outcome: 'error',
+                        durationMs: 0,
+                      },
+                      expectedReds: [...expectedReds],
+                      fidelityUnreviewed: false,
+                    },
+                  })
+                  continue
+                }
+                return false
+              }
+              if (!redPredictionHolds(run.result, expectedReds)) return false
+              stashed.push({
+                sha: sha256Hex(scenarioYaml),
+                entry: {
                   candidate,
                   yaml: scenarioYaml,
-                  result: {
-                    id: scenario.id,
-                    title: scenario.title,
-                    binds: scenario.binds[0],
-                    outcome: 'error',
-                    durationMs: 0,
-                  },
+                  result: run.result,
                   expectedReds: [...expectedReds],
                   fidelityUnreviewed: false,
-                })
-                state.acceptedSha = sha256Hex(scenarioYaml)
-                return true
-              }
-              return false
+                },
+              })
             }
-            if (!redPredictionHolds(run.result, expectedReds)) return false
-            const sha = sha256Hex(scenarioYaml)
-            stash.set(sha, {
-              candidate,
-              yaml: scenarioYaml,
-              result: run.result,
-              expectedReds: [...expectedReds],
-              fidelityUnreviewed: false,
-            })
-            state.acceptedSha = sha
+            // All reproduced: the hit stands, every candidate is stashed for
+            // the fold, and their ids are reserved exactly as a session would.
+            for (const { sha, entry } of stashed) {
+              usedIds.add(entry.candidate.scenario.id)
+              stash.set(sha, entry)
+            }
+            state.acceptedSha = stashed[0]!.sha
             return true
           },
         }
@@ -2857,10 +3086,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             freshlyAuthoredTaints.add(autoResolutionKey(work.flow.id, surface))
           }
           if (outcome.kind === 'settled') {
-            const entry = stash.get(outcome.scenarioYamlSha!)
-            if (!entry || entry.candidate.ref !== ref) {
-              // The seam's reject hook converts this to `malformed` before
-              // fold and cache; belt-and-braces for a seam that did not.
+            // Every accepted scenario, primary first — one for a from-scratch
+            // author, several for an edit-mode settle. Each sha must be a stash
+            // entry of THIS task; the seam's reject hook already converts a
+            // foreign sha to `malformed`, this is belt-and-braces.
+            const accepted = settledScenariosOf(outcome).map((s) => ({ s, entry: stash.get(s.scenarioYamlSha) }))
+            const foreign = accepted.find(({ entry }) => !entry || entry.candidate.ref !== ref)
+            if (foreign || accepted.length === 0) {
               task.errored = true
               errors.push({
                 doc: work.primary.doc,
@@ -2872,21 +3104,41 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               })
               continue
             }
-            if (entry.result.outcome === 'pass') {
-              if (entry.fidelityUnreviewed) {
-                fidelityUnreviewed++
-                unadjudicatedRefs.add(ref)
+            // The outcome may only list drops the engine recorded through
+            // `drop_scenario`; an invented one unsettles the flow.
+            const recorded = new Set(states.get(ref)?.drops.map((d) => d.id) ?? [])
+            const invented = (outcome.droppedScenarios ?? []).filter((d) => !recorded.has(d.id))
+            if (invented.length > 0) {
+              task.errored = true
+              errors.push({
+                doc: work.primary.doc,
+                anchor: work.primary.anchor,
+                kind: 'authoring',
+                flowId: work.flow.id,
+                surface,
+                message: `flow worker (${surface}) reported dropping ${invented.map((d) => d.id).join(', ')} without a \`drop_scenario\` call the engine accepted`,
+              })
+              continue
+            }
+            const drops = states.get(ref)?.drops ?? []
+            if (drops.length > 0) dropsByRef.set(ref, drops.map((d) => ({ ...d })))
+            for (const { entry } of accepted) {
+              if (entry!.result.outcome === 'pass') {
+                if (entry!.fidelityUnreviewed) {
+                  fidelityUnreviewed++
+                  unadjudicatedRefs.add(ref)
+                }
+                pushInto(persisted, ref, entry!.candidate)
+              } else {
+                // A committed red: its diagnosis is the WORKER's confirmed
+                // prediction — the session path's triage.
+                const finding = toFinding({ candidate: entry!.candidate, result: entry!.result })
+                const declared = entry!.expectedReds.find(
+                  (r) => r.step === (entry!.result.failure?.step ?? 1),
+                )
+                if (declared) finding.expectedRed = declared
+                pushInto(failedTests, ref, { candidate: entry!.candidate, finding })
               }
-              pushInto(persisted, ref, entry.candidate)
-            } else {
-              // A committed red: its diagnosis is the WORKER's confirmed
-              // prediction — the session path's triage.
-              const finding = toFinding({ candidate: entry.candidate, result: entry.result })
-              const declared = entry.expectedReds.find(
-                (r) => r.step === (entry.result.failure?.step ?? 1),
-              )
-              if (declared) finding.expectedRed = declared
-              pushInto(failedTests, ref, { candidate: entry.candidate, finding })
             }
             continue
           }
@@ -3017,6 +3269,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // fidelity rejection (the test itself is wrong), a retirement, or an error
   // withholds work and leaves the flow unsettled for the next generate.
   const written: GeneratedScenarioInfo[] = []
+  const retiredReport: (GuardManifestRetiredScenario & { flowId: string })[] = []
   const birthFindings: GuardBirthFinding[] = []
   const workingManifest = new Map<string, GuardManifestFlow>()
   let flowsSettled = 0
@@ -3037,7 +3290,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           .filter((s) => !boundKeys.has(`${s.doc}\0${s.anchor}`))
           .map((s) => ({ doc: s.doc, anchor: s.anchor, fingerprint: s.fingerprint }))
       : (priorGapSections ?? []).filter((g) => !boundKeys.has(`${g.doc}\0${g.anchor}`))
-    writeManifest(repoRoot, { flows, gapSections })
+    // Every document extraction read, with the content hash its cache entry is
+    // keyed on — what the next generate's claim-diff gate needs to find the
+    // prior extraction of a document whose text has since moved.
+    const manifestDocs = docs.map((d) => ({ doc: d.doc, contentHash: docContentHash(d.content) }))
+    writeManifest(repoRoot, { flows, gapSections, docs: manifestDocs })
   }
 
   // THE SETTLE INVARIANT, enforced at the one place a flow settles: an entry may
@@ -3067,14 +3324,29 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       )
       continue
     }
-    // The flow re-authored: its OWN prior files go, then its survivors land.
-    deleteScenarioFiles(repoRoot, work.prior?.scenarios.map((s) => s.id) ?? [])
+    // The flow re-authored. Its survivors land first; its prior files are
+    // deleted AFTER the commit loop, minus the ids re-written (an edited prior
+    // keeps its id and is simply overwritten) and minus the priors CARRIED on
+    // a surface that produced nothing this run (a worker that blocked or
+    // retired must not erase real coverage) — so a failed edit never leaves
+    // the flow with less than it had.
     const slug = areaOrDocSlug(work.primary)
     const scenarios: GuardManifestScenario[] = []
+    const retired: GuardManifestRetiredScenario[] = []
+    const priorIds = new Set(work.prior?.scenarios.map((s) => s.id) ?? [])
+    // Where each prior file lives NOW — captured before any write, so an edited
+    // prior re-homed under a new area slug still has its old file removed.
+    const priorFiles = scenarioFileIndex(repoRoot)
+    const keptIds = new Set<string>()
+    const writtenFiles = new Map<string, string>()
+    const priorsOnSurface = priorScenariosBySurface(work)
     let unsettledFlow = false
     for (const [surface] of work.plans) {
       const ref = `${work.flow.id}\0${surface}`
       const task = taskByKey.get(ref)
+      const committedHere: string[] = []
+      const dropsHere = dropsByRef.get(ref) ?? []
+      for (const d of dropsHere) retired.push({ id: d.id, surface, reason: d.reason })
       const commit = (c: BirthCandidate, status: GuardTestStatus, finding?: GuardBirthFinding): string => {
         const file = writeScenarioFile(repoRoot, slug, c.scenario)
         written.push({
@@ -3099,6 +3371,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           status,
           ...(finding ? { diagnosis: diagnosisOf(finding, file) } : {}),
         })
+        keptIds.add(c.scenario.id)
+        committedHere.push(c.scenario.id)
+        writtenFiles.set(c.scenario.id, path.resolve(repoRoot, file))
         return file
       }
       for (const c of persisted.get(ref) ?? []) commit(c, 'passing')
@@ -3121,11 +3396,37 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       ) {
         unsettledFlow = true
       }
+      // A surface that committed nothing and dropped nothing CARRIES the priors
+      // it owns: their files stay and their rows re-list, so a blocked or
+      // retired edit never erases coverage (the flow is unsettled anyway when
+      // the worker did not settle). An id a sibling surface re-wrote this run
+      // is that sibling's now, not a carried prior.
+      if (committedHere.length === 0 && dropsHere.length === 0) {
+        for (const s of priorsOnSurface.get(surface) ?? []) {
+          if (keptIds.has(s.id)) continue
+          scenarios.push(s)
+          keptIds.add(s.id)
+        }
+      }
+      if (committedHere.length > 0) {
+        for (const r of retired) if (r.surface === surface) r.replacedBy = [...committedHere]
+      }
     }
+    // Now the deletions: every prior id neither re-written nor carried, plus
+    // the OLD file of a re-written id whose path moved.
+    const stale: string[] = []
+    for (const id of priorIds) {
+      const oldFile = priorFiles.get(id)
+      if (!oldFile) continue
+      const newFile = writtenFiles.get(id)
+      if (!keptIds.has(id) || (newFile !== undefined && newFile !== oldFile)) stale.push(oldFile)
+    }
+    for (const file of stale) if (fs.existsSync(file)) fs.rmSync(file)
     // A flow left unsettled on some surface keeps a manifest entry (its committed
     // tests are real coverage) but records NO inputs hash, so the next generate
     // re-runs it. A committed failing test is NOT such a surface — it settled.
-    const entry = enforceSettleInvariant(manifestEntry(work, scenarios, unsettledFlow ? null : work.inputsHash))
+    for (const r of retired) retiredReport.push({ flowId: work.flow.id, ...r })
+    const entry = enforceSettleInvariant(manifestEntry(work, scenarios, unsettledFlow ? null : work.inputsHash, retired))
     workingManifest.set(work.flow.id, entry)
     if (entry.generationInputsHash === null) flowsReport.unsettled++
     else flowsReport.settled++
@@ -3240,6 +3541,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     skippedUnchanged: plan.sections.length - plan.work.length,
     // A prune rewrites a committed file, so it is never a no-op run.
     noChanges: changedWorks.length === 0 && removedFlows === 0 && prunedFlows === 0,
+    cosmeticSections: claimDiff.cosmetic.size,
+    claimDiffCalls: claimDiff.calls,
+    retiredScenarios: retiredReport,
     written,
     coverageGaps,
     birthFindings,
@@ -3302,6 +3606,56 @@ interface FlowWork {
   changed: boolean
 }
 
+/** A committed scenario's yaml + parsed form, indexed by id for edit mode. */
+type PriorScenarioIndex = ReadonlyMap<string, { yaml: string; scenario: GuardScenario }>
+
+/**
+ * Which surface each of the flow's committed scenarios belongs to — the
+ * deterministic owner rule for edit mode: the first runnable driver (registry
+ * order) that both the scenario drives and the flow planned this run; a
+ * scenario driving no planned surface falls to the first planned surface, so
+ * every prior is briefed somewhere and never twice.
+ */
+function priorScenariosBySurface(work: FlowWork): Map<GuardDriverId, GuardManifestScenario[]> {
+  const out = new Map<GuardDriverId, GuardManifestScenario[]>()
+  const planned = [...work.plans.keys()]
+  if (planned.length === 0) return out
+  for (const s of work.prior?.scenarios ?? []) {
+    const owner = runnableDriverIds.find((d) => s.drivers.includes(d) && work.plans.has(d)) ?? planned[0]!
+    const list = out.get(owner)
+    if (list) list.push(s)
+    else out.set(owner, [s])
+  }
+  return out
+}
+
+/** The bound sections whose text moved since the flow's committed entry. */
+function movedSectionsFor(work: FlowWork): { doc: string; anchor: string; heading: string }[] {
+  const priorFp = new Map((work.prior?.bindings ?? []).map((b) => [flowSectionKey(b.doc, b.anchor), b.fingerprint]))
+  const out: { doc: string; anchor: string; heading: string }[] = []
+  for (const b of work.flow.bindings) {
+    if (priorFp.get(flowSectionKey(b.doc, b.anchor)) === b.fingerprint) continue
+    const section = [...work.sections.values()].find((s) => s.doc === b.doc && s.anchor === b.anchor)
+    out.push({ doc: b.doc, anchor: b.anchor, heading: section?.headingText ?? b.anchor })
+  }
+  return out
+}
+
+/** The plan's interfaces whose fingerprint differs from what a prior scenario recorded. */
+function movedInterfacesFor(plan: RealizationPlan, priors: readonly GuardScenario[]): string[] {
+  const live = new Map(plan.interfaces.map((j) => [j.id, j.fingerprint]))
+  const moved = new Set<string>()
+  for (const s of priors) {
+    const path = s.interface?.path ?? []
+    const fps = s.interface?.fingerprints ?? []
+    path.forEach((id, i) => {
+      const now = live.get(id)
+      if (now !== undefined && fps[i] !== undefined && fps[i] !== now) moved.add(id)
+    })
+  }
+  return [...moved].sort()
+}
+
 /** One (flow, surface) authoring unit. */
 interface AuthorTask {
   work: FlowWork
@@ -3320,12 +3674,14 @@ function manifestEntry(
   work: FlowWork,
   scenarios: GuardManifestScenario[],
   generationInputsHash: string | null,
+  retiredScenarios: GuardManifestRetiredScenario[] = [],
 ): GuardManifestFlow {
   return {
     flowId: work.flow.id,
     flowFingerprint: work.flow.fingerprint,
     bindings: work.flow.bindings,
     scenarios: scenarios.slice().sort((a, b) => a.id.localeCompare(b.id)),
+    retiredScenarios: retiredScenarios.slice().sort((a, b) => a.id.localeCompare(b.id)),
     // Every surface that got a PLAN records the interfaces it walks — including the
     // surfaces that then failed to author (blocked-on / errored) and contribute no
     // scenario. That is the only record that the spec DOES reach this code path,

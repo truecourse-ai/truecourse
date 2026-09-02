@@ -120,6 +120,8 @@ export function rebuildManifestFromScenarios(repoRoot: string): GuardManifest {
         (a, b) => a.doc.localeCompare(b.doc) || a.anchor.localeCompare(b.anchor),
       ),
       scenarios: e.scenarios.slice().sort((a, b) => a.id.localeCompare(b.id)),
+      // A manifest rebuilt from files knows nothing about deliberate drops.
+      retiredScenarios: [],
       interfaces: [...e.interfaces.entries()]
         .map(([surface, interfaceIds]) => ({ surface, interfaceIds }))
         .sort((a, b) => a.surface.localeCompare(b.surface)),

@@ -168,4 +168,37 @@ describe('flow taint — what the worker is told, and when the taint clears', ()
     expect(briefing).toContain('PRIOR FLAG')
     expect(briefing).toContain(`why it was rejected: ${mismatch}`)
   }, 60_000)
+
+  it('a tainted flow with a committed scenario is authored from scratch — PRIOR FLAG, never PRIOR SCENARIOS', async () => {
+    const r = seed()
+    // Commit a scenario first, so edit mode WOULD apply on the re-author…
+    const first = await runGenerate({
+      repoRoot: r,
+      extractSession: versionCliBgUntestable,
+      flowWorkerSession: submitWorkerSessions(() => raw('relkit --version prints the version', PASSING_STEPS)),
+    })
+    expect(first.written.length).toBe(1)
+    // …then move the bound section AND taint the flow: the taint wins.
+    writeDoc(r, DOC, DOC_CONTENT.replace('prints the version', 'prints the SEMVER version'))
+    const mismatch = 'asserts exit 0 where the claim quotes exact output'
+    writeGuardAutoResolutions(r, taintedLedger(mismatch))
+
+    let briefing = ''
+    let prior: FlowWorkerTask['prior'] | undefined
+    let mode = ''
+    await runGenerate({
+      repoRoot: r,
+      extractSession: versionCliBgUntestable,
+      flowWorkerSession: flowWorkerSessionOf(async (task) => {
+        prior = task.prior
+        mode = task.cacheMaterial.mode
+        briefing = await task.prepare()
+        return { kind: 'outcome', outcome: { kind: 'retired', attempts: 1, lastEvidence: 'briefing only' } }
+      }),
+    })
+    expect(prior).toBeUndefined()
+    expect(mode).toBe('scratch')
+    expect(briefing).toContain('PRIOR FLAG')
+    expect(briefing).not.toContain('PRIOR SCENARIOS')
+  }, 60_000)
 })
