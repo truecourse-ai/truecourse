@@ -164,9 +164,7 @@ const MULTI_FILE_TREE = [
 ]
 
 describe('deriveApiInterfacesFromTree — routers mounted from another file', () => {
-  // Awaiting the analyzer extractor this case reads (openapi route metas /
-  // cross-file mount resolution); the derivation under test is already here.
-  it.skip('composes the mount prefix onto a router mounted behind middleware args', () => {
+  it('composes the mount prefix onto a router mounted behind middleware args', () => {
     const paths = deriveApiInterfacesFromTree(MULTI_FILE_TREE).map((j) => j.title)
     expect(paths).toContain('GET /api/repos/{id}/analyses')
     expect(paths).not.toContain('GET /{id}/analyses')
@@ -178,9 +176,7 @@ describe('deriveApiInterfacesFromTree — routers mounted from another file', ()
     expect(paths).toContain('DELETE /api/admin/users/{userId}')
   })
 
-  // Awaiting the analyzer extractor this case reads (openapi route metas /
-  // cross-file mount resolution); the derivation under test is already here.
-  it.skip('leaves nothing bare across the whole layout', () => {
+  it('leaves nothing bare across the whole layout', () => {
     expect(deriveApiInterfacesFromTree(MULTI_FILE_TREE).map((j) => j.title).sort()).toEqual([
       'DELETE /api/admin/users/{userId}',
       'GET /api/admin/users',
@@ -191,9 +187,7 @@ describe('deriveApiInterfacesFromTree — routers mounted from another file', ()
     ])
   })
 
-  // Awaiting the analyzer extractor this case reads (openapi route metas /
-  // cross-file mount resolution); the derivation under test is already here.
-  it.skip('never hands a mount prefix to a middleware module', () => {
+  it('never hands a mount prefix to a middleware module', () => {
     // `app.use('/api/repos', projectResolver, analysesRouter)` names two things;
     // only the one that turns out to be a router may claim the prefix.
     const prefixes = buildMountPrefixes(MULTI_FILE_TREE)
@@ -312,22 +306,16 @@ describe('deriveApiInterfacesFromTree — openapi metas', () => {
   const interfaces = deriveApiInterfacesFromTree(tree)
   const paths = interfaces.map((j) => `${j.entry?.method} ${j.entry?.path}`)
 
-  // Awaiting the analyzer extractor this case reads (openapi route metas /
-  // cross-file mount resolution); the derivation under test is already here.
-  it.skip('mounts each meta under the base the app serves its openapi document at', () => {
+  it('mounts each meta under the base the app serves its openapi document at', () => {
     expect(paths).toContain('POST /api/v2/envelope/distribute')
     expect(paths).toContain('GET /api/v2/envelope/{envelopeId}')
   })
 
-  // Awaiting the analyzer extractor this case reads (openapi route metas /
-  // cross-file mount resolution); the derivation under test is already here.
-  it.skip('keeps the document route itself as its own operation', () => {
+  it('keeps the document route itself as its own operation', () => {
     expect(paths).toContain('GET /api/v2/openapi.json')
   })
 
-  // Awaiting the analyzer extractor this case reads (openapi route metas /
-  // cross-file mount resolution); the derivation under test is already here.
-  it.skip('carries the meta summary as the step label', () => {
+  it('carries the meta summary as the step label', () => {
     // Titles stay `<METHOD> <path>`; a label is cosmetic and rides the step, as
     // it does for a handler name or an operationId.
     const distribute = interfaces.find((j) => j.entry?.path === '/api/v2/envelope/distribute')
@@ -343,9 +331,7 @@ describe('deriveApiInterfacesFromTree — openapi metas', () => {
     expect(orphaned).toEqual([])
   })
 
-  // Awaiting the analyzer extractor this case reads (openapi route metas /
-  // cross-file mount resolution); the derivation under test is already here.
-  it.skip('serves the metas at EVERY base the app documents', () => {
+  it('serves the metas at EVERY base the app documents', () => {
     // documenso publishes the same surface at /api/v2 and /api/v2-beta; both are
     // live addresses, and the beta prefix is a documented one.
     const dual = deriveApiInterfacesFromTree([
@@ -386,9 +372,7 @@ describe('deriveApiInterfacesFromTree — scoped workspace mounts', () => {
     auth.post('/signout', signOut)
   `
 
-  // Awaiting the analyzer extractor this case reads (openapi route metas /
-  // cross-file mount resolution); the derivation under test is already here.
-  it.skip('resolves a scoped package specifier to its workspace file', () => {
+  it('resolves a scoped package specifier to its workspace file', () => {
     const paths = deriveApiInterfacesFromTree([
       analyze('apps/remix/server/router.ts', ROOT),
       analyze('packages/auth/server.ts', AUTH),

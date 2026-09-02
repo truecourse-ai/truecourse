@@ -37,7 +37,10 @@ export { buildScopedCompilerOptions, resolveModule, analyzeSemantics, extractJsx
 // Extractors
 export { extractCalls, buildFunctionContext } from './extractors/calls.js'
 export { extractHttpCalls } from './extractors/http-calls.js'
-export { extractRouteRegistrations } from './extractors/route-registrations.js'
+export { extractRouteRegistrations, type RouteExtraction } from './extractors/route-registrations.js'
+export { extractTrpcRouters } from './extractors/routes/trpc-routers.js'
+export { extractWebRoutes } from './extractors/web-routes.js'
+export { extractWebRedirects, type WebRedirectExtraction } from './extractors/web-redirects.js'
 export { extractCliCommands } from './extractors/cli-commands.js'
 export { extractOutboundRequests } from './extractors/outbound-requests.js'
 export { extractRequestContracts, type RequestContractExtraction } from './extractors/request-contracts.js'
