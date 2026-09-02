@@ -14,7 +14,7 @@ import {
   PendingGuardBaselineStore,
   GuardBackfillMarkerStore,
   type PendingGuardBaselineInput,
-} from '../../ee/packages/data-store/src/index';
+} from '../../packages/data-store/src/index';
 
 const ORG = 'org_A';
 const REPO = 'acme/api';

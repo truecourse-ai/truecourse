@@ -20,3 +20,16 @@ export { PgLlmConfigStore } from './llm-config-store.js';
 export { encryptSecret, decryptSecret, maskKey } from './crypto.js';
 export { PgAnalyzeLock } from './analyze-lock.js';
 export { purgeRepoData } from './repo-purge.js';
+export {
+  JobStore,
+  NotificationStore,
+  ActiveJobExistsError,
+  PendingBaselineStore,
+  PendingGuardBaselineStore,
+  GuardBackfillMarkerStore,
+  type OrphanedJob,
+  type PendingBaselineInput,
+  type PendingBaselineView,
+  type PendingGuardBaselineInput,
+  type PendingGuardBaselineView,
+} from './jobs-store.js';

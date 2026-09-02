@@ -23,17 +23,21 @@ import type { GuardGenerateReport } from '@truecourse/shared';
 import { JobStore, PgGuardStore } from '../../ee/packages/data-store/src/index';
 
 // Both collaborators need a live Postgres — mock them (hoisted before the module
-// under test loads). `startWorker` resolves to a fake runner whose `addJob` we
+// under test loads). `startEeWorker` resolves to a fake runner whose `addJob` we
 // observe; individual tests flip it to reject to simulate a failed boot.
 const startWorkerMock = vi.hoisted(() => vi.fn());
 const addJobMock = vi.hoisted(() => vi.fn());
 vi.mock('../../ee/packages/server/src/jobs/worker', () => ({
-  startWorker: startWorkerMock,
+  startEeWorker: startWorkerMock,
+  captureJobException: () => {},
 }));
 vi.mock('../../ee/packages/server/src/jobs/events', () => ({
   EventHub: class {
     async start() {}
     async stop() {}
+    subscribe() {
+      return () => {};
+    }
   },
   publishEvent: async () => {},
 }));
@@ -46,7 +50,7 @@ import {
   guardJobKey,
   guardBaselineJobKey,
 } from '../../ee/packages/server/src/jobs/constants';
-import type { StartWorkerDeps } from '../../ee/packages/server/src/jobs/worker';
+import type { StartEeWorkerDeps } from '../../ee/packages/server/src/jobs/worker';
 
 const ORG = 'org_A';
 const REPO = 'acme/api';
@@ -163,9 +167,9 @@ describe('registerJobs — enqueueGuardGenerate', () => {
 });
 
 describe('registerJobs — baseline→guard onboarding chain', () => {
-  async function settledHook(): Promise<NonNullable<StartWorkerDeps['onBaselineSettled']>> {
+  async function settledHook(): Promise<NonNullable<StartEeWorkerDeps['onBaselineSettled']>> {
     await reg();
-    const deps = startWorkerMock.mock.calls[0]![0] as StartWorkerDeps;
+    const deps = startWorkerMock.mock.calls[0]![0] as StartEeWorkerDeps;
     expect(deps.onBaselineSettled).toBeDefined();
     return deps.onBaselineSettled!;
   }
@@ -233,9 +237,9 @@ describe('registerJobs — baseline→guard onboarding chain', () => {
 });
 
 describe('registerJobs — generate→baseline chain', () => {
-  async function generateSettledHook(): Promise<NonNullable<StartWorkerDeps['onGuardGenerateSettled']>> {
+  async function generateSettledHook(): Promise<NonNullable<StartEeWorkerDeps['onGuardGenerateSettled']>> {
     await reg();
-    const deps = startWorkerMock.mock.calls[0]![0] as StartWorkerDeps;
+    const deps = startWorkerMock.mock.calls[0]![0] as StartEeWorkerDeps;
     expect(deps.onGuardGenerateSettled).toBeDefined();
     return deps.onGuardGenerateSettled!;
   }
@@ -279,7 +283,7 @@ describe('registerJobs — generate→baseline chain', () => {
 
   it('passes the guard-baseline settle hook to the worker', async () => {
     await reg();
-    const deps = startWorkerMock.mock.calls[0]![0] as StartWorkerDeps;
+    const deps = startWorkerMock.mock.calls[0]![0] as StartEeWorkerDeps;
     expect(deps.onGuardBaselineSettled).toBeDefined();
   });
 });
@@ -296,9 +300,9 @@ describe('registerJobs — repo-lifecycle refresh events', () => {
   });
   afterEach(() => setRepoLifecycleEmitter(null));
 
-  async function workerDeps(): Promise<StartWorkerDeps> {
+  async function workerDeps(): Promise<StartEeWorkerDeps> {
     await reg();
-    return startWorkerMock.mock.calls[0]![0] as StartWorkerDeps;
+    return startWorkerMock.mock.calls[0]![0] as StartEeWorkerDeps;
   }
 
   it('a successful baseline announces scan for the repo', async () => {

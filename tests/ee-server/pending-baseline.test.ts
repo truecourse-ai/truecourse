@@ -4,21 +4,11 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 
-// executeJob's side-channels (SSE + Sentry) are irrelevant here — silence them so
-// the coalescing chain is what's under test (mirrors job-harness.test.ts).
-vi.mock('../../ee/packages/server/src/jobs/events', () => ({
-  publishEvent: async () => {},
-}));
-vi.mock('../../ee/packages/server/src/observability/sentry', () => ({
-  captureEeException: () => {},
-  upstreamStatusOf: () => undefined,
-}));
-
 // Import the data-store from the built package (not src): the coalescing code
 // under test does an `instanceof ActiveJobExistsError` against this package's
 // export, so the JobStore that throws it must be the same module instance.
 import { JobStore, NotificationStore, PendingBaselineStore } from '@truecourse/ee-data-store';
-import { executeJob, type JobDefinition } from '../../ee/packages/server/src/jobs/harness';
+import { executeJob, type JobDefinition, type JobRuntime } from '../../ee/packages/server/src/jobs/harness';
 import {
   enqueueOrPendBaseline,
   replayPendingBaseline,
@@ -58,6 +48,15 @@ const req = (commitSha: string, extra: Partial<BaselineEnqueueRequest> = {}): Ba
 
 const payloadFor = (jobId: string, commitSha: string): BaselineJobPayload => ({ jobId, ...req(commitSha) });
 
+/** The lifecycle collaborators, with the live-event seam inert: the coalescing
+ *  chain is what's under test, not the feedback it publishes. */
+const runtime = (jobStore: JobStore, notifications: NotificationStore): JobRuntime => ({
+  db,
+  jobStore,
+  notifications,
+  publish: async () => {},
+});
+
 /** A repo.baseline-shaped definition whose onSettled replays the pending row via a
  *  fake enqueue — the real chain executeJob → onSettled → replayPendingBaseline. */
 function baselineDef(
@@ -70,7 +69,6 @@ function baselineDef(
     title: 'Scanning repository',
     steps: [{ key: 'clone', label: 'Cloning repository' }],
     org: (p) => p.workspaceOrgId,
-    sentry: () => ({ component: 'github-gate', route: 'test' }),
     onSettled: (ctx) => replayPendingBaseline(pending, enqueue, ctx.payload),
     run: async () => {
       if (opts.fail) throw new Error('scan boom');
@@ -153,7 +151,7 @@ describe('replayPendingBaseline — replay when the running scan settles', () =>
     const enqueue = vi.fn(async () => 'follow-up-job');
 
     const job = await jobStore.create({ org: ORG, type: REPO_BASELINE_TASK, key: baselineJobKey(REPO) });
-    await executeJob({ db, jobStore, notifications }, baselineDef(pending, enqueue), payloadFor(job.id, 'c1'));
+    await executeJob(runtime(jobStore, notifications), baselineDef(pending, enqueue), payloadFor(job.id, 'c1'));
 
     expect((await jobStore.get(job.id))?.status).toBe('succeeded');
     expect(enqueue).toHaveBeenCalledTimes(1);
@@ -170,7 +168,7 @@ describe('replayPendingBaseline — replay when the running scan settles', () =>
 
     const job = await jobStore.create({ org: ORG, type: REPO_BASELINE_TASK, key: baselineJobKey(REPO) });
     await expect(
-      executeJob({ db, jobStore, notifications }, baselineDef(pending, enqueue, { fail: true }), payloadFor(job.id, 'c1')),
+      executeJob(runtime(jobStore, notifications), baselineDef(pending, enqueue, { fail: true }), payloadFor(job.id, 'c1')),
     ).rejects.toThrow('scan boom');
 
     expect((await jobStore.get(job.id))?.status).toBe('failed');
@@ -187,7 +185,7 @@ describe('replayPendingBaseline — replay when the running scan settles', () =>
     const enqueue = vi.fn(async () => 'x');
 
     const job = await jobStore.create({ org: ORG, type: REPO_BASELINE_TASK, key: baselineJobKey(REPO) });
-    await executeJob({ db, jobStore, notifications }, baselineDef(pending, enqueue), payloadFor(job.id, 'c1'));
+    await executeJob(runtime(jobStore, notifications), baselineDef(pending, enqueue), payloadFor(job.id, 'c1'));
 
     expect(enqueue).not.toHaveBeenCalled();
     expect(await pending.take(REPO)).toBeNull(); // still consumed (read-and-delete)

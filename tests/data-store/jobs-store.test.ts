@@ -7,7 +7,7 @@ import {
   JobStore,
   NotificationStore,
   ActiveJobExistsError,
-} from '../../ee/packages/data-store/src/index';
+} from '../../packages/data-store/src/index';
 
 let client: PGlite;
 let db: Db;
@@ -101,6 +101,40 @@ describe('JobStore — single-flight', () => {
     // The freed key accepts a fresh job.
     const fresh = await store.create({ org: 'org_A', type: 'knowledge.sync', key: 'a' });
     expect(fresh.status).toBe('queued');
+  });
+
+  it('markRunning only claims a QUEUED row, so a cancelled job never runs', async () => {
+    const store = new JobStore(db);
+    const job = await store.create({ org: 'org_A', type: 'repo.scan', key: 'k' });
+
+    expect(await store.markCancelled(job.id)).toMatchObject({ status: 'cancelled' });
+    // The worker picks the graphile job up after the row was cancelled.
+    expect(await store.markRunning(job.id)).toBeNull();
+    expect((await store.get(job.id))?.status).toBe('cancelled');
+    // A second claim of an already-running row is refused too.
+    const other = await store.create({ org: 'org_A', type: 'repo.scan', key: 'k2' });
+    expect(await store.markRunning(other.id)).toMatchObject({ status: 'running' });
+    expect(await store.markRunning(other.id)).toBeNull();
+  });
+
+  it('markCancelled frees the single-flight key and leaves a settled job alone', async () => {
+    const store = new JobStore(db);
+    const job = await store.create({ org: 'org_A', type: 'repo.scan', key: 'k' });
+    await store.markRunning(job.id);
+
+    const cancelled = await store.markCancelled(job.id);
+    expect(cancelled?.status).toBe('cancelled');
+    expect(cancelled?.error).toBeNull();
+    expect(cancelled?.finishedAt).toBeTruthy();
+    expect(await store.listActive('org_A')).toEqual([]);
+    // The freed key accepts a fresh job.
+    expect((await store.create({ org: 'org_A', type: 'repo.scan', key: 'k' })).status).toBe('queued');
+
+    // A job that already succeeded keeps its outcome.
+    const done = await store.create({ org: 'org_A', type: 'repo.scan', key: 'done' });
+    await store.markSucceeded(done.id, { ok: true });
+    expect(await store.markCancelled(done.id)).toBeNull();
+    expect((await store.get(done.id))?.status).toBe('succeeded');
   });
 
   it('get is org-scoped so one workspace cannot read another\'s job', async () => {

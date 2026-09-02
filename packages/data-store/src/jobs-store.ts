@@ -9,7 +9,7 @@
  *
  * `NotificationStore` is the durable feed (the `notifications` row) shown in the
  * bell + notifications page — the source of truth for history (SSE is only live
- * push). Both are EE-internal stores, constructed directly by the jobs module.
+ * push). Both are constructed directly by the jobs runner.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -113,8 +113,18 @@ export class JobStore {
     }
   }
 
+  /**
+   * Claim a queued job. Returns null when the row is no longer `queued` — it was
+   * cancelled (or already claimed) between the enqueue and the worker picking it
+   * up — so the harness can skip the body instead of running work nobody wants.
+   */
   async markRunning(id: string): Promise<JobView | null> {
-    return this.update(id, { status: 'running', startedAt: new Date().toISOString() });
+    const [row] = await this.db
+      .update(jobs)
+      .set({ status: 'running', startedAt: new Date().toISOString() })
+      .where(and(eq(jobs.id, id), eq(jobs.status, 'queued')))
+      .returning();
+    return row ? toJobView(row) : null;
   }
 
   async setProgress(id: string, p: { current: number; total: number; message?: string | null }): Promise<JobView | null> {
@@ -131,6 +141,21 @@ export class JobStore {
 
   async markFailed(id: string, error: string): Promise<JobView | null> {
     return this.update(id, { status: 'failed', error, finishedAt: new Date().toISOString() });
+  }
+
+  /**
+   * Stop a job deliberately (a disconnect, a superseding request). Only an
+   * ACTIVE row moves — a job that already settled keeps its outcome — so the
+   * single-flight key frees without rewriting history. Returns null when there
+   * was nothing active to cancel.
+   */
+  async markCancelled(id: string): Promise<JobView | null> {
+    const [row] = await this.db
+      .update(jobs)
+      .set({ status: 'cancelled', finishedAt: new Date().toISOString() })
+      .where(and(eq(jobs.id, id), inArray(jobs.status, ['queued', 'running'])))
+      .returning();
+    return row ? toJobView(row) : null;
   }
 
   private async update(id: string, set: Partial<JobRow>): Promise<JobView | null> {

@@ -1,5 +1,5 @@
 {
-  "name": "@truecourse/ee-server",
+  "name": "@truecourse/jobs",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -17,17 +17,11 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@sentry/node": "^10.0.0",
     "@truecourse/core": "workspace:*",
+    "@truecourse/data-store": "workspace:*",
     "@truecourse/db": "workspace:*",
-    "@truecourse/ee-data-store": "workspace:*",
-    "@truecourse/ee-github-app": "workspace:*",
-    "@truecourse/ee-llm": "workspace:*",
-    "@truecourse/ee-storage": "workspace:*",
-    "@truecourse/jobs": "workspace:*",
-    "@truecourse/llm": "workspace:*",
+    "@truecourse/llm-api": "workspace:*",
     "@truecourse/shared": "workspace:*",
-    "@workos-inc/node": "^7.0.0",
     "drizzle-orm": "^0.45.2",
     "graphile-worker": "^0.16.6",
     "pg": "^8.13.1",

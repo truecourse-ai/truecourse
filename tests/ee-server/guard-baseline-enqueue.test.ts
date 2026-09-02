@@ -22,12 +22,16 @@ import { JobStore, PendingGuardBaselineStore } from '@truecourse/ee-data-store';
 const startWorkerMock = vi.hoisted(() => vi.fn());
 const addJobMock = vi.hoisted(() => vi.fn());
 vi.mock('../../ee/packages/server/src/jobs/worker', () => ({
-  startWorker: startWorkerMock,
+  startEeWorker: startWorkerMock,
+  captureJobException: () => {},
 }));
 vi.mock('../../ee/packages/server/src/jobs/events', () => ({
   EventHub: class {
     async start() {}
     async stop() {}
+    subscribe() {
+      return () => {};
+    }
   },
   publishEvent: async () => {},
 }));

@@ -16,17 +16,21 @@ import { setBackgroundTaskRunner } from '@truecourse/core/lib/background-tasks';
 import { JobStore, ActiveJobExistsError } from '../../ee/packages/data-store/src/index';
 
 // Both collaborators need a live Postgres — mock them (hoisted before the module
-// under test loads). `startWorker` resolves to a fake runner whose `addJob` we
+// under test loads). `startEeWorker` resolves to a fake runner whose `addJob` we
 // observe; one test flips it to reject to simulate a failed boot.
 const startWorkerMock = vi.hoisted(() => vi.fn());
 const addJobMock = vi.hoisted(() => vi.fn());
 vi.mock('../../ee/packages/server/src/jobs/worker', () => ({
-  startWorker: startWorkerMock,
+  startEeWorker: startWorkerMock,
+  captureJobException: () => {},
 }));
 vi.mock('../../ee/packages/server/src/jobs/events', () => ({
   EventHub: class {
     async start() {}
     async stop() {}
+    subscribe() {
+      return () => {};
+    }
   },
   publishEvent: async () => {},
 }));
