@@ -305,14 +305,18 @@ export function planGuardWork(repoRoot: string, recipeFingerprint?: string): Gua
   }
   sections.sort((a, b) => a.doc.localeCompare(b.doc) || a.anchor.localeCompare(b.anchor))
 
-  // Section CHANGE detection, projected off the flow-keyed manifest: a section is
-  // changed when its live text fingerprint differs from what the flows binding it
-  // recorded, or when no flow binds it at all (never generated for, or accounted
-  // for as a coverage gap). The incremental GATE is per flow — everything global
-  // (recipe, prompts, format, the interfaces a flow grounds on) rides
-  // `flowGenerationInputsHash`, so this stays a pure spec-side question.
-  const manifestSections = guardManifestSections(readManifest(repoRoot))
+  // Section CHANGE detection, projected off the flow-keyed manifest: a section
+  // is changed when its live text fingerprint differs from what the flows
+  // binding it recorded — or, when no flow binds it, from what the persisted
+  // gap record judged (a completed generate saw the section and left it
+  // uncovered on purpose). A section in neither is genuinely new work. The
+  // incremental GATE is per flow — everything global (recipe, prompts, format,
+  // the interfaces a flow grounds on) rides `flowGenerationInputsHash`, so this
+  // stays a pure spec-side question.
+  const manifest = readManifest(repoRoot)
+  const manifestSections = guardManifestSections(manifest)
   const byKey = new Map(manifestSections.map((e) => [`${e.doc}\0${e.anchor}`, e]))
+  const gapByKey = new Map((manifest?.gapSections ?? []).map((g) => [`${g.doc}\0${g.anchor}`, g]))
   const seen = new Set<string>()
 
   const work: SectionInput[] = []
@@ -320,7 +324,12 @@ export function planGuardWork(repoRoot: string, recipeFingerprint?: string): Gua
     const key = `${s.doc}\0${s.anchor}`
     seen.add(key)
     const prior = byKey.get(key)
-    if (!prior || prior.fingerprint !== s.fingerprint) work.push(s)
+    if (prior) {
+      if (prior.fingerprint !== s.fingerprint) work.push(s)
+      continue
+    }
+    const gap = gapByKey.get(key)
+    if (!gap || gap.fingerprint !== s.fingerprint) work.push(s)
   }
 
   const orphaned = manifestSections.filter((e) => !seen.has(`${e.doc}\0${e.anchor}`))

@@ -171,11 +171,34 @@ function dropLegacyVersion(value: unknown): unknown {
   return rest
 }
 
+/**
+ * One live section a completed generate SAW and deliberately left uncovered —
+ * no flow bound it (untestable prose, a heading with no assertable claim, a
+ * no-flow verdict). Persisted so the next generate's section-change gate can
+ * tell "known, judged, unchanged" from "never seen": without this record every
+ * uncovered section re-entered the work set on every run, forever, because the
+ * verdicts lived only in the gitignored run report. Keyed by the same text
+ * fingerprint the flow bindings use — an edit to the section re-admits it.
+ */
+export const GuardManifestGapSectionSchema = z
+  .object({
+    /** Repo-relative path of the spec document. */
+    doc: z.string(),
+    /** Slugified heading path (the section anchor). */
+    anchor: z.string(),
+    /** `sha256:…` over the normalized section text at the judging generate. */
+    fingerprint: z.string(),
+  })
+  .strict()
+export type GuardManifestGapSection = z.infer<typeof GuardManifestGapSectionSchema>
+
 export const GuardManifestSchema = z.preprocess(
   dropLegacyVersion,
   z
     .object({
       flows: z.array(GuardManifestFlowSchema),
+      /** Absent on manifests written before the field existed — treated as empty. */
+      gapSections: z.array(GuardManifestGapSectionSchema).optional(),
     })
     .strict(),
 )

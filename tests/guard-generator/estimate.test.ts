@@ -316,9 +316,10 @@ describe('estimateGuardTokens — cache awareness', () => {
     const est = await estimateGuardTokens(r)
     expect(est.stages).toEqual([])
     expect(est.totalEstimatedTokens).toBe(0)
-    // `background` states no claim, so no flow binds it: it counts as an
-    // unguarded section forever, which is honest.
-    expect(est.subjectLabel).toBe('1 of 2 sections changed')
+    // `background` states no claim, so no flow binds it — and the completed
+    // generate PINNED that verdict in the manifest's gap record, so an
+    // unchanged section is cached work, not perpetual work.
+    expect(est.subjectLabel).toBe('all 2 sections cached')
 
     const second = await runGenerate({
       repoRoot: r,

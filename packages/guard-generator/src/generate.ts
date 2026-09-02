@@ -1407,7 +1407,27 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     unsettledAreas: synthesis.unsettled.map((u) => ({ areaId: u.areaId, reason: u.reason })),
   }
 
-  const priorFlows = new Map((readManifest(repoRoot)?.flows ?? []).map((f) => [f.flowId, f]))
+  const priorManifest = readManifest(repoRoot)
+  const priorFlows = new Map((priorManifest?.flows ?? []).map((f) => [f.flowId, f]))
+  // Carried into the final manifest write when a degraded run cannot re-judge
+  // the whole universe — see writeWorkingManifest.
+  const priorGapSections = priorManifest?.gapSections
+  // A generationInputsHash that is not a real computed hash (a hand-stamped
+  // sentinel from a staged corpus) can never match, so its flow re-authors on
+  // EVERY generate — silently. Say so once per run; settling writes the real
+  // one. Orphaned entries are inert carry-forwards (no live flow looks them
+  // up), so they never re-author and never warrant the warning.
+  const sentinelHashes = [...priorFlows.values()].filter(
+    (f) =>
+      !f.orphaned &&
+      typeof f.generationInputsHash === 'string' &&
+      !/^sha256:[0-9a-f]{64}$/.test(f.generationInputsHash),
+  ).length
+  if (sentinelHashes > 0) {
+    console.warn(
+      `[guard] ${sentinelHashes} manifest flow(s) carry a non-computed generationInputsHash (hand-stamped?) — they will re-author every generate until they settle with a real hash.`,
+    )
+  }
 
   // C-LITE ARRANGE REUSE: the committed corpus's PASSING scenarios, indexed by
   // the interfaces they walk. A worker's briefing injects up to
@@ -3003,7 +3023,21 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const settleTotal = changedWorks.length
   const writeWorkingManifest = (): void => {
     const flows = [...workingManifest.values()].sort((a, b) => a.flowId.localeCompare(b.flowId))
-    writeManifest(repoRoot, { flows })
+    // The persisted gap record: every LIVE section no flow binds, so the next
+    // planner can tell "seen and deliberately uncovered" from "never seen" —
+    // without it those sections re-enter the work set on every generate. Only a
+    // run that judged the whole universe may recompute it (no extraction
+    // failures, no unsettled areas); a degraded run carries the prior record
+    // forward so pins are never lost to a transient failure. Sections that
+    // vanished or became bound drop out naturally.
+    const wholeUniverseJudged = extractionFailures.length === 0 && synthesis.unsettled.length === 0
+    const boundKeys = new Set(flows.flatMap((f) => f.bindings.map((b) => `${b.doc}\0${b.anchor}`)))
+    const gapSections = wholeUniverseJudged
+      ? plan.sections
+          .filter((s) => !boundKeys.has(`${s.doc}\0${s.anchor}`))
+          .map((s) => ({ doc: s.doc, anchor: s.anchor, fingerprint: s.fingerprint }))
+      : (priorGapSections ?? []).filter((g) => !boundKeys.has(`${g.doc}\0${g.anchor}`))
+    writeManifest(repoRoot, { flows, gapSections })
   }
 
   // THE SETTLE INVARIANT, enforced at the one place a flow settles: an entry may
