@@ -32,6 +32,7 @@ import {
   readGuardSetup,
   guardAuthoredInterfacesPath,
   guardInterfacesPath,
+  dependenciesPath,
 } from '@truecourse/guard-runner'
 import {
   runGuardSetup,
@@ -1002,5 +1003,95 @@ describe('detectRoleColumns', () => {
         ],
       }),
     ).toEqual([{ name: 'member', source: 'User.role' }])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The catalog settle record — the COMMITTABLE session skip
+// ---------------------------------------------------------------------------
+// The legacy skip lives in gitignored guard/setup.json, so a fresh checkout
+// re-ran the catalog session every time — and its LLM-nondeterministic
+// additions grew the committed catalog, which moved the recipe fingerprint,
+// which re-authored every flow. `scenarios/dependencies.settle.json` commits
+// the "these inputs were already classified" verdict next to the catalog.
+
+describe('runGuardSetup — the catalog settle record', () => {
+  const settlePath = (r: string): string =>
+    path.join(path.dirname(dependenciesPath(r)), 'dependencies.settle.json')
+
+  const countingCatalogSession = () => {
+    const state = { calls: 0 }
+    const session: GuardSetupCatalogSession = async (input) => {
+      state.calls++
+      fs.mkdirSync(path.dirname(dependenciesPath(input.repoRoot)), { recursive: true })
+      fs.writeFileSync(
+        dependenciesPath(input.repoRoot),
+        `${JSON.stringify({ version: 1, dependencies: [] }, null, 2)}\n`,
+      )
+      return { status: 'ok', added: ['postgres'], findings: [], sessionRunId: 'run-cat' }
+    }
+    return { state, session }
+  }
+
+  it('a session run settles; a fresh checkout (no setup.json) skips on the record alone', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    const { state, session } = countingCatalogSession()
+
+    const first = await runGuardSetup(baseOpts(r, { catalogSession: session }))
+    expect(state.calls).toBe(1)
+    expect(first.report.steps.find((s) => s.key === 'catalog')).toMatchObject({ status: 'ok' })
+    expect(fs.existsSync(settlePath(r))).toBe(true)
+
+    // guard/setup.json was never persisted — the fresh-checkout case. The
+    // committable settle record must skip the session on its own, and the
+    // committed catalog must stand byte-for-byte.
+    const bytes = fs.readFileSync(dependenciesPath(r), 'utf-8')
+    const second = await runGuardSetup(baseOpts(r, { catalogSession: session }))
+    expect(state.calls).toBe(1)
+    expect(second.report.steps.find((s) => s.key === 'catalog')).toMatchObject({
+      status: 'skipped',
+      reason: 'unchanged',
+    })
+    expect(fs.readFileSync(dependenciesPath(r), 'utf-8')).toBe(bytes)
+  })
+
+  it('a committed catalog with no settle record is adopted, never re-classified', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    fs.mkdirSync(path.dirname(dependenciesPath(r)), { recursive: true })
+    fs.writeFileSync(
+      dependenciesPath(r),
+      `${JSON.stringify({ version: 1, dependencies: [] }, null, 2)}\n`,
+    )
+    const { state, session } = countingCatalogSession()
+
+    const { report } = await runGuardSetup(baseOpts(r, { catalogSession: session }))
+    expect(state.calls).toBe(0)
+    expect(report.steps.find((s) => s.key === 'catalog')).toMatchObject({
+      status: 'skipped',
+      reason: 'unchanged',
+    })
+    // Adoption is recorded, so the next run skips by fingerprint match.
+    expect(fs.existsSync(settlePath(r))).toBe(true)
+  })
+
+  it('a recipe edit re-runs the session and re-settles', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    const { state, session } = countingCatalogSession()
+    await runGuardSetup(baseOpts(r, { catalogSession: session }))
+    expect(state.calls).toBe(1)
+    const settled = fs.readFileSync(settlePath(r), 'utf-8')
+
+    // Edit the recipe: the session inputs moved, so classification re-runs.
+    const file = recipePath(r)
+    const doc = JSON.parse(fs.readFileSync(file, 'utf-8')) as { env?: Record<string, string> }
+    doc.env = { ...(doc.env ?? {}), NEW_FLAG: '1' }
+    fs.writeFileSync(file, `${JSON.stringify(doc, null, 2)}\n`)
+
+    await runGuardSetup(baseOpts(r, { catalogSession: session }))
+    expect(state.calls).toBe(2)
+    expect(fs.readFileSync(settlePath(r), 'utf-8')).not.toBe(settled)
   })
 })

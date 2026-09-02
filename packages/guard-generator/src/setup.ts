@@ -60,8 +60,10 @@ import {
   computeRecipeFingerprint,
   dependenciesPath,
   guardAuthoredInterfacesPath,
+  hashableRecipeText,
   readGuardSetup,
   readInterfaceCatalog,
+  resolveSeedScript,
   FINGERPRINT_INPUTS,
   RecipeSchema,
   type Recipe,
@@ -586,9 +588,60 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   // classified is a reported step, never a failed setup.
   const catalogFpOf = (): string =>
     catalogFingerprint(detectionSnapshotJson, computeRecipeFingerprint(repoRoot), dependenciesFileContent(repoRoot))
+  // The session's COMMITTABLE settle gate. The legacy `settled('catalog')` gate
+  // lives in gitignored guard/setup.json, so a fresh checkout re-runs the
+  // session every time — and the session's additions are LLM-nondeterministic,
+  // so each fresh run can grow the catalog, which moves the recipe fingerprint,
+  // which re-authors every flow. This fingerprint deliberately excludes the
+  // committed catalog (feeding the session's OUTPUT back into its gate is what
+  // made the churn self-sustaining) and the full recipe fingerprint (which
+  // folds the catalog too): it hashes only what the session derives FROM —
+  // detection, the recipe's own text, and the seed script. While it holds, the
+  // committed catalog stands byte-for-byte; the add-only fold already protects
+  // curated entries whenever the session does run.
+  // Detection IDENTITY without evidence: the evidence entries carry absolute
+  // file paths, which differ between two checkouts of identical content (a
+  // base worktree vs a head worktree), so a settle gate that folds them can
+  // never hold across worktrees. Identity is what the session classifies —
+  // which services exist, how they were seen, their override env vars, and the
+  // database class — never where in the tree they were spotted.
+  const stableDetectionJson = JSON.stringify({
+    services: [...detectedExternals]
+      .map((s) => ({
+        service: s.service,
+        category: s.category ?? null,
+        source: s.source ?? null,
+        baseUrlEnvs: [
+          ...new Set([...(s.baseUrlEnvs ?? []).map((e) => e.envVar), ...(s.baseUrlEnv ? [s.baseUrlEnv] : [])]),
+        ].sort(),
+      }))
+      .sort((a, b) => a.service.localeCompare(b.service)),
+    database: database ? { type: database.type, driver: database.driver } : null,
+  })
+  const catalogSessionFpOf = (): string => {
+    let recipeRaw = ''
+    try {
+      recipeRaw = fs.readFileSync(recipePath(repoRoot), 'utf-8')
+    } catch {
+      // no recipe — the fingerprint still keys on detection alone
+    }
+    const seedAbs = recipeRaw ? resolveSeedScript(repoRoot, recipeRaw) : null
+    const hash = createHash('sha256')
+    hash.update(`${stableDetectionJson}::${recipeRaw ? hashableRecipeText(recipeRaw) : ''}::`)
+    if (seedAbs && fs.existsSync(seedAbs)) hash.update(fs.readFileSync(seedAbs))
+    return `sha256:${hash.digest('hex')}`
+  }
   let externalsStep: GuardSetupExternalsStep | undefined
   if (enter('catalog')) {
     const catalogFpPre = catalogFpOf()
+    const catalogSessionFp = catalogSessionFpOf()
+    const settledSession = opts.refresh === true ? null : readCatalogSettle(repoRoot)
+    const catalogOnDisk = fs.existsSync(dependenciesPath(repoRoot))
+    // A committed catalog with no settle record predates this gate: adopt it as
+    // settled rather than re-classifying — it is a curated, committed file, and
+    // `--refresh` remains the explicit way to re-derive it.
+    const settleSkip =
+      catalogOnDisk && (settledSession === catalogSessionFp || (settledSession === null && opts.refresh !== true))
     if (replayed('catalog')) {
       // Prior step: the catalog on disk stands as it is. Not even the
       // deterministic skeleton runs — it WRITES `api.externals` into the recipe,
@@ -597,11 +650,12 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         throw new SetupStepNotReadyError('catalog', 'no catalog row in guard/setup.json')
       }
       opts.onStepDone?.('catalog', 'replayed — scenarios/dependencies.json stands as it is')
-    } else if (settled('catalog') === catalogFpPre) {
+    } else if (settled('catalog') === catalogFpPre || settleSkip) {
       // The skeleton is still run for the legacy report field — with unchanged
       // detection and an unchanged recipe it derives nothing and writes nothing —
       // but no session is spent.
       externalsStep = applyExternalsSkeleton(repoRoot, recipe, detectedExternals)
+      if (settledSession !== catalogSessionFp) writeCatalogSettle(repoRoot, catalogSessionFp)
       steps.push({ key: 'catalog', status: 'skipped', reason: 'unchanged', inputFingerprint: catalogFpPre })
       opts.onStepDone?.('catalog', 'unchanged')
     } else {
@@ -621,6 +675,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
           },
           fingerprint: catalogFpPre,
         })
+        if (result.status === 'ok') writeCatalogSettle(repoRoot, catalogSessionFpOf())
         steps.push(
           result.status === 'ok'
             ? {
@@ -893,6 +948,37 @@ function dependenciesFileContent(repoRoot: string): string {
 
 function catalogFingerprint(detectionJson: string, recipeFingerprint: string, depsContent: string): string {
   return createHash('sha256').update(`${detectionJson}::${recipeFingerprint}::${depsContent}`).digest('hex')
+}
+
+/**
+ * The catalog session's COMMITTABLE settle record — `scenarios/dependencies.settle.json`,
+ * a sibling of the catalog it settles. Committed (and carried by any seedstore
+ * that carries `scenarios/`) so a fresh checkout inherits the verdict "these
+ * session inputs were already classified" instead of re-running the session.
+ * Deliberately folded into NO other fingerprint: it is bookkeeping about the
+ * catalog, not part of it.
+ */
+function catalogSettlePath(repoRoot: string): string {
+  return path.join(path.dirname(dependenciesPath(repoRoot)), 'dependencies.settle.json')
+}
+
+function readCatalogSettle(repoRoot: string): string | null {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(catalogSettlePath(repoRoot), 'utf-8')) as {
+      catalogSessionFingerprint?: unknown
+    }
+    return typeof parsed.catalogSessionFingerprint === 'string' ? parsed.catalogSessionFingerprint : null
+  } catch {
+    return null
+  }
+}
+
+function writeCatalogSettle(repoRoot: string, fingerprint: string): void {
+  fs.writeFileSync(
+    catalogSettlePath(repoRoot),
+    `${JSON.stringify({ catalogSessionFingerprint: fingerprint }, null, 2)}\n`,
+    'utf-8',
+  )
 }
 
 /** Sorted derived web place `(id, address)` pairs :: the recipe fingerprint —
