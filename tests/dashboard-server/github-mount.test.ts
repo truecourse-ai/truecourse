@@ -773,7 +773,13 @@ describe('connecting a repository enqueues its spec scan', () => {
     // Release anything still held so the bodies settle, and only then drop the
     // dispose log — the release itself disposes a tree.
     for (const d of held.splice(0)) d.resolve();
-    await Promise.all(running ?? []);
+    // Drain, rather than await once: a succeeded scan CHAINS the guard setup,
+    // whose body is pushed onto `running` while we are already awaiting the
+    // scan's. Awaiting the array once would leave that body running past the
+    // reset below, and its `dispose()` would land in the next test's log.
+    for (let pending = running?.splice(0) ?? []; pending.length > 0; pending = running.splice(0)) {
+      await Promise.all(pending);
+    }
     setRepoJobsCanceller(null);
     await jobs?.stop();
     disposed.length = 0;

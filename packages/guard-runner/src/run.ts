@@ -386,9 +386,8 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       .filter((s) => isInterfaceDrifted({ interface: s.interface ?? s.journey }, interfaceCatalog))
       .map((s) => s.id),
   )
-  // Both spellings are stamped while readers still look for the older one.
-  const annotate = (scenario: GuardScenario): { journeyDrifted?: true; interfaceDrifted?: true } =>
-    drifted.has(scenario.id) ? { journeyDrifted: true as const, interfaceDrifted: true as const } : {}
+  const annotate = (scenario: GuardScenario): { interfaceDrifted?: true } =>
+    drifted.has(scenario.id) ? { interfaceDrifted: true as const } : {}
 
   // Per-driver preparation: a cli scenario needs the recipe `entry`; an api
   // scenario needs the `api` block. A scenario whose preparation is missing

@@ -11,8 +11,8 @@
  * never italic, active exactly when no item tab is) only for a pane whose
  * no-selection state is a DESTINATION of its own, i.e. the panes that pass
  * `onSelectOverview`: Flows (the filter dashboard), Tests, Runs. Coverage and
- * Journeys pass none: their no-selection state is just the pane at rest ("pick a
- * document", the surface banner + "pick a journey"), and a tab for it invited a
+ * Interfaces pass none: their no-selection state is just the pane at rest ("pick a
+ * document", the catalog at rest + "pick a place"), and a tab for it invited a
  * reader to think there was a second thing to read.
  *
  * The visible label is the HUMAN text (a scenario/finding title) — truncated

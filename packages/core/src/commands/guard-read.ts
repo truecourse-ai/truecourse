@@ -501,7 +501,7 @@ function scenarioSurface(
     status: run ? run.outcome : birthFailed ? 'fail' : 'guarded',
     ...(run ? { outcome: run.outcome } : {}),
     stage: run ? 'run' : 'birth',
-    ...(run?.journeyDrifted ? { journeyDrifted: true } : {}),
+    ...(run?.interfaceDrifted ? { interfaceDrifted: true } : {}),
   }
 }
 
@@ -1115,7 +1115,7 @@ function flowListItem(
     findings: flowFindings(flowId, result).filter((f) => guardFindingClass(f) !== 'defect').length,
     toolDefects: flowFindings(flowId, result).filter((f) => guardFindingClass(f) === 'defect').length,
     errors: flowErrors(flowId, join, result).length,
-    journeyDrifted: surfaces.some((s) => s.journeyDrifted === true),
+    interfaceDrifted: surfaces.some((s) => s.interfaceDrifted === true),
     ...(flowOrphaned(flowId, join) ? { orphaned: true } : {}),
   }
 }
@@ -1269,7 +1269,7 @@ export async function readGuardFlowDetail(
         : birth?.failedMilestone
           ? { failedMilestone: birth.failedMilestone }
           : {}),
-      ...(run?.journeyDrifted ? { journeyDrifted: true } : {}),
+      ...(run?.interfaceDrifted ? { interfaceDrifted: true } : {}),
       // The blocked-precondition annotation of the RUN's failure. A birth finding
       // carries no such flag (the report schema records the milestone pair, not the
       // annotation), so a birth-stage row simply renders without it.

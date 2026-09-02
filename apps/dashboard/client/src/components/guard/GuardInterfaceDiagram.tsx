@@ -1,34 +1,34 @@
 /**
- * A journey as a SEQUENCE DIAGRAM — participants across the top, dashed lifelines
+ * An interface as a SEQUENCE DIAGRAM — participants across the top, dashed lifelines
  * beneath them, one labelled message per step (an `input` step is a self-message
- * box on its own lifeline). Rendered in the Journeys-tab detail and in a
+ * box on its own lifeline). Rendered in the Interfaces-tab detail and in a
  * scenario's detail, where it shows the code path the scenario grounds on.
  *
  * Compact and self-contained (no canvas, no zoom chrome): the shape is derived by
- * `lib/guard-journey-diagram.ts`, so the renderer stays surface-agnostic.
+ * `lib/guard-interface-diagram.ts`, so the renderer stays surface-agnostic.
  */
 
-import { journeyDiagramModel } from '@/lib/guard-journey-diagram';
-import type { Journey } from '@truecourse/shared';
+import { interfaceDiagramModel } from '@/lib/guard-interface-diagram';
+import type { Interface } from '@truecourse/shared';
 
 const CELL = 'text-[11px] font-mono text-muted-foreground';
 
-export function GuardJourneyDiagram({
-  journey,
+export function GuardInterfaceDiagram({
+  iface,
   label,
 }: {
-  journey: Pick<Journey, 'steps'> & Partial<Pick<Journey, 'type' | 'id'>>;
-  /** Accessible name — defaults to the journey id. */
+  iface: Pick<Interface, 'steps'> & Partial<Pick<Interface, 'type' | 'id'>>;
+  /** Accessible name — defaults to the interface id. */
   label?: string;
 }) {
-  const { participants, messages } = journeyDiagramModel(journey);
+  const { participants, messages } = interfaceDiagramModel(iface);
   const columns = { gridTemplateColumns: `repeat(${participants.length}, minmax(0, 1fr))` };
 
   return (
     <div
       className="rounded border border-border bg-card/40 p-3"
       role="group"
-      aria-label={label ? `Journey ${label}` : 'Journey sequence'}
+      aria-label={label ? `Interface ${label}` : 'Interface sequence'}
     >
       {/* Participants */}
       <div className="grid gap-2" style={columns}>
@@ -69,7 +69,7 @@ export function GuardJourneyDiagram({
                   </div>
                 ) : (
                   <div className="flex flex-col items-center">
-                    <span className={`w-full truncate text-center ${CELL}`}>{m.label}</span>
+                    <span className={`w-full truncate text-center ${CELL}`} title={m.label}>{m.label}</span>
                     <span className="flex w-full items-center text-primary/70">
                       {!forward && <span className="text-[10px] leading-none">◀</span>}
                       <span className="h-px flex-1 bg-primary/40" />

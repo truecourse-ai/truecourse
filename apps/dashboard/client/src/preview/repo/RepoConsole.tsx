@@ -1,6 +1,7 @@
-// PREVIEW (UI mock, fake data) with one exception: on a REAL
+// PREVIEW (UI mock, fake data) with two exceptions: on a REAL
 // (provider-connected) repository the Activity tab is the real thing, reading
-// and live-tailing the repository's sessions store.
+// and live-tailing the repository's sessions store, and the Interfaces tab reads
+// the server's own interface catalog for that repository.
 
 /**
  * The repository console: one header, ONE menu, no toggle.
@@ -169,6 +170,17 @@ export default function RepoConsole() {
             // A `truecourse spec scan` in that clone shows up here as it runs.
             // The fixture repositories keep the mock below.
             <RealSessionsActivityView repoId={repo.id} starter={starter} />
+          ) : active === 'interfaces' && repo.real ? (
+            // REAL, not mock: the interface catalog of a connected repository is
+            // derived from that repository's own tree, so this surface reads the
+            // server's catalog over `/api/repos/<id>/guard/interfaces`. Same two
+            // views as the fixture repositories get — the table, and one
+            // interface as its own page — over real data.
+            interfaceId ? (
+              <InterfacePage repo={repo} interfaceId={decodeURIComponent(interfaceId)} />
+            ) : (
+              <InterfacesTab repo={repo} />
+            )
           ) : !guard ? (
             // A real repository with nothing in flight has not started, rather
             // than not finished: promising a run that is not running would be

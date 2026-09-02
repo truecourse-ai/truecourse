@@ -67,7 +67,7 @@ const CLI_SURFACE = {
   status: 'fail' as const,
   outcome: 'fail' as const,
   stage: 'run' as const,
-  journeyDrifted: true,
+  interfaceDrifted: true,
 };
 const WEB_GAP = {
   surface: 'web' as const,
@@ -97,7 +97,7 @@ const FLOWS: GuardFlowListItem[] = [
     findings: 0,
     toolDefects: 0,
     errors: 0,
-    journeyDrifted: true,
+    interfaceDrifted: true,
   },
   {
     flowId: 'task-export',
@@ -121,7 +121,7 @@ const FLOWS: GuardFlowListItem[] = [
     findings: 0,
     toolDefects: 0,
     errors: 0,
-    journeyDrifted: false,
+    interfaceDrifted: false,
   },
   {
     // Authoring never started: the repo declares no API preparation and no
@@ -151,7 +151,7 @@ const FLOWS: GuardFlowListItem[] = [
     findings: 0,
     toolDefects: 0,
     errors: 0,
-    journeyDrifted: false,
+    interfaceDrifted: false,
   },
   {
     flowId: `manual:${MANUAL_ID}`,
@@ -169,7 +169,7 @@ const FLOWS: GuardFlowListItem[] = [
     findings: 0,
     toolDefects: 0,
     errors: 0,
-    journeyDrifted: false,
+    interfaceDrifted: false,
   },
 ];
 
@@ -206,7 +206,7 @@ const BIRTH_FAILED_FLOW: GuardFlowListItem = {
   findings: 1,
   toolDefects: 0,
   errors: 0,
-  journeyDrifted: false,
+  interfaceDrifted: false,
 };
 
 const ERROR_ONLY_FLOW: GuardFlowListItem = {
@@ -225,7 +225,7 @@ const ERROR_ONLY_FLOW: GuardFlowListItem = {
   findings: 0,
   toolDefects: 0,
   errors: 2,
-  journeyDrifted: false,
+  interfaceDrifted: false,
 };
 
 const LONG_BLOCKED_REASON =
@@ -253,7 +253,7 @@ const LONG_BLOCKED_FLOW: GuardFlowListItem = {
   findings: 0,
   toolDefects: 0,
   errors: 0,
-  journeyDrifted: false,
+  interfaceDrifted: false,
 };
 
 /**
@@ -284,7 +284,7 @@ const CONFLICTS_FLOW: GuardFlowListItem = {
   findings: 0,
   toolDefects: 0,
   errors: 0,
-  journeyDrifted: false,
+  interfaceDrifted: false,
 };
 
 /**
@@ -311,7 +311,7 @@ const UNDERIVED_FLOW: GuardFlowListItem = {
   findings: 0,
   toolDefects: 0,
   errors: 0,
-  journeyDrifted: false,
+  interfaceDrifted: false,
   orphaned: true,
 };
 
@@ -439,7 +439,7 @@ const DETAIL: GuardFlowDetailData = {
       durationMs: 412,
       failure: { step: 3, expected: 'exit 0', actual: 'exit 1: unknown command `done`' },
       failedMilestone: 3,
-      journeyDrifted: true,
+      interfaceDrifted: true,
       evidencePath: `.truecourse/guard/evidence/${RUN_ID}/${SCENARIO_ID}`,
       hasEvidence: true,
       journeyPath: ['cli/tasks-add', 'cli/tasks-list', 'cli/tasks-done'],
@@ -812,7 +812,7 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
         detail={DETAIL}
         onOpenSpec={() => {}}
         onOpenTest={() => {}}
-        onOpenJourney={() => {}}
+        onOpenInterface={() => {}}
         {...props}
       />,
     );
@@ -949,7 +949,7 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
           detail={detail}
           onOpenSpec={() => {}}
           onOpenTest={onOpenTest}
-          onOpenJourney={() => {}}
+          onOpenInterface={() => {}}
         />,
       );
       const tests = screen.getByRole('list', { name: 'Tests' });
@@ -964,10 +964,10 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
     }
   });
 
-  it('renders its journeys ONE PER LINE, the Journeys pane row idiom', () => {
+  it('renders its interfaces ONE PER LINE, the Interfaces pane row idiom', () => {
     renderDetail();
-    const journeys = screen.getByText('Journeys').parentElement!;
-    const list = journeys.querySelector('div.flex.flex-col')!;
+    const interfaces = screen.getByText('Interfaces').parentElement!;
+    const list = interfaces.querySelector('div.flex.flex-col')!;
     expect(list).not.toBeNull();
     expect(list.className).toContain('flex-col');
     expect(list.querySelectorAll('button')).toHaveLength(DETAIL.journeyIds.length);
@@ -1138,7 +1138,7 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
         }}
         onOpenSpec={() => {}}
         onOpenTest={() => {}}
-        onOpenJourney={() => {}}
+        onOpenInterface={() => {}}
       />,
     );
     const graph = screen.getByRole('list', { name: 'Milestones' });
@@ -1197,7 +1197,7 @@ function FlowsHarness({
         onFilter={setFilter}
         onOpenSpec={() => {}}
         onOpenTest={onOpenTest}
-        onOpenJourney={() => {}}
+        onOpenInterface={() => {}}
       />
     </div>
   );
@@ -1290,7 +1290,7 @@ function DismissHarness() {
         decisions={decisions}
         onOpenSpec={() => {}}
         onOpenTest={() => {}}
-        onOpenJourney={() => {}}
+        onOpenInterface={() => {}}
       />
     </div>
   );
@@ -1428,7 +1428,7 @@ const NEEDS_SETUP_FLOW: GuardFlowListItem = {
   findings: 0,
   toolDefects: 0,
   errors: 0,
-  journeyDrifted: false,
+  interfaceDrifted: false,
 };
 
 /** A corpus with every state on it — failing, needs-setup, blocked, not
@@ -1526,7 +1526,7 @@ const FAILED_RESULT: GuardScenarioResult = {
   evidencePath: `.truecourse/guard/evidence/${RUN_ID}/${SCENARIO_ID}`,
   flowId: FLOW_ID,
   failedMilestone: 3,
-  journeyDrifted: true,
+  interfaceDrifted: true,
 };
 
 describe('GuardDriftDetail — the flow instance in execution paint', () => {
@@ -1555,7 +1555,7 @@ describe('GuardDriftDetail — the flow instance in execution paint', () => {
     expect(within(graph).getByLabelText(/Milestone 4: .* — not reached/)).toBeInTheDocument();
     expect(screen.getByText(/Failed at step/)).toBeInTheDocument();
     expect(screen.getByText('exit 1: unknown command `done`')).toBeInTheDocument();
-    expect(screen.getByText(/Journey drift/)).toBeInTheDocument();
+    expect(screen.getByText(/Interface drift/)).toBeInTheDocument();
   });
 
   it('opens IN PLACE and offers ONE link out to the test itself', async () => {
@@ -1580,11 +1580,11 @@ describe('GuardDriftDetail — the flow instance in execution paint', () => {
   });
 
   it('claims nothing when the failure names no milestone (a plumbing failure)', () => {
-    renderRun({ ...FAILED_RESULT, failedMilestone: undefined, journeyDrifted: undefined });
+    renderRun({ ...FAILED_RESULT, failedMilestone: undefined, interfaceDrifted: undefined });
     const graph = screen.getByRole('list', { name: 'Milestones' });
     expect(within(graph).getAllByLabelText(/— no milestone reached/)).toHaveLength(4);
     expect(within(graph).queryByLabelText(/— pass/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Journey drift/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Interface drift/)).not.toBeInTheDocument();
   });
 
   // A red run whose SETUP step broke gets its own line, so it is
@@ -1593,12 +1593,12 @@ describe('GuardDriftDetail — the flow instance in execution paint', () => {
     renderRun({
       ...FAILED_RESULT,
       failedMilestone: undefined,
-      journeyDrifted: undefined,
+      interfaceDrifted: undefined,
       blockedPrecondition: true,
       failure: { step: 1, expected: '200', actual: '404' },
     });
     expect(screen.getByText(/Setup failed/)).toBeInTheDocument();
-    expect(screen.queryByText(/Journey drift/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Interface drift/)).not.toBeInTheDocument();
     // The outcome is untouched: the verdict still reads as a failure.
     expect(screen.getByText(/Failed at step/)).toBeInTheDocument();
   });

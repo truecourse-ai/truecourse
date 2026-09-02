@@ -6,7 +6,7 @@
  * its own contract and its own fingerprint, with a {@link InterfaceSchema.group}
  * naming the family it sits in (the `rules` command tree, the `analyses` route
  * family). Never a tree of commands folded into one entry, and never independent
- * invocations rendered as sequential steps (decided 2026-08-10). A scenario is one
+ * invocations rendered as sequential steps. A scenario is one
  * spec flow realized through the interfaces its steps actually invoke.
  *
  * Shared (not under `guard/`) because the analyze side renders the same shape.
@@ -102,7 +102,7 @@ export type InterfaceStep = z.infer<typeof InterfaceStepSchema>
 
 // ---------------------------------------------------------------------------
 // NAMED STATES — the per-area registry an interface's state contract points into
-// (decided 2026-08-11, replacing the one-sentence prose those fields carried).
+// (replacing the one-sentence prose those fields carried).
 // A state is DEFINED ONCE, with an id and one line, and every task that assumes
 // or leaves it references that id. Two tasks chain when their ids are EQUAL,
 // which is the whole reason the prose went: sentences describing the same world
@@ -694,7 +694,7 @@ export type InterfaceCommandContract = z.infer<typeof InterfaceCommandContractSc
 
 // ---------------------------------------------------------------------------
 // THE API OPERATION CONTRACT — the api surface's own half of the union below,
-// written in HTTP's vocabulary (2026-08-14, the SOM restructure). Before it, an
+// written in HTTP's vocabulary (the SOM restructure). Before it, an
 // api interface's contract wore a cli COSTUME: the operation's identity rode in
 // a command `path` of `["GET", "/x"]`, response-body markers were `stream:
 // "stdout"` output facts, and HTTP statuses were `exit` codes. Nothing read it
@@ -753,7 +753,7 @@ export type InterfaceRequestField = z.infer<typeof InterfaceRequestFieldSchema>
  * because the four are addressed differently by every caller and a scenario has
  * to know which is which.
  *
- * `headers` joined the other three on 2026-08-17, having been missed when this
+ * `headers` joined the other three later, having been missed when this
  * region was written: the corpus it was validated against was cli-heavy, and the
  * three hand-authored api corpora turned out to carry 305 of them — more than
  * they carry query parameters. They are not all credentials. Strapi alone
@@ -890,7 +890,7 @@ export type InterfaceOperationContract = z.infer<typeof InterfaceOperationContra
  * mapper finds are run reporting, never stored interface data. Every field here
  * is a field the derivation must be able to produce.
  *
- * A DISCRIMINATED UNION on `surface` (2026-08-14), which is the whole point: an
+ * A DISCRIMINATED UNION on `surface`, which is the whole point: an
  * api operation used to be described as a command whose argv was
  * `["GET", "/x"]`, so a reader — and a prompt, and the dashboard — had to decode
  * a costume before it could say anything true about HTTP. Each surface now says
@@ -905,7 +905,7 @@ export type InterfaceOperationContract = z.infer<typeof InterfaceOperationContra
  * grammar is not a contract for this entry at all.
  *
  * The cli member carries exactly ONE command, singular: one entry is one
- * invocable thing (2026-08-10), so the array this field used to be has been
+ * invocable thing, so the array this field used to be has been
  * exactly one element long ever since, and the tree lives in the catalog as
  * sibling entries sharing a {@link InterfaceSchema.group} and a
  * {@link InterfaceSchema.resource}.
@@ -937,7 +937,7 @@ export type InterfaceContract = z.infer<typeof InterfaceContractSchema>
 
 // ---------------------------------------------------------------------------
 // RESOURCES — the PLACES of a stateful surface, defined once per area
-// (decided 2026-08-12). A web task acts somewhere: a screen, a dialog, a panel.
+//. A web task acts somewhere: a screen, a dialog, a panel.
 // Before this region that somewhere was smeared across the catalog — a `group`
 // naming a family, and a states registry where most entries were really
 // locations (`rules-panel-open` is not a world, it is a place). A resource is
@@ -945,7 +945,7 @@ export type InterfaceContract = z.infer<typeof InterfaceContractSchema>
 // and — through the interfaces' own `at`/`to` — how a user gets there.
 //
 // The unit of IDENTITY does not move: an interface stays one invocable thing
-// with its own fingerprint (the 2026-08-10 decision), and nothing in this
+// with its own fingerprint, and nothing in this
 // region is ever fingerprinted. A resource is the ENVELOPE — the rendering,
 // grounding and reading unit — so the catalog can present a medium number of
 // medium-sized resources while drift stays per-interaction.
@@ -990,7 +990,7 @@ export type InterfaceResourceId = z.infer<typeof InterfaceResourceIdSchema>
  *    `/api/repos/{id}/analyses` under it. Its actions are the operations rooted
  *    at it (its own, and those of its instances); its `of` is the enclosing noun.
  *
- * Extended from three to five 2026-08-14: resources were introduced for the web
+ * Extended from three to five: resources were introduced for the web
  * surface, where "where does this happen" had nowhere else to live, but the
  * envelope was never web-specific — a command tree and a REST path are the same
  * "a medium number of medium-sized places, each holding its interactions", and
@@ -1239,7 +1239,7 @@ export const InterfaceSchema = z
      * `analyses` route family, the page a web task acts on. One entry is one
      * invocable thing (one command, one operation, one task); the group is the
      * only thing that says which others it sits with, so a reader can still see
-     * the tree the per-entry granularity dissolved. Decided 2026-08-10 with the
+     * the tree the per-entry granularity dissolved. Decided with the
      * INTERFACE rename; optional so a catalog written before it parses unchanged.
      * Scoped to the entry's `type` — two surfaces may name a family alike (the cli
      * `rules` tree and the api `rules` routes) and mean their own. Never
@@ -1253,7 +1253,7 @@ export const InterfaceSchema = z
      * The world the interface ASSUMES, as a STATE ID from its area's registry —
      * an interface is one task a user can perform from a specific state
      * (`repo-report-open`), and this is that state. Named rather than described
-     * (2026-08-11) so an earlier task's `endState` and this one's `startingState`
+     * so an earlier task's `endState` and this one's `startingState`
      * chain by equality; the sentence lives once, in
      * {@link InterfacesFileSchema.states}, and the file refuses an id no registry
      * defines. Optional so cli/api catalogs carrying none parse unchanged, and
@@ -1270,7 +1270,7 @@ export const InterfaceSchema = z
     /**
      * THE LOCATION CONTRACT, half one: the resource this task acts ON — a
      * resource id from its area's registry ({@link InterfacesFileSchema.resources}).
-     * Split out of the state contract 2026-08-12: before resources existed,
+     * Split out of the state contract: before resources existed,
      * "where the task happens" rode in `startingState` as pseudo-states
      * (`rules-panel-open`), and the registry filled with places instead of
      * worlds. `at` is the place; `startingState` keeps saying the WORLD — a
@@ -1286,7 +1286,7 @@ export const InterfaceSchema = z
      * resource id resolved in its own area's registry, the same area-scoped
      * resolution `at`/`to` use.
      *
-     * Why ownership is a REFERENCE and `interfaces[]` stays FLAT (2026-08-14):
+     * Why ownership is a REFERENCE and `interfaces[]` stays FLAT:
      * the unit of identity does not move. An interface is still one invocable
      * thing with its own fingerprint over `type` + `entry` + `steps`, and every
      * consumer that iterates the catalog — the fingerprint set, the drift diff,
@@ -1462,7 +1462,7 @@ export type MapperDiagnostic = z.infer<typeof MapperDiagnosticSchema>
 /**
  * `.truecourse/guard/interfaces.json` — the last mapping's catalog (gitignored).
  *
- * ONE SHAPE, TWO HOMES (2026-08-17): the same shape validates
+ * ONE SHAPE, TWO HOMES: the same shape validates
  * `guard/interfaces.authored.json`, the COMMITTED half a human writes for the
  * surfaces no derivation produces. The two are joined at read time
  * (`readMergedInterfaceCatalog`), authored winning per interface id and per
@@ -1472,11 +1472,11 @@ export type MapperDiagnostic = z.infer<typeof MapperDiagnosticSchema>
  * is held to this one (shape + the id resolution below), because a reference
  * that crosses the two halves can only be resolved in the merge.
  *
- * **version 2 (2026-08-14)** — the SOM restructure, and THE break the number was
+ * **version 2** — the SOM restructure, and THE break the number was
  * reserved for. `version` stayed 1 through every additive growth: the contract
  * fields (a catalog written before them parses unchanged, a catalog written with
  * them parses in a reader that ignores them), and the state contract's move from
- * prose to named ids (2026-08-11), which reached hand-authored web entries only —
+ * prose to named ids, which reached hand-authored web entries only —
  * no extractor had ever written one.
  *
  * This one is different in exactly the way the reserved number describes: the
@@ -1504,7 +1504,7 @@ const InterfacesFileShapeSchema = z
      * `repos` task starts from — so a group-scoped registry could not express a
      * flow's own walk.
      *
-     * A state is a WORLD, never a place (2026-08-12): "a rule is silenced" is a
+     * A state is a WORLD, never a place: "a rule is silenced" is a
      * state; "the rules dialog is open" is a location, and locations live in
      * {@link InterfacesFileSchema.resources}, referenced by the interfaces' own
      * `at`/`to`. Before the split most of this registry was places wearing
@@ -1530,7 +1530,7 @@ const InterfacesFileShapeSchema = z
 /**
  * HALF a catalog: the shape above, with the CROSS-REFERENCE rules below left
  * out. This is what `guard/interfaces.authored.json` is read with, and the
- * distinction is forced by the split itself (2026-08-17): the authored file
+ * distinction is forced by the split itself: the authored file
  * holds the interfaces no derivation produces, and their `at`/`to`/`resource`
  * ids resolve against the MERGED catalog — a web task stands on a screen the
  * derivation writes into the gitignored half. Checking those references against
@@ -1702,7 +1702,7 @@ function normalizeToken(text: string): string {
  * A step's fingerprinted identity: its kind plus the SURFACE-VISIBLE payload —
  * the command path and its flag set, the method + path template, the route, the
  * target. `label` is cosmetic and never folded in, and a step carries no state
- * at all: within a task the chain IS step order (2026-08-11), and the task's own
+ * at all: within a task the chain IS step order, and the task's own
  * two states are ids on the interface, outside the fold. Flags fold as a SET
  * (sorted): which flags a command accepts is the surface, the order help prints
  * them is not.
@@ -1741,12 +1741,12 @@ function stepIdentity(step: InterfaceStep): string {
  * by the same rule: which operations a click reaches is what the task DOES behind
  * the glass, not which task it is. The STATE CONTRACT is excluded too, and always
  * was: the world a task assumes and leaves is not WHICH task it is, so naming the
- * states (2026-08-11) left all 60 reference fingerprints byte-identical. The
+ * states left all 60 reference fingerprints byte-identical. The
  * LOCATION CONTRACT (`at`/`to`) and the resource registry follow the identical
- * rule (2026-08-12): where a task happens is not which task it is, so making
+ * rule: where a task happens is not which task it is, so making
  * places first-class moved no fingerprint either. {@link InterfaceSchema.resource}
  * — the place that OWNS the invocable — is excluded by the same rule and was the
- * whole reason ownership landed as a reference on a flat list (2026-08-14): the
+ * whole reason ownership landed as a reference on a flat list: the
  * SOM restructure reshaped every api contract and left all 114 reference
  * fingerprints byte-identical.
  *
@@ -1757,7 +1757,7 @@ function stepIdentity(step: InterfaceStep): string {
  * mount IS the same operation whichever side named it.
  *
  * {@link InterfaceSchema.origin} is excluded by the same rule and for the same
- * stakes (2026-08-17): moving a hand-authored surface out of the derived file
+ * stakes: moving a hand-authored surface out of the derived file
  * and into `interfaces.authored.json` must re-author NOTHING, so where an entry
  * came from cannot be part of which task it is. The reference catalog is the
  * proof — all 114 fingerprints hold with every entry stamped.

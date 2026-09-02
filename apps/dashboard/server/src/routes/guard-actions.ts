@@ -17,7 +17,7 @@
  *   POST /:id/guard/setup      enqueue `guard setup` (recipe, dependencies, seed)
  *                              as a background job; 202 { jobId }, 409 when the
  *                              repository is already working.
- *   POST /:id/guard/map        derive the journey catalog from the working tree
+ *   POST /:id/guard/map        derive the interface catalog from the working tree
  *                              (analyzer + interface-mapper: deterministic, free,
  *                              no LLM — so no estimate modal, ever).
  *   POST /:id/guard/dismiss    dismiss a finding's claim (write decisions.json).
@@ -353,7 +353,7 @@ router.post('/:id/guard/run', async (req: Request, res: Response, next: NextFunc
   }
 });
 
-// POST — map the repo's surfaces to journeys (the Journeys tab's action). The
+// POST — map the repo's surfaces to interfaces (the Interfaces tab's action). The
 // analyzer + interface-mapper are deterministic and LLM-free, so this action has NO
 // estimate gate and costs nothing; it rewrites `guard/interfaces.json` and answers
 // with the fresh catalog view (the same shape `GET /guard/interfaces` returns), so
@@ -368,7 +368,7 @@ router.post('/:id/guard/map', async (req: Request, res: Response, next: NextFunc
   try {
     const repo = await resolveProjectForRequest(repoId);
     if (!guardsMaterializeInPlace()) {
-      res.status(501).json({ error: 'Journey mapping requires a local working tree.' });
+      res.status(501).json({ error: 'Interface mapping requires a local working tree.' });
       return;
     }
     if (guardJobs.has(repoId)) {

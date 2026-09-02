@@ -106,7 +106,7 @@ describe('ee-lens — the Guard lens', () => {
       'coverage',
       'guardflows',
       'tests',
-      'journeys',
+      'interfaces',
       'guarddrifts',
     ]);
     expect(eeLensTabOrder('guard')).toEqual(EE_GUARD_TAB_ORDER);
@@ -131,9 +131,9 @@ describe('ee-lens — the Guard lens', () => {
     });
   });
 
-  it('Flows, Journeys, and Runs (guarddrifts) are coherent guard tabs', () => {
+  it('Flows, Interfaces, and Runs (guarddrifts) are coherent guard tabs', () => {
     expect(resolve('section=guard&tab=guardflows', { leftTab: 'guardflows' })).toBeNull();
-    expect(resolve('section=guard&tab=journeys', { leftTab: 'journeys' })).toBeNull();
+    expect(resolve('section=guard&tab=interfaces', { leftTab: 'interfaces' })).toBeNull();
     expect(
       resolve('section=guard&tab=guarddrifts', { leftTab: 'guarddrifts' }),
     ).toBeNull();

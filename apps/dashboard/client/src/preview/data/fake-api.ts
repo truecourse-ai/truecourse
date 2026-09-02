@@ -41,6 +41,7 @@ import {
   generateReport,
   scenarioInventory,
 } from './flow-fixtures';
+import { guardForRepo } from './index';
 import { interfacesView } from './interface-fixtures';
 import { artifactRaw } from './artifact-fixtures';
 import {
@@ -452,6 +453,15 @@ export function installPreviewFetch(): void {
     // through the server, and no fixture could stand in for the answer — it is
     // where "this workspace has no provider" is found out.
     if (rest === 'spec/corpus/scan' || rest === 'guard/setup') return real(input, init);
+    // So is the INTERFACE CATALOG of a connected repository: it is derived from
+    // that repository's own tree, and no fixture could stand in for it. A
+    // repository with guard fixtures is one of the mock ones and keeps them.
+    if (
+      !guardForRepo(repoId) &&
+      (rest === 'guard/interfaces' || rest === 'guard/interface/raw' || rest === 'guard/map')
+    ) {
+      return real(input, init);
+    }
     const method = (init?.method ?? 'GET').toUpperCase();
     let body: Record<string, unknown> = {};
     if (typeof init?.body === 'string') {

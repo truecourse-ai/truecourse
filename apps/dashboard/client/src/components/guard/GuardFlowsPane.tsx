@@ -45,7 +45,7 @@ export function GuardFlowsPane({
   onOpenConflict,
   onOpenSpec,
   onOpenTest,
-  onOpenJourney,
+  onOpenInterface,
   onOpenExternals,
 }: {
   repoId: string;
@@ -74,7 +74,7 @@ export function GuardFlowsPane({
   onOpenSpec: (doc: string, section: string) => void;
   /** Open a test on the Tests tab (`?gtest=`). */
   onOpenTest: (testId: string) => void;
-  onOpenJourney: (journeyId: string) => void;
+  onOpenInterface: (interfaceId: string) => void;
   /**
    * Jump to the External APIs tab, on the named service's card — the needs-setup
    * CTA a flow's why-no-test row carries.
@@ -109,7 +109,7 @@ export function GuardFlowsPane({
             {...(decisions ? { decisions } : {})}
             onOpenSpec={onOpenSpec}
             onOpenTest={onOpenTest}
-            onOpenJourney={onOpenJourney}
+            onOpenInterface={onOpenInterface}
             {...(onOpenExternals ? { onOpenExternals } : {})}
           />
         );

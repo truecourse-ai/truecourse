@@ -5,7 +5,7 @@
  * flow, the login) is red for a reason that is not doc-vs-code drift: the
  * specified behavior was never reached. The annotation says so on BOTH drivers;
  * the outcome enum is untouched (it is still a `fail`) — an annotation by design,
- * on the `journeyDrifted` precedent. It is deliberately silent on a scenario that
+ * on the `interfaceDrifted` precedent. It is deliberately silent on a scenario that
  * declares no milestone at all — a hand-written test asserts THROUGH its plumbing,
  * so an unmilestoned failure there IS its verdict.
  */

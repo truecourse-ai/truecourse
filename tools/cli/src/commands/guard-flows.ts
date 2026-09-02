@@ -377,7 +377,7 @@ function surfaceLines(
     const result = resultsByScenario.get(s.id);
     // A committed scenario passed birth by construction; a run outcome supersedes it.
     const state = result ? `${result.outcome} ${MARK[result.outcome]}` : "birth ✓";
-    const drift = result?.journeyDrifted ? " · journey drifted" : "";
+    const drift = result?.interfaceDrifted ? " · interface drifted" : "";
     return `${s.surface} → ${s.id} (${state}${drift})`;
   });
   for (const gap of entry?.gaps ?? []) lines.push(`${gap.surface} → ${gapChipLabel(gap)}`);

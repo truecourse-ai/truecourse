@@ -4,8 +4,8 @@
  * section on the Guard coverage tab: it lands the Guard section + coverage tab and
  * writes `?guard=`+`?gsec=` in ONE param update so the writes never race (and drops
  * the `?gdrift` tab selection the Runs view was showing). `openGuardFlow` /
- * `openGuardJourney` are the same jump in the other direction — a section's flow
- * row into the Flows tab, a flow's journey into the Journeys tab — and
+ * `openGuardInterface` are the same jump in the other direction — a section's
+ * flow row into the Flows tab, a test's interface into the Interfaces tab — and
  * `openSpecDoc` / `openSpecSources` connect the Sources page to the doc viewer
  * and back.
  *
@@ -44,11 +44,16 @@ export interface GuardViewState {
   openSpecSources: () => void;
   /**
    * Jump to the Flows tab with one flow's detail open (`?gflow=`) — the route a
-   * Coverage section's flow row and a journey's "grounds" link both take.
+   * Coverage section's flow row and an interface's "grounds" link both take.
    */
   openGuardFlow: (flowId: string) => void;
-  /** Jump to the Journeys tab with one journey's detail open (`?gjourney=`). */
-  openGuardJourney: (journeyId: string) => void;
+  /**
+   * Jump to the Interfaces tab with one interface open (`?ginterface=`). The
+   * tab's own selection is a catalog ROW (a screen, an operation, a command),
+   * so this writes the interface id and the pane resolves it, selecting the row
+   * that owns it and expanding the member.
+   */
+  openGuardInterface: (interfaceId: string) => void;
   /**
    * Jump to the Tests tab with one test's detail open (`?gtest=`) — the route a
    * flow's test row and a run instance's "open this test" link both take. A test
@@ -67,7 +72,7 @@ export interface GuardViewState {
 
 /** Drop every guard tab selection — each jump owns the pane it lands on. */
 function clearGuardSelections(q: URLSearchParams): void {
-  for (const key of ['gdrift', 'gflow', 'gscn', 'gtest', 'gfind', 'gjourney', 'gext', 'gsrc']) {
+  for (const key of ['gdrift', 'gflow', 'gscn', 'gtest', 'gfind', 'ginterface', 'gplace', 'gext', 'gsrc']) {
     q.delete(key);
   }
 }
@@ -163,14 +168,14 @@ export function useGuardView(): GuardViewState {
     [setParams],
   );
 
-  const openGuardJourney = useCallback(
-    (journeyId: string) => {
+  const openGuardInterface = useCallback(
+    (interfaceId: string) => {
       setParams((prev) => {
         const q = new URLSearchParams(prev);
         q.set('section', 'guard');
-        q.set('tab', 'journeys');
+        q.set('tab', 'interfaces');
         clearGuardSelections(q);
-        q.set('gjourney', journeyId);
+        q.set('ginterface', interfaceId);
         return q;
       });
     },
@@ -214,7 +219,7 @@ export function useGuardView(): GuardViewState {
     openSpecDoc,
     openSpecSources,
     openGuardFlow,
-    openGuardJourney,
+    openGuardInterface,
     openGuardTest,
     openGuardExternals,
   };

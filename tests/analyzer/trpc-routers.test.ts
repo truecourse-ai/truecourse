@@ -1,5 +1,5 @@
 /**
- * THE tRPC ROUTER READER (SPEC_GUARD_PLAN item 12) — the fourth route idiom, and
+ * THE tRPC ROUTER READER — the fourth route idiom, and
  * the only one whose product is not a route: a router node names procedures and
  * child routers, never an address.
  *

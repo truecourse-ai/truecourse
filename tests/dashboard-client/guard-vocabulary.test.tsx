@@ -27,7 +27,7 @@ import type {
   GuardFlowDetail as GuardFlowDetailData,
   GuardFlowListItem,
   GuardGenerateReport,
-  GuardJourneyRow,
+  GuardInterfaceRow,
   GuardScenarioResult,
   GuardSectionCoverage,
   GuardSectionCoverageStatus,
@@ -39,8 +39,8 @@ import { GuardTestsPanel } from '@/components/guard/GuardTestsPanel';
 import { GuardTestDetail } from '@/components/guard/GuardTestDetail';
 import { GuardDriftDetail } from '@/components/guard/GuardDriftDetail';
 import { GuardDriftList } from '@/components/guard/GuardDriftList';
-import { GuardJourneysPane } from '@/components/guard/GuardJourneysPane';
-import { GuardJourneysPanel } from '@/components/guard/GuardJourneysPanel';
+import { GuardInterfacesPane } from '@/components/guard/GuardInterfacesPane';
+import { GuardInterfacesPanel } from '@/components/guard/GuardInterfacesPanel';
 import { GuardSectionDetail } from '@/components/guard/GuardSectionDetail';
 import { GuardBlockedPanel } from '@/components/guard/GuardBlockedPanel';
 import { GuardStatusBadge } from '@/components/guard/GuardStatusBadge';
@@ -73,7 +73,7 @@ const BANNED: { term: string; pattern: RegExp }[] = [
   // Replaced by "Used by flows".
   { term: 'grounds', pattern: /\bgrounds\b/i },
   // The retired all-caps section header (it became "Tests"). The surface NAMES
-  // (CLI / API / Web) and the Journeys banner's "Detected surfaces" both stay —
+  // (CLI / API / Web) and the Interfaces banner's "Detected surfaces" both stay —
   // the complaint was the shouted engine header, not the English word.
   { term: 'SURFACES header', pattern: /\bSURFACES\b/ },
   // The technical artifact's name — it renders as "test" everywhere.
@@ -154,7 +154,7 @@ const flow = (over: Partial<GuardFlowListItem>): GuardFlowListItem => ({
   findings: 0,
   toolDefects: 0,
   errors: 0,
-  journeyDrifted: false,
+  interfaceDrifted: false,
   ...over,
 });
 
@@ -171,9 +171,9 @@ const FLOWS: GuardFlowListItem[] = [
     title: 'A user exports the task list',
     status: 'fail',
     bucket: 'guarded',
-    journeyDrifted: true,
+    interfaceDrifted: true,
     surfaces: [
-      { surface: 'api', scenarioId: 'x.api.1', status: 'fail', outcome: 'fail', stage: 'run', journeyDrifted: true },
+      { surface: 'api', scenarioId: 'x.api.1', status: 'fail', outcome: 'fail', stage: 'run', interfaceDrifted: true },
     ],
   }),
   flow({
@@ -440,7 +440,7 @@ const runResult = (over: Partial<GuardScenarioResult> = {}): GuardScenarioResult
   durationMs: 412,
   failure: { step: 2, expected: 'exit 0', actual: 'exit 1' },
   evidencePath: `.truecourse/guard/evidence/${RUN_ID}/${PASSING_ID}`,
-  journeyDrifted: true,
+  interfaceDrifted: true,
   ...over,
 });
 
@@ -508,7 +508,7 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
         detail={FLOW_DETAIL}
         onOpenSpec={() => {}}
         onOpenTest={() => {}}
-        onOpenJourney={() => {}}
+        onOpenInterface={() => {}}
       />,
     );
     expectCleanVocabulary('GuardFlowDetail');
@@ -520,7 +520,7 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
         detail={UNDERIVED_DETAIL}
         onOpenSpec={() => {}}
         onOpenTest={() => {}}
-        onOpenJourney={() => {}}
+        onOpenInterface={() => {}}
       />,
     );
     expectCleanVocabulary('GuardFlowDetail (no longer derived)');
@@ -536,7 +536,7 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
         detail={ERROR_DETAIL}
         onOpenSpec={() => {}}
         onOpenTest={() => {}}
-        onOpenJourney={() => {}}
+        onOpenInterface={() => {}}
       />,
     );
     expectCleanVocabulary('GuardFlowDetail (authoring error)');
@@ -548,7 +548,7 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
         detail={NOT_ATTEMPTED_DETAIL}
         onOpenSpec={() => {}}
         onOpenTest={() => {}}
-        onOpenJourney={() => {}}
+        onOpenInterface={() => {}}
       />,
     );
     expectCleanVocabulary('GuardFlowDetail (nothing attempted)');
@@ -561,7 +561,7 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
         decisions={decisionsStub()}
         onOpenSpec={() => {}}
         onOpenTest={() => {}}
-        onOpenJourney={() => {}}
+        onOpenInterface={() => {}}
       />,
     );
     expectCleanVocabulary('GuardFlowDetail (dismissal offered)');
@@ -581,7 +581,7 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
         })}
         onOpenSpec={() => {}}
         onOpenTest={() => {}}
-        onOpenJourney={() => {}}
+        onOpenInterface={() => {}}
       />,
     );
     expectCleanVocabulary('GuardFlowDetail (dismissed)');
@@ -634,12 +634,12 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
         test={TEST_ROWS.find((t) => t.id === BIRTH_ID)!}
         row={{ ...FLOW_DETAIL.surfaces[0], failedMilestone: 1 }}
         runId={RUN_ID}
-        journeys={[]}
+        interfaces={[]}
         flowGoal="Analyze a repo carrying a pathological file without freezing"
         milestones={FLOW_DETAIL.milestones}
         decisions={decisionsStub()}
         onOpenFlow={() => {}}
-        onOpenJourney={() => {}}
+        onOpenInterface={() => {}}
         onOpenSpec={() => {}}
       />,
     );
@@ -655,7 +655,7 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
         test={TEST_ROWS.find((t) => t.id === BIRTH_ID)!}
         row={{ ...FLOW_DETAIL.surfaces[0], failedMilestone: 1 }}
         runId={RUN_ID}
-        journeys={[]}
+        interfaces={[]}
         milestones={FLOW_DETAIL.milestones}
         decisions={decisionsStub({
           dismissalFor: () => ({
@@ -666,7 +666,7 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
           }),
         })}
         onOpenFlow={() => {}}
-        onOpenJourney={() => {}}
+        onOpenInterface={() => {}}
         onOpenSpec={() => {}}
       />,
     );
@@ -727,10 +727,10 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
     expectCleanVocabulary('GuardDriftList');
   });
 
-  it('the journey catalog — the reverse index onto the flows that use each journey', () => {
+  it('the interface catalog — the reverse index onto the flows that use each interface', () => {
     // "Used by flows", never "Grounds"; a matched-but-blocked flow says so in
     // plain words rather than naming the artifact that was never written.
-    const journeys: GuardJourneyRow[] = [
+    const interfaces: GuardInterfaceRow[] = [
       {
         id: 'cli/tasks-add',
         type: 'cli',
@@ -763,25 +763,28 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
       },
     ];
     render(
-      <GuardJourneysPanel
-        journeys={journeys}
+      <GuardInterfacesPanel
+        interfaces={interfaces}
         loading={false}
         error={null}
         activeId={null}
+        surfaces={[]}
+        onSurfaces={() => {}}
         onOpen={() => {}}
       />,
     );
-    expectCleanVocabulary('GuardJourneysPanel');
+    expectCleanVocabulary('GuardInterfacesPanel');
   });
 
-  it('the journey detail pane — the banner, the reverse index and the fingerprint note', () => {
+  it('the interface detail pane — the reverse index and the fingerprint note', () => {
     render(
-      <GuardJourneysPane
+      <GuardInterfacesPane
+        repoId="r"
         view={{
           mapped: true,
           generatedAt: '2026-07-24T13:00:00.000Z',
           recipeFingerprint: 'sha256:r',
-          journeys: [
+          interfaces: [
             {
               id: 'cli/tasks-add',
               type: 'cli',
@@ -803,18 +806,16 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
             },
           ],
           surfaces: [
-            { surface: 'cli', label: 'CLI', runnable: true, journeys: 1, detected: true, source: 'tree' },
-            { surface: 'web', label: 'Web', runnable: false, waitingLabel: 'Needs web driver', journeys: 0, detected: true },
+            { surface: 'cli', label: 'CLI', runnable: true, interfaces: 1, detected: true, source: 'tree' },
+            { surface: 'web', label: 'Web', runnable: false, waitingLabel: 'Needs web driver', interfaces: 0, detected: true },
           ],
-          totals: { journeys: 1, detectedSurfaces: 2, grounded: 1, ungrounded: 0 },
+          totals: { interfaces: 1, detectedSurfaces: 2, grounded: 1, ungrounded: 0 },
         }}
         loading={false}
         error={null}
-        mapping={false}
-        onMap={() => {}}
         tabs={{
-          activeId: 'cli/tasks-add',
-          openTabs: [{ id: 'cli/tasks-add', pinned: true }],
+          activeId: 'cli:tasks-add',
+          openTabs: [{ id: 'cli:tasks-add', pinned: true }],
           open: () => {},
           close: () => {},
           selectOverview: () => {},
@@ -822,7 +823,7 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
         onOpenFlow={() => {}}
       />,
     );
-    expectCleanVocabulary('GuardJourneysPane');
+    expectCleanVocabulary('GuardInterfacesPane');
   });
 
   it('a coverage section detail — the flows that test the section', () => {
@@ -960,7 +961,7 @@ describe('guard hover popovers — none of them can clip', () => {
         detail={FLOW_DETAIL}
         onOpenSpec={() => {}}
         onOpenTest={() => {}}
-        onOpenJourney={() => {}}
+        onOpenInterface={() => {}}
       />,
     );
     expect(expectHoversCannotClip('GuardFlowDetail')).toBeGreaterThan(0);
@@ -995,9 +996,9 @@ describe('guard hover popovers — none of them can clip', () => {
         test={TEST_ROWS.find((t) => t.id === BIRTH_ID)!}
         row={null}
         runId={RUN_ID}
-        journeys={null}
+        interfaces={null}
         onOpenFlow={() => {}}
-        onOpenJourney={() => {}}
+        onOpenInterface={() => {}}
         onOpenSpec={() => {}}
       />,
     );

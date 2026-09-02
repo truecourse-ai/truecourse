@@ -215,7 +215,7 @@ const LATEST = {
       evidencePath: `.truecourse/guard/evidence/${RUN_ID}/${SCENARIO_ID}`,
       flowId: FLOW_ID,
       failedMilestone: 3,
-      journeyDrifted: true,
+      interfaceDrifted: true,
     },
     {
       id: MANUAL_ID,
@@ -391,7 +391,7 @@ describe('Guard flow read surfaces', () => {
       // Both surfaces ride the flow: the cli scenario (painted by the run) and the
       // web gap that explains why there is no second scenario.
       expect(creating.flows[0].surfaces).toEqual([
-        expect.objectContaining({ surface: 'cli', scenarioId: SCENARIO_ID, status: 'fail', outcome: 'fail', journeyDrifted: true }),
+        expect.objectContaining({ surface: 'cli', scenarioId: SCENARIO_ID, status: 'fail', outcome: 'fail', interfaceDrifted: true }),
         expect.objectContaining({
           surface: 'web',
           status: 'web',
@@ -473,7 +473,7 @@ describe('Guard flow read surfaces', () => {
         findings: 0,
         toolDefects: 1,
         errors: 0,
-        journeyDrifted: true,
+        interfaceDrifted: true,
       });
       expect(byId.get('task-export')).toMatchObject({
         status: 'no-journey',
@@ -555,7 +555,7 @@ describe('Guard flow read surfaces', () => {
         birthPassed: true,
         outcome: 'fail',
         failedMilestone: 3,
-        journeyDrifted: true,
+        interfaceDrifted: true,
         hasEvidence: true,
         evidencePath: `.truecourse/guard/evidence/${RUN_ID}/${SCENARIO_ID}`,
         journeyPath: ['cli/tasks-add', 'cli/tasks-list', 'cli/tasks-done'],
@@ -870,7 +870,7 @@ describe('Guard flow read surfaces', () => {
       seed();
       const res = await request(app).get(url('latest')).expect(200);
       expect(res.body.run.runId).toBe(RUN_ID);
-      expect(res.body.scenarios[0]).toMatchObject({ flowId: FLOW_ID, failedMilestone: 3, journeyDrifted: true });
+      expect(res.body.scenarios[0]).toMatchObject({ flowId: FLOW_ID, failedMilestone: 3, interfaceDrifted: true });
       expect(res.body.runFlows).toHaveLength(1);
       expect(res.body.runFlows[0]).toMatchObject({ flowId: FLOW_ID, title: FLOWS_FILE.flows[0].title, epic: false });
       expect(res.body.runFlows[0].milestones.map((m: any) => m.order)).toEqual([1, 2, 3, 4]);

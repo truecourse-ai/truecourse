@@ -50,8 +50,8 @@ import { SpecSourcesPage } from '@/components/spec/SpecSourcesPage';
 import { GuardCoveragePage } from '@/components/guard/GuardCoveragePage';
 import { GuardFlowsPanel } from '@/components/guard/GuardFlowsPanel';
 import { GuardFlowsPane } from '@/components/guard/GuardFlowsPane';
-import { GuardJourneysPanel } from '@/components/guard/GuardJourneysPanel';
-import { GuardJourneysPane } from '@/components/guard/GuardJourneysPane';
+import { GuardInterfacesPanel } from '@/components/guard/GuardInterfacesPanel';
+import { GuardInterfacesPane } from '@/components/guard/GuardInterfacesPane';
 import { GuardTestsPanel } from '@/components/guard/GuardTestsPanel';
 import { GuardTestsPane } from '@/components/guard/GuardTestsPane';
 import { GuardDriftsView } from '@/components/guard/GuardDriftsView';
@@ -72,8 +72,8 @@ import { useGuardDecisions } from '@/hooks/useGuardDecisions';
 import { useGuardScenarios } from '@/hooks/useGuardScenarios';
 import { buildGuardTestRows, type GuardTestFilter } from '@/lib/guard-tests';
 import type { GuardFlowFilter } from '@/lib/guard-flow-status';
-import { useGuardJourneys } from '@/hooks/useGuardJourneys';
-import { useGuardJourneyTabs } from '@/hooks/useGuardJourneyTabs';
+import { useGuardInterfaces } from '@/hooks/useGuardInterfaces';
+import { useGuardInterfaceMember, useGuardInterfaceTabs } from '@/hooks/useGuardInterfaceTabs';
 import { useGraph } from '@/hooks/useGraph';
 import { useRepoGateRuns } from '@/ee/useRepoGateRuns';
 import { resolvePrGuardScope, guardReadsEnabled as canReadGuard } from '@/ee/pr-guard-scope';
@@ -88,6 +88,7 @@ import { Button } from '@/components/ui/button';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Progress, ProgressLabel } from '@/components/ui/progress';
 import * as api from '@/lib/api';
+import type { GuardDriverId } from '@truecourse/shared';
 import type { RepoResponse } from '@/lib/api';
 import type { Node } from '@xyflow/react';
 
@@ -370,7 +371,7 @@ function RepoPageInner() {
     openSpecConflict,
     openSpecSources,
     openGuardFlow,
-    openGuardJourney,
+    openGuardInterface,
     openGuardTest,
     openGuardExternals,
   } = useGuardView();
@@ -383,25 +384,36 @@ function RepoPageInner() {
   // panel and the main pane read ONE fetch and the guard reload key refreshes both.
   const guardFlows = useGuardFlows(
     repoId,
-    (leftTab === 'guardflows' || leftTab === 'tests') && guardReadsEnabled,
+    (leftTab === 'guardflows' || leftTab === 'tests' || leftTab === 'interfaces') && guardReadsEnabled,
     guardReloadKey,
     refForTabs,
   );
-  // The code-side journey catalog + its free Map action. Read by the Journeys tab
-  // AND by the Flows tab (a scenario's detail draws the journey it grounds on), so
-  // both tabs share ONE fetch.
-  const guardJourneys = useGuardJourneys(
+  // The code-side interface catalog + its free Map action. Read by the Interfaces
+  // tab AND by the Tests tab (a test's detail draws the interface it grounds on),
+  // so both tabs share ONE fetch. The Interfaces tab also reads the flows payload
+  // for the preparation recipe that rides it.
+  const guardInterfaces = useGuardInterfaces(
     repoId,
-    (leftTab === 'journeys' || leftTab === 'tests') && guardReadsEnabled,
+    (leftTab === 'interfaces' || leftTab === 'tests') && guardReadsEnabled,
     guardReloadKey,
     refForTabs,
   );
-  // Guard's OWN flow (`?gflow=`), test (`?gtest=`) and journey (`?gjourney=`) tab
-  // sets — the Spec-doc transient/pinned tab model (single-click preview,
-  // double-click pin), guard-scoped so nothing bleeds into BL Drift's tab sets.
+  // Guard's OWN flow (`?gflow=`), test (`?gtest=`) and interface-PLACE
+  // (`?gplace=`) tab sets — the Spec-doc transient/pinned tab model (single-click
+  // preview, double-click pin), guard-scoped so nothing bleeds into BL Drift's.
   const guardFlowTabs = useGuardFlowTabs(repoId);
   const guardTestTabs = useGuardTestTabs(repoId);
-  const guardJourneyTabs = useGuardJourneyTabs(repoId);
+  const guardInterfaceTabs = useGuardInterfaceTabs(repoId);
+  // WHICH MEMBER of the open row is expanded. It lives here because the panel's
+  // entry rows open one and the pane's rows toggle one — one selection, two
+  // surfaces. `?ginterface=` seeds it, which is how a cross-navigation jump from
+  // a test lands on the right method.
+  const [guardInterfaceMember, setGuardInterfaceMember] = useGuardInterfaceMember();
+  // The Interfaces catalog's surface narrowing and its per-surface RECIPE toggle
+  // live here for the reason they must: the opener is in the panel and the body
+  // is in the pane.
+  const [guardSurfaces, setGuardSurfaces] = useState<string[]>([]);
+  const [guardRecipeSurface, setGuardRecipeSurface] = useState<GuardDriverId | null>(null);
   // The Flows / Tests list filters live HERE because two siblings share each one:
   // the left panel's dropdown and the main pane's overview chips are two controls
   // over the SAME narrowing, so a chip click must move the dropdown and vice versa.
@@ -455,7 +467,7 @@ function RepoPageInner() {
     if (
       leftTab === 'coverage' ||
       leftTab === 'guardflows' ||
-      leftTab === 'journeys' ||
+      leftTab === 'interfaces' ||
       leftTab === 'tests' ||
       leftTab === 'externals' ||
       leftTab === 'guarddrifts'
@@ -1015,14 +1027,14 @@ function RepoPageInner() {
         otherBusy={guardRun.running}
         stale={guardStaleness.generateStale}
       />
-    ) : leftTab === 'journeys' ? (
-      // Map — the one FREE action: the analyzer + journey mapper are deterministic
-      // and LLM-free, so there is no estimate and no progress stream; the response
-      // is the fresh catalog and the tab swaps state from it.
+    ) : leftTab === 'interfaces' ? (
+      // Map — the one FREE action: the analyzer + interface mapper are
+      // deterministic and LLM-free, so there is no estimate and no progress
+      // stream; the response is the fresh catalog and the tab swaps state from it.
       <GuardSectionActions
         kind="map"
-        onClick={() => void guardJourneys.map()}
-        busy={guardJourneys.mapping}
+        onClick={() => void guardInterfaces.map()}
+        busy={guardInterfaces.mapping}
         otherBusy={guardGen.busy || guardRun.running}
       />
     ) : leftTab === 'guarddrifts' ? (
@@ -1061,7 +1073,7 @@ function RepoPageInner() {
           actions={
             leftTab === 'coverage' ||
             leftTab === 'guardflows' ||
-            leftTab === 'journeys' ||
+            leftTab === 'interfaces' ||
             leftTab === 'guarddrifts'
               ? sectionActionsNode
               : undefined
@@ -1253,16 +1265,30 @@ function RepoPageInner() {
               />
             </GuardPrScopeGate>
           )}
-          {leftTab === 'journeys' && (
-            // The code-derived catalog, grouped by surface, each row carrying the
-            // reverse index onto the flows that ground on it.
+          {leftTab === 'interfaces' && (
+            // The code-derived catalog as SCREENS, OPERATIONS AND COMMANDS — one
+            // flat row per screen (web), per method+path (api) or per command
+            // (cli). Each surface group leads with its loose entries and the
+            // preparation THAT surface runs on.
             <GuardPrScopeGate scope={prGuardScope}>
-              <GuardJourneysPanel
-                journeys={guardJourneys.view?.journeys ?? []}
-                loading={guardJourneys.loading}
-                error={guardJourneys.error}
-                activeId={guardJourneyTabs.activeId}
-                onOpen={guardJourneyTabs.open}
+              <GuardInterfacesPanel
+                interfaces={guardInterfaces.view?.interfaces ?? []}
+                {...(guardInterfaces.view?.resources ? { resources: guardInterfaces.view.resources } : {})}
+                loading={guardInterfaces.loading}
+                error={guardInterfaces.error}
+                activeId={guardRecipeSurface ? null : guardInterfaceTabs.activeId}
+                surfaces={guardSurfaces}
+                onSurfaces={setGuardSurfaces}
+                hasRecipe={guardFlows.view?.recipe != null}
+                recipeSurface={guardRecipeSurface}
+                onToggleRecipe={(surface) =>
+                  setGuardRecipeSurface((open) => (open === surface ? null : surface))
+                }
+                onOpen={(place, pinned, member) => {
+                  setGuardRecipeSurface(null);
+                  setGuardInterfaceMember(member ?? null);
+                  guardInterfaceTabs.open(place, pinned);
+                }}
               />
             </GuardPrScopeGate>
           )}
@@ -1288,7 +1314,7 @@ function RepoPageInner() {
         {/* Main content area */}
         <div className="flex flex-1 flex-col overflow-hidden">
           {/* Tab bar only on tabs where opening items makes sense (Files/Flows/Databases).
-              Guard's Flows/Journeys/Runs render their own GuardTabStrip (permanent Overview tab), not this shared bar. */}
+              Guard's Flows/Interfaces/Tests/Runs render their own GuardTabStrip, not this shared bar. */}
           {(leftTab === 'files' || leftTab === 'flows' || leftTab === 'databases') &&
             (openFiles.length > 0 || openFlows.length > 0 || openDatabases.length > 0) ? (
             <div className="flex shrink-0 items-center border-b border-border bg-card text-xs overflow-x-auto">
@@ -1448,27 +1474,34 @@ function RepoPageInner() {
                 onOpenConflict={openSpecConflict}
                 onOpenSpec={openSpecSection}
                 onOpenTest={openGuardTest}
-                onOpenJourney={openGuardJourney}
+                onOpenInterface={openGuardInterface}
                 onOpenExternals={openGuardExternals}
               />
             </GuardPrScopeGate>
-          ) : leftTab === 'journeys' ? (
-            // Guard Journeys: the detected-surface banner over the catalog detail —
-            // the sequence diagram and the flows that ground on it.
+          ) : leftTab === 'interfaces' ? (
+            // Guard Interfaces: the selected row in full — a screen aggregated
+            // over its panels and dialogs (its actions table and what the page
+            // shows), one operation, or one command — or the preparation recipe
+            // of whichever surface the panel opened.
             <GuardPrScopeGate scope={prGuardScope}>
-              <GuardJourneysPane
-                view={guardJourneys.view}
-                loading={guardJourneys.loading}
-                error={guardJourneys.error}
-                mapping={guardJourneys.mapping}
-                onMap={() => void guardJourneys.map()}
-                tabs={guardJourneyTabs}
+              <GuardInterfacesPane
+                repoId={repoId}
+                view={guardInterfaces.view}
+                loading={guardInterfaces.loading}
+                error={guardInterfaces.error}
+                tabs={guardInterfaceTabs}
+                member={guardInterfaceMember}
+                onMember={setGuardInterfaceMember}
+                recipe={guardFlows.view?.recipe ?? null}
+                recipeSurface={guardRecipeSurface}
+                onCloseRecipe={() => setGuardRecipeSurface(null)}
+                prRef={refForTabs}
                 onOpenFlow={openGuardFlow}
               />
             </GuardPrScopeGate>
           ) : leftTab === 'tests' ? (
             // Guard Tests: the test inventory's detail — what a test checks, how it
-            // ran, its steps, its transcript, and the journey it drives.
+            // ran, its steps, its transcript, and the interface it drives.
             <GuardPrScopeGate scope={prGuardScope}>
               <GuardTestsPane
                 repoId={repoId}
@@ -1477,7 +1510,7 @@ function RepoPageInner() {
                 error={guardTests.error}
                 runId={guardTests.runId}
                 lastRun={guardTests.lastRun}
-                journeys={guardJourneys.view?.journeys ?? null}
+                interfaces={guardInterfaces.view?.interfaces ?? null}
                 flowGoals={guardFlowMeta.goals}
                 decisions={guardDecisions}
                 tabs={guardTestTabs}
@@ -1486,7 +1519,7 @@ function RepoPageInner() {
                 reloadKey={guardReloadKey}
                 prRef={refForTabs}
                 onOpenFlow={openGuardFlow}
-                onOpenJourney={openGuardJourney}
+                onOpenInterface={openGuardInterface}
                 onOpenSpec={openSpecSection}
               />
             </GuardPrScopeGate>

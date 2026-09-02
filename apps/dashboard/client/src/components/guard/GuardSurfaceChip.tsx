@@ -33,7 +33,7 @@ export interface GuardSurfaceChipData {
   surface?: GuardDriverId;
   status: GuardSectionCoverageStatus;
   gap?: GuardFlowGap;
-  journeyDrifted?: boolean;
+  interfaceDrifted?: boolean;
 }
 
 export function GuardSurfaceChip({
@@ -53,8 +53,8 @@ export function GuardSurfaceChip({
   const chip = (
     <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium ${meta.badge}`}>
       {text}
-      {data.journeyDrifted && (
-        <span aria-label="journey drift" className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+      {data.interfaceDrifted && (
+        <span aria-label="interface drift" className="h-1.5 w-1.5 rounded-full bg-amber-500" />
       )}
     </span>
   );

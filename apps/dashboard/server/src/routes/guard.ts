@@ -12,6 +12,7 @@
  *   GET /:id/guard/flows         the flow inventory + recipe card (the Flows tab)
  *   GET /:id/guard/flows/:flowId one flow: milestones, per-surface scenarios, gaps, findings
  *   GET /:id/guard/interfaces    the code-derived interface catalog + its reverse index
+ *   GET /:id/guard/interface/raw one catalog entry's stored JSON, by ?id=
  *   GET /:id/guard/scenarios     the committed-scenario inventory + recipe card
  *   GET /:id/guard/scenario      a scenario's YAML source by ?id=
  *   GET /:id/guard/evidence      one evidence file for ?runId=&scenarioId=[&file=transcript.txt]
@@ -46,6 +47,7 @@ import {
   readGuardFlowDetail,
   readGuardFlowsForView,
   readGuardInterfaces,
+  readGuardInterfaceRaw,
   readGuardRunFlows,
   guardExternalSetupIndexForView,
 } from '@truecourse/core/commands/guard-read';
@@ -234,6 +236,35 @@ router.get('/:id/guard/interfaces', async (req: Request, res: Response, next: Ne
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
     res.json(await readGuardInterfaces(repo.path, refOf(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * The stored artifact behind ONE catalog entry — the raw half of the two readings
+ * the Interfaces detail offers (the page, and the file it came from). The entry's
+ * own slice of the interfaces store, pretty-printed by the driver; 404 when the
+ * store, or that id in it, is absent — which is also how a hosted repo reads,
+ * since both halves of the catalog live in the working tree.
+ *
+ * The id selects INSIDE an already-read file and never reaches a path, so the
+ * store seam's own confinement is the whole path story.
+ */
+router.get('/:id/guard/interface/raw', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    const id = String(req.query.id ?? '');
+    if (!id) {
+      res.status(400).json({ error: 'Missing ?id=<interface id>.' });
+      return;
+    }
+    const source = await readGuardInterfaceRaw(repo.path, id);
+    if (!source) {
+      res.status(404).json({ error: `No stored interface: ${id}` });
+      return;
+    }
+    res.json(source);
   } catch (e) {
     next(e);
   }

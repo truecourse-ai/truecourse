@@ -2,8 +2,6 @@ export * from './types/index.js'
 export * from './schemas/index.js'
 export * from './guard/index.js'
 export * from './interfaces.js'
-// The pre-interface catalog, kept until every consumer moves to `interfaces.js`.
-export * from './journeys.js'
 export * from './external-services.js'
 export * from './spec/index.js'
 export * from './fs/tcignore.js'

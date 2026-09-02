@@ -712,7 +712,7 @@ const envelope = {
    * against `flows.json`, which is regenerated and may no longer name it. Written
    * by the engine, never authored by the model. Additive and optional, so no
    * format bump — absent on a hand-written scenario and on any file written
-   * before the field (the `journeyDrifted`/`server` precedent).
+   * before the field (the `interfaceDrifted`/`server` precedent).
    */
   promise: z.string().min(1).optional(),
   /** The flow realized here; absent on a hand-written scenario (Manual pseudo-flow). */
@@ -759,7 +759,7 @@ export const GuardApiScenarioSchema = z
      * ENGINE-ASSIGNED at authoring from the app that serves the flow's operations;
      * absent ⇒ the recipe's default server, which is what every pre-multi-server
      * scenario means. An additive optional field, so no format bump — the
-     * `journeyDrifted`/`corpusFingerprint` precedent.
+     * `interfaceDrifted`/`corpusFingerprint` precedent.
      */
     server: z.string().min(1).optional(),
     steps: z.array(GuardApiStepSchema).min(1),
