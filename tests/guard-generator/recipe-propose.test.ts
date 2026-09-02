@@ -19,7 +19,7 @@ import {
   credentialStubs,
   credentialEnvName,
   tokenizeCommand,
-  routesFromInterfaces,
+  routesFromJourneys,
   type ApiRouteRef,
 } from '@truecourse/guard-generator'
 
@@ -531,13 +531,10 @@ describe('health-path ranking', () => {
     expect(without.recipe.api?.healthPath).toBeUndefined()
   })
 
-  it('reads the surface off operation-rooted interfaces, minus the RPC-derived ones', () => {
-    // An RPC operation is the same adapter address behind a procedure name
-    // (item 12) — probing it says nothing a probe of the app's routes does not.
-    const routes = routesFromInterfaces([
+  it('reads the surface off operation-rooted journeys', () => {
+    const routes = routesFromJourneys([
       { id: 'api/get-health', title: 'GET /healthz', type: 'api', entry: { method: 'GET', path: '/healthz' }, steps: [], fingerprint: 'f1' },
       { id: 'cli/tool', title: 'tool', type: 'cli', entry: { command: ['tool'] }, steps: [], fingerprint: 'f2' },
-      { id: 'api/get-api-trpc-health', title: 'GET /api/trpc/health', type: 'api', entry: { method: 'GET', path: '/api/trpc/health' }, steps: [], fingerprint: 'f3', procedure: 'health' },
     ] as never)
 
     expect(routes).toEqual([{ method: 'GET', path: '/healthz' }])

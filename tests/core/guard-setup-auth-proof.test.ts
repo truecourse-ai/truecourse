@@ -428,7 +428,7 @@ describe('the blocked verdict in the report', () => {
     const h = harness(null);
     const opts: GuardSetupOptions = {
       repoRoot: r,
-      interfaces: async () => ({ interfaces: [], externalServices: [], database: null, datastoreUrls: [] }),
+      journeys: async () => ({ journeys: [], externalServices: [], database: null, datastoreUrls: [] }),
       recipeRunner: async () => {
         throw new Error('the recipe runner must not be called');
       },

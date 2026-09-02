@@ -43,7 +43,7 @@ import {
   type RouteManifestApp,
 } from '@truecourse/guard-runner'
 import { parseOpenApiSpec, parseSecuritySchemes, type SecurityScheme } from '@truecourse/shared/openapi'
-import type { DatastoreUrlRef, Interface } from '@truecourse/shared'
+import type { DatastoreUrlRef, Journey } from '@truecourse/shared'
 import { deriveGuardCompose, GUARD_COMPOSE_FILE, type ComposePlan } from './datastore-compose.js'
 
 /** One operation of the derived api surface — all the health ranking needs. */
@@ -184,18 +184,12 @@ export function proposeRecipe(repoRoot: string, inputs: ProposeRecipeInputs = {}
 
 /**
  * The api route surface as the proposer consumes it — the method + path of every
- * operation-rooted interface. Lets a caller that already mapped interfaces hand the
+ * operation-rooted journey. Lets a caller that already mapped journeys hand the
  * surface over without a second analysis pass.
- *
- * RPC-derived operations are left out (item 12): they are the same procedure
- * behind one adapter address, so probing them says nothing a probe of the app's
- * own routes does not, and they are excluded from scenario generation this round
- * anyway.
  */
-export function routesFromInterfaces(interfaces: readonly Interface[]): ApiRouteRef[] {
+export function routesFromJourneys(journeys: readonly Journey[]): ApiRouteRef[] {
   const routes: ApiRouteRef[] = []
-  for (const j of interfaces) {
-    if (j.procedure) continue
+  for (const j of journeys) {
     const entry = j.entry as { method?: string; path?: string }
     if (typeof entry?.method === 'string' && typeof entry.path === 'string') {
       routes.push({ method: entry.method, path: entry.path })

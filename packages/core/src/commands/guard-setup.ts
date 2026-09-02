@@ -3,11 +3,15 @@
  * stage between `spec scan` and `guard generate`.
  *
  * The ENGINE is `@truecourse/guard-generator`'s `runGuardSetup` (recipe discovery +
- * the live endpoint probe, detection, the externals skeleton, the one seed). THIS
- * module is the adapter both the CLI and (later) the dashboard call: it owns
- * step 0 (is a provider configured — a CONFIG question, which the engine package
- * deliberately has no dependency on), model + transport resolution, the pre-flight
- * cost estimate, usage accounting, and persisting `guard/setup.json`.
+ * the live endpoint probe, detection, the catalog step with its externals skeleton,
+ * the one seed — the step spine with per-step fingerprints). THIS module is the
+ * adapter both the CLI and (later) the dashboard call: it owns step 0 (is a
+ * provider configured — a CONFIG question, which the engine package deliberately
+ * has no dependency on), model + transport resolution, the pre-flight cost
+ * estimate, usage accounting, persisting `guard/setup.json`, and the AGENT-SESSION
+ * seams: the recipe-repair, dependency-catalog, seed and auth-proof sessions are
+ * built here (they need the configured session driver + the sessions store) and
+ * injected into the engine, which stays core-free.
  *
  * Working-tree only, by design: setup writes files inside the repo. A hosted store
  * has no working tree, which is exactly why hosted `guard generate` keeps deriving
@@ -17,13 +21,16 @@
 import {
   runGuardSetup,
   spawnRecipeRunner,
-  spawnSeedRunner,
   GUARD_SETUP_STEPS,
+  type GuardSetupOnlyStep,
+  type GuardSetupAuthStep,
+  type GuardSetupCatalogSession,
+  type GuardSetupJourneyProvider,
   type GuardSetupResult,
+  type GuardSetupSeedSession,
   type GuardSetupStepKey,
-  type JourneyProvider,
+  type RecipeRepairFn,
   type RecipeRunner,
-  type SeedRunner,
 } from '@truecourse/guard-generator';
 import { writeGuardSetup, readGuardSetup, guardSetupPath } from '@truecourse/guard-runner';
 import {
@@ -52,11 +59,24 @@ import { resolveFallbackModel, resolveModel } from '../config/llm-models.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
 import { estimateGuardSetup } from '../services/llm/spec-estimate.js';
 import { mapJourneys } from '../services/journey.service.js';
+import { sessionRunDir, type SessionRunStartedInfo } from '../lib/sessions-store.js';
+import {
+  buildAuthProof,
+  buildCatalogSession,
+  buildRecipeRepair,
+  buildSeedSession,
+  createGuardSetupSessionContext,
+} from '../services/guard-setup/index.js';
 import type { LlmEstimate } from './analyze-core.js';
 import { EstimateDeclined } from './spec-in-process.js';
 import type { StepTracker } from '../progress.js';
 
-export { GUARD_SETUP_STEPS } from '@truecourse/guard-generator';
+export {
+  GUARD_SETUP_STEPS,
+  GUARD_SETUP_ONLY_STEPS,
+  SetupStepNotReadyError,
+  type GuardSetupOnlyStep,
+} from '@truecourse/guard-generator';
 export { EstimateDeclined } from './spec-in-process.js';
 export { readGuardSetup, guardSetupPath } from '@truecourse/guard-runner';
 
@@ -80,23 +100,50 @@ export interface GuardSetupInProcessOptions {
   /** Re-derive the recipe and re-draft the seed even when both already exist. */
   refresh?: boolean;
   /**
-   * Pre-flight cost gate. Called with the (bounded, at-most-two-stage) estimate
-   * before any LLM work; return `false` to abort (throws {@link EstimateDeclined}).
+   * A sessions-store run record just came into being — setup's own, lazy, on
+   * its first session — so the CLI can print a "watch live" deep link. Never
+   * fires on a run spending no sessions.
+   */
+  onRunStarted?: (info: SessionRunStartedInfo) => void;
+  /**
+   * Single-step mode (the CLI's `--only-<step>` flags): run only this step —
+   * prior steps replay from what they left on disk (a step nobody ran throws
+   * {@link SetupStepNotReadyError}), later steps never start, and the persisted
+   * `guard/setup.json` merges over the previous one. The estimate gate prices
+   * only the chosen step.
+   */
+  only?: GuardSetupOnlyStep;
+  /**
+   * Pre-flight cost gate. Called with the session-modeled estimate before any
+   * LLM work; return `false` to abort (throws {@link EstimateDeclined}).
    */
   onLlmEstimate?: (estimate: LlmEstimate) => Promise<boolean>;
   /** Asked only when a refresh would REPLACE an existing `api.seed`; see the engine. */
   confirmSeedReplace?: () => Promise<boolean>;
   signal?: AbortSignal;
-  // --- test seams (production spawns the transport) ---
+  // --- test seams (production spawns the transport / builds the sessions) ---
   recipeRunner?: RecipeRunner;
-  seedRunner?: SeedRunner;
-  journeys?: JourneyProvider;
+  journeys?: GuardSetupJourneyProvider;
+  /** Test seam for the recipe-repair session. */
+  repair?: RecipeRepairFn;
+  /** Test seam for the dependency-catalog session. */
+  catalogSession?: GuardSetupCatalogSession;
+  /** Test seam for the seed session. */
+  seedSession?: GuardSetupSeedSession;
+  /** Test seam for the auth-proof step. */
+  verifyAuth?: GuardSetupAuthStep;
 }
 
 export interface GuardSetupInProcessResult {
   report: GuardSetupReport;
   /** Absolute path of the persisted `guard/setup.json`. */
   reportPath: string;
+  /**
+   * The sessions-store run dirs this run opened — `sessions/guard-setup/<runId>/`
+   * when any session ran. Empty when nothing spent a session. Named for
+   * stepwise runs, whose point is reading the transcripts afterwards.
+   */
+  sessionsRunDirs: string[];
 }
 
 /**
@@ -179,13 +226,24 @@ interface ResolvedSetupTransport {
 /** The pre-flight estimate the CLI prompt renders — the SAME one the gate uses. */
 export async function estimateGuardSetupCost(
   repoRoot: string,
-  opts: { refresh?: boolean; mode?: LlmTransportMode } = {},
+  opts: {
+    refresh?: boolean;
+    mode?: LlmTransportMode;
+    /** Single-step mode: price ONLY this step's sessions. */
+    only?: GuardSetupOnlyStep;
+  } = {},
 ): Promise<LlmEstimate> {
   return estimateGuardSetup(repoRoot, await getModelPrices(), opts);
 }
 
-/** The two LLM stages setup can spend on. */
-const SETUP_USAGE_STAGES = ['guard.recipe', 'guard.seed'] as const;
+/**
+ * The ONE-SHOT stage setup can still spend on: the legacy recipe fallback,
+ * which fires only on runs without a session driver (the `agent` mailbox
+ * transport, or an injected `recipeRunner` test seam). The sessions' spend is
+ * accounted separately — the loop's `BudgetSpent` has no input/output token
+ * split, so it rides `usage.sessions` instead of being forced into these fields.
+ */
+const SETUP_USAGE_STAGES = ['guard.recipe'] as const;
 
 export async function guardSetupInProcess(
   repoRoot: string,
@@ -214,6 +272,7 @@ export async function guardSetupInProcess(
     const estimate = await estimateGuardSetupCost(repoRoot, {
       mode,
       ...(options.refresh ? { refresh: true } : {}),
+      ...(options.only ? { only: options.only } : {}),
     });
     if ((estimate.stages?.length ?? 0) > 0) {
       const proceed = await options.onLlmEstimate(estimate);
@@ -225,6 +284,55 @@ export async function guardSetupInProcess(
   const llmLog = createLlmCallLogger(repoRoot, 'guard-setup');
   if (llmLog) setLlmCallSink(llmLog.sink);
   const startedAt = Date.now();
+
+  // THE SESSION SEAMS. Production wires the real agent
+  // sessions; a run with an injected one-shot recipe runner (the test seam)
+  // keeps the legacy path those tests drive, and the `agent` mailbox transport
+  // has no session driver at all. The context is LAZY throughout — a run whose
+  // deterministic paths settle everything never creates a run record and never
+  // builds a driver.
+  const sessionsAvailable = options.llm !== 'agent' && options.recipeRunner === undefined;
+  const sessionContext = sessionsAvailable
+    ? createGuardSetupSessionContext({
+        repoRoot,
+        ...(options.llm === 'cli' || options.llm === 'api' ? { transport: options.llm } : {}),
+        ...(options.onRunStarted ? { onRunStarted: options.onRunStarted } : {}),
+      })
+    : null;
+  const repair =
+    options.repair ??
+    (sessionContext
+      ? buildRecipeRepair(sessionContext, {
+          ...(options.signal ? { signal: options.signal } : {}),
+        })
+      : undefined);
+  const catalogSession =
+    options.catalogSession ??
+    (sessionContext
+      ? buildCatalogSession(sessionContext, {
+          ...(options.signal ? { signal: options.signal } : {}),
+        })
+      : undefined);
+  const seedSession =
+    options.seedSession ??
+    (sessionContext
+      ? buildSeedSession(sessionContext, {
+          ...(options.signal ? { signal: options.signal } : {}),
+        })
+      : undefined);
+  const verifyAuth =
+    options.verifyAuth ??
+    (sessionContext
+      ? buildAuthProof(sessionContext, {
+          ...(options.signal ? { signal: options.signal } : {}),
+        })
+      : undefined);
+
+  /** Where this run's transcripts landed — setup's own run, when one opened. */
+  const sessionsRunDirs = (): string[] => {
+    const setupRunId = sessionContext?.runId();
+    return setupRunId ? [sessionRunDir(repoRoot, 'guard-setup', setupRunId)] : [];
+  };
 
   const steps = GUARD_SETUP_STEPS.map((s) => s.key as GuardSetupStepKey);
   let current = 0;
@@ -245,13 +353,6 @@ export async function guardSetupInProcess(
           model: resolveModel('guard.recipe', undefined, repoRoot, mode),
           fallbackModel: resolveFallbackModel(repoRoot, mode) ?? undefined,
         }),
-      seedRunner:
-        options.seedRunner ??
-        spawnSeedRunner({
-          transport,
-          model: resolveModel('guard.seed', undefined, repoRoot, mode),
-          fallbackModel: resolveFallbackModel(repoRoot, mode) ?? undefined,
-        }),
       journeys:
         options.journeys ??
         (async () => {
@@ -264,7 +365,12 @@ export async function guardSetupInProcess(
             datastoreUrls: mapped.datastoreUrls,
           };
         }),
+      ...(repair ? { repair } : {}),
+      ...(catalogSession ? { catalogSession } : {}),
+      ...(seedSession ? { seedSession } : {}),
+      ...(verifyAuth ? { verifyAuth } : {}),
       ...(options.refresh ? { refresh: true } : {}),
+      ...(options.only ? { only: options.only } : {}),
       ...(options.confirmSeedReplace ? { confirmSeedReplace: options.confirmSeedReplace } : {}),
       ...(options.signal ? { signal: options.signal } : {}),
       onStep: (step) => advanceTo(step),
@@ -283,16 +389,24 @@ export async function guardSetupInProcess(
     if (result.report.status === 'failed') {
       tracker?.error(steps[current], firstLine(result.report.reason) ?? 'aborted');
     } else {
-      for (let i = current; i < steps.length; i++) tracker?.done(steps[i]);
+      // A single-step run closes the checklist at the step it was asked for:
+      // everything past it never started, so nothing past it may tick.
+      const last = options.only ? steps.indexOf(options.only) + 1 : steps.length;
+      for (let i = current; i < last; i++) tracker?.done(steps[i]);
     }
 
-    const report: GuardSetupReport = { ...result.report, ...withUsage() };
+    const report: GuardSetupReport = {
+      ...result.report,
+      ...withUsage(sessionContext?.usageTotals() ?? null),
+    };
     const reportPath = writeGuardSetup(repoRoot, report);
-    return { report, reportPath };
+    return { report, reportPath, sessionsRunDirs: sessionsRunDirs() };
   } catch (e) {
     tracker?.error(steps[current], (e as Error).message);
     throw e;
   } finally {
+    // Close the sessions-store run, when any session actually ran under it.
+    sessionContext?.finish(options.signal?.aborted === true);
     if (llmLog) {
       setLlmCallSink(undefined);
       llmLog.finish(Date.now() - startedAt);
@@ -300,8 +414,16 @@ export async function guardSetupInProcess(
   }
 }
 
-/** Sum the run's usage over setup's two stages; omitted when no real call landed. */
-function withUsage(): Pick<GuardSetupReport, 'usage'> {
+/**
+ * The run's spend: the one-shot stage usage (the legacy recipe fallback) plus
+ * the agent-session totals the context accumulated. `costUsd` is the WHOLE
+ * run; the sessions' turn/token detail rides its own block because the loop's
+ * `BudgetSpent` has no input/output split to fold into the one-shot fields.
+ * Omitted entirely when nothing was spent.
+ */
+function withUsage(
+  sessions: { count: number; turns: number; tokens: number; costUsd: number } | null,
+): Pick<GuardSetupReport, 'usage'> {
   const usage = getStageUsage();
   let calls = 0;
   let inputTokens = 0;
@@ -315,7 +437,16 @@ function withUsage(): Pick<GuardSetupReport, 'usage'> {
     outputTokens += u.outputTokens;
     costUsd += u.costUsd;
   }
-  return calls > 0 ? { usage: { calls, inputTokens, outputTokens, costUsd } } : {};
+  if (calls === 0 && (sessions === null || sessions.count === 0)) return {};
+  return {
+    usage: {
+      calls,
+      inputTokens,
+      outputTokens,
+      costUsd: costUsd + (sessions?.costUsd ?? 0),
+      ...(sessions && sessions.count > 0 ? { sessions } : {}),
+    },
+  };
 }
 
 function firstLine(reason: string | undefined): string | undefined {

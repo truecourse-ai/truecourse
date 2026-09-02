@@ -1496,6 +1496,26 @@ Concretely:
              "defaultServer": "web" }
 - Propose entry for a command-line program, api for an HTTP server, or BOTH when
   the repository ships both. At least one of them is required.
+- Everything the recipe runs must be something THIS repository ships. Never an
+  inline-eval stand-in (\`node -e …\` as a server, an entry that merely loads a
+  module, a build that builds nothing) — the engine refuses those statically, and
+  a stand-in that passed would test nothing.
+- A server that needs a datastore declares the repo's OWN bring-up under
+  \`api.services\` (\`{"up": "docker compose -f <repo compose file> up -d --wait …",
+  "down": "docker compose -f … stop"}\`) — never inside \`build\` (statically
+  refused: the runner owns the services lifecycle, and a build's leftovers leak).
+  Namespace EVERY \`docker compose\` invocation: pass \`-p <dedicated-project>\`, or
+  point \`-f\` at a compose file that declares a top-level \`name:\` (a dedicated
+  test compose). A bare \`docker compose up/stop\` attaches to the repository's
+  DEFAULT compose project — the developer's own running stack, whose containers
+  it would recreate or stop — and is refused statically. And when the app pins a
+  SQL datastore, run the repo's schema/migration step inside \`api.services.up\`
+  after the bring-up — a compose that only starts an empty database boots a
+  server with no schema behind a green health probe.
+- ownHosts (optional, recommended) lists the product's OWN hostnames
+  ("acme.com", "api.acme.com") — domains the app's code calls that ARE the app,
+  not third parties. Without it, detection reports the app's own domains as
+  external services.
 
 Output exactly one JSON object with \`build\` plus \`entry\` and/or \`api\` (and
 \`install\` when dependencies must be fetched first). No prose.`

@@ -1395,8 +1395,8 @@ describe('collectProbeCandidates — probe endpoints are a lookup, not a search'
 // ---------------------------------------------------------------------------
 
 describe('runGuardSetup — the seed step honors confirmSeedReplace', () => {
-  const interfaces = () => async () => ({
-    interfaces: [],
+  const journeys = () => async () => ({
+    journeys: [],
     externalServices: [],
     database: DATABASE,
     datastoreUrls: [],
@@ -1417,7 +1417,7 @@ describe('runGuardSetup — the seed step honors confirmSeedReplace', () => {
   function opts(r: string, over: Partial<GuardSetupOptions>): GuardSetupOptions {
     return {
       repoRoot: r,
-      interfaces: interfaces(),
+      journeys: journeys(),
       recipeRunner: async () => {
         throw new Error('the recipe runner must not be called');
       },

@@ -84,6 +84,13 @@ import { apiModeModel } from '../../config/global-config.js';
 import {
   planGuardWork,
   proposeRecipe,
+  recipeCacheKey,
+  RECIPE_CACHE_NAME,
+  RecipeProposalSchema,
+  SEED_CACHE_NAME,
+  settledFingerprints,
+  computeSeedStepFingerprint,
+  authFingerprint,
   collectWorkDocs,
   countExtractViews,
   countUncachedExtractViews,
@@ -101,12 +108,12 @@ import {
   EXTRACT_SYSTEM_PROMPT as GUARD_EXTRACT_SYSTEM_PROMPT,
   GENERATE_SYSTEM_PROMPT,
   RECIPE_SYSTEM_PROMPT,
-  SEED_SYSTEM_PROMPT,
   FIDELITY_SYSTEM_PROMPT,
   TRIAGE_SYSTEM_PROMPT as GUARD_TRIAGE_SYSTEM_PROMPT,
   FLOWS_SYSTEM_PROMPT as GUARD_FLOWS_SYSTEM_PROMPT,
   MATCH_SYSTEM_PROMPT as GUARD_MATCH_SYSTEM_PROMPT,
   type FlowAreaDocInput,
+  type GuardSetupOnlyStep,
   type GuardWorkPlan,
   type SurfaceCatalog,
 } from '@truecourse/guard-generator';
@@ -119,12 +126,26 @@ import {
   type GuardFlow,
 } from '@truecourse/shared';
 import {
+  computeRecipeFingerprint,
+  loadDependencyCatalog,
   loadRecipe,
   readJourneyCatalog,
   readManifest as readGuardManifest,
   recipePath,
   type Recipe,
 } from '@truecourse/guard-runner';
+import {
+  AUTH_PROOF_BUDGET,
+  AUTH_PROOF_SESSION_KIND,
+  DEPENDENCY_CATALOG_BUDGET,
+  DEPENDENCY_CATALOG_SESSION_KIND,
+  RECIPE_REPAIR_BUDGET,
+  RECIPE_REPAIR_SESSION_KIND,
+  SEED_SESSION_BUDGET,
+  SEED_SESSION_KIND,
+  SeedSessionOutcomeSchema,
+  seedSessionCacheKey,
+} from '../guard-setup/index.js';
 import type { RepoIdentity } from '@truecourse/spec-consolidator';
 import type { LlmEstimate } from '../../commands/analyze-core.js';
 import type { LlmTransportMode } from '../../config/global-config.js';
@@ -143,10 +164,13 @@ const STAGE_LABELS: Record<string, string> = {
   [CURATE_DOC_SESSION_KIND]: 'Curating docs',
   [SETTLE_AREAS_SESSION_KIND]: 'Settling areas',
   [OVERLAP_SESSION_KIND]: 'Flagging overlaps',
+  // guard setup (session kinds)
+  [RECIPE_REPAIR_SESSION_KIND]: 'Repairing the recipe',
+  [DEPENDENCY_CATALOG_SESSION_KIND]: 'Classifying dependencies',
+  [SEED_SESSION_KIND]: 'Preparing data + principals',
+  [AUTH_PROOF_SESSION_KIND]: 'Verifying supplied auth',
   // guard generate
-  // guard setup
   guardRecipe: 'Discovering recipe',
-  guardSeed: 'Preparing data + principals',
   guardExtract: 'Extracting claims',
   guardFlows: 'Synthesizing flows',
   guardMatch: 'Matching flows',
@@ -167,6 +191,10 @@ const EXPECTED_TURNS: Record<string, number> = {
   [CURATE_DOC_SESSION_KIND]: 2,
   [SETTLE_AREAS_SESSION_KIND]: 4,
   [OVERLAP_SESSION_KIND]: 8,
+  [RECIPE_REPAIR_SESSION_KIND]: 8,
+  [DEPENDENCY_CATALOG_SESSION_KIND]: 6,
+  [SEED_SESSION_KIND]: 12,
+  [AUTH_PROOF_SESSION_KIND]: 3,
 };
 // PROVISIONAL prior-turns growth: each turn's input carries the turns before it
 // (tool results, the model's own reasoning); this approximates the average
@@ -179,6 +207,10 @@ const SESSION_OUTPUT_TOKENS: Record<string, number> = {
   [CURATE_DOC_SESSION_KIND]: 120,
   [SETTLE_AREAS_SESSION_KIND]: 250,
   [OVERLAP_SESSION_KIND]: 400,
+  [RECIPE_REPAIR_SESSION_KIND]: 300,
+  [DEPENDENCY_CATALOG_SESSION_KIND]: 500,
+  [SEED_SESSION_KIND]: 3000, // the outcome carries the whole script
+  [AUTH_PROOF_SESSION_KIND]: 150,
 };
 /** Cold-cache fallback for an overlap briefing's size (outlines, no bodies). */
 const OVERLAP_BRIEFING_FALLBACK_CHARS = 8_000;
@@ -486,11 +518,9 @@ const GUARD_AUTHOR_OUTPUT_TOKENS = 700; // ~one flow scenario's YAML (several st
 const GUARD_FIDELITY_OUTPUT_TOKENS = 60; // ~a verdict + a one-sentence mismatch
 const GUARD_TRIAGE_OUTPUT_TOKENS = 300; // ~a verdict + confidence + brief + recommendation
 const GUARD_SCENARIO_YAML_CHARS = 2400; // ~one flow scenario's YAML body (the review input)
-// Seed drafting: the prompt carries the parsed schema + the blocked
-// claims, and the reply is a whole script file — the largest single output of any
-// guard stage.
+// The seed session's briefing carries the parsed schema + the route surface —
+// the largest single briefing of any setup session.
 const GUARD_SEED_BODY_CHARS = 6000;
-const GUARD_SEED_OUTPUT_TOKENS = 3000;
 // Grounded authoring injects real empty-sandbox probe transcripts into each
 // authoring prompt (zero extra LLM CALLS — it just enlarges the input).
 const GUARD_GROUND_TRANSCRIPT_CHARS = 4000;
@@ -774,59 +804,173 @@ function preparedSurfaces(repoRoot: string): GuardDriverId[] {
  *  - FIDELITY reviews one scenario per authoring call; the evidence RETRY is at most
  *    one re-author per authored scenario, so it ranges 0..authoring.
  */
+// --- guard setup session-modeling constants ---------------------------------
+// PROVISIONAL prompt/briefing sizes per setup session kind. Deliberately
+// constants rather than imports: most of these kinds keep their system prompts
+// module-private, and the estimate only needs an order-of-magnitude input size.
+// Re-ground on transcript data once a few session-era setups have run.
+const SETUP_KIND_CHARS: Record<string, { system: number; briefing: number }> = {
+  [RECIPE_REPAIR_SESSION_KIND]: { system: 2_600, briefing: 4_500 },
+  [DEPENDENCY_CATALOG_SESSION_KIND]: { system: 3_200, briefing: 4_000 },
+  [SEED_SESSION_KIND]: { system: 5_500, briefing: GUARD_SEED_BODY_CHARS + 9_000 },
+  [AUTH_PROOF_SESSION_KIND]: { system: 1_800, briefing: 1_200 },
+};
+
 /**
- * Pre-flight estimate for `truecourse guard setup`.
+ * Pre-flight estimate for `truecourse guard setup` — SESSION math, mirroring
+ * the scan estimate: per session kind, `items` counts the work a run would
+ * actually start, probed with the run's own machinery wherever it is knowable
+ * OFFLINE:
  *
- * Setup spends on AT MOST TWO calls, so this is deliberately not a full staged
- * integration: one recipe PROPOSAL (only when `recipe.json` is absent — a committed
- * recipe is reused and the deterministic proposer may well answer for free anyway)
- * and one seed DRAFT (only when the recipe declares no `api.seed`, or the caller
- * asked to replace it). Both are ceilings: each also buys one evidence retry, which
- * `maxCalls` prices, and either can be a cache hit that costs nothing.
+ *  - SKIP-WHEN-SETTLED is read from the real `guard/setup.json` spine
+ *    (`settledFingerprints`) with the real fingerprint builders — the recipe,
+ *    seed and auth fingerprints are pure tree reads. The CATALOG fingerprint
+ *    folds the detection snapshot (an analysis pass the estimate must never pay
+ *    for), so that step degrades to an honest 0..1 range.
+ *  - CACHES are probed with the REAL exported key builders where the key is
+ *    computable offline: the repair proposal (`guard/recipe`) and the seed
+ *    draft (`guard/seed`).
  *
- * Deliberately NOT probed: the database (the seed's real gate), which needs the
- * working-tree ANALYSIS pass an estimate must never pay for. So this over-counts by
- * at most one call on a repo with no datastore — exactly what a CEILING is for.
+ * ONE MODEL for every session; expected turns are the provisional per-kind
+ * constants, the ceiling is always the budget's hard limit.
+ *
+ * `only` (the `--only-<step>` flags) prices ONLY that step's kind: prior steps
+ * replay from disk and later ones never start, so quoting them would ask the
+ * user to approve a bill this run cannot produce.
  */
 export async function estimateGuardSetup(
   repoRoot: string,
   prices?: PriceTable,
-  opts: { refresh?: boolean; mode?: LlmTransportMode } = {},
+  opts: { refresh?: boolean; mode?: LlmTransportMode; only?: GuardSetupOnlyStep } = {},
 ): Promise<LlmEstimate> {
+  const model = sessionModel(opts.mode);
+  const refresh = opts.refresh === true;
   let recipe: Recipe | undefined;
   try {
     recipe = loadRecipe(repoRoot, recipePath(repoRoot))?.recipe;
   } catch {
-    recipe = undefined; // a broken recipe is re-derived, so it costs the proposal
+    recipe = undefined; // a broken recipe is re-derived, so it costs the session
   }
-  const recipeCalls = recipe && !opts.refresh ? 0 : 1;
-  const seedCalls = recipe?.api && recipe.api.seed && !opts.refresh ? 0 : 1;
+  const settled = settledFingerprints(repoRoot, refresh);
+
+  // ---- recipe repair: loop only on the failure path -------------------------
+  // Zero whenever a recipe exists (discovery reuses it) or the settled proposal
+  // is cached; when discovery WILL run, the deterministic proposer (pure over
+  // the tree — the same first pass the run makes) predicts whether the model is
+  // even reached, and a verify failure it cannot predict keeps the 0..1 range.
+  let repairItems = 0;
+  let repairMax = 0;
+  if (refresh || !recipe) {
+    const cached = await probeSessionCache(
+      repoRoot,
+      RECIPE_CACHE_NAME,
+      recipeCacheKey(computeRecipeFingerprint(repoRoot)),
+      RecipeProposalSchema,
+    );
+    repairMax = cached ? 0 : 1;
+    repairItems = cached ? 0 : proposeRecipe(repoRoot).ok ? 0 : 1;
+  }
+
+  // ---- dependency catalog: fingerprint folds the detection snapshot ---------
+  const catalogSettledRow = settled('catalog') !== null;
+  const catalogItems = catalogSettledRow ? 0 : 1;
+  // A settled row zeroes the ceiling too — same convention as the seed's cache
+  // probe: a detection snapshot that moves between estimate and run is unpriced.
+  const catalogMax = catalogSettledRow ? 0 : 1;
+
+  // ---- seed: real cache key when the step will run --------------------------
+  const seedGateOpen =
+    !recipe || (recipe.api !== undefined && (recipe.api.seed === undefined || refresh));
+  const seedSettled = recipe !== undefined && settled('seed') === computeSeedStepFingerprint(repoRoot);
+  let seedItems = 0;
+  let seedMax = 0;
+  if (seedGateOpen && !seedSettled) {
+    const cached =
+      recipe !== undefined
+        ? await probeSessionCache(
+            repoRoot,
+            SEED_CACHE_NAME,
+            seedSessionCacheKey(computeSeedStepFingerprint(repoRoot)),
+            SeedSessionOutcomeSchema,
+          )
+        : null;
+    seedMax = cached ? 0 : 1;
+    seedItems = cached ? 0 : 1;
+  }
+
+  // ---- auth proof: one session per supplied catalog entry (never cached) ----
+  const suppliedEntries = loadDependencyCatalog(repoRoot).dependencies.filter(
+    (d) => d.class === 'supplied',
+  ).length;
+  const authRuns =
+    suppliedEntries > 0 &&
+    recipe?.entry !== undefined &&
+    settled('auth') !== authFingerprint(repoRoot);
+  const authItems = authRuns ? suppliedEntries : 0;
+
+  const setupStage = (input: {
+    kind: string;
+    budget: SessionBudget;
+    items: number;
+    minItems?: number;
+    maxItems?: number;
+    bound?: string;
+  }): StageCallEstimate => {
+    const chars = SETUP_KIND_CHARS[input.kind] ?? { system: 3_000, briefing: 4_000 };
+    return sessionKindStage({
+      kind: input.kind,
+      model,
+      items: input.items,
+      minItems: input.minItems ?? 0,
+      maxItems: input.maxItems ?? input.items,
+      budget: input.budget,
+      systemPromptChars: chars.system,
+      briefingChars: chars.briefing,
+      ...(input.bound ? { bound: input.bound } : {}),
+    });
+  };
 
   const stages: StageCallEstimate[] = [
-    {
-      stage: 'guardRecipe',
-      model: resolveModel('guard.recipe', undefined, repoRoot, opts.mode),
-      calls: recipeCalls,
-      minCalls: 0,
-      // The deterministic proposer answers first and costs nothing; the model is the
-      // fallback, and a rejected proposal buys exactly one evidence retry.
-      maxCalls: recipeCalls * 2,
-      avgInputTokens: tokensFromChars(RECIPE_SYSTEM_PROMPT.length, 2000),
-      avgOutputTokens: 120,
-      bound: 'the repo\'s own manifests are tried first, for free — the model is the fallback',
-    },
-    {
-      stage: 'guardSeed',
-      model: resolveModel('guard.seed', undefined, repoRoot, opts.mode),
-      calls: seedCalls,
-      minCalls: 0,
-      maxCalls: seedCalls * 2,
-      avgInputTokens: tokensFromChars(SEED_SYSTEM_PROMPT.length, GUARD_SEED_BODY_CHARS),
-      avgOutputTokens: GUARD_SEED_OUTPUT_TOKENS,
-      bound: 'one draft plus at most one evidence retry; skipped when no database is detected',
-    },
+    setupStage({
+      kind: RECIPE_REPAIR_SESSION_KIND,
+      budget: RECIPE_REPAIR_BUDGET,
+      items: repairItems,
+      maxItems: repairMax,
+      bound: 'loop only on the failure path — a deterministic proposal that verifies spends nothing',
+    }),
+    setupStage({
+      kind: DEPENDENCY_CATALOG_SESSION_KIND,
+      budget: DEPENDENCY_CATALOG_BUDGET,
+      items: catalogItems,
+      maxItems: catalogMax,
+      bound: catalogSettledRow
+        ? 'settled last run; re-runs only if detection or the catalog moved (unknowable offline)'
+        : 'one classification session over the whole detection',
+    }),
+    setupStage({
+      kind: SEED_SESSION_KIND,
+      budget: SEED_SESSION_BUDGET,
+      items: seedItems,
+      maxItems: seedMax,
+      bound: 'prove-by-execution; skipped when no database schema is detected (unknowable offline)',
+    }),
+    setupStage({
+      kind: AUTH_PROOF_SESSION_KIND,
+      budget: AUTH_PROOF_BUDGET,
+      items: authItems,
+      maxItems: authItems,
+      bound: 'one proof per supplied catalog entry; never cached (proof-class)',
+    }),
   ];
-  return estimateStageTokens(withLabels(stages), 'preparation', prices);
+  // Single-step mode prices the chosen step's kind and nothing else.
+  const SETUP_STEP_KINDS: Record<GuardSetupOnlyStep, string> = {
+    recipe: RECIPE_REPAIR_SESSION_KIND,
+    catalog: DEPENDENCY_CATALOG_SESSION_KIND,
+    seed: SEED_SESSION_KIND,
+    auth: AUTH_PROOF_SESSION_KIND,
+  };
+  const included = opts.only ? stages.filter((s) => s.stage === SETUP_STEP_KINDS[opts.only!]) : stages;
+  return estimateStageTokens(withLabels(included), 'preparation', prices);
 }
 
 export async function estimateGuardTokens(

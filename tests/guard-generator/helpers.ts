@@ -32,6 +32,10 @@ import {
 export const FIXTURE_BIN = fileURLToPath(
   new URL('../fixtures/guard-fixture-cli/bin.mjs', import.meta.url),
 )
+/** The web fixture: a static server whose `/` renders and whose unknown paths 404. */
+export const FIXTURE_WEB_SERVER = fileURLToPath(
+  new URL('../fixtures/guard-fixture-web/server.mjs', import.meta.url),
+)
 
 export function makeTempRepo(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-gen-'))

@@ -201,7 +201,11 @@ TrueCourse builds a curated spec corpus from your docs, then **guards** it: an L
 cd <your-repo>
 truecourse spec scan                    # Curate docs → corpus (areas + overlap flags)
 truecourse spec conflicts list          # Review flagged overlaps (resolve with `spec conflicts resolve`)
-truecourse guard setup                  # Prepare the repo: recipe + external APIs + the data/auth seed (cheap)
+truecourse guard setup                  # Prepare the repo: recipe + dependency catalog + the data/auth seed + auth proof
+truecourse guard setup --only-<step>    # Run ONE setup step in isolation: recipe | catalog | seed | auth. Earlier steps
+                                        # replay from what they left on disk (a step nobody ran aborts, naming the flag
+                                        # to run first), later steps never start, detection always re-runs, and
+                                        # setup.json keeps the untouched steps' rows.
 truecourse guard generate               # Author scenario tests from spec sections (classify → generate → birth-validate)
 truecourse guard run                    # Run the committed scenarios; exits non-zero on any drift (CI gate)
 ```
@@ -218,7 +222,7 @@ Stages run in order, each producing committable artifacts the next consumes:
 
 Only genuine within-area **disagreements** flag as overlaps — docs that agree never surface. You resolve them in the dashboard's Guard → Coverage tab or via `spec conflicts` (pick a side or dismiss).
 
-**2. Guard setup** (`truecourse guard setup`) — The cheap preparation stage between the scan and the generator, and a **prerequisite** for it: `guard generate` refuses to run until it has been done. It derives and *proves* the recipe (install → build → boot, then a live call against a real route of every declared server), detects the third parties and the database this repo uses, **declares** every detected external API in `recipe.json`, and drafts the one seed script that creates both the rows and the authenticated principals your scenarios need — running it for real and validating its manifest before either artifact is written. At most two LLM calls.
+**2. Guard setup** (`truecourse guard setup`) — The cheap preparation stage between the scan and the generator, and a **prerequisite** for it: `guard generate` refuses to run until it has been done. It derives and *proves* the recipe (install → build → boot, then a live call against a real route of every declared server), detects the third parties and the database this repo uses, **declares** every detected external API in `recipe.json`, classifies the **dependency catalog** (`scenarios/dependencies.json` — the classes of starting state the program needs and how a test may obtain each), authors the one seed script that creates both the rows and the authenticated principals your scenarios need — proving it by execution against the live services before either artifact is written — and proves every user-registered dependency actually authenticates. Every LLM-bearing step is an agent session that runs only when its inputs changed; `--only-<step>` runs one in isolation.
 
 Why it is a separate stage rather than something `guard generate` figures out: all of these facts live in `recipe.json`, and editing `recipe.json` moves the recipe fingerprint, which re-authors every section generated against it. Discovering them as a byproduct of the expensive stage means every fix costs a full regenerate. Discovering them first means every fix is free. The same logic is why setup declares external services you have *no account for*: the DECLARATION is what enters the fingerprint, the API key is not — so handing guard a key later touches only the gitignored `scenarios/externals.local.json` and re-authors nothing.
 
@@ -262,6 +266,7 @@ The spec, the scenarios, and a guard baseline are committable so they travel wit
 │   ├── history.json          ← per-run summaries (gitignored)
 │   ├── evidence/<runId>/     ← per-failure transcripts (gitignored)
 │   ├── setup.json            ← last `truecourse guard setup` record + detection snapshot (gitignored)
+│   ├── setup.findings.md     ← code-vs-docs findings the setup sessions read (committable)
 │   └── result.json           ← last `guard generate` summary (gitignored)
 └── .cache/                  ← LLM caches (gitignored)
 ```

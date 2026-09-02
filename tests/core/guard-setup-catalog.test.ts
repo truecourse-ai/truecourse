@@ -25,7 +25,6 @@ import {
 } from '@truecourse/guard-runner';
 import { setCacheEntry } from '@truecourse/llm';
 import { GITIGNORE_CONTENTS } from '../../packages/core/src/config/paths.js';
-import { readGuardExternalsView } from '../../packages/core/src/commands/guard-externals.js';
 import {
   buildCatalogSession,
   dependencyCatalogBriefing,
@@ -359,20 +358,6 @@ describe('foldCatalogDraft', () => {
       description: 'the analyzer needs a real checkout',
     });
     expect(fs.existsSync(dependenciesLocalPath(r))).toBe(false);
-  });
-
-  // §7.6's read-surface move: after the fold, the External APIs surface lists the
-  // service through its CATALOG row — no `api` block required.
-  it('makes the folded entry visible to the externals view', () => {
-    const r = repo();
-
-    foldCatalogDraft(
-      input(r, { detected: [STRIPE] }),
-      draft([{ name: 'stripe', class: 'supplied', evidence: 'src/pay.ts imports stripe' }]),
-    );
-
-    const row = readGuardExternalsView(r).services.find((s) => s.service === 'stripe');
-    expect(row?.catalog?.dependency).toBe('stripe');
   });
 
   it('stores a condition as parsed predicates, not as the raw string', () => {

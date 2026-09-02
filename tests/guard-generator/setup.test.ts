@@ -2,7 +2,7 @@
  * `runGuardSetup` — the whole stage over a copy of the `seed-draft` fixture.
  *
  * The engine no longer owns any LLM call: the recipe repair, the dependency
- * catalog, the interfaces step (reconcile + web authoring), the seed and the
+ * catalog, the seed and the
  * auth proof are all SEAMS the command adapter injects (plan 03 steps 8–14).
  * What this file pins is the engine's own contract:
  *
@@ -10,7 +10,7 @@
  *  - SKIP-WHEN-SETTLED — a step whose fingerprint matches a settled row is
  *    skipped whole, `--refresh` forces every one of them, and a step that WRITES
  *    records the tree it left behind so it matches itself next run;
- *  - the HARD GATE is still step 1 and only step 1 (catalog, interfaces, seed
+ *  - the HARD GATE is still step 1 and only step 1 (catalog, seed
  *    and auth are soft and report their own outcome);
  *  - the seams are called with what they are promised, and their results land on
  *    the right row.
@@ -30,8 +30,6 @@ import {
   computeRecipeFingerprint,
   writeGuardSetup,
   readGuardSetup,
-  guardAuthoredInterfacesPath,
-  guardInterfacesPath,
   dependenciesPath,
 } from '@truecourse/guard-runner'
 import {
@@ -40,11 +38,10 @@ import {
   ecosystemFingerprint,
   type GuardSetupAuthStep,
   type GuardSetupCatalogSession,
-  type GuardSetupInterfacesStep,
   type GuardSetupOptions,
   type GuardSetupSeedSession,
   type GuardSetupSeedSessionInput,
-  type InterfaceProvider,
+  type JourneyProvider,
   type SeedDraftDatabase,
   type RecipeRunner,
 } from '@truecourse/guard-generator'
@@ -53,10 +50,9 @@ import {
   GuardSetupTaxonomyStepSchema,
   type DetectedExternalService,
   type GuardSetupServerProbe,
-  type InterfacesFile,
 } from '@truecourse/shared'
 import { rmrf } from '../guard-runner/helpers.js'
-import { writeCorpus, apiInterface } from './helpers.js'
+import { writeCorpus, apiJourney } from './helpers.js'
 
 const FIXTURE = fileURLToPath(new URL('../fixtures/seed-draft', import.meta.url))
 
@@ -114,15 +110,15 @@ const DATABASE: SeedDraftDatabase = {
   appImports: ["src/db.js: import { PrismaClient } from '@prisma/client'"],
 }
 
-/** The interface/detection pass, stubbed at the seam the engine already has. */
-function interfaces(
+/** The journey/detection pass, stubbed at the seam the engine already has. */
+function journeys(
   over: {
     externalServices?: DetectedExternalService[]
     database?: SeedDraftDatabase | null
   } = {},
-): InterfaceProvider {
+): JourneyProvider {
   return async () => ({
-    interfaces: [apiInterface('GET', '/orgs')],
+    journeys: [apiJourney('GET', '/orgs')],
     externalServices: over.externalServices ?? [],
     database: over.database === undefined ? DATABASE : over.database,
     datastoreUrls: [],
@@ -196,7 +192,7 @@ function writingSeedSeam(): GuardSetupSeedSession {
 function baseOpts(r: string, over: Partial<GuardSetupOptions> = {}): GuardSetupOptions {
   return {
     repoRoot: r,
-    interfaces: interfaces(),
+    journeys: journeys(),
     recipeRunner: neverCalled('recipe'),
     probe: probeStub().probe,
     ...over,
@@ -262,21 +258,18 @@ describe('runGuardSetup — the step spine (plan 03 step 8)', () => {
       'recipe',
       'detect',
       'catalog',
-      'interfaces',
       'seed',
       'auth',
     ])
     // detect is free: it always runs, so it has no fingerprint to settle on.
     const byKey = Object.fromEntries(report.steps.map((s) => [s.key, s]))
     expect(byKey.detect).toEqual({ key: 'detect', status: 'ok', inputFingerprint: '' })
-    for (const key of ['recipe', 'catalog', 'interfaces', 'seed', 'auth']) {
+    for (const key of ['recipe', 'catalog', 'seed', 'auth']) {
       expect(byKey[key].inputFingerprint).toMatch(/^[0-9a-f]{64}$/)
     }
-    // The unwired seams report a placeholder row that NAMES what is missing.
-    expect(byKey.interfaces).toMatchObject({ status: 'skipped' })
-    expect(byKey.interfaces.reason).toMatch(/not wired into this run/)
+    // The unwired seam reports a placeholder row that NAMES what is missing.
     expect(byKey.auth).toMatchObject({ status: 'skipped' })
-    expect(byKey.auth.reason).toMatch(/not wired into setup yet/)
+    expect(byKey.auth.reason).toMatch(/not wired into this run/)
 
     // The persisted record is what `guard status` and the externals view read.
     expect(GuardSetupReportSchema.safeParse(report).success).toBe(true)
@@ -285,7 +278,6 @@ describe('runGuardSetup — the step spine (plan 03 step 8)', () => {
       'recipe',
       'detect',
       'catalog',
-      'interfaces',
       'seed',
       'auth',
     ])
@@ -521,7 +513,7 @@ describe('runGuardSetup — the happy path', () => {
       repoRoot: r,
       recipeRunner: neverCalled('recipe'),
       seedSession: seed.seam,
-      interfaces: interfaces({
+      journeys: journeys({
         externalServices: [
           { service: 'stripe', category: 'payment', evidence: [], baseUrlEnv: 'STRIPE_BASE_URL' },
           // No base-URL variable ⇒ nothing honest to declare.
@@ -614,7 +606,7 @@ describe('runGuardSetup — the soft steps', () => {
     const { report } = await runGuardSetup(
       baseOpts(r, {
         catalogSession,
-        interfaces: interfaces({
+        journeys: journeys({
           externalServices: [
             { service: 'stripe', category: 'payment', evidence: [], baseUrlEnv: 'STRIPE_BASE_URL' },
           ],
@@ -641,7 +633,7 @@ describe('runGuardSetup — the soft steps', () => {
 
     const { report } = await runGuardSetup(
       baseOpts(r, {
-        interfaces: interfaces({ database: null }),
+        journeys: journeys({ database: null }),
         seedSession: async () => {
           throw new Error('the seed seam must not be reached past the gate')
         },
@@ -778,181 +770,6 @@ describe('runGuardSetup — the soft steps', () => {
     expect(report.status).toBe('ok')
     expect(report.steps.find((s) => s.key === 'auth')).toMatchObject({ status: 'blocked' })
     expect(GuardSetupReportSchema.safeParse(report).success).toBe(true)
-  })
-})
-
-// ---------------------------------------------------------------------------
-// Step 11 — the interfaces step's engine half
-// ---------------------------------------------------------------------------
-
-describe('runGuardSetup — the interfaces step (plan 03 step 11)', () => {
-  const DERIVED: InterfacesFile = {
-    version: 2,
-    generatedAt: '2026-08-19T00:00:00.000Z',
-    recipeFingerprint: 'sha256:recipe',
-    interfaces: [],
-    resources: { web: [{ id: 'root', kind: 'screen', title: '/', address: '/' }] },
-    source: { web: 'tree' },
-  }
-
-  function writeCatalogs(r: string, opts: { authored?: boolean } = {}): void {
-    fs.mkdirSync(path.dirname(guardInterfacesPath(r)), { recursive: true })
-    fs.writeFileSync(guardInterfacesPath(r), JSON.stringify(DERIVED))
-    if (opts.authored) {
-      fs.writeFileSync(
-        guardAuthoredInterfacesPath(r),
-        JSON.stringify({
-          version: 2,
-          generatedAt: '2026-08-19T00:00:00.000Z',
-          recipeFingerprint: 'sha256:recipe',
-          interfaces: [],
-        }),
-      )
-    }
-  }
-
-  /** A step seam recording what it was handed. */
-  function step(
-    result: Awaited<ReturnType<GuardSetupInterfacesStep>> = { status: 'ok' },
-  ): { seam: GuardSetupInterfacesStep; inputs: Parameters<GuardSetupInterfacesStep>[0][] } {
-    const inputs: Parameters<GuardSetupInterfacesStep>[0][] = []
-    return {
-      inputs,
-      seam: async (input) => {
-        inputs.push(input)
-        return result
-      },
-    }
-  }
-
-  it('skips only when the places are unchanged AND an authored file exists', async () => {
-    const r = fixtureRepo()
-    writeRecipe(r)
-    writeCatalogs(r, { authored: true })
-    const first = step({ status: 'ok', reason: 'authored 3 task(s)', sessionRunId: 'run-if' })
-
-    const one = await runGuardSetup(baseOpts(r, { authorInterfaces: first.seam }))
-    writeGuardSetup(r, one.report)
-    expect(first.inputs).toHaveLength(1)
-    expect(one.report.steps.find((s) => s.key === 'interfaces')).toMatchObject({
-      status: 'ok',
-      sessionRunId: 'run-if',
-    })
-
-    // Unchanged places + the authored file still there ⇒ zero sessions.
-    const second = step()
-    const two = await runGuardSetup(baseOpts(r, { authorInterfaces: second.seam }))
-    writeGuardSetup(r, two.report)
-    expect(second.inputs).toHaveLength(0)
-    expect(two.report.steps.find((s) => s.key === 'interfaces')).toMatchObject({
-      status: 'skipped',
-      reason: 'unchanged',
-    })
-
-    // Delete the authored half (a fresh clone has none) ⇒ the step is work again,
-    // matching fingerprint or not.
-    fs.rmSync(guardAuthoredInterfacesPath(r))
-    const third = step()
-    const three = await runGuardSetup(baseOpts(r, { authorInterfaces: third.seam }))
-    writeGuardSetup(r, three.report)
-    expect(third.inputs).toHaveLength(1)
-  })
-
-  it('--replace never skips, and the seam is told', async () => {
-    const r = fixtureRepo()
-    writeRecipe(r)
-    writeCatalogs(r, { authored: true })
-
-    const first = step()
-    const one = await runGuardSetup(baseOpts(r, { authorInterfaces: first.seam }))
-    writeGuardSetup(r, one.report)
-
-    const second = step()
-    await runGuardSetup(baseOpts(r, { authorInterfaces: second.seam, replace: true }))
-
-    expect(second.inputs).toHaveLength(1)
-    expect(second.inputs[0]).toMatchObject({ replace: true, refresh: false })
-  })
-
-  it('an authoring failure fails the STEP, never setup', async () => {
-    const r = fixtureRepo()
-    writeRecipe(r)
-    writeCatalogs(r)
-    const seam = step({ status: 'failed', reason: 'every authoring session failed (2 place(s))' })
-
-    const { report } = await runGuardSetup(baseOpts(r, { authorInterfaces: seam.seam }))
-
-    expect(report.status).toBe('ok')
-    expect(report.steps.find((s) => s.key === 'interfaces')).toMatchObject({
-      status: 'failed',
-      reason: 'every authoring session failed (2 place(s))',
-    })
-  })
-
-  // Diagnostics are RUN REPORTING: they land on the step row and nowhere else.
-  it('records the step row diagnostics, resolutions and changes the seam reports', async () => {
-    const r = fixtureRepo()
-    writeRecipe(r)
-    writeCatalogs(r)
-    const seam = step({
-      status: 'ok',
-      diagnostics: [
-        {
-          surface: 'cli',
-          kind: 'tree-missing-flag',
-          subject: 'relkit add --transport',
-          detail: 'the probe lists it; the tree does not',
-          command: ['add'],
-          flag: '--transport',
-        },
-      ],
-      resolutions: [
-        { subject: 'relkit add --transport', resolution: 'probe-right', evidence: 'accepted' },
-      ],
-      changes: ['cli/add: added --transport'],
-    })
-
-    const { report } = await runGuardSetup(baseOpts(r, { authorInterfaces: seam.seam }))
-
-    const row = report.steps.find((s) => s.key === 'interfaces')
-    expect(row?.diagnostics).toHaveLength(1)
-    expect(row?.resolutions?.[0].resolution).toBe('probe-right')
-    expect(row?.changes).toEqual(['cli/add: added --transport'])
-    expect(GuardSetupReportSchema.safeParse(report).success).toBe(true)
-    // And never into the catalog itself.
-    expect(fs.readFileSync(guardInterfacesPath(r), 'utf-8')).not.toMatch(/diagnostics/)
-  })
-
-  // The mapping's diagnostics reach the seam untouched — the seam decides which
-  // kinds its session can answer.
-  it('hands the seam the mapping diagnostics and the in-memory catalog', async () => {
-    const r = fixtureRepo()
-    writeRecipe(r)
-    writeCatalogs(r)
-    const seam = step()
-    const diagnostic = {
-      surface: 'cli' as const,
-      kind: 'probe-missing-command' as const,
-      subject: 'relkit sync',
-      detail: 'the tree registers it; the probe does not list it',
-      command: ['sync'],
-    }
-
-    await runGuardSetup(
-      baseOpts(r, {
-        authorInterfaces: seam.seam,
-        interfaces: async () => ({
-          interfaces: [apiInterface('GET', '/orgs')],
-          externalServices: [],
-          database: DATABASE,
-          datastoreUrls: [],
-          diagnostics: [diagnostic],
-        }),
-      }),
-    )
-
-    expect(seam.inputs[0].diagnostics).toEqual([diagnostic])
-    expect(seam.inputs[0].interfaces).toHaveLength(1)
   })
 })
 

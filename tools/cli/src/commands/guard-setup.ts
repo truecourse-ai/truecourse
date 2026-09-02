@@ -26,26 +26,35 @@
 import path from "node:path";
 import * as p from "@clack/prompts";
 import { StepTracker } from "@truecourse/core/progress";
-import type { JourneyProvider, RecipeRunner, SeedRunner } from "@truecourse/guard-generator";
+import type { GuardSetupJourneyProvider, RecipeRunner } from "@truecourse/guard-generator";
 import type { GuardSetupReport } from "@truecourse/shared";
 import {
   guardSetupInProcess,
   estimateGuardSetupCost,
   NoLlmProviderError,
   GUARD_SETUP_STEPS,
+  GUARD_SETUP_ONLY_STEPS,
+  SetupStepNotReadyError,
   EstimateDeclined,
+  type GuardSetupOnlyStep,
 } from "@truecourse/core/commands/guard-setup";
 import { registerProject } from "@truecourse/core/config/registry";
 import { createStdoutStepRenderer } from "../lib/stdout-step-renderer.js";
 import { requireGitRepo } from "./git-guard.js";
 import { preflightLlmOrExit } from "../lib/claude-preflight.js";
-import { isInteractive } from "./helpers.js";
+import { isInteractive, printWatchLive, resolveDashboardUrl } from "./helpers.js";
 import { provisionExternals } from "./guard-setup-externals.js";
 
 export interface RunGuardSetupOptions {
   cwd?: string;
   /** Re-derive the recipe and re-draft the seed even when both already exist. */
   refresh?: boolean;
+  /**
+   * Single-step mode (`--only-<step>`): run one step in isolation — prior steps
+   * replay from what they left on disk (a step nobody ran aborts loudly), later
+   * steps never start. `detect` always runs; it costs nothing.
+   */
+  only?: GuardSetupOnlyStep;
   /** Skip the pre-flight cost confirm — and, with `--refresh`, consent to replacing the seed. */
   yes?: boolean;
   /** LLM transport for this run: `cli` (spawn `claude -p`), `agent` (mailbox under `io`), or `api`. */
@@ -53,17 +62,17 @@ export interface RunGuardSetupOptions {
   io?: string;
   /** Test seams (production spawns the transport / analyzes the tree). */
   recipeRunner?: RecipeRunner;
-  seedRunner?: SeedRunner;
-  journeys?: JourneyProvider;
+  journeys?: GuardSetupJourneyProvider;
   /** Test seam / explicit override for whether the terminal can prompt. */
   interactive?: boolean;
 }
 
 export async function runGuardSetup(opts: RunGuardSetupOptions = {}): Promise<void> {
   const repoRoot = opts.cwd ?? process.cwd();
-  p.intro("Guard setup");
+  p.intro(opts.only ? `Guard setup — ${SETUP_STEP_LABEL[opts.only]} only` : "Guard setup");
   await requireGitRepo(repoRoot);
-  await registerProject(repoRoot);
+  const project = await registerProject(repoRoot);
+  const dashboardUrl = await resolveDashboardUrl();
 
   if (opts.llmTransport === "agent" && !opts.io) {
     p.log.error("--llm-transport agent requires --io <dir> (the request/response mailbox directory).");
@@ -75,7 +84,7 @@ export async function runGuardSetup(opts: RunGuardSetupOptions = {}): Promise<vo
   // check (and the install that makes it the default) in API mode, nothing for the
   // mailbox. Setup's LLM stages come AFTER a build, a boot, and an analysis pass, so
   // finding out then would waste all of it.
-  if (!opts.recipeRunner && !opts.seedRunner) {
+  if (!opts.recipeRunner) {
     await preflightLlmOrExit(opts.llmTransport);
   }
 
@@ -83,19 +92,29 @@ export async function runGuardSetup(opts: RunGuardSetupOptions = {}): Promise<vo
   const interactive = opts.interactive ?? isInteractive();
 
   const renderer = createStdoutStepRenderer();
-  const tracker = new StepTracker(renderer.onProgress, GUARD_SETUP_STEPS.map((s) => ({ ...s })));
+  // A single-step run gets a checklist of only the steps that will report:
+  // everything up to the chosen one (they replay), plus the free `detect` pass.
+  const stepDefs = opts.only
+    ? GUARD_SETUP_STEPS.filter(
+        (s, i) => s.key === "detect" || i <= GUARD_SETUP_STEPS.findIndex((x) => x.key === opts.only),
+      )
+    : GUARD_SETUP_STEPS;
+  const tracker = new StepTracker(renderer.onProgress, stepDefs.map((s) => ({ ...s })));
 
   let report: GuardSetupReport;
   let reportPath: string;
+  let sessionsRunDirs: string[];
   try {
-    ({ report, reportPath } = await guardSetupInProcess(repoRoot, {
+    ({ report, reportPath, sessionsRunDirs } = await guardSetupInProcess(repoRoot, {
       tracker,
       llm: opts.llmTransport,
       io: opts.io,
       ...(opts.refresh ? { refresh: true } : {}),
+      ...(opts.only ? { only: opts.only } : {}),
       ...(opts.recipeRunner ? { recipeRunner: opts.recipeRunner } : {}),
-      ...(opts.seedRunner ? { seedRunner: opts.seedRunner } : {}),
       ...(opts.journeys ? { journeys: opts.journeys } : {}),
+      // Fires when setup's (lazy) run record opens — the exact-run deep link.
+      onRunStarted: (info) => printWatchLive(dashboardUrl, project.slug, info.runId),
       onLlmEstimate: async (estimate) => {
         // ONE LINE, deliberately: setup is bounded at two calls, so the staged modal
         // the big pipelines render would be more ceremony than the spend it describes.
@@ -105,7 +124,7 @@ export async function runGuardSetup(opts: RunGuardSetupOptions = {}): Promise<vo
           0,
         );
         const cost = estimate.estimatedCostUsd != null ? ` (~$${estimate.estimatedCostUsd.toFixed(2)})` : "";
-        const line = `Setup makes up to ${calls} LLM call${calls === 1 ? "" : "s"}${cost} — the repo's own manifests are tried first, for free.`;
+        const line = `Setup's agent sessions may spend up to ${calls} model turn${calls === 1 ? "" : "s"}${cost} — deterministic derivations and warm caches run first, for free.`;
         if (autoApprove) {
           p.log.step(line);
           return true;
@@ -142,6 +161,14 @@ export async function runGuardSetup(opts: RunGuardSetupOptions = {}): Promise<vo
       p.outro("Aborted — setup needs a model to fall back on when the repo's own manifests do not decide.");
       process.exit(1);
     }
+    // A single-step run found a PRIOR step never ran: doing it here would blur
+    // the step isolation the flags exist for, so it stops and names the flag.
+    if (e instanceof SetupStepNotReadyError) {
+      p.log.error(`Step not ready — the ${SETUP_STEP_LABEL[e.step]} step has not run (${e.missing}).`);
+      p.log.step(`Run \`truecourse guard setup --only-${e.step}\` first, then re-run this step.`);
+      p.outro("Aborted.");
+      process.exit(1);
+    }
     p.log.error(`Guard setup failed: ${(e as Error).message}`);
     p.outro("Aborted.");
     process.exit(1);
@@ -156,8 +183,16 @@ export async function runGuardSetup(opts: RunGuardSetupOptions = {}): Promise<vo
   // externals` because declaring a service is what enters the recipe fingerprint —
   // doing it in the preparation stage is free, doing it after a generate is a
   // regenerate. Non-interactive runs skip it: the declarations are already written,
-  // and the values can be supplied later for nothing.
-  if (report.status === "ok" && interactive && (report.externals?.unprovided.length ?? 0) > 0) {
+  // and the values can be supplied later for nothing. A single-step run offers it
+  // only when the CATALOG step is the one that ran — otherwise the `unprovided`
+  // list is the previous report's, carried forward, and nothing just changed.
+  const catalogRan = !opts.only || opts.only === "catalog";
+  if (
+    report.status === "ok" &&
+    interactive &&
+    catalogRan &&
+    (report.externals?.unprovided.length ?? 0) > 0
+  ) {
     await provisionExternals(repoRoot);
   }
 
@@ -166,10 +201,38 @@ export async function runGuardSetup(opts: RunGuardSetupOptions = {}): Promise<vo
     process.exit(1);
     return;
   }
+  // Single-step mode: name where the transcripts landed (the inspection loop's
+  // whole point) and which step comes next.
+  if (opts.only) {
+    for (const dir of sessionsRunDirs) {
+      p.log.step(`sessions    ${path.relative(repoRoot, dir) || dir}`);
+    }
+    const next = SETUP_STEP_NEXT[opts.only];
+    p.outro(
+      next
+        ? `Ran the ${SETUP_STEP_LABEL[opts.only]} step only — every other row of guard/setup.json is carried forward. Next: \`truecourse guard setup --only-${next}\`.`
+        : `Ran the ${SETUP_STEP_LABEL[opts.only]} step only — the last one. Review what changed, then run \`truecourse guard generate\`.`,
+    );
+    return;
+  }
   p.outro(
     "Review and commit what changed (recipe.json, the seed script), then run `truecourse guard generate`.",
   );
 }
+
+/** Human name of each `--only-<step>` setup step, for prose lines. */
+const SETUP_STEP_LABEL: Record<GuardSetupOnlyStep, string> = {
+  recipe: "recipe",
+  catalog: "dependency catalog",
+  seed: "seed",
+  auth: "auth proof",
+};
+
+/** The step to suggest after a single-step run; the last one has no successor. */
+const SETUP_STEP_NEXT: Record<GuardSetupOnlyStep, GuardSetupOnlyStep | undefined> =
+  Object.fromEntries(
+    GUARD_SETUP_ONLY_STEPS.map((step, i) => [step, GUARD_SETUP_ONLY_STEPS[i + 1]]),
+  ) as Record<GuardSetupOnlyStep, GuardSetupOnlyStep | undefined>;
 
 /** The closing report: one block per step, then the honest to-do list. */
 export function printSetupReport(report: GuardSetupReport, reportPath: string): void {
@@ -234,13 +297,36 @@ export function printSetupReport(report: GuardSetupReport, reportPath: string): 
       p.log.message(`  command     ${s.command}`);
       if (s.fixtures?.length) p.log.message(`  fixtures    ${s.fixtures.join(", ")}`);
       if (s.credentials?.length) p.log.message(`  principals  ${s.credentials.join(", ")}`);
-      p.log.message("  The script RAN, its manifest matched `provides`, and the server booted against it.");
+      if (s.salvaged) {
+        p.log.message("  salvaged    the session ended without an outcome; the engine folded its last verified draft");
+      }
+      p.log.message(
+        s.credentials?.length
+          ? "  The script RAN in a fresh world, its manifest matched `provides`, and every principal answered a live authenticated probe."
+          : "  The script RAN in a fresh world and its manifest matched `provides`.",
+      );
     } else if (s.status === "ok") {
       p.log.step(`seed        already present (${s.command})`);
     } else if (s.status === "failed") {
       p.log.warn(`seed        not drafted: ${s.reason}`);
     } else {
       p.log.info(`seed        skipped: ${s.reason}`);
+    }
+  }
+
+  // The auth verdict lives only on the steps spine (no legacy top-level field),
+  // and `blocked` is BY DESIGN loud and actionable — a registration the user
+  // must perform. Swallowing it defeated the step (2026-08-24 bench, twice).
+  const auth = report.steps?.find((step) => step.key === "auth");
+  if (auth) {
+    if (auth.status === "blocked") {
+      p.log.warn(`auth        blocked: ${auth.reason}`);
+    } else if (auth.status === "failed") {
+      p.log.warn(`auth        failed: ${auth.reason}`);
+    } else if (auth.status === "skipped") {
+      p.log.info(`auth        skipped: ${auth.reason}`);
+    } else {
+      p.log.step(`auth        every provided dependency proved`);
     }
   }
 

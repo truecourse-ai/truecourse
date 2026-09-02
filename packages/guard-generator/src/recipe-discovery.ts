@@ -187,7 +187,7 @@ export interface DiscoverRecipeOptions {
   /**
    * The repo's detected datastore dependency, resolved lazily and ONLY when a boot
    * verification failed — the same seam `routes` rides (the caller's memoized
-   * interface-mapping pass, never a second analysis). Present, and the proposal
+   * journey-mapping pass, never a second analysis). Present, and the proposal
    * declares no `api.services`, the boot failure is reported as a datastore story
    * with what to do about it instead of a bare stack trace.
    */
