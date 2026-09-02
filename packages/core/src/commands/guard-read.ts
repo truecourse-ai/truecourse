@@ -158,11 +158,17 @@ export {
 // ---------------------------------------------------------------------------
 
 /** The baseline commit — the default-branch anchor guard reads fall back to
- *  when no explicit ref is given (EE): the analyze LATEST's commit (the same
- *  anchor spec-in-process uses for the baseline corpus). `undefined` when no
- *  baseline exists yet. */
+ *  when no explicit ref is given (hosted): the analyze LATEST's commit (the same
+ *  anchor spec-in-process uses for the baseline corpus), else the commit of the
+ *  newest generate the store flagged as a baseline — what the hosted generate
+ *  job writes, since it only ever runs on the default branch. `undefined` when
+ *  neither exists yet. */
 async function guardBaselineCommit(repoKey: string): Promise<string | undefined> {
-  return (await readLatest(repoKey))?.analysis.commitHash ?? undefined
+  return (
+    (await readLatest(repoKey))?.analysis.commitHash ??
+    (await getGuardStore().readGuardBaselineCommit(repoKey)) ??
+    undefined
+  )
 }
 
 /**

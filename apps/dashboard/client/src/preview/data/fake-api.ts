@@ -461,7 +461,9 @@ export function installPreviewFetch(): void {
     // So is starting a run: a connected repository's Activity starts a real one
     // through the server, and no fixture could stand in for the answer — it is
     // where "this workspace has no provider" is found out.
-    if (rest === 'spec/corpus/scan' || rest === 'guard/setup') return real(input, init);
+    if (rest === 'spec/corpus/scan' || rest === 'guard/setup' || rest === 'guard/generate') {
+      return real(input, init);
+    }
     // So is the INTERFACE CATALOG of a connected repository: it is derived from
     // that repository's own tree, and no fixture could stand in for it. A
     // repository with guard fixtures is one of the mock ones and keeps them.

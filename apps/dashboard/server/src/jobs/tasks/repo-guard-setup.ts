@@ -11,8 +11,10 @@
  *
  * A repository with no stored corpus is refused up front — setup reads the
  * curated doc universe, and there is nothing to catalogue against without it.
+ * A setup whose recipe gate held chains straight into `repo.guard-generate`.
  */
 
+import { log } from '@truecourse/core/lib/logger';
 import { resolveCommitSha } from '@truecourse/core/lib/repo-ref';
 import { emitRepoLifecycle } from '@truecourse/core/lib/repo-lifecycle';
 import { materializeGuardOverlays } from '@truecourse/core/lib/guard-overlays';
@@ -49,12 +51,14 @@ export type GuardSetupJobPayload = GuardSetupJobRequest & JobPayload;
 
 /** The engines the body drives — production wires the real ones. */
 export interface RepoGuardSetupTaskDeps {
+  /** Enqueue the scenario generation a successful setup chains into. */
+  chainGuardGenerate(request: OnboardingJobRequest): Promise<void>;
   startLlm?: (orgId: string) => Promise<WorkspaceLlm>;
   runSetup?: typeof guardSetupInProcess;
 }
 
 export function createRepoGuardSetupTask(
-  deps: RepoGuardSetupTaskDeps = {},
+  deps: RepoGuardSetupTaskDeps,
 ): JobDefinition<GuardSetupJobPayload> {
   const startLlm = deps.startLlm ?? startWorkspaceLlm;
   const runSetup = deps.runSetup ?? guardSetupInProcess;
@@ -134,10 +138,26 @@ export function createRepoGuardSetupTask(
       data: { repoFullName: payload.repoFullName },
     }),
 
-    async onSettled(ctx) {
+    async onSettled(ctx, outcome, result) {
       // Clears the in-page progress popup and refreshes the guard surfaces,
-      // however setup ended. Nothing chains after it.
+      // however setup ended.
       await emitRepoLifecycle(ctx.payload.repoFullName, 'guard-setup');
+      // Only a setup whose recipe gate held has anything to generate against: a
+      // refused setup ends the chain here, and its notification already says why.
+      if (outcome !== 'succeeded') return;
+      if ((result as { status?: string } | undefined)?.status !== 'ok') return;
+      try {
+        // A fresh request, not this job's payload: the chained job gets its own
+        // row id from the enqueue, never setup's.
+        const { repoId, repoFullName, workspaceOrgId } = ctx.payload;
+        await deps.chainGuardGenerate({ repoId, repoFullName, workspaceOrgId, source: 'chain' });
+      } catch (err) {
+        // A chain that cannot be enqueued is not this setup's failure: setup
+        // already succeeded, and generate can be started by hand.
+        log.warn(
+          `[jobs] could not chain scenario generation for ${ctx.payload.repoFullName}: ${(err as Error).message}`,
+        );
+      }
     },
   };
 }

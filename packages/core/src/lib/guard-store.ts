@@ -99,8 +99,24 @@ export interface GuardStore {
    * omit for the newest stored one. The file impl always reads the live store.
    */
   readGuardResult(repoKey: string, commitSha?: string): Promise<GuardGenerateReport | null>;
-  /** Persist a generate report for `ref` (EE keys by commit; file impl ignores it). */
-  writeGuardResult(ref: RepoRef, report: GuardGenerateReport): Promise<void>;
+  /**
+   * Persist a generate report for `ref` (EE keys by commit; file impl ignores it).
+   * `baseline` marks a DEFAULT-BRANCH generate — the one the repo-level views
+   * anchor on (see {@link GuardStore.readGuardBaselineCommit}); a PR head's
+   * regenerate never sets it.
+   */
+  writeGuardResult(
+    ref: RepoRef,
+    report: GuardGenerateReport,
+    opts?: { baseline?: boolean },
+  ): Promise<void>;
+  /**
+   * The commit of the newest generate report written as a baseline, or `null`
+   * when none was. The hosted repo-level guard views fall back to it when the
+   * repo has no analyze baseline to anchor on; the file impl has no commits to
+   * anchor (its tree IS the baseline) and always answers `null`.
+   */
+  readGuardBaselineCommit(repoKey: string): Promise<string | null>;
 
   // --- Evidence -------------------------------------------------------------
   /**
@@ -272,6 +288,10 @@ class FileGuardStore implements GuardStore {
     fileWriteGuardResult(ref.repoKey, report);
   }
 
+  async readGuardBaselineCommit(): Promise<string | null> {
+    return null;
+  }
+
   async writeGuardEvidence(
     repoPath: string,
     runId: string,
@@ -437,8 +457,13 @@ export const readGuardResult = (
   repoKey: string,
   commitSha?: string,
 ): Promise<GuardGenerateReport | null> => active.readGuardResult(repoKey, commitSha);
-export const writeGuardResult = (ref: RepoRef, report: GuardGenerateReport): Promise<void> =>
-  active.writeGuardResult(ref, report);
+export const writeGuardResult = (
+  ref: RepoRef,
+  report: GuardGenerateReport,
+  opts?: { baseline?: boolean },
+): Promise<void> => active.writeGuardResult(ref, report, opts);
+export const readGuardBaselineCommit = (repoKey: string): Promise<string | null> =>
+  active.readGuardBaselineCommit(repoKey);
 
 export const writeGuardEvidence = (
   repoPath: string,

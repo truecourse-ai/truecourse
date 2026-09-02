@@ -1,7 +1,7 @@
 /**
- * Guard UI-triggered actions: the Generate estimate-gate flow (GET estimate → the
- * reused LlmEstimateModal with the CLI-identical numbers → POST with the confirmed
- * flag), the deterministic Run trigger (no modal), the in-flight disabled state,
+ * Guard UI-triggered actions: the Generate trigger (one POST that enqueues the
+ * job — no estimate round-trip, no modal — and a toast naming each refusal's
+ * remedy), the deterministic Run trigger, the in-flight disabled state,
  * the action-button staleness dots (the ONLY staleness dots — the rail carries
  * none, per the BL-Drift-matching dot policy pinned in guard-view tests), and the
  * completion → refetch mechanism (the reload key the page bumps on a
@@ -12,8 +12,8 @@
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
 
-// The outcome toast is the only place a generate's status is spoken to the user,
-// so it is asserted rather than swallowed.
+// The toast is the only place a refused start is spoken to the user, so it is
+// asserted rather than swallowed.
 const { toastMock } = vi.hoisted(() => ({ toastMock: { success: vi.fn(), error: vi.fn() } }));
 vi.mock('sonner', () => ({ toast: toastMock }));
 
@@ -24,30 +24,19 @@ import { useGuardGenerate } from '@/hooks/useGuardGenerate';
 import { useGuardRun } from '@/hooks/useGuardRun';
 import { useGuardScenarios } from '@/hooks/useGuardScenarios';
 import { GuardHeaderActions } from '@/components/guard/GuardHeaderActions';
-import { LlmEstimateModal } from '@/components/spec/LlmEstimateModal';
-import type { LlmEstimateData } from '@/hooks/useSocket';
 
-const json = (body: unknown) =>
-  new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
-const STAGED: LlmEstimateData = {
-  totalEstimatedTokens: 42000,
-  tiers: [],
-  stages: [
-    { stage: 'guardExtract', label: 'Extracting claims', model: 'sonnet', calls: 3, estimatedTokens: 12000, estimatedCostUsd: 0.12 },
-    { stage: 'guardAuthor', label: 'Authoring scenarios', model: 'opus', calls: 5, estimatedTokens: 30000, callsRange: { low: 2, high: 8 }, estimatedCostUsd: 0.88 },
-  ],
-  subjectLabel: '4 of 12 sections changed',
-  estimatedCostUsd: 1.0,
-  costSource: 'bundled',
-};
-
-const EMPTY: LlmEstimateData = { totalEstimatedTokens: 0, tiers: [], stages: [] };
-
-/** A URL-routed fetch stub; `opts.estimate` chooses the estimate; `opts.onGenerate`
+/** A URL-routed fetch stub; `opts.generateResult`/`generateStatus` shape the start answer; `opts.onGenerate`
  *  lets a test gate the generate POST (e.g. hang it to observe the in-flight state). */
 function stubFetch(
-  opts: { estimate?: LlmEstimateData; onGenerate?: () => Promise<void>; generateResult?: unknown } = {},
+  opts: {
+    onGenerate?: () => Promise<void>;
+    /** The generate route's body; with `generateStatus` a refusal instead of the 202. */
+    generateResult?: unknown;
+    generateStatus?: number;
+  } = {},
 ) {
   const calls: { url: string; method: string; body?: string }[] = [];
   vi.stubGlobal(
@@ -56,10 +45,9 @@ function stubFetch(
       const u = String(url);
       const method = init?.method ?? 'GET';
       calls.push({ url: u, method, body: init?.body as string | undefined });
-      if (u.includes('/guard/estimate')) return json({ estimate: opts.estimate ?? STAGED });
       if (u.includes('/guard/generate')) {
         if (opts.onGenerate) await opts.onGenerate();
-        return json(opts.generateResult ?? { status: 'ok', noChanges: false, written: 2, birthFindings: 0 });
+        return json(opts.generateResult ?? { jobId: 'job_1' }, opts.generateStatus ?? 202);
       }
       if (u.includes('/guard/run')) return json({ status: 'ok', summary: { total: 3, pass: 3, fail: 0, stale: 0, orphaned: 0, error: 0 } });
       return json({});
@@ -75,9 +63,6 @@ function Harness() {
     <>
       <GuardHeaderActions kind="generate" onClick={gen.begin} busy={gen.busy} otherBusy={run.running} />
       <GuardHeaderActions kind="run" onClick={run.run} busy={run.running} otherBusy={gen.busy} />
-      {gen.modalOpen && gen.estimate && (
-        <LlmEstimateModal estimate={gen.estimate} onConfirm={gen.confirm} onCancel={gen.cancel} />
-      )}
     </>
   );
 }
@@ -92,64 +77,62 @@ afterEach(() => {
   toastMock.error.mockClear();
 });
 
-describe('Guard Generate — estimate gate', () => {
-  it('opens the estimate modal with the CLI-identical numbers', async () => {
-    stubFetch({ estimate: STAGED });
-    render(<Harness />);
-    await userEvent.click(genButton());
-
-    // The staged modal: subject, per-stage table, and the ceiling cost.
-    await screen.findByText('4 of 12 sections changed', { exact: false });
-    expect(screen.getByText('Extracting claims')).toBeInTheDocument();
-    expect(screen.getByText('Authoring scenarios')).toBeInTheDocument();
-    expect(screen.getByText('$0.12')).toBeInTheDocument();
-    expect(screen.getByText('$0.88')).toBeInTheDocument();
-    // The author stage's call RANGE renders low–high.
-    expect(screen.getByText('2–8')).toBeInTheDocument();
-  });
-
-  it('confirming triggers the generate with confirmed=true and closes the modal', async () => {
-    const calls = stubFetch({ estimate: STAGED });
-    render(<Harness />);
-    await userEvent.click(genButton());
-    await screen.findByRole('button', { name: 'Proceed' });
-
-    await userEvent.click(screen.getByRole('button', { name: 'Proceed' }));
-
-    await waitFor(() => {
-      const post = calls.find((c) => c.url.includes('/guard/generate') && c.method === 'POST');
-      expect(post).toBeTruthy();
-      expect(JSON.parse(post!.body ?? '{}')).toEqual({ confirmed: true });
-    });
-    // Modal closed after confirming.
-    expect(screen.queryByRole('button', { name: 'Proceed' })).not.toBeInTheDocument();
-  });
-
-  it('skips the modal and triggers directly when nothing changed (no stages)', async () => {
-    const calls = stubFetch({ estimate: EMPTY });
+describe('Guard Generate — the enqueue', () => {
+  it('POSTs the start route with no estimate round-trip, and says the job started', async () => {
+    const calls = stubFetch();
     render(<Harness />);
     await userEvent.click(genButton());
 
     await waitFor(() => expect(calls.some((c) => c.url.includes('/guard/generate') && c.method === 'POST')).toBe(true));
-    // No modal was ever shown.
+    // The route enqueues, so nothing is asked first: no estimate, no modal.
+    expect(calls.some((c) => c.url.includes('/guard/estimate'))).toBe(false);
     expect(screen.queryByRole('button', { name: 'Proceed' })).not.toBeInTheDocument();
-    const post = calls.find((c) => c.url.includes('/guard/generate'));
-    expect(JSON.parse(post!.body ?? '{}')).toEqual({ confirmed: true });
+    await waitFor(() => expect(toastMock.success).toHaveBeenCalled());
+    expect(toastMock.success.mock.calls[0][0]).toBe('Scenario generation started');
   });
 
-  it('disables both guard buttons while a generate is in flight', async () => {
+  it('disables both guard buttons while the start request is in flight', async () => {
     let release!: () => void;
     const pending = new Promise<void>((r) => { release = r; });
-    stubFetch({ estimate: EMPTY, onGenerate: () => pending });
+    stubFetch({ onGenerate: () => pending });
     render(<Harness />);
     await userEvent.click(genButton());
 
-    // begin() → estimate (empty) → trigger → the POST hangs → busy true.
     await waitFor(() => expect(genButton()).toBeDisabled());
     expect(runButton()).toBeDisabled();
 
     release();
     await waitFor(() => expect(genButton()).not.toBeDisabled());
+  });
+
+  it('tells the unconfigured workspace and the busy repository apart by the body code', async () => {
+    stubFetch({ generateStatus: 409, generateResult: { error: 'llm-not-configured', message: 'no provider' } });
+    render(<Harness />);
+    await userEvent.click(genButton());
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalled());
+    expect(toastMock.error.mock.calls[0][0]).toMatch(/No LLM provider configured/);
+
+    toastMock.error.mockClear();
+    stubFetch({ generateStatus: 409, generateResult: { error: 'A guard job is already running for this repo.' } });
+    await userEvent.click(genButton());
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalled());
+    expect(toastMock.error.mock.calls[0][0]).toBe('A guard job is already running for this repo.');
+  });
+
+  it('surfaces the open-conflict gate with its full report', async () => {
+    stubFetch({
+      generateStatus: 422,
+      generateResult: { error: '1 open spec conflict must be resolved before guard generate.\n  booking' },
+    });
+    render(<Harness />);
+    await userEvent.click(genButton());
+
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalled());
+    expect(toastMock.error.mock.calls[0][0]).toBe('Generate blocked by open spec conflicts');
+    expect(toastMock.error.mock.calls[0][1]).toMatchObject({
+      description: expect.stringContaining('1 open spec conflict'),
+    });
+    expect(toastMock.success).not.toHaveBeenCalled();
   });
 });
 
@@ -236,30 +219,5 @@ describe('Guard completion → refetch (reload key)', () => {
     await waitFor(() =>
       expect(calls.filter((c) => c.url.includes('/guard/scenarios')).length).toBeGreaterThan(before),
     );
-  });
-});
-
-describe('Guard Generate — a run that generated nothing', () => {
-  it('reports an `llm-failed` abort as an error carrying its reason, never as a success', async () => {
-    stubFetch({
-      estimate: EMPTY,
-      generateResult: {
-        status: 'llm-failed',
-        noChanges: false,
-        written: 0,
-        birthFindings: 0,
-        reason: 'every LLM call in the `guard.extract` stage failed (3 of 3).',
-      },
-    });
-    render(<Harness />);
-    await userEvent.click(genButton());
-
-    await waitFor(() => expect(toastMock.error).toHaveBeenCalled());
-    expect(toastMock.error.mock.calls[0][0]).toBe('Generate aborted');
-    expect(toastMock.error.mock.calls[0][1]).toMatchObject({
-      description: 'every LLM call in the `guard.extract` stage failed (3 of 3).',
-    });
-    // "Wrote 0 scenarios" is exactly the line an outage must never produce.
-    expect(toastMock.success).not.toHaveBeenCalled();
   });
 });

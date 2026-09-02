@@ -635,3 +635,25 @@ describe('computeGuardStaleness — hosted (store-composed, no FS)', () => {
     expect(s.runStale).toBe(true);
   });
 });
+
+describe('hosted repo-level view anchored on the store baseline (no analyze LATEST)', () => {
+  // The hosted generate job only ever runs on the default branch, so the report
+  // it writes is flagged as the repo's guard baseline; a repo that never ran
+  // analyze anchors its guard views on it.
+  it('reads the flagged generate’s set and report, never a newer PR-head row', async () => {
+    await saveSet('gen1111111', [['a1', 'alpha']]);
+    await guardStore.writeGuardResult({ repoKey: REPO, commitSha: 'gen1111111' }, REPORT(), { baseline: true });
+    // A PR head's regenerate lands later and unflagged.
+    await saveSet('prhead0000', [['pr1', 'beta']]);
+    await guardStore.writeGuardResult(
+      { repoKey: REPO, commitSha: 'prhead0000' },
+      REPORT({ generatedAt: '2026-07-07T00:00:00.000Z' }),
+    );
+
+    const inv = await listGuardScenarios(REPO);
+    expect(inv.scenarios.map((s) => s.id)).toEqual(['a1']);
+    expect(inv.scenariosCommit).toBe('gen1111111');
+    expect(await readGuardReport(REPO)).toMatchObject({ generatedAt: REPORT().generatedAt });
+    expect((await computeGuardStaleness(REPO)).hasScenarios).toBe(true);
+  });
+});

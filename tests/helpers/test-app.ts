@@ -59,6 +59,7 @@ export interface StubJobs {
   mount: JobsMount;
   scans: OnboardingJobRequest[];
   guardSetups: GuardSetupJobRequest[];
+  guardGenerates: OnboardingJobRequest[];
   /** What the next enqueue answers — set it to `{ status: 'busy' }` for a 409. */
   answer: EnqueueResult;
 }
@@ -67,6 +68,7 @@ export function stubJobs(): StubJobs {
   const stub: StubJobs = {
     scans: [],
     guardSetups: [],
+    guardGenerates: [],
     answer: { status: 'queued', jobId: 'job_test' },
     mount: null as unknown as JobsMount,
   };
@@ -77,6 +79,10 @@ export function stubJobs(): StubJobs {
     },
     enqueueGuardSetup: async (request: GuardSetupJobRequest) => {
       stub.guardSetups.push(request);
+      return stub.answer;
+    },
+    enqueueGuardGenerate: async (request: OnboardingJobRequest) => {
+      stub.guardGenerates.push(request);
       return stub.answer;
     },
     cancelRepoJobs: async () => 'stopped' as const,

@@ -12,9 +12,9 @@ import { type Express } from 'express';
  * TRUECOURSE_NO_PRICE_FETCH is set by tests/setup.ts), so its shape is asserted
  * against a direct call: proof the dashboard shows the SAME numbers as the CLI. The
  * two engine drivers are mocked (never a real LLM call, no sandbox build), so the
- * trigger tests assert only the route contract: it starts the job, emits the
- * completion lifecycle event, rejects a concurrent duplicate (409), and returns the
- * clean cancel on a declined estimate.
+ * trigger tests assert only the route contract: generate ENQUEUES (202, 409 while
+ * the repo is working), run starts in the request, emits the completion lifecycle
+ * event and rejects a concurrent duplicate (409).
  */
 
 vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal) => {
@@ -41,13 +41,12 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import { PgGuardStore } from '../../ee/packages/data-store/src/index';
-import { createTestApp } from '../helpers/test-app';
+import { createTestApp, stubJobs, TEST_ORG, type StubJobs } from '../helpers/test-app';
 import { emitSpecComplete } from '../../apps/dashboard/server/src/socket/handlers';
 import {
   estimateGuard,
   guardGenerateInProcess,
   guardRunInProcess,
-  EstimateDeclined,
 } from '@truecourse/core/commands/guard-in-process';
 import { setGuardStore, resetGuardStore, writeGuardResult } from '@truecourse/core/lib/guard-store';
 import { writeLatest } from '@truecourse/core/lib/analysis-store';
@@ -64,6 +63,7 @@ describe('Guard action routes', () => {
   let app: Express;
   let fixture: TestFixture;
   let root: string;
+  let jobs: StubJobs;
 
   const write = (rel: string, content: string) => {
     const f = path.join(root, rel);
@@ -92,7 +92,8 @@ describe('Guard action routes', () => {
     vi.mocked(guardGenerateInProcess).mockReset();
     vi.mocked(guardRunInProcess).mockReset();
     vi.mocked(emitSpecComplete).mockClear();
-    app = createTestApp();
+    jobs = stubJobs();
+    app = createTestApp({ jobs: jobs.mount });
   });
   afterEach(async () => {
     await teardownTestFixture(fixture.project.slug);
@@ -123,51 +124,40 @@ describe('Guard action routes', () => {
 
   // --- Generate trigger -----------------------------------------------------
 
-  it('POST /guard/generate starts the job, honors confirmed, and emits guard-generate', async () => {
-    vi.mocked(guardGenerateInProcess).mockResolvedValue({
-      guard: { status: 'ok', noChanges: false, written: [{}, {}], birthFindings: [{}] },
-    } as never);
-
-    const res = await request(app).post(url('generate')).send({ confirmed: true }).expect(200);
-    expect(res.body).toEqual({ status: 'ok', noChanges: false, written: 2, birthFindings: 1 });
-
-    expect(vi.mocked(guardGenerateInProcess)).toHaveBeenCalledTimes(1);
-    // The confirmed flag flows into the driver's estimate gate.
-    const [, opts] = vi.mocked(guardGenerateInProcess).mock.calls[0] as [string, { onLlmEstimate: () => Promise<boolean> }];
-    await expect(opts.onLlmEstimate()).resolves.toBe(true);
-    expect(vi.mocked(emitSpecComplete)).toHaveBeenCalledWith(fixture.project.slug, 'guard-generate');
+  it('POST /guard/generate enqueues the job and answers 202', async () => {
+    const res = await request(app).post(url('generate')).expect(202);
+    expect(res.body).toEqual({ jobId: 'job_test' });
+    expect(jobs.guardGenerates).toEqual([
+      { repoId: fixture.project.slug, repoFullName: root, workspaceOrgId: TEST_ORG, source: 'manual' },
+    ]);
+    // The queue owns the work: the route neither runs the engine nor announces a
+    // completion of its own.
+    expect(vi.mocked(guardGenerateInProcess)).not.toHaveBeenCalled();
+    expect(vi.mocked(emitSpecComplete)).not.toHaveBeenCalled();
   });
 
-  it('POST /guard/generate returns { cancelled } when the estimate gate declines', async () => {
-    vi.mocked(guardGenerateInProcess).mockRejectedValue(new EstimateDeclined('guard'));
-    const res = await request(app).post(url('generate')).send({ confirmed: false }).expect(200);
-    expect(res.body).toEqual({ cancelled: true });
-    // A declined estimate flowing through: onLlmEstimate resolves false.
-    const [, opts] = vi.mocked(guardGenerateInProcess).mock.calls[0] as [string, { onLlmEstimate: () => Promise<boolean> }];
-    await expect(opts.onLlmEstimate()).resolves.toBe(false);
+  it('POST /guard/generate answers 409 while the repository is already working', async () => {
+    jobs.answer = { status: 'busy' };
+    const res = await request(app).post(url('generate')).expect(409);
+    expect(res.body.error).toMatch(/already running/i);
   });
 
-  it('POST /guard/generate rejects a concurrent duplicate with 409', async () => {
+  it('POST /guard/run rejects a concurrent duplicate with 409', async () => {
     let release!: () => void;
-    vi.mocked(guardGenerateInProcess).mockImplementation(
-      () => new Promise((r) => { release = () => r({ guard: { status: 'ok', noChanges: true, written: [], birthFindings: [] } } as never); }),
+    vi.mocked(guardRunInProcess).mockImplementation(
+      () => new Promise((r) => { release = () => r({ status: 'ok', latest: { summary: { total: 0 } } } as never); }),
     );
 
     // `.then(...)` fires the request now (supertest is otherwise lazy); await it at
     // the end. Give the first handler time to acquire the lock before racing it.
-    const firstDone = request(app).post(url('generate')).send({ confirmed: true }).then((r) => r);
+    const firstDone = request(app).post(url('run')).then((r) => r);
     await new Promise((r) => setTimeout(r, 150));
 
-    await request(app).post(url('generate')).send({ confirmed: true }).expect(409);
-    // A run trigger is rejected too — generate + run share the one-job-per-repo lock.
     await request(app).post(url('run')).expect(409);
 
     release();
     const firstRes = await firstDone;
     expect(firstRes.status).toBe(200);
-    // Lock released → a fresh trigger is accepted again.
-    vi.mocked(guardGenerateInProcess).mockResolvedValue({ guard: { status: 'ok', noChanges: true, written: [], birthFindings: [] } } as never);
-    await request(app).post(url('generate')).send({ confirmed: true }).expect(200);
   });
 
   // --- Run trigger ----------------------------------------------------------
