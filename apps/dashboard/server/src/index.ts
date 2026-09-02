@@ -5,10 +5,12 @@ import { setupSocket } from './socket/index.js';
 import { createApp } from './app.js';
 import { createAuth } from './auth/index.js';
 import { createGithubConnection } from './github/index.js';
-import { closeDb, getDbHandle, initDb } from './db.js';
+import { createServerJobs } from './jobs/index.js';
+import { closeDb, getDb, getDbHandle, initDb } from './db.js';
 import { installDbStores } from './stores.js';
 import { operatorClaudeCode } from './services/workspace-llm.service.js';
 import { sweepStaleRunClones } from './services/run-clone.service.js';
+import { setRepoJobsCanceller } from './services/repo-removal.service.js';
 import { stopAllWatchers } from './services/watcher.service.js';
 import { stopAllRunTails } from './services/session-tailer.service.js';
 import { wipeLegacyPostgresData, getLogDir } from '@truecourse/core/config/paths';
@@ -69,21 +71,50 @@ async function main() {
   //    server boots authenticated or not at all.
   const auth = createAuth();
 
-  // 4. GitHub App connection. Optional: without GITHUB_APP_* the server still
+  // 4. Background job queue. Long-running work runs here instead of inside the
+  //    request that asked for it. Built BEFORE the GitHub connection, whose
+  //    link hook enqueues the onboarding scan, and started after — the task
+  //    bodies read seams (the work-tree provider) the connection installs.
+  const jobs = createServerJobs({ db: getDb(), connectionString: databaseUrl });
+  // Disconnecting a repository stops whatever it has in flight.
+  setRepoJobsCanceller(jobs.cancelRepoJobs);
+
+  // 5. GitHub App connection. Optional: without GITHUB_APP_* the server still
   //    boots, and /api/github answers 503 with the vars to set.
-  const github = createGithubConnection();
+  const github = createGithubConnection({
+    scan: async (repoId, repoKey, orgId) => {
+      const outcome = await jobs.enqueueScan({
+        repoId,
+        repoFullName: repoKey,
+        workspaceOrgId: orgId,
+        source: 'connect',
+      });
+      return outcome.status;
+    },
+  });
   if (github) {
     log.info('[Server] GitHub connect enabled');
   } else {
     log.info('[Server] GitHub connect disabled — set GITHUB_APP_* to enable');
   }
 
-  // 5. Setup Express app + socket.io
-  const app = createApp({ authVerifier: auth.verify, authRouter: auth.router, github });
+  // A failure to start must not stop the server coming up — the routes then
+  // answer honestly that jobs aren't running.
+  try {
+    await jobs.start();
+    log.info('[Server] background jobs running');
+  } catch (err) {
+    log.error(
+      `[Server] background jobs failed to start (jobs will not process): ${(err as Error).message}`,
+    );
+  }
+
+  // 6. Setup Express app + socket.io
+  const app = createApp({ authVerifier: auth.verify, authRouter: auth.router, github, jobs });
   const httpServer = createServer(app);
   setupSocket(httpServer);
 
-  // 6. Start listening
+  // 7. Start listening
   await new Promise<void>((resolve, reject) => {
     httpServer.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRINUSE') {
@@ -126,6 +157,8 @@ async function main() {
     stopAllRunTails();
     httpServer.closeAllConnections();
     httpServer.close();
+    // Stop the queue before the pool it runs on.
+    await jobs.stop();
     await closeDb();
     log.info('[Server] Closed');
     await closeLogger();

@@ -20,7 +20,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2, Play, AlertCircle } from 'lucide-react';
-import { toast } from 'sonner';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { EmptyState } from '@/components/ui/empty-state';
 import { EntityList, type EntityListGroup } from '@/preview/ui/entity-list';
@@ -158,24 +157,16 @@ export function useSpecCorpus(
     };
   }, [source, enabled]);
 
+  // Starting a scan only ENQUEUES it, so `scanning` stays true past the request:
+  // the corpus arrives through `refetch`, which the page calls when the scan's
+  // completion event lands. A refused start clears it here.
   const scan = useCallback(async () => {
     setScanning(true);
     setError(null);
     try {
-      const res = await source.scan();
-      // Workspace has no on-demand scan, or the user dismissed the cost-estimate
-      // confirm, leave existing data untouched.
-      if (!res || 'cancelled' in res) return;
-      setData(res);
-      // Every doc was unchanged (no LLM calls), toast it, mirroring generate.
-      if (res.noChanges) {
-        toast.success('Nothing changed', {
-          description: 'No new or updated docs since the last scan, corpus is up to date.',
-        });
-      }
+      await source.scan();
     } catch (e) {
       setError((e as Error).message);
-    } finally {
       setScanning(false);
     }
   }, [source]);
@@ -185,6 +176,8 @@ export function useSpecCorpus(
       setData(await source.getCorpus());
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      setScanning(false);
     }
   }, [source]);
 

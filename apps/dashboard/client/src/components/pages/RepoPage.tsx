@@ -341,6 +341,11 @@ function RepoPageInner() {
   // Bumped on a web-source add / refresh / remove so the Sources page re-reads the
   // registry — including when the mutation came from the CLI, not this tab.
   const [specSourcesReloadKey, setSpecSourcesReloadKey] = useState(0);
+  // The scan runs as a background job, so its completion event is what tells the
+  // page to pull the new corpus in. The corpus hook is created much further down
+  // (it needs the tab state), so the completion listener reaches its refetch
+  // through this ref rather than a value that does not exist yet.
+  const refetchCorpusRef = useRef<() => void>(() => {});
   // The last-generate report feeds the Scenarios overview's "last generate"
   // strip, which auto-expands when it carries birth findings or errors.
   const { report: guardReport } = useGuardReport(
@@ -574,7 +579,15 @@ function RepoPageInner() {
   useEffect(() => {
     const unsub = onEvent('spec:complete', (data) => {
       const payload = data as
-        | { kind?: 'scan' | 'guard-generate' | 'guard-run' | 'guard-externals' | 'sources' }
+        | {
+            kind?:
+              | 'scan'
+              | 'guard-setup'
+              | 'guard-generate'
+              | 'guard-run'
+              | 'guard-externals'
+              | 'sources';
+          }
         | undefined;
       // A web source was added/refreshed/removed: its snapshot is new spec docs on
       // disk that no scan has folded in yet, so the Rescan dot moves and the
@@ -583,8 +596,11 @@ function RepoPageInner() {
         refetchStaleness();
         setSpecSourcesReloadKey((k) => k + 1);
       }
-      // A scan rewrites the corpus — refresh the spec staleness dot.
+      // A scan rewrites the corpus — pull the new one in (the scan runs as a
+      // background job, so this event is how the page learns it landed) and
+      // refresh the spec staleness dot.
       if (payload?.kind === 'scan') {
+        refetchCorpusRef.current();
         refetchStaleness();
         // A scan can also flip the Guard generate-stale dot (specs changed since
         // the last guard generate) — keep the Coverage tab's staleness in sync.
@@ -596,7 +612,10 @@ function RepoPageInner() {
       // child views (coverage / scenarios / runs) re-fetch their data.
       // Declaring an external API account enters the recipe fingerprint,
       // so it flips the generate-stale dot exactly like a spec edit does.
+      // Guard setup rewrites the recipe and the dependency catalog, which the
+      // guard surfaces read — the same refresh a generate needs.
       if (
+        payload?.kind === 'guard-setup' ||
         payload?.kind === 'guard-generate' ||
         payload?.kind === 'guard-run' ||
         payload?.kind === 'guard-externals'
@@ -956,6 +975,10 @@ function RepoPageInner() {
     refForTabs,
     prNumber ?? undefined,
   );
+  // Same ref convention as the tab refetchers: the completion listener above
+  // fires long before this hook exists in the render order.
+  refetchCorpusRef.current = () => void specCorpus.refetch();
+
   // The LIVE open conflicts for the Scenarios-tab blocked panel: `null` while the
   // corpus is still loading (panel spins), else the unresolved subset derived from
   // the corpus (drops instantly when one is resolved on the Coverage tab).

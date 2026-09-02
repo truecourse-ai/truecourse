@@ -3,7 +3,7 @@
  * spec scan (Module 1).
  *
  *   GET    /api/repos/:id/spec/corpus       read corpus.json. 404 if no scan.
- *   GET    /api/repos/:id/spec/corpus/scan  run curate(), persist corpus.json, return it (socket).
+ *   POST   /api/repos/:id/spec/corpus/scan  enqueue the scan job; 202 { jobId }.
  *   GET    /api/repos/:id/spec/doc?ref=...  a doc's markdown (for the prose Spec tab).
  *   GET    /api/repos/:id/spec/staleness    cheap mtime probe powering the amber dots.
  */
@@ -42,8 +42,6 @@ import {
   addConflictResolution,
   addManualExclude,
   addManualInclude,
-  CURATE_STEPS,
-  EstimateDeclined,
   generatedMarkerPath,
   getCorpus,
   getDecisions,
@@ -53,7 +51,6 @@ import {
   removeManualExclude,
   removeManualInclude,
 } from '@truecourse/core/commands/spec-in-process';
-import { estimateStepPhase } from '@truecourse/core/progress';
 import { baselineCommit } from './diff-base.js';
 import {
   LlmNotConfiguredError,
@@ -61,18 +58,8 @@ import {
   orgOf,
   startWorkspaceLlm,
 } from '../services/workspace-llm.service.js';
-import {
-  beginSpecScan,
-  recordFailedScanRun,
-  runStoredSpecScan,
-  type SpecScanClaim,
-} from '../services/onboarding-scan.service.js';
-import {
-  createSocketSpecTracker,
-  createSocketSpecEstimateHandler,
-  emitSpecComplete,
-  emitSpecProgress,
-} from '../socket/handlers.js';
+import { recordFailedScanRun } from '../services/spec-scan.service.js';
+import { requireJobs } from '../jobs/current.js';
 
 const router: Router = Router();
 
@@ -302,30 +289,18 @@ router.get(
   },
 );
 
-router.get(
+router.post(
   '/:id/spec/corpus/scan',
   async (req: Request, res: Response, next: NextFunction) => {
-    let repoIdForCleanup: string | null = null;
-    let scanClaim: SpecScanClaim | null = null;
     try {
       const repo = await resolveProjectForRequest(req.params.id as string);
-      repoIdForCleanup = req.params.id as string;
-      // One scan per repo at a time, shared with the onboarding scan a connect
-      // starts: two concurrent scans would race each other's corpus/decisions
-      // writes. The slot is held through the whole request — the estimate
-      // confirm included, which is exactly the window the run record can't
-      // cover yet (and the window the ephemeral work tree must survive).
-      scanClaim = beginSpecScan(repo.path);
-      if (!scanClaim) {
-        res.status(409).json({ error: 'A spec scan is already running for this repository.' });
-        return;
-      }
-      // The asking workspace's provider, loaded and proved before any spend.
-      // Unconfigured is not an error to debug — it's a setting to fill in — so
-      // it answers with the machine-readable code the client routes on.
-      let llm;
+      // The asking workspace's provider, proved BEFORE anything is queued: an
+      // unconfigured or unusable provider is a refusal the caller can act on,
+      // not a job that will fail minutes later. Unconfigured is not an error to
+      // debug — it's a setting to fill in — so it answers with the
+      // machine-readable code the client routes on.
       try {
-        llm = await startWorkspaceLlm(orgOf(req));
+        await startWorkspaceLlm(orgOf(req));
       } catch (e) {
         if (e instanceof LlmNotConfiguredError) {
           res.status(409).json({ error: e.code, message: e.message });
@@ -340,46 +315,19 @@ router.get(
         }
         throw e;
       }
-      const tracker = createSocketSpecTracker(repoIdForCleanup, CURATE_STEPS.map((s) => ({ ...s })));
-      // `?confirm=none` runs without the estimate gate — the caller has already
-      // said yes (the preview's start/restart IS the confirmation), the way the
-      // onboarding scan does. Everything else keeps the socket confirm.
-      const gated = req.query.confirm !== 'none';
-      const result = await runStoredSpecScan(repo.path, {
-        tracker,
-        source: 'dashboard',
-        // Same slot, same cancellation: disconnecting the repository stops a
-        // manual scan exactly as it stops an onboarding one.
-        signal: scanClaim.signal,
-        driver: llm.driver(),
-        ...(gated
-          ? {
-              // The popup replaces in place, so the estimate rides the checklist
-              // here as a leading step (the terminal renders its own line).
-              onEstimatePhase: estimateStepPhase(tracker),
-              onLlmEstimate: createSocketSpecEstimateHandler(repoIdForCleanup, scanClaim.signal),
-            }
-          : {}),
+      const outcome = await requireJobs().enqueueScan({
+        repoId: req.params.id as string,
+        repoFullName: repo.path,
+        workspaceOrgId: orgOf(req),
+        source: 'manual',
       });
-      emitSpecComplete(repoIdForCleanup, 'scan');
-      res.json({ ...(await corpusPayload(repo.path)), noChanges: result.noChanges });
-    } catch (e) {
-      // User declined the cost estimate — a clean cancel, not an error. Return
-      // 200 with a `cancelled` flag so the client treats it as a no-op (no toast,
-      // no error state). A scan aborted under us (the repository is being
-      // disconnected — that IS the cancel) answers the same way: there is
-      // nobody left to show an error to.
-      if (e instanceof EstimateDeclined || scanClaim?.signal.aborted) {
-        if (repoIdForCleanup) emitSpecComplete(repoIdForCleanup, 'scan');
-        res.json({ cancelled: true });
+      if (outcome.status === 'busy') {
+        res.status(409).json({ error: 'A spec scan is already running for this repository.' });
         return;
       }
-      if (repoIdForCleanup) {
-        emitSpecProgress(repoIdForCleanup, { step: 'error', percent: 100, detail: (e as Error).message });
-      }
+      res.status(202).json({ jobId: outcome.jobId });
+    } catch (e) {
       next(e);
-    } finally {
-      scanClaim?.release();
     }
   },
 );

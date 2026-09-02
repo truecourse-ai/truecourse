@@ -14,6 +14,9 @@
  *                              (no stages ⇒ deterministic no-op, gate skipped).
  *   POST /:id/guard/run        run the committed scenarios (deterministic,
  *                              LLM-free — no estimate).
+ *   POST /:id/guard/setup      enqueue `guard setup` (recipe, dependencies, seed)
+ *                              as a background job; 202 { jobId }, 409 when the
+ *                              repository is already working.
  *   POST /:id/guard/map        derive the journey catalog from the working tree
  *                              (analyzer + journey-mapper: deterministic, free,
  *                              no LLM — so no estimate modal, ever).
@@ -64,6 +67,7 @@ import {
   GuardExternalsWriteError,
   type GuardExternalsWrite,
 } from '@truecourse/core/commands/guard-externals';
+import { GUARD_SETUP_ONLY_STEPS } from '@truecourse/core/commands/guard-setup';
 import { estimateStepPhase } from '@truecourse/core/progress';
 import { runFailureMessage } from '@truecourse/guard-runner';
 import { dismissedClaimKey, type GuardDecisions } from '@truecourse/shared';
@@ -73,6 +77,7 @@ import {
   emitSpecProgress,
 } from '../socket/handlers.js';
 import { parsePr } from './route-params.js';
+import { requireJobs } from '../jobs/current.js';
 import {
   LlmNotConfiguredError,
   LlmProbeFailedError,
@@ -255,6 +260,56 @@ router.post('/:id/guard/generate', async (req: Request, res: Response, next: Nex
     next(e);
   } finally {
     if (held) guardJobs.delete(repoId);
+  }
+});
+
+// POST — prepare the repository for guard: derive the recipe, catalogue the
+// dependencies, draft the seed. Long-running (it installs, builds and boots the
+// program), so it is a QUEUED JOB rather than work inside the request: the route
+// proves the workspace's provider, enqueues, and answers 202 with the job id.
+// The engine's own per-step fingerprints decide what actually re-runs, so there
+// is no estimate gate and a re-trigger over unchanged inputs costs nothing.
+router.post('/:id/guard/setup', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    const body = (req.body ?? {}) as { only?: string; refresh?: boolean };
+    const only = GUARD_SETUP_ONLY_STEPS.find((step) => step === body.only);
+    if (body.only !== undefined && !only) {
+      res.status(400).json({
+        error: `only must be one of ${GUARD_SETUP_ONLY_STEPS.join(', ')}.`,
+      });
+      return;
+    }
+    // The asking workspace's provider, proved before anything is queued — the
+    // same two coded refusals every spending entry answers with.
+    try {
+      await startWorkspaceLlm(orgOf(req));
+    } catch (e) {
+      if (e instanceof LlmNotConfiguredError) {
+        res.status(409).json({ error: e.code, message: e.message });
+        return;
+      }
+      if (e instanceof LlmProbeFailedError) {
+        res.status(502).json({ error: e.code, message: e.message });
+        return;
+      }
+      throw e;
+    }
+    const outcome = await requireJobs().enqueueGuardSetup({
+      repoId: req.params.id as string,
+      repoFullName: repo.path,
+      workspaceOrgId: orgOf(req),
+      source: 'manual',
+      ...(only ? { only } : {}),
+      ...(body.refresh ? { refresh: true } : {}),
+    });
+    if (outcome.status === 'busy') {
+      res.status(409).json({ error: 'A guard job is already running for this repo.' });
+      return;
+    }
+    res.status(202).json({ jobId: outcome.jobId });
+  } catch (e) {
+    next(e);
   }
 });
 

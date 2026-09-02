@@ -5,8 +5,8 @@
  * API, the link store. This module owns what connecting a repository MEANS here:
  * the `gh_repos` row IS the connection. Nothing is cloned at connect time — the
  * work-tree provider installed here clones per run (spec scan now; guard runs
- * later) and the clone is deleted when the run settles. Linking starts the
- * onboarding scan; unlinking cancels any scan of ours and drops the repo's
+ * later) and the clone is deleted when the run settles. Linking ENQUEUES the
+ * onboarding scan; unlinking cancels the repo's in-flight jobs and drops its
  * persistent session transcripts.
  *
  * The factory reads its configuration from the environment and returns `null`
@@ -37,8 +37,14 @@ import {
 import { getDb } from '../db.js';
 import { createRunClone } from '../services/run-clone.service.js';
 import { setWorkTreeProvider, type WorkTreeProvider } from '../services/work-tree.service.js';
-import { startOnboardingScan } from '../services/onboarding-scan.service.js';
 import { removeRepoRunState } from '../services/repo-removal.service.js';
+
+/** How connecting a repository starts its onboarding: enqueue, or say why not. */
+export type OnboardingScanStart = (
+  repoId: string,
+  repoKey: string,
+  orgId: string,
+) => Promise<'queued' | 'busy' | 'failed'>;
 
 /** The routers app.ts mounts, plus the store the repo list scopes itself with. */
 export interface GithubMount {
@@ -61,9 +67,18 @@ export interface GithubConnectionOverrides {
   ) => Promise<{ accountLogin: string; accountType: string } | null>;
   /** Per-run work trees. Default: a token clone into the workspace's run dir. */
   workTree?: WorkTreeProvider;
-  /** Start a repo's onboarding scan. Default: the in-process background scan. */
-  scan?: (repoId: string, repoKey: string, orgId: string) => boolean;
+  /**
+   * Start a repo's onboarding scan. Boot passes the job enqueue; without one a
+   * connect writes the link row and starts nothing.
+   */
+  scan?: OnboardingScanStart;
 }
+
+/** No runner installed (a server whose job queue never came up). */
+const noScanRunner: OnboardingScanStart = async (_repoId, repoKey) => {
+  log.warn(`[github] background jobs are not running — ${repoKey} was connected without a scan`);
+  return 'failed';
+};
 
 export function createGithubConnection(
   overrides: GithubConnectionOverrides = {},
@@ -74,7 +89,7 @@ export function createGithubConnection(
   const store = overrides.store ?? new PostgresGateStore(getDb());
   const octokitFor =
     overrides.octokitFor ?? ((installationId: number) => installationOctokit(cfg, installationId));
-  const scan = overrides.scan ?? startOnboardingScan;
+  const scan = overrides.scan ?? noScanRunner;
 
   // App auth is built on first use: the private key is only parsed when a token
   // is actually minted, so a test that injects `workTree` never needs a real one.
@@ -104,7 +119,7 @@ export function createGithubConnection(
     // GitHub taking a repo away (app uninstall, repo removed from the
     // installation) disconnects it exactly like an explicit unlink does.
     onRepoRemoved: async (link: RepoLinkRecord) => {
-      await removeRepoRunState(link.repoFullName);
+      await removeRepoRunState(link.repoFullName, link.workspaceOrgId);
       log.info(`[github] ${link.repoFullName} disconnected by GitHub`);
     },
   });
@@ -120,13 +135,26 @@ export function createGithubConnection(
       overrides.lookupInstallationAccount ??
       ((installationId: number) => fetchInstallationAccount(cfg, installationId)),
     onRepoLinked: async (link: RepoLinkRecord) => {
-      // The row is the connection — no clone, no registration. The onboarding
-      // scan acquires (and disposes) its own ephemeral work tree, and spends on
-      // the provider of the workspace that just connected the repository.
-      scan(slugify(link.repoFullName, []), link.repoFullName, link.workspaceOrgId);
+      // The row is the connection — no clone, no registration. Onboarding is a
+      // queued job that acquires (and disposes) its own ephemeral work tree and
+      // spends on the provider of the workspace that just connected the repo,
+      // so the enqueue is awaited but the scan itself is not.
+      const outcome = await scan(
+        slugify(link.repoFullName, []),
+        link.repoFullName,
+        link.workspaceOrgId,
+      ).catch((err: unknown) => {
+        log.error(
+          `[github] could not start the scan of ${link.repoFullName}: ${(err as Error).message}`,
+        );
+        return 'failed' as const;
+      });
+      if (outcome !== 'queued') {
+        log.info(`[github] ${link.repoFullName} connected — scan ${outcome}`);
+      }
     },
     onRepoUnlinked: async (link: RepoLinkRecord) => {
-      await removeRepoRunState(link.repoFullName);
+      await removeRepoRunState(link.repoFullName, link.workspaceOrgId);
       log.info(`[github] ${link.repoFullName} disconnected`);
     },
   });

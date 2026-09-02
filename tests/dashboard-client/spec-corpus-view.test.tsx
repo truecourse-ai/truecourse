@@ -931,6 +931,69 @@ describe('useSpecCorpus (PR ref threading)', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Scanning is a background JOB: the start route only enqueues, so the hook holds
+// its `scanning` flag past the request and takes the new corpus from the refetch
+// the page fires when the scan's completion event lands.
+// ---------------------------------------------------------------------------
+
+describe('useSpecCorpus (starting a scan)', () => {
+  let calls: { url: string; method: string }[];
+  beforeEach(() => {
+    calls = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push({ url: String(url), method: (init?.method ?? 'GET').toUpperCase() });
+        return json(RESP);
+      }),
+    );
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('POSTs the scan route and stays scanning until the corpus is refetched', async () => {
+    const { result } = renderHook(() => useSpecCorpus('r1', true));
+    await waitFor(() => expect(result.current.data).not.toBeNull());
+    calls.length = 0;
+
+    await act(async () => {
+      await result.current.scan();
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ method: 'POST' });
+    expect(calls[0].url).toMatch(/\/api\/repos\/r1\/spec\/corpus\/scan$/);
+    // The job is only queued — the button must not read as ready again yet.
+    expect(result.current.scanning).toBe(true);
+
+    await act(async () => {
+      await result.current.refetch();
+    });
+    expect(result.current.scanning).toBe(false);
+  });
+
+  it('stops scanning when the start itself is refused', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) =>
+        (init?.method ?? 'GET') === 'POST'
+          ? new Response(JSON.stringify({ error: 'A spec scan is already running.' }), {
+              status: 409,
+              headers: { 'Content-Type': 'application/json' },
+            })
+          : json(RESP),
+      ),
+    );
+    const { result } = renderHook(() => useSpecCorpus('r1', true));
+    await waitFor(() => expect(result.current.data).not.toBeNull());
+
+    await act(async () => {
+      await result.current.scan();
+    });
+    expect(result.current.scanning).toBe(false);
+    expect(result.current.error).toMatch(/already running/i);
+  });
+});
+
 describe('SpecCorpusView (PR-scoped decisions)', () => {
   let calls: { url: string; method?: string }[];
   beforeEach(() => {

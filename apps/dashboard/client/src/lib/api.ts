@@ -868,11 +868,6 @@ export interface SpecCorpusResponse {
   corpusCommit?: string;
 }
 
-/** A scan that the user dismissed at the cost-estimate confirm — a no-op. */
-export interface SpecScanCancelled {
-  cancelled: true;
-}
-
 /**
  * OSS include/exclude ack: the persisted decision lists only. The corpus is
  * unchanged by an OSS decision (no re-curate), so no corpus is returned — the
@@ -920,13 +915,12 @@ export async function getSpecCorpus(
 }
 
 /**
- * Run a fresh corpus scan (curate), persist corpus.json, return it — or
- * `{ cancelled: true }` when the user dismisses the cost-estimate confirm.
+ * Enqueue a fresh corpus scan. It runs as a background job, so this resolves as
+ * soon as the job is QUEUED (202): progress arrives over `spec:progress` and the
+ * corpus is refetched when `spec:complete { kind: 'scan' }` lands.
  */
-export function getSpecCorpusScan(
-  repoId: string,
-): Promise<SpecCorpusResponse | SpecScanCancelled> {
-  return fetchApi<SpecCorpusResponse | SpecScanCancelled>(`/api/repos/${repoId}/spec/corpus/scan`);
+export function startSpecCorpusScan(repoId: string): Promise<{ jobId: string }> {
+  return fetchApi<{ jobId: string }>(`/api/repos/${repoId}/spec/corpus/scan`, { method: 'POST' });
 }
 
 /** A source doc's markdown (for the prose Spec tab). `commit` reads it at a PR head (EE). */

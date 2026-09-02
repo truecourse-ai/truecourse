@@ -1,38 +1,38 @@
-// PREVIEW: REAL — starting a spec scan on a connected repository.
+// PREVIEW: REAL — starting an agentic run on a connected repository.
 
 /**
- * Start a scan, and say what happened in words a surface can act on.
+ * Ask the server to start a run, and say what happened in words a surface can
+ * act on.
  *
- * `?confirm=none` skips the estimate gate: pressing the button IS the
- * confirmation here, so there is no second dialog to answer over a socket.
+ * The route ENQUEUES: a `202` means the job is on the queue, not that the work
+ * is done. Progress arrives on the run stream, so this promise is only ever
+ * about whether the run started.
  *
  * Three refusals matter and each is its own outcome, because each has its own
  * remedy: the workspace has no provider (fill in Settings), the provider failed
  * its pre-flight probe (the provider's own words, which the user must read),
- * and a scan is already running (wait). The first two are coded in the body's
- * `error` field with the human sentence in `message` — so this reads the body
- * itself rather than going through `fetchApi`, whose one-string `ApiError`
+ * and the repository is already working (wait). The first two are coded in the
+ * body's `error` field with the human sentence in `message` — so this reads the
+ * body itself rather than going through `fetchApi`, whose one-string `ApiError`
  * would keep the code and drop the sentence.
- *
- * `started` resolves only when the scan ENDS: the route runs the whole scan
- * inside the request. Callers watch the run stream for progress and use this
- * promise for its refusals, not as a finish line.
  */
 
 import { getServerUrl } from '@/lib/server-url';
 
-export type ScanStart =
+export type RunStart =
   | { kind: 'started' }
   | { kind: 'not-configured'; message: string }
   | { kind: 'probe-failed'; message: string }
   | { kind: 'busy'; message: string }
   | { kind: 'failed'; message: string };
 
-export async function startSpecScan(repoId: string): Promise<ScanStart> {
-  const url = `${getServerUrl()}/api/repos/${encodeURIComponent(repoId)}/spec/corpus/scan?confirm=none`;
+/** POST a repo-scoped start route (`spec/corpus/scan`, `guard/setup`, …). */
+export async function startRun(repoId: string, path: string): Promise<RunStart> {
+  const url = `${getServerUrl()}/api/repos/${encodeURIComponent(repoId)}/${path}`;
   let res: Response;
   try {
     res = await fetch(url, {
+      method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
     });
@@ -54,3 +54,9 @@ export async function startSpecScan(repoId: string): Promise<ScanStart> {
   if (res.status === 409) return { kind: 'busy', message };
   return { kind: 'failed', message };
 }
+
+export const startSpecScan = (repoId: string): Promise<RunStart> =>
+  startRun(repoId, 'spec/corpus/scan');
+
+export const startGuardSetup = (repoId: string): Promise<RunStart> =>
+  startRun(repoId, 'guard/setup');

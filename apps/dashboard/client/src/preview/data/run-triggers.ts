@@ -4,16 +4,17 @@
  * The command → start-it map.
  *
  * A run surface asks this whether the run in front of it can be started again;
- * a command with no entry simply has no button. Guard's steps light up by
- * adding their call here, and nothing else changes.
+ * a command with no entry simply has no button. Guard's remaining steps light
+ * up by adding their call here, and nothing else changes.
  */
 
-import { startSpecScan, type ScanStart } from './scan';
+import { startGuardSetup, startSpecScan, type RunStart } from './scan';
 
-export type RunTrigger = (repoId: string) => Promise<ScanStart>;
+export type RunTrigger = (repoId: string) => Promise<RunStart>;
 
 const RUN_TRIGGERS: Record<string, RunTrigger> = {
   'spec-scan': startSpecScan,
+  'guard-setup': startGuardSetup,
 };
 
 export const triggerFor = (command: string): RunTrigger | null =>

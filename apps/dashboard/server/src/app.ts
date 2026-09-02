@@ -23,9 +23,15 @@ import capabilitiesRouter from './routes/capabilities.js';
 import llmRouter from './routes/llm.js';
 import { createAuthGate } from './middleware/auth.js';
 import type { GithubMount } from './github/index.js';
+import type { JobsMount } from './jobs/index.js';
+import { setCurrentJobs } from './jobs/current.js';
 import type { AuthVerifier } from '@truecourse/shared';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+/** What a server with no job runner tells a caller who reaches its job routes. */
+const JOBS_NOT_RUNNING =
+  'Background jobs are not running on this server.';
 
 /** What an unconfigured server tells a caller who reaches /api/github. */
 const GITHUB_NOT_CONFIGURED =
@@ -49,10 +55,20 @@ export interface CreateAppOptions {
    * 503 instead of 404, so the client can say why.
    */
   github: GithubMount | null;
+  /**
+   * The background job runner. REQUIRED for the same reason as `github`: a
+   * server that answers /api/jobs without one would be lying. `null` (tests
+   * pass it) makes the three job routes answer 503.
+   */
+  jobs: JobsMount | null;
 }
 
 export function createApp(opts: CreateAppOptions): express.Express {
   const app: express.Express = express();
+
+  // The routes that START work enqueue onto the runner rather than doing it
+  // inline, so the mount this app was built with is what they reach for.
+  setCurrentJobs(opts.jobs);
 
   // Reflect the request origin and allow credentials so the session cookie
   // flows on cross-origin dev requests (client :3000 → server :3001).
@@ -127,6 +143,20 @@ export function createApp(opts: CreateAppOptions): express.Express {
   // The workspace's Models settings — workspace-scoped, not repo-scoped, so it
   // sits beside the registry routes rather than behind the project resolver.
   app.use('/api/llm', llmRouter);
+
+  // The job queue: the live event stream, job status, and the notifications
+  // feed. Workspace-scoped like the Models settings, so they mount together.
+  if (opts.jobs) {
+    app.use('/api/events', opts.jobs.routers.events);
+    app.use('/api/jobs', opts.jobs.routers.jobs);
+    app.use('/api/notifications', opts.jobs.routers.notifications);
+  } else {
+    for (const route of ['/api/events', '/api/jobs', '/api/notifications']) {
+      app.use(route, (_req, res) => {
+        res.status(503).json({ error: JOBS_NOT_RUNNING });
+      });
+    }
+  }
 
   // Home page / registry routes run without a project.
   app.use('/api/repos', createReposRouter({ githubLinks }));

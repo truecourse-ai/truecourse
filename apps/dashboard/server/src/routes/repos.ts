@@ -11,6 +11,7 @@ import {
   type RegistryEntry,
 } from '@truecourse/core/config/registry';
 import { removeRepoRunState } from '../services/repo-removal.service.js';
+import { orgOf } from '../services/workspace-llm.service.js';
 import { isVisibleTo, type RepoOwnershipLookup } from '../middleware/project.js';
 
 /**
@@ -152,8 +153,8 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
     }
   });
 
-  // DELETE /api/repos/:id - Disconnect: stop the repo's running scan, drop its
-  // server-side run state, then drop the link row. 409 while a scan we cannot
+  // DELETE /api/repos/:id - Disconnect: stop the repo's in-flight jobs, drop its
+  // server-side run state, then drop the link row. 409 while a job we cannot
   // stop is still running. Run-state cleanup precedes the row delete for the
   // same reason the unlink hook orders it that way: a cleanup failure must
   // keep the repo connected (and retryable), never orphan its state behind a
@@ -161,7 +162,7 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
   router.delete('/:id', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const entry = await requireEntry(req);
-      await removeRepoRunState(entry.path);
+      await removeRepoRunState(entry.path, orgOf(req));
       await deps.githubLinks?.unlinkRepo(entry.name);
       res.status(204).send();
     } catch (error) {

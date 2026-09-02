@@ -19,6 +19,7 @@
  *   GET /:id/guard/decisions     the committable guard decisions (dismissed claims)
  *   GET /:id/guard/staleness     the two amber-dot signals (generate / run)
  *   GET /:id/guard/externals     detected + declared external API accounts
+ *   GET /:id/guard/setup         the last `guard setup` report (?commit= pins one)
  */
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
@@ -49,7 +50,9 @@ import {
   guardExternalSetupIndexForView,
 } from '@truecourse/core/commands/guard-read';
 import { readGuardExternalsView } from '@truecourse/core/commands/guard-externals';
-import { guardsMaterializeInPlace } from '@truecourse/core/lib/guard-store';
+import { readGuardSetup } from '@truecourse/core/commands/guard-setup';
+import { readBundleGuardSetup } from '@truecourse/core/services/guard-setup/bundle';
+import { guardsMaterializeInPlace, loadGuardSetupBundle } from '@truecourse/core/lib/guard-store';
 import { getGuardGatePendingLookup } from '@truecourse/core/lib/guard-gate-pending';
 import { prOf, refOf } from './route-params.js';
 
@@ -351,6 +354,31 @@ router.get('/:id/guard/externals', async (req: Request, res: Response, next: Nex
       return;
     }
     res.json(readGuardExternalsView(repo.path));
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET — what `guard setup` last decided for this repository: the recipe it
+// derived, the dependencies it catalogued, the seed it drafted, and the step
+// spine that says which of those are settled. Hosted repos keep it in the setup
+// BUNDLE (`?commit=` pins a commit; without one the newest bundle answers); a
+// working-tree store reads it off disk. 404 when setup has never run.
+router.get('/:id/guard/setup', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    const commit = req.query.commit ? String(req.query.commit) : undefined;
+    const bundle = await loadGuardSetupBundle(repo.path, commit);
+    const report = bundle
+      ? readBundleGuardSetup(bundle)
+      : guardsMaterializeInPlace()
+        ? readGuardSetup(repo.path)
+        : null;
+    if (!report) {
+      res.status(404).json({ error: 'Guard setup has not run for this repository yet.' });
+      return;
+    }
+    res.json({ report });
   } catch (e) {
     next(e);
   }

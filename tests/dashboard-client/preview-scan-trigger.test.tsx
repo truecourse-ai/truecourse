@@ -1,10 +1,11 @@
 /**
- * Starting a scan from the product surface, and being told when it cannot.
+ * Starting a run from the product surface, and being told when it cannot.
  *
- * The start route answers three refusals that each have their own remedy — no
- * provider configured, a provider that failed its pre-flight probe, and a
- * repository already scanning — and two of them share a status code, so the
- * helper reads the body's own error CODE rather than the number.
+ * The start route ENQUEUES (202) and answers three refusals that each have
+ * their own remedy — no provider configured, a provider that failed its
+ * pre-flight probe, and a repository already working — and two of them share a
+ * status code, so the helper reads the body's own error CODE rather than the
+ * number.
  *
  * Above it sit the two affordances: a connected repository with no runs is
  * offered its first scan, and a run that ended badly is offered another. A
@@ -36,7 +37,7 @@ vi.mock('@/lib/socket', () => {
 });
 
 import PreviewApp from '@/preview/PreviewApp';
-import { startSpecScan } from '@/preview/data/scan';
+import { startGuardSetup, startSpecScan } from '@/preview/data/scan';
 import { triggerFor } from '@/preview/data/run-triggers';
 import type { PublicSessionRun } from '@/lib/api';
 
@@ -75,19 +76,23 @@ function serve(options: {
   runs?: PublicSessionRun[];
   config?: unknown;
   scan?: () => Response;
+  setup?: () => Response;
 }) {
   const calls: string[] = [];
-  const scan = options.scan ?? (() => json({ noChanges: false }));
-  window.fetch = vi.fn(async (input: RequestInfo | URL) => {
+  const scan = options.scan ?? (() => json({ jobId: 'job_1' }, 202));
+  const setup = options.setup ?? (() => json({ jobId: 'job_2' }, 202));
+  window.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const url = new URL(href, window.location.origin);
-    calls.push(`${url.pathname}${url.search}`);
+    const method = (init?.method ?? 'GET').toUpperCase();
+    calls.push(method === 'GET' ? `${url.pathname}${url.search}` : `${method} ${url.pathname}`);
     if (url.pathname === '/api/repos') return json([REAL]);
     if (url.pathname === '/api/llm/config') {
       return json({ config: options.config ?? null, providers: ['anthropic'] });
     }
     if (url.pathname === `/api/repos/${REAL.id}/sessions/runs`) return json({ runs: options.runs ?? [] });
     if (url.pathname === `/api/repos/${REAL.id}/spec/corpus/scan`) return scan();
+    if (url.pathname === `/api/repos/${REAL.id}/guard/setup`) return setup();
     return json({ error: 'not found' }, 404);
   }) as unknown as typeof window.fetch;
   return calls;
@@ -119,7 +124,7 @@ afterEach(() => {
 // the helper, on its own
 // ---------------------------------------------------------------------------
 
-describe('starting a scan', () => {
+describe('starting a run', () => {
   it('reads the refusals apart by their code, not their status', async () => {
     serve({
       scan: () => json({ error: 'llm-not-configured', message: 'This workspace has no LLM provider.' }, 409),
@@ -147,14 +152,21 @@ describe('starting a scan', () => {
     });
   });
 
-  it('asks without the estimate gate, and calls a 200 a start', async () => {
-    const calls = serve({});
+  it('POSTs the start route, and calls the 202 a start', async () => {
+    const calls = serve({ scan: () => json({ jobId: 'job_1' }, 202) });
     expect(await startSpecScan('linkwarden')).toEqual({ kind: 'started' });
-    expect(calls).toContain('/api/repos/linkwarden/spec/corpus/scan?confirm=none');
+    expect(calls).toContain('POST /api/repos/linkwarden/spec/corpus/scan');
   });
 
-  it('offers a trigger for the scan and none for a command that has no start yet', () => {
+  it('starts guard setup through the same route shape', async () => {
+    const calls = serve({ setup: () => json({ jobId: 'job_2' }, 202) });
+    expect(await startGuardSetup('linkwarden')).toEqual({ kind: 'started' });
+    expect(calls).toContain('POST /api/repos/linkwarden/guard/setup');
+  });
+
+  it('offers a trigger for the scan and for guard setup, none for one with no start yet', () => {
     expect(triggerFor('spec-scan')).not.toBeNull();
+    expect(triggerFor('guard-setup')).not.toBeNull();
     expect(triggerFor('guard-generate')).toBeNull();
   });
 });
@@ -171,7 +183,7 @@ describe('the Activity surface of a connected repository', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Start scan' }));
     await waitFor(() =>
-      expect(calls).toContain(`/api/repos/${REAL.id}/spec/corpus/scan?confirm=none`),
+      expect(calls).toContain(`POST /api/repos/${REAL.id}/spec/corpus/scan`),
     );
   });
 
@@ -186,7 +198,7 @@ describe('the Activity surface of a connected repository', () => {
     await user.click(await screen.findByRole('button', { name: /Open spec scan run/ }));
     await user.click(await screen.findByRole('button', { name: 'Run again' }));
     await waitFor(() =>
-      expect(calls).toContain(`/api/repos/${REAL.id}/spec/corpus/scan?confirm=none`),
+      expect(calls).toContain(`POST /api/repos/${REAL.id}/spec/corpus/scan`),
     );
   });
 
@@ -241,7 +253,7 @@ describe('the Activity surface of a connected repository', () => {
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole('button', { name: 'Start scan' }));
-    expect(await screen.findByText('A scan is already running')).toBeInTheDocument();
+    expect(await screen.findByText('A run is already in progress')).toBeInTheDocument();
   });
 });
 
