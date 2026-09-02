@@ -8,8 +8,6 @@ Thanks for your interest in contributing! This guide will help you get started.
 
 - Node.js 22+
 - pnpm 9+
-- Docker (for the local Postgres)
-- A WorkOS account — the dashboard is authenticated, so dev needs real AuthKit credentials
 
 ### Getting Started
 
@@ -17,12 +15,10 @@ Thanks for your interest in contributing! This guide will help you get started.
 git clone https://github.com/truecourse-ai/truecourse.git
 cd truecourse
 pnpm install
-POSTGRES_PASSWORD=truecourse docker compose up -d db   # Postgres on :5432
-cp .env.example .env                                   # Fill in the REQUIRED section
 pnpm dev          # Start all services (Vite frontend + Express backend)
 ```
 
-The dev server starts at `http://localhost:3000`. It will not boot until the required env is set — `DATABASE_URL` plus `WORKOS_API_KEY`, `WORKOS_CLIENT_ID`, `WORKOS_COOKIE_PASSWORD` (32+ chars), `WORKOS_REDIRECT_URI` (`http://localhost:3001/api/auth/callback`) and `WORKOS_APP_URL` (`http://localhost:3000`). See `.env.example`.
+The dev server starts at `http://localhost:3000`. State is stored as JSON files under `.truecourse/` in your repo — no database, no Docker.
 
 ### Project Structure
 
@@ -48,7 +44,7 @@ pnpm build:dist   # Build distributable npm package (static frontend + bundled s
 
 ### Storage
 
-Analyses, specs, contracts and guard runs are plain JSON files under `<repo>/.truecourse/`; the file format is documented in `packages/core/src/types/snapshot.ts`. The dashboard server additionally needs Postgres (`DATABASE_URL`), which it migrates at boot.
+TrueCourse stores everything as plain JSON files under `<repo>/.truecourse/` — no database, no Docker, no migrations. The file format is documented in `packages/core/src/types/snapshot.ts`.
 
 ## How to Contribute
 

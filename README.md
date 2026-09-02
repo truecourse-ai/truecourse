@@ -30,7 +30,7 @@ Both store their results under `.truecourse/` and surface them in a shared [dash
 
 Jump to: **[Install](#install)** · **[1. Analyze](#1-analyze--code-intelligence)** · **[2. Spec → Guard](#2-spec--guard--business-logic-drift)** · **[Dashboard](#dashboard-web-ui)**
 
-The CLI has no setup step and no database: `truecourse analyze` and friends create `.truecourse/` in your repo on first use and store everything there as plain JSON files. The [dashboard](#dashboard-web-ui) is different — it is an authenticated, Postgres-backed server (`DATABASE_URL` + WorkOS auth required, see [Development](#development)) that stores repo state in the database and clones connected repositories per run. For LLM-powered work TrueCourse uses the [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) by default, or a **provider API with your own key** — your first `truecourse` command asks which, and [`truecourse config llm setup`](#llm-transport-claude-code-or-api) changes it later. With neither available, deterministic analysis still runs and LLM-dependent features are skipped.
+No setup step and no database: TrueCourse creates `.truecourse/` in your repo on first use and stores everything there as plain JSON files. For LLM-powered work it uses the [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) by default, or a **provider API with your own key** — your first `truecourse` command asks which, and [`truecourse config llm setup`](#llm-transport-claude-code-or-api) changes it later. With neither available, deterministic analysis still runs and LLM-dependent features are skipped.
 
 ---
 
@@ -997,8 +997,6 @@ offers it as `View · Story · YAML`; the terminal prints the same words with
 
 One web UI for both capabilities — browse code findings and business-logic drift side by side, with the architecture graph, analytics, and the spec-curation + guard workflow.
 
-The dashboard server is authenticated and Postgres-backed: it needs `DATABASE_URL` and the `WORKOS_*` variables to boot (migrations apply automatically), and repositories arrive by connecting them through the TrueCourse GitHub App (`GITHUB_APP_*`, optional — without it the server boots with an empty repo list). See [Development](#development) for the variable tables. Repo state lives in the database; runs clone the repository ephemerally and clean up after themselves.
-
 ```bash
 truecourse dashboard                  # Start + open the dashboard
 truecourse dashboard --reconfigure    # Re-prompt for console vs background service mode
@@ -1262,35 +1260,11 @@ cd truecourse
 pnpm install
 pnpm build              # Build all packages — required before the first `pnpm test` (tests resolve workspace packages from their dist/)
 dotnet build -c Release tools/csharp-roslyn-host   # One-time, needs the .NET 8 SDK — see note below
-POSTGRES_PASSWORD=truecourse docker compose up -d db   # Postgres on :5432
-cp .env.example .env    # Then fill in the REQUIRED section (see below)
 pnpm dev                # Start dashboard at http://localhost:3000 (server on :3001, Vite on :3000)
 pnpm test               # Run tests
 ```
 
-The dashboard server is authenticated and Postgres-backed: it will not boot until these are set, in `.env` at the repo root or in `~/.truecourse/.env`.
-
-| Variable | Notes |
-| --- | --- |
-| `DATABASE_URL` | e.g. `postgres://truecourse:truecourse@localhost:5432/truecourse`. Migrations apply at boot. |
-| `WORKOS_API_KEY` | WorkOS dashboard → API Keys. |
-| `WORKOS_CLIENT_ID` | Same page. |
-| `WORKOS_COOKIE_PASSWORD` | 32+ characters. `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` |
-| `WORKOS_REDIRECT_URI` | `http://localhost:3001/api/auth/callback` — register it on the WorkOS app. |
-| `WORKOS_APP_URL` | `http://localhost:3000` in dev. |
-
-Connecting repositories through the TrueCourse GitHub App is optional — the server boots without it and `/api/github/*` answers `503` with the variables to set. Set all four to turn it on:
-
-| Variable | Notes |
-| --- | --- |
-| `GITHUB_APP_ID` | Numeric App ID from the App's settings page. |
-| `GITHUB_APP_PRIVATE_KEY` | The App's PEM private key — raw (escaped `\n` newlines are fine) or base64-encoded. |
-| `GITHUB_APP_WEBHOOK_SECRET` | Shared secret; the webhook receiver at `POST /api/github/webhook` verifies every delivery against it. |
-| `GITHUB_APP_SLUG` | The `github.com/apps/<slug>` handle, used to build the install URL. |
-
-Connecting a repository (`POST /api/github/repos/link`) writes the link row — the row is the connection — and starts its spec scan in the background. There is no persistent clone: each run (spec scan today, guard runs later) shallow-clones the repo with an installation token into an ephemeral per-workspace directory under `~/.truecourse/run-clones/`, persists its results to Postgres, and deletes the clone when it settles. Disconnecting (`DELETE /api/github/repos/link`) cancels any running scan, drops the repo's session transcripts, and deletes the row.
-
-`pnpm dev` also expects a `.truecourse/` folder at the repo root — created automatically on the first `truecourse analyze` against the repo (or simply `mkdir -p .truecourse`).
+`pnpm dev` expects a `.truecourse/` folder at the repo root — created automatically on the first `truecourse analyze` against the repo (or simply `mkdir -p .truecourse`).
 
 The full test suite requires the C# Roslyn host to be built (same requirement as [analyzing C#](#prerequisites)): the C# e2e test fails without it, and the Roslyn semantic-rule tests silently skip. CI builds it before running tests (`.github/workflows/test.yml`); do the same locally, once per checkout/worktree.
 
