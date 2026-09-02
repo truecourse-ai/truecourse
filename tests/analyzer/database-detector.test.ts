@@ -2,7 +2,7 @@ import { describe, it, expect, afterAll } from 'vitest';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { detectDatabases, parseDockerCompose } from '../../packages/analyzer/src/database-detector';
+import { databaseFromManifest, detectDatabases, parseDockerCompose } from '../../packages/analyzer/src/database-detector';
 import { discoverFiles } from '../../packages/analyzer/src/file-discovery';
 import { detectServices } from '../../packages/analyzer/src/service-detector';
 import type { FileAnalysis } from '@truecourse/shared';
@@ -240,6 +240,27 @@ describe('detectDatabases with fixture project', () => {
     const redisDb = result.databases.find((db) => db.type === 'redis');
     expect(redisDb).toBeDefined();
     expect(redisDb!.connectedServices).toContain('api-gateway');
+  });
+});
+
+// The recipe-app fallback's primitive: a dir whose manifest declares a driver the
+// code only names in a config string (strapi's examples/getstarted + knex).
+describe('databaseFromManifest', () => {
+  it('reads the driver off the directory manifest, and claims nothing without one', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'truecourse-manifest-db-'));
+    try {
+      const app = join(tempDir, 'examples', 'getstarted');
+      mkdirSync(app, { recursive: true });
+      writeFileSync(
+        join(app, 'package.json'),
+        JSON.stringify({ name: 'getstarted', dependencies: { '@strapi/strapi': '5.0.0', 'better-sqlite3': '11.3.0' } }),
+      );
+
+      expect(databaseFromManifest(app)).toEqual({ type: 'sqlite', driver: 'better-sqlite3' });
+      expect(databaseFromManifest(join(tempDir, 'examples'))).toBeNull();
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });
 

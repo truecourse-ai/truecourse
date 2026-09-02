@@ -67,7 +67,8 @@ function datastoreRepo(): { root: string; marker: string; log: string } {
       "  console.error(`Database error: role does not exist (${process.env.DATABASE_URL})`)",
       '  process.exit(1)',
       '}',
-      "http.createServer((_q, r) => { r.writeHead(200); r.end('ok') }).listen(Number(process.env.PORT))",
+      // 404 on unknown paths — the wildcard probe refuses 200-everything stubs.
+      "http.createServer((q, r) => { if (q.url !== '/') { r.writeHead(404); r.end('nope'); return } r.writeHead(200); r.end('ok') }).listen(Number(process.env.PORT))",
     ].join('\n'),
   )
   return { root, marker, log }

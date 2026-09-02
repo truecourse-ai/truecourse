@@ -54,13 +54,19 @@ export {
   resolveApiServers,
   resolveScenarioServer,
   credentialServers,
+  FINGERPRINT_INPUTS,
+  DEFAULT_WEB_HEALTH_PATH,
+  DEFAULT_WEB_READY_TIMEOUT_MS,
+  resolveWebSurface,
 } from './recipe.js'
 export type {
   Recipe,
   RecipeApi,
   RecipeApiServer,
+  RecipeWeb,
   ResolvedApiServer,
   ResolvedApiServers,
+  ResolvedWebSurface,
   RecipeApiCredential,
   RecipeApiCredentialRequest,
   RecipeApiSeed,
@@ -78,8 +84,10 @@ export {
   RecipeApiSeedCredentialSchema,
   RecipeApiExternalSchema,
   RecipeApiExternalEnvSchema,
+  RecipeWebSchema,
 } from './recipe.js'
 export { hashableRecipeText, resolveSeedScript, recipeControlledEnvVars } from './recipe.js'
+export { maskedRecipeText, maskRecipeSecret, secretBullets } from './recipe.js'
 export { isNoOpEntry, NO_OP_ENTRY_MESSAGE } from './recipe.js'
 
 // The route manifest — which workspace app serves which path, derived
@@ -169,8 +177,28 @@ export {
 } from './run-scenario.js'
 export type { RunScenarioContext } from './run-scenario.js'
 
-export { createSandbox, SandboxError, listSandboxFiles, DETERMINISM_PINS } from './sandbox.js'
-export type { Sandbox, SandboxOptions } from './sandbox.js'
+export { createSandbox, createWorkingSandbox, resolveInSandbox, SandboxError, listSandboxFiles, DETERMINISM_PINS } from './sandbox.js'
+export type { Sandbox, SandboxOptions, WorkingSandbox } from './sandbox.js'
+
+export {
+  DependencyCatalogError,
+  maskStoredSecret,
+  loadDependencyCatalog,
+  loadDependenciesLocal,
+  resolveDependencies,
+  resolveDependency,
+  materializeSupplied,
+  externalServiceStates,
+  SUPPLIED_DIR,
+} from './dependencies.js'
+export type {
+  DependencyState,
+  DependencyRequirement,
+  ResolvedDependency,
+  ResolvedDependencies,
+  SuppliedInstance,
+  SuppliedValues,
+} from './dependencies.js'
 
 export { constructChildEnv, overlayStepEnv, BUILD_PASSTHROUGH } from './child-env.js'
 export type { ChildEnvOptions } from './child-env.js'
@@ -234,11 +262,14 @@ export {
   guardResultPath,
   guardSetupPath,
   guardJourneysPath,
+  guardSetupFindingsPath,
   scenariosDir,
   recipePath,
   manifestPath,
   guardDecisionsPath,
   externalsLocalPath,
+  dependenciesPath,
+  dependenciesLocalPath,
   evidenceRunDir,
   evidenceScenarioDir,
   evidenceRelPath,

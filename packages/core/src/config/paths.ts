@@ -28,6 +28,14 @@ const TRUECOURSE_DIR = '.truecourse';
 // services exist (and is committed so the team shares the declaration), this file
 // holds the values that must never reach git.
 //
+// `scenarios/dependencies.local.json` is the same split one level up: the committed
+// `scenarios/dependencies.json` declares WHICH classes of starting state the
+// program needs (and travels with the repo), while this file holds the machine's
+// INSTANCES — a path to a real project, a config dir, an API key — which are
+// per-developer by definition and must never reach git. `guard/setup.findings.md`
+// is deliberately NOT listed: the setup sessions' findings are a report about the
+// repository, committed like the rest of `guard/`'s curated files.
+//
 // `sessions/` is the agent-session store — per-run `run.json` plus one
 // append-only JSONL transcript per session. Pure run output, re-derived by the
 // next run and never read back by a teammate, so it never reaches git.
@@ -49,6 +57,7 @@ export const GITIGNORE_CONTENTS = [
   'guard/journeys.json',
   'guard/auto-resolutions.json',
   'scenarios/externals.local.json',
+  'scenarios/dependencies.local.json',
   'sessions/',
 ].join('\n') + '\n';
 
@@ -130,8 +139,9 @@ export function resolveRepoDir(startDir: string): string | null {
  *
  * An EXISTING `.gitignore` is upgraded in place: every template line it is
  * missing is appended (user additions are preserved, nothing is removed). The
- * template grows entries over time, and a repo initialized before an entry
- * existed must not be able to `git add` state that was never meant for git.
+ * template grows secret-bearing entries over time — `scenarios/
+ * dependencies.local.json` holds registered API keys — and a repo initialized
+ * before such an entry existed must not be able to `git add` a secret.
  */
 export function ensureRepoTruecourseDir(repoDir: string): string {
   const tcDir = getRepoTruecourseDir(repoDir);

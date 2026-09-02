@@ -59,7 +59,7 @@ export interface ComposePlan {
   /** The full file text, header comment included. */
   content: string
   /** The recipe's `api.services`, referencing the file by path. */
-  services: { up: string; down: string }
+  services: { up: string; down: string; reset: string }
   /** Recipe `api.env` entries — EMPTY when the app's own defaults already reach
    *  the generated containers. */
   env: Record<string, string>
@@ -189,6 +189,8 @@ export function deriveGuardCompose(refs: readonly DatastoreUrlRef[]): ComposeDer
       services: {
         up: `docker compose -f ${GUARD_COMPOSE_FILE} up -d --wait`,
         down: `docker compose -f ${GUARD_COMPOSE_FILE} down`,
+        // Volumes included: the world restore a `world: mutates` tail runs after.
+        reset: `docker compose -f ${GUARD_COMPOSE_FILE} down -v`,
       },
       env,
       notes,
@@ -401,7 +403,14 @@ function rebuildUrl(endpoint: Endpoint, user: string): string {
  */
 function renderCompose(services: readonly DerivedService[], endpoints: readonly Endpoint[]): string {
   const body = yaml.dump(
-    { services: Object.fromEntries(services.map((s) => [s.name, s.spec])) },
+    {
+      // The project NAMESPACE (compose top-level `name:`): without it the file
+      // runs under the directory's default project — the developer's own stack,
+      // which the static compose-namespace rule refuses (cal.diy 2026-08-21).
+      // Derived from the app's own literals to keep this module pure.
+      name: projectName(endpoints),
+      services: Object.fromEntries(services.map((s) => [s.name, s.spec])),
+    },
     { lineWidth: 120, noRefs: true, quotingType: '"' },
   )
   const header = [
@@ -420,4 +429,13 @@ function renderCompose(services: readonly DerivedService[], endpoints: readonly 
     '',
   ].join('\n')
   return `${header}\n${body}`
+}
+
+/** `tc-guard-<database>` (first named database, else the first engine), squeezed
+ *  into compose's project-name alphabet. Deterministic from the same literals the
+ *  rest of the file is derived from. */
+function projectName(endpoints: readonly Endpoint[]): string {
+  const seed = endpoints.find((e) => e.database)?.database ?? endpoints[0]?.engine ?? 'datastore'
+  const squeezed = seed.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^[-_]+|[-_]+$/g, '')
+  return `tc-guard-${squeezed || 'datastore'}`
 }

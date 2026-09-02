@@ -9,7 +9,16 @@
  *   guard/result.json            last `guard generate` report (gitignored)
  *   guard/setup.json             last `guard setup` record + detection snapshot (gitignored)
  *   guard/journeys.json          last journey-mapping catalog (gitignored, re-derived)
+ *   guard/setup.findings.md      the setup sessions' code-vs-docs findings ledger (COMMITTED)
  *   guard/evidence/<runId>/…     per-scenario transcripts (every executed outcome; gitignored)
+ *
+ * The committable corpus files live one level over, under `scenarios/`:
+ *
+ *   scenarios/recipe.json             how to build/run the app (committable)
+ *   scenarios/manifest.json           flow → scenario map (committable)
+ *   scenarios/decisions.json          user-authored dismissals (committable)
+ *   scenarios/dependencies.json       the dependency catalog (committable)
+ *   scenarios/dependencies.local.json the machine's registered instances (gitignored)
  */
 
 import fs from 'node:fs'
@@ -43,10 +52,13 @@ const RESULT_FILE = 'result.json'
 const SETUP_FILE = 'setup.json'
 const AUTO_RESOLUTIONS_FILE = 'auto-resolutions.json'
 const JOURNEYS_FILE = 'journeys.json'
+const SETUP_FINDINGS_FILE = 'setup.findings.md'
 const RECIPE_FILE = 'recipe.json'
 const MANIFEST_FILE = 'manifest.json'
 const DECISIONS_FILE = 'decisions.json'
 const EXTERNALS_LOCAL_FILE = 'externals.local.json'
+const DEPENDENCIES_FILE = 'dependencies.json'
+const DEPENDENCIES_LOCAL_FILE = 'dependencies.local.json'
 
 export function guardDir(repoRoot: string): string {
   return path.join(repoRoot, TRUECOURSE_DIR, GUARD_DIR)
@@ -83,6 +95,17 @@ export function guardJourneysPath(repoRoot: string): string {
   return path.join(guardDir(repoRoot), JOURNEYS_FILE)
 }
 
+/**
+ * The SETUP FINDINGS LEDGER — where `guard setup`'s sessions (the dependency
+ * catalog, the seed session) append the code-vs-docs discrepancies they read.
+ * Committed: what it holds is a report about the REPOSITORY, not a record of a
+ * run, so a teammate who never ran setup can still read it. Keep it out of
+ * `GITIGNORE_CONTENTS`.
+ */
+export function guardSetupFindingsPath(repoRoot: string): string {
+  return path.join(guardDir(repoRoot), SETUP_FINDINGS_FILE)
+}
+
 export function scenariosDir(repoRoot: string): string {
   return path.join(repoRoot, TRUECOURSE_DIR, SCENARIOS_DIR)
 }
@@ -108,6 +131,25 @@ export function guardDecisionsPath(repoRoot: string): string {
  */
 export function externalsLocalPath(repoRoot: string): string {
   return path.join(scenariosDir(repoRoot), EXTERNALS_LOCAL_FILE)
+}
+
+/**
+ * The COMMITTED dependency catalog — `scenarios/dependencies.json`, sibling of the
+ * recipe it is fingerprinted with. Committable for the recipe's reason: it declares
+ * WHAT starting state the program needs, which every teammate's run must agree on.
+ */
+export function dependenciesPath(repoRoot: string): string {
+  return path.join(scenariosDir(repoRoot), DEPENDENCIES_FILE)
+}
+
+/**
+ * The GITIGNORED instance overlay — `scenarios/dependencies.local.json`. Holds the
+ * machine-specific half the committed catalog must never carry (a path to a real
+ * project, a config dir, an API key), merged over the declaration per field at load
+ * time and deliberately outside every fingerprint.
+ */
+export function dependenciesLocalPath(repoRoot: string): string {
+  return path.join(scenariosDir(repoRoot), DEPENDENCIES_LOCAL_FILE)
 }
 
 export function evidenceRunDir(repoRoot: string, runId: string): string {

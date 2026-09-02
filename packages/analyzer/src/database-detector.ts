@@ -270,6 +270,21 @@ export function detectDatabases(
 }
 
 /**
+ * The database a directory's OWN manifest declares — the fallback for an app the
+ * service detectors never cover (strapi's `examples/getstarted`: `examples/` is
+ * not a monorepo service dir) whose code reaches its driver lazily (a knex
+ * config string), so the import scan cannot see it either. The recipe names the
+ * app dir; its manifest names the driver. First declared match wins.
+ */
+export function databaseFromManifest(dir: string): { type: DatabaseType; driver: string } | null {
+  for (const dep of readAllDependencies(dir)) {
+    const match = DATABASE_IMPORT_MAP[dep] ?? DATABASE_IMPORT_MAP[dep.toLowerCase()]
+    if (match) return { type: match.type, driver: match.driver }
+  }
+  return null
+}
+
+/**
  * Parse docker-compose.yml for database services.
  */
 export function parseDockerCompose(rootPath: string): { name: string; type: DatabaseType }[] {

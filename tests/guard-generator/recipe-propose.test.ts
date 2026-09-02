@@ -19,7 +19,7 @@ import {
   credentialStubs,
   credentialEnvName,
   tokenizeCommand,
-  routesFromJourneys,
+  routesFromInterfaces,
   type ApiRouteRef,
 } from '@truecourse/guard-generator'
 
@@ -208,6 +208,65 @@ describe('proposeRecipe — JS/TS', () => {
     const repo = repoOf({ 'package.json': json({ name: 'svc', dependencies: { express: '^4' } }) })
 
     expect(bail(repo)).toMatch(/HTTP server but declares no runnable/)
+  })
+})
+
+// The workspace api derivation (2026-08-20): a monorepo used to punt to the model
+// unless exactly one member declared a `bin` — the cal.com failure, where the
+// fallback then authored a CLI recipe while the route manifest knew about the Nest
+// api. Now the most-routed non-example member with a plain `start` derives.
+describe('proposeRecipe — workspace api member', () => {
+  const manifestApp = (dir: string, routes: string[], pkg?: string) => ({
+    dir,
+    ...(pkg ? { pkg } : {}),
+    framework: 'nest' as const,
+    routes,
+    prefixes: routes.map((r) => `/${r.split('/')[1]}`),
+    opaque: false,
+    pathsShifted: false,
+  })
+
+  it('derives the most-routed member as api.serve, workspace-mediated, with its own health route', () => {
+    const root = repoOf({
+      'package.json': JSON.stringify({ name: 'mono', workspaces: ['apps/*'], scripts: { build: 'turbo build' } , dependencies: { turbo: '2' } }),
+      'yarn.lock': '',
+      'apps/api/package.json': JSON.stringify({ name: '@mono/api', scripts: { start: 'node dist/main.js' } }),
+      'apps/web/package.json': JSON.stringify({ name: '@mono/web', scripts: { start: 'node server.js' } }),
+    })
+    const res = proposeRecipe(root, {
+      manifestApps: [
+        manifestApp('apps/api', ['/health', '/v2/bookings', '/v2/slots'], '@mono/api'),
+        manifestApp('apps/web', ['/api/auth'], '@mono/web'),
+      ],
+    })
+    expect(res.ok).toBe(true)
+    if (!res.ok) return
+    expect(res.recipe.api).toMatchObject({
+      serve: ['yarn', 'workspace', '@mono/api', 'start'],
+      app: 'apps/api',
+      cwd: 'repo',
+      healthPath: '/health',
+    })
+  })
+
+  it('a routed EXAMPLE app never wins, and a watcher `start` refuses to derive at all', () => {
+    const root = repoOf({
+      'package.json': JSON.stringify({ name: 'mono', workspaces: ['**'] }),
+      'yarn.lock': '',
+      'example-apps/demo/package.json': JSON.stringify({ name: 'demo', scripts: { start: 'node s.js' } }),
+      'apps/api/package.json': JSON.stringify({ name: '@mono/api', scripts: { start: 'next dev --watch' } }),
+    })
+    const res = proposeRecipe(root, {
+      manifestApps: [
+        manifestApp('example-apps/demo', ['/api/getToken', '/a', '/b', '/c'], 'demo'),
+        manifestApp('apps/api', ['/health'], '@mono/api'),
+      ],
+    })
+    // The example app is excluded, the real app's start is a watcher — the old
+    // punt stands (no bin-declaring member either).
+    expect(res.ok).toBe(false)
+    if (res.ok) return
+    expect(res.reason).toMatch(/workspaces/)
   })
 })
 
@@ -472,10 +531,13 @@ describe('health-path ranking', () => {
     expect(without.recipe.api?.healthPath).toBeUndefined()
   })
 
-  it('reads the surface off operation-rooted journeys', () => {
-    const routes = routesFromJourneys([
+  it('reads the surface off operation-rooted interfaces, minus the RPC-derived ones', () => {
+    // An RPC operation is the same adapter address behind a procedure name
+    // (item 12) — probing it says nothing a probe of the app's routes does not.
+    const routes = routesFromInterfaces([
       { id: 'api/get-health', title: 'GET /healthz', type: 'api', entry: { method: 'GET', path: '/healthz' }, steps: [], fingerprint: 'f1' },
       { id: 'cli/tool', title: 'tool', type: 'cli', entry: { command: ['tool'] }, steps: [], fingerprint: 'f2' },
+      { id: 'api/get-api-trpc-health', title: 'GET /api/trpc/health', type: 'api', entry: { method: 'GET', path: '/api/trpc/health' }, steps: [], fingerprint: 'f3', procedure: 'health' },
     ] as never)
 
     expect(routes).toEqual([{ method: 'GET', path: '/healthz' }])
@@ -494,7 +556,11 @@ describe('compose services', () => {
       'docker-compose.yml': 'services:\n  db:\n    image: postgres:16\n  api:\n    build: .\n',
     })
 
-    expect(proposal(repo).recipe.api?.services).toEqual({ up: 'docker compose up -d --wait', down: 'docker compose down' })
+    expect(proposal(repo).recipe.api?.services).toEqual({
+      up: 'docker compose up -d --wait',
+      down: 'docker compose down',
+      reset: 'docker compose down -v',
+    })
   })
 
   it('proposes nothing for a compose file with no datastore image', () => {
