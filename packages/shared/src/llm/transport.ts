@@ -48,6 +48,20 @@ export {
   type StageTransportTally,
 } from './tally.js';
 
+/**
+ * ONE image attached to a request — base64 bytes plus their media type, which is
+ * the only form every backend agrees on (the `claude` CLI's stream-json envelope,
+ * the AI SDK's image part, and the mailbox's JSON payload all take base64).
+ * Deliberately NOT a path or a URL: a transport must never read the filesystem or
+ * the network on the caller's behalf, and an artifact under `.truecourse/` is not
+ * reachable from a hosted answerer anyway.
+ */
+export interface LlmImage {
+  mediaType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
+  /** The raw bytes, base64-encoded — no `data:` prefix. */
+  data: string;
+}
+
 export interface LlmRequest {
   /** Stable id (the runner's natural id, e.g. `contract.extract:<sliceId>`).
    *  Falls back to a content hash when absent. */
@@ -83,6 +97,17 @@ export interface LlmRequest {
    * Informational only — drives per-item metrics in the call log. Defaults to 1.
    */
   itemCount?: number;
+  /**
+   * Images the model must LOOK at, alongside `user`. Absent (the overwhelmingly
+   * common case) leaves every backend on the text path it has always taken —
+   * adding a vision stage must not change one byte of how a text stage is sent.
+   */
+  images?: readonly LlmImage[];
+}
+
+/** True when a request carries anything for the model to look at. */
+function hasImages(req: LlmRequest): boolean {
+  return (req.images?.length ?? 0) > 0;
 }
 
 /** Returns the model's raw assistant text. The caller strips fences + parses. */
@@ -507,8 +532,18 @@ export function extractJsonValue(text: string): string {
  * validators require `$ref`s under `$defs`/`definitions` and reject the rest
  * ("References must be defined under '$defs'…") — which fails the whole call.
  * Inlining sidesteps it; these extraction schemas are flat DTOs, not recursive.
+ *
+ * `definitions` opts a DEEPLY-SHARED schema out of that inlining: each named
+ * sub-schema renders once under `definitions` and is referenced everywhere it
+ * recurs. Without it the web scenario schema — whose locator union (with its
+ * 80-role enum) recurs in every verb, expectation, and capture — renders at
+ * ~119K characters; named, it is ~18K. Callers without `definitions` get the
+ * exact bytes they always did, so every existing prompt fingerprint holds.
  */
-export function jsonSchemaHint(schema: ZodTypeAny): string {
+export function jsonSchemaHint(schema: ZodTypeAny, definitions?: Record<string, ZodTypeAny>): string {
+  if (definitions) {
+    return JSON.stringify(zodToJsonSchema(schema, { $refStrategy: 'root', definitions }));
+  }
   return JSON.stringify(zodToJsonSchema(schema, { $refStrategy: 'none' }));
 }
 
@@ -579,6 +614,50 @@ function isFirstTokenDelta(ev: unknown): boolean {
   if (e.event?.type !== 'content_block_delta') return false;
   const d = e.event.delta?.type;
   return d === 'text_delta' || d === 'thinking_delta';
+}
+
+/**
+ * The extra flags an IMAGE-carrying call needs, and nothing else. `claude -p`
+ * reads a bare prompt off stdin by default; the moment a call has to carry
+ * content BLOCKS it must be told stdin is stream-json instead. A text-only
+ * request returns `[]`, so the text path's command line is byte-identical to
+ * what it has always been.
+ */
+export function cliInputFormatArgs(req: LlmRequest): string[] {
+  return hasImages(req) ? ['--input-format', 'stream-json'] : [];
+}
+
+/**
+ * What is written to `claude`'s stdin for one request — the whole of the
+ * text-vs-image decision, in one pure function so it is testable without
+ * spawning anything.
+ *
+ * Text-only: the prompt verbatim, exactly as before (stdin has no option
+ * grammar, which is why the prompt travels here and never as argv).
+ *
+ * With images: ONE newline-terminated NDJSON user-message envelope — the same
+ * shape the Claude Agent SDK emits — carrying a single text block followed by one
+ * image block per attachment. Text FIRST: the instruction has to be in context
+ * before the pixels it is about.
+ */
+export function buildCliStdinPayload(req: LlmRequest): string {
+  if (!hasImages(req)) return req.user;
+  const envelope = {
+    type: 'user',
+    session_id: '',
+    parent_tool_use_id: null,
+    message: {
+      role: 'user',
+      content: [
+        { type: 'text', text: req.user },
+        ...(req.images ?? []).map((image) => ({
+          type: 'image',
+          source: { type: 'base64', media_type: image.mediaType, data: image.data },
+        })),
+      ],
+    },
+  };
+  return `${JSON.stringify(envelope)}\n`;
 }
 
 export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
@@ -679,6 +758,8 @@ export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
         // has no option grammar, so prompt CONTENT can never change the command.
         '-p',
         ...modelArgs,
+        // Only ever present when the call carries images — see `cliInputFormatArgs`.
+        ...cliInputFormatArgs(req),
         // stream-json emits one NDJSON event per line: system:init, stream_event
         // deltas, then a terminal `result` object identical to the buffered
         // `--output-format json` envelope. `--verbose` is REQUIRED by the CLI
@@ -711,7 +792,7 @@ export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
       ];
       const proc = spawn(bin, args, { stdio: ['pipe', 'pipe', 'pipe'] });
       proc.stdin.on('error', () => {}); // EPIPE if claude dies first — close() reports it
-      proc.stdin.write(req.user);
+      proc.stdin.write(buildCliStdinPayload(req));
       proc.stdin.end();
       const err: Buffer[] = [];
 
@@ -914,6 +995,9 @@ export function agentTransport(ioDir: string, opts: AgentTransportOptions = {}):
             schema: req.schema,
             system: req.system,
             user: req.user,
+            // Pass-through: an answerer that cannot look at images simply ignores
+            // the field, and one that can has the bytes without a second channel.
+            ...(hasImages(req) ? { images: req.images } : {}),
           },
           null,
           2,

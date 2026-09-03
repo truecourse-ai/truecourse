@@ -17,7 +17,7 @@ vi.mock('../../tools/cli/src/lib/claude-preflight.js', async (importOriginal) =>
 });
 
 /**
- * The spec scan runs AGENT SESSIONS now, and `runSpecScan` has no
+ * The spec scan runs AGENT SESSIONS now (plan 02), and `runSpecScan` has no
  * driver seam of its own — so the session driver the run resolves is mocked at
  * the module the built core imports it from, and each case scripts it. Anything
  * that reaches it without a script fails loudly rather than calling a provider.
@@ -236,18 +236,86 @@ function seedGuardRepo(): string {
   return r;
 }
 
-describe('guard generate — every extraction call failed', () => {
+/**
+ * GUARD GENERATE runs its content stages as agent SESSIONS too (plan 04), so
+ * these cases script the session driver the same way the scan cases above do.
+ * Only `guard.match` is still a one-shot CALL, and it keeps its transport stub.
+ */
+
+/** Call one of a session's tools the way a driver does. */
+async function callTool(call: StubCall, name: string, args: unknown): Promise<{ content: string; isError?: boolean }> {
+  const tool = call.def.tools.find((t) => t.name === name)!;
+  const result = await tool.execute(args, {
+    workItem: call.input.workItem,
+    signal: call.input.signal,
+    dispatchChild: call.input.dispatchChild,
+  });
+  await call.emit({ type: 'tool-result', toolName: name, content: result.content, isError: result.isError });
+  return result;
+}
+
+const TRANSPORT_FAILURE = (detail: string): { kind: 'failure'; failure: { kind: 'transport'; detail: string; class: 'provider'; retryability: 'none' } } => ({
+  kind: 'failure',
+  failure: { kind: 'transport', detail, class: 'provider', retryability: 'none' },
+});
+
+const CLAIM = 'version works';
+
+/** The extract + flows sessions, answered so a case can script only the stage
+ *  it is about. Both run their checker tool first, as the shell requires. */
+async function answerSpecSideSession(call: StubCall): Promise<ReturnType<typeof outcome> | null> {
+  if (call.kind === 'guard-generate.extract') {
+    const draft = {
+      claims: [{ claim: CLAIM, driver: 'cli', sectionAnchor: 'version', reason: 'the exit code is observable', needs: [] }],
+      untestable: [],
+    };
+    await callTool(call, 'check_claims', draft);
+    return outcome(draft);
+  }
+  if (call.kind === 'guard-generate.flows') {
+    // The epic session shares the kind; its checker takes an epic set.
+    if (call.def.tools.some((t) => t.name === 'read_section')) {
+      const draft = {
+        flows: [
+          {
+            title: 'version',
+            goal: 'verify the version claim',
+            milestones: [{ order: 1, doc: DOC, anchor: 'version', claimTitle: CLAIM }],
+          },
+        ],
+        noFlowClaims: [],
+      };
+      await callTool(call, 'check_flows', draft);
+      return outcome(draft);
+    }
+    await callTool(call, 'check_flows', { epics: [] });
+    return outcome({ epics: [] });
+  }
+  return null;
+}
+
+/** The matcher is the one remaining one-shot: answer it off the prompt. */
+function matchOnlyTransport(): LlmTransport {
+  return async (req) => {
+    if (req.stage === 'guard.match') {
+      const interfaceId = /^--- id: (.+)$/m.exec(req.user)?.[1] ?? '';
+      return JSON.stringify({ plan: [{ interfaceId, milestone: 1 }] });
+    }
+    return '{}';
+  };
+}
+
+describe('guard generate — every extraction session failed', () => {
   it('exits non-zero, records status llm-failed in result.json, and writes no manifest', async () => {
     const r = seedGuardRepo();
 
-    setDefaultTransport(async () => {
-      throw new Error("Invalid schema for response_format 'response': Missing 'extension'.");
-    });
+    sessionScript = () => TRANSPORT_FAILURE("Invalid schema for response_format 'response': Missing 'extension'.");
+    setDefaultTransport(matchOnlyTransport());
     const { out, exitCode } = await capture(() => runGuardGenerate({ cwd: r, yes: true }));
 
     expect(exitCode).toBe(1);
     expect(out).toContain('Generate aborted');
-    expect(out).toContain('guard.extract');
+    expect(out).toContain('guard-generate.extract');
     expect(out).toContain(DOC);
 
     const report = readGuardResult(r);
@@ -257,10 +325,11 @@ describe('guard generate — every extraction call failed', () => {
     expect(report!.written).toEqual([]);
     expect(report!.llmFailures).toEqual([
       {
-        stage: 'guard.extract',
+        stage: 'guard-generate.extract',
         attempts: 1,
         failures: 1,
-        firstError: "Invalid schema for response_format 'response': Missing 'extension'.",
+        firstError:
+          "the provider failed (provider): Invalid schema for response_format 'response': Missing 'extension'.",
       },
     ]);
     // Never a healthy-looking empty manifest.
@@ -268,8 +337,29 @@ describe('guard generate — every extraction call failed', () => {
   });
 });
 
-describe('guard generate — every fidelity review was lost', () => {
-  // The end-to-end round trip of the adjudication carve-out: the
+describe('guard generate — every flow-worker session failed', () => {
+  it('exits non-zero, records status llm-failed in result.json, and writes no manifest', async () => {
+    const r = seedGuardRepo();
+
+    sessionScript = async (call) =>
+      (await answerSpecSideSession(call)) ?? TRANSPORT_FAILURE('claude exited 1: expired login');
+    setDefaultTransport(matchOnlyTransport());
+    const { out, exitCode } = await capture(() => runGuardGenerate({ cwd: r, yes: true }));
+
+    expect(exitCode).toBe(1);
+    expect(out).toContain('Generate aborted');
+    expect(out).toContain('guard-generate.flow-worker');
+
+    const report = readGuardResult(r);
+    expect(report!.status).toBe('llm-failed');
+    expect(report!.written).toEqual([]);
+    expect(report!.llmFailures?.find((f) => f.stage === 'guard-generate.flow-worker')?.failures).toBe(1);
+    expect(fs.existsSync(manifestPath(r))).toBe(false);
+  });
+});
+
+describe('guard generate — every fidelity child was lost', () => {
+  // The end-to-end round trip of the adjudication carve-out (plan item 88): the
   // command SUCCEEDS, the corpus lands, and the stored report — the file `guard
   // status` and the dashboard read back — says the tests carry no review. Before
   // the carve-out this run aborted at the very last stage and threw away every
@@ -277,41 +367,23 @@ describe('guard generate — every fidelity review was lost', () => {
   it('exits clean, writes the manifest, and records the stage unadjudicated in result.json', async () => {
     const r = seedGuardRepo();
 
-    setDefaultTransport(async (req) => {
-      if (req.stage === 'guard.fidelity') throw new Error('claude API error (api 429): usage limit reached');
-      if (req.stage === 'guard.extract') {
-        return JSON.stringify({
-          claims: [{ claim: 'version works', driver: 'cli', sectionAnchor: 'version', reason: 'exit code is observable' }],
-          untestable: [],
-        });
+    sessionScript = async (call) => {
+      const specSide = await answerSpecSideSession(call);
+      if (specSide) return specSide;
+      // The fidelity CHILD is dispatched from inside `submit_scenario`; losing
+      // it must not lose the green the confirmation run already executed.
+      if (call.kind === 'guard-generate.fidelity') {
+        return TRANSPORT_FAILURE('claude API error (api 429): usage limit reached');
       }
-      if (req.stage === 'guard.flows') {
-        return JSON.stringify({
-          flows: [
-            {
-              title: 'version',
-              goal: 'verify the version claim',
-              milestones: [{ order: 1, doc: DOC, anchor: 'version', claimTitle: 'version works' }],
-            },
-          ],
-          noFlowClaims: [],
-        });
-      }
-      if (req.stage === 'guard.match') {
-        const journeyId = /^--- id: (.+)$/m.exec(req.user)?.[1] ?? '';
-        return JSON.stringify({ plan: [{ journeyId, milestone: 1 }] });
-      }
-      if (req.stage === 'guard.generate') {
-        return JSON.stringify({
-          scenario: {
-            title: 'prints the version',
-            driver: 'cli',
-            steps: [{ run: ['--version'], expect: { exit: 0 }, milestone: 1 }],
-          },
-        });
-      }
-      return '{}';
-    });
+      const submitted = await callTool(call, 'submit_scenario', {
+        yaml: ['title: prints the version', 'steps:', '  - run: ["--version"]', '    expect: { exit: 0 }', '    milestone: 1'].join('\n'),
+        expectedReds: [],
+      });
+      const sha = /under sha ([0-9a-f]{64})/.exec(submitted.content)?.[1];
+      if (!sha) return TRANSPORT_FAILURE(`the submission was refused: ${submitted.content}`);
+      return outcome({ kind: 'settled', scenarioYamlSha: sha, expectedReds: [] });
+    };
+    setDefaultTransport(matchOnlyTransport());
     const { out, exitCode } = await capture(() => runGuardGenerate({ cwd: r, yes: true }));
 
     expect(exitCode).toBeNull();
@@ -325,58 +397,7 @@ describe('guard generate — every fidelity review was lost', () => {
     expect(report!.unadjudicated).toEqual([{ stage: 'guard.fidelity', affected: 1 }]);
     // The corpus really landed — the whole point of not aborting.
     expect(fs.existsSync(manifestPath(r))).toBe(true);
-  });
-});
-
-describe('guard generate — every authoring reply was unusable', () => {
-  it('exits non-zero, records status llm-failed in result.json, and writes no manifest', async () => {
-    const r = seedGuardRepo();
-
-    // Extraction, synthesis and matching answer; authoring answers with a JSON
-    // object that is not the reply contract — every call LANDS, so nothing is a
-    // transport failure and only the engine's own counters catch the loss.
-    setDefaultTransport(async (req) => {
-      if (req.stage === 'guard.extract') {
-        return JSON.stringify({
-          claims: [{ claim: 'version works', driver: 'cli', sectionAnchor: 'version', reason: 'exit code is observable' }],
-          untestable: [],
-        });
-      }
-      if (req.stage === 'guard.flows') {
-        return JSON.stringify({
-          flows: [
-            {
-              title: 'version',
-              goal: 'verify the version claim',
-              milestones: [{ order: 1, doc: DOC, anchor: 'version', claimTitle: 'version works' }],
-            },
-          ],
-          noFlowClaims: [],
-        });
-      }
-      if (req.stage === 'guard.match') {
-        // The catalog is the real mapped one, so the plan copies its first id back
-        // out of the prompt rather than inventing one.
-        const journeyId = /^--- id: (.+)$/m.exec(req.user)?.[1] ?? '';
-        return JSON.stringify({ plan: [{ journeyId, milestone: 1 }] });
-      }
-      if (req.stage === 'guard.generate') return '{"scenarios":[]}';
-      return '{}';
-    });
-    const { out, exitCode } = await capture(() => runGuardGenerate({ cwd: r, yes: true }));
-
-    expect(exitCode).toBe(1);
-    expect(out).toContain('Generate aborted');
-    expect(out).toContain('guard.generate');
-
-    const report = readGuardResult(r);
-    expect(report!.status).toBe('llm-failed');
-    expect(report!.written).toEqual([]);
-    expect(report!.reason).toContain('unusable');
-    // The lost calls answered, so the transport tally stays empty.
-    expect(report!.llmFailures ?? []).toEqual([]);
-    expect(fs.existsSync(manifestPath(r))).toBe(false);
-  });
+  }, 60_000);
 });
 
 // ---------------------------------------------------------------------------
@@ -469,7 +490,7 @@ describe('guard status — an llm-failed report', () => {
 
 /**
  * The unadjudicated surfaces. A generate whose fidelity or triage stage lost every
- * call no longer aborts — it ships the corpus. The terminal is what
+ * call no longer aborts — it ships the corpus (plan item 88). The terminal is what
  * keeps that honest: both the closing summary and `guard status` must say the
  * tests carry no verdict, or an unreviewed corpus reads as a reviewed one.
  */

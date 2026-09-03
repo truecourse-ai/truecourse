@@ -1,39 +1,47 @@
 /**
- * Flow SYNTHESIS (stage `guard.flows`) — the spec-side generation unit. One LLM
- * call per AREA composes that area's already-extracted claims into user-goal
- * paths (flows); a second call chains the results into cross-area epics. The
- * output is `.truecourse/scenarios/flows.json`, the committable flow corpus
- * scenarios reference by id.
+ * Flow SYNTHESIS — the spec-side generation unit, run as `guard-generate.flows`
+ * agent sessions (plan 04 step 16; the per-area one-shots + their corrective
+ * re-ask were retired by step 20). One session per AREA composes that area's
+ * already-extracted claims into user-goal paths (flows); one epic session,
+ * after the area pool, chains the results into cross-area epics. The output is
+ * `.truecourse/scenarios/flows.json`, the committable flow corpus scenarios
+ * reference by id.
  *
- * THE INDEPENDENCE INVARIANT: synthesis sees ONLY spec-derived text — claims,
- * their sections, and heading outlines. No code, no probe transcripts, no recipe,
- * no journey catalog ever enters these prompts. Flow-vs-journey independence is
- * what makes an unrealizable milestone a real signal instead of a tautology.
+ * THE INDEPENDENCE INVARIANT, session form: the briefing carries interface
+ * DIGESTS and the dependency catalog as GROUNDING — orientation for
+ * composition — while the binding rule survives whole: a milestone snaps onto
+ * a CLAIM, never onto an interface, so an unrealizable milestone is still a
+ * real signal.
  *
- * The model may only ORDER and GROUP claims: every milestone is SNAPPED back onto
- * the area's claim inventory (unknown references are rejected), and every runnable
- * claim must land in a flow or carry a stated no-flow reason. Both failures earn
- * exactly ONE corrective re-ask; an area that still fails stays UNSETTLED (no
- * flows, nothing cached, reported) rather than emitting invented paths.
+ * The model may only ORDER and GROUP claims: every milestone is SNAPPED back
+ * onto the area's claim inventory (unknown references are rejected), and every
+ * runnable claim must land in a flow or carry a stated no-flow reason. The
+ * session's `check_flows` tool tells it in-session; the FOLD here re-validates
+ * every outcome regardless (never trust a transcript), and an area whose value
+ * still fails stays UNSETTLED (no flows, reported) rather than emitting
+ * invented paths.
  *
- * Caches are content-keyed under `.cache/guard/flows` (derived, deletable): an
- * area keys on its claim set + outlines + the prompt fingerprint, the epic pass on
- * the flow digests + its prompt fingerprint. {@link planFlowSynthesis} is the ONE
- * planner both the runtime and the pre-flight estimate use, so the estimate probes
- * exactly the cache the run reads.
+ * The session cache (name `guard/flows`, kept from the one-shot stage) lives in
+ * `@truecourse/core`, which owns the session prompts; its keys hash the SAME
+ * claim/outline material through {@link flowAreaClaimsMaterial} /
+ * {@link flowAreaOutlinesMaterial} / {@link flowEpicDigestsMaterial}, exported
+ * for exactly that (and for the pre-flight estimate, which probes the same keys).
  */
 
-import fs from 'node:fs'
-import path from 'node:path'
 import { createHash } from 'node:crypto'
-import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
-import { atomicWriteJson, scenariosDir, slugifyHeading } from '@truecourse/guard-runner'
+import {
+  atomicWriteJson,
+  guardFlowsPath,
+  readGuardFlowsCorpus,
+  slugifyHeading,
+} from '@truecourse/guard-runner'
 import {
   GuardFlowsFileSchema,
   flowFingerprint,
   flowMilestoneKey,
   resolveFlowIdentity,
   isRunnableDriver,
+  type ClaimNeed,
   type GuardDriverId,
   type GuardFlow,
   type GuardFlowBinding,
@@ -42,42 +50,20 @@ import {
   type GuardNoFlowClaim,
 } from '@truecourse/shared'
 import {
-  FlowSynthesisSchema,
-  EpicSynthesisSchema,
+  type EpicSynthesis,
   type FlowSynthesis,
   type SynthesizedMilestone,
 } from './schemas.js'
-import {
-  FLOWS_PROMPT_FINGERPRINT,
-  FLOWS_EPIC_PROMPT_FINGERPRINT,
-  type FlowClaimLine,
-  type FlowDigest,
-  type FlowsUserContext,
-  type FlowsEpicUserContext,
-  type OutlineEntry,
-} from './prompts.js'
-import { flattenZodError, quoteInvalidOutput } from './validate.js'
-import type { ConcurrencyLimit } from './extract.js'
-import type { FlowsRunner, FlowsEpicRunner } from './runners.js'
-
-export const FLOWS_CACHE_NAME = 'guard/flows'
+import { type FlowDigest, type OutlineEntry } from './prompts.js'
+import type { GuardSessionSummary } from './extract.js'
+import type { GuardDoc } from './section-plan.js'
+import type { InterfaceDigest } from './prompts.js'
 
 /** The committed flow corpus — next to `manifest.json`, same commit story. */
-export function flowsPath(repoRoot: string): string {
-  return path.join(scenariosDir(repoRoot), 'flows.json')
-}
+export const flowsPath = guardFlowsPath
 
 /** Read the committed flows file, or `null` when absent/unparseable. */
-export function readFlowsFile(repoRoot: string): GuardFlowsFile | null {
-  const file = flowsPath(repoRoot)
-  if (!fs.existsSync(file)) return null
-  try {
-    const parsed = GuardFlowsFileSchema.safeParse(JSON.parse(fs.readFileSync(file, 'utf-8')))
-    return parsed.success ? parsed.data : null
-  } catch {
-    return null
-  }
-}
+export const readFlowsFile = readGuardFlowsCorpus
 
 // ---------------------------------------------------------------------------
 // Inputs
@@ -94,6 +80,12 @@ export interface FlowClaimInput {
   title: string
   /** The surface hint extraction assigned; runnable surfaces must be accounted for. */
   driver: GuardDriverId
+  /**
+   * The extraction session's structured needs for this claim (plan 04 step 15),
+   * read by flow synthesis (and its `check_flows` needs-vs-catalog binding).
+   * Advisory — they steer composition, never gate it.
+   */
+  needs?: ClaimNeed[]
 }
 
 /** One document's synthesis context: its outline and its untestable sections. */
@@ -108,6 +100,13 @@ export interface FlowSynthesisArea {
   areaId: string
   claims: FlowClaimInput[]
   docs: FlowDocInput[]
+  /**
+   * 0-based shard index when the area was too big for one session (item 133),
+   * absent when it was not. The AREA identity does not change — only the work is
+   * split — so area accounting downstream is untouched, and an unsharded area
+   * keys byte-identically to before this existed.
+   */
+  chunk?: number
 }
 
 /** A document with its extraction, ready to be grouped into areas. */
@@ -115,6 +114,17 @@ export interface FlowAreaDocInput extends FlowDocInput {
   /** Canonical area ids from the corpus (empty for an untagged doc). */
   areaTags: string[]
   claims: FlowClaimInput[]
+}
+
+/**
+ * The identity of one SYNTHESIS UNIT — the area, plus its chunk when the area
+ * was sharded (item 133). Two chunks share an `areaId`, so anything that pairs a
+ * session RESULT back to the work that produced it must key on this, never on
+ * `areaId` alone: keying on the area silently folds one chunk's flows against
+ * another chunk's claim inventory.
+ */
+export function flowAreaKey(area: Pick<FlowSynthesisArea, 'areaId' | 'chunk'>): string {
+  return area.chunk === undefined ? area.areaId : `${area.areaId}#${area.chunk}`
 }
 
 /** `doc` + `anchor` key for the section-fingerprint lookup bindings resolve through. */
@@ -134,6 +144,60 @@ export function flowAreaIdForDoc(doc: string, areaTags: readonly string[]): stri
 
 /** Group per-document extractions into the areas synthesis calls on, in stable
  *  (area id) order with each area's docs in the order they were given. */
+/**
+ * The most claims one flow-synthesis session is briefed with (item 133).
+ *
+ * The session's contract is TOTAL — every claim it is handed must come back as a
+ * milestone or as a `noFlowClaims` entry, copied verbatim — so the accounting it
+ * owes grows with the inventory while its useful output does not. Measured on
+ * documenso: 91, 179, 185 and 207 claims all settled; **371 refused twice**
+ * ("N claim(s) left unaccounted"), emitting FEWER output tokens than the
+ * 207-claim area as it degraded to a partial answer. The ceiling sits at the
+ * settling frontier rather than at the largest observed success, and it is a
+ * CEILING, not a target: an area under it is never split.
+ */
+export const FLOW_AREA_CLAIM_CEILING = 200
+
+/**
+ * Shard one area's docs into synthesis units under {@link FLOW_AREA_CLAIM_CEILING}.
+ *
+ * A DOC is never split: its claims are what a flow's milestones chain through,
+ * and scattering them across chunks would cost flows no session could compose.
+ * Docs are packed greedily in their existing (corpus) order, so the shard is
+ * deterministic and a doc's neighbours stay together. A single doc that alone
+ * exceeds the ceiling gets its own chunk — the alternative is splitting it, and
+ * an oversized doc is a curation problem (item 131), not a sharding one.
+ */
+function shardArea(area: FlowSynthesisArea): FlowSynthesisArea[] {
+  if (area.claims.length <= FLOW_AREA_CLAIM_CEILING) return [area]
+
+  const claimsByDoc = new Map<string, FlowClaimInput[]>()
+  for (const c of area.claims) {
+    const list = claimsByDoc.get(c.doc) ?? []
+    list.push(c)
+    claimsByDoc.set(c.doc, list)
+  }
+
+  const chunks: FlowSynthesisArea[] = []
+  let current: FlowSynthesisArea | undefined
+  for (const doc of area.docs) {
+    const claims = claimsByDoc.get(doc.doc) ?? []
+    const wouldOverflow = current && current.claims.length + claims.length > FLOW_AREA_CLAIM_CEILING
+    if (!current || wouldOverflow) {
+      current = { areaId: area.areaId, claims: [], docs: [], chunk: chunks.length }
+      chunks.push(current)
+    }
+    current.docs.push(doc)
+    current.claims.push(...claims)
+  }
+  return chunks
+}
+
+/**
+ * Group docs into areas, then shard any area too big for one session. Both
+ * callers — the run and the pre-flight estimate — come through here, so the work
+ * they count and the work they run cannot drift apart.
+ */
 export function buildFlowAreas(docs: readonly FlowAreaDocInput[]): FlowSynthesisArea[] {
   const byArea = new Map<string, FlowSynthesisArea>()
   for (const d of docs) {
@@ -146,33 +210,43 @@ export function buildFlowAreas(docs: readonly FlowAreaDocInput[]): FlowSynthesis
     area.docs.push({ doc: d.doc, outline: d.outline, untestable: d.untestable })
     area.claims.push(...d.claims)
   }
-  return [...byArea.values()].sort((a, b) => a.areaId.localeCompare(b.areaId))
+  return [...byArea.values()]
+    .sort((a, b) => a.areaId.localeCompare(b.areaId))
+    .flatMap(shardArea)
 }
 
 // ---------------------------------------------------------------------------
-// Cache keys + planning (shared by the runtime and the pre-flight estimate)
+// Cache-key material (hashed by core's session keys and the pre-flight estimate)
 // ---------------------------------------------------------------------------
-
-function sha(text: string): string {
-  return createHash('sha256').update(text).digest('hex')
-}
 
 function normalizeText(text: string): string {
   return text.replace(/\s+/g, ' ').trim()
 }
 
 /**
- * An area's content key: its claim set (identity + surface, order-independent)
- * plus its documents' outlines, under the synthesis prompt's fingerprint. Adding,
- * removing, or editing a claim re-synthesizes the area; re-running with the same
- * inventory is a cache hit and costs nothing.
+ * The area's claim-set serialization: identity + surface (+ needs, appended ONLY
+ * when a claim carries any — so a one-shot inventory keys byte-identically to
+ * before needs existed), order-independent. Exported because the session cache
+ * key (core, `guard-generate.flows`) hashes the SAME material under its own
+ * prompt fingerprint — one serializer, two keys that can never drift apart.
  */
-export function flowAreaCacheKey(area: FlowSynthesisArea): string {
-  const claims = area.claims
-    .map((c) => `${c.doc}\0${normalizeText(c.anchor)}\0${normalizeText(c.title)}\0${c.driver}`)
+export function flowAreaClaimsMaterial(area: FlowSynthesisArea): string {
+  return area.claims
+    .map((c) => {
+      const base = `${c.doc}\0${normalizeText(c.anchor)}\0${normalizeText(c.title)}\0${c.driver}`
+      const needs = (c.needs ?? [])
+        .map((n) => `${n.kind}\0${normalizeText(n.name)}${n.detail ? `\0${normalizeText(n.detail)}` : ''}`)
+        .sort()
+        .join('')
+      return needs ? `${base}\0needs:${needs}` : base
+    })
     .sort()
     .join('\n')
-  const outlines = area.docs
+}
+
+/** The area's document-outline serialization — the other half of its content key. */
+export function flowAreaOutlinesMaterial(area: FlowSynthesisArea): string {
+  return area.docs
     .map((d) => {
       const sections = d.outline.map((e) => `${e.anchor}\0${normalizeText(e.headingText)}\0${e.level}`).join('\n')
       const untestable = (d.untestable ?? []).map((u) => `${u.anchor}\0${normalizeText(u.reason)}`).sort().join('\n')
@@ -180,73 +254,14 @@ export function flowAreaCacheKey(area: FlowSynthesisArea): string {
     })
     .sort()
     .join('\n--\n')
-  return sha(`${FLOWS_PROMPT_FINGERPRINT}::${area.areaId}::${sha(claims)}::${sha(outlines)}`)
 }
 
-/** The epic pass's content key: the flow digests it reads, under its own prompt
- *  fingerprint. Unchanged flows ⇒ no epic call. */
-export function flowEpicCacheKey(digests: readonly FlowDigest[]): string {
-  const body = digests
+/** The epic digests' serialization — hashed by the session key (core) and the
+ *  pre-flight estimate, so the two can never drift. */
+export function flowEpicDigestsMaterial(digests: readonly FlowDigest[]): string {
+  return digests
     .map((d) => [d.areaId, d.title, d.goal, ...d.milestones.map((m) => `${m.doc}\0${m.anchor}\0${normalizeText(m.claimTitle)}`)].join('\n'))
     .join('\n--\n')
-  return sha(`${FLOWS_EPIC_PROMPT_FINGERPRINT}::${sha(body)}`)
-}
-
-/** One area's planned synthesis work — the estimate and the run read the same row. */
-export interface FlowAreaPlan {
-  areaId: string
-  cacheKey: string
-  /** True when this area's synthesis is already cached (zero LLM calls). */
-  cached: boolean
-  claims: number
-  /** Claims on runnable surfaces — the coverage-accounted subset. */
-  runnableClaims: number
-}
-
-/** The synthesis stage's planned work: exact per-area calls plus the epic ceiling. */
-export interface FlowSynthesisPlan {
-  areas: FlowAreaPlan[]
-  /** Exact number of per-area synthesis calls a run will make (cache misses). */
-  areaCalls: number
-  /** Ceiling on epic-pass calls (1 when >1 area can yield flows, else 0). */
-  epicCalls: number
-  /**
-   * The honest upper bound on synthesized flows: milestones partition claims in
-   * the worst case, so a run can never produce more flows than it has runnable
-   * claims. Flow COUNT is a synthesis output — unknowable before the call — and
-   * this bound is what the pre-flight estimate quotes instead of guessing.
-   */
-  maxFlows: number
-}
-
-/**
- * Plan the synthesis stage against the real cache. The ONE planner: the runtime
- * calls it to decide which areas need an LLM call, and the pre-flight estimate
- * calls it to count them — so an estimate can never promise work the run skips
- * (or hide work it pays for).
- */
-export async function planFlowSynthesis(
-  repoRoot: string,
-  areas: readonly FlowSynthesisArea[],
-): Promise<FlowSynthesisPlan> {
-  const rows: FlowAreaPlan[] = []
-  for (const area of areas) {
-    const cacheKey = flowAreaCacheKey(area)
-    rows.push({
-      areaId: area.areaId,
-      cacheKey,
-      cached: (await getCacheEntry(repoRoot, FLOWS_CACHE_NAME, cacheKey)) !== null,
-      claims: area.claims.length,
-      runnableClaims: area.claims.filter((c) => isRunnableDriver(c.driver)).length,
-    })
-  }
-  const areasWithClaims = rows.filter((r) => r.claims > 0).length
-  return {
-    areas: rows,
-    areaCalls: rows.filter((r) => !r.cached).length,
-    epicCalls: areasWithClaims > 1 ? 1 : 0,
-    maxFlows: rows.reduce((n, r) => n + r.runnableClaims, 0),
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -432,78 +447,134 @@ function validateAreaSynthesis(
 }
 
 // ---------------------------------------------------------------------------
-// Per-area synthesis (cache → call → one corrective re-ask)
+// The session CHECKER (plan 04 step 16) — the det post-passes as one callable.
+// The `guard-generate.flows` session's `check_flows` tool runs it live (defects
+// come back as observations instead of silent drops), and the fold re-runs the
+// refusal half through `validateAreaSynthesis` — never trust the transcript.
 // ---------------------------------------------------------------------------
 
+export interface FlowSetCheckContext {
+  /** The area whose claim inventory the draft must snap onto. */
+  area: FlowSynthesisArea
+  /** Live {@link flowSectionKey}s — the bindability check. Omit to skip. */
+  sectionKeys?: ReadonlySet<string>
+  /** Dependency-catalog entry names — the needs-binding check. Omit to skip. */
+  catalogNames?: ReadonlySet<string>
+}
+
+/**
+ * Every defect class the checker knows. The first two REFUSE an outcome (they
+ * are exactly the criteria the one-shot re-ask corrected); the rest are
+ * OBSERVATIONS — the fold handles them deterministically (subsumption is
+ * APPLIED there, per tier with the coverage gate) or records them, and the
+ * session only hears about them so it can do better in the same turn.
+ */
+export interface FlowSetCheckReport {
+  /** Milestone / noFlowClaims references that snap onto no given claim. REFUSAL. */
+  unknownReferences: string[]
+  /** `account: required` claims in no flow and no noFlowClaims entry. REFUSAL. */
+  uncoveredClaims: string[]
+  /** Contiguous near-duplicates the det fold will drop (report, don't delete). */
+  subsumed: SubsumedFlow[]
+  /** Milestones whose section is outside the live index — no flow can bind them. */
+  unbindable: string[]
+  /** Claim needs naming no dependency-catalog entry (observation only). */
+  unboundNeeds: string[]
+}
+
+/** True when the report carries no refusal-class defect. */
+export function isFlowSetClean(report: Pick<FlowSetCheckReport, 'unknownReferences' | 'uncoveredClaims'>): boolean {
+  return report.unknownReferences.length === 0 && report.uncoveredClaims.length === 0
+}
+
+export function checkFlowSet(data: FlowSynthesis, ctx: FlowSetCheckContext): FlowSetCheckReport {
+  const index = buildClaimIndex(ctx.area.claims)
+  // The inputs hash is irrelevant to a check — the drafts are discarded.
+  const v = validateAreaSynthesis(ctx.area, data, index, '')
+  const subsumed = applySubsumption(v.flows).dropped
+
+  const unbindable: string[] = []
+  const unboundNeeds: string[] = []
+  const seenNeed = new Set<string>()
+  for (const flow of v.flows) {
+    for (const m of flow.milestones) {
+      if (ctx.sectionKeys && !ctx.sectionKeys.has(flowSectionKey(m.doc, m.anchor))) {
+        unbindable.push(`${m.doc}#${m.anchor} — "${normalizeText(m.claimTitle)}"`)
+      }
+      if (!ctx.catalogNames) continue
+      const claim = index.byKey.get(claimKey(m.doc, m.anchor, m.claimTitle))
+      for (const need of claim?.needs ?? []) {
+        if (ctx.catalogNames.has(need.name) || seenNeed.has(need.name)) continue
+        seenNeed.add(need.name)
+        unboundNeeds.push(`"${need.name}" (${need.kind}) — named by "${normalizeText(m.claimTitle)}" but in no dependency-catalog entry`)
+      }
+    }
+  }
+
+  return {
+    unknownReferences: v.unknownReferences,
+    uncoveredClaims: v.uncoveredClaims,
+    subsumed,
+    unbindable,
+    unboundNeeds,
+  }
+}
+
+/**
+ * The epic half of the checker, restricted to the composed flows' milestones —
+ * mirrors `synthesizeEpics`' engine validation exactly. `notes` carry the det
+ * drop rules (<2 known refs, <2 snapped milestones) as observations: the fold
+ * applies them silently, the session gets to fix them.
+ */
+export function checkEpicSet(
+  data: EpicSynthesis,
+  digests: readonly FlowDigest[],
+  claims: readonly FlowClaimInput[],
+): { unknownReferences: string[]; notes: string[] } {
+  const index = buildClaimIndex(claims)
+  const byRef = new Map(digests.map((d) => [d.ref, d]))
+  const unknownReferences: string[] = []
+  const notes: string[] = []
+  for (const epic of data.epics) {
+    const refs: string[] = []
+    for (const ref of epic.composedOf) {
+      const normalized = ref.trim().toUpperCase()
+      if (!byRef.has(normalized)) {
+        unknownReferences.push(`composedOf: ${ref}`)
+        continue
+      }
+      if (!refs.includes(normalized)) refs.push(normalized)
+    }
+    if (refs.length < 2) {
+      notes.push(`"${normalizeText(epic.title)}" chains fewer than two known flows — it will be dropped`)
+      continue
+    }
+    const allowed = new Set<string>()
+    for (const r of refs) {
+      for (const m of byRef.get(r)!.milestones) allowed.add(claimKey(m.doc, m.anchor, m.claimTitle))
+    }
+    let snapped = 0
+    for (const milestone of epic.milestones) {
+      const claim = snapClaim(milestone, index)
+      if (!claim || !allowed.has(claimKey(claim.doc, claim.anchor, claim.title))) {
+        unknownReferences.push(describeRef(milestone))
+        continue
+      }
+      snapped++
+    }
+    if (snapped < 2) notes.push(`"${normalizeText(epic.title)}" keeps fewer than two snapped milestones — it will be dropped`)
+  }
+  return { unknownReferences, notes }
+}
+
+// ---------------------------------------------------------------------------
+// Per-area fold shapes
+// ---------------------------------------------------------------------------
+
+/** One area's validated session value, as the fold routes it. */
 type AreaOutcome =
-  | { ok: true; flows: DraftFlow[]; noFlowClaims: GuardNoFlowClaim[]; calls: number }
-  | { ok: false; reason: string; calls: number }
-
-function claimLines(area: FlowSynthesisArea): FlowClaimLine[] {
-  return area.claims.map((c) => ({
-    doc: c.doc,
-    anchor: c.anchor,
-    claim: c.title,
-    driver: c.driver,
-    required: isRunnableDriver(c.driver),
-  }))
-}
-
-async function synthesizeArea(
-  repoRoot: string,
-  area: FlowSynthesisArea,
-  plan: FlowAreaPlan,
-  runner: FlowsRunner,
-): Promise<AreaOutcome> {
-  const index = buildClaimIndex(area.claims)
-  const base: FlowsUserContext = { areaId: area.areaId, claims: claimLines(area), docs: area.docs }
-
-  const cached = await getCacheEntry(repoRoot, FLOWS_CACHE_NAME, plan.cacheKey)
-  if (cached) {
-    const parsed = FlowSynthesisSchema.safeParse(cached)
-    if (parsed.success) {
-      const v = validateAreaSynthesis(area, parsed.data, index, plan.cacheKey)
-      // A cached entry was validated before it was written, so this re-check is a
-      // formality — but it keeps a hand-edited or half-written cache file from
-      // producing flows the engine would never have accepted.
-      if (v.unknownReferences.length === 0 && v.uncoveredClaims.length === 0) {
-        return { ok: true, flows: v.flows, noFlowClaims: v.noFlowClaims, calls: 0 }
-      }
-    }
-  }
-
-  let calls = 0
-  let ctx: FlowsUserContext = base
-  for (let attempt = 0; attempt < 2; attempt++) {
-    let raw: unknown
-    try {
-      calls++
-      raw = await runner(ctx)
-    } catch (e) {
-      return { ok: false, reason: `flow synthesis call failed: ${(e as Error).message}`, calls }
-    }
-    const parsed = FlowSynthesisSchema.safeParse(raw)
-    if (!parsed.success) {
-      if (attempt > 0) return { ok: false, reason: `flow synthesis invalid after re-ask: ${flattenZodError(parsed.error)}`, calls }
-      ctx = { ...base, correction: { invalidOutput: quoteInvalidOutput(raw) } }
-      continue
-    }
-    const v = validateAreaSynthesis(area, parsed.data, index, plan.cacheKey)
-    if (v.unknownReferences.length > 0 || v.uncoveredClaims.length > 0) {
-      if (attempt > 0) {
-        const parts: string[] = []
-        if (v.unknownReferences.length > 0) parts.push(`${v.unknownReferences.length} milestone(s) matched no claim (${v.unknownReferences[0]})`)
-        if (v.uncoveredClaims.length > 0) parts.push(`${v.uncoveredClaims.length} claim(s) left unaccounted (${v.uncoveredClaims[0]})`)
-        return { ok: false, reason: `flow synthesis unsettled after re-ask: ${parts.join('; ')}`, calls }
-      }
-      ctx = { ...base, issues: { unknownReferences: v.unknownReferences, uncoveredClaims: v.uncoveredClaims } }
-      continue
-    }
-    await setCacheEntry(repoRoot, FLOWS_CACHE_NAME, plan.cacheKey, parsed.data)
-    return { ok: true, flows: v.flows, noFlowClaims: v.noFlowClaims, calls }
-  }
-  return { ok: false, reason: 'flow synthesis exhausted its attempts', calls }
-}
+  | { ok: true; flows: DraftFlow[]; noFlowClaims: GuardNoFlowClaim[] }
+  | { ok: false; reason: string }
 
 // ---------------------------------------------------------------------------
 // Epic pass
@@ -519,106 +590,63 @@ function digestsOf(flows: readonly DraftFlow[]): FlowDigest[] {
   }))
 }
 
-type EpicOutcome = { epics: DraftFlow[]; calls: number; error?: string }
-
 /**
- * One call over the flow DIGESTS (never the documents again). Epics may only chain
- * flows the per-area pass produced, and may only reuse THOSE flows' milestones — so
- * an epic can never introduce a claim no flow covers.
+ * Build epic drafts out of an epic-pass reply: resolve the composed refs, snap
+ * every milestone against the inventory RESTRICTED to the composed flows'
+ * milestones, apply the det drop rules (<2 known refs, <2 snapped milestones),
+ * and stamp `inputsKey` as the drafts' synthesis-inputs hash — the ONE engine
+ * validation of an epic value, whichever session (or cache entry) produced it.
  */
-async function synthesizeEpics(
-  repoRoot: string,
+function buildEpicDrafts(
+  data: { epics: { title: string; goal: string; composedOf: string[]; milestones: SynthesizedMilestone[] }[] },
   flows: readonly DraftFlow[],
   index: ClaimIndex,
-  runner: FlowsEpicRunner,
-): Promise<EpicOutcome> {
+  inputsKey: string,
+): { epics: DraftFlow[]; unknownReferences: string[] } {
   const digests = digestsOf(flows)
-  const cacheKey = flowEpicCacheKey(digests)
   const byRef = new Map(digests.map((d, i) => [d.ref, i]))
-  const base: FlowsEpicUserContext = { digests }
-
-  const build = (data: { epics: { title: string; goal: string; composedOf: string[]; milestones: SynthesizedMilestone[] }[] }) => {
-    const unknownReferences: string[] = []
-    const epics: DraftFlow[] = []
-    for (const epic of data.epics) {
-      const refs: string[] = []
-      for (const ref of epic.composedOf) {
-        const normalized = ref.trim().toUpperCase()
-        if (!byRef.has(normalized)) {
-          unknownReferences.push(`composedOf: ${ref}`)
-          continue
-        }
-        if (!refs.includes(normalized)) refs.push(normalized)
-      }
-      if (refs.length < 2) {
-        if (epic.composedOf.length >= 2) unknownReferences.push(`"${normalizeText(epic.title)}" chains fewer than two known flows`)
+  const unknownReferences: string[] = []
+  const epics: DraftFlow[] = []
+  for (const epic of data.epics) {
+    const refs: string[] = []
+    for (const ref of epic.composedOf) {
+      const normalized = ref.trim().toUpperCase()
+      if (!byRef.has(normalized)) {
+        unknownReferences.push(`composedOf: ${ref}`)
         continue
       }
-      // The milestone vocabulary of an epic is exactly its composed flows' milestones.
-      const allowed = new Set<string>()
-      for (const r of refs) {
-        for (const m of flows[byRef.get(r)!].milestones) allowed.add(claimKey(m.doc, m.anchor, m.claimTitle))
-      }
-      const snapped: { milestone: SynthesizedMilestone; claim: FlowClaimInput }[] = []
-      for (const milestone of epic.milestones) {
-        const claim = snapClaim(milestone, index)
-        if (!claim || !allowed.has(claimKey(claim.doc, claim.anchor, claim.title))) {
-          unknownReferences.push(describeRef(milestone))
-          continue
-        }
-        snapped.push({ milestone, claim })
-      }
-      const milestones = orderMilestones(snapped)
-      if (milestones.length < 2) continue
-      epics.push({
-        areaId: '(epic)',
-        title: normalizeText(epic.title),
-        goal: normalizeText(epic.goal),
-        milestones,
-        composedRefs: refs,
-        synthesisInputsHash: cacheKey,
-      })
+      if (!refs.includes(normalized)) refs.push(normalized)
     }
-    return { epics, unknownReferences }
-  }
-
-  const cached = await getCacheEntry(repoRoot, FLOWS_CACHE_NAME, cacheKey)
-  if (cached) {
-    const parsed = EpicSynthesisSchema.safeParse(cached)
-    if (parsed.success) {
-      const built = build(parsed.data)
-      if (built.unknownReferences.length === 0) return { epics: built.epics, calls: 0 }
-    }
-  }
-
-  let calls = 0
-  let ctx: FlowsEpicUserContext = base
-  for (let attempt = 0; attempt < 2; attempt++) {
-    let raw: unknown
-    try {
-      calls++
-      raw = await runner(ctx)
-    } catch (e) {
-      return { epics: [], calls, error: `epic pass call failed: ${(e as Error).message}` }
-    }
-    const parsed = EpicSynthesisSchema.safeParse(raw)
-    if (!parsed.success) {
-      if (attempt > 0) return { epics: [], calls, error: `epic pass invalid after re-ask: ${flattenZodError(parsed.error)}` }
-      ctx = { ...base, correction: { invalidOutput: quoteInvalidOutput(raw) } }
+    if (refs.length < 2) {
+      if (epic.composedOf.length >= 2) unknownReferences.push(`"${normalizeText(epic.title)}" chains fewer than two known flows`)
       continue
     }
-    const built = build(parsed.data)
-    if (built.unknownReferences.length > 0) {
-      if (attempt > 0) {
-        return { epics: [], calls, error: `epic pass unsettled after re-ask: ${built.unknownReferences[0]}` }
-      }
-      ctx = { ...base, issues: { unknownReferences: built.unknownReferences } }
-      continue
+    // The milestone vocabulary of an epic is exactly its composed flows' milestones.
+    const allowed = new Set<string>()
+    for (const r of refs) {
+      for (const m of flows[byRef.get(r)!].milestones) allowed.add(claimKey(m.doc, m.anchor, m.claimTitle))
     }
-    await setCacheEntry(repoRoot, FLOWS_CACHE_NAME, cacheKey, parsed.data)
-    return { epics: built.epics, calls }
+    const snapped: { milestone: SynthesizedMilestone; claim: FlowClaimInput }[] = []
+    for (const milestone of epic.milestones) {
+      const claim = snapClaim(milestone, index)
+      if (!claim || !allowed.has(claimKey(claim.doc, claim.anchor, claim.title))) {
+        unknownReferences.push(describeRef(milestone))
+        continue
+      }
+      snapped.push({ milestone, claim })
+    }
+    const milestones = orderMilestones(snapped)
+    if (milestones.length < 2) continue
+    epics.push({
+      areaId: '(epic)',
+      title: normalizeText(epic.title),
+      goal: normalizeText(epic.goal),
+      milestones,
+      composedRefs: refs,
+      synthesisInputsHash: inputsKey,
+    })
   }
-  return { epics: [], calls, error: 'epic pass exhausted its attempts' }
+  return { epics, unknownReferences }
 }
 
 // ---------------------------------------------------------------------------
@@ -729,6 +757,61 @@ function freeId(base: string, taken: ReadonlySet<string>): string {
 }
 
 // ---------------------------------------------------------------------------
+// The flow-synthesis SESSION seams (plan 04 step 16) — typed here because the
+// engine cannot depend on `@truecourse/core`, which owns the sessions; the
+// command adapter injects the implementations (same pattern as plan 03's
+// guard-setup seams and the extract seam above).
+// ---------------------------------------------------------------------------
+
+/**
+ * The grounding a flows-session briefing carries BEYOND the spec-side inputs:
+ * the interface digests per surface (id/title/entry/steps — no paths; built off
+ * the post-procedure-gate surface catalogs, so RPC-derived operations never
+ * appear) and the dependency catalog's names + classes. Deliberately OUTSIDE
+ * the session cache key (the plan's stated key is prompt :: areaId :: claims ::
+ * outlines): grounding orients composition the way tool results do, and keying
+ * on the whole catalog would re-synthesize every area on unrelated route churn.
+ */
+export interface FlowsSessionGrounding {
+  interfaces: { surface: GuardDriverId; digests: InterfaceDigest[] }[]
+  dependencies: { name: string; class: string }[]
+}
+
+export type FlowsAreaSessionResult =
+  | { ok: true; value: FlowSynthesis; fromCache?: boolean; inputsKey: string }
+  | { ok: false; reason: string }
+
+export type FlowsEpicSessionResult =
+  | { ok: true; value: EpicSynthesis; fromCache?: boolean; inputsKey: string }
+  | { ok: false; reason: string }
+
+/**
+ * The per-area flow-synthesis session seam: one `guard-generate.flows` session
+ * per cache-missing area (the implementation pools them). Each result carries
+ * the session cache key it keyed on (`inputsKey`) — stamped as the produced
+ * flows' `synthesisInputsHash`, so the corpus records the inputs that actually
+ * generated it, whichever engine ran.
+ */
+export type FlowsAreaSessionSeam = (input: {
+  areas: readonly FlowSynthesisArea[]
+  grounding?: FlowsSessionGrounding
+  /** The work docs (section texts) the sessions' `read_section` reads from. */
+  docs?: readonly GuardDoc[]
+  /** Ticks once per settled area (cache hits included). */
+  onArea?: (areaId: string) => void
+  /** Keyed by {@link flowAreaKey} — the AREA plus its chunk, never `areaId` alone. */
+}) => Promise<{ byArea: Map<string, FlowsAreaSessionResult>; summary: GuardSessionSummary }>
+
+/** The epic session seam — one session over the flow digests, after the area pool. */
+export type FlowsEpicSessionSeam = (input: {
+  digests: readonly FlowDigest[]
+  /** The whole run's claim inventory — the epic checker's snapping set. */
+  claims: readonly FlowClaimInput[]
+  grounding?: FlowsSessionGrounding
+  docs?: readonly GuardDoc[]
+}) => Promise<{ result: FlowsEpicSessionResult; summary: GuardSessionSummary }>
+
+// ---------------------------------------------------------------------------
 // synthesizeFlows
 // ---------------------------------------------------------------------------
 
@@ -736,18 +819,24 @@ export interface SynthesizeFlowsOptions {
   repoRoot: string
   /** The areas to synthesize — every area whose claim inventory the run knows. */
   areas: readonly FlowSynthesisArea[]
-  /** Per-area synthesis seam (`guard.flows`). */
-  runner: FlowsRunner
-  /** Cross-area epic seam. Omit to skip the epic pass entirely. */
-  epicRunner?: FlowsEpicRunner
+  /**
+   * The per-area SESSION seam (plan 04 step 16) — THE synthesis path since the
+   * one-shot retirement (step 20). The fold below re-validates every session
+   * value against the live claim inventory regardless.
+   */
+  areaSession: FlowsAreaSessionSeam
+  /** The epic SESSION seam — one session over the digests, after the area pool. */
+  epicSession: FlowsEpicSessionSeam
+  /** Interface digests + dependency catalog for the session briefings. */
+  sessionGrounding?: FlowsSessionGrounding
+  /** The work docs (section texts) for the sessions' `read_section` tool. */
+  sessionDocs?: readonly GuardDoc[]
   /** `doc`+`anchor` ({@link flowSectionKey}) → the section's live fingerprint. */
   sectionFingerprints: ReadonlyMap<string, string>
   /** The committed flows identity resolves against; defaults to `flows.json`. */
   previous?: readonly GuardFlow[]
   /** False to compute without writing `flows.json` (callers that stage the write). */
   write?: boolean
-  /** Shared concurrency limit for the per-area calls. */
-  limit?: ConcurrencyLimit
   /** Progress hook, fired once per area as it settles. */
   onArea?: (areaId: string) => void
   /** Clock seam for `generatedAt` (tests pin it). */
@@ -783,8 +872,12 @@ export interface FlowSynthesisResult {
   subsumed: SubsumedFlow[]
   /** Areas (and the epic pass, as `(epic)`) that failed to settle. */
   unsettled: UnsettledArea[]
-  /** LLM calls made, re-asks included. */
+  /** Sessions that actually RAN across the area pool + the epic session
+   *  (cache hits excluded) — the wipeout guard's spend witness. */
   calls: number
+  /** Session-kind summaries, present only when the session seams ran — the
+   *  caller's systemic-loss gate and llm-failure tallies read these. */
+  sessionSummaries?: GuardSessionSummary[]
   /** Absolute path written, when `write` was not disabled. */
   path?: string
 }
@@ -798,8 +891,7 @@ export interface FlowSynthesisResult {
  * flows and is reported in `unsettled` while every other area's flows are written.
  */
 export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<FlowSynthesisResult> {
-  const { repoRoot, runner, sectionFingerprints } = opts
-  const run: ConcurrencyLimit = opts.limit ?? ((fn) => fn())
+  const { repoRoot, sectionFingerprints } = opts
 
   // Claims whose section has no live fingerprint cannot be bound, so they never
   // enter synthesis — they are recorded as no-flow claims with that reason.
@@ -818,25 +910,39 @@ export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<Flo
     return { ...area, claims }
   })
 
-  // `plan.areas` is index-aligned with `areas` — the same planner the pre-flight
-  // estimate runs, so estimate and run agree on every area's cache verdict.
-  const plan = await planFlowSynthesis(repoRoot, areas)
-
-  const outcomes = await Promise.all(
-    areas.map((area, i) =>
-      run(() => synthesizeArea(repoRoot, area, plan.areas[i], runner)).then((got) => {
-        opts.onArea?.(area.areaId)
-        return got
-      }),
-    ),
-  )
-
+  const sessionSummaries: GuardSessionSummary[] = []
   let calls = 0
+  // One agent session per cache-missing area, pooled by the seam. The seam's
+  // `check_flows` already refused dirty outcomes, but the fold NEVER trusts a
+  // transcript (or a cache entry): every value is re-validated against the live
+  // claim inventory right here, and a dirty one lands the area in `unsettled`
+  // exactly like a failed session.
+  const { byArea, summary } = await opts.areaSession({
+    areas,
+    ...(opts.sessionGrounding ? { grounding: opts.sessionGrounding } : {}),
+    ...(opts.sessionDocs ? { docs: opts.sessionDocs } : {}),
+    onArea: (areaId) => opts.onArea?.(areaId),
+  })
+  sessionSummaries.push(summary)
+  calls += summary.ran
+  const outcomes: AreaOutcome[] = areas.map((area): AreaOutcome => {
+    const r = byArea.get(flowAreaKey(area))
+    if (!r) return { ok: false, reason: 'the flows session produced no result for this area' }
+    if (!r.ok) return { ok: false, reason: r.reason }
+    const v = validateAreaSynthesis(area, r.value, buildClaimIndex(area.claims), r.inputsKey)
+    if (v.unknownReferences.length > 0 || v.uncoveredClaims.length > 0) {
+      const parts: string[] = []
+      if (v.unknownReferences.length > 0) parts.push(`${v.unknownReferences.length} milestone(s) matched no claim (${v.unknownReferences[0]})`)
+      if (v.uncoveredClaims.length > 0) parts.push(`${v.uncoveredClaims.length} claim(s) left unaccounted (${v.uncoveredClaims[0]})`)
+      return { ok: false, reason: `flow synthesis refused: ${parts.join('; ')}` }
+    }
+    return { ok: true, flows: v.flows, noFlowClaims: v.noFlowClaims }
+  })
+
   const unsettled: UnsettledArea[] = []
   const noFlowClaims: GuardNoFlowClaim[] = [...unbindable]
   let drafts: DraftFlow[] = []
   outcomes.forEach((outcome, i) => {
-    calls += outcome.calls
     if (!outcome.ok) {
       unsettled.push({ areaId: areas[i].areaId, reason: outcome.reason })
       return
@@ -855,14 +961,32 @@ export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<Flo
   // at the same draft index once the combined list is id'd below.
   const composableRefs = new Map(digestsOf(drafts).map((d, i) => [d.ref, i]))
   const areasWithFlows = new Set(drafts.map((f) => f.areaId))
-  if (opts.epicRunner && areasWithFlows.size > 1) {
-    const index = buildClaimIndex(areas.flatMap((a) => a.claims))
-    const epicOutcome = await synthesizeEpics(repoRoot, drafts, index, opts.epicRunner)
-    calls += epicOutcome.calls
-    if (epicOutcome.error) unsettled.push({ areaId: '(epic)', reason: epicOutcome.error })
-    const epicPass = applySubsumption(epicOutcome.epics)
-    subsumed.push(...epicPass.dropped)
-    drafts = [...drafts, ...epicPass.kept]
+  if (areasWithFlows.size > 1) {
+    // The epic SESSION (a true barrier after the area pool). Same fold
+    // discipline as the areas: the seam's value is rebuilt through the engine
+    // validation (`buildEpicDrafts`), so an epic can never smuggle in a claim
+    // its composed flows don't cover.
+    const claims = areas.flatMap((a) => a.claims)
+    const { result: epicResult, summary } = await opts.epicSession({
+      digests: digestsOf(drafts),
+      claims,
+      ...(opts.sessionGrounding ? { grounding: opts.sessionGrounding } : {}),
+      ...(opts.sessionDocs ? { docs: opts.sessionDocs } : {}),
+    })
+    sessionSummaries.push(summary)
+    calls += summary.ran
+    if (!epicResult.ok) {
+      unsettled.push({ areaId: '(epic)', reason: epicResult.reason })
+    } else {
+      const built = buildEpicDrafts(epicResult.value, drafts, buildClaimIndex(claims), epicResult.inputsKey)
+      if (built.unknownReferences.length > 0) {
+        unsettled.push({ areaId: '(epic)', reason: `epic pass refused: ${built.unknownReferences[0]}` })
+      } else {
+        const epicPass = applySubsumption(built.epics)
+        subsumed.push(...epicPass.dropped)
+        drafts = [...drafts, ...epicPass.kept]
+      }
+    }
   }
 
   // Bindings + fingerprints, then identity against the committed corpus.
@@ -931,6 +1055,7 @@ export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<Flo
     subsumed,
     unsettled,
     calls,
+    ...(sessionSummaries.length > 0 ? { sessionSummaries } : {}),
   }
   // A wipeout NEVER rewrites `flows.json`: the corpus it would write is the loss,
   // not an answer, and the file is committable — a clobbered one takes every

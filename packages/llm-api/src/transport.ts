@@ -25,7 +25,7 @@
  * for a future exporter.
  */
 
-import { generateText, generateObject, jsonSchema, type LanguageModel } from 'ai';
+import { generateText, generateObject, jsonSchema, type LanguageModel, type ModelMessage } from 'ai';
 import {
   recordStageUsage,
   resolveTimeoutScale,
@@ -126,6 +126,36 @@ function deadline(timeoutMs: number | undefined): {
     effectiveMs,
   );
   return { signal: controller.signal, cleanup: () => clearTimeout(timer) };
+}
+
+/**
+ * How the user half of the call reaches the SDK. A text-only request keeps the
+ * `prompt` string it has always used — the ~20 text stages must not change shape
+ * because a vision stage exists. A request carrying images has to become a
+ * MESSAGE of content parts, because that is the only form an image can travel in.
+ * The `system` prompt is unaffected either way: it rides its own field.
+ */
+type PromptInput = { prompt: string } | { messages: ModelMessage[] };
+
+function promptInputOf(req: LlmRequest): PromptInput {
+  const images = req.images ?? [];
+  if (images.length === 0) return { prompt: req.user };
+  return {
+    messages: [
+      {
+        role: 'user',
+        content: [
+          // Text FIRST — the instruction has to be in context before the pixels.
+          { type: 'text', text: req.user },
+          ...images.map((image) => ({
+            type: 'image' as const,
+            image: image.data,
+            mediaType: image.mediaType,
+          })),
+        ],
+      },
+    ],
+  };
 }
 
 /** The granular unit id the call processed, parsed from `LlmRequest.id`. */
@@ -310,6 +340,7 @@ export function createApiTransport(
     // must be non-empty"). Callers that pack everything into `user` legitimately
     // pass system: ''.
     const system = req.system?.trim() ? req.system : undefined;
+    const promptInput = promptInputOf(req);
     const telemetry = {
       isEnabled: true as const,
       functionId: req.stage ?? 'llm.call',
@@ -321,7 +352,7 @@ export function createApiTransport(
           model,
           schema: jsonSchema(enforced.schema),
           system,
-          prompt: req.user,
+          ...promptInput,
           abortSignal: signal,
           experimental_telemetry: telemetry,
         });
@@ -337,7 +368,7 @@ export function createApiTransport(
           model,
           output: 'no-schema',
           system,
-          prompt: req.user,
+          ...promptInput,
           abortSignal: signal,
           experimental_telemetry: telemetry,
         });
@@ -346,7 +377,7 @@ export function createApiTransport(
       const r = await generateText({
         model,
         system,
-        prompt: req.user,
+        ...promptInput,
         abortSignal: signal,
         experimental_telemetry: telemetry,
       });

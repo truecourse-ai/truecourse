@@ -1,12 +1,13 @@
 /**
  * COMPOSITION validation — the rules the scenario schema accepts but the engine
- * cannot execute, checked at authoring and corrected through the SAME one
- * corrective re-ask a schema failure gets. They are per driver, because the two
- * surfaces compose differently:
+ * cannot execute. On the worker path (plan 04 step 17) they are part of
+ * `run_scenario`/`submit_scenario`'s deterministic PRE-FLIGHT: a defect comes
+ * back as the tool error WITHOUT an execution, and the session revises in-loop.
+ * They are per driver, because the two surfaces compose differently:
  *
  *  - cli — `run` is argv APPENDED to the recipe entrypoint, so `run[0]` must be an
  *    argument, never the program's own name and never a foreign binary;
- *  - api — a journey is a chain: a `${var}` must come from an EARLIER step's
+ *  - api — an interface is a chain: a `${var}` must come from an EARLIER step's
  *    capture, and a `${HTTP_STUB:…}` must name a stub the scenario declares.
  *
  * Left uncaught, every one of these dies as a run-level INFRASTRUCTURE error after
@@ -17,17 +18,20 @@ import {
   apiCompositionDefect,
   cliCompositionDefect,
   scenarioCompositionDefect,
-  type AuthorUserContext,
-  type GenerateRunner,
 } from '@truecourse/guard-generator'
-import type { GuardApiStep, GuardStep } from '@truecourse/shared'
+import type { GuardApiStep, GuardStep, GuardWebStep } from '@truecourse/shared'
 import {
   makeTempRepo,
   rmrf,
   writeRecipe,
   writeDoc,
   writeCorpus,
-  extractBy,
+  extractSessionBy,
+  flowWorkerSessionOf,
+  faithfulJudge,
+  acceptedSha,
+  scenarioYaml,
+  PASSING_STEPS,
   raw,
   runGenerate,
   stampMilestones,
@@ -83,12 +87,12 @@ describe('cliCompositionDefect — `run` is argv, not a command line', () => {
   })
 
   it('is skipped entirely when the recipe declares no cli entry', () => {
-    expect(scenarioCompositionDefect({ driver: 'cli', steps: [step(['npm'])] }, undefined)).toBeNull()
-    expect(scenarioCompositionDefect({ driver: 'cli', steps: [step(['npm'])] }, [])).toBeNull()
+    expect(scenarioCompositionDefect({ steps: [step(['npm'])] }, undefined)).toBeNull()
+    expect(scenarioCompositionDefect({ steps: [step(['npm'])] }, [])).toBeNull()
   })
 })
 
-describe('apiCompositionDefect — a journey has to chain with itself', () => {
+describe('apiCompositionDefect — an interface has to chain with itself', () => {
   it('accepts a ${var} the previous step captured, from a body or a header', () => {
     expect(
       apiCompositionDefect(
@@ -158,44 +162,93 @@ describe('apiCompositionDefect — a journey has to chain with itself', () => {
   })
 })
 
-describe('generateGuards — the composition defect routes through the corrective re-ask', () => {
-  it('re-asks ONCE with the rule, and persists the corrected scenario', async () => {
+describe('generateGuards — the composition defect is the worker’s pre-flight', () => {
+  it('bounces the draft in-session (no execution), and the corrected draft persists', async () => {
     const r = seed()
-    const contexts: AuthorUserContext[] = []
-    let calls = 0
-    const gen: GenerateRunner = async (ctx) => {
-      contexts.push(ctx)
-      calls++
-      // Round 1 composes a whole command line (the recipe entry is
-      // `["node", "…/bin.mjs"]`); round 2 returns argv only.
-      const steps =
-        calls === 1
-          ? [{ run: ['node', 'bin.mjs', '--version'], expect: { exit: 0 } }]
-          : [{ run: ['--version'], expect: { exit: 0 } }]
-      return { scenario: stampMilestones(raw('version prints', steps as never), ctx.milestones.length) }
-    }
-
-    const res = await runGenerate({ repoRoot: r, extractRunner: extractBy({}), generateRunner: gen })
-
-    expect(calls).toBe(2)
-    expect(contexts[1].issues?.composition).toContain('repeats the entrypoint')
-    expect(res.errors).toEqual([])
-    expect(res.written.map((w) => w.flowId)).toEqual(['version'])
-  })
-
-  it('records an error when the scenario still does not compose after the re-ask', async () => {
-    const r = seed()
-    const gen: GenerateRunner = async (ctx) => ({
-      scenario: stampMilestones(
-        raw('version prints', [{ run: ['npm', 'run', 'version'], expect: { exit: 0 } }] as never),
-        ctx.milestones.length,
-      ),
+    const reports: { content: string; isError?: boolean }[] = []
+    const res = await runGenerate({
+      repoRoot: r,
+      extractSession: extractSessionBy({}),
+      flowWorkerSession: flowWorkerSessionOf(async (task) => {
+        // Round 1 composes a whole command line (the recipe entry is
+        // `["node", "…/bin.mjs"]`); round 2 returns argv only.
+        reports.push(
+          await task.runScenario(
+            scenarioYaml(stampMilestones(raw('version prints', [{ run: ['node', 'bin.mjs', '--version'], expect: { exit: 0 } }] as never), 1)),
+          ),
+        )
+        const good = scenarioYaml(stampMilestones(raw('version prints', PASSING_STEPS), 1))
+        const accepted = await task.submitScenario(good, [], faithfulJudge)
+        reports.push(accepted)
+        return { kind: 'outcome', outcome: { kind: 'settled', scenarioYamlSha: acceptedSha(accepted)!, expectedReds: [] } }
+      }),
     })
 
-    const res = await runGenerate({ repoRoot: r, extractRunner: extractBy({}), generateRunner: gen })
+    expect(reports[0].isError).toBe(true)
+    expect(reports[0].content).toContain('pre-flight defect (not executed)')
+    expect(reports[0].content).toContain('repeats the entrypoint')
+    expect(res.errors).toEqual([])
+    expect(res.written.map((w) => w.flowId)).toEqual(['version'])
+  }, 60_000)
 
+  it('a foreign binary is refused the same way, on submit as on run', async () => {
+    const r = seed()
+    const foreign = scenarioYaml(
+      stampMilestones(raw('version prints', [{ run: ['npm', 'run', 'version'], expect: { exit: 0 } }] as never), 1),
+    )
+    const reports: { content: string; isError?: boolean }[] = []
+    const res = await runGenerate({
+      repoRoot: r,
+      extractSession: extractSessionBy({}),
+      flowWorkerSession: flowWorkerSessionOf(async (task) => {
+        reports.push(await task.runScenario(foreign))
+        reports.push(await task.submitScenario(foreign, [], faithfulJudge))
+        return { kind: 'outcome', outcome: { kind: 'retired', attempts: 2, lastEvidence: 'cannot compose a step' } }
+      }),
+    })
+
+    for (const report of reports) {
+      expect(report.isError).toBe(true)
+      expect(report.content).toContain('is the foreign binary "npm"')
+    }
     expect(res.written).toEqual([])
-    expect(res.errors.map((e) => e.anchor)).toEqual(['version'])
-    expect(res.errors[0].message).toContain('still does not compose after re-ask')
+  }, 60_000)
+})
+
+describe('scenarioCompositionDefect — partitioned by vocabulary (the web arm)', () => {
+  const webNav: GuardWebStep = {
+    driver: 'web',
+    navigate: '/',
+    expect: { visible: { role: 'heading', name: 'Board' } },
+  }
+
+  it('composes a mixed web + cli scenario instead of crashing on the web step', () => {
+    // Pre-partition, a web step fell into the cli rule's `run[0]` read — a
+    // TypeError inside the worker tool, not a verdict.
+    expect(scenarioCompositionDefect({ steps: [webNav, step(['add', 'x'])] }, ['node', 'cli.js'])).toBeNull()
+  })
+
+  it('still catches a cli entrypoint repeat inside a mixed draft', () => {
+    const defect = scenarioCompositionDefect({ steps: [webNav, step(['node', 'cli.js', 'add'])] }, ['node', 'cli.js'])
+    expect(defect).toContain('repeats the entrypoint')
+  })
+
+  it('still catches an api ${var} with no earlier capture inside a mixed draft', () => {
+    const defect = scenarioCompositionDefect(
+      { steps: [webNav, request('/api/notes/${id}')] },
+      ['node', 'cli.js'],
+    )
+    expect(defect).toContain('${id}')
+  })
+
+  it('web captures live in their own namespace — a request reading ${captured:…} is not the api rule’s business', () => {
+    const captures: GuardWebStep = {
+      driver: 'web',
+      navigate: '/',
+      capture: { noteId: { from: { role: 'link', name: 'Permalink' }, get: { attribute: 'href' } } },
+    }
+    expect(
+      scenarioCompositionDefect({ steps: [captures, request('/api/notes/${captured:noteId}')] }, undefined),
+    ).toBeNull()
   })
 })

@@ -13,6 +13,18 @@
 import type { GuardHttpRequest } from '@truecourse/shared'
 import type { CookieJar } from './cookies.js'
 
+/** Sleep between re-issues of an idempotent read whose expectation does not hold yet. */
+export const API_EXPECT_POLL_MS = 100
+
+/**
+ * How long an idempotent read keeps polling for its expectation before the
+ * mismatch stands. A settle window, not the step budget: it must cover an
+ * app's ack-to-queryable lag (queued flushes run on ~1s intervals), while a
+ * legitimately-wrong assertion still fails in seconds, not at the step
+ * timeout. Capped by the step budget when that is shorter.
+ */
+export const API_EXPECT_SETTLE_MS = 5_000
+
 export interface ApiStepCapture {
   /** HTTP status, or null when the request never completed. */
   status: number | null
@@ -74,6 +86,19 @@ export async function executeApiRequest(opts: ExecuteApiRequestOptions): Promise
   if (opts.cookies && !Object.keys(headers).some((h) => h.toLowerCase() === 'cookie')) {
     const cookieHeader = opts.cookies.header(request.path)
     if (cookieHeader) headers.cookie = cookieHeader
+  }
+
+  // Node's fetch stamps browser-shaped `Sec-Fetch-*` headers on every request,
+  // so origin-checking middleware (better-auth CSRF protection, for one) reads
+  // the call as a browser request and refuses state-changing paths that carry
+  // no `Origin`. Default it to the server's own origin — a step that writes its
+  // OWN `Origin` header wins (explicit beats implicit), same as the cookie jar.
+  if (!Object.keys(headers).some((h) => h.toLowerCase() === 'origin')) {
+    try {
+      headers.origin = new URL(opts.baseUrl).origin
+    } catch {
+      // A malformed baseUrl fails at fetch below with its real error, not here.
+    }
   }
 
   try {

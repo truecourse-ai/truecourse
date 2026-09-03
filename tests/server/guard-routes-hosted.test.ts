@@ -36,7 +36,6 @@ const OTHER = 'otherhead9999';
 
 const yaml = (id: string, section: string): string =>
   [
-    'guard: 2',
     `id: ${id}`,
     `title: ${section} claim`,
     'binds:',
@@ -52,7 +51,7 @@ const yaml = (id: string, section: string): string =>
   ].join('\n');
 
 const runAt = (commit: string, id: string, outcome: GuardLatest['scenarios'][number]['outcome']): GuardLatest => ({
-  run: { runId: `run-${commit}`, ranAt: '2026-07-08T00:00:00.000Z', branch: 'main', commit, recipeFingerprint: 'sha256:r', scenarioFormat: 2 },
+  run: { runId: `run-${commit}`, ranAt: '2026-07-08T00:00:00.000Z', branch: 'main', commit, recipeFingerprint: 'sha256:r' },
   summary: { total: 1, pass: outcome === 'pass' ? 1 : 0, fail: outcome === 'fail' ? 1 : 0, stale: 0, orphaned: 0, error: 0 },
   scenarios: [{ id, title: `${id} claim`, binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x' }, outcome, durationMs: 2 }],
   sections: [],
@@ -82,7 +81,7 @@ async function saveSet(commit: string, ids: Array<[string, string]>): Promise<vo
         gaps: [],
       });
     }
-    fs.writeFileSync(path.join(src, 'manifest.json'), JSON.stringify({ version: 2, flows }));
+    fs.writeFileSync(path.join(src, 'manifest.json'), JSON.stringify({ flows }));
     await guardStore.saveScenarios({ repoKey, commitSha: commit }, src);
   } finally {
     fs.rmSync(src, { recursive: true, force: true });

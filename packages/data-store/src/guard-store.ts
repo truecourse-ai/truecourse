@@ -62,6 +62,7 @@ import {
   decisions,
   type Db,
 } from '@truecourse/db';
+import { guardEvidenceVisual } from '@truecourse/shared';
 import type {
   GuardStore,
   RepoRef,
@@ -111,6 +112,22 @@ interface Manifest {
 
 /** Evidence pointer prefix (`evidenceRelPath` shape): `.truecourse/guard/evidence/`. */
 const EVIDENCE_PREFIX_SEGMENTS = ['.truecourse', 'guard', 'evidence'];
+
+/**
+ * A repo-relative evidence dir (`.truecourse/guard/evidence/<runId>/<scenarioSeg>`)
+ * taken apart, or null when it is not one — the read is confined to the evidence
+ * root by construction, so a `../`-laced dir can never name anything.
+ */
+function parseEvidenceDir(evidenceDir: string): { runId: string; scenarioSeg: string } | null {
+  const segs = evidenceDir.split('/');
+  if (segs.length !== EVIDENCE_PREFIX_SEGMENTS.length + 2) return null;
+  if (segs.slice(0, EVIDENCE_PREFIX_SEGMENTS.length).join('/') !== EVIDENCE_PREFIX_SEGMENTS.join('/')) {
+    return null;
+  }
+  const [runId, scenarioSeg] = segs.slice(EVIDENCE_PREFIX_SEGMENTS.length) as [string, string];
+  if (!SAFE_SEGMENT.test(runId) || !SAFE_SEGMENT.test(scenarioSeg)) return null;
+  return { runId, scenarioSeg };
+}
 
 export class PgGuardStore implements GuardStore {
   readonly materializesInPlace = false;
@@ -283,21 +300,12 @@ export class PgGuardStore implements GuardStore {
     repoKey: string,
     runId: string,
     scenarioId: string,
-    files: Record<string, string>,
+    files: Record<string, string | Buffer>,
   ): Promise<string> {
     if (!SAFE_SEGMENT.test(runId)) {
       throw new Error(`[ee-data-store] unsafe guard run id: ${runId}`);
     }
-    const scope = contentScope.guardEvidence(repoKey);
-    const scenarioSeg = sanitizeSegment(scenarioId);
-    const entries: Record<string, string> = {};
-    for (const [file, body] of Object.entries(files)) {
-      if (!SAFE_SEGMENT.test(file)) {
-        throw new Error(`[ee-data-store] unsafe evidence file name: ${file}`);
-      }
-      const sha = await this.content.putText(scope, body);
-      entries[`${scenarioSeg}/${file}`] = sha;
-    }
+    const entries = await this.putEvidenceFiles(repoKey, sanitizeSegment(scenarioId), files);
 
     // Merge the new entries onto the run row's evidence manifest atomically —
     // a single jsonb `||` UPDATE, so two scenarios' concurrent writes to the same
@@ -317,22 +325,38 @@ export class PgGuardStore implements GuardStore {
     return evidenceRelPath(runId, scenarioId);
   }
 
-  async writeGuardResultEvidence(
-    ref: RepoRef,
+  /**
+   * Store a scenario's evidence files under the repo's evidence pool and return
+   * the manifest entries (`<scenarioSeg>/<file>` → sha). A text body is stored as
+   * text; a `Buffer` — a screenshot, the session video — as bytes, and the file's
+   * NAME says which it was when it is read back (see `readGuardEvidenceBytesAt`).
+   */
+  private async putEvidenceFiles(
+    repoKey: string,
     scenarioSeg: string,
-    files: Record<string, string>,
-  ): Promise<void> {
-    const commitSha = requireCommit(ref, 'writeGuardResultEvidence');
-    const scope = contentScope.guardEvidence(ref.repoKey);
-    const seg = sanitizeSegment(scenarioSeg);
+    files: Record<string, string | Buffer>,
+  ): Promise<Record<string, string>> {
+    const scope = contentScope.guardEvidence(repoKey);
     const entries: Record<string, string> = {};
     for (const [file, body] of Object.entries(files)) {
       if (!SAFE_SEGMENT.test(file)) {
         throw new Error(`[ee-data-store] unsafe evidence file name: ${file}`);
       }
-      const sha = await this.content.putText(scope, body);
-      entries[`${seg}/${file}`] = sha;
+      const sha = Buffer.isBuffer(body)
+        ? await this.content.putBytes(scope, body)
+        : await this.content.putText(scope, body);
+      entries[`${scenarioSeg}/${file}`] = sha;
     }
+    return entries;
+  }
+
+  async writeGuardResultEvidence(
+    ref: RepoRef,
+    scenarioSeg: string,
+    files: Record<string, string | Buffer>,
+  ): Promise<void> {
+    const commitSha = requireCommit(ref, 'writeGuardResultEvidence');
+    const entries = await this.putEvidenceFiles(ref.repoKey, sanitizeSegment(scenarioSeg), files);
 
     // Merge onto the generate report's evidence manifest atomically (jsonb `||`),
     // mirroring `writeGuardEvidence` for runs — concurrent birth-finding writes for
@@ -366,25 +390,65 @@ export class PgGuardStore implements GuardStore {
     file: string,
   ): Promise<string | null> {
     if (!SAFE_SEGMENT.test(file)) return null;
-    const segs = evidenceDir.split('/');
-    if (segs.length !== EVIDENCE_PREFIX_SEGMENTS.length + 2) return null;
-    const prefix = segs.slice(0, EVIDENCE_PREFIX_SEGMENTS.length);
-    if (prefix.join('/') !== EVIDENCE_PREFIX_SEGMENTS.join('/')) return null;
-    const [runId, scenarioSeg] = segs.slice(EVIDENCE_PREFIX_SEGMENTS.length);
-    if (!SAFE_SEGMENT.test(runId!) || !SAFE_SEGMENT.test(scenarioSeg!)) return null;
-    const key = `${scenarioSeg}/${file}`;
-    // A run's evidence first (a `fail`/`error` transcript from a persisted run).
-    // When a run row matches the runId it is authoritative — a missing key there is
-    // a miss, not a cue to fall through to some other report's transcript.
-    const manifest = await this.runEvidenceManifest(repoKey, runId!);
-    if (manifest) {
-      const sha = manifest[key];
-      return sha ? this.content.get(contentScope.guardEvidence(repoKey), sha) : null;
-    }
-    // No run row: a BIRTH finding's transcript. Its evidencePath embeds a generate
-    // runId that never created a `guard_runs` row, so the transcript hangs off a
-    // `guard_results` evidence manifest instead (see `writeGuardResultEvidence`).
-    return this.resolveResultEvidence(repoKey, key);
+    const located = await this.locateEvidenceSha(repoKey, evidenceDir, file);
+    return located ? this.content.get(contentScope.guardEvidence(repoKey), located) : null;
+  }
+
+  async listGuardEvidenceAt(repoKey: string, evidenceDir: string): Promise<string[]> {
+    const dir = parseEvidenceDir(evidenceDir);
+    if (!dir) return [];
+    const manifest = await this.evidenceManifestFor(repoKey, dir.runId, dir.scenarioSeg);
+    const prefix = `${dir.scenarioSeg}/`;
+    return Object.keys(manifest ?? {})
+      .filter((key) => key.startsWith(prefix))
+      .map((key) => key.slice(prefix.length))
+      .sort();
+  }
+
+  async readGuardEvidenceBytesAt(
+    repoKey: string,
+    evidenceDir: string,
+    file: string,
+  ): Promise<Buffer | null> {
+    if (!SAFE_SEGMENT.test(file)) return null;
+    const sha = await this.locateEvidenceSha(repoKey, evidenceDir, file);
+    if (!sha) return null;
+    const scope = contentScope.guardEvidence(repoKey);
+    // A visual artifact was stored as bytes; everything else is text, read as UTF-8.
+    if (guardEvidenceVisual(file)) return this.content.getBytes(scope, sha);
+    const text = await this.content.get(scope, sha);
+    return text == null ? null : Buffer.from(text, 'utf-8');
+  }
+
+  /** The sha behind `<evidenceDir>/<file>`, or null — see `evidenceManifestFor`. */
+  private async locateEvidenceSha(
+    repoKey: string,
+    evidenceDir: string,
+    file: string,
+  ): Promise<string | null> {
+    const dir = parseEvidenceDir(evidenceDir);
+    if (!dir) return null;
+    const manifest = await this.evidenceManifestFor(repoKey, dir.runId, dir.scenarioSeg);
+    return manifest?.[`${dir.scenarioSeg}/${file}`] ?? null;
+  }
+
+  /**
+   * The evidence manifest an evidence dir resolves in. A run's own first: when a
+   * run row matches the runId it is authoritative — a missing key there is a
+   * miss, not a cue to fall through to some other report's transcript. No run
+   * row means a BIRTH finding's bundle: its evidencePath embeds a generate runId
+   * that never created a `guard_runs` row, so it hangs off a `guard_results`
+   * manifest instead (see `writeGuardResultEvidence`), the newest report
+   * holding that scenario's keys winning.
+   */
+  private async evidenceManifestFor(
+    repoKey: string,
+    runId: string,
+    scenarioSeg: string,
+  ): Promise<Record<string, string> | null> {
+    const manifest = await this.runEvidenceManifest(repoKey, runId);
+    if (manifest) return manifest;
+    return this.resultEvidenceManifest(repoKey, `${scenarioSeg}/`);
   }
 
   /** A run row's evidence manifest, or `null` when no row matches the runId. */
@@ -413,27 +477,27 @@ export class PgGuardStore implements GuardStore {
   }
 
   /**
-   * Resolve `<scenarioSeg>/<file>` against a `guard_results` evidence manifest → the
-   * content body. Unlike runs, results aren't keyed by runId, so the newest report
-   * row holding the key wins (filtered in SQL) — a birth finding's runId
-   * distinguishes it only from a run row, not between reports; content is
-   * content-addressed, so a hit is served from the evidence pool.
+   * The newest `guard_results` evidence manifest holding a key under `prefix`
+   * (`<scenarioSeg>/`). Unlike runs, results aren't keyed by runId, so the newest
+   * report row wins — a birth finding's runId distinguishes it only from a run
+   * row, not between reports; content is content-addressed, so a hit is served
+   * from the evidence pool either way. A repo holds few reports, so the scan is
+   * over their manifests, newest first.
    */
-  private async resolveResultEvidence(repoKey: string, manifestKey: string): Promise<string | null> {
-    const [row] = await this.db
+  private async resultEvidenceManifest(
+    repoKey: string,
+    prefix: string,
+  ): Promise<Record<string, string> | null> {
+    const rows = await this.db
       .select({ evidence: guardResults.evidence })
       .from(guardResults)
-      .where(
-        and(
-          eq(guardResults.repoKey, repoKey),
-          sql`jsonb_exists(${guardResults.evidence}, ${manifestKey})`,
-        ),
-      )
-      .orderBy(desc(guardResults.createdAt))
-      .limit(1);
-    const sha = (row?.evidence as Record<string, string> | undefined)?.[manifestKey];
-    if (!sha) return null;
-    return this.content.get(contentScope.guardEvidence(repoKey), sha);
+      .where(eq(guardResults.repoKey, repoKey))
+      .orderBy(desc(guardResults.createdAt));
+    for (const row of rows) {
+      const manifest = (row.evidence as Record<string, string> | null) ?? {};
+      if (Object.keys(manifest).some((key) => key.startsWith(prefix))) return manifest;
+    }
+    return null;
   }
 
   // --- Scenario corpus ------------------------------------------------------

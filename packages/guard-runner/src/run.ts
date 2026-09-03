@@ -9,10 +9,15 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import {
-  GUARD_FORMAT_VERSION,
+  guardExecutionSteps,
+  guardScenarioDrivers,
   isApiRequestStep,
+  isApiServerScenario,
+  isRunStep,
+  isWebStep,
   worstOutcome,
   type GuardApiScenario,
+  type GuardCliStep,
   type GuardBinds,
   type GuardLatest,
   type GuardManifest,
@@ -20,7 +25,6 @@ import {
   type GuardScenario,
   type GuardScenarioResult,
   type GuardSectionRollup,
-  type GuardSummary,
 } from '@truecourse/shared'
 import { responseJsonSchema, openApiServerBasePath } from '@truecourse/shared/openapi'
 import {
@@ -32,6 +36,7 @@ import {
   RecipeError,
   resolveApiServers,
   resolveScenarioServer,
+  resolveWebSurface,
   credentialServers,
   type Recipe,
   type LoadedRecipe,
@@ -49,6 +54,16 @@ import {
   type ResolvedExternal,
 } from './externals.js'
 import { loadScenarios, type ScenarioLoadError } from './scenario-loader.js'
+import type { GuardSharedWorld } from './shared-world.js'
+import {
+  DependencyCatalogError,
+  dependencyBlockFor,
+  resolveDependencies,
+  suppliedInstancesFor,
+  type DependencyBlock,
+  type ResolvedDependencies,
+} from './dependencies.js'
+import { readGuardDecisions } from './decisions.js'
 import { runBuild, runInstall, DEFAULT_BUILD_TIMEOUT_MS, DEFAULT_INSTALL_TIMEOUT_MS, type BuildResult } from './build.js'
 import { preflightEntry, formatEntryPreflightError, type EntryPreflightResult } from './preflight.js'
 import { runScenario } from './run-scenario.js'
@@ -62,14 +77,18 @@ import { runApiScenario, type RunApiScenarioContext, type ServesPathVerdict } fr
 import { buildRouteManifest, whichAppServes, type RouteManifest } from './route-manifest.js'
 import { preflightApiServer } from './api/preflight.js'
 import { runSeed, SeedError } from './api/seed.js'
+import { containsFixtureReference } from './api/vars.js'
 import { runCredentialRequests, CredentialRequestError } from './api/credential-request.js'
 import {
   appendGuardHistory,
+  guardWorldDirtyMarkerPath,
+  readGuardLatest,
   readMergedInterfaceCatalog,
   recipePath,
   writeGuardLatest,
   writeGuardRun,
 } from './store.js'
+import { mergeGuardBoard, summarizeResults } from './board.js'
 import { DEFAULT_STEP_TIMEOUT_MS } from './executor.js'
 import { indexRepoDocs, nodeRefContext } from './doc-index.js'
 import {
@@ -83,6 +102,7 @@ import {
 import { isInterfaceDrifted } from './interface-drift.js'
 import { readManifest } from './manifest.js'
 import { newRunNonce, scenarioUnique } from './unique.js'
+import type { GuardVisualJudge } from './visual-judge.js'
 
 export interface RunGuardOptions {
   repoRoot: string
@@ -95,6 +115,15 @@ export interface RunGuardOptions {
    * anything to the corpus. Omitted → the committed scenarios are loaded.
    */
   scenarios?: GuardScenario[]
+  /**
+   * The ids of the FULL committed corpus this run's selection was drawn from — what
+   * the merged board keeps rows for. A caller that applies its own `--scenario`
+   * restriction before calling (the core run driver does, so a hosted executor never
+   * carries a filter) must pass it, or the scenarios it filtered out would look
+   * deleted and drop off the board. Omitted → the scenarios handed to this run ARE
+   * the corpus, which is what a full run and the `scenarioId` path below both mean.
+   */
+  corpusIds?: readonly string[]
   /**
    * Run against this recipe instead of loading `scenarios/recipe.json` from disk.
    * The executor seam supplies it (a hosted store per-commit; birth validation the
@@ -118,6 +147,15 @@ export interface RunGuardOptions {
   /** Suppress the build (tests that pre-build). Off by default. */
   skipBuild?: boolean
   /**
+   * The run-level SHARED world (services + seed), threaded by generate across
+   * every sandbox/birth execution so their lifecycles cannot race on the
+   * recipe's singleton compose project (see shared-world.ts). When present,
+   * this run consumes the shared boot instead of running `services.up`/`seed`
+   * itself, and NEVER runs `services.down` — the handle's owner does, once.
+   * In-process only; absent on a plain `guard run` and on hosted executors.
+   */
+  sharedWorld?: GuardSharedWorld
+  /**
    * The wall-clock below which an exit-0 empty-output cli step is classified a
    * no-op for anomaly detection (C4). Defaults to `NO_OP_STEP_THRESHOLD_MS`; a
    * test seam that lets a run exercise the aggregation without relying on
@@ -134,6 +172,13 @@ export interface RunGuardOptions {
   onPhase?: (phase: 'build' | 'run', total?: number) => void
   /** Fires as each scenario settles, with the running done-count. */
   onScenarioSettled?: (done: number, total: number, result: GuardScenarioResult) => void
+  /**
+   * OPTIONAL annotator for FAILING web steps (see {@link GuardVisualJudge}). This
+   * package calls no model; core injects one built from the installed transport.
+   * Omitted ⇒ zero behavior change, which is what every test and birth validation
+   * relies on. A green run never invokes it, so it costs nothing when nothing broke.
+   */
+  visualJudge?: GuardVisualJudge
 }
 
 export type RunGuardResult =
@@ -218,7 +263,19 @@ export type RunGuardResult =
     }
   | {
       status: 'ok'
+      /**
+       * THIS RUN's own record — exactly the scenarios it executed, which is what the
+       * run snapshot, the history row and every "what did this run do" surface show.
+       * A scoped run's `latest` therefore holds one scenario, not the whole board.
+       */
       latest: GuardLatest
+      /**
+       * The materialized current-state view this run wrote to `LATEST.json`: `latest`
+       * merged into the recorded board (see {@link mergeGuardBoard}). Equal to
+       * `latest` for a full run over a fresh store; absent when `persist` is false,
+       * where nothing was written and there is no board to speak of.
+       */
+      board?: GuardLatest
       latestPath: string
       loadErrors: ScenarioLoadError[]
       /** The binding record if `scenarios/manifest.json` exists (informational). */
@@ -287,7 +344,14 @@ export function runFailureMessage(result: RunGuardResult): string | null {
 /** Recipe + scenario sourcing outcome: an early result, or the inputs to execute. */
 export type GuardRunInputs =
   | { early: RunGuardResult }
-  | { loaded: LoadedRecipe; selected: GuardScenario[]; loadErrors: ScenarioLoadError[] }
+  | {
+      loaded: LoadedRecipe
+      selected: GuardScenario[]
+      /** Every committed scenario id, before the `--scenario` restriction — what the
+       *  merged board keeps rows for (see {@link RunGuardOptions.corpusIds}). */
+      corpusIds: string[]
+      loadErrors: ScenarioLoadError[]
+    }
 
 /** Load the committed recipe, mapping load failures to their early results. */
 function sourceRecipe(repoRoot: string): { early: RunGuardResult } | { loaded: LoadedRecipe } {
@@ -328,7 +392,12 @@ export function sourceGuardRunInputs(repoRoot: string, scenarioId?: string): Gua
   const { scenarios, errors: loadErrors } = loadScenarios(repoRoot)
   const sel = selectScenarios(scenarios, loadErrors, scenarioId)
   if ('early' in sel) return sel
-  return { loaded: recipe.loaded, selected: sel.selected, loadErrors }
+  return {
+    loaded: recipe.loaded,
+    selected: sel.selected,
+    corpusIds: scenarios.map((s) => s.id),
+    loadErrors,
+  }
 }
 
 export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
@@ -355,6 +424,9 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   const sel = selectScenarios(scenarios, loadErrors, opts.scenarioId)
   if ('early' in sel) return sel.early
   const selected = sel.selected
+  // What the merged board keeps rows for: the caller's corpus when it filtered before
+  // calling, else the set handed to this run (which its own `scenarioId` narrowed).
+  const corpusIds = new Set(opts.corpusIds ?? scenarios.map((s) => s.id))
 
   // Check EVERY binding against the live section index before running anything: a
   // scenario realizes a flow, so it binds one section per milestone. A section that
@@ -370,31 +442,71 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   const executable = planned.filter((p) => p.verdict.kind === 'executable')
   const nonExecutable = planned.filter((p) => p.verdict.kind !== 'executable')
 
-  // The surface grounding check — a per-scenario ANNOTATION, computed once against
+  // The interface grounding check — a per-scenario ANNOTATION, computed once against
   // the mapping snapshot (absent snapshot ⇒ no annotation anywhere). It never gates
   // execution: a scenario whose surface moved still runs its frozen steps.
   //
   // The baseline is the MERGED catalog, both halves of it: `isInterfaceDrifted`
   // reads an id it cannot find as drift, and the mapper derives `cli`/`api` only —
-  // every web surface lives in the committed authored file, so the derived snapshot
-  // alone would stamp drift on every web-grounded scenario on every run with
-  // nothing having moved. A scenario committed before the interface rename carries
-  // its grounding under `journey`, so either spelling is compared.
+  // so every hand-authored surface lives in the committed
+  // `guard/interfaces.authored.json`. Reading the derived half alone would stamp
+  // every web-grounded scenario as drifted on every run, with nothing having moved.
   const interfaceCatalog = readMergedInterfaceCatalog(repoRoot)
   const drifted = new Set(
-    selected
-      .filter((s) => isInterfaceDrifted({ interface: s.interface ?? s.journey }, interfaceCatalog))
-      .map((s) => s.id),
+    selected.filter((s) => isInterfaceDrifted(s, interfaceCatalog)).map((s) => s.id),
   )
   const annotate = (scenario: GuardScenario): { interfaceDrifted?: true } =>
-    drifted.has(scenario.id) ? { interfaceDrifted: true as const } : {}
+    drifted.has(scenario.id) ? { interfaceDrifted: true } : {}
 
-  // Per-driver preparation: a cli scenario needs the recipe `entry`; an api
-  // scenario needs the `api` block. A scenario whose preparation is missing
-  // settles as an `error` naming the gap (never a silent skip) and never blocks
-  // the other driver's scenarios from running.
-  const cliExec = executable.filter((p) => p.scenario.driver === 'cli')
-  const apiExec = executable.filter((p) => p.scenario.driver === 'api')
+  // WHICH EXECUTOR, read off the steps ({@link isApiServerScenario}): a scenario
+  // whose every step is an api verb runs against the recipe's booted server;
+  // anything else runs in a sandbox. Preparation follows from that — the api path
+  // needs the `api` block, the sandbox path needs whatever its own steps ask for.
+  // A scenario whose preparation is missing settles as an `error` naming the gap
+  // (never a silent skip) and never blocks the other path's scenarios from running.
+  const sandboxExec = executable.filter((p) => !isApiServerScenario(p.scenario))
+  const apiExec = executable.filter(
+    (p): p is (typeof executable)[number] & { scenario: GuardApiScenario } =>
+      isApiServerScenario(p.scenario),
+  )
+  // The web surface is per RECIPE, not per scenario: it boots inside whichever
+  // sandbox reaches a step that needs it. What the run needs to know up front is only
+  // whether ANY selected scenario has one, so the surface's build can be skipped
+  // otherwise. A `request` step counts as much as a web step — it is sent to that
+  // same served surface, so a request-only scenario needs it built too.
+  const webSurface = resolveWebSurface(loaded.recipe)
+  /** Does this scenario reach the served web surface? (Teardown steps count.) */
+  const usesServedSurface = (s: GuardScenario): boolean =>
+    guardExecutionSteps(s).some((step) => isWebStep(step) || isApiRequestStep(step))
+  const servedExec = sandboxExec.filter((p) => usesServedSurface(p.scenario))
+  // What a sandbox scenario NEEDS decides its preparation: only a `run:` step
+  // invokes the entry, so a scenario with none — a browser-only journey on a
+  // web-only product (cal.com has no CLI) — must not be gated on `entry`. Its
+  // preparation is the served web surface, and a missing one settles the same
+  // honest unprepared error a missing `entry` always has.
+  const entryExec = sandboxExec.filter((p) =>
+    guardExecutionSteps(p.scenario).some((step) => isRunStep(step as GuardCliStep)),
+  )
+  /**
+   * Does this scenario need the run's PREPARED WORLD — the one-shot `api.services.up`
+   * and the `api.seed` that fills it? The same question the per-driver gate above
+   * asks, asked of the world the whole run SHARES rather than of one surface:
+   *
+   *  - an api-server scenario runs against the recipe's booted server, which is that
+   *    world by definition;
+   *  - a sandbox scenario that reaches the SERVED surface is driving the product —
+   *    the app the datastore stands behind, whose rows the seed wrote;
+   *  - a scenario whose steps read `{{fixture:…}}` is quoting the seed's own output,
+   *    which is a need for the seed however the step then uses it.
+   *
+   * Anything else — pure git/write/`run:` sandbox work — needs none of it, and that
+   * is the economy this predicate exists to protect: a cli-only selection must not
+   * start docker (item 98).
+   */
+  const needsPreparedWorld = (s: GuardScenario): boolean =>
+    isApiServerScenario(s) ||
+    usesServedSurface(s) ||
+    containsFixtureReference(JSON.stringify(guardExecutionSteps(s)))
   const hasEntry = loaded.recipe.entry !== undefined
   const api = loaded.recipe.api
   // Both recipe shapes collapse into ONE named-server map here, and every
@@ -407,21 +519,77 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   const unboundApi: { scenario: GuardScenario; verdict: ScenarioBindingVerdict; missing: string }[] = []
   if (api) {
     for (const p of apiExec) {
-      const bound = resolveScenarioServer(p.scenario as GuardApiScenario, resolvedServers)
+      const bound = resolveScenarioServer(p.scenario, resolvedServers)
       if (bound.ok) boundServerById.set(p.scenario.id, bound.server)
       else unboundApi.push({ ...p, missing: bound.reason })
     }
   }
   const apiRunnableExec = api ? apiExec.filter((p) => boundServerById.has(p.scenario.id)) : []
-  const runnable = [...(hasEntry ? cliExec : []), ...apiRunnableExec]
+  const sandboxUnprepared: { scenario: GuardScenario; verdict: ScenarioBindingVerdict; missing: string }[] = []
+  const sandboxPrepared: typeof sandboxExec = []
+  for (const p of sandboxExec) {
+    if (!hasEntry && entryExec.includes(p)) {
+      sandboxUnprepared.push({ ...p, missing: 'recipe.json has no `entry` — the cli driver has no preparation' })
+    } else if (webSurface === undefined && servedExec.includes(p)) {
+      sandboxUnprepared.push({
+        ...p,
+        missing: 'recipe.json has no `web` block — the scenario’s browser/request steps have no served surface',
+      })
+    } else {
+      sandboxPrepared.push(p)
+    }
+  }
+  const prepared = [...sandboxPrepared, ...apiRunnableExec]
   const unprepared = [
-    ...(hasEntry
-      ? []
-      : cliExec.map((p) => ({ ...p, missing: 'recipe.json has no `entry` — the cli driver has no preparation' }))),
+    ...sandboxUnprepared,
     ...(api
       ? unboundApi
       : apiExec.map((p) => ({ ...p, missing: 'recipe.json has no `api` block — the api driver has no preparation' }))),
   ]
+
+  // THE DEPENDENCY GATE. A scenario that binds a SUPPLIED dependency with no
+  // registered instance does not execute: it settles `blocked` naming the
+  // dependency and its rolled-up requirement. Deliberately BEFORE the build and
+  // before any sandbox — nothing is spawned, nothing is fetched, and a
+  // `${supplied:…}` token can never land in an argv or a seeded file, because the
+  // only path that interpolates one runs on the other side of this filter.
+  //
+  // Never a `fail`: the code is not in dispute here and the spec is not
+  // contradicted; what is missing is a real-world input the engine must not
+  // fabricate (§7.2). Registering an instance is the one action that clears it.
+  let resolvedDependencies: ResolvedDependencies
+  try {
+    resolvedDependencies = resolveDependencies(repoRoot, {
+      // A dismissed flow's contributed need drops out of the requirement a reader
+      // is shown — its expectation died with the flow.
+      dismissedFlows: new Set(readGuardDecisions(repoRoot).dismissedFlows.map((f) => f.flowId)),
+    })
+  } catch (e) {
+    if (e instanceof DependencyCatalogError) return { status: 'invalid-recipe', message: e.message }
+    throw e
+  }
+  const dependencyBlocked: {
+    scenario: GuardScenario
+    verdict: ScenarioBindingVerdict
+    block: DependencyBlock
+  }[] = []
+  const runnable = prepared.filter((p) => {
+    const block = dependencyBlockFor(p.scenario, resolvedDependencies)
+    if (!block) return true
+    dependencyBlocked.push({ ...p, block })
+    return false
+  })
+
+  /**
+   * THE PREPARED-WORLD GATE (item 98). Services and the seed are the RUN's shared
+   * world, so what decides whether to prepare it is whether anything this selection
+   * will actually RUN needs it — not the size of the api pool. Gating on the pool is
+   * what made `guard run --scenario <a web one>` start no services and seed nothing,
+   * leaving every `{{fixture:…}}` in it settling as "the seed did not run for this
+   * selection". The api pool keeps its own disjunct so an api selection's preparation
+   * is byte-identical to what it always was, dependency-blocked scenarios included.
+   */
+  const worldNeeded = apiRunnableExec.length > 0 || runnable.some((p) => needsPreparedWorld(p.scenario))
 
   // B5: build the OpenAPI operation-schema index ONCE for the docs bound by api
   // scenarios that assert `schema: true`. Built only when at least one such scenario
@@ -430,9 +598,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   // returns undefined and any stray `schema: true` step errors.
   const schemaBoundDocs = new Set(
     apiExec
-      .filter((p) =>
-        (p.scenario as GuardApiScenario).steps.some((s) => isApiRequestStep(s) && s.expect.schema === true),
-      )
+      .filter((p) => p.scenario.steps.some((s) => isApiRequestStep(s) && s.expect.schema === true))
       .flatMap((p) => p.scenario.binds.map((b) => b.doc)),
   )
   const operationSchemaIndex = schemaBoundDocs.size > 0 ? buildOperationSchemaIndex(repoRoot, schemaBoundDocs) : new Map()
@@ -499,6 +665,25 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       const stop = cancelled('build')
       if (stop) return stop
       if (!build.ok) return { status: 'build-failed', build, loadErrors }
+
+      // The WEB surface's own build, and ONLY when this run has steps that reach it.
+      // Compiling a client is minutes on a real app; a cli-only run must not pay
+      // for it, which is the whole reason the web block carries its own command.
+      // It builds with the SURFACE's env (`recipe.env` ⊕ `web.env`) — the same env
+      // the serve process gets, so a variable the client is compiled against
+      // (`VITE_*`) reaches the build too.
+      if (webSurface?.build && servedExec.length > 0) {
+        const webBuild = await runBuild(
+          repoRoot,
+          webSurface.build,
+          webSurface.env,
+          opts.buildTimeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
+          cancel.signal,
+        )
+        const stopWeb = cancelled('build')
+        if (stopWeb) return stopWeb
+        if (!webBuild.ok) return { status: 'build-failed', build: webBuild, loadErrors }
+      }
     }
 
     const resolvedEntry = hasEntry ? resolveEntry(repoRoot, loaded.recipe.entry!) : null
@@ -506,7 +691,9 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     // Pre-flight the built entry ONCE before any cli scenario touches it: if it
     // can't even start, that is ONE loud entry-level error, not N indistinguishable
     // scenario failures. Runs under the build phase (before the run counter is announced).
-    if (buildsOwnEntry && resolvedEntry && cliExec.length > 0) {
+    // Probe only when a selected scenario will actually invoke the entry — a
+    // web-only selection must not boot a binary no step runs.
+    if (buildsOwnEntry && resolvedEntry && entryExec.length > 0) {
       const preflight = await preflightEntry({
         resolvedEntry,
         displayEntry: loaded.recipe.entry!,
@@ -525,6 +712,13 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     // throwaway sandbox (the api analog of the entry preflight above, reported
     // through the SAME result status). Runs even under `skipBuild` — the server
     // boot is not the build, and birth validation needs the loud single error too.
+    //
+    // The SHARED half (services + seed) is prepared whenever this selection needs
+    // the world (`worldNeeded`); the api SERVER half — credentials, `fromRequest`
+    // logins, the per-server boot preflight — belongs to the api pool alone and is
+    // gated on `apiPool` below. A web-only selection therefore gets the seeded
+    // datastore its app reads and boots no api server for scenarios it will not run.
+    const apiPool = apiRunnableExec.length > 0
     /** Per bound server: its absolutized serve argv and its boot env. */
     const serverBoot = new Map<string, { resolvedServe: string[]; env: Record<string, string> }>()
     let apiCredentials: Map<string, string> | undefined
@@ -542,7 +736,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       external: ResolvedExternal
     }[] = []
     const externalBlockedIds = new Set<string>()
-    if (api && apiRunnableExec.length > 0) {
+    if (api && worldNeeded) {
       // User-provided external API accounts. A PROVIDED external puts its
       // base URL + its extra env into the SERVER env, ABOVE `api.env` (the account
       // the user supplied beats the recipe's default pointer) and BELOW a scenario's
@@ -597,12 +791,18 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       // injection ON TOP — the user-supplied account beats the recipe's pointer.
       const externalsEnv = externalsInjectEnv(resolvedExternals)
       const loginsByServer = new Map<string, Record<string, RecipeApiCredential>>()
-      for (const [name, cred] of Object.entries(api.credentials ?? {})) {
-        if (!cred.fromRequest) continue
-        const server = cred.fromRequest.server ?? resolvedServers.defaultServer
-        const group = loginsByServer.get(server) ?? {}
-        group[name] = cred
-        loginsByServer.set(server, group)
+      // A `fromRequest` login is minted against a LIVE server, and only an api
+      // scenario can ever read the value. With no api pool the mint would boot a
+      // server for nobody, so a world-only preparation declares no logins — and
+      // `serversNeeded` below is then empty, which is what keeps it from booting one.
+      if (apiPool) {
+        for (const [name, cred] of Object.entries(api.credentials ?? {})) {
+          if (!cred.fromRequest) continue
+          const server = cred.fromRequest.server ?? resolvedServers.defaultServer
+          const group = loginsByServer.get(server) ?? {}
+          group[name] = cred
+          loginsByServer.set(server, group)
+        }
       }
       const serversNeeded = new Set<string>([
         // A scenario refused above never dispatches, so its server is not needed —
@@ -628,53 +828,106 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
         { ...(resolvedServers.servers.get(resolvedServers.defaultServer)?.env ?? {}), ...externalsEnv }
       // Resolve declared credentials from the host env BEFORE booting — a missing
       // env var is a loud stop, and the secret values never touch the recipe env.
-      try {
-        const resolved = resolveApiCredentials(api.credentials, process.env)
-        apiCredentials = new Map([...resolved].map(([name, cred]) => [name, cred.value]))
-      } catch (e) {
-        if (e instanceof CredentialResolutionError) return { status: 'missing-credential-env', message: e.message }
-        throw e
-      }
-      if (api.services) {
-        const up = await runBuild(
-          repoRoot,
-          api.services.up,
-          loaded.recipe.env,
-          opts.buildTimeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
-          cancel.signal,
-        )
-        const stop = cancelled('build')
-        if (stop) return stop
-        if (!up.ok) return { status: 'build-failed', build: up, loadErrors }
-        servicesUp = true
-      }
-      // Seed AFTER services.up (its datastore/migrations are ready) and BEFORE the
-      // server boots — once per run. Seeded credentials merge into the resolved map
-      // (and are redacted like any secret); seeded fixtures feed `{{fixture:…}}`.
-      if (api.seed) {
+      // Only the api pool can READ a credential (a sandbox scenario binds no server,
+      // and `{{cred:…}}` is deliberately not active there — item 99), so a world-only
+      // preparation resolves none: refusing a web-only run over an api key nothing in
+      // it can use would be the same false gate item 98 removes. The seed still folds
+      // whatever it PUBLISHES into this map.
+      if (apiPool) {
         try {
-          const seeded = await runSeed({
-            repoRoot,
-            seed: api.seed,
-            // The seed prepares state for the SERVER, so it runs with the server's env
-            // (recipe.env merged with api.env) — a datastore URL in `api.env` must reach it.
-            env: sharedEnv,
-            // Fold the already-resolved Phase-1 credential values into the failure
-            // redactor so a secret the seed echoes before failing is masked in seed-failed.
-            knownCredentials: apiCredentials,
-            externalSecrets,
-            timeoutMs: opts.buildTimeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
-            signal: cancel.signal,
-          })
-          for (const [name, cred] of seeded.credentials) apiCredentials.set(name, cred.value)
-          apiFixtures = seeded.fixtures
+          const resolved = resolveApiCredentials(api.credentials, process.env)
+          apiCredentials = new Map([...resolved].map(([name, cred]) => [name, cred.value]))
         } catch (e) {
-          const stop = cancelled('build')
-          if (stop) return stop
-          if (e instanceof SeedError) return { status: 'seed-failed', message: e.message }
+          if (e instanceof CredentialResolutionError) return { status: 'missing-credential-env', message: e.message }
           throw e
         }
+      } else {
+        apiCredentials = new Map()
       }
+      // The prepared world (services + seed) — either THIS run's own, or the
+      // run-level SHARED one (`opts.sharedWorld`): generate threads a single
+      // world across every sandbox/birth execution so their up/down lifecycles
+      // cannot race each other on the recipe's singleton compose project (see
+      // shared-world.ts — the documenso 13-worker P1017 incident). A plain
+      // `guard run` passes no handle and prepares + tears down its own, as
+      // before. The boot/teardown THUNKS live here so the shared path runs
+      // byte-identical logic to the owned path.
+      type WorldBoot =
+        | { ok: true; credentials: [string, string][]; fixtures: Map<string, Record<string, unknown>> | undefined }
+        | { ok: false; stop: RunGuardResult }
+      const bootWorld = async (): Promise<WorldBoot> => {
+        if (api.services) {
+          // A prior run's mutator tail left the world dirty (a crash mid-tail,
+          // or a reset that was not declared then): restore before booting on
+          // top of the damage. A failed reset falls through to `up` — the up's
+          // own failure, or the run's results, are the honest signal.
+          if (api.services.reset && fs.existsSync(guardWorldDirtyMarkerPath(repoRoot))) {
+            const reset = await runBuild(
+              repoRoot,
+              api.services.reset,
+              loaded.recipe.env,
+              opts.buildTimeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
+              cancel.signal,
+            )
+            if (reset.ok) fs.rmSync(guardWorldDirtyMarkerPath(repoRoot), { force: true })
+          }
+          const up = await runBuild(
+            repoRoot,
+            api.services.up,
+            loaded.recipe.env,
+            opts.buildTimeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
+            cancel.signal,
+          )
+          const stop = cancelled('build')
+          if (stop) return { ok: false, stop }
+          if (!up.ok) return { ok: false, stop: { status: 'build-failed', build: up, loadErrors } }
+        }
+        // Seed AFTER services.up (its datastore/migrations are ready) and BEFORE
+        // the server boots — once per prepared world. Seeded credentials merge
+        // into the resolved map (and are redacted like any secret); seeded
+        // fixtures feed `{{fixture:…}}`.
+        const credentials: [string, string][] = []
+        let fixtures: Map<string, Record<string, unknown>> | undefined
+        if (api.seed) {
+          try {
+            const seeded = await runSeed({
+              repoRoot,
+              seed: api.seed,
+              // The seed prepares state for the SERVER, so it runs with the server's env
+              // (recipe.env merged with api.env) — a datastore URL in `api.env` must reach it.
+              env: sharedEnv,
+              // Fold the already-resolved Phase-1 credential values into the failure
+              // redactor so a secret the seed echoes before failing is masked in seed-failed.
+              knownCredentials: apiCredentials,
+              externalSecrets,
+              timeoutMs: opts.buildTimeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
+              signal: cancel.signal,
+            })
+            for (const [name, cred] of seeded.credentials) credentials.push([name, cred.value])
+            fixtures = seeded.fixtures
+          } catch (e) {
+            const stop = cancelled('build')
+            if (stop) return { ok: false, stop }
+            if (e instanceof SeedError) return { ok: false, stop: { status: 'seed-failed', message: e.message } }
+            throw e
+          }
+        }
+        return { ok: true, credentials, fixtures }
+      }
+      const downWorld = async (): Promise<void> => {
+        if (api.services?.down) {
+          await runBuild(repoRoot, api.services.down, loaded.recipe.env, DEFAULT_BUILD_TIMEOUT_MS)
+        }
+      }
+      const world = opts.sharedWorld
+        ? await opts.sharedWorld.ensure(bootWorld, downWorld, (v) => !v.ok)
+        : await bootWorld()
+      if (!world.ok) return world.stop
+      // Own-world runs tear down in the finally below; a shared world is torn
+      // down exactly once by its owner's `shutdown()`, never per execution.
+      if (!opts.sharedWorld && api.services) servicesUp = true
+      for (const [name, value] of world.credentials) apiCredentials.set(name, value)
+      if (world.fixtures !== undefined) apiFixtures = world.fixtures
       // `fromRequest` credentials mint their value against a LIVE app, so the login
       // rides the preflight boot itself (`onReady`) rather than paying for a second
       // one — and lands after the seed, so a seeded account can be the one it logs
@@ -758,7 +1011,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       opts.onScenarioSettled?.(settled, selected.length, result)
     }
 
-    // Scenarios whose driver has no preparation in the recipe settle as errors —
+    // Scenarios whose surface has no preparation in the recipe settle as errors —
     // an honest per-scenario gap, never a silent skip, never a run-wide failure.
     for (const { scenario, verdict, missing } of unprepared) {
       const result: GuardScenarioResult = {
@@ -768,7 +1021,45 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
         ...(scenario.flow ? { flowId: scenario.flow.id } : {}),
         outcome: 'error',
         durationMs: 0,
-        failure: { step: 1, expected: `the recipe to prepare the ${scenario.driver} driver`, actual: missing },
+        failure: {
+          step: 1,
+          // The driver named is the scenario's PRIMARY one (registry order), which
+          // is the surface whose preparation the recipe is missing.
+          expected: `the recipe to prepare the ${guardScenarioDrivers(scenario)[0]} driver`,
+          actual: missing,
+        },
+        ...(verdict.kind === 'executable' && verdict.remappedTo ? { remappedTo: verdict.remappedTo } : {}),
+        ...annotate(scenario),
+      }
+      results.push(result)
+      settled += 1
+      opts.onScenarioSettled?.(settled, selected.length, result)
+    }
+
+    // Scenarios held back by the dependency gate settle as `blocked` — a
+    // non-executed outcome like stale/orphaned, not a verdict about the repo. The
+    // `failure` carries the same sentence for every surface that already renders a
+    // reason, and `blockedOn` carries the structured half (which dependency, whose
+    // flows asked for what, where an instance is registered).
+    for (const { scenario, verdict, block } of dependencyBlocked) {
+      const result: GuardScenarioResult = {
+        id: scenario.id,
+        title: scenario.title,
+        binds: scenario.binds[0],
+        ...(scenario.flow ? { flowId: scenario.flow.id } : {}),
+        outcome: 'blocked',
+        durationMs: 0,
+        failure: {
+          step: 1,
+          expected: `a registered instance of the supplied dependency "${block.dependency}"`,
+          actual: `${block.detail} — it must be ${block.requirement}`,
+        },
+        blockedOn: {
+          dependency: block.dependency,
+          requirement: block.requirement,
+          needs: block.needs,
+          registerIn: block.registerIn,
+        },
         ...(verdict.kind === 'executable' && verdict.remappedTo ? { remappedTo: verdict.remappedTo } : {}),
         ...annotate(scenario),
       }
@@ -877,8 +1168,10 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       // Once cancelled, no new child spawns; a post-cancel settlement doesn't count
       // either — a run ending `aborted`/`run-timed-out` discards these results.
       if (cancel.signal.aborted) return null
+      // WHICH EXECUTOR — the same steps-derived question the preparation split
+      // asked, asked once more where the scenario is actually dispatched.
       const outcome =
-        scenario.driver === 'api'
+        isApiServerScenario(scenario)
           ? await runApiScenario(scenario, {
               repoRoot,
               runId,
@@ -907,10 +1200,25 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               unique: scenarioUnique(runNonce, scenario.id),
               resolvedEntry: resolvedEntry!,
               recipeEnv: loaded.recipe.env,
+              ...(loaded.recipe.expose ? { expose: loaded.recipe.expose } : {}),
+              // Every binding is `provided` by construction — the gate above kept the
+              // rest out of `runnable` — so this only ever materializes real instances.
+              supplied: suppliedInstancesFor(scenario, resolvedDependencies),
+              // The seed's fixtures reach a SANDBOX scenario too (the api call site
+              // above passes the same map): the canonical document a seeded world
+              // published is the one a web step uploads and an api step posts, and
+              // one world has one copy of it. Undefined when the seed did not run —
+              // which the scenario reports as such, `seedDeclared` telling it apart
+              // from a fixture that simply does not exist.
+              ...(apiFixtures ? { fixtures: apiFixtures } : {}),
+              ...(api?.seed ? { seedDeclared: true } : {}),
+              ...(webSurface ? { web: webSurface } : {}),
               stepTimeoutMs,
               capturePassEvidence,
               signal: cancel.signal,
               onStep: (o) => stepStats.onCliStep(o),
+              // Only the cli/web pool: an api scenario has no screen to look at.
+              ...(opts.visualJudge ? { visualJudge: opts.visualJudge } : {}),
             })
       if (cancel.signal.aborted) return null
       const result: GuardScenarioResult = {
@@ -923,32 +1231,93 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       return result
     }
 
-    // TWO POOLS, run concurrently. An api scenario boots a whole target server that
-    // lives for the scenario's duration, so a shared pool at the CLI sandbox width lets
-    // heavyweight servers pile up (the diagnosed cal.com starvation). The api pool caps
-    // parallel scenarios at `apiBootConcurrency` — which bounds RESIDENT servers, not
-    // just boot-starts. `orderReadBeforeWrite` still runs read-only api scenarios ahead
-    // of mutating ones WITHIN the api pool (its ordering only ever mattered for the api
-    // set — cli sandboxes are isolated).
-    const apiRunnable = orderReadBeforeWrite(
-      runnable.filter((x) => x.scenario.driver === 'api' && !externalBlockedIds.has(x.scenario.id)),
+    // THREE POOLS, run concurrently — split by what a scenario keeps RESIDENT. An
+    // api-server scenario boots a whole target server that lives for the scenario's
+    // duration, and a sandbox scenario with web/request steps boots its own served
+    // surface PLUS a browser — both are heavyweight, so each heavy pool caps
+    // parallel scenarios at `apiBootConcurrency` (which bounds resident servers,
+    // not just boot-starts — the diagnosed cal.com starvation). The plain cli pool
+    // takes the rest of the budget. `orderReadBeforeWrite` still runs read-only api
+    // scenarios ahead of mutating ones WITHIN the api pool (its ordering only ever
+    // mattered for the api set — sandboxes are isolated).
+    // THE WORLD-MUTATOR TAIL (blast-radius scheduling): a scenario declaring
+    // `world: mutates` may destroy state every shared-world sibling depends on —
+    // the seeded principal's password, its sessions, the account itself (one
+    // committed delete-account scenario cost a documenso run 452 sign-in
+    // failures) — so the tail runs LAST, serialized, after every shared scenario
+    // settled, and the world is restored afterwards (`api.services.reset`) so
+    // the damage cannot reach the next run either.
+    const isWorldMutator = ({ scenario }: (typeof runnable)[number]): boolean =>
+      scenario.world === 'mutates'
+    const mainRunnable = runnable.filter((x) => !isWorldMutator(x))
+    const tailRunnable = runnable.filter(
+      (x) => isWorldMutator(x) && !externalBlockedIds.has(x.scenario.id),
     )
-    const cliRunnable = runnable.filter((x) => x.scenario.driver !== 'api')
-    // The two pools share ONE budget so their combined in-flight count never exceeds
-    // `concurrency` — the host-load knob whose violation caused the incident. When both
-    // drivers run, the api pool draws from that budget (capped so it can't starve cli of
-    // its floor of 1) and cli takes the remainder; a single-driver run is unchanged
-    // (api-only ≤ apiCap, cli-only = full width). See `TRUECOURSE_MAX_API_CONCURRENCY`.
-    const bothDrivers = apiRunnable.length > 0 && cliRunnable.length > 0
-    const apiWidth = bothDrivers
-      ? Math.min(apiBootConcurrency(concurrency), Math.max(1, concurrency - 1))
-      : apiBootConcurrency(concurrency)
-    const cliWidth = bothDrivers ? Math.max(1, concurrency - apiWidth) : concurrency
-    const [apiResults, cliResults] = await Promise.all([
+    const apiRunnable = orderReadBeforeWrite(
+      mainRunnable.filter((x) => isApiServerScenario(x.scenario) && !externalBlockedIds.has(x.scenario.id)),
+    )
+    const servedIds = new Set(servedExec.map((p) => p.scenario.id))
+    const sandboxRunnable = mainRunnable.filter((x) => !isApiServerScenario(x.scenario))
+    const servedRunnable = sandboxRunnable.filter((x) => servedIds.has(x.scenario.id))
+    const plainRunnable = sandboxRunnable.filter((x) => !servedIds.has(x.scenario.id))
+    // The pools share ONE budget so their combined in-flight count never exceeds
+    // `concurrency` — the host-load knob whose violation caused the incident. Each
+    // present pool keeps a floor of 1 so none can be starved outright; allocation
+    // runs heavy-first and the plain pool takes the remainder. A single-path run is
+    // unchanged (api-only ≤ apiCap, plain-sandbox-only = full width). See
+    // `TRUECOURSE_MAX_API_CONCURRENCY`.
+    const heavyCap = apiBootConcurrency(concurrency)
+    const laterPools = (...counts: number[]): number => counts.filter((n) => n > 0).length
+    let remaining = concurrency
+    const apiWidth =
+      apiRunnable.length > 0
+        ? Math.min(heavyCap, Math.max(1, remaining - laterPools(servedRunnable.length, plainRunnable.length)))
+        : 0
+    remaining -= apiWidth
+    const servedWidth =
+      servedRunnable.length > 0
+        ? Math.min(heavyCap, Math.max(1, remaining - laterPools(plainRunnable.length)))
+        : 0
+    remaining -= servedWidth
+    const plainWidth = plainRunnable.length > 0 ? Math.max(1, remaining) : 0
+    const [apiResults, servedResults, plainResults] = await Promise.all([
       mapWithConcurrency(apiRunnable, apiWidth, runOne),
-      mapWithConcurrency(cliRunnable, cliWidth, runOne),
+      mapWithConcurrency(servedRunnable, servedWidth, runOne),
+      mapWithConcurrency(plainRunnable, plainWidth, runOne),
     ])
-    const executed = [...apiResults, ...cliResults].filter((r): r is GuardScenarioResult => r !== null)
+    // The mutator tail: serialized, and only once every shared scenario is done.
+    // The dirty marker is written BEFORE the first mutator so a crash mid-tail
+    // still tells the next run's world boot to reset before building on the
+    // damage; a successful reset clears it (and leaves the finally's `down`
+    // nothing to stop — the reset took the world with it).
+    let worldLeftDirty = false
+    let tailResults: (GuardScenarioResult | null)[] = []
+    if (tailRunnable.length > 0 && !cancel.signal.aborted) {
+      fs.mkdirSync(path.dirname(guardWorldDirtyMarkerPath(repoRoot)), { recursive: true })
+      fs.writeFileSync(guardWorldDirtyMarkerPath(repoRoot), `${runId}\n`)
+      tailResults = await mapWithConcurrency(tailRunnable, 1, runOne)
+      if (!cancel.signal.aborted) {
+        if (api?.services?.reset) {
+          const reset = await runBuild(
+            repoRoot,
+            api.services.reset,
+            loaded.recipe.env,
+            opts.buildTimeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
+          )
+          if (reset.ok) {
+            fs.rmSync(guardWorldDirtyMarkerPath(repoRoot), { force: true })
+            servicesUp = false
+          } else {
+            worldLeftDirty = true
+          }
+        } else {
+          worldLeftDirty = true
+        }
+      }
+    }
+    const executed = [...apiResults, ...servedResults, ...plainResults, ...tailResults].filter(
+      (r): r is GuardScenarioResult => r !== null,
+    )
     const stop = cancelled('run')
     if (stop) return stop
     results.push(...executed)
@@ -961,9 +1330,9 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
         branch: opts.branch ?? null,
         commit: opts.commit ?? null,
         recipeFingerprint: loaded.fingerprint,
-        scenarioFormat: GUARD_FORMAT_VERSION,
+        ...(worldLeftDirty ? { worldLeftDirty: true } : {}),
       },
-      summary: summarize(results),
+      summary: summarizeResults(results),
       scenarios: results,
       sections: rollupSections(results, new Map(selected.map((s) => [s.id, s.binds]))),
     }
@@ -971,8 +1340,14 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     // Birth validation runs with `persist: false` and must write NOTHING to the
     // store — no LATEST, no run snapshot, no history — so it never moves the baseline.
     let latestPath = ''
+    let board: GuardLatest | undefined
     if (opts.persist !== false) {
-      latestPath = writeGuardLatest(repoRoot, latest)
+      // LATEST is the BOARD: this run merged into what was already recorded, so a
+      // scoped run updates its own scenarios and leaves every other verdict standing.
+      // The run snapshot and the history row stay scoped to what actually ran — they
+      // are this run's own record, not a view of current state.
+      board = mergeGuardBoard(readGuardLatest(repoRoot), latest, corpusIds)
+      latestPath = writeGuardLatest(repoRoot, board)
       writeGuardRun(repoRoot, latest)
       appendGuardHistory(repoRoot, {
         runId: latest.run.runId,
@@ -986,6 +1361,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     return {
       status: 'ok',
       latest,
+      ...(board ? { board } : {}),
       latestPath,
       loadErrors,
       manifest: readManifest(repoRoot),
@@ -1009,7 +1385,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
  * never treated as read-only.
  */
 function isReadOnlyScenario(scenario: GuardScenario): boolean {
-  if (scenario.driver !== 'api') return false
+  if (!isApiServerScenario(scenario)) return false
   // A lifecycle step (boot/signal/logs) restarts or stops the server under test —
   // the least read-only thing a scenario can do, so one is disqualifying.
   return scenario.steps.every(
@@ -1054,12 +1430,6 @@ function nonExecutableResult(
     }
   }
   return { ...base, outcome: 'orphaned' }
-}
-
-function summarize(results: readonly GuardScenarioResult[]): GuardSummary {
-  const summary: GuardSummary = { total: results.length, pass: 0, fail: 0, stale: 0, orphaned: 0, error: 0 }
-  for (const r of results) summary[r.outcome] += 1
-  return summary
 }
 
 /**

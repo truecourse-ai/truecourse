@@ -16,6 +16,11 @@
  *         transcript, which lives in a gitignored evidence dir the clone takes
  *         with it.
  *
+ * The RUN job reads the same IN half (the baseline set is what it runs) and
+ * leaves its own OUT: the run snapshot as the baseline run, and every
+ * scenario's evidence bundle — the transcript and, for a browser run, the
+ * screenshots and session video, which travel as bytes.
+ *
  * The recipe, the dependency catalog and the interface catalog are NOT moved
  * here: they belong to setup's bundle, which the job materializes over
  * whatever the scenario set carried.
@@ -31,7 +36,12 @@ import {
   readGuardResult as readCloneGuardResult,
   writeGuardResult as writeCloneGuardResult,
 } from '@truecourse/guard-runner';
-import { guardEvidencePaths, type GuardGenerateReport } from '@truecourse/shared';
+import {
+  guardEvidencePaths,
+  guardEvidenceVisual,
+  type GuardGenerateReport,
+  type GuardLatest,
+} from '@truecourse/shared';
 import {
   listScenarioFiles,
   readGuardBaselineCommit,
@@ -40,6 +50,8 @@ import {
   readManifest,
   readScenarioFile,
   saveScenarios,
+  writeGuardEvidence,
+  writeGuardLatest,
   writeGuardResult,
   writeGuardResultEvidence,
   type RepoRef,
@@ -129,8 +141,37 @@ async function persistBirthEvidence(
   }
 }
 
-/** An evidence dir as `{ fileName: body }`, or null when it holds no regular file. */
-function collectEvidenceFiles(treeDir: string, evidencePath: string): Record<string, string> | null {
+/**
+ * Lift a completed run out of `treeDir` into the store: the snapshot the runner
+ * left as the repo's BASELINE run (keyed by the clone's commit), then every
+ * scenario's evidence bundle, which attaches to that run row. The snapshot is
+ * written first — the evidence manifest lives on it.
+ */
+export async function persistGuardRun(
+  ref: RepoRef,
+  treeDir: string,
+  latest: GuardLatest,
+): Promise<void> {
+  await writeGuardLatest(ref.repoKey, latest);
+  const runId = latest.run.runId;
+  for (const scenario of latest.scenarios) {
+    if (!scenario.evidencePath) continue;
+    const files = collectEvidenceFiles(treeDir, scenario.evidencePath);
+    if (!files) continue;
+    await writeGuardEvidence(ref.repoKey, runId, scenario.id, files);
+  }
+}
+
+/**
+ * An evidence dir as `{ fileName: body }`, or null when it holds no regular
+ * file. A visual artifact (a screenshot, the session video) is read as BYTES —
+ * decoded as text it would be a corrupted file; everything else is the text
+ * it is.
+ */
+function collectEvidenceFiles(
+  treeDir: string,
+  evidencePath: string,
+): Record<string, string | Buffer> | null {
   const dir = path.join(treeDir, evidencePath);
   let names: string[];
   try {
@@ -138,10 +179,11 @@ function collectEvidenceFiles(treeDir: string, evidencePath: string): Record<str
   } catch {
     return null;
   }
-  const files: Record<string, string> = {};
+  const files: Record<string, string | Buffer> = {};
   for (const name of names) {
     const file = path.join(dir, name);
-    if (fs.statSync(file).isFile()) files[name] = fs.readFileSync(file, 'utf-8');
+    if (!fs.statSync(file).isFile()) continue;
+    files[name] = guardEvidenceVisual(name) ? fs.readFileSync(file) : fs.readFileSync(file, 'utf-8');
   }
   return Object.keys(files).length > 0 ? files : null;
 }

@@ -9,6 +9,12 @@
  * path, parent/child chain) plus a `fingerprint` (a hash of the normalized
  * section text). Non-markdown docs collapse to a single whole-document section.
  *
+ * A markdown doc's LEAD REGION — everything before its first heading, frontmatter
+ * included — is a section too, named by the doc's frontmatter title (see
+ * {@link leadSection}). Published docs put their title in frontmatter and state
+ * real behavior before the first `##`, and text that belongs to no section is
+ * text nothing can bind to.
+ *
  * The slug helper is a small, self-contained duplicate of the heading-slug
  * convention used elsewhere in the codebase (spec-consolidator's overlap
  * widening): strip inline emphasis/code markers, lowercase, fold non-alphanumeric
@@ -99,6 +105,34 @@ export function fingerprintText(text: string): string {
 function countLines(content: string): number {
   const lines = content.split('\n')
   return Math.max(1, content.endsWith('\n') ? lines.length - 1 : lines.length)
+}
+
+/**
+ * The doc's frontmatter `title`, when it declares one — a `---` fence on the very
+ * first line, closed by the next `---`, holding a top-level `title:` entry. Only
+ * the title is read (it is the doc's human name, and the only thing the lead
+ * section needs from the block); everything else in the block is body text as far
+ * as the section index is concerned. Quotes around the value are stripped.
+ */
+export function frontmatterTitle(lines: readonly string[]): string | null {
+  if (lines.length === 0 || lines[0].trim() !== '---') return null
+  // An unterminated block is not frontmatter — it is a horizontal rule and body.
+  let close = -1
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].trim() === '---') {
+      close = i
+      break
+    }
+  }
+  if (close === -1) return null
+  for (let i = 1; i < close; i++) {
+    const m = /^title[ \t]*:[ \t]*(.*)$/.exec(lines[i])
+    if (!m) continue
+    const raw = m[1].trim()
+    const value = /^(["'])([\s\S]*)\1$/.exec(raw)?.[2] ?? raw
+    return value.trim() || null
+  }
+  return null
 }
 
 /** Line index where a section ends: the next heading of same-or-higher level. */
@@ -224,7 +258,65 @@ function deriveSections(
     })
     ancestors.push({ level: heading.level, anchor })
   }
-  return out
+
+  const lead = leadSection(doc, lines, headings, totalLines, used)
+  return lead ? [lead, ...out] : out
+}
+
+/**
+ * The LEAD REGION as a bindable section: everything from the first byte of the
+ * document down to its first heading (the whole document when it has none),
+ * frontmatter included. Published documentation typically carries its title in
+ * frontmatter and states substantive behavior before the first `##`, and without
+ * this that text belongs to no section at all — a claim anchored there binds to
+ * nothing and reads as permanently stale.
+ *
+ * Two rules keep it strictly ADDITIVE, so no repository in the field sees an
+ * identity move:
+ *
+ *  - it is emitted only when the lead region has substance (a doc that opens
+ *    directly with a heading, or whose lead is blank/whitespace, gets none — the
+ *    behaviour before this section existed);
+ *  - its anchor is claimed AFTER every heading has taken its own, so a doc whose
+ *    frontmatter title also exists as a heading leaves the heading's anchor
+ *    untouched and the lead takes the `-N` ordinal instead.
+ *
+ * Its text is the lead region ALONE — never the whole document. A lead is a
+ * sibling of the top-level headings, not their parent, and folding their text in
+ * would roll the lead's fingerprint on every unrelated edit further down.
+ */
+function leadSection(
+  doc: string,
+  lines: readonly string[],
+  headings: readonly RawHeading[],
+  totalLines: number,
+  used: Set<string>,
+): (DocSection & { fullText: string; ownText: string }) | null {
+  const end = headings.length > 0 ? headings[0].line : lines.length
+  const text = lines.slice(0, end).join('\n')
+  if (normalizeSectionText(text) === '') return null
+
+  // The doc's human name: its frontmatter title, or its filename when it declares
+  // none — the same "name it by what it is" rule the non-markdown fallback uses.
+  const headingText =
+    frontmatterTitle(lines) ?? path.basename(doc, path.extname(doc))
+  const base = slugifyHeading(headingText) || 'lead'
+  let anchor = base
+  for (let n = 2; used.has(anchor); n++) anchor = `${base}-${n}`
+  used.add(anchor)
+
+  return {
+    anchor,
+    fingerprint: fingerprintText(text),
+    headingText,
+    // `0` — the level the whole-document fallback already uses for "this section
+    // is not a heading". A lead has no heading by definition.
+    level: 0,
+    startLine: 1,
+    endLine: Math.min(Math.max(end, 1), totalLines),
+    fullText: text,
+    ownText: text,
+  }
 }
 
 /** Anchor → section text (full + own) for a document. See {@link SectionText}. */

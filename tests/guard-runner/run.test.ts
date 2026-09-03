@@ -65,7 +65,6 @@ describe('runGuard — end to end', () => {
     expect(res.latestPath).toBe(guardLatestPath(r))
 
     expect(res.latest.summary).toMatchObject({ total: 3, pass: 2, fail: 1, error: 0 })
-    expect(res.latest.run.scenarioFormat).toBe(2)
     expect(res.latest.run.recipeFingerprint).toMatch(/^sha256:/)
 
     const boom = res.latest.scenarios.find((s) => s.id === 'boom.fail')!
@@ -531,7 +530,7 @@ describe('runGuard — tests committed FAILING at birth', () => {
       }),
     )
     writeManifest(r, {
-      version: 2,
+      version: 3,
       flows: [
         {
           flowId: 'flow',
@@ -541,7 +540,7 @@ describe('runGuard — tests committed FAILING at birth', () => {
             { id: 'flow.cli.1', surface: 'cli', status: 'failing' },
             { id: 'flow.cli.2', surface: 'cli', status: 'failing' },
           ],
-          journeys: [],
+          interfaces: [],
           generationInputsHash: 'sha256:gen',
           gaps: [],
         },

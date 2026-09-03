@@ -130,7 +130,9 @@ export function buildGuardTestRows(
       doc: s.doc,
       anchor: s.anchor,
       ...(s.headingText ? { headingText: s.headingText } : {}),
-      ...(s.surface ? { surface: s.surface } : {}),
+      // The row wears its FIRST driver: the list is one surface per row, and a
+      // scenario spanning surfaces reads under the one its steps open with.
+      ...(s.drivers?.[0] ? { surface: s.drivers[0] } : {}),
       flowId: s.flowId,
       flowTitle: flowTitles.get(s.flowId) ?? s.title,
       handWritten: s.handWritten,

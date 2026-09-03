@@ -6,8 +6,7 @@
 
 import { describe, it, expect } from 'vitest'
 import {
-  GUARD_FORMAT_VERSION,
-  GuardApiScenarioSchema,
+    GuardScenarioSchema,
   GuardApiStepSchema,
   describeGuardScenarioSteps,
   isApiBootStep,
@@ -19,12 +18,11 @@ import {
 const binds = [{ doc: 'docs/a.md', section: 'a/b', fingerprint: 'sha256:x' }]
 
 function scenario(steps: unknown[]): unknown {
-  return { guard: 2, id: 's.api.1', title: 't', binds, driver: 'api', steps, normalize: [] }
+  return { id: 's.api.1', title: 't', binds, steps, normalize: [] }
 }
 
 describe('api lifecycle steps — schema', () => {
-  it('is ADDITIVE: the format version does not move, request steps parse unchanged', () => {
-    expect(GUARD_FORMAT_VERSION).toBe(2)
+  it('is ADDITIVE: request steps parse unchanged', () => {
     const step = GuardApiStepSchema.parse({ request: { method: 'GET', path: '/x' }, expect: { status: 200 } })
     expect(isApiRequestStep(step)).toBe(true)
     expect(isApiBootStep(step)).toBe(false)
@@ -71,7 +69,7 @@ describe('api lifecycle steps — schema', () => {
   })
 
   it('a whole scenario mixes request and lifecycle steps', () => {
-    const parsed = GuardApiScenarioSchema.parse(
+    const parsed = GuardScenarioSchema.parse(
       scenario([
         { boot: { env: { LOG_LEVEL: 'debug' } } },
         { request: { method: 'GET', path: '/x' }, expect: { status: 200 } },

@@ -29,7 +29,14 @@
  * claim-faithfulness rules, not here.
  */
 
-import { isApiRequestStep, type GuardApiStep, type GuardSetup, type GuardStep } from '@truecourse/shared'
+import {
+  isApiRequestStep,
+  isWebStep,
+  type GuardApiStep,
+  type GuardSetup,
+  type GuardStep,
+  type GuardWebStep,
+} from '@truecourse/shared'
 
 /** One fenced block mined from a section, byte-exact. */
 export interface MinedExampleBlock {
@@ -111,27 +118,36 @@ interface ExampleCarrier {
 }
 
 /** The input-side carriers — where a doc example RUNS, and where byte comparison
- *  is feasible: seeded file content, cli stdin, api raw request body. */
-function exampleCarriers(
-  scenario:
-    | { driver: 'cli'; steps: readonly GuardStep[]; setup?: GuardSetup }
-    | { driver: 'api'; steps: readonly GuardApiStep[]; setup?: GuardSetup },
-): ExampleCarrier[] {
+ *  is feasible: seeded file content, cli stdin, api raw request body, a web
+ *  step's filled value or uploaded text. */
+function exampleCarriers(scenario: {
+  steps: readonly (GuardStep | GuardApiStep | GuardWebStep)[]
+  setup?: GuardSetup
+}): ExampleCarrier[] {
   const carriers: ExampleCarrier[] = []
   for (const [file, content] of Object.entries(scenario.setup?.files ?? {})) {
     carriers.push({ where: `setup.files["${file}"]`, value: content })
   }
-  if (scenario.driver === 'cli') {
-    scenario.steps.forEach((step, i) => {
-      if (typeof step.stdin === 'string') carriers.push({ where: `step ${i + 1} stdin`, value: step.stdin })
-    })
-  } else {
-    scenario.steps.forEach((step, i) => {
-      if (isApiRequestStep(step) && typeof step.request.body === 'string') {
+  // Each step names its own carrier — a cli step's `stdin`, a request step's raw
+  // body, a web step's typed value or uploaded text — so a mixed scenario
+  // contributes them all without anyone declaring a driver.
+  scenario.steps.forEach((step, i) => {
+    if (isApiRequestStep(step)) {
+      if (typeof step.request.body === 'string') {
         carriers.push({ where: `step ${i + 1} request.body`, value: step.request.body })
       }
-    })
-  }
+      return
+    }
+    if (isWebStep(step)) {
+      if ('fill' in step) carriers.push({ where: `step ${i + 1} fill value`, value: step.value })
+      if ('upload' in step && typeof step.file.text === 'string') {
+        carriers.push({ where: `step ${i + 1} upload file.text`, value: step.file.text })
+      }
+      return
+    }
+    const stdin = (step as GuardStep).stdin
+    if (typeof stdin === 'string') carriers.push({ where: `step ${i + 1} stdin`, value: stdin })
+  })
   return carriers
 }
 
@@ -143,9 +159,7 @@ function exampleCarriers(
  * composition defect gets. An example no carrier resembles constrains nothing.
  */
 export function exampleFidelityDefect(
-  scenario:
-    | { driver: 'cli'; steps: readonly GuardStep[]; setup?: GuardSetup }
-    | { driver: 'api'; steps: readonly GuardApiStep[]; setup?: GuardSetup },
+  scenario: { steps: readonly (GuardStep | GuardApiStep | GuardWebStep)[]; setup?: GuardSetup },
   examples: readonly DocExampleBlock[],
 ): string | null {
   if (examples.length === 0) return null

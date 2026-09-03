@@ -19,6 +19,9 @@ import {
 import { DetectedExternalServiceSchema } from '../external-services.js'
 import { GuardAutoResolutionSourceSchema } from './auto-resolutions.js'
 import { OutputExcerptsSchema } from './excerpts.js'
+// Value import into a file flows.ts type-imports back from — the reverse edge is
+// type-only (erased), so there is no runtime cycle.
+import { GuardExpectedRedSchema } from './flows.js'
 // The per-stage transport tally lives with the LLM seam; imported from the
 // node-free `tally` module so this schema stays browser-safe.
 import { StageTransportTallySchema } from '../llm/tally.js'
@@ -60,10 +63,10 @@ export type GuardWrittenScenario = z.infer<typeof GuardWrittenScenarioSchema>
  * noise/won't-fix in `scenarios/decisions.json`, so generate settles it explicitly
  * instead of silently disappearing it), or the two REALIZATION kinds a flow's
  * surface can end in:
- *  - `no-journey` — the surface's journey catalog is EMPTY: nothing was mapped
+ *  - `no-interface` — the surface's interface catalog is EMPTY: nothing was mapped
  *    that could serve the flow. Usually "the mapper can't see your code" (an
  *    extraction gap), and must never read as "your product lacks the feature".
- *  - `unrealizable` — the catalog is healthy, matching examined it, and no journey
+ *  - `unrealizable` — the catalog is healthy, matching examined it, and no interface
  *    path serves the flow's milestones: the real "the spec claims this; no code
  *    surface offers it" signal.
  * Both stay GAPS (never findings) while matcher precision is unmeasured — a bogus
@@ -80,7 +83,7 @@ export const GuardCoverageGapKindSchema = z.enum([
   'no-claim',
   'blocked-on',
   'dismissed',
-  'no-journey',
+  'no-interface',
   'unrealizable',
 ])
 export type GuardCoverageGapKind = z.infer<typeof GuardCoverageGapKindSchema>
@@ -101,7 +104,7 @@ export const GuardCoverageGapSchema = z
     /** Present iff `kind === 'awaiting-driver'` — the non-runnable driver awaited. */
     driver: GuardDriverIdSchema.optional(),
     /**
-     * The FLOW the gap belongs to, when it is a flow-level gap (`no-journey`,
+     * The FLOW the gap belongs to, when it is a flow-level gap (`no-interface`,
      * `unrealizable`, `awaiting-driver` on a mapped-but-unrunnable surface, a
      * dismissed flow). `doc`/`anchor` then name the flow's PRIMARY binding (its
      * first milestone's section) so every gap still pivots on a section. Absent
@@ -133,7 +136,9 @@ export type GuardGapDisplayKind = GuardAwaitingDriverId | Exclude<GuardCoverageG
  * valid awaiting driver (never produced by the emitter or the legacy migration;
  * the schema refine guarantees a driver — callers skip a `null`).
  */
-export function gapDisplayKind(gap: GuardCoverageGap): GuardGapDisplayKind | null {
+export function gapDisplayKind(
+  gap: Pick<GuardCoverageGap, 'kind' | 'driver'>,
+): GuardGapDisplayKind | null {
   if (gap.kind === 'awaiting-driver') {
     return gap.driver && isAwaitingDriver(gap.driver) ? gap.driver : null
   }
@@ -193,7 +198,7 @@ export type GuardTriageConfidence = z.infer<typeof GuardTriageConfidenceSchema>
 
 /**
  * A triage verdict on ONE failing test — the post-birth judgment call over the
- * test's own evidence (the journey transcript: steps, expected vs actual, raw
+ * test's own evidence (the interface transcript: steps, expected vs actual, raw
  * output; the flow's spec text; and the request-surface grounding). It attaches to
  * the TEST — two tests of one flow may carry different verdicts, and a flow-level
  * verdict would lie about one of them; flow surfaces show the rollup.
@@ -227,7 +232,7 @@ export type GuardTriage = z.infer<typeof GuardTriageSchema>
  * RE-DERIVED from it at persist
  * ({@link carryForwardBirthFindings}), never carried from a prior report.
  *
- * It carries the failing journey-step identity (`step` + `failedMilestone`, and
+ * It carries the failing interface-step identity (`step` + `failedMilestone`, and
  * the milestone's own `doc`/`anchor`/`claim`), expected vs actual, the raw output
  * excerpts, the evidence pointer, and the triage verdict — everything a reader
  * needs to explain the red test without `guard/result.json`. NOT `.strict()`: a
@@ -261,6 +266,14 @@ export const GuardScenarioDiagnosisSchema = z.object({
   /** The triage verdict that committed this test (`code-drift` / `doc-drift`).
    *  Absent when the test committed untriaged (no runner, or a fail-soft call). */
   triage: GuardTriageSchema.optional(),
+  /**
+   * The FLOW WORKER's own adjudication of this committed red (plan 04 step 17):
+   * the `expectedReds` prediction the engine's confirmation run reproduced before
+   * the submission was accepted. On the session path this takes the triage
+   * verdict's place — `triage` stays absent; a one-shot generate writes `triage`
+   * and leaves this absent.
+   */
+  expectedRed: GuardExpectedRedSchema.optional(),
 })
 export type GuardScenarioDiagnosis = z.infer<typeof GuardScenarioDiagnosisSchema>
 
@@ -371,6 +384,13 @@ export const GuardBirthFindingSchema = z
      * A `fidelity` rejection carries none (the reviewer's verdict is its own).
      */
     triage: GuardTriageSchema.optional(),
+    /**
+     * The FLOW WORKER's adjudication of a committed red (plan 04 step 17) — the
+     * confirmed `expectedReds` prediction. The session path's analog of `triage`
+     * (a worker-committed red carries this and no triage verdict). Optional so
+     * every one-shot report keeps parsing.
+     */
+    expectedRed: GuardExpectedRedSchema.optional(),
     /**
      * Set when the auto-resolve loop KEPT rejecting this flow's test: the
      * verdict said auto-resolve (a HIGH-confidence generation-defect, a
@@ -517,13 +537,13 @@ export const GuardGenerateErrorSchema = z
      *    plan). Self-healing: the next generate re-authors and may well succeed.
      *  - `birth` — a scenario WAS authored and its execution errored. Scenario-level,
      *    so it carries {@link flowId}.
-     *  - `refusal` — the RUN was declined before anything was validated (a broken
-     *    recipe, a half-configured external account, a dead entry). Nothing was
-     *    authored, nothing executed, and re-running changes NOTHING until the
-     *    config does — so a surface must never offer "will retry next generate".
+     *  - `refusal` — the RUN latched a decline (a broken recipe, a half-configured
+     *    external account, a dead world): every round from the latch on was refused
+     *    unvalidated. Work settled BEFORE the latch stands; the refusal itself
+     *    never heals by re-running until the config/world does — but a re-run DOES
+     *    resume the refused flows from the authoring cache.
      * Optional: reports written before the discriminator existed carry no kind, and
-     * are read as `authoring` (the retry wording those surfaces already used). NO
-     * format-version bump.
+     * are read as `authoring` (the retry wording those surfaces already used).
      */
     kind: z.enum(['authoring', 'birth', 'refusal']).optional(),
     /**
@@ -537,7 +557,7 @@ export const GuardGenerateErrorSchema = z
      * The surface the errored work was for — authoring is one call per (flow,
      * surface), so a flow can fail on one surface and succeed on another, and a
      * reader that cannot tell them apart attributes the failure to both. Optional:
-     * a run-level refusal has none, and older reports carry none. NO format bump.
+     * a run-level refusal has none, and older reports carry none.
      */
     surface: GuardDriverIdSchema.optional(),
     /**
@@ -546,8 +566,7 @@ export const GuardGenerateErrorSchema = z
      * own stdout/stderr (so `result.json` shows WHY it didn't come up — the diagnosed
      * cal.com health-timeouts left zero server-side evidence); a step-level INFRA error
      * carries the response-body/server-stderr excerpts. Absent for authoring errors (no
-     * process ran). Optional so those and pre-change snapshots keep parsing. NO
-     * format-version bump.
+     * process ran). Optional so those and pre-change snapshots keep parsing.
      */
     ...OutputExcerptsSchema.shape,
   })
@@ -616,11 +635,12 @@ export const GuardEntryPreflightSchema = z
 export type GuardEntryPreflight = z.infer<typeof GuardEntryPreflightSchema>
 
 /**
- * The runner DECLINED the run — before building, booting, or executing anything.
- * A broken `recipe.json`, a credential env var that is not set, an external account
- * described only half-way: all are read off one JSON file in milliseconds, and all
- * of them mean the same thing — no scenario was validated, and none will be until
- * the configuration changes.
+ * The runner DECLINED a run — a broken `recipe.json`, a credential env var that
+ * is not set, a seed whose world died under it. From the round that hit it, the
+ * latch refuses every later round: none of THOSE flows was validated, and none
+ * will be until the configuration (or world) changes. In a generate whose
+ * validation runs per-candidate, rounds that settled BEFORE the latch stand —
+ * the refusal marks where validation STOPPED, not that none ever happened.
  *
  * Recorded ONCE, at the RUN level, in the runner's own grammar. It must never be
  * fanned out per candidate: a refusal that arrives as N per-scenario "validation
@@ -741,18 +761,18 @@ export const GuardFlowsReportSchema = z
 export type GuardFlowsReport = z.infer<typeof GuardFlowsReportSchema>
 
 /**
- * The journey catalog the run grounded on — deterministic, free, and re-derived
- * every generate. An empty surface is exactly what a `no-journey` gap reports, so
+ * The interface catalog the run grounded on — deterministic, free, and re-derived
+ * every generate. An empty surface is exactly what a `no-interface` gap reports, so
  * the counts are the first thing to read when flows settle unrealized.
  */
-export const GuardJourneysReportSchema = z
+export const GuardInterfacesReportSchema = z
   .object({
     total: z.number().int().nonnegative(),
-    /** Journey type (a driver id) → how many journeys were mapped for it. */
+    /** Interface type (a driver id) → how many interfaces were mapped for it. */
     bySurface: z.record(z.string(), z.number().int().nonnegative()),
   })
   .strict()
-export type GuardJourneysReport = z.infer<typeof GuardJourneysReportSchema>
+export type GuardInterfacesReport = z.infer<typeof GuardInterfacesReportSchema>
 
 /** A bound section whose scenarios remain but the section itself is gone. */
 export const GuardOrphanedSectionSchema = z
@@ -881,6 +901,28 @@ export const GuardGenerateReportSchema = z
     sectionsTotal: z.number().int().nonnegative(),
     sectionsChanged: z.number().int().nonnegative(),
     skippedUnchanged: z.number().int().nonnegative(),
+    /** Of `sectionsChanged`, the sections whose edit the claim-diff gate judged
+     *  cosmetic: their prior extraction was reused and no flow re-authored for
+     *  them. Absent on reports written before the gate existed. */
+    cosmeticSections: z.number().int().nonnegative().optional(),
+    /** Live claim-diff gate calls this run made (cache hits excluded). */
+    claimDiffCalls: z.number().int().nonnegative().optional(),
+    /** Prior scenarios editing workers deliberately dropped this run, each with
+     *  the vanished obligation it named. Absent on reports that predate
+     *  incremental authoring. */
+    retiredScenarios: z
+      .array(
+        z
+          .object({
+            flowId: z.string().min(1),
+            id: z.string().min(1),
+            surface: z.string().min(1),
+            reason: z.string().min(1),
+            replacedBy: z.array(z.string().min(1)).optional(),
+          })
+          .strict(),
+      )
+      .optional(),
     /** True when nothing changed — the confirm/run was a no-op. */
     noChanges: z.boolean(),
     written: z.array(GuardWrittenScenarioSchema),
@@ -957,11 +999,11 @@ export const GuardGenerateReportSchema = z
      * Optional so reports written before flows existed keep parsing.
      */
     flows: GuardFlowsReportSchema.optional(),
-    /** The journey catalog the run matched against. Optional, same reason. */
-    journeys: GuardJourneysReportSchema.optional(),
+    /** The interface catalog the run matched against. Optional, same reason. */
+    interfaces: GuardInterfacesReportSchema.optional(),
     /**
      * The third parties the repo imports — detected from the same working-tree
-     * analysis the journeys came from, so it costs nothing extra. Independent of the
+     * analysis the interfaces came from, so it costs nothing extra. Independent of the
      * gaps: it answers "what does this app talk to" even when no flow was blocked.
      * Optional so reports written before detection existed keep parsing.
      */
@@ -1028,7 +1070,7 @@ export function guardEvidencePaths(sources: {
  *  half of {@link GuardScenarioDiagnosisSchema}'s durability contract. */
 export function findingFromDiagnosis(
   flowId: string,
-  scenario: { id: string; surface: GuardDriverId },
+  scenario: { id: string; drivers: GuardDriverId[] },
   d: GuardScenarioDiagnosis,
 ): GuardBirthFinding {
   return {
@@ -1046,7 +1088,9 @@ export function findingFromDiagnosis(
     ...(d.evidencePath !== undefined ? { evidencePath: d.evidencePath } : {}),
     ...(d.claim !== undefined ? { claim: d.claim } : {}),
     flowId,
-    surface: scenario.surface,
+    // The (flow, surface) pair a report row is keyed by is the surface the flow was
+    // AUTHORED for — the scenario's primary driver, first in registry order.
+    surface: scenario.drivers[0],
     ...(d.failedMilestone !== undefined ? { failedMilestone: d.failedMilestone } : {}),
     ...(d.priorMilestonesPassed !== undefined ? { priorMilestonesPassed: d.priorMilestonesPassed } : {}),
     ...(d.triage !== undefined ? { triage: d.triage } : {}),

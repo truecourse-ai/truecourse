@@ -11,14 +11,13 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { buildAuthorUserPrompt, type AuthorUserContext } from '@truecourse/guard-generator'
 import {
   makeTempRepo,
   rmrf,
   writeDoc,
   writeCorpus,
-  extractBy,
-  authorBy,
+  extractSessionBy,
+  submitWorkerSessions,
   runGenerate,
   withExternalServices,
   writeApiRecipe,
@@ -42,25 +41,26 @@ function writeLocal(repo: string, local: unknown): void {
   fs.writeFileSync(target, JSON.stringify(local, null, 2))
 }
 
-/** Run one api generate and hand back the api author context it built. */
-async function apiContext(repo: string, detected: { service: string; baseUrlEnv?: string }[]): Promise<AuthorUserContext> {
+/** Run one api generate and hand back the api WORKER's briefing (the payload the
+ *  retired one-shot author context used to carry). */
+async function apiBriefing(repo: string, detected: { service: string; baseUrlEnv?: string }[]): Promise<string> {
   writeCorpus(repo, [{ ref: API_DOC }])
   writeDoc(repo, API_DOC, API_DOC_CONTENT)
-  const contexts: AuthorUserContext[] = []
+  const briefings: string[] = []
   await runGenerate({
     repoRoot: repo,
     interfaces: withExternalServices(
       interfacesOf(repo, apiInterface('GET', '/todos')),
       ...detected.map((d) => ({ category: 'ai' as const, ...d })),
     ),
-    extractRunner: extractBy({
+    extractSession: extractSessionBy({
       list: [{ driver: 'api', claim: 'GET /todos returns 200 with the todo list', reason: 'HTTP status' }],
     }),
-    generateRunner: authorBy({ list: rawApi('GET /todos answers 200', PASSING_API_STEPS) }, (ctx) =>
-      contexts.push(ctx),
-    ),
+    flowWorkerSession: submitWorkerSessions(() => rawApi('GET /todos answers 200', PASSING_API_STEPS), {
+      onBriefing: (_task, text) => briefings.push(text),
+    }),
   })
-  return contexts.find((c) => c.driver === 'api')!
+  return briefings[0]
 }
 
 describe('generate — a PROVIDED external is advertised as live', () => {
@@ -81,20 +81,10 @@ describe('generate — a PROVIDED external is advertised as live', () => {
     })
     writeLocal(r, { 'open-meteo': { env: { GEO_KEY: 'sandbox-key' } } })
 
-    const ctx = await apiContext(r, [{ service: 'open-meteo', baseUrlEnv: 'OM_BASE' }])
-    expect(ctx.externalServices).toEqual([
-      {
-        name: 'open-meteo',
-        // The RECIPE's declaration wins over the detector's guess — it is the var
-        // the runner actually injects.
-        baseUrlEnv: 'GEOCODING_BASE_URL',
-        provided: true,
-        mode: 'sandbox',
-        description: 'shared team sandbox',
-      },
-    ])
-
-    const prompt = buildAuthorUserPrompt(ctx)
+    const prompt = await apiBriefing(r, [{ service: 'open-meteo', baseUrlEnv: 'OM_BASE' }])
+    // The RECIPE's declaration wins over the detector's guess — GEOCODING_BASE_URL
+    // is the var the runner actually injects, so OM_BASE never reaches the worker.
+    expect(prompt).not.toContain('OM_BASE')
     expect(prompt).toContain('EXTERNAL SERVICES AVAILABLE FOR REAL')
     expect(prompt).toContain('open-meteo: sandbox account; the server reaches it via GEOCODING_BASE_URL; shared team sandbox')
     expect(prompt).toContain('do NOT stub them')
@@ -117,9 +107,8 @@ describe('generate — a PROVIDED external is advertised as live', () => {
       },
     })
 
-    const ctx = await apiContext(r, [{ service: 'open-meteo', baseUrlEnv: 'OM_BASE' }])
-    expect(ctx.externalServices).toEqual([{ name: 'open-meteo', baseUrlEnv: 'OM_BASE' }])
-    const prompt = buildAuthorUserPrompt(ctx)
+    const prompt = await apiBriefing(r, [{ service: 'open-meteo', baseUrlEnv: 'OM_BASE' }])
+    expect(prompt).toContain('open-meteo (base URL env: OM_BASE')
     expect(prompt).toContain('THIRD PARTIES THIS REPO DEPENDS ON')
     expect(prompt).not.toContain('EXTERNAL SERVICES AVAILABLE FOR REAL')
   })
@@ -132,12 +121,7 @@ describe('generate — a PROVIDED external is advertised as live', () => {
       externals: { 'billing-co': { baseUrlEnv: 'BILLING_BASE', baseUrl: 'https://billing.test', mode: 'real' } },
     })
 
-    const ctx = await apiContext(r, [{ service: 'stripe', baseUrlEnv: 'STRIPE_API_BASE' }])
-    expect(ctx.externalServices).toEqual([
-      { name: 'stripe', baseUrlEnv: 'STRIPE_API_BASE' },
-      { name: 'billing-co', baseUrlEnv: 'BILLING_BASE', provided: true, mode: 'real' },
-    ])
-    const prompt = buildAuthorUserPrompt(ctx)
+    const prompt = await apiBriefing(r, [{ service: 'stripe', baseUrlEnv: 'STRIPE_API_BASE' }])
     // Both blocks render: stripe is still a blocker, billing-co is a capability.
     expect(prompt).toContain('detected in its source: stripe (base URL env: STRIPE_API_BASE — stubable via setup.http, or provide it)')
     expect(prompt).toContain('- billing-co: real account; the server reaches it via BILLING_BASE')
@@ -155,8 +139,7 @@ describe('generate — a PROVIDED external is advertised as live', () => {
       },
     })
 
-    const ctx = await apiContext(r, [{ service: 'open-meteo', baseUrlEnv: 'FORECAST_BASE_URL' }])
-    const prompt = buildAuthorUserPrompt(ctx)
+    const prompt = await apiBriefing(r, [{ service: 'open-meteo', baseUrlEnv: 'FORECAST_BASE_URL' }])
     expect(prompt).toContain('setup.externals')
     expect(prompt).toContain('fail once and then recover')
     expect(prompt).toContain('A flow about UPSTREAM FAILURE behavior is therefore authorable')
@@ -166,8 +149,8 @@ describe('generate — a PROVIDED external is advertised as live', () => {
     const r = makeTempRepo()
     repos.push(r)
     writeApiRecipe(r, { entry: null })
-    const ctx = await apiContext(r, [{ service: 'stripe', baseUrlEnv: 'STRIPE_API_BASE' }])
-    expect(ctx.externalServices).toEqual([{ name: 'stripe', baseUrlEnv: 'STRIPE_API_BASE' }])
-    expect(buildAuthorUserPrompt(ctx)).not.toContain('AVAILABLE FOR REAL')
+    const prompt = await apiBriefing(r, [{ service: 'stripe', baseUrlEnv: 'STRIPE_API_BASE' }])
+    expect(prompt).toContain('stripe (base URL env: STRIPE_API_BASE')
+    expect(prompt).not.toContain('AVAILABLE FOR REAL')
   })
 })

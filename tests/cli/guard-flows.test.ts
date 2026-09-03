@@ -13,8 +13,7 @@ import { flowsPath } from '@truecourse/guard-generator'
 import { writeManifest, writeGuardLatest } from '@truecourse/guard-runner'
 import {
   flowFingerprint,
-  GUARD_FORMAT_VERSION,
-  type GuardFlow,
+    type GuardFlow,
   type GuardFlowMilestone,
   type GuardLatest,
   type GuardManifest,
@@ -111,7 +110,7 @@ function manifestFlow(over: Partial<GuardManifestFlow> & Pick<GuardManifestFlow,
 }
 
 function manifest(flows: GuardManifestFlow[]): GuardManifest {
-  return { version: GUARD_FORMAT_VERSION, flows }
+  return { flows }
 }
 
 function result(over: Partial<GuardScenarioResult> & Pick<GuardScenarioResult, 'id' | 'outcome'>): GuardScenarioResult {
@@ -133,7 +132,6 @@ function latest(scenarios: GuardScenarioResult[]): GuardLatest {
       branch: 'main',
       commit: 'deadbeefcafef00d',
       recipeFingerprint: 'sha256:r',
-      scenarioFormat: GUARD_FORMAT_VERSION,
     },
     summary,
     scenarios,
@@ -157,7 +155,7 @@ async function seedTaskbird(r: string): Promise<void> {
           anchor,
           fingerprint: `sha256:${anchor}`,
         })),
-        scenarios: [{ id: 'task-lifecycle.api.1', surface: 'api' }],
+        scenarios: [{ id: 'task-lifecycle.api.1', drivers: ['api'] }],
         gaps: [
           {
             surface: 'web',
@@ -170,7 +168,7 @@ async function seedTaskbird(r: string): Promise<void> {
       manifestFlow({
         flowId: 'rate-limiting',
         bindings: [{ doc: DOC, anchor: 'auth/rate-limits', fingerprint: 'sha256:auth/rate-limits' }],
-        scenarios: [{ id: 'rate-limiting.api.1', surface: 'api' }],
+        scenarios: [{ id: 'rate-limiting.api.1', drivers: ['api'] }],
       }),
     ]),
   )
@@ -181,7 +179,7 @@ async function seedTaskbird(r: string): Promise<void> {
       id: 'task-lifecycle.api.1',
       title: 'Tasks are created, listed newest-first, completed, and filterable as done',
       flow: { id: 'task-lifecycle', fingerprint: 'sha256:41ac' },
-      journey: {
+      interface: {
         path: ['api/create-task', 'api/list-tasks', 'api/complete-task'],
         fingerprints: ['sha256:9b', 'sha256:c2', 'sha256:77'],
       },
@@ -228,21 +226,26 @@ describe('runGuardFlows — the inventory', () => {
 
     await runGuardFlows({ cwd: r })
 
-    expect(out).toContain('FLOWS (2) · 1 guarded · 1 gap')
-    // The gap flow sorts first and carries both surfaces as chips.
+    // The tally is the coverage vocabulary and nothing else — worst first, and the
+    // same five words the dashboard's chips wear.
+    expect(out).toContain('FLOWS (2) · 1 blocked · 1 succeeded')
+    // The blocked flow sorts first and carries both surfaces as chips.
     expect(out).toMatch(/✗ task-lifecycle\s+api ✓ · web awaiting driver\s+4 milestones · 3 sections/)
     expect(out).toMatch(/✓ rate-limiting\s+api ✓\s+1 milestone · 1 section/)
     expect(out).toContain('guard flows --show')
+    expect(out).not.toMatch(/guarded|not generated/i)
   })
 
-  it('a flow synthesized but never generated reads "not generated", never "guarded"', async () => {
+  it('a flow synthesized but never generated reads "blocked", never a mute bucket', async () => {
     const r = repo()
     writeFlows(r, [flow('rate-limiting', 'Login rate limiting', 'g', RATE_LIMITING)])
 
     await runGuardFlows({ cwd: r })
 
-    expect(out).toContain('FLOWS (1) · 0 guarded · 0 gap · 1 not generated')
-    expect(out).toContain('not generated')
+    expect(out).toContain('FLOWS (1) · 1 blocked')
+    // The row says it too — a flow with no surface at all is not a blank cell.
+    expect(out).toMatch(/✗ rate-limiting\s+blocked/)
+    expect(out).not.toMatch(/not generated|guarded/i)
   })
 
   it('paints the last run outcome over the coverage glyph', async () => {
@@ -280,7 +283,7 @@ describe('runGuardFlows --show — the drill-down', () => {
   })
   afterEach(() => spy.mockRestore())
 
-  it('shows goal, milestones, binds, surfaces, journeys and gaps', async () => {
+  it('shows goal, milestones, binds, surfaces, interfaces and gaps', async () => {
     const r = repo()
     await seedTaskbird(r)
 
@@ -291,30 +294,13 @@ describe('runGuardFlows --show — the drill-down', () => {
     expect(out).toContain('→ 4 Done tasks appear und…')
     expect(out).toContain('binds       docs/specs/tasks.md  §tasks/creating-tasks · §tasks/listing-tasks · §tasks/completing-tasks')
     expect(out).toContain('surfaces    api → task-lifecycle.api.1 (birth ✓) · web → awaiting driver')
-    expect(out).toContain('journeys    api/create-task · api/list-tasks · api/complete-task')
+    expect(out).toContain('interfaces  api/create-task · api/list-tasks · api/complete-task')
     expect(out).toContain('gaps        web: awaiting web driver')
   })
 
-  // The same shared renderer the dashboard's Story mode reads, in the terminal —
-  // a reviewer with no browser can still read what a test promises.
-  it('--story reads each committed test in plain words, from the shared renderer', async () => {
-    const r = repo()
-    await seedTaskbird(r)
-
-    await runGuardFlows({ cwd: r, show: 'task-lifecycle', story: true })
-
-    expect(out).toContain('task-lifecycle.api.1  (api)')
-    expect(out).toContain('promise     A user creates a task, sees it listed, completes it, and sees it done')
-    expect(out).toContain('world       The sandbox starts with 1 seeded file: seed.json.')
-    expect(out).toContain('POST /tasks, sending JSON {"title":"write the spec"}')
-    expect(out).toContain('remembers `id` from `data.id` in the response body')
-    expect(out).toContain('must be true: the response status is 201')
-    // The chained step names what it reuses, so the path reads as a path.
-    expect(out).toContain('GET /tasks/${id}')
-    expect(out).toContain('using `id` remembered earlier')
-  })
-
-  it('leaves the drill-down compact without --story', async () => {
+  // The drill-down is a COMPACT read: the flow's shape, never a retelling of the
+  // test files it points at. Reading a test is the test surface's job.
+  it('keeps the drill-down compact — never the test files told back', async () => {
     const r = repo()
     await seedTaskbird(r)
 

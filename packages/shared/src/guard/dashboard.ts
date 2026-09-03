@@ -26,9 +26,8 @@ import {
   GuardGenerateErrorSchema,
   GuardTriageSchema,
 } from './report.js'
-import type { GuardGapDisplayKind } from './report.js'
-import type { GuardScenarioStepView } from './scenario.js'
-import type { GuardScenarioStory } from './describe.js'
+import type { GuardCoverageGapKind, GuardGapDisplayKind } from './report.js'
+import type { GuardScenarioSetupView, GuardScenarioStepView } from './scenario.js'
 import { GuardNeedsSetupSchema } from './needs-setup.js'
 import type { GuardNeedsSetup } from './needs-setup.js'
 import {
@@ -54,6 +53,10 @@ import {
  *    driver id so the drivers stay separate chips (the flat set is registry-derived);
  *  - `guarded` — scenarios are bound but the current run has no outcome for them
  *    (the run is stale, or the section was never run);
+ *  - `never-run` — a bound scenario that has NEVER EXECUTED AT ALL, not even at
+ *    birth (a hand-authored corpus). `guarded` still means "it ran when it was
+ *    written, just not in this run"; this one means nothing has ever proved it, so
+ *    it must not borrow a passing word;
  *  - `needs-setup` — a `blocked-on` gap whose missing capability is an external
  *    service the user can PROVIDE. Derived on read from the externals
  *    view, never persisted and never a gap kind of its own: the stored gap stays
@@ -70,47 +73,61 @@ export type GuardSectionCoverageStatus =
   | GuardOutcome
   | GuardGapDisplayKind
   | 'guarded'
+  | 'never-run'
   | 'needs-setup'
   | 'authoring-error'
   | 'unguarded'
 
 /**
  * Every coverage status in WORST-FIRST precedence — the ONE order every rollup
- * uses (surface → flow → section). It encodes the read model's tiers:
+ * uses (surface → flow → section).
  *
- *   1. run outcomes — a result always outranks a generate-time verdict, so a
- *      section that ran paints its run (even a `pass`) and never a sibling gap;
- *   2. `guarded` — generated but absent from the current run;
- *   2b. `authoring-error` — generate tried and could not produce a test. It is a
- *      FAILURE of the engine, not a verdict about the repo, so it sits above every
- *      gap (a gap is a settled answer; this is an unanswered question) and below
- *      the run outcomes and `guarded` (anything that actually produced a test
- *      outranks something that produced nothing);
- *   3. gaps, MOST ACTIONABLE first, then "could not test" before "nothing to
- *      test": `needs-setup` → `blocked-on` → `unrealizable` → `no-journey` → the
- *      awaiting-driver ids (registry order) → `untestable` → `no-claim` →
- *      `dismissed`. `needs-setup` leads its tier because it is the one gap a user
- *      can clear today (provide the account, re-generate); it stays BELOW the run
- *      outcomes because a section that ran paints its run, always;
- *   4. `unguarded` — nothing binds it at all.
+ * The ORDER OF TIERS is {@link GUARD_COVERAGE_PLAIN_ORDER}, the five-word coverage
+ * vocabulary: Failed → Blocked → Never run → Succeeded → Not testable. A rollup
+ * therefore never hides a blocker behind a sibling that passed — a section with a
+ * green scenario and a blocked claim reads Blocked, and the mix stays visible in
+ * its detail. Within a tier the order is most-informative first:
+ *
+ *   1. **Failed** — `fail` before `error` (a verdict about the repo before a
+ *      verdict about the run);
+ *   2. **Blocked** — the two re-anchor states (`stale`, `orphaned`) lead because
+ *      they are about a bind that USED to hold; then the run outcome `blocked` (a
+ *      scenario exists and was held back on an unregistered supplied dependency —
+ *      one registration away from a verdict); then `authoring-error` (generate
+ *      tried and could not — an unanswered question, not a settled answer); then
+ *      the gaps a user can clear, most actionable first: `needs-setup` (provide
+ *      the account) → `blocked-on` → `no-interface` → the awaiting-driver ids
+ *      (registry order); `unguarded` last, the only one that names nothing at all;
+ *   3. **Never run** — a test exists and has never executed;
+ *   4. **Succeeded** — `pass` (this run proved it) before `guarded` (an earlier
+ *      execution did);
+ *   5. **Not testable** — `unrealizable` (the spec promises what no code surface
+ *      offers) → `untestable` → `no-claim` → `dismissed`.
  */
 export const GUARD_COVERAGE_STATUS_PRECEDENCE = [
+  // Failed
   'fail',
   'error',
+  // Blocked
   'stale',
   'orphaned',
-  'pass',
-  'guarded',
+  'blocked',
   'authoring-error',
   'needs-setup',
   'blocked-on',
-  'unrealizable',
-  'no-journey',
+  'no-interface',
   ...awaitingDriverIds,
+  'unguarded',
+  // Never run
+  'never-run',
+  // Succeeded
+  'pass',
+  'guarded',
+  // Not testable
+  'unrealizable',
   'untestable',
   'no-claim',
   'dismissed',
-  'unguarded',
 ] as const satisfies readonly GuardSectionCoverageStatus[]
 
 // Compile-time backstop: a new status (a new outcome, driver, or gap kind) that
@@ -149,6 +166,122 @@ export function worstCoverageStatus(
     }
   }
   return best
+}
+
+// ---------------------------------------------------------------------------
+// THE COVERAGE VOCABULARY — five words, and only these five.
+// ---------------------------------------------------------------------------
+
+/**
+ * What a reader is told about coverage: a doc section, a flow, an overview
+ * counter, a filter and a chip each wear exactly ONE of these five, everywhere,
+ * on the CLI and in the dashboard alike.
+ *
+ *  - `succeeded` — the claims' scenarios passed;
+ *  - `failed` — a scenario contradicted the spec (drift), or could not complete;
+ *  - `blocked` — something NAMED stands between the claim and its proof: no
+ *    interface to step through, a supplied dependency nobody registered, an
+ *    external account to provide, a bind that no longer holds (a stale or
+ *    orphaned anchor is Blocked — it is actionable, not a status of its own);
+ *  - `not-testable` — a settled answer: nothing here can be proven (unrealizable,
+ *    untestable, no testable claim, or the user ruled it out);
+ *  - `never-run` — scenarios exist and have never executed. A first-class status:
+ *    "committed but unproven" is neither a pass nor a gap.
+ *
+ * The wire keeps its richer status ids ({@link GuardSectionCoverageStatus}); they
+ * decide COLOUR, ordering, and the sentence a detail row shows. They are never
+ * the word. Scenario-level RUN verdicts keep their own pass/fail wording — these
+ * five are the coverage vocabulary, not the verdict vocabulary.
+ */
+export type GuardCoveragePlainStatus =
+  | 'failed'
+  | 'blocked'
+  | 'never-run'
+  | 'succeeded'
+  | 'not-testable'
+
+/**
+ * The five in SEVERITY order — worst first, and the order every counter, filter
+ * and legend lists them in. `not-testable` is last on purpose: it is the one
+ * status that is nobody's to-do, so it surfaces only when nothing else applies.
+ */
+export const GUARD_COVERAGE_PLAIN_ORDER = [
+  'failed',
+  'blocked',
+  'never-run',
+  'succeeded',
+  'not-testable',
+] as const satisfies readonly GuardCoveragePlainStatus[]
+
+/** The ONE word per status. Nothing else may name a coverage state to a reader. */
+export const GUARD_COVERAGE_STATUS_WORD: Record<GuardCoveragePlainStatus, string> = {
+  succeeded: 'Succeeded',
+  failed: 'Failed',
+  blocked: 'Blocked',
+  'not-testable': 'Not testable',
+  'never-run': 'Never run',
+}
+
+/**
+ * Every wire status folded onto its word. Derived from the precedence tiers above
+ * so the two can never disagree: re-ranking a status into another tier changes
+ * its word with it.
+ */
+const COVERAGE_PLAIN: Record<GuardSectionCoverageStatus, GuardCoveragePlainStatus> = {
+  fail: 'failed',
+  // Nothing about the repo is proven wrong, but the scenario reached no verdict —
+  // and a run that could not finish is a failure of the run, never a pass.
+  error: 'failed',
+  stale: 'blocked',
+  orphaned: 'blocked',
+  // A scenario held back on an unregistered supplied dependency — the outcome the
+  // word was coined for: named, actionable, and nothing about the repo disproven.
+  blocked: 'blocked',
+  'authoring-error': 'blocked',
+  'needs-setup': 'blocked',
+  'blocked-on': 'blocked',
+  'no-interface': 'blocked',
+  ...(Object.fromEntries(awaitingDriverIds.map((id) => [id, 'blocked'])) as Record<
+    (typeof awaitingDriverIds)[number],
+    GuardCoveragePlainStatus
+  >),
+  // Nothing accounts for this section — no flow, no gap, no claim. It is a HOLE in
+  // the coverage record, which the next generate closes: attention-needing, and
+  // never a quiet bucket that reads as "fine".
+  unguarded: 'blocked',
+  'never-run': 'never-run',
+  pass: 'succeeded',
+  guarded: 'succeeded',
+  unrealizable: 'not-testable',
+  untestable: 'not-testable',
+  'no-claim': 'not-testable',
+  dismissed: 'not-testable',
+}
+
+/**
+ * A wire status's word-bearing status. An id this build never learned (a payload
+ * from a newer server) reads `blocked` — attention-needing, never blank.
+ */
+export function guardCoveragePlainStatus(
+  status: GuardSectionCoverageStatus,
+): GuardCoveragePlainStatus {
+  return COVERAGE_PLAIN[status] ?? 'blocked'
+}
+
+/** The one WORD a wire status wears on a coverage surface. */
+export function guardCoverageWord(status: GuardSectionCoverageStatus): string {
+  return GUARD_COVERAGE_STATUS_WORD[guardCoveragePlainStatus(status)]
+}
+
+/**
+ * The worst of several coverage statuses, as its word-bearing status —
+ * {@link worstCoverageStatus} read through the five. The empty set is `blocked`
+ * (nothing accounts for it), matching `unguarded`'s own word.
+ */
+export function worstCoveragePlainStatus(
+  statuses: readonly GuardSectionCoverageStatus[],
+): GuardCoveragePlainStatus {
+  return guardCoveragePlainStatus(worstCoverageStatus(statuses))
 }
 
 /**
@@ -200,7 +333,7 @@ export const GuardFlowGapSchema = z
     reason: z.string(),
     /** Present iff `kind === 'awaiting-driver'` — the non-runnable driver awaited. */
     driver: GuardDriverIdSchema.optional(),
-    /** One-line display label (`awaiting web driver`, `no journey`). */
+    /** One-line display label (`awaiting web driver`, `no interface`). */
     label: z.string(),
     /**
      * Present iff `kind === 'blocked-on'` AND the gap names an external service
@@ -273,6 +406,23 @@ export const GuardSectionFlowSchema = z
   .strict()
 export type GuardSectionFlow = z.infer<typeof GuardSectionFlowSchema>
 
+/**
+ * One claim a section states that no flow carries — the gap that must stay
+ * visible next to the section's scenarios. Sourced from the flow corpus's
+ * `noFlowClaims` (which names the claim) and from the last generate's
+ * claim-level coverage gaps (which may only carry the reason).
+ */
+export interface GuardSectionClaimGap {
+  /** The claim's store id, when the claims store resolves the identity. */
+  claimId?: string
+  /** The claim's title; absent for a generate gap that named no claim. */
+  title?: string
+  /** Why it reached no flow. */
+  reason: string
+  /** The gap's kind, when the generate report classified it. */
+  kind?: GuardCoverageGapKind
+}
+
 /** A live doc section joined to its guard coverage. */
 export interface GuardSectionCoverage {
   /** Slugified heading path (the section anchor) in the live doc. */
@@ -299,6 +449,13 @@ export interface GuardSectionCoverage {
    * shows. The section's `status` is the worst status over them.
    */
   flows: GuardSectionFlow[]
+  /**
+   * The section's CLAIM-LEVEL gaps — claims stated here that no flow carries,
+   * each with its reason. Independent of `status`: `guarded` outranks every gap
+   * status, so a section with both scenarios and gapped claims would otherwise
+   * report only its rank and lose the gaps entirely. A reader must see both.
+   */
+  claimGaps: GuardSectionClaimGap[]
   /** Scenario ids the section's flows are realized by (flat, for counts/links). */
   scenarioIds: string[]
   /**
@@ -425,11 +582,11 @@ export interface GuardLatestWithRunFlows extends GuardLatest {
 
 /**
  * A committed test's source, for the detail view: its STEPS as the reader sees
- * them (the primary rendering), its STORY in plain sentences, and the raw YAML
- * behind both. `steps` is empty (and `story` absent) when the file doesn't parse
- * as a known driver — the detail then shows the source alone rather than a
- * half-rendered guess. Both renderings are derived SERVER-SIDE from the parsed
- * file, so the dashboard and the CLI read one source.
+ * them (the View mode's primary rendering) and the raw YAML behind them (the YAML
+ * mode). `steps` is empty when the file doesn't parse — the detail then shows the
+ * source alone rather than a half-rendered guess. The step list is derived
+ * SERVER-SIDE from the parsed file, so the dashboard and the CLI read one source,
+ * and each row names its own driver ({@link GuardScenarioStepView.kind}).
  */
 export interface GuardScenarioSource {
   id: string
@@ -437,12 +594,31 @@ export interface GuardScenarioSource {
   file: string
   /** Raw YAML text. */
   content: string
-  /** The driver the file declares, when it parsed. */
-  driver?: GuardDriverId
   /** The step list, rendered structurally by the test detail. */
   steps?: GuardScenarioStepView[]
-  /** The same file told in plain words — the detail's Story mode. */
-  story?: GuardScenarioStory
+  /**
+   * The world the test starts in — the `setup:` block, derived from the same
+   * parse as the steps. Absent when the file declares none.
+   */
+  setup?: GuardScenarioSetupView
+}
+
+/**
+ * ONE entity's own slice of the JSON store file that holds it — the RAW half of
+ * the two readings every artifact-backed entity offers (View + the artifact).
+ * Pretty-printed server-side from the real file, so the pane shows what is
+ * actually stored rather than a re-serialization of the view model.
+ *
+ * The scenario detail has no `GuardArtifactSource`: its artifact is the whole
+ * YAML file, which {@link GuardScenarioSource.content} already carries.
+ */
+export interface GuardArtifactSource {
+  /** The entity's id, echoed back — what the slice was selected by. */
+  id: string
+  /** Repo-relative path of the store file the slice came out of. */
+  file: string
+  /** The entity's entry, pretty-printed JSON. */
+  content: string
 }
 
 /**
@@ -475,8 +651,11 @@ export interface GuardScenarioListItem {
    * flow and the drill-down stays total.
    */
   flowId: string
-  /** The surface (driver) it runs on. */
-  surface?: GuardDriverId
+  /**
+   * The drivers its STEPS exercise, in registry order — several for a scenario that
+   * spans surfaces. Empty only for a row recovered without its file.
+   */
+  drivers: GuardDriverId[]
   /**
    * The status the last generate COMMITTED the test with — `failing` for a test
    * that failed its birth execution (committed anyway: the doc and the code
@@ -489,38 +668,73 @@ export interface GuardScenarioListItem {
 }
 
 /**
- * The preparation-recipe card for the Scenarios tab — the committed
- * `recipe.json` (`{ build, entry, serve, services, env }`) plus its current working-tree inputs
- * fingerprint and a staleness signal. `stale` compares the current fingerprint
- * to the last run's recorded `recipeFingerprint` (the only stored baseline);
- * it is `null` when there is no run to compare against.
+ * ONE SURFACE'S preparation, in the SAME fields whatever surface it is: the
+ * commands that make the surface runnable, the argv that starts it, how its
+ * readiness is observed, and the env its processes get. Every scope of the card
+ * reads through this one shape, so cli, api and web can never grow three
+ * different renderings — or three different vocabularies — for the same idea.
+ *
+ * A field the recipe does not declare for the surface is ABSENT: never null,
+ * never a default the file itself never stated (the defaults the runner applies
+ * are the runner's).
  */
-export interface GuardRecipeCard {
-  /** Shell command run once to produce the entrypoint/server. */
-  build: string
-  /** Entrypoint argv (cli driver); null on an api-only recipe. */
-  entry: string[] | null
+export interface GuardRecipeSurface {
+  /** Shell command run once before the build to fetch dependencies. */
+  install?: string
+  /** Shell command that produces what this surface runs. */
+  build?: string
+  /** Entrypoint argv this surface invokes (cli driver). */
+  entry?: string[]
   /**
-   * Serve argv (api driver) of the DEFAULT server; null when the recipe has no
-   * `api` block. A multi-server recipe reports its default server here
-   * and the full inventory in {@link servers} — so a card written before servers
-   * existed reads exactly the same.
+   * Argv that starts this surface's server — the DEFAULT server's, when the
+   * surface declares several (the full inventory is {@link servers}).
    */
-  serve: string[] | null
+  serve?: string[]
   /**
-   * Every HTTP service the recipe declares, in name order: `null` for a
-   * single-server (or api-less) recipe, so the card only grows a server list when
-   * there is more than one story to tell.
+   * Every HTTP service the surface declares, in name order. Present only when
+   * there is more than one story to tell; a single server is `serve` alone.
    */
-  servers?: { name: string; serve: string[]; app?: string }[] | null
+  servers?: { name: string; serve: string[]; app?: string }[]
   /**
    * One-shot datastore orchestration (`api.services`): `up` runs in the repo root
    * once per run before any api scenario (e.g. `docker compose up -d --wait`),
-   * `down` after the last one. Null when the recipe declares none.
+   * `down` after the last one.
    */
-  services: { up: string; down?: string } | null
-  /** Recipe-level env the sandbox inherits; null when none is declared. */
-  env: Record<string, string> | null
+  services?: { up: string; down?: string }
+  /** Path polled until it answers 2xx before this surface's first step. */
+  healthPath?: string
+  /** Where the process runs — `sandbox` (the default) or `repo`. */
+  cwd?: 'sandbox' | 'repo'
+  /** Budget for the surface to become ready, in ms. */
+  readyTimeoutMs?: number
+  /** Env this surface's processes get. */
+  env?: Record<string, string>
+  /**
+   * THE API SURFACE'S SHARED SERVER. The runner serves ONE surface for both web
+   * steps and `request` steps (`guard-runner`'s `drivers/surface.ts`: one world
+   * has one address), so a recipe with a `web` block and no `api` block still has
+   * an api server — the web block's. When that is what this block is, it carries
+   * the web block's own fields and says so here, which is why the api scope reads
+   * a real server instead of "nothing declared" and the reader is told whose it
+   * is. Absent on a surface that declares its own preparation.
+   */
+  sharedWithWeb?: true
+}
+
+/**
+ * The preparation-recipe card — the committed `recipe.json` resolved to ONE
+ * per-surface shape, plus its current working-tree inputs fingerprint and a
+ * staleness signal. `stale` compares the current fingerprint to the last run's
+ * recorded `recipeFingerprint` (the only stored baseline); it is `null` when
+ * there is no run to compare against.
+ */
+export interface GuardRecipeCard {
+  /**
+   * Preparation per surface, keyed by driver id — the one shape every scope of
+   * the card reads. A surface the recipe says nothing about has NO entry at all,
+   * which is how a reader is told there is no preparation for it.
+   */
+  surfaces: Partial<Record<GuardDriverId, GuardRecipeSurface>>
   /** `sha256:…` over the current discovery-input files (package.json, lockfile, …). */
   fingerprint: string
   /**
@@ -581,6 +795,17 @@ export const GuardFlowListItemSchema = z
     docs: z.array(z.string()),
     surfaces: z.array(GuardFlowSurfaceSchema),
     /**
+     * The drivers this flow's TESTS actually exercise — the union of the step
+     * kinds their scenarios use, not the scenario-level `driver` field. A cli
+     * scenario carrying web steps reports BOTH (`['cli','web']`), which is the
+     * whole point: the scenario-level driver names the sandbox world, and a
+     * reader filtering for "web" means the steps. A flow with no test yet falls
+     * back to its surfaces' declared drivers, so a blocked flow still answers
+     * "which surface was this for". Optional so a payload written before the
+     * field still parses (the `orphaned` precedent).
+     */
+    drivers: z.array(GuardDriverIdSchema).optional(),
+    /**
      * DRIFT-class findings the last generate attributed to this flow — the ones
      * that mean the flow is failing: a committed red test the repo and the doc
      * disagree about, or an escalation re-generation stopped fixing. A withheld
@@ -609,6 +834,28 @@ export const GuardFlowListItemSchema = z
   })
   .strict()
 export type GuardFlowListItem = z.infer<typeof GuardFlowListItemSchema>
+
+/**
+ * A flow's coverage status in the five words — the ONE derivation the CLI list and
+ * the dashboard list both read, so `guard flows` and the Flows tab can never
+ * disagree about a flow.
+ *
+ * FAILED means a test ran and was contradicted (at birth or in a run): guard
+ * commits failing tests, so a birth failure reaches the list as a `fail` surface
+ * and the flow's own status carries it; a recorded finding the surface join lost
+ * still decides, so a red flow can never read blank.
+ *
+ * An UNGENERATED flow (no manifest entry at all) is deliberately NOT failed —
+ * nothing ran, so there is no result to report. It is Blocked, and the next
+ * generate is what clears it.
+ */
+export function guardFlowPlainStatus(
+  flow: Pick<GuardFlowListItem, 'status' | 'bucket' | 'findings'>,
+): GuardCoveragePlainStatus {
+  if (flow.findings > 0) return 'failed'
+  if (flow.bucket === 'ungenerated') return 'blocked'
+  return guardCoveragePlainStatus(flow.status)
+}
 
 /** Flow-tally for the list header — the buckets plus the corpus totals. */
 export const GuardFlowTotalsSchema = z
@@ -716,6 +963,14 @@ export const GuardFlowScenarioRowSchema = z
     /** Repo-relative evidence dir the run recorded. */
     evidencePath: z.string().optional(),
     /**
+     * The run that produced this row's outcome. The board is merged across runs, so
+     * the detail's own `runId` (the board envelope's) is only the run that wrote it
+     * LAST — a row carried from an earlier run keeps that run's evidence, and this is
+     * the id its transcript is filed under. Present on every run-stage row; absent on
+     * a birth-stage or never-run row, which no run produced.
+     */
+    runId: z.string().optional(),
+    /**
      * The TRIAGE verdict that committed this test red — what the failure
      * actually is, in one word plus a plain-words brief and the concrete unblock.
      * Birth stage only: the verdict was reached about that birth failure, and a
@@ -732,7 +987,7 @@ export const GuardFlowScenarioRowSchema = z
      */
     hasEvidence: z.boolean(),
     /** Interface ids this scenario grounds on (its realization path, in order). */
-    journeyPath: z.array(z.string()).default([]),
+    interfacePath: z.array(z.string()).default([]),
     gap: GuardFlowGapSchema.optional(),
   })
   .strict()
@@ -766,7 +1021,7 @@ export const GuardFlowDetailSchema = z
     /** The same gaps the surface rows carry, flattened for the gaps block. */
     gaps: z.array(GuardFlowSurfaceGapSchema),
     /** Interface ids the flow's scenarios ground on, first-seen order. */
-    journeyIds: z.array(z.string()),
+    interfaceIds: z.array(z.string()),
     /**
      * The birth-stage failure results the last generate attributed to this flow —
      * its committed failing tests plus any fidelity rejection. Transitional: a
@@ -990,3 +1245,125 @@ export const GuardInterfacesViewSchema = z
   })
   .strict()
 export type GuardInterfacesView = z.infer<typeof GuardInterfacesViewSchema>
+
+// --- Claims tab ---------------------------------------------------------------
+
+/**
+ * One flow that carries a claim — the trace's middle link. `milestoneOrder` is
+ * where the claim sits in the flow's path, so a reader can jump straight at it.
+ */
+export const GuardClaimFlowRefSchema = z
+  .object({
+    flowId: z.string(),
+    /** The flow's title; its id when the corpus no longer names it. */
+    title: z.string(),
+    /** 1-based position of the milestone that proves this claim in that flow. */
+    milestoneOrder: z.number().int().positive(),
+    /** The synthesis note on that milestone, when it wrote one. */
+    note: z.string().optional(),
+  })
+  .strict()
+export type GuardClaimFlowRef = z.infer<typeof GuardClaimFlowRefSchema>
+
+/**
+ * One scenario that proves a claim, reached through a step tagged with the
+ * claim's ID. `steps` are the 1-based step numbers carrying the tag — the exact
+ * observations that stand behind the claim.
+ */
+export const GuardClaimScenarioRefSchema = z
+  .object({
+    scenarioId: z.string(),
+    title: z.string(),
+    /** 1-based step numbers whose `milestone` names this claim. */
+    steps: z.array(z.number().int().positive()),
+    /**
+     * The scenario's verdict in the latest run, when one ran it — what makes the
+     * claim ledger run-aware. Absent when the scenario has never executed (or
+     * the view was built with no run store).
+     */
+    outcome: GuardOutcomeSchema.optional(),
+  })
+  .strict()
+export type GuardClaimScenarioRef = z.infer<typeof GuardClaimScenarioRefSchema>
+
+/**
+ * Where a claim stands in coverage accounting. Claim-keyed, so it always exists,
+ * and RUN-AWARE — "proven" is earned by a green run, never by authorship alone:
+ * `proven` (a proof step PASSED in the latest run), `failing` (proof steps exist
+ * and the latest run failed them — none passing), `planned` (a flow carries it,
+ * and any proof step has no verdict yet — unwritten, never run, stale, or
+ * blocked), `gapped` (accounted for as a `noFlowClaim`, with a reason),
+ * `unplanned` (no flow, no gap record — the honest hole synthesis owes an answer
+ * for).
+ */
+export const GuardClaimCoverageSchema = z.enum(['proven', 'failing', 'planned', 'gapped', 'unplanned'])
+export type GuardClaimCoverage = z.infer<typeof GuardClaimCoverageSchema>
+
+/** One claim as the Claims tab lists it: the store row plus its two traces. */
+export const GuardClaimRowSchema = z
+  .object({
+    id: z.string(),
+    doc: z.string(),
+    anchor: z.string(),
+    title: z.string(),
+    claim: z.string(),
+    contentHash: z.string(),
+    verifyVia: z.string().optional(),
+    /** The live section's heading text, when the anchor still resolves in the doc. */
+    headingText: z.string().optional(),
+    /** False when the claim's anchor no longer exists in the live doc. */
+    anchorLive: z.boolean(),
+    coverage: GuardClaimCoverageSchema,
+    /** Why the claim reached no flow — present exactly for `gapped`. */
+    gapReason: z.string().optional(),
+    /** True when a `decisions.json` dismissal names this claim. */
+    dismissed: z.boolean(),
+    flows: z.array(GuardClaimFlowRefSchema),
+    scenarios: z.array(GuardClaimScenarioRefSchema),
+  })
+  .strict()
+export type GuardClaimRow = z.infer<typeof GuardClaimRowSchema>
+
+/** One refused statement, as the Claims tab lists it under its doc. */
+export const GuardUntestableRowSchema = z
+  .object({
+    doc: z.string(),
+    anchor: z.string(),
+    text: z.string(),
+    reason: z.string(),
+    headingText: z.string().optional(),
+    anchorLive: z.boolean(),
+  })
+  .strict()
+export type GuardUntestableRow = z.infer<typeof GuardUntestableRowSchema>
+
+/**
+ * The Claims tab payload — the extracted claim corpus with the trace from claim
+ * to flow to scenario, and the refused statements beside it. Always answers (an
+ * `extracted: false` view is the empty state, never an error).
+ */
+export const GuardClaimsViewSchema = z
+  .object({
+    /** False when no claims store exists — the client renders its empty state. */
+    extracted: z.boolean(),
+    generatedAt: z.string().nullable(),
+    claims: z.array(GuardClaimRowSchema),
+    untestable: z.array(GuardUntestableRowSchema),
+    totals: z
+      .object({
+        claims: z.number().int().nonnegative(),
+        proven: z.number().int().nonnegative(),
+        /** Claims whose proof steps the latest run failed (none passing). */
+        failing: z.number().int().nonnegative(),
+        planned: z.number().int().nonnegative(),
+        gapped: z.number().int().nonnegative(),
+        unplanned: z.number().int().nonnegative(),
+        dismissed: z.number().int().nonnegative(),
+        untestable: z.number().int().nonnegative(),
+        /** Claims whose anchor no longer resolves in its live doc. */
+        orphanedAnchors: z.number().int().nonnegative(),
+      })
+      .strict(),
+  })
+  .strict()
+export type GuardClaimsView = z.infer<typeof GuardClaimsViewSchema>

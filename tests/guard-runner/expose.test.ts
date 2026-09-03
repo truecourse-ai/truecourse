@@ -12,13 +12,28 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { createSandbox, RecipeSchema } from '@truecourse/guard-runner'
-import { FIXTURE_BIN } from './helpers.js'
+import { createSandbox, runGuard } from '@truecourse/guard-runner'
+import { makeTempRepo, rmrf, writeRecipe, writeScenario, scenario, specBinds, FIXTURE_BIN } from './helpers.js'
 
+const repos: string[] = []
 const sandboxes: { cleanup(): void }[] = []
 afterEach(() => {
+  while (repos.length) rmrf(repos.pop()!)
   while (sandboxes.length) sandboxes.pop()!.cleanup()
 })
+function repo(): string {
+  const r = makeTempRepo()
+  repos.push(r)
+  return r
+}
+
+function writeRecipeWithExpose(r: string, expose: Record<string, string | string[]>): void {
+  writeRecipe(r)
+  const file = path.join(r, '.truecourse', 'scenarios', 'recipe.json')
+  const recipe = JSON.parse(fs.readFileSync(file, 'utf-8'))
+  recipe.expose = expose
+  fs.writeFileSync(file, JSON.stringify(recipe, null, 2))
+}
 
 describe('createSandbox — the shim directory', () => {
   it('writes an executable shim per entry and puts it FIRST on PATH', () => {
@@ -78,15 +93,61 @@ describe('createSandbox — the shim directory', () => {
   })
 })
 
+describe('runGuard — a child that invokes the program by name', () => {
+  it('runs the exposed build, not whatever the machine has installed', async () => {
+    const r = repo()
+    writeRecipeWithExpose(r, { 'relkit-under-test': ['node', FIXTURE_BIN] })
+    writeScenario(
+      r,
+      'cli/exposed.yaml',
+      scenario({
+        id: 'exposed',
+        binds: specBinds('cli/version'),
+        // `run-child` spawns a binary resolved through PATH — the shape a git hook,
+        // a Makefile or a plugin uses to reach the program under test.
+        steps: [
+          {
+            run: ['run-child', 'relkit-under-test', 'version'],
+            expect: { exit: 0, stdout: { matches: '^\\d+\\.\\d+\\.\\d+' } },
+          },
+        ],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    expect(res.latest.scenarios[0].outcome).toBe('pass')
+  })
+
+  it('leaves an unexposed name unresolvable — the sandbox gains nothing it was not given', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeScenario(
+      r,
+      'cli/unexposed.yaml',
+      scenario({
+        id: 'unexposed',
+        binds: specBinds('cli/version'),
+        steps: [{ run: ['run-child', 'relkit-under-test', 'version'], expect: { exit: 0 } }],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    expect(res.latest.scenarios[0].outcome).toBe('fail')
+  })
+})
+
 describe('the recipe schema', () => {
-  it('rejects a binary name carrying a path separator', () => {
+  it('rejects a binary name carrying a path separator', async () => {
+    const { RecipeSchema } = await import('@truecourse/guard-runner')
     expect(
-      RecipeSchema.safeParse({ build: 'true', entry: ['node', 'x'], expose: { 'a/b': ['node', 'x'] } })
-        .success,
+      RecipeSchema.safeParse({ build: 'true', entry: ['node', 'x'], expose: { 'a/b': ['node', 'x'] } }).success,
     ).toBe(false)
     expect(
-      RecipeSchema.safeParse({ build: 'true', entry: ['node', 'x'], expose: { tool: 'dist/cli.js' } })
-        .success,
+      RecipeSchema.safeParse({ build: 'true', entry: ['node', 'x'], expose: { tool: 'dist/cli.js' } }).success,
     ).toBe(true)
   })
 })

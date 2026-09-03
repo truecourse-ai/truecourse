@@ -28,6 +28,7 @@ import {
   isApiBootStep,
   isApiRequestStep,
   isApiSignalStep,
+  milestoneOrder,
 } from '@truecourse/shared'
 import { createSandbox, SandboxError, DETERMINISM_PINS } from '../sandbox.js'
 import { applyCapabilities, CapabilityError } from '../capabilities/index.js'
@@ -41,7 +42,8 @@ import { startExternalProxies, type ExternalProxiesHandle } from '../capabilitie
 import type { ExternalProxyTarget } from '../externals.js'
 import { normalize, type NormalizerContext } from '../normalizers.js'
 import { applyUniqueEnv, applyUniqueSetup } from '../unique.js'
-import { SANDBOX_SETUP_EXPECTED, CAPABILITY_SETUP_EXPECTED, FAILURE_OUTPUT_LIMIT } from '../run-scenario.js'
+import { SANDBOX_SETUP_EXPECTED, CAPABILITY_SETUP_EXPECTED } from '../run-scenario.js'
+import { STEP_OUTPUT_LIMIT } from '../evidence.js'
 import type { ApiStepObservation } from '../step-stats.js'
 import {
   spawnApiProcess,
@@ -49,7 +51,7 @@ import {
   type ApiServerHandle,
   type StartApiServerResult,
 } from './server.js'
-import { executeApiRequest, type ApiStepCapture } from './executor.js'
+import { API_EXPECT_POLL_MS, API_EXPECT_SETTLE_MS, executeApiRequest, type ApiStepCapture } from './executor.js'
 import { CookieJar } from './cookies.js'
 import { evaluateApiExpect, parseJsonBody, type ApiExpectMismatch } from './expect.js'
 import {
@@ -271,8 +273,8 @@ function apiExcerpts(
   redact: (t: string) => string,
 ): OutputExcerpts {
   const out: OutputExcerpts = {}
-  if (capture?.bodyText) out.stdout = redact(capture.bodyText.slice(0, FAILURE_OUTPUT_LIMIT))
-  if (serverLogs.stderr) out.stderr = redact(serverLogs.stderr.slice(-FAILURE_OUTPUT_LIMIT))
+  if (capture?.bodyText) out.stdout = redact(capture.bodyText.slice(0, STEP_OUTPUT_LIMIT))
+  if (serverLogs.stderr) out.stderr = redact(serverLogs.stderr.slice(-STEP_OUTPUT_LIMIT))
   return out
 }
 
@@ -458,8 +460,8 @@ export async function runApiScenario(
             expected: 'the api server to start',
             // The message names the retry so a persisted error shows the boot was tried twice.
             actual: attempts > 1 ? `${boot.reason} (boot failed on both of ${attempts} attempts)` : boot.reason,
-            ...(boot.stdout ? { stdout: redact(boot.stdout.slice(-FAILURE_OUTPUT_LIMIT)) } : {}),
-            ...(boot.stderr ? { stderr: redact(boot.stderr.slice(-FAILURE_OUTPUT_LIMIT)) } : {}),
+            ...(boot.stdout ? { stdout: redact(boot.stdout.slice(-STEP_OUTPUT_LIMIT)) } : {}),
+            ...(boot.stderr ? { stderr: redact(boot.stderr.slice(-STEP_OUTPUT_LIMIT)) } : {}),
           },
         }
       }
@@ -502,6 +504,7 @@ export async function runApiScenario(
     for (let i = 0; i < scenario.steps.length; i++) {
       const step = scenario.steps[i]
       const stepIndex = i + 1
+      const stepMilestone = milestoneOrder(step.milestone)
       // Attribute any stub violation raised while this step runs to THIS step.
       stubs?.markStep(stepIndex)
       // Taken BEFORE the step runs, and handed to the NEXT step: a `logs` step's
@@ -532,7 +535,7 @@ export async function runApiScenario(
             await settledLogs(),
             records,
             stepIndex,
-            step.milestone,
+            stepMilestone,
             start,
             { subject: 'process', expected, actual, ...(detail ? { detail } : {}) },
             null,
@@ -556,7 +559,7 @@ export async function runApiScenario(
               bootEnv = { ...sandbox.env, ...overlay }
             } catch (e) {
               const message = e instanceof CapabilityError ? e.message : e instanceof Error ? e.message : String(e)
-              return errorAt(stepIndex, step.milestone, CAPABILITY_SETUP_EXPECTED, message)
+              return errorAt(stepIndex, stepMilestone, CAPABILITY_SETUP_EXPECTED, message)
             }
           }
           const expectation = step.boot.expect
@@ -572,7 +575,7 @@ export async function runApiScenario(
               retired.stderr += boot.stderr
               // A child that could not be SPAWNED is infrastructure: there is no
               // process whose readiness could have been judged.
-              if (boot.spawnFailed) return errorAt(stepIndex, step.milestone, 'the api server to start', boot.reason)
+              if (boot.spawnFailed) return errorAt(stepIndex, stepMilestone, 'the api server to start', boot.reason)
               return fail('the server to boot and become healthy', boot.reason)
             }
             server = boot.server
@@ -593,7 +596,7 @@ export async function runApiScenario(
             await retireServer()
             if (ctx.signal?.aborted) return abortedResult(base, stepIndex, start)
             if (spawned.spawnError()) {
-              return errorAt(stepIndex, step.milestone, 'the api server to start', `api server failed to spawn: ${spawned.spawnError()}`)
+              return errorAt(stepIndex, stepMilestone, 'the api server to start', `api server failed to spawn: ${spawned.spawnError()}`)
             }
             if (!exit.exited) {
               return fail(
@@ -604,14 +607,14 @@ export async function runApiScenario(
             if (expectation.exitCode !== undefined && exit.code !== expectation.exitCode) {
               return fail(`the server process to exit with code ${expectation.exitCode}`, `it ${exitLabel(exit)}`, [
                 `--- stderr ---`,
-                bootLogs.stderr.slice(-FAILURE_OUTPUT_LIMIT),
+                bootLogs.stderr.slice(-STEP_OUTPUT_LIMIT),
               ])
             }
             for (const needle of expectation.stderrContains ?? []) {
               if (!bootLogs.stderr.includes(needle)) {
                 return fail(`the failing startup to write “${needle}” to stderr`, 'it did not', [
                   `--- stderr ---`,
-                  bootLogs.stderr.slice(-FAILURE_OUTPUT_LIMIT),
+                  bootLogs.stderr.slice(-STEP_OUTPUT_LIMIT),
                 ])
               }
             }
@@ -625,7 +628,7 @@ export async function runApiScenario(
           if (!server) {
             return errorAt(
               stepIndex,
-              step.milestone,
+              stepMilestone,
               'a running server to signal',
               'no server is running — a `boot` step must start one before it can be signalled',
             )
@@ -644,7 +647,7 @@ export async function runApiScenario(
               )
             }
             if (expectation.exitCode !== undefined && exit.code !== expectation.exitCode) {
-              const detail = [`--- stderr ---`, (await settledLogs()).stderr.slice(-FAILURE_OUTPUT_LIMIT)]
+              const detail = [`--- stderr ---`, (await settledLogs()).stderr.slice(-STEP_OUTPUT_LIMIT)]
               await retireServer()
               return fail(
                 `the server to exit with code ${expectation.exitCode} on ${step.signal.name}`,
@@ -665,7 +668,7 @@ export async function runApiScenario(
         if (!everBooted) {
           return errorAt(
             stepIndex,
-            step.milestone,
+            stepMilestone,
             'a server whose output can be read',
             'no server has been started yet — a `boot` step must precede a `logs` step',
           )
@@ -694,7 +697,7 @@ export async function runApiScenario(
               ? `a ${stream} line matching ${logMatchLabel(match)}${scope}`
               : `exactly ${step.logs.count} ${stream} line(s) matching ${logMatchLabel(match)}${scope}`,
             `${matches.length} line(s) matched`,
-            [`--- ${stream}${scope} ---`, window.slice(-FAILURE_OUTPUT_LIMIT)],
+            [`--- ${stream}${scope} ---`, window.slice(-STEP_OUTPUT_LIMIT)],
           )
         }
         records.push(lifecycleRecord(stepIndex, step))
@@ -706,7 +709,7 @@ export async function runApiScenario(
       if (!server) {
         return errorAt(
           stepIndex,
-          step.milestone,
+          stepMilestone,
           'a running server to request',
           'no server is running — a `boot` step must start one before a request can be sent',
         )
@@ -733,7 +736,7 @@ export async function runApiScenario(
         } catch (e) {
           if (e instanceof UnknownVariableError) {
             records.push(toRecord(stepIndex, step, step.request.path, null, repeat, iteration, normText, undefined))
-            return failResult(base, scenario, ctx, sandbox.cwd, await settledLogs(), records, stepIndex, step.milestone, start, {
+            return failResult(base, scenario, ctx, sandbox.cwd, await settledLogs(), records, stepIndex, stepMilestone, start, {
               expected: `\${${e.variable}} to be captured by an earlier step`,
               actual: e.message,
             }, null, redact, bootAttempts)
@@ -747,7 +750,7 @@ export async function runApiScenario(
               outcome: 'error',
               durationMs: Date.now() - start,
               ...(bootAttempts ? { bootAttempts } : {}),
-              ...(step.milestone ? { failedMilestone: step.milestone } : {}),
+              ...(stepMilestone ? { failedMilestone: stepMilestone } : {}),
               failure: {
                 step: stepIndex,
                 expected: foreign
@@ -765,7 +768,7 @@ export async function runApiScenario(
               outcome: 'error',
               durationMs: Date.now() - start,
               ...(bootAttempts ? { bootAttempts } : {}),
-              ...(step.milestone ? { failedMilestone: step.milestone } : {}),
+              ...(stepMilestone ? { failedMilestone: stepMilestone } : {}),
               failure: {
                 step: stepIndex,
                 expected: `fixture "${e.fixture}" to be declared in the recipe's api.seed.provides.fixtures`,
@@ -776,7 +779,8 @@ export async function runApiScenario(
           throw e
         }
 
-        const capture = await executeApiRequest({
+        const pollDeadline = Date.now() + Math.min(ctx.stepTimeoutMs, API_EXPECT_SETTLE_MS)
+        let capture = await executeApiRequest({
           baseUrl: server.baseUrl,
           request,
           timeoutMs: ctx.stepTimeoutMs,
@@ -824,7 +828,7 @@ export async function runApiScenario(
             outcome: 'error',
             durationMs: Date.now() - start,
             ...(bootAttempts ? { bootAttempts } : {}),
-            ...(step.milestone ? { failedMilestone: step.milestone } : {}),
+            ...(stepMilestone ? { failedMilestone: stepMilestone } : {}),
             failure: { step: stepIndex, expected: 'the request to complete', actual: infra, ...apiExcerpts(capture, logs, redact) },
             evidencePath,
           }
@@ -842,7 +846,7 @@ export async function runApiScenario(
               outcome: 'error',
               durationMs: Date.now() - start,
               ...(bootAttempts ? { bootAttempts } : {}),
-              ...(step.milestone ? { failedMilestone: step.milestone } : {}),
+              ...(stepMilestone ? { failedMilestone: stepMilestone } : {}),
               failure: {
                 step: stepIndex,
                 expected: 'the step to assert response-schema conformance against a bound operation',
@@ -853,16 +857,48 @@ export async function runApiScenario(
           responseSchema = resolved.schema
         }
 
-        const normBody = normText(capture.bodyText)
-        const mismatch = evaluateApiExpect({
-          expect: stepExpect,
-          status: capture.status,
-          headers: capture.headers,
-          bodyText: normBody,
-          rawBodyText: capture.bodyText,
-          normalizeText: normText,
-          responseSchema,
-        })
+        const judge = (c: ApiStepCapture) =>
+          evaluateApiExpect({
+            expect: stepExpect,
+            status: c.status,
+            headers: c.headers,
+            bodyText: normText(c.bodyText),
+            rawBodyText: c.bodyText,
+            normalizeText: normText,
+            responseSchema,
+          })
+        let mismatch = judge(capture)
+
+        // Idempotent reads poll the way web expects do: an app may ack a write
+        // before it is queryable (queued flushes, eventual consistency), so a
+        // GET/HEAD whose expectation does not hold yet is re-issued every
+        // API_EXPECT_POLL_MS until it holds or the step budget runs out — the
+        // last observation is the judgment. Mutating methods are never
+        // replayed; their single observation stands. A re-issue that cannot
+        // complete keeps the previous real observation rather than erroring.
+        if (mismatch && (request.method === 'GET' || request.method === 'HEAD')) {
+          while (mismatch && Date.now() + API_EXPECT_POLL_MS < pollDeadline && !ctx.signal?.aborted) {
+            await new Promise((resolve) => setTimeout(resolve, API_EXPECT_POLL_MS))
+            const again = await executeApiRequest({
+              baseUrl: server.baseUrl,
+              request,
+              timeoutMs: Math.max(1, pollDeadline - Date.now()),
+              signal: ctx.signal,
+              cookies,
+            })
+            if (again.requestError || again.timedOut) break
+            ctx.onStep?.({
+              status: again.status,
+              bodyEmpty: again.bodyText.length === 0,
+              timedOut: again.timedOut,
+              requestLine: `${step.request.method.toUpperCase()} ${step.request.path}`,
+              durationMs: again.durationMs,
+            })
+            capture = again
+            mismatch = judge(again)
+          }
+          if (ctx.signal?.aborted) return abortedResult(base, stepIndex, start)
+        }
         if (mismatch) {
           records.push(toRecord(stepIndex, step, request.path, capture, repeat, iteration, normText, undefined))
           // A 404 on a path ANOTHER workspace app serves is infrastructure, not
@@ -902,12 +938,12 @@ export async function runApiScenario(
               unservedRoute: true,
               durationMs: Date.now() - start,
               ...(bootAttempts ? { bootAttempts } : {}),
-              ...(step.milestone ? { failedMilestone: step.milestone } : {}),
+              ...(stepMilestone ? { failedMilestone: stepMilestone } : {}),
               failure: { step: stepIndex, expected, actual, ...apiExcerpts(capture, logs, redact) },
               evidencePath,
             }
           }
-          return failResult(base, scenario, ctx, sandbox.cwd, await settledLogs(), records, stepIndex, step.milestone, start, mismatch, capture, redact, bootAttempts)
+          return failResult(base, scenario, ctx, sandbox.cwd, await settledLogs(), records, stepIndex, stepMilestone, start, mismatch, capture, redact, bootAttempts)
         }
 
         // Captures resolve AFTER the expectation holds; a path that resolves to
@@ -922,7 +958,7 @@ export async function runApiScenario(
             const value = capture.headers[headerName.toLowerCase()]
             if (value === undefined) {
               records.push(toRecord(stepIndex, step, request.path, capture, repeat, iteration, normText, captured))
-              return failResult(base, scenario, ctx, sandbox.cwd, await settledLogs(), records, stepIndex, step.milestone, start, {
+              return failResult(base, scenario, ctx, sandbox.cwd, await settledLogs(), records, stepIndex, stepMilestone, start, {
                 expected: `capture "${name}" from response header "${headerName}"`,
                 actual: 'the response carries no such header',
               }, capture, redact, bootAttempts)
@@ -941,7 +977,7 @@ export async function runApiScenario(
             const value = 'error' in parsed ? JSON_PATH_MISS : lookupJsonPath(parsed.value, jsonPath)
             if (value === JSON_PATH_MISS) {
               records.push(toRecord(stepIndex, step, request.path, capture, repeat, iteration, normText, captured))
-              return failResult(base, scenario, ctx, sandbox.cwd, await settledLogs(), records, stepIndex, step.milestone, start, {
+              return failResult(base, scenario, ctx, sandbox.cwd, await settledLogs(), records, stepIndex, stepMilestone, start, {
                 expected: `capture "${name}" at json path "${jsonPath}"`,
                 actual:
                   'error' in parsed
@@ -981,7 +1017,7 @@ export async function runApiScenario(
         await settledLogs(),
         records,
         violationStep,
-        scenario.steps[violationStep - 1]?.milestone,
+        milestoneOrder(scenario.steps[violationStep - 1]?.milestone),
         start,
         {
           subject: 'stub',
@@ -1011,7 +1047,7 @@ export async function runApiScenario(
         await settledLogs(),
         records,
         lastStep,
-        scenario.steps[lastStep - 1]?.milestone,
+        milestoneOrder(scenario.steps[lastStep - 1]?.milestone),
         start,
         {
           subject: 'external',

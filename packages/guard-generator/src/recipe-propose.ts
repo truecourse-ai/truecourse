@@ -184,12 +184,18 @@ export function proposeRecipe(repoRoot: string, inputs: ProposeRecipeInputs = {}
 
 /**
  * The api route surface as the proposer consumes it — the method + path of every
- * operation-rooted journey. Lets a caller that already mapped journeys hand the
+ * operation-rooted interface. Lets a caller that already mapped interfaces hand the
  * surface over without a second analysis pass.
+ *
+ * RPC-derived operations are left out (item 12): they are the same procedure
+ * behind one adapter address, so probing them says nothing a probe of the app's
+ * own routes does not, and they are excluded from scenario generation this round
+ * anyway.
  */
-export function routesFromInterfaces(journeys: readonly Interface[]): ApiRouteRef[] {
+export function routesFromInterfaces(interfaces: readonly Interface[]): ApiRouteRef[] {
   const routes: ApiRouteRef[] = []
-  for (const j of journeys) {
+  for (const j of interfaces) {
+    if (j.procedure) continue
     const entry = j.entry as { method?: string; path?: string }
     if (typeof entry?.method === 'string' && typeof entry.path === 'string') {
       routes.push({ method: entry.method, path: entry.path })
@@ -316,15 +322,10 @@ function detectJs(repoRoot: string, inputs: ProposeRecipeInputs = {}): RecipeSig
   // single-command invocation of something this repo produces. A workspace ROOT's
   // `start` is not one app's — it is whatever the root wires up — so it is never
   // read as a serve argv; the member's cli is all the ambiguity check cleared.
-  // A `start` that runs the package's own `bin` is the cli again, not a server:
-  // a tool's `start` is a convenience alias for its entry, and booting it as an
-  // api server only prints its usage and exits.
   const start = !workspaceRoot && typeof scripts.start === 'string' ? scripts.start : ''
   if (start.trim()) {
     const argv = tokenizeCommand(start)
-    if (argv && !runsProgram(argv, signals.entry) && (hasBuild || argvFilesExist(repoRoot, argv))) {
-      signals.serve = argv
-    }
+    if (argv && (hasBuild || argvFilesExist(repoRoot, argv))) signals.serve = argv
   }
 
   const looksLikeServer =
@@ -492,13 +493,6 @@ function splitTokens(command: string): string[] | null {
 /** Every repo-relative FILE-looking argument of an argv exists on disk. Applied
  *  only when the recipe has no build step: with a build, the artifact is produced
  *  by it, and `verifyProposal` checks after the build runs. */
-/** Does `argv` run the same `node <file>` program as `entry` (paths normalized)? */
-function runsProgram(argv: readonly string[], entry: readonly string[] | undefined): boolean {
-  if (!entry || argv.length !== 2 || entry.length !== 2) return false
-  if (argv[0] !== 'node' || entry[0] !== 'node') return false
-  return path.normalize(argv[1]!) === path.normalize(entry[1]!)
-}
-
 function argvFilesExist(repoRoot: string, argv: readonly string[]): boolean {
   const candidates = argv.slice(1).filter((a) => !a.startsWith('-') && /[./]/.test(a))
   return candidates.every((a) => existsFile(repoRoot, a))

@@ -3,7 +3,7 @@
  *
  * The engine no longer owns any LLM call: the recipe repair, the dependency
  * catalog, the interfaces step (reconcile + web authoring), the seed and the
- * auth proof are all SEAMS the command adapter injects.
+ * auth proof are all SEAMS the command adapter injects (plan 03 steps 8–14).
  * What this file pins is the engine's own contract:
  *
  *  - the §7.6 STEP SPINE — six rows, in order, each with its input fingerprint;
@@ -249,7 +249,7 @@ describe('runGuardSetup — the gates', () => {
 // Step 8 — the spine
 // ---------------------------------------------------------------------------
 
-describe('runGuardSetup — the step spine', () => {
+describe('runGuardSetup — the step spine (plan 03 step 8)', () => {
   it('records six rows in taxonomy order, and the record round-trips the schema', async () => {
     const r = fixtureRepo()
     writeRecipe(r)
@@ -276,7 +276,7 @@ describe('runGuardSetup — the step spine', () => {
     expect(byKey.interfaces).toMatchObject({ status: 'skipped' })
     expect(byKey.interfaces.reason).toMatch(/not wired into this run/)
     expect(byKey.auth).toMatchObject({ status: 'skipped' })
-    expect(byKey.auth.reason).toMatch(/not wired into this run/)
+    expect(byKey.auth.reason).toMatch(/not wired into setup yet/)
 
     // The persisted record is what `guard status` and the externals view read.
     expect(GuardSetupReportSchema.safeParse(report).success).toBe(true)
@@ -826,10 +826,10 @@ describe('runGuardSetup — the soft steps', () => {
 })
 
 // ---------------------------------------------------------------------------
-// The interfaces step's engine half
+// Step 11 — the interfaces step's engine half
 // ---------------------------------------------------------------------------
 
-describe('runGuardSetup — the interfaces step', () => {
+describe('runGuardSetup — the interfaces step (plan 03 step 11)', () => {
   const DERIVED: InterfacesFile = {
     version: 2,
     generatedAt: '2026-08-19T00:00:00.000Z',

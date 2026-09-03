@@ -84,7 +84,7 @@ const REPORT: GuardGenerateReport = {
   written: [],
   coverageGaps: [
     { doc: 'd', anchor: 'a1', kind: 'no-claim', reason: 'nothing assertable' },
-    { doc: 'd', anchor: 'a2', kind: 'awaiting-driver', driver: 'web', reason: 'browser UI boundary' },
+    { doc: 'd', anchor: 'a2', kind: 'awaiting-driver', driver: 'tui', reason: 'browser UI boundary' },
     { doc: 'd', anchor: 'a3', kind: 'blocked-on', reason: 'blocked on git: needs a repo' },
     { doc: 'd', anchor: 'a4', kind: 'blocked-on', reason: 'blocked on git, db: needs both' },
   ],
@@ -117,9 +117,9 @@ describe('gapsByKind / blockedOnTally', () => {
   it('counts gaps by kind', () => {
     const k = gapsByKind(REPORT.coverageGaps);
     expect(k['no-claim']).toBe(1);
-    expect(k.web).toBe(1);
+    expect(k.tui).toBe(1);
     expect(k['blocked-on']).toBe(2);
-    expect(k.tui).toBe(0);
+    expect(k.library).toBe(0);
   });
 
   it('tallies every blocked-on capability, descending by count', () => {

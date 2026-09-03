@@ -8,12 +8,17 @@ import {
   resolveApiCredentials,
   credentialShapeWarning,
   CredentialResolutionError,
+  maskedRecipeText,
+  maskRecipeSecret,
   RecipeError,
   recipeControlledEnvVars,
   recipePath,
   resolveApiServers,
   resolveScenarioServer,
+  resolveWebSurface,
   DEFAULT_API_SERVER_NAME,
+  DEFAULT_WEB_HEALTH_PATH,
+  DEFAULT_WEB_READY_TIMEOUT_MS,
   type Recipe,
 } from '@truecourse/guard-runner'
 import { makeTempRepo, rmrf, writeRecipe, FIXTURE_BIN } from './helpers.js'
@@ -131,6 +136,17 @@ describe('computeRecipeFingerprint', () => {
     expect(computeRecipeFingerprint(r)).not.toBe(a)
   })
 
+  it('ignores lockfiles so a dependency-only commit does not re-author the corpus', () => {
+    const r = repo()
+    const a = computeRecipeFingerprint(r)
+    fs.writeFileSync(path.join(r, 'yarn.lock'), '# yarn lockfile v1\n"left-pad@^1.0.0":\n  version "1.3.0"\n')
+    fs.writeFileSync(path.join(r, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n')
+    fs.writeFileSync(path.join(r, 'package-lock.json'), JSON.stringify({ lockfileVersion: 3 }))
+    expect(computeRecipeFingerprint(r)).toBe(a)
+    fs.writeFileSync(path.join(r, 'yarn.lock'), '# yarn lockfile v1\n"left-pad@^1.0.0":\n  version "1.3.1"\n')
+    expect(computeRecipeFingerprint(r)).toBe(a)
+  })
+
   it('folds the recipe file itself so a recipe edit invalidates the fingerprint', () => {
     const r = repo()
     writeRawRecipe(r, { build: 'true', entry: ['node', 'cli.js'] })
@@ -184,6 +200,66 @@ describe('computeRecipeFingerprint', () => {
       build: 'true',
     })
     expect(computeRecipeFingerprint(r)).toBe(a)
+  })
+})
+
+/**
+ * The recipe as a READER may see it. The fingerprint and the two readings of a
+ * recipe (the terminal's, the dashboard's raw JSON) walk ONE list of inline-secret
+ * fields, so a secret that never enters the hash never reaches a screen either.
+ */
+describe('maskedRecipeText — every inline secret, masked', () => {
+  it('masks an inline credential value and keeps every capability field', () => {
+    const raw = JSON.stringify(
+      apiRecipeWith({ 'api-key': { header: 'Authorization', value: 'sk-live-super-secret' } }),
+      null,
+      2,
+    )
+    const masked = maskedRecipeText(raw)!
+    expect(masked).not.toContain('sk-live-super-secret')
+    expect(masked).toContain(maskRecipeSecret('sk-live-super-secret'))
+    // The capability — which credential exists and which header it rides — stays.
+    const parsed = JSON.parse(masked)
+    expect(parsed.api.credentials['api-key'].header).toBe('Authorization')
+    expect(parsed.api.build ?? parsed.build).toBe('true')
+  })
+
+  it('masks an external service’s inline env value, and never its var NAMES', () => {
+    const raw = JSON.stringify({
+      build: 'true',
+      api: {
+        serve: ['node', 'server.js'],
+        externals: {
+          'hit-pay': {
+            baseUrlEnv: 'HITPAY_BASE_URL',
+            env: { HITPAY_API_KEY: { value: 'hp-live-9f2c' }, HITPAY_MODE: { valueFromEnv: 'MODE' } },
+          },
+        },
+      },
+    })
+    const masked = maskedRecipeText(raw)!
+    expect(masked).not.toContain('hp-live-9f2c')
+    const parsed = JSON.parse(masked)
+    expect(parsed.api.externals['hit-pay'].baseUrlEnv).toBe('HITPAY_BASE_URL')
+    // An env-var NAME is a capability, not a secret — it survives untouched.
+    expect(parsed.api.externals['hit-pay'].env.HITPAY_MODE.valueFromEnv).toBe('MODE')
+    expect(parsed.api.externals['hit-pay'].env.HITPAY_API_KEY.value).toBe(maskRecipeSecret('hp-live-9f2c'))
+  })
+
+  it('keeps the file as stored — a field no schema knows about still shows', () => {
+    const masked = maskedRecipeText(JSON.stringify({ build: 'true', authoredBy: 'a-human' }))!
+    expect(JSON.parse(masked).authoredBy).toBe('a-human')
+    // Pretty-printed: this reading is for a person.
+    expect(masked.split('\n').length).toBeGreaterThan(1)
+  })
+
+  it('reads as ABSENT when the file does not parse — never unmasked', () => {
+    expect(maskedRecipeText('{ not json')).toBeNull()
+  })
+
+  it('masks to the value’s length, capped — the terminal’s own spelling', () => {
+    expect(maskRecipeSecret('abc')).toBe('••• (inline value, masked)')
+    expect(maskRecipeSecret('a'.repeat(64))).toBe(`${'•'.repeat(12)} (inline value, masked)`)
   })
 })
 
@@ -981,5 +1057,76 @@ describe('resolveApiServers', () => {
     expect(missing.reason).toBe(
       'scenario binds server "api-v3", which recipe.json does not declare (declared: web, api-v2)',
     )
+  })
+})
+
+describe('the recipe web block', () => {
+  it('applies its defaults, and layers env recipe ⊕ web.env', () => {
+    const recipe = loadRaw(repo(), {
+      build: 'true',
+      entry: ['node', 'cli.js'],
+      env: { A: 'recipe', B: 'recipe' },
+      web: { serve: ['node', 'web.js'], env: { B: 'web' } },
+    })
+    expect(recipe.ok).toBe(true)
+    if (!recipe.ok) return
+    const surface = resolveWebSurface(recipe.recipe)!
+    expect(surface).toMatchObject({
+      serve: ['node', 'web.js'],
+      cwd: 'sandbox',
+      healthPath: DEFAULT_WEB_HEALTH_PATH,
+      readyTimeoutMs: DEFAULT_WEB_READY_TIMEOUT_MS,
+      env: { A: 'recipe', B: 'web' },
+    })
+    // No build command declared ⇒ the top-level build already produced the assets.
+    expect(surface.build).toBeUndefined()
+  })
+
+  it('carries its own build command, and honours declared overrides', () => {
+    const recipe = loadRaw(repo(), {
+      build: 'true',
+      entry: ['node', 'cli.js'],
+      web: {
+        build: 'pnpm --filter client build',
+        serve: ['node', 'web.js'],
+        cwd: 'repo',
+        healthPath: '/healthz',
+        readyTimeoutMs: 5_000,
+      },
+    })
+    expect(recipe.ok).toBe(true)
+    if (!recipe.ok) return
+    expect(resolveWebSurface(recipe.recipe)).toMatchObject({
+      build: 'pnpm --filter client build',
+      cwd: 'repo',
+      healthPath: '/healthz',
+      readyTimeoutMs: 5_000,
+    })
+  })
+
+  it('a repo with no web block resolves to no surface', () => {
+    const recipe = loadRaw(repo(), { build: 'true', entry: ['node', 'cli.js'] })
+    expect(recipe.ok).toBe(true)
+    if (!recipe.ok) return
+    expect(resolveWebSurface(recipe.recipe)).toBeNull()
+  })
+
+  it('refuses a web block that cannot start or cannot be probed', () => {
+    const noServe = loadRaw(repo(), { build: 'true', entry: ['node', 'cli.js'], web: {} })
+    expect(noServe.ok).toBe(false)
+    const badPath = loadRaw(repo(), {
+      build: 'true',
+      entry: ['node', 'cli.js'],
+      web: { serve: ['node', 'web.js'], healthPath: 'health' },
+    })
+    expect(badPath.ok).toBe(false)
+    if (badPath.ok) return
+    expect(badPath.message).toContain('healthPath must start with /')
+    const unknownField = loadRaw(repo(), {
+      build: 'true',
+      entry: ['node', 'cli.js'],
+      web: { serve: ['node', 'web.js'], port: 3000 },
+    })
+    expect(unknownField.ok).toBe(false)
   })
 })

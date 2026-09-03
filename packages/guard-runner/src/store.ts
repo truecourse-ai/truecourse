@@ -8,19 +8,22 @@
  *   guard/history.json           per-run summaries, append-only (gitignored)
  *   guard/result.json            last `guard generate` report (gitignored)
  *   guard/setup.json             last `guard setup` record + detection snapshot (gitignored)
- *   guard/journeys.json          last journey-mapping catalog (gitignored, re-derived)
  *   guard/interfaces.json        last interface-mapping catalog (gitignored, re-derived)
  *   guard/interfaces.authored.json  the hand-authored half of that catalog (COMMITTED)
  *   guard/interfaces.findings.md    the authoring sessions' doc-bug feed (COMMITTED)
  *   guard/setup.findings.md      the setup sessions' code-vs-docs findings ledger (COMMITTED)
+ *   guard/adjudicate.findings.md the adjudication sessions' findings ledger (COMMITTED)
+ *   guard/findings.md            the rendered findings report (COMMITTED)
  *   guard/evidence/<runId>/…     per-scenario transcripts (every executed outcome; gitignored)
  *
  * The committable corpus files live one level over, under `scenarios/`:
  *
- *   scenarios/recipe.json             how to build/run the app (committable)
- *   scenarios/manifest.json           flow → scenario map (committable)
- *   scenarios/decisions.json          user-authored dismissals (committable)
- *   scenarios/dependencies.json       the dependency catalog (committable)
+ *   scenarios/recipe.json        how to build/run the app (committable)
+ *   scenarios/manifest.json      flow → scenario map (committable)
+ *   scenarios/flows.json         the synthesized flow corpus (committable)
+ *   scenarios/claims.json        the extracted claim corpus (committable)
+ *   scenarios/decisions.json     user-authored dismissals (committable)
+ *   scenarios/dependencies.json  the dependency catalog (committable)
  *   scenarios/dependencies.local.json the machine's registered instances (gitignored)
  */
 
@@ -28,8 +31,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { z } from 'zod'
 import {
-  EMPTY_GUARD_AUTO_RESOLUTIONS,
   GuardAutoResolutionsSchema,
+  GuardClaimsFileSchema,
+  GuardFlowsFileSchema,
   GuardGenerateReportSchema,
   GuardHistorySchema,
   GuardLatestSchema,
@@ -37,6 +41,8 @@ import {
   InterfacesFileSchema,
   InterfacesFragmentSchema,
   type GuardAutoResolutions,
+  type GuardClaimsFile,
+  type GuardFlowsFile,
   type GuardGenerateReport,
   type GuardHistory,
   type GuardHistoryEntry,
@@ -61,9 +67,13 @@ const INTERFACES_FILE = 'interfaces.json'
 const AUTHORED_INTERFACES_FILE = 'interfaces.authored.json'
 const INTERFACE_FINDINGS_FILE = 'interfaces.findings.md'
 const SETUP_FINDINGS_FILE = 'setup.findings.md'
+const ADJUDICATE_FINDINGS_FILE = 'adjudicate.findings.md'
+const FINDINGS_REPORT_FILE = 'findings.md'
 const RECIPE_FILE = 'recipe.json'
 const MANIFEST_FILE = 'manifest.json'
 const DECISIONS_FILE = 'decisions.json'
+const FLOWS_FILE = 'flows.json'
+const CLAIMS_FILE = 'claims.json'
 const EXTERNALS_LOCAL_FILE = 'externals.local.json'
 const DEPENDENCIES_FILE = 'dependencies.json'
 const DEPENDENCIES_LOCAL_FILE = 'dependencies.local.json'
@@ -122,6 +132,17 @@ export function guardInterfaceFindingsPath(repoRoot: string): string {
 }
 
 /**
+ * The SETUP FINDINGS LEDGER — where `guard setup`'s sessions (the dependency
+ * catalog, the seed session) append the code-vs-docs discrepancies they read.
+ * Committed: what it holds is a report about the REPOSITORY, not a record of a
+ * run, so a teammate who never ran setup can still read it. Keep it out of
+ * `GITIGNORE_CONTENTS`.
+ */
+export function guardSetupFindingsPath(repoRoot: string): string {
+  return path.join(guardDir(repoRoot), SETUP_FINDINGS_FILE)
+}
+
+/**
  * THE WORLD-DIRTY MARKER (`guard/.world-dirty`, gitignored, derived): written
  * before a `world: mutates` tail runs — by `guard run` and by generate's
  * mutator wave alike — and cleared by a successful `api.services.reset`. A
@@ -133,16 +154,27 @@ export function guardWorldDirtyMarkerPath(repoRoot: string): string {
   return path.join(guardDir(repoRoot), '.world-dirty')
 }
 
+/**
+ * The ADJUDICATION FINDINGS LEDGER — where `guard adjudicate`'s sessions append
+ * the code-vs-docs discrepancies they read while classifying failures (the
+ * outcome's `findings`). Committed for the same reason its two
+ * siblings above are: a report about the REPOSITORY, not a record of a run.
+ * Keep it out of `GITIGNORE_CONTENTS`.
+ */
+export function guardAdjudicateFindingsPath(repoRoot: string): string {
+  return path.join(guardDir(repoRoot), ADJUDICATE_FINDINGS_FILE)
+}
 
 /**
- * The SETUP FINDINGS LEDGER — where `guard setup`'s sessions (the dependency
- * catalog, the seed session) append the code-vs-docs discrepancies they read.
- * Committed: what it holds is a report about the REPOSITORY, not a record of a
- * run, so a teammate who never ran setup can still read it. Keep it out of
- * `GITIGNORE_CONTENTS`.
+ * THE FINDINGS REPORT — `guard/findings.md`: the on-demand
+ * render of the board's `bug` / `drift` adjudications, one `## F<n>` per
+ * finding with stable first-seen numbering persisted in the file itself.
+ * COMMITTABLE (deliberately not in `GITIGNORE_CONTENTS`): it is the repo's
+ * findings record, regenerated — never appended — by
+ * `truecourse guard adjudicate --report`.
  */
-export function guardSetupFindingsPath(repoRoot: string): string {
-  return path.join(guardDir(repoRoot), SETUP_FINDINGS_FILE)
+export function guardFindingsReportPath(repoRoot: string): string {
+  return path.join(guardDir(repoRoot), FINDINGS_REPORT_FILE)
 }
 
 export function scenariosDir(repoRoot: string): string {
@@ -161,6 +193,22 @@ export function manifestPath(repoRoot: string): string {
  *  NOT under the mostly-gitignored `guard/` run store. */
 export function guardDecisionsPath(repoRoot: string): string {
   return path.join(scenariosDir(repoRoot), DECISIONS_FILE)
+}
+
+/** The committable synthesized flow corpus — `scenarios/flows.json`. */
+export function guardFlowsPath(repoRoot: string): string {
+  return path.join(scenariosDir(repoRoot), FLOWS_FILE)
+}
+
+/**
+ * The committable extracted claim corpus — `scenarios/claims.json`, next to the
+ * flow corpus it is the denominator of. Committable for the same reason
+ * `flows.json` is: claims are what scenarios' milestones and flows' bindings
+ * REFERENCE, so a fresh clone that inherits the scenarios must inherit the claims
+ * they name or every reference dangles.
+ */
+export function guardClaimsPath(repoRoot: string): string {
+  return path.join(scenariosDir(repoRoot), CLAIMS_FILE)
 }
 
 /**
@@ -268,9 +316,21 @@ export function guardAutoResolutionsPath(repoRoot: string): string {
   return path.join(guardDir(repoRoot), AUTO_RESOLUTIONS_FILE)
 }
 
-/** Read the ledger; a missing or corrupt file reads as empty (never blocks a run). */
+/**
+ * Read the ledger; a missing or corrupt file reads as empty (never blocks a run).
+ * Every call returns a FRESH object — never the shared
+ * `EMPTY_GUARD_AUTO_RESOLUTIONS` constant by reference — because callers follow
+ * the store's read-patch-write idiom (adjudication's fold mutates the read
+ * before writing it back), and a shared fallback would leak one repo's
+ * escalation counts and taints into every ledgerless repo of a long-lived
+ * process.
+ */
 export function readGuardAutoResolutions(repoRoot: string): GuardAutoResolutions {
-  return readJsonOr(guardAutoResolutionsPath(repoRoot), GuardAutoResolutionsSchema, EMPTY_GUARD_AUTO_RESOLUTIONS)
+  return readJsonOr<GuardAutoResolutions>(guardAutoResolutionsPath(repoRoot), GuardAutoResolutionsSchema, {
+    version: 1,
+    entries: {},
+    tainted: {},
+  })
 }
 
 /** Write the durable auto-resolution ledger atomically. */
@@ -530,6 +590,31 @@ export function readInterfaceCatalogRaw(repoRoot: string): string | null {
   } catch {
     return null
   }
+}
+
+/**
+ * Read the committed flow corpus, or `null` when it is absent or unparseable — a
+ * repo that has never synthesized legitimately has none.
+ */
+export function readGuardFlowsCorpus(repoRoot: string): GuardFlowsFile | null {
+  return readJsonOr(guardFlowsPath(repoRoot), GuardFlowsFileSchema, null)
+}
+
+/**
+ * Read the committed claim corpus, or `null` when it is absent or unparseable. A
+ * missing file is "claims have never been extracted here", not a failure: the
+ * cross-checks that resolve milestone and milestone-identity references against
+ * it simply have nothing to check.
+ */
+export function readGuardClaimsCorpus(repoRoot: string): GuardClaimsFile | null {
+  return readJsonOr(guardClaimsPath(repoRoot), GuardClaimsFileSchema, null)
+}
+
+/** Write the claim corpus atomically. */
+export function writeGuardClaims(repoRoot: string, claims: GuardClaimsFile): string {
+  const target = guardClaimsPath(repoRoot)
+  atomicWriteJson(target, claims)
+  return target
 }
 
 

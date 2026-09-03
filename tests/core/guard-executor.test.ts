@@ -14,7 +14,7 @@ import {
   type GuardExecInput,
   type GuardExecReport,
 } from '../../packages/core/src/lib/guard-executor'
-import { defaultGuardExecutor } from '@truecourse/guard-runner'
+import { defaultGuardExecutor, type GuardVisualJudge } from '@truecourse/guard-runner'
 import { guardRunInProcess } from '../../packages/core/src/commands/guard-in-process'
 import type { GuardLatest } from '../../packages/shared/src/index'
 import {
@@ -54,7 +54,6 @@ function emptyLatest(): GuardLatest {
       branch: null,
       commit: null,
       recipeFingerprint: 'sha256:deadbeef',
-      scenarioFormat: 2,
     },
     summary: { total: 0, pass: 0, fail: 0, stale: 0, orphaned: 0, error: 0 },
     scenarios: [],
@@ -104,6 +103,38 @@ describe('guardRunInProcess through the executor seam', () => {
     // The caller returns exactly what the seam produced (zero spawns above it).
     expect(result.status).toBe('ok')
     if (result.status === 'ok') expect(result.latest).toBe(latest)
+  })
+
+  // The visual judge is wired at THIS boundary and nowhere else — that is what
+  // keeps every other caller of the runner (birth validation, a hosted executor,
+  // the whole test suite) free of a model it never asked for. The judge is
+  // PARKED: the built one is wired only under the opt-in flag, an injected judge
+  // always wins, and the day-to-day default is no judge at all.
+  it('wires the built visual judge only under the opt-in flag, and an injected one wins', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeVersionScenario(r, 'ver')
+
+    let seen: GuardExecInput | undefined
+    setGuardExecutor(async (input) => {
+      seen = input
+      return cannedReport(emptyLatest())
+    })
+
+    await guardRunInProcess(r)
+    expect(seen!.visualJudge).toBeUndefined()
+
+    process.env.TRUECOURSE_GUARD_VISUAL_JUDGE = '1'
+    try {
+      await guardRunInProcess(r)
+      expect(typeof seen!.visualJudge).toBe('function')
+    } finally {
+      delete process.env.TRUECOURSE_GUARD_VISUAL_JUDGE
+    }
+
+    const injected: GuardVisualJudge = async () => null
+    await guardRunInProcess(r, { visualJudge: injected })
+    expect(seen!.visualJudge).toBe(injected)
   })
 
   it('maps a missing recipe to no-recipe WITHOUT invoking the executor', async () => {

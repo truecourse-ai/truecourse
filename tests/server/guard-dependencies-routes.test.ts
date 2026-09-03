@@ -255,6 +255,19 @@ describe('Guard dependencies routes', () => {
     expect(res.body.dependencies[0].service).toMatchObject({ tokenSet: true, headers: [] });
   });
 
+  it('PUT refuses a header name HTTP does not allow, rather than writing a file nothing can read', async () => {
+    writeJson(RECIPE, {
+      build: 'true',
+      api: { serve: ['node', 'server.mjs'], externals: { stripe: { baseUrlEnv: 'STRIPE_BASE_URL' } } },
+    });
+    const res = await request(app)
+      .put(url())
+      .send({ name: 'stripe', baseUrlEnv: 'STRIPE_BASE_URL', headers: { 'X Tenant: nope': 'acme' } })
+      .expect(422);
+    expect(res.body.error).toContain('header name');
+    expect(fs.existsSync(path.join(root, EXTERNALS_LOCAL))).toBe(false);
+  });
+
   it('PUT rejects a body with no name (400) and an undeclared variable (422)', async () => {
     writeJson(CATALOG, { dependencies: [ACCOUNT] });
     await request(app).put(url()).send({ env: { A: 'b' } }).expect(400);

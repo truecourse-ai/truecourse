@@ -1,26 +1,29 @@
 /**
- * THE DEPENDENCY CATALOG, run side: the declaration joined with the instance
- * overlay, and the materialization of a registered instance into a sandbox.
+ * THE DEPENDENCY GATE, end to end.
  *
- * The contract is narrow and load-bearing: a supplied dependency nobody
- * registered reads `unprovided` (never an error), a half-registered one reads
- * `incomplete`, and a registered instance is materialized as a self-contained
- * COPY — a run can never reach the host original through it.
+ * The engine's contract is narrow and load-bearing: a scenario that binds a supplied
+ * dependency with no registered instance NEVER RUNS — it settles `blocked` naming the
+ * dependency and the requirement its flows contributed — and one that binds a
+ * registered instance runs against a COPY of it, with every `${supplied:…}` resolved
+ * to the copy's path inside the sandbox.
  */
 import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import {
-  applySupplied,
   DependencyCatalogError,
   dependencyBlockFor,
   loadDependencyCatalog,
+  gitChildEnv,
   materializeSupplied,
   resolveDependencies,
+  runGuard,
   scenarioDependencyNames,
   suppliedInstancesFor,
+  applySupplied,
+  omitsOptionalPair,
 } from '@truecourse/guard-runner'
-import { makeTempRepo, rmrf, writeRecipe, scenario } from './helpers.js'
+import { makeTempRepo, rmrf, writeRecipe, writeScenario, scenario, specBinds, FIXTURE_BIN } from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -151,25 +154,36 @@ describe('resolveDependencies — declaration ∪ instance overlay', () => {
     })
 
     it('is incomplete when a REQUIRED variable is missing, however full the optional one is', () => {
-      const { dep } = resolve({ provider: 'anthropic', 'base-url': 'https://llm.internal' })
+      const { r, dep } = resolve({ provider: 'anthropic', 'base-url': 'https://llm.internal' })
       expect(dep.state).toBe('incomplete')
-      // …and the unresolved requirement names only what is actually missing.
-      const unresolved = dep.requirements.filter((q) => !q.resolved && !q.optional)
-      expect(unresolved.map((q) => q.reason)).toEqual(['no value registered for `api-key`'])
+      // …and the scenario it blocks names only what is actually missing.
+      const named = scenario({ id: 'z', needs: ['llm-api-credentials'], steps: [{ run: ['version'] }] })
+      const block = dependencyBlockFor(named, resolveDependencies(r))
+      expect(block!.detail).toBe('no value registered for `api-key`')
     })
 
     it('never lifts an entry off unprovided by itself', () => {
       expect(resolve({ 'base-url': 'https://llm.internal' }).dep.state).toBe('unprovided')
     })
 
-    // A registered optional value materializes like any other: the env instance
-    // carries it, and a child sees it under its registered name.
-    it('materializes like a required one once registered', () => {
+    // No special-casing downstream: a registered optional value reaches a scenario
+    // through the same `${supplied:…}` resolution every other field uses.
+    it('resolves through ${supplied:…} exactly like a required one once registered', () => {
       const { r, dep } = resolve({ provider: 'anthropic', 'api-key': 'sk-x', 'base-url': 'https://llm.internal' })
       expect(dep.state).toBe('provided')
+      const named = scenario({
+        id: 'z',
+        setup: { env: { BASE: '${supplied:llm-api-credentials.base-url}' } },
+        steps: [{ run: ['version'] }],
+      })
       const sandbox = { cwd: path.join(r, 'sandbox'), home: path.join(r, 'home') }
-      const { values } = materializeSupplied([{ name: 'llm-api-credentials', kind: 'env', env: dep.env }], sandbox)
-      expect(values['llm-api-credentials']['base-url']).toBe('https://llm.internal')
+      const { values } = materializeSupplied(
+        suppliedInstancesFor(named, resolveDependencies(r)),
+        sandbox,
+      )
+      expect(applySupplied('${supplied:llm-api-credentials.base-url}', values)).toBe(
+        'https://llm.internal',
+      )
     })
   })
 
@@ -220,14 +234,16 @@ describe('resolveDependencies — declaration ∪ instance overlay', () => {
       )
     })
 
-    it('still lists the missing variable beside the stale-instance note', () => {
+    it('says so in the reason a scenario binding it is blocked', () => {
       const r = repo()
       writeCatalog(r, [TOKEN_LOGIN])
       writeLocal(r, { 'tool-login': { path: '/Users/someone/.toolrc' } })
-      const dep = resolveDependencies(r).dependencies[0]
-      expect(dep.state).toBe('unprovided')
-      expect(dep.requirements.map((q) => q.reason)).toEqual(['no value registered for `TOOL_OAUTH_TOKEN`'])
-      expect(dep.staleInstance).toMatch(/the path is ignored$/)
+      const named = scenario({ id: 'z', needs: ['tool-login'], steps: [{ run: ['version'] }] })
+      const block = dependencyBlockFor(named, resolveDependencies(r))
+      expect(block!.detail).toBe(
+        'no value registered for `TOOL_OAUTH_TOKEN`; the registered instance is a path, but ' +
+          'this dependency is now registered as `TOOL_OAUTH_TOKEN` — the path is ignored',
+      )
     })
 
     it('is silent when the shapes agree', () => {
@@ -274,20 +290,112 @@ describe('what a scenario binds', () => {
     const named = scenario({ id: 'y', needs: ['a-repo'], steps: [{ run: ['version'] }] })
     expect(dependencyBlockFor(named, resolveDependencies(r))).toBeNull()
   })
+})
 
-  it('materializes only the instances a registered binding resolves to', () => {
+describe('runGuard — the gate', () => {
+  it('settles blocked (never fail), runs nothing, and names the dependency + requirement', async () => {
     const r = repo()
+    writeRecipe(r)
+    writeCatalog(r, [TARGET])
+    writeScenario(
+      r,
+      'cli/needs.yaml',
+      scenario({
+        id: 'needs-target',
+        binds: specBinds('cli/version'),
+        needs: ['analysis-target'],
+        // `tick` appends a line per invocation: if the step ever spawned, the sandbox
+        // would carry the evidence. Blocked means it never did.
+        steps: [{ run: ['tick'], expect: { exit: 0 } }],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    const [result] = res.latest.scenarios
+    expect(result.outcome).toBe('blocked')
+    expect(res.latest.summary).toMatchObject({ blocked: 1, fail: 0, error: 0, pass: 0 })
+    expect(result.blockedOn).toMatchObject({
+      dependency: 'analysis-target',
+      requirement: 'a project with one high finding; at least one file the rules accept',
+      needs: [
+        { flowId: 'claude', need: 'a project with one high finding' },
+        { flowId: 'api', need: 'at least one file the rules accept' },
+      ],
+    })
+    expect(result.blockedOn!.registerIn).toContain('dependencies.local.json')
+    // Nothing executed, so there is no transcript to write.
+    expect(result.evidencePath).toBeUndefined()
+    expect(result.durationMs).toBe(0)
+  })
+
+  it('runs the scenario once an instance is registered, resolving ${supplied:…} to the sandbox COPY', async () => {
+    const r = repo()
+    writeRecipe(r)
     writeCatalog(r, [TARGET])
     const fixture = path.join(r, 'fixture-project')
     fs.mkdirSync(fixture, { recursive: true })
+    fs.writeFileSync(path.join(fixture, 'README.md'), 'supplied content\n')
     writeLocal(r, { 'analysis-target': { path: fixture } })
-    const bound = scenario({
-      id: 'z',
-      steps: [{ run: ['show', '${supplied:analysis-target.path}'] }],
-    })
-    expect(suppliedInstancesFor(bound, resolveDependencies(r))).toEqual([
-      { name: 'analysis-target', kind: 'path', hostPath: fixture },
-    ])
+
+    writeScenario(
+      r,
+      'cli/needs.yaml',
+      scenario({
+        id: 'needs-target',
+        binds: specBinds('cli/version'),
+        needs: ['analysis-target'],
+        steps: [
+          {
+            run: ['show', '${supplied:analysis-target.path}/README.md'],
+            expect: { exit: 0, stdout: { contains: 'supplied content' } },
+          },
+          // The run works on a COPY: writing through the resolved path must not reach
+          // the registered original.
+          { run: ['note', '${supplied:analysis-target.path}/README.md'], expect: { exit: 0 } },
+        ],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    expect(res.latest.scenarios[0].outcome).toBe('pass')
+    expect(res.latest.summary.blocked).toBe(0)
+    expect(fs.readFileSync(path.join(fixture, 'README.md'), 'utf-8')).toBe('supplied content\n')
+  })
+
+  it('blocks one variant while its sibling runs — a dependency gates its binder alone', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCatalog(r, [TARGET])
+    writeScenario(
+      r,
+      'cli/blocked.yaml',
+      scenario({
+        id: 'blocked-one',
+        binds: specBinds('cli/version'),
+        needs: ['analysis-target'],
+        steps: [{ run: ['version'], expect: { exit: 0 } }],
+      }),
+    )
+    writeScenario(
+      r,
+      'cli/free.yaml',
+      scenario({
+        id: 'free-one',
+        binds: specBinds('cli/whoami'),
+        steps: [{ run: ['version'], expect: { exit: 0 } }],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    expect(
+      Object.fromEntries(res.latest.scenarios.map((s) => [s.id, s.outcome])),
+    ).toEqual({ 'blocked-one': 'blocked', 'free-one': 'pass' })
   })
 })
 
@@ -297,6 +405,80 @@ describe('applySupplied', () => {
       DependencyCatalogError,
     )
     expect(applySupplied('at ${supplied:target.path}', { target: { path: '/tmp/x' } })).toBe('at /tmp/x')
+  })
+
+  it('settles ONE scenario as an error on an undeclared field — the sibling still runs', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCatalog(r, [TARGET])
+    const fixture = path.join(r, 'fixture-project')
+    fs.mkdirSync(fixture, { recursive: true })
+    writeLocal(r, { 'analysis-target': { path: fixture } })
+    // `pth` is a typo for `path`: the NAME gate passes (the dependency is
+    // registered), so the miss can only surface at token resolution — which must
+    // fail this scenario alone, never reject the whole run.
+    writeScenario(
+      r,
+      'cli/typo.yaml',
+      scenario({
+        id: 'typo-field',
+        binds: specBinds('cli/version'),
+        steps: [{ run: ['show', '${supplied:analysis-target.pth}'], expect: { exit: 0 } }],
+      }),
+    )
+    writeScenario(
+      r,
+      'cli/free.yaml',
+      scenario({
+        id: 'free-one',
+        binds: specBinds('cli/whoami'),
+        steps: [{ run: ['version'], expect: { exit: 0 } }],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    const byId = Object.fromEntries(res.latest.scenarios.map((s) => [s.id, s]))
+    expect(byId['typo-field'].outcome).toBe('error')
+    expect(byId['typo-field'].failure?.actual).toContain('declares no')
+    expect(byId['free-one'].outcome).toBe('pass')
+  })
+
+  it('resolves ${supplied:…} in a step env overlay, exactly like argv', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCatalog(r, [TARGET])
+    const fixture = path.join(r, 'fixture-project')
+    fs.mkdirSync(fixture, { recursive: true })
+    fs.writeFileSync(path.join(fixture, 'README.md'), 'env-resolved content\n')
+    writeLocal(r, { 'analysis-target': { path: fixture } })
+    writeScenario(
+      r,
+      'cli/env.yaml',
+      scenario({
+        id: 'env-supplied',
+        binds: specBinds('cli/version'),
+        needs: ['analysis-target'],
+        // `env NAME` echoes the variable as the child sees it; a literal
+        // `${supplied:…}` reaching the child would fail the assertion.
+        steps: [
+          {
+            run: ['env', 'TARGET_FILE'],
+            env: { TARGET_FILE: '${supplied:analysis-target.path}/README.md' },
+            expect: {
+              exit: 0,
+              stdout: { contains: '.tc-supplied/analysis-target/README.md' },
+            },
+          },
+        ],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    expect(res.latest.scenarios[0].outcome).toBe('pass')
   })
 })
 
@@ -352,6 +534,377 @@ describe('materializeSupplied — the copy is self-contained', () => {
   })
 })
 
+describe('a config-dir instance', () => {
+  it('is copied into the sandbox HOME, so a run cannot touch the real login state', async () => {
+    const r = repo()
+    writeRecipe(r)
+    const hostConfig = path.join(r, 'host-claude')
+    fs.mkdirSync(hostConfig, { recursive: true })
+    fs.writeFileSync(path.join(hostConfig, 'creds.json'), '{"token":"real"}')
+    writeCatalog(r, [
+      {
+        name: 'tool-login',
+        class: 'supplied',
+        summary: 'an authenticated tool installation',
+        registration: { kind: 'config-dir', homePath: '.toolrc', description: 'the config dir' },
+        needs: [{ flowId: 'f', need: 'a login that answers without prompting' }],
+      },
+    ])
+    writeLocal(r, { 'tool-login': { path: hostConfig } })
+
+    writeScenario(
+      r,
+      'cli/login.yaml',
+      scenario({
+        id: 'uses-login',
+        binds: specBinds('cli/version'),
+        needs: ['tool-login'],
+        // `show` reads a path relative to the sandbox cwd; the token resolves to the
+        // materialized copy inside the sandbox HOME.
+        steps: [
+          {
+            run: ['show', '${supplied:tool-login.path}/creds.json'],
+            expect: { exit: 0, stdout: { contains: '"token":"real"' } },
+          },
+        ],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    expect(res.latest.scenarios[0].outcome).toBe('pass')
+  })
+})
+
+/**
+ * THE OMITTABLE ARGV PAIR — `optional: ["--base-url", "${supplied:…}"]`.
+ *
+ * A registration may declare a variable optional because the program has its own
+ * default for it. The scenario still has to name the flag, and the pair is how it
+ * says "…unless nobody registered one": registered ⇒ two ordinary argv words,
+ * blank ⇒ the flag AND the value drop out, so the program falls back to its default
+ * instead of being handed an empty endpoint. Nothing else about token resolution
+ * moves — a REQUIRED field still blocks the scenario before anything runs.
+ */
+describe('an optional argv pair', () => {
+  const CREDENTIALS = {
+    name: 'llm-api-credentials',
+    class: 'supplied',
+    summary: 'a provider API account the CLI can reach the model through',
+    registration: {
+      kind: 'env',
+      vars: [
+        { name: 'provider', description: 'the provider id', secret: false },
+        {
+          name: 'base-url',
+          description: 'the provider API base URL — omit for the provider default',
+          secret: false,
+          optional: true,
+        },
+      ],
+    },
+    needs: [{ flowId: 'api', need: 'a key whose live provider probe succeeds' }],
+  }
+
+  /** Run one scenario whose only step carries the pair; return its result + argv. */
+  async function runWithOverlay(
+    env: Record<string, string>,
+  ): Promise<{ outcome: string; argv: string[]; blockedOn?: string }> {
+    const r = repo()
+    writeRecipe(r)
+    writeCatalog(r, [CREDENTIALS])
+    writeLocal(r, { 'llm-api-credentials': { env } })
+    writeScenario(
+      r,
+      'cli/credentials.yaml',
+      scenario({
+        id: 'uses-credentials',
+        binds: specBinds('cli/version'),
+        needs: ['llm-api-credentials'],
+        steps: [
+          {
+            run: [
+              'version',
+              '--provider',
+              '${supplied:llm-api-credentials.provider}',
+              { optional: ['--base-url', '${supplied:llm-api-credentials.base-url}'] },
+            ],
+            expect: { exit: 0, stdout: { contains: '.' } },
+          },
+        ],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    if (res.status !== 'ok') throw new Error(`run did not settle: ${res.status}`)
+    const [result] = res.latest.scenarios
+    if (!result.evidencePath) {
+      return { outcome: result.outcome, argv: [], blockedOn: result.blockedOn?.dependency }
+    }
+    // The transcript records what the child was ACTUALLY spawned with — the only
+    // honest place to read an argv the runner assembled.
+    const invocation = JSON.parse(
+      fs.readFileSync(path.join(r, result.evidencePath, 'invocation.json'), 'utf-8'),
+    ) as { steps: { argv: string[] }[] }
+    return { outcome: result.outcome, argv: invocation.steps[0].argv }
+  }
+
+  it('passes the pair through, resolved, when the optional field is registered', async () => {
+    const { outcome, argv } = await runWithOverlay({
+      provider: 'anthropic',
+      'base-url': 'https://llm.internal/v1',
+    })
+    expect(outcome).toBe('pass')
+    expect(argv.slice(-4)).toEqual([
+      '--provider',
+      'anthropic',
+      '--base-url',
+      'https://llm.internal/v1',
+    ])
+  })
+
+  it('drops the flag AND its value when the optional field is blank — the command still runs', async () => {
+    const { outcome, argv } = await runWithOverlay({ provider: 'anthropic' })
+    expect(outcome).toBe('pass')
+    expect(argv.slice(-3)).toEqual(['version', '--provider', 'anthropic'])
+    expect(argv).not.toContain('--base-url')
+    // And certainly not the literal token: a dropped pair is dropped, never emptied.
+    expect(argv.join(' ')).not.toContain('${supplied:')
+  })
+
+  it('still blocks the whole scenario when a REQUIRED field is unregistered', async () => {
+    const { outcome, argv, blockedOn } = await runWithOverlay({
+      'base-url': 'https://llm.internal/v1',
+    })
+    // A registered OPTIONAL field lifts nothing: the pair mechanism is about what a
+    // machine may leave blank, never about what it must supply.
+    expect(outcome).toBe('blocked')
+    expect(argv).toEqual([])
+    expect(blockedOn).toBe('llm-api-credentials')
+
+    const r = repo()
+    writeCatalog(r, [CREDENTIALS])
+    writeLocal(r, { 'llm-api-credentials': { env: { 'base-url': 'https://llm.internal/v1' } } })
+    const named = scenario({
+      id: 'z',
+      needs: ['llm-api-credentials'],
+      steps: [{ run: ['version'] }],
+    })
+    expect(dependencyBlockFor(named, resolveDependencies(r))!.detail).toBe(
+      'no value registered for `provider`',
+    )
+  })
+
+  it('resolves a pair naming a registered field like any other token', () => {
+    const omissions = new Set(['llm-api-credentials.base-url'])
+    expect(omitsOptionalPair('${supplied:llm-api-credentials.base-url}', omissions)).toBe(true)
+    expect(omitsOptionalPair('${supplied:llm-api-credentials.model}', omissions)).toBe(false)
+    expect(omitsOptionalPair('--base-url', omissions)).toBe(false)
+  })
+
+  it('reports the blank optional fields materialization saw, and only those', () => {
+    const r = repo()
+    writeCatalog(r, [CREDENTIALS])
+    writeLocal(r, { 'llm-api-credentials': { env: { provider: 'anthropic' } } })
+    const named = scenario({
+      id: 'z',
+      needs: ['llm-api-credentials'],
+      steps: [{ run: ['version'] }],
+    })
+    const { omissions } = materializeSupplied(
+      suppliedInstancesFor(named, resolveDependencies(r)),
+      { cwd: path.join(r, 'sandbox'), home: path.join(r, 'home') },
+    )
+    expect([...omissions]).toEqual(['llm-api-credentials.base-url'])
+  })
+})
+
+/**
+ * A registered variable whose NAME is a legal environment identifier is exported to
+ * the scenario's child — the path that makes a token registration work without the
+ * scenario placing it anywhere (the program reads `CLAUDE_CODE_OAUTH_TOKEN` itself).
+ */
+describe('a token registration', () => {
+  it('auto-exports into the child env, so the spawned program finds it', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCatalog(r, [
+      {
+        name: 'tool-login',
+        class: 'supplied',
+        summary: 'an authenticated tool installation',
+        registration: {
+          kind: 'env',
+          vars: [
+            { name: 'TOOL_OAUTH_TOKEN', description: 'a long-lived token', secret: true },
+          ],
+        },
+        needs: [{ flowId: 'f', need: 'a token that answers without prompting' }],
+      },
+    ])
+    writeLocal(r, { 'tool-login': { env: { TOOL_OAUTH_TOKEN: 'oat-abc' } } })
+    writeScenario(
+      r,
+      'cli/login.yaml',
+      scenario({
+        id: 'uses-token',
+        binds: specBinds('cli/version'),
+        needs: ['tool-login'],
+        // The scenario names the variable nowhere: `env` echoes what the child got.
+        steps: [
+          {
+            run: ['env', 'TOOL_OAUTH_TOKEN'],
+            expect: { exit: 0, stdout: { equals: 'TOOL_OAUTH_TOKEN=oat-abc\n' } },
+          },
+        ],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    expect(res.status).toBe('ok')
+    if (res.status !== 'ok') return
+    expect(res.latest.scenarios[0].outcome).toBe('pass')
+  })
+})
+
+/**
+ * A registered env value must actually REACH the program — the whole point of
+ * registering a token is that the child authenticates with it. The sandbox builds
+ * its env from an allowlist (no `process.env` spread), so an exported value has to
+ * survive that construction, ride EVERY step of the scenario that bound it, and
+ * survive a step's own `env` overlay and the git-step identity layer on top.
+ *
+ * The values here are fake by construction: the probe echoes them to stdout, which
+ * is exactly what a real credential must never do.
+ */
+describe('a bound env dependency reaches the child process', () => {
+  const TOOL_LOGIN = {
+    name: 'tool-login',
+    class: 'supplied',
+    summary: 'an authenticated tool installation',
+    registration: {
+      kind: 'env',
+      vars: [
+        // A legal environment identifier — the program reads it by itself.
+        { name: 'TOOL_OAUTH_TOKEN', description: 'a long-lived token', secret: true },
+        // NOT a legal identifier — a registration FIELD, reachable only via `${supplied:…}`.
+        { name: 'api-key', description: 'a provider key', secret: true },
+      ],
+    },
+    needs: [{ flowId: 'f', need: 'a login that answers without prompting' }],
+  }
+  const INSTANCE = { 'tool-login': { env: { TOOL_OAUTH_TOKEN: 'fake-oat-value', 'api-key': 'fake-key' } } }
+
+  it('exports it into every step, through the allowlist, under a step overlay and on a git step', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCatalog(r, [TOOL_LOGIN])
+    writeLocal(r, INSTANCE)
+    writeScenario(
+      r,
+      'cli/login.yaml',
+      scenario({
+        id: 'binds-a-login',
+        binds: specBinds('cli/version'),
+        needs: ['tool-login'],
+        steps: [
+          // The first step the scenario runs already has it…
+          {
+            run: ['env', 'TOOL_OAUTH_TOKEN'],
+            expect: { exit: 0, stdout: { contains: 'TOOL_OAUTH_TOKEN=fake-oat-value' } },
+          },
+          // …so does a LATER one (the export is the scenario's env, not one child's)…
+          {
+            run: ['env', 'TOOL_OAUTH_TOKEN'],
+            expect: { exit: 0, stdout: { contains: 'TOOL_OAUTH_TOKEN=fake-oat-value' } },
+          },
+          // …a step declaring its own overlay ADDS to it rather than replacing it…
+          {
+            run: ['env', 'TOOL_OAUTH_TOKEN', 'STEP_ONLY'],
+            env: { STEP_ONLY: 'yes' },
+            expect: {
+              exit: 0,
+              stdout: { contains: 'TOOL_OAUTH_TOKEN=fake-oat-value\nSTEP_ONLY=yes' },
+            },
+          },
+        ],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    if (res.status !== 'ok') throw new Error(`expected ok, got ${res.status}`)
+    const [result] = res.latest.scenarios
+    expect(result.failure).toBeUndefined()
+    expect(result.outcome).toBe('pass')
+
+    // The git-step layer adds identity ON TOP of that same env — a `git` step of a
+    // scenario that bound a login carries it too. (git itself cannot echo an env
+    // var, so the layer is asserted where it is built.)
+    expect(gitChildEnv({ TOOL_OAUTH_TOKEN: 'fake-oat-value' }).TOOL_OAUTH_TOKEN).toBe(
+      'fake-oat-value',
+    )
+  })
+
+  it('exports only the names a child can carry — a registration FIELD stays a token', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCatalog(r, [TOOL_LOGIN])
+    writeLocal(r, INSTANCE)
+    writeScenario(
+      r,
+      'cli/fields.yaml',
+      scenario({
+        id: 'field-vs-variable',
+        binds: specBinds('cli/version'),
+        needs: ['tool-login'],
+        // The scenario PLACES a field where the program reads it — the token is the
+        // only route for a name a child process cannot carry.
+        setup: { env: { PLACED: '${supplied:tool-login.api-key}' } },
+        steps: [
+          {
+            // `api-key` is not an environment identifier, so nothing the scenario
+            // did not ask for lands in its env under that name.
+            run: ['env', 'api-key', 'PLACED'],
+            expect: { exit: 0, stdout: { equals: 'api-key=(unset)\nPLACED=fake-key\n' } },
+          },
+        ],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    if (res.status !== 'ok') throw new Error(`expected ok, got ${res.status}`)
+    const [result] = res.latest.scenarios
+    expect(result.failure).toBeUndefined()
+    expect(result.outcome).toBe('pass')
+  })
+
+  it('exports nothing when the scenario binds nothing — a registration is not ambient', async () => {
+    const r = repo()
+    writeRecipe(r)
+    writeCatalog(r, [TOOL_LOGIN])
+    writeLocal(r, INSTANCE)
+    writeScenario(
+      r,
+      'cli/unbound.yaml',
+      scenario({
+        id: 'binds-nothing',
+        binds: specBinds('cli/version'),
+        steps: [
+          {
+            run: ['env', 'TOOL_OAUTH_TOKEN'],
+            expect: { exit: 0, stdout: { equals: 'TOOL_OAUTH_TOKEN=(unset)\n' } },
+          },
+        ],
+      }),
+    )
+
+    const res = await runGuard({ repoRoot: r, skipBuild: true })
+    if (res.status !== 'ok') throw new Error(`expected ok, got ${res.status}`)
+    expect(res.latest.scenarios[0].outcome).toBe('pass')
+  })
+})
+
 describe('the catalog is a recipe-class input', () => {
   it('is folded into the recipe fingerprint, while the instance overlay is not', async () => {
     const r = repo()
@@ -383,3 +936,5 @@ describe('the corpus walk', () => {
   })
 })
 
+// `FIXTURE_BIN` is referenced by `writeRecipe`; keep the import honest.
+void FIXTURE_BIN

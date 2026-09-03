@@ -142,41 +142,24 @@ describe('Guard action routes', () => {
     expect(res.body.error).toMatch(/already running/i);
   });
 
-  it('POST /guard/run rejects a concurrent duplicate with 409', async () => {
-    let release!: () => void;
-    vi.mocked(guardRunInProcess).mockImplementation(
-      () => new Promise((r) => { release = () => r({ status: 'ok', latest: { summary: { total: 0 } } } as never); }),
-    );
-
-    // `.then(...)` fires the request now (supertest is otherwise lazy); await it at
-    // the end. Give the first handler time to acquire the lock before racing it.
-    const firstDone = request(app).post(url('run')).then((r) => r);
-    await new Promise((r) => setTimeout(r, 150));
-
-    await request(app).post(url('run')).expect(409);
-
-    release();
-    const firstRes = await firstDone;
-    expect(firstRes.status).toBe(200);
-  });
-
   // --- Run trigger ----------------------------------------------------------
 
-  it('POST /guard/run starts the run and emits guard-run on ok', async () => {
-    const summary = { total: 3, pass: 2, fail: 1, stale: 0, orphaned: 0, error: 0 };
-    vi.mocked(guardRunInProcess).mockResolvedValue({ status: 'ok', latest: { summary } } as never);
-
-    const res = await request(app).post(url('run')).expect(200);
-    expect(res.body).toEqual({ status: 'ok', summary });
-    expect(vi.mocked(guardRunInProcess)).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(emitSpecComplete)).toHaveBeenCalledWith(fixture.project.slug, 'guard-run');
+  it('POST /guard/run enqueues the job and answers 202', async () => {
+    const res = await request(app).post(url('run')).expect(202);
+    expect(res.body).toEqual({ jobId: 'job_test' });
+    expect(jobs.guardRuns).toEqual([
+      { repoId: fixture.project.slug, repoFullName: root, workspaceOrgId: TEST_ORG, source: 'manual' },
+    ]);
+    // The queue owns the work: the route neither runs the runner nor announces a
+    // completion of its own.
+    expect(vi.mocked(guardRunInProcess)).not.toHaveBeenCalled();
+    expect(vi.mocked(emitSpecComplete)).not.toHaveBeenCalled();
   });
 
-  it('POST /guard/run surfaces a non-ok status with a message (no recipe)', async () => {
-    vi.mocked(guardRunInProcess).mockResolvedValue({ status: 'no-recipe' } as never);
-    const res = await request(app).post(url('run')).expect(200);
-    expect(res.body.status).toBe('no-recipe');
-    expect(res.body.message).toMatch(/recipe/i);
+  it('POST /guard/run answers 409 while the repository is already working', async () => {
+    jobs.answer = { status: 'busy' };
+    const res = await request(app).post(url('run')).expect(409);
+    expect(res.body.error).toMatch(/already running/i);
   });
 
   // --- Flow dismissal — the manual dismissal unit ----------------------------

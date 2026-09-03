@@ -135,10 +135,25 @@ const GUARD_STATUS_COLOUR: Record<GuardSectionCoverageStatus, GuardStatusColour>
     dot: 'bg-red-500',
     badge: 'bg-red-500/15 text-red-600 dark:text-red-400',
   },
+  // A run outcome, not a gap: the test exists and is blocked on a dependency the
+  // user can register. Sky like `guarded` (nothing failed), its own group so the
+  // filter can tell "blocked" from "never run".
+  blocked: {
+    group: 'gap',
+    band: 'border-sky-500/50 bg-sky-500/[0.07]',
+    dot: 'bg-sky-500',
+    badge: 'bg-sky-500/15 text-sky-600 dark:text-sky-400',
+  },
+  'never-run': {
+    group: 'guarded',
+    band: 'border-sky-500/50 bg-sky-500/[0.07]',
+    dot: 'bg-sky-500',
+    badge: 'bg-sky-500/15 text-sky-600 dark:text-sky-400',
+  },
   'blocked-on': GAP_COLOUR,
   untestable: GAP_COLOUR,
   'no-claim': GAP_COLOUR,
-  'no-journey': GAP_COLOUR,
+  'no-interface': GAP_COLOUR,
   unrealizable: GAP_COLOUR,
   // The user dismissed this claim's finding (won't-fix / noise) — its own zinc
   // tint separates it from the "can't test" gaps.
@@ -174,8 +189,12 @@ export const GUARD_STATUS_ORDER: GuardSectionCoverageStatus[] = [
   'error',
   'stale',
   'orphaned',
+  // A run outcome, not a gap: the test exists and is blocked on a dependency the
+  // user can register — beside the other actionable state below.
+  'blocked',
   'pass',
   'guarded',
+  'never-run',
   // Needs-setup leads the gaps wherever they are listed — it is the one a user can
   // clear (the totals strip's own chip, split out of "blocked").
   'needs-setup',
@@ -183,6 +202,8 @@ export const GUARD_STATUS_ORDER: GuardSectionCoverageStatus[] = [
   'blocked-on',
   'untestable',
   'no-claim',
+  'no-interface',
+  'unrealizable',
   'dismissed',
   // After every gap: a gap is a settled answer, this is an unanswered question.
   'authoring-error',

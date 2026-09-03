@@ -71,12 +71,12 @@ const CLI_SURFACE = {
 };
 const WEB_GAP = {
   surface: 'web' as const,
-  status: 'web' as const,
+  status: 'tui' as const,
   gap: {
     kind: 'awaiting-driver' as const,
     driver: 'web' as const,
     reason: 'the board is browser-only',
-    label: 'awaiting web driver',
+    label: 'awaiting tui driver',
   },
 };
 
@@ -103,7 +103,7 @@ const FLOWS: GuardFlowListItem[] = [
     flowId: 'task-export',
     title: 'A user exports the task list',
     goal: 'Export tasks to a file from the CLI',
-    status: 'no-journey',
+    status: 'no-interface',
     bucket: 'blocked',
     epic: false,
     composedOf: [],
@@ -114,8 +114,8 @@ const FLOWS: GuardFlowListItem[] = [
     surfaces: [
       {
         surface: 'cli',
-        status: 'no-journey',
-        gap: { kind: 'no-journey', reason: 'no cli journey exports the list', label: 'no journey' },
+        status: 'no-interface',
+        gap: { kind: 'no-interface', reason: 'no cli journey exports the list', label: 'no journey' },
       },
     ],
     findings: 0,
@@ -324,10 +324,7 @@ const VIEW: GuardFlowsView = {
   runId: RUN_ID,
   ranAt: '2026-07-24T14:02:00.000Z',
   recipe: {
-    build: 'pnpm build',
-    entry: ['node', 'dist/tasks.js'],
-    serve: null,
-    env: null,
+    surfaces: { cli: { build: 'pnpm build', entry: ['node', 'dist/tasks.js'] } },
     fingerprint: 'sha256:9f2caabbccdd',
     stale: false,
   },
@@ -442,12 +439,12 @@ const DETAIL: GuardFlowDetailData = {
       interfaceDrifted: true,
       evidencePath: `.truecourse/guard/evidence/${RUN_ID}/${SCENARIO_ID}`,
       hasEvidence: true,
-      journeyPath: ['cli/tasks-add', 'cli/tasks-list', 'cli/tasks-done'],
+      interfacePath: ['cli/tasks-add', 'cli/tasks-list', 'cli/tasks-done'],
     },
-    { surface: 'web', status: 'web', birthPassed: false, hasEvidence: false, journeyPath: [], gap: WEB_GAP.gap },
+    { surface: 'web', status: 'tui', birthPassed: false, hasEvidence: false, interfacePath: [], gap: WEB_GAP.gap },
   ],
   gaps: [{ surface: 'web', ...WEB_GAP.gap }],
-  journeyIds: ['cli/tasks-add', 'cli/tasks-list', 'cli/tasks-done'],
+  interfaceIds: ['cli/tasks-add', 'cli/tasks-list', 'cli/tasks-done'],
   findings: [],
   errors: [],
   generatedAt: '2026-07-24T13:40:00.000Z',
@@ -474,11 +471,11 @@ const BIRTH_FAILED_DETAIL: GuardFlowDetailData = {
       stage: 'birth',
       failure: { step: 2, expected: 'exit 0', actual: 'timed out after 120s' },
       hasEvidence: true,
-      journeyPath: [],
+      interfacePath: [],
     },
   ],
   gaps: [],
-  journeyIds: [],
+  interfaceIds: [],
   findings: [],
   errors: [],
 };
@@ -493,9 +490,9 @@ const ERROR_ONLY_DETAIL: GuardFlowDetailData = {
   status: 'authoring-error',
   bucket: 'blocked',
   milestones: [DETAIL.milestones[0]],
-  surfaces: [{ surface: 'cli', status: 'authoring-error', birthPassed: false, hasEvidence: false, journeyPath: [] }],
+  surfaces: [{ surface: 'cli', status: 'authoring-error', birthPassed: false, hasEvidence: false, interfacePath: [] }],
   gaps: [],
-  journeyIds: [],
+  interfaceIds: [],
   findings: [],
   errors: [
     {
@@ -535,11 +532,11 @@ const UNDERIVED_DETAIL: GuardFlowDetailData = {
       stage: 'run',
       outcome: 'pass',
       hasEvidence: false,
-      journeyPath: [],
+      interfacePath: [],
     },
   ],
   gaps: [],
-  journeyIds: [],
+  interfaceIds: [],
   findings: [],
   errors: [],
   orphaned: true,
@@ -554,10 +551,10 @@ const CONFLICTS_DETAIL: GuardFlowDetailData = {
   bucket: 'blocked',
   milestones: [DETAIL.milestones[0]],
   surfaces: [
-    { surface: 'cli', status: 'blocked-on', birthPassed: false, hasEvidence: false, journeyPath: [], gap: CONFLICTS_GAP },
+    { surface: 'cli', status: 'blocked-on', birthPassed: false, hasEvidence: false, interfacePath: [], gap: CONFLICTS_GAP },
   ],
   gaps: [{ surface: 'cli', ...CONFLICTS_GAP }],
-  journeyIds: [],
+  interfaceIds: [],
   findings: [],
   errors: [],
 };
@@ -743,7 +740,7 @@ describe('GuardFlowsPanel — the flow inventory', () => {
     expect(within(list).queryByText(/needs an LLM provider/)).not.toBeInTheDocument();
     expect(within(list).queryByText(/needs API recipe/)).not.toBeInTheDocument();
     expect(within(list).queryByText(/no code path mapped/)).not.toBeInTheDocument();
-    expect(within(list).queryByText(/awaiting web driver/)).not.toBeInTheDocument();
+    expect(within(list).queryByText(/awaiting tui driver/)).not.toBeInTheDocument();
     // The filter says the SAME word the chip says — one state, one word.
     expect(
       within(screen.getByLabelText('Filter by status')).getByRole('option', { name: /^Blocked \(\d+\)$/ }),
@@ -970,7 +967,7 @@ describe('GuardFlowDetail — a test, or one plain sentence saying why not', () 
     const list = interfaces.querySelector('div.flex.flex-col')!;
     expect(list).not.toBeNull();
     expect(list.className).toContain('flex-col');
-    expect(list.querySelectorAll('button')).toHaveLength(DETAIL.journeyIds.length);
+    expect(list.querySelectorAll('button')).toHaveLength(DETAIL.interfaceIds.length);
   });
 
   it('has NO gaps block, NO findings block and NO authoring-errors block', () => {
@@ -1546,7 +1543,7 @@ describe('GuardDriftDetail — the flow instance in execution paint', () => {
       />,
     );
 
-  it('paints pass up to the failure, fail at the milestone, and a not-reached tail', () => {
+  it('paints pass up to the failure, fail at the milestone, and a not-reached tail', async () => {
     renderRun(FAILED_RESULT);
     const graph = screen.getByRole('list', { name: 'Milestones' });
     expect(within(graph).getByLabelText(/Milestone 1: .* — pass/)).toBeInTheDocument();
@@ -1554,7 +1551,8 @@ describe('GuardDriftDetail — the flow instance in execution paint', () => {
     expect(within(graph).getByLabelText(/Milestone 3: .* — fail/)).toBeInTheDocument();
     expect(within(graph).getByLabelText(/Milestone 4: .* — not reached/)).toBeInTheDocument();
     expect(screen.getByText(/Failed at step/)).toBeInTheDocument();
-    expect(screen.getByText('exit 1: unknown command `done`')).toBeInTheDocument();
+    // What it got reads in the failing step's own record, which starts open.
+    expect(await screen.findByLabelText('actual value')).toHaveTextContent('exit 1: unknown command `done`');
     expect(screen.getByText(/Interface drift/)).toBeInTheDocument();
   });
 
@@ -1587,8 +1585,6 @@ describe('GuardDriftDetail — the flow instance in execution paint', () => {
     expect(screen.queryByText(/Interface drift/)).not.toBeInTheDocument();
   });
 
-  // A red run whose SETUP step broke gets its own line, so it is
-  // not read as doc-vs-code drift. Still a fail — the annotation only says where.
   it('marks a blocked precondition beside the failure, distinctly from drift', () => {
     renderRun({
       ...FAILED_RESULT,

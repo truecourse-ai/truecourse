@@ -51,6 +51,7 @@ import {
   loadScenarios,
   maskStoredSecret,
   readGuardDecisions,
+  readGuardFlowsCorpus,
   readGuardResult,
   recipePath,
   resolveDependencies,
@@ -60,15 +61,12 @@ import {
   type ExternalRequirement,
   type ResolvedDependency,
 } from '@truecourse/guard-runner';
-import { flowsPath } from '@truecourse/guard-generator';
 import {
-  GuardFlowsFileSchema,
   parseBlockedOnCapabilities,
   type GuardDependenciesLocal,
   type GuardDependencyClass,
   type GuardDependencyNeed,
   type GuardDependencyRegistration,
-  type GuardFlowsFile,
 } from '@truecourse/shared';
 import { atomicWriteText } from '../lib/atomic-write.js';
 import {
@@ -519,15 +517,10 @@ function usedByFlows(
   return flows.size;
 }
 
-/** flowId → title, from the committed flow corpus (absent ⇒ no titles). */
+/** flowId → title, from the committed flow corpus. */
 function readFlowTitles(repoRoot: string): Map<string, string> {
-  let parsed: GuardFlowsFile;
-  try {
-    parsed = GuardFlowsFileSchema.parse(JSON.parse(fs.readFileSync(flowsPath(repoRoot), 'utf-8')));
-  } catch {
-    return new Map();
-  }
-  return new Map(parsed.flows.map((flow) => [flow.id, flow.title]));
+  const flows = readGuardFlowsCorpus(repoRoot);
+  return new Map((flows?.flows ?? []).map((f) => [f.id, f.title]));
 }
 
 /**

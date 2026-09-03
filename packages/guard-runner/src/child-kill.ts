@@ -119,6 +119,14 @@ export function trackProcessGroup(
 export interface ChildKillControls {
   /** True once the timeout timer fired (and SIGKILLed the child). */
   readonly timedOut: boolean
+  /**
+   * Kill NOW, by the same path (and the same group reach) the timeout uses, without
+   * marking the step as having overrun. For a caller that has its own reason to end
+   * a child that would otherwise never end: a step declaring `until` stops its
+   * command the moment the ready line appears, and that is a normal settle, not a
+   * budget being spent.
+   */
+  now(): void
   /** Cancel the timer and detach the abort listener (call on settle). */
   disarm(): void
 }
@@ -189,6 +197,7 @@ export function armChildKill(
     get timedOut() {
       return timedOut
     },
+    now: kill,
     disarm() {
       clearTimeout(timer)
       signal?.removeEventListener('abort', kill)

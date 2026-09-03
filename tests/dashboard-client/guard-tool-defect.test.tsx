@@ -71,12 +71,12 @@ describe('a withheld defect is never drift', () => {
   })
 
   it('never paints its milestone red on the flow chain', () => {
-    const withDrift = generatePaintNodes(MILESTONES, [{ status: 'fail', birthPassed: false, hasEvidence: false, journeyPath: [], scenarioId: 't.cli.1' }], [DRIFT]);
+    const withDrift = generatePaintNodes(MILESTONES, [{ status: 'fail', birthPassed: false, hasEvidence: false, interfacePath: [], scenarioId: 't.cli.1' }], [DRIFT]);
     expect(withDrift[1].paint).toBe('finding');
 
     // The SAME milestone, broken by our own withheld defect: no red. Nothing was
     // committed, so claiming the milestone failed would report drift that is not there.
-    const withDefect = generatePaintNodes(MILESTONES, [{ status: 'fail', birthPassed: false, hasEvidence: false, journeyPath: [], scenarioId: 't.cli.1' }], [DEFECT]);
+    const withDefect = generatePaintNodes(MILESTONES, [{ status: 'fail', birthPassed: false, hasEvidence: false, interfacePath: [], scenarioId: 't.cli.1' }], [DEFECT]);
     expect(withDefect[1].paint).not.toBe('finding');
     expect(withDefect[1].paint).toBe('settled');
   });

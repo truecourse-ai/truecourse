@@ -26,6 +26,7 @@ import path from 'node:path'
 import { constructChildEnv, BUILD_PASSTHROUGH } from '../child-env.js'
 import { armChildKill } from '../child-kill.js'
 import { DEFAULT_BUILD_TIMEOUT_MS } from '../build.js'
+import { PORT_PLACEHOLDER } from './server.js'
 import { warnCredentialShapes, type RecipeApiSeed, type ResolvedCredential } from '../recipe.js'
 import { buildCredentialRedactor } from './redact.js'
 
@@ -98,10 +99,20 @@ export async function runSeed(opts: RunSeedOptions): Promise<SeedResult> {
   const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-seed-'))
   const outFile = path.join(outDir, 'manifest.json')
   try {
+    // The server env may carry `${PORT}` placeholder values (the boot
+    // substitutes them against the allocated port) — but the seed has no port,
+    // and a RAW placeholder is poison: an app's own env wrapper may run
+    // dotenv-expand over the process env, and `PORT=${PORT}` expands into
+    // itself forever (documenso 2026-08-30: every seed draft spun at 100% CPU
+    // to its timeout before the script started). Entries carrying the
+    // placeholder are dropped — absent is truer than a fake port.
+    const env = Object.fromEntries(
+      Object.entries(opts.env ?? {}).filter(([, value]) => !value.includes(PORT_PLACEHOLDER)),
+    )
     const run = await spawnSeed(
       repoRoot,
       seed.command,
-      { ...(opts.env ?? {}), [SEED_OUT_ENV]: outFile },
+      { ...env, [SEED_OUT_ENV]: outFile },
       opts.timeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
       opts.signal,
     )

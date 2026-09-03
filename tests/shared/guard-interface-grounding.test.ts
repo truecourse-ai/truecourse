@@ -3,14 +3,12 @@
  * says about the SURFACE it was authored against (`interface`, and the supplied
  * dependencies it binds), and the setup record's `interfaces` step row.
  *
- * Both are ADDITIVE — the format version does not move, and a scenario written
- * before either field still parses.
+ * Both are ADDITIVE — a scenario written before either field still parses.
  */
 
 import { describe, it, expect } from 'vitest'
 import {
-  GUARD_FORMAT_VERSION,
-  GuardCliScenarioSchema,
+  GuardScenarioSchema,
   GuardSetupTaxonomyKeySchema,
   GuardSetupTaxonomyStepSchema,
 } from '@truecourse/shared'
@@ -19,11 +17,9 @@ const binds = [{ doc: 'docs/a.md', section: 'a/b', fingerprint: 'sha256:x' }]
 
 function scenario(over: Record<string, unknown> = {}): unknown {
   return {
-    guard: GUARD_FORMAT_VERSION,
     id: 's.cli.1',
     title: 't',
     binds,
-    driver: 'cli',
     steps: [{ run: ['version'], expect: { exit: 0 } }],
     normalize: [],
     ...over,
@@ -32,30 +28,25 @@ function scenario(over: Record<string, unknown> = {}): unknown {
 
 describe('the scenario envelope — surface grounding', () => {
   it('parses without either field: a hand-written scenario is grounded on nothing', () => {
-    const parsed = GuardCliScenarioSchema.parse(scenario())
+    const parsed = GuardScenarioSchema.parse(scenario())
     expect(parsed.interface).toBeUndefined()
     expect(parsed.needs).toBeUndefined()
   })
 
   it('carries the interface path it was authored against, with a fingerprint each', () => {
     const ref = { path: ['cli/version'], fingerprints: ['sha256:surface'] }
-    expect(GuardCliScenarioSchema.parse(scenario({ interface: ref })).interface).toEqual(ref)
+    expect(GuardScenarioSchema.parse(scenario({ interface: ref })).interface).toEqual(ref)
     // A ref with no ids at all states nothing and is refused.
     expect(
-      GuardCliScenarioSchema.safeParse(scenario({ interface: { path: [], fingerprints: [] } })).success,
+      GuardScenarioSchema.safeParse(scenario({ interface: { path: [], fingerprints: [] } })).success,
     ).toBe(false)
   })
 
-  it('still reads the pre-interface spelling of the same ref', () => {
-    const ref = { path: ['cli/version'], fingerprints: ['sha256:surface'] }
-    expect(GuardCliScenarioSchema.parse(scenario({ journey: ref })).journey).toEqual(ref)
-  })
-
   it('declares the supplied dependencies it binds, by catalog entry name', () => {
-    expect(GuardCliScenarioSchema.parse(scenario({ needs: ['analysis-target'] })).needs).toEqual([
+    expect(GuardScenarioSchema.parse(scenario({ needs: ['analysis-target'] })).needs).toEqual([
       'analysis-target',
     ])
-    expect(GuardCliScenarioSchema.safeParse(scenario({ needs: [''] })).success).toBe(false)
+    expect(GuardScenarioSchema.safeParse(scenario({ needs: [''] })).success).toBe(false)
   })
 })
 

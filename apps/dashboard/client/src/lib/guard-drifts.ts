@@ -14,7 +14,7 @@ export { GUARD_DRIFT_ORDER, orderGuardDrifts } from '@truecourse/shared';
  * the single ordering the left run-summary aside and the main-pane run overview
  * both read, so their tallies never diverge.
  */
-export const GUARD_OUTCOMES: readonly GuardOutcome[] = ['pass', 'fail', 'error', 'stale', 'orphaned'];
+export const GUARD_OUTCOMES: readonly GuardOutcome[] = ['pass', 'fail', 'error', 'blocked', 'stale', 'orphaned'];
 
 /** A run envelope's `branch @ commit8` reference line, empty when neither is set. */
 export function guardRunRef(env: GuardRunEnvelope): string {

@@ -54,6 +54,23 @@ export class ContentStore {
     return inserted.length > 0;
   }
 
+  /**
+   * Hash + store raw BYTES under `scope`; returns the sha of the bytes. The body
+   * column is text, so the bytes travel base64-encoded — `getBytes` is the only
+   * reader that knows, and a text `get` of such a row is a caller's mistake.
+   */
+  async putBytes(scope: string, bytes: Buffer): Promise<string> {
+    const sha = sha256(bytes);
+    await this.put(scope, sha, bytes.toString('base64'));
+    return sha;
+  }
+
+  /** The bytes `putBytes` stored, or null. */
+  async getBytes(scope: string, sha: string): Promise<Buffer | null> {
+    const body = await this.get(scope, sha);
+    return body == null ? null : Buffer.from(body, 'base64');
+  }
+
   async get(scope: string, sha: string): Promise<string | null> {
     const rows = await this.db
       .select({ body: content.body })

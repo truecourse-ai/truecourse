@@ -19,16 +19,16 @@ const bindsFor = (...sections: string[]) =>
 describe('GuardManifestSchema', () => {
   it('round-trips through JSON', () => {
     const manifest: GuardManifest = {
-      version: 2,
       flows: [
         {
           flowId: 'task-lifecycle',
           flowFingerprint: 'sha256:flow',
           bindings: [{ doc: 'docs/spec.md', anchor: 'a/b', fingerprint: 'sha256:1' }],
-          scenarios: [{ id: 'task-lifecycle.cli.1', surface: 'cli', status: 'passing' }],
-          journeys: [{ surface: 'cli', journeyIds: ['cli/tasks-add'] }],
+          scenarios: [{ id: 'task-lifecycle.cli.1', drivers: ['cli'], status: 'passing' }],
+          interfaces: [{ surface: 'cli', interfaceIds: ['cli/tasks-add'] }],
           generationInputsHash: null,
           gaps: [],
+          retiredScenarios: [],
         },
       ],
     }
@@ -36,28 +36,27 @@ describe('GuardManifestSchema', () => {
     expect(reparsed).toEqual(manifest)
   })
 
-  it('defaults the generation-inputs hash slot to null, and gaps/journeys to []', () => {
+  it('defaults the generation-inputs hash slot to null, and gaps/interfaces to []', () => {
     const parsed = GuardManifestSchema.parse({
-      version: 2,
       flows: [{ flowId: 'f', flowFingerprint: 'sha256:x', bindings: [], scenarios: [] }],
     })
     expect(parsed.flows[0].generationInputsHash).toBeNull()
     expect(parsed.flows[0].gaps).toEqual([])
-    expect(parsed.flows[0].journeys).toEqual([])
+    expect(parsed.flows[0].interfaces).toEqual([])
+    expect(parsed.flows[0].retiredScenarios).toEqual([])
   })
 
   it('carries a test committed FAILING at birth, and defaults a status-less entry to passing', () => {
     const parsed = GuardManifestSchema.parse({
-      version: 2,
       flows: [
         {
           flowId: 'f',
           flowFingerprint: 'sha256:x',
           bindings: [],
           scenarios: [
-            { id: 'f.cli.1', surface: 'cli', status: 'failing' },
+            { id: 'f.cli.1', drivers: ['cli'], status: 'failing' },
             // A manifest written before failing tests were committed carries none.
-            { id: 'f.api.1', surface: 'api' },
+            { id: 'f.api.1', drivers: ['api'] },
           ],
         },
       ],
@@ -83,13 +82,12 @@ describe('rebuildManifestFromScenarios', () => {
         id: 'task-lifecycle.cli.2',
         flow,
         binds: bindsFor('one'),
-        journey: { path: ['cli/tasks-list'], fingerprints: ['sha256:j2'] },
+        interface: { path: ['cli/tasks-list'], fingerprints: ['sha256:j2'] },
         steps: [{ run: [], expect: { exit: 0 } }],
       }),
     )
 
     const manifest = rebuildManifestFromScenarios(r)
-    expect(manifest.version).toBe(2)
     expect(manifest.flows).toHaveLength(1)
     expect(manifest.flows[0]).toEqual({
       flowId: 'task-lifecycle',
@@ -99,15 +97,40 @@ describe('rebuildManifestFromScenarios', () => {
         { doc: 'docs/spec.md', anchor: 'two', fingerprint: 'sha256:two' },
       ],
       scenarios: [
-        { id: 'task-lifecycle.cli.1', surface: 'cli', status: 'passing' },
-        { id: 'task-lifecycle.cli.2', surface: 'cli', status: 'passing' },
+        { id: 'task-lifecycle.cli.1', drivers: ['cli'], status: 'passing' },
+        { id: 'task-lifecycle.cli.2', drivers: ['cli'], status: 'passing' },
       ],
-      // Rebuilt from the committed scenarios: only journeys they actually ground
+      // Rebuilt from the committed scenarios: only interfaces they actually ground
       // on can be recovered (a blocked surface left no file to read a plan from).
-      journeys: [{ surface: 'cli', journeyIds: ['cli/tasks-list'] }],
+      interfaces: [{ surface: 'cli', interfaceIds: ['cli/tasks-list'] }],
       generationInputsHash: null,
       gaps: [],
+      retiredScenarios: [],
     })
+  })
+
+  it('records the drivers a scenario’s STEPS exercise, not one surface tag', () => {
+    const r = repo()
+    writeRecipe(r)
+    writeScenario(
+      r,
+      'mixed.yaml',
+      scenario({
+        id: 'mixed.cli.1',
+        binds: bindsFor('one'),
+        steps: [
+          { run: ['analyze'], expect: { exit: 0 } },
+          { driver: 'web', navigate: '/board', expect: { text: { contains: 'ok' } } },
+          { request: { method: 'GET', path: '/api/board' }, expect: { status: 200 } },
+        ],
+      }),
+    )
+    const manifest = rebuildManifestFromScenarios(r)
+    // Registry order, and every driver it touches — the coverage classification
+    // counts it under each, instead of calling the whole thing a CLI test.
+    expect(manifest.flows[0].scenarios).toEqual([
+      { id: 'mixed.cli.1', drivers: ['cli', 'api', 'web'], status: 'passing' },
+    ])
   })
 
   it('gives each hand-written scenario its Manual pseudo-flow', () => {
@@ -121,7 +144,7 @@ describe('rebuildManifestFromScenarios', () => {
     expect(manifest.flows[0].flowFingerprint).toBe(
       flowFingerprint([{ order: 1, doc: 'docs/spec.md', anchor: 'one', claimTitle: 'a hand-written guard' }]),
     )
-    expect(manifest.flows[0].scenarios).toEqual([{ id: 'hand.1', surface: 'cli', status: 'passing' }])
+    expect(manifest.flows[0].scenarios).toEqual([{ id: 'hand.1', drivers: ['cli'], status: 'passing' }])
   })
 
   it('writes and reads back a schema-valid manifest', () => {

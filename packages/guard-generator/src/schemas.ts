@@ -19,11 +19,18 @@
 import { z } from 'zod'
 import {
   GuardSetupSchema,
-  GuardStepSchema,
+  GuardStepObjectSchema,
+  promptKeysNeedATerminal,
   GuardApiStepSchema,
+  GuardApiRequestStepSchema,
   GuardNormalizerSchema,
   GuardTestabilityVerdictSchema,
+  GuardWebStepSchema,
   guardDriverIds,
+  isWebStep,
+  type GuardApiRequestStep,
+  type GuardDriverId,
+  type GuardWebStep,
 } from '@truecourse/shared'
 import { isNoOpEntry, NO_OP_ENTRY_MESSAGE, RecipeWebSchema } from '@truecourse/guard-runner'
 
@@ -295,15 +302,45 @@ export type DocExtraction = z.infer<typeof DocExtractionSchema>
  * One scenario as the model authors it: the behavioral fields only. `id`,
  * `binds`, and `guard` are engine-owned, so we tolerate (and ignore) whatever the
  * model wrote for them via `.passthrough()`. One schema per runnable driver —
- * each authoring prompt embeds ITS driver's schema, and the parse accepts either
- * (keyed on `driver`) so a batch can never smuggle a step vocabulary across drivers.
+ * each authoring prompt embeds ITS driver's schema, and the engine knows which
+ * surface it asked for, so the reply never declares one.
  */
+/**
+ * The runner's `run` step, minus the one argv form a MODEL can never write: the
+ * omittable pair, which exists to drop a flag whose value comes from a
+ * declared-optional registration field. Authoring never sees the dependency
+ * catalog and never emits a `${supplied:…}` token, so the pair could only ever be
+ * wrong here — and offering a vocabulary that cannot be used correctly costs every
+ * authoring call the prompt bytes and buys nothing. Everything else is the runner's
+ * own schema, so an authored step still cannot drift from what executes it.
+ *
+ * THE `run` STEP AND NOTHING ELSE. The cli driver executes five step kinds; a model
+ * authors one. `git`, `write`, `delete` and — since 2026-08-09 — `patch` are the
+ * REFERENCE corpus's vocabulary, hand-authored by someone who knows the subject's
+ * files; a generated scenario states the world it needs in `setup` and then only
+ * runs the program. Widening this is the Generate workstream's call to make
+ * deliberately, and it is never free: this schema IS the prompt's canonical scenario
+ * schema, so anything added here rolls `GENERATE_PROMPT_FINGERPRINT` and re-authors
+ * every cli flow in the corpus. A runner-side step kind must therefore be added to
+ * the runner's union WITHOUT touching this one, which is what `patch` did.
+ */
+const AuthoredCliStepSchema = GuardStepObjectSchema.extend({ run: z.array(z.string()) }).superRefine(
+  promptKeysNeedATerminal,
+)
+
 export const RawGeneratedCliScenarioSchema = z
   .object({
     title: z.string().min(1),
-    driver: z.literal('cli'),
+    /**
+     * The scenario's BLAST RADIUS. Omit (= `shared`) when the scenario only
+     * ADDS state it creates itself; declare `mutates` when it mutates or
+     * destroys state it did not mint — the seeded principal's credentials or
+     * sessions, account deletion, global configuration — so the runner
+     * schedules it last against a world it restores afterwards.
+     */
+    world: z.enum(['shared', 'mutates']).optional(),
     setup: GuardSetupSchema.optional(),
-    steps: z.array(GuardStepSchema).min(1),
+    steps: z.array(AuthoredCliStepSchema).min(1),
     normalize: z.array(GuardNormalizerSchema).optional(),
   })
   .passthrough()
@@ -312,7 +349,14 @@ export type RawGeneratedCliScenario = z.infer<typeof RawGeneratedCliScenarioSche
 export const RawGeneratedApiScenarioSchema = z
   .object({
     title: z.string().min(1),
-    driver: z.literal('api'),
+    /**
+     * The scenario's BLAST RADIUS. Omit (= `shared`) when the scenario only
+     * ADDS state it creates itself; declare `mutates` when it mutates or
+     * destroys state it did not mint — the seeded principal's credentials or
+     * sessions, account deletion, global configuration — so the runner
+     * schedules it last against a world it restores afterwards.
+     */
+    world: z.enum(['shared', 'mutates']).optional(),
     setup: GuardSetupSchema.optional(),
     steps: z.array(GuardApiStepSchema).min(1),
     normalize: z.array(GuardNormalizerSchema).optional(),
@@ -320,11 +364,90 @@ export const RawGeneratedApiScenarioSchema = z
   .passthrough()
 export type RawGeneratedApiScenario = z.infer<typeof RawGeneratedApiScenarioSchema>
 
-export const RawGeneratedScenarioSchema = z.discriminatedUnion('driver', [
+/**
+ * One step of an authored WEB scenario. A web scenario runs in ONE sandbox world
+ * shared by three vocabularies, so beside the six web verbs it admits:
+ *  - the authored cli `run` step (the SAME arm the cli prompt uses — `git`/`write`/
+ *    `delete`/`patch` stay reference-corpus vocabulary here too), because a browser
+ *    flow routinely needs a cli step to seed the world it then looks at;
+ *  - the api `request` step, because "verify through the server what the UI just
+ *    wrote" is half of what makes a web assertion honest. The api LIFECYCLE verbs
+ *    (`boot`/`signal`/`logs`) deliberately stay out — in a sandbox the served
+ *    surface's lifecycle belongs to the sandbox.
+ */
+/** One authored web-scenario step. The explicit annotation is load-bearing: the
+ *  web step union's inferred type exceeds what tsc will serialize into a
+ *  declaration (TS7056), and the alias keeps every schema built on it emittable. */
+export type AuthoredWebStep = GuardWebStep | z.infer<typeof AuthoredCliStepSchema> | GuardApiRequestStep
+const AuthoredWebStepSchema: z.ZodType<AuthoredWebStep, z.ZodTypeDef, unknown> = z.union([
+  GuardWebStepSchema,
+  AuthoredCliStepSchema,
+  GuardApiRequestStepSchema,
+])
+
+/** The web arm's object shape alone — exported because the prompt's canonical
+ *  schema hint needs `.strip()`, which the refinement wrapper below cannot offer
+ *  (a refinement renders nothing in JSON Schema anyway; it exists for the parse). */
+export const RawGeneratedWebScenarioObjectSchema = z
+  .object({
+    title: z.string().min(1),
+    /**
+     * The scenario's BLAST RADIUS. Omit (= `shared`) when the scenario only
+     * ADDS state it creates itself; declare `mutates` when it mutates or
+     * destroys state it did not mint — the seeded principal's credentials or
+     * sessions, account deletion, global configuration — so the runner
+     * schedules it last against a world it restores afterwards.
+     */
+    world: z.enum(['shared', 'mutates']).optional(),
+    setup: GuardSetupSchema.optional(),
+    steps: z.array(AuthoredWebStepSchema).min(1),
+    normalize: z.array(GuardNormalizerSchema).optional(),
+  })
+  .passthrough()
+
+export const RawGeneratedWebScenarioSchema = RawGeneratedWebScenarioObjectSchema.refine(
+  (s) => s.steps.some(isWebStep),
+  {
+    path: ['steps'],
+    message:
+      'a web scenario carries at least one `driver: web` step — a draft of only run/request steps belongs on the cli or api surface',
+  },
+)
+export type RawGeneratedWebScenario = z.infer<typeof RawGeneratedWebScenarioSchema>
+
+/**
+ * A scenario as authored, whichever surface the call was for. The arms are keyed by
+ * their STEP VOCABULARY, not by a declared driver: an authored cli step always
+ * carries `run`, an api step never does, and a web step tags itself `driver: web`,
+ * so the union resolves without a discriminator (and each authoring call parses
+ * against its own arm anyway — the prompt and the schema follow the same
+ * `ctx.driver`, so a batch cannot smuggle one driver's vocabulary into another's).
+ * The web arm sits LAST so no pre-existing cli/api draft's resolution changes.
+ */
+export const RawGeneratedScenarioSchema = z.union([
   RawGeneratedCliScenarioSchema,
   RawGeneratedApiScenarioSchema,
+  RawGeneratedWebScenarioSchema,
 ])
 export type RawGeneratedScenario = z.infer<typeof RawGeneratedScenarioSchema>
+
+/**
+ * The raw scenario schema ONE surface's drafts parse against. Parsing by surface —
+ * the engine always knows which surface it asked for — is what turns a union
+ * failure's useless `(root): Invalid input` into a field-path error the worker can
+ * act on. A surface with no arm of its own falls back to the whole union.
+ */
+const RAW_SCENARIO_SCHEMAS = {
+  cli: RawGeneratedCliScenarioSchema,
+  api: RawGeneratedApiScenarioSchema,
+  web: RawGeneratedWebScenarioSchema,
+} as const satisfies Partial<Record<GuardDriverId, z.ZodTypeAny>>
+
+export function rawScenarioSchemaFor(
+  surface: GuardDriverId,
+): z.ZodType<RawGeneratedScenario, z.ZodTypeDef, unknown> {
+  return RAW_SCENARIO_SCHEMAS[surface as keyof typeof RAW_SCENARIO_SCHEMAS] ?? RawGeneratedScenarioSchema
+}
 
 /**
  * One (flow, surface) authoring call's output: the scenario that realizes the
@@ -336,7 +459,13 @@ export type RawGeneratedScenario = z.infer<typeof RawGeneratedScenarioSchema>
  * present — a reply with neither is malformed and earns the corrective re-ask,
  * never a silent empty settle.
  */
-export const AuthoredFlowScenarioSchema = z
+export interface AuthoredFlowScenario {
+  scenario: RawGeneratedScenario | null
+  blockedOn: string[]
+}
+// Annotated for the same TS7056 reason as `AuthoredWebStepSchema` above: with
+// the web arm in the union, the transform's inferred type stops being emittable.
+export const AuthoredFlowScenarioSchema: z.ZodType<AuthoredFlowScenario, z.ZodTypeDef, unknown> = z
   .object({
     scenario: RawGeneratedScenarioSchema.nullish(),
     blockedOn: z.array(z.string().min(1)).optional(),
@@ -348,7 +477,6 @@ export const AuthoredFlowScenarioSchema = z
     scenario: a.scenario ?? null,
     blockedOn: a.scenario == null ? (a.blockedOn ?? []) : [],
   }))
-export type AuthoredFlowScenario = z.infer<typeof AuthoredFlowScenarioSchema>
 
 /** The reply's two fields, narrowed to one driver's scenario shape. */
 function authoredResponse(scenario: z.ZodTypeAny) {
@@ -450,6 +578,23 @@ export const FlowSynthesisSchema = z
 export type FlowSynthesis = z.infer<typeof FlowSynthesisSchema>
 
 /**
+ * The flow-synthesis SESSION outcome (`guard-generate.flows`, plan 04 step 16) —
+ * the same {flows, noFlowClaims} pair as {@link FlowSynthesisSchema}, but
+ * `.strict()` with BOTH arrays required: the agent loop's outcome gate re-asks
+ * on a malformed reply, so the one-shot schema's omission tolerance would only
+ * hide a drifting model. It doubles as the `check_flows` tool's input schema —
+ * the validator-as-tool pattern, where the draft a session checks IS the
+ * outcome it will produce.
+ */
+export const FlowSetSchema = z
+  .object({
+    flows: z.array(SynthesizedFlowSchema),
+    noFlowClaims: z.array(SynthesizedNoFlowClaimSchema),
+  })
+  .strict()
+export type FlowSet = z.infer<typeof FlowSetSchema>
+
+/**
  * One epic flow: a cross-area path that CHAINS flows the per-area pass already
  * produced. `composedOf` carries the digest refs of the chained flows (the engine
  * rewrites them to flow ids); every milestone must be one of those flows'
@@ -475,24 +620,54 @@ export type EpicSynthesis = z.infer<typeof EpicSynthesisSchema>
 // Realization matching (one call per flow × surface)
 // ---------------------------------------------------------------------------
 
-/** One step of a realization plan: the journey that realizes a milestone. */
+/** One step of a realization plan: the interface that realizes a milestone. */
 export const RealizationStepSchema = z.object({
-  /** A journey id copied verbatim from the surface's catalog digest. */
-  journeyId: z.string().min(1),
-  /** The flow milestone (`order`) this journey realizes. */
+  /** An interface id copied verbatim from the surface's catalog digest. */
+  interfaceId: z.string().min(1),
+  /** The flow milestone (`order`) this interface realizes. */
   milestone: z.number().int().positive(),
-  /** Optional one-liner on how the journey serves the milestone. */
+  /** Optional one-liner on how the interface serves the milestone. */
   note: z.string().optional(),
 })
 export type RealizationStep = z.infer<typeof RealizationStepSchema>
 
 /**
  * One flow's realization verdict on ONE surface: an ordered `plan` walking its
- * milestones through the surface's journeys, or an explicit `unrealizable` reason
- * (no journey path serves the flow). Exactly one of the two — a reply carrying
+ * milestones through the surface's interfaces, or an explicit `unrealizable` reason
+ * (no interface path serves the flow). Exactly one of the two — a reply carrying
  * both, or neither, is malformed and earns the corrective re-ask, so "this surface
  * cannot do it" is always a STATED answer rather than an empty plan.
  */
+
+/**
+ * The world-classify reply: which of the listed flows MUTATE shared world state
+ * (credential changes, account deletion, session revocation, global config) —
+ * their workers are scheduled last so a destructive draft cannot poison the
+ * shared generate world for every sibling still authoring. One batched call per
+ * generate, cached on the flow set.
+ */
+export const WorldClassifySchema = z
+  .object({
+    /** Flow ids judged world-mutating; every other listed flow is additive. */
+    mutators: z.array(z.string()),
+  })
+  .strict()
+export type WorldClassify = z.infer<typeof WorldClassifySchema>
+
+/**
+ * The claim-diff gate's reply for ONE edited section: `cosmetic` when the
+ * current text still guarantees every previously extracted claim and adds no
+ * observable behavior, `changed` otherwise. Cached per (prompt, new section
+ * fingerprint, prior claims), so the same edit is judged once per repo.
+ */
+export const ClaimDiffSchema = z
+  .object({
+    verdict: z.enum(['cosmetic', 'changed']),
+    reason: z.string().min(1),
+  })
+  .strict()
+export type ClaimDiff = z.infer<typeof ClaimDiffSchema>
+
 export const RealizationMatchSchema = z
   .object({
     plan: z.array(RealizationStepSchema).optional(),

@@ -81,7 +81,7 @@ const BANNED: { term: string; pattern: RegExp }[] = [
   // Raw kind / bucket tokens off the wire.
   { term: 'blocked-on', pattern: /blocked-on/i },
   { term: 'unrealizable', pattern: /\bunrealizable\b/i },
-  { term: 'no-journey', pattern: /no-journey/i },
+  { term: 'no-interface', pattern: /no-journey/i },
   // Catches "Guarded" and "Unguarded" alike.
   { term: 'guarded', pattern: /guarded/i },
   { term: 'partial', pattern: /\bpartial\b/i },
@@ -204,15 +204,15 @@ const FLOWS: GuardFlowListItem[] = [
   flow({
     flowId: 'awaiting',
     title: 'A user drags a task on the board',
-    status: 'web',
+    status: 'tui',
     bucket: 'blocked',
     epic: true,
     composedOf: ['passing'],
     surfaces: [
       {
         surface: 'web',
-        status: 'web',
-        gap: { kind: 'awaiting-driver', driver: 'web', reason: 'the board is browser-only', label: 'awaiting web driver' },
+        status: 'tui',
+        gap: { kind: 'awaiting-driver', driver: 'tui', reason: 'the board is browser-only', label: 'awaiting tui driver' },
       },
     ],
   }),
@@ -268,22 +268,22 @@ const FLOW_DETAIL: GuardFlowDetailData = {
       stage: 'birth',
       failure: { step: 2, expected: 'exit 0', actual: 'exit 1' },
       hasEvidence: true,
-      journeyPath: [],
+      interfacePath: [],
     },
     {
       surface: 'web',
-      status: 'web',
+      status: 'tui',
       birthPassed: false,
       hasEvidence: false,
-      journeyPath: [],
-      gap: { kind: 'awaiting-driver', driver: 'web', reason: 'the board is browser-only', label: 'awaiting web driver' },
+      interfacePath: [],
+      gap: { kind: 'awaiting-driver', driver: 'tui', reason: 'the board is browser-only', label: 'awaiting tui driver' },
     },
     {
       surface: 'api',
       status: 'blocked-on',
       birthPassed: false,
       hasEvidence: false,
-      journeyPath: [],
+      interfacePath: [],
       gap: { kind: 'blocked-on', reason: 'blocked on credentials: schedule a reminder', label: 'blocked-on' },
     },
     {
@@ -291,12 +291,12 @@ const FLOW_DETAIL: GuardFlowDetailData = {
       status: 'unrealizable',
       birthPassed: false,
       hasEvidence: false,
-      journeyPath: [],
+      interfacePath: [],
       gap: { kind: 'unrealizable', reason: 'no code path offers it', label: 'unrealizable' },
     },
   ],
   gaps: [],
-  journeyIds: ['cli/tasks-add'],
+  interfaceIds: ['cli/tasks-add'],
   findings: [],
   errors: [],
   generatedAt: '2026-07-24T13:40:00.000Z',
@@ -326,10 +326,10 @@ const UNDERIVED_DETAIL: GuardFlowDetailData = {
       stage: 'run',
       outcome: 'pass',
       hasEvidence: false,
-      journeyPath: [],
+      interfacePath: [],
     },
   ],
-  journeyIds: [],
+  interfaceIds: [],
   errors: [],
 };
 
@@ -342,7 +342,7 @@ const ERROR_DETAIL: GuardFlowDetailData = {
   epic: false,
   composedOf: [],
   surfaces: [],
-  journeyIds: [],
+  interfaceIds: [],
   errors: [{ doc: DOC, anchor: 'tasks/creating-tasks', message: 'the model returned an unparseable envelope' }],
 };
 
@@ -591,10 +591,7 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
     render(
       <GuardScenariosOverview
         recipe={{
-          build: 'pnpm build',
-          entry: ['node', 'dist/tasks.js'],
-          serve: null,
-          env: null,
+          surfaces: { cli: { build: 'pnpm build', entry: ['node', 'dist/tasks.js'] } },
           fingerprint: 'sha256:9f2c',
           stale: true,
         }}
@@ -807,7 +804,7 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
           ],
           surfaces: [
             { surface: 'cli', label: 'CLI', runnable: true, interfaces: 1, detected: true, source: 'tree' },
-            { surface: 'web', label: 'Web', runnable: false, waitingLabel: 'Needs web driver', interfaces: 0, detected: true },
+            { surface: 'tui', label: 'TUI', runnable: false, waitingLabel: 'Needs TUI driver', interfaces: 0, detected: true },
           ],
           totals: { interfaces: 1, detectedSurfaces: 2, grounded: 1, ungrounded: 0 },
         }}
@@ -967,9 +964,9 @@ describe('guard hover popovers — none of them can clip', () => {
     expect(expectHoversCannotClip('GuardFlowDetail')).toBeGreaterThan(0);
   });
 
-  it('a test detail — including the Setup group header the review caught', async () => {
-    // A source whose first steps realize NO milestone → the "Setup" group header,
-    // the hover the 2026-07-27 review caught going off-screen.
+  it('a test detail — including the step records the review caught', async () => {
+    // A source whose first steps realize NO milestone — the reading the
+    // 2026-07-27 review caught a hover going off-screen in.
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string | URL) =>
@@ -1002,7 +999,7 @@ describe('guard hover popovers — none of them can clip', () => {
         onOpenSpec={() => {}}
       />,
     );
-    expect(await screen.findByText('Setup')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Step 1 record' })).toBeInTheDocument();
     expect(expectHoversCannotClip('GuardTestDetail')).toBeGreaterThan(0);
   });
 

@@ -136,12 +136,22 @@ const VOCAB = {
     sentence: 'needs an external service or seed data you can provide',
     hint: 'Blocked on something you can provide: a third-party account (External APIs page) or seed data the seed script doesn’t create yet. Provide it, then re-run guard generate.',
   },
+  // The run OUTCOME `blocked`: the scenario binds a supplied dependency nobody has
+  // registered on this machine, so it never ran — the runner names the dependency.
+  blocked: {
+    plain: 'blocked',
+    label: 'Blocked',
+    sentence: 'blocked on a dependency you can register',
+    hint: 'The test binds a supplied dependency with no registered instance. Register it in the local dependency overlay, then re-run.',
+  },
+  // Committed and never executed — the same story as `guarded` without a birth run.
+  'never-run': { plain: 'passing', label: 'Never run', sentence: 'never run' },
   untestable: { plain: 'blocked', label: 'Nothing testable', sentence: 'nothing testable' },
   'no-claim': { plain: 'blocked', label: 'No testable claim', sentence: 'no testable claim' },
   // The two realization gaps, kept apart because their remedies are opposite: an
   // empty catalog is an EXTRACTION gap (teach the mapper this surface), while
   // `unrealizable` is the real "the spec promises this, no code surface offers it".
-  'no-journey': {
+  'no-interface': {
     plain: 'blocked',
     label: 'No code path mapped',
     sentence: 'no code path mapped',

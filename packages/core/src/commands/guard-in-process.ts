@@ -3,8 +3,9 @@
  * `curateInProcess`. Shared by the CLI and the dashboard so the estimate gate,
  * model resolution, transport selection, and progress wiring live in one place.
  *
- * Steps: index (deterministic section plan) → extract (whole-document claim
- * extraction) → author (batched scenario authoring) → validate (birth). Birth
+ * Steps: index (deterministic section plan) → extract (claim-extraction
+ * sessions) → interfaces → flows (synthesis sessions) → match (one-shot) →
+ * author (the flow-worker session pool) → validate (per-flow settling). Birth
  * findings are NOT a failure — the driver surfaces them as work to review; only a
  * hard error (no docs, recipe discovery failed) is a non-success outcome.
  *
@@ -21,16 +22,15 @@ import {
   type SatisfiesDiagnostics,
   type GuardGenerateResult,
   type GuardGenerateModels,
-  type ExtractRunner,
-  type GenerateRunner,
+  type ExtractSessionSeam,
+  type ReuseExtractionSeam,
   type RecipeRunner,
-  type FidelityRunner,
-  type TriageRunner,
-  type FlowsRunner,
-  type FlowsEpicRunner,
+  type FlowsAreaSessionSeam,
+  type FlowsEpicSessionSeam,
+  type FlowWorkerSessionSeam,
   type MatchRunner,
   type InterfaceProvider,
-  type AuthorFailure,
+  type GenerateStep,
 } from '@truecourse/guard-generator';
 import {
   writeGuardResult,
@@ -51,7 +51,8 @@ import {
   type GuardScenarioResult,
   type CorpusConflict,
 } from '@truecourse/shared';
-import type { RunError, SessionLlm } from '@truecourse/agent-loop';
+import path from 'node:path';
+import type { RunError, SessionDriver, SessionLlm } from '@truecourse/agent-loop';
 import { getGit } from '../lib/git.js';
 import { getGuardExecutor } from '../lib/guard-executor.js';
 import { guardsMaterializeInPlace } from '../lib/guard-store.js';
@@ -67,12 +68,18 @@ import {
   type LlmTransport,
 } from '@truecourse/shared/llm';
 import { createConfiguredApiTransport } from '../services/llm/install-transport.js';
+import { createGuardVisualJudge, guardVisualJudgeEnabled } from '../services/llm/guard-visual-judge.js';
+import type { GuardVisualJudge } from '@truecourse/guard-runner';
 import { effectiveLlmMode, readApiLlmConfig, type LlmTransportMode } from '../config/global-config.js';
+import { createConfiguredSessionDriver } from '../services/llm/session-driver.js';
 import { resolveFallbackModel, resolveModel, type StageId } from '../config/llm-models.js';
 import { createLlmCallLogger } from '../lib/llm-call-log.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
 import { estimateGuardTokens } from '../services/llm/spec-estimate.js';
 import { mapInterfaces } from '../services/interface.service.js';
+import { createGuardGenerateSessionSeams, type AcquiredContext } from '../services/guard-generate/index.js';
+export { GenerateStepNotReadyError } from '../services/guard-generate/index.js';
+export { GENERATE_SESSION_STEPS, type GenerateStep } from '@truecourse/guard-generator';
 import { readGuardRecipeCard } from './guard-read.js';
 import { readCorpus, readDecisions } from '@truecourse/spec-consolidator';
 import type { LlmEstimate } from './analyze-core.js';
@@ -80,7 +87,6 @@ import { EstimateDeclined, stageUsageTag } from './spec-in-process.js';
 import { withEstimatePhase, type EstimatePhase, type StepTracker } from '../progress.js';
 
 export { EstimateDeclined } from './spec-in-process.js';
-export type { AuthorFailure } from '@truecourse/guard-generator';
 
 /**
  * The corpus has unresolved within-area overlaps — thrown by the guard-generate
@@ -141,11 +147,11 @@ function assertNoOpenConflicts(repoRoot: string): void {
 export const GUARD_GENERATE_STEPS = [
   { key: 'index', label: 'Indexing sections' },
   { key: 'extract', label: 'Extracting claims' },
-  { key: 'journeys', label: 'Mapping journeys' },
+  { key: 'interfaces', label: 'Mapping interfaces' },
   { key: 'flows', label: 'Synthesizing flows' },
   { key: 'match', label: 'Matching flows' },
-  { key: 'author', label: 'Authoring scenarios' },
-  { key: 'validate', label: 'Birth-validating' },
+  { key: 'author', label: 'Working flows' },
+  { key: 'validate', label: 'Settling flows' },
 ] as const;
 
 /**
@@ -162,12 +168,14 @@ export const GUARD_GENERATE_STEPS = [
  */
 const GUARD_STEP_STAGES: Record<string, StageId[]> = {
   index: ['guard.recipe'],
-  extract: ['guard.extract'],
-  journeys: [],
-  flows: ['guard.flows'],
+  // The claim-diff gate spends here: one call per edited section before the
+  // (session-based) extraction decides whether to re-run for the doc.
+  extract: ['guard.claimDiff'],
+  interfaces: [],
+  flows: [],
   match: ['guard.match'],
-  author: ['guard.generate'],
-  validate: ['guard.retry', 'guard.fidelity', 'guard.triage'],
+  author: [],
+  validate: [],
 };
 
 export interface GuardGenerateInProcessOptions {
@@ -180,11 +188,20 @@ export interface GuardGenerateInProcessOptions {
   llm?: 'cli' | 'agent' | 'api';
   io?: string;
   /**
-   * Run on THIS transport instead of resolving one. The dashboard server passes
-   * the transport it built from the asking workspace's stored provider config —
-   * credentials travel with the run, not through a process-wide default.
+   * Run the ONE-SHOT stages (recipe discovery, realization matching) on THIS
+   * transport instead of resolving one. The dashboard server passes the
+   * transport it built from the asking workspace's stored provider config —
+   * credentials travel with the run, not through a process-wide default. The
+   * session stages ride `driver`; a hosted caller passes both.
    */
   transport?: LlmTransport;
+  /**
+   * Run the SESSION stages (extraction, flow synthesis, the flow workers) on
+   * THIS driver instead of the configured one. Ignored when every session seam
+   * is injected. The run record's attribution comes from `attribution` when
+   * given, else from the driver itself.
+   */
+  driver?: SessionDriver;
   /**
    * The mode an explicit `transport` runs in, which decides the stage models:
    * `claude-code` keeps the tier aliases `claude -p` understands, `api` (the
@@ -199,12 +216,6 @@ export interface GuardGenerateInProcessOptions {
    */
   onLlmEstimate?: (estimate: LlmEstimate) => Promise<boolean>;
   /**
-   * Fired the moment an authoring attempt fails. The CLI surfaces it live and gains
-   * a "· N failed" reading on the flow counter; the dashboard popup wires nothing,
-   * so its counter is unchanged.
-   */
-  onAuthorFailure?: (failure: AuthorFailure) => void;
-  /**
    * Progress surface for the estimate itself (it runs before the first pipeline
    * step, so the tracker can't carry it). The CLI resolves a spinner line above
    * the estimate panel; the dashboard passes `estimateStepPhase(tracker)`.
@@ -217,8 +228,8 @@ export interface GuardGenerateInProcessOptions {
   sessionsKey?: string;
   /**
    * What the run record says it ran on. A caller that built the transport
-   * itself knows (the workspace's provider); unset, the saved selection's
-   * provider and this run's authoring model are stamped.
+   * itself knows (the workspace's provider); unset, the session driver's own
+   * attribution is stamped once it is built.
    */
   attribution?: SessionLlm;
   /** The run record just came into being — before the gates, so a generate the
@@ -228,8 +239,8 @@ export interface GuardGenerateInProcessOptions {
    * Stop the run. The generator has no abort seam of its own, so this is honored
    * at the step boundaries: the next phase transition throws
    * {@link GuardGenerateAborted} and nothing further is authored or written.
-   * Work already inside a phase (an extraction batch, a birth sandbox) runs to
-   * its end first.
+   * Work already inside a phase (a session pool, a birth sandbox) runs to its
+   * end first.
    */
   signal?: AbortSignal;
   /**
@@ -238,15 +249,25 @@ export interface GuardGenerateInProcessOptions {
    * file store. A hosted job materializes setup's bundle first and passes true.
    */
   requireExistingRecipe?: boolean;
-  // --- test seams (production injects none; runners bypass the transport) ---
-  extractRunner?: ExtractRunner;
-  generateRunner?: GenerateRunner;
+  // --- test seams for the two remaining one-shot stages (production injects
+  // none; an injected runner bypasses the transport) ---
   recipeRunner?: RecipeRunner;
-  fidelityRunner?: FidelityRunner;
-  triageRunner?: TriageRunner;
-  flowsRunner?: FlowsRunner;
-  flowsEpicRunner?: FlowsEpicRunner;
   matchRunner?: MatchRunner;
+  /**
+   * Session-seam overrides (plan 04) — tests inject stubs here. Unset,
+   * production wires `createGuardGenerateSessionSeams`. The seams are REQUIRED
+   * by the engine since the one-shot retirement (step 20), which is why
+   * `--llm agent` (the mailbox transport, which has no session driver) is
+   * refused up front unless every seam is injected.
+   */
+  extractSession?: ExtractSessionSeam;
+  /** The claim-diff gate's extract-cache access; unset, production wires the
+   *  cache-backed seam beside `extractSession`. Absent entirely (an injected
+   *  `extractSession` with no `reuseExtraction`), the gate is skipped. */
+  reuseExtraction?: ReuseExtractionSeam;
+  flowsAreaSession?: FlowsAreaSessionSeam;
+  flowsEpicSession?: FlowsEpicSessionSeam;
+  flowWorkerSession?: FlowWorkerSessionSeam;
   /** Interface mapping seam — defaults to the deterministic analyzer-backed mapper. */
   interfaces?: InterfaceProvider;
   /**
@@ -255,6 +276,17 @@ export interface GuardGenerateInProcessOptions {
    * curation is `dismissedFlows` and cost control is the estimate gate.
    */
   stopAfterFlows?: boolean;
+  /**
+   * Single-step mode (the CLI's `--only-<step>` flags): run only this session
+   * step's sessions — prior steps replay from their outcome caches (a miss
+   * throws {@link GenerateStepNotReadyError}), later steps never start, and
+   * nothing durable is written unless the FINAL step (`worker`) runs: no
+   * scenario file, no manifest, no `flows.json`, and no `guard/result.json`.
+   * The estimate gate prices only the chosen step.
+   */
+  only?: GenerateStep;
+  /** Re-author changed flows from scratch instead of editing their committed scenarios. */
+  fromScratch?: boolean;
 }
 
 /**
@@ -270,15 +302,15 @@ export async function estimateGuard(
   return estimateGuardTokens(repoRoot, await getModelPrices(), { mode });
 }
 
+/**
+ * The models of the two remaining ONE-SHOT stages. Every session stage
+ * (extraction, flow synthesis, the flow workers, the fidelity children) runs on
+ * the ONE configured session model (§3.4) inside
+ * `createGuardGenerateSessionSeams` — there is no per-stage tier for them.
+ */
 function resolveGuardModels(repoRoot: string, mode: LlmTransportMode): GuardGenerateModels {
   return {
-    extract: resolveModel('guard.extract', undefined, repoRoot, mode),
-    flows: resolveModel('guard.flows', undefined, repoRoot, mode),
     match: resolveModel('guard.match', undefined, repoRoot, mode),
-    generate: resolveModel('guard.generate', undefined, repoRoot, mode),
-    retry: resolveModel('guard.retry', undefined, repoRoot, mode),
-    fidelity: resolveModel('guard.fidelity', undefined, repoRoot, mode),
-    triage: resolveModel('guard.triage', undefined, repoRoot, mode),
     recipe: resolveModel('guard.recipe', undefined, repoRoot, mode),
     fallback: resolveFallbackModel(repoRoot, mode) ?? undefined,
   };
@@ -318,6 +350,12 @@ function resolveTransport(options: {
 
 export interface GuardGenerateInProcessResult {
   guard: GuardGenerateResult;
+  /**
+   * The sessions-store run dir (`.truecourse/sessions/guard-generate/<runId>/`)
+   * this run's transcripts landed in — what a stepwise run is inspected
+   * through. The record exists from the first gate on, so it is always set.
+   */
+  sessionsRunDir?: string;
 }
 
 export async function guardGenerateInProcess(
@@ -333,18 +371,16 @@ export async function guardGenerateInProcess(
   const mode = options.transport ? (options.transportMode ?? 'api') : effectiveLlmMode(options.llm);
   const models = resolveGuardModels(repoRoot, mode);
 
-  // The run record: `sessions/guard-generate/<runId>/`. Generate spends
-  // one-shot calls rather than sessions, so the record carries no transcripts —
-  // it carries the step checklist, what it ran on and how it ended, which is all
-  // a surface that never saw the process can read. Created FIRST: a generate
-  // that started and was stopped by a gate — a blocked corpus, a declined
-  // estimate, an unusable provider config — is still a generate that started,
-  // and Activity must say so and why.
+  // The run record: `sessions/guard-generate/<runId>/` — the step checklist,
+  // what it ran on, how it ended, and every session's transcript. Created
+  // FIRST: a generate that started and was stopped by a gate — a blocked
+  // corpus, a declined estimate, an unusable provider config — is still a
+  // generate that started, and Activity must say so and why.
   const run = createSessionRun(options.sessionsKey ?? repoRoot, {
     command: 'guard-generate',
     gitRef: await resolveCommitSha(repoRoot),
   });
-  run.setLlm({ mode, ...(options.attribution ?? defaultAttribution(mode, models)) });
+  run.setLlm({ mode, ...(options.attribution ?? defaultAttribution(mode)) });
   options.onRunStarted?.({ command: 'guard-generate', runId: run.runId, dir: run.dir });
   const untap = tracker?.tap((progress) => {
     if (progress.steps) run.setChecklist(progress.steps);
@@ -361,7 +397,7 @@ export async function guardGenerateInProcess(
     if (options.onLlmEstimate) {
       const prices = await getModelPrices();
       const estimate = await withEstimatePhase(options.onEstimatePhase, () =>
-        estimateGuardTokens(repoRoot, prices, { mode }),
+        estimateGuardTokens(repoRoot, prices, { mode, ...(options.only ? { only: options.only } : {}) }),
       );
       if ((estimate.stages?.length ?? 0) > 0) {
         const proceed = await options.onLlmEstimate(estimate);
@@ -406,80 +442,104 @@ export async function guardGenerateInProcess(
   // A step's detail line = base text + its live usage tag (model/tokens/$).
   const withUsage = (key: string, base: string): string => `${base}${stageUsageTag(GUARD_STEP_STAGES[key] ?? [], repoRoot, mode)}`;
 
-  // Grounding (real-CLI probe capture) runs per section batch BEFORE that batch's
-  // authoring call — a sweep that can take minutes on a cold run. It rides the
-  // author step's detail so the phase never looks idle: "grounding probes X/Y ·
-  // authoring Z/W claims". The probe total grows as later sections enter grounding.
-  // The extract step's planned view denominator — the generator announces it
-  // via onExtractViewProgress(0, total) before the first view resolves; kept so
-  // the completed line can report both units (docs read AND views called).
-  let extractViewsTotal = 0;
-  let authorDone = 0;
-  let authorTotal = 0;
-  let authorFinished = false;
+  // The author step's line is the WORKER POOL's: `workers a/b · settled n ·
+  // blocked m`, fed from the pool's per-task tick (cache hits included). The
+  // grounding sweep (real-CLI probe capture, run while briefings render) rides
+  // the same line so a cold run's probe minutes never look idle.
+  let workersDone = 0;
+  let workersTotal = 0;
+  let workersSettled = 0;
+  let workersBlocked = 0;
+  let workersStarted = false;
   let groundCaptured = 0;
   let groundPlanned = 0;
-  const authorDetail = (): string => {
-    const flows = `${authorDone}/${authorTotal} flow scenario${authorTotal === 1 ? '' : 's'}`;
-    const base = groundPlanned > 0 ? `grounding probes ${groundCaptured}/${groundPlanned} · authoring ${flows}` : flows;
-    return withUsage('author', base);
+  const workerDetail = (): string => {
+    const workers = `workers ${workersDone}/${workersTotal} · settled ${workersSettled} · blocked ${workersBlocked}`;
+    return groundPlanned > 0 && groundCaptured < groundPlanned
+      ? `grounding probes ${groundCaptured}/${groundPlanned} · ${workers}`
+      : workers;
+  };
+  const renderWorkers = (): void => {
+    advanceTo('author');
+    tracker?.detail('author', workerDetail());
   };
 
-  // The validate step's detail LEADS with the flow denominator (the flows this run
-  // has work for, ticking as each settles — monotonic, never fake-complete), then
-  // the build phase / plain birth count / retry counter: "flows 3/8 · building…" →
-  // "flows 3/8 · birth 9" → "flows 3/8 · birth 9 · retrying 1/2". Birth counts carry
-  // no denominator — their total grows across rounds, reading as complete while
-  // flows still settle. Retry re-authoring is LLM work (stage `guard.retry`), so the
-  // live usage tag rides this line.
+  // The validate step covers what happens around the pool: the recipe build
+  // that precedes it ("building…"), then the per-FLOW settle counter as the
+  // routing fold + persist land each flow. Every execution (birth runs,
+  // confirmations, fidelity children) happens INSIDE the worker sessions now —
+  // there are no separate birth/retry/fidelity/triage counters any more.
   let building = false;
-  let birthDone = 0;
   let flowsDone = 0;
   let flowsTotal = 0;
-  // Live authoring-failure surfacing is a CLI concern: only a caller that wires
-  // `onAuthorFailure` gets the "· N failed" reading, so the dashboard popup's
-  // counter is byte-identical to what it always was.
-  const surfacesFailures = !!options.onAuthorFailure;
-  const failedFlows = new Set<string>();
-  let retrySeen = false;
-  let retryDone = 0;
-  let retryTotal = 0;
-  // Fidelity review runs per green candidate in the settle flow — its
-  // counter rides the validate line's detail (a monotonic "fidelity N", like birth).
-  let fidelitySeen = false;
-  let fidelityReviewed = 0;
-  // Failing-test triage runs once per birth failure after every round —
-  // a bounded counter on the validate line, since the total is known when it starts.
-  let triageSeen = false;
-  let triageDone = 0;
-  let triageTotal = 0;
-  // Isolated re-confirmation (layer d): api would-be birth findings are re-run alone
-  // in a clean room to shed shared-state false negatives. The `confirm` phase carries
-  // the ACTUAL number being isolated (api-only, capped), surfaced on the validate line
-  // so the (failure-scaled) phase never looks like a hang.
-  let confirming = 0;
-  // Author and validate overlap under the per-section pipeline: birth for an early
-  // section can begin while later sections are still authoring. renderValidate
-  // therefore starts validate WITHOUT completing author (advanceTo('author') only
-  // finishes the deterministic pre-steps); author completes on its own when the
-  // last claim resolves (in onAuthorProgress).
   let validateStarted = false;
   const renderValidate = (): void => {
+    // The build (and the first gap-only settles) can land before the pool's
+    // first tick — the author step still opens first so the checklist never
+    // shows validate running ahead of a pending author line.
     advanceTo('author');
     if (!validateStarted) {
       tracker?.start('validate');
       validateStarted = true;
     }
-    const flowsPart = surfacesFailures && failedFlows.size > 0
-      ? `flows ${flowsDone}/${flowsTotal} · ${failedFlows.size} failed`
-      : `flows ${flowsDone}/${flowsTotal}`;
-    const parts = [flowsPart, building ? 'building…' : `birth ${birthDone}`];
-    if (retrySeen) parts.push(`retrying ${retryDone}/${retryTotal}`);
-    if (confirming > 0) parts.push(`confirming ${confirming}`);
-    if (fidelitySeen) parts.push(`fidelity ${fidelityReviewed}`);
-    if (triageSeen) parts.push(`triaging ${triageDone}/${triageTotal}`);
-    tracker?.detail('validate', withUsage('validate', parts.join(' · ')));
+    const parts = [`flows ${flowsDone}/${flowsTotal}`];
+    if (building) parts.push('building…');
+    tracker?.detail('validate', parts.join(' · '));
   };
+
+  // The generate session seams (plan 04): extraction, flow synthesis and the
+  // flow workers run as agent sessions — THE paths since the one-shot
+  // retirement (step 20). Lazy by construction: a fully-cached run creates no
+  // run record and no driver. The `agent` mailbox transport has no session
+  // driver, so it cannot drive a generate any more — refused up front (before
+  // the estimate already ran above) unless a test injected every seam.
+  const seamsInjected =
+    options.extractSession && options.flowsAreaSession && options.flowsEpicSession && options.flowWorkerSession;
+  if (options.llm === 'agent' && !seamsInjected) {
+    throw new Error(
+      'guard generate runs its LLM stages as agent sessions, and the `agent` mailbox transport has no session driver — use `--llm-transport cli` or `--llm-transport api`.',
+    );
+  }
+  // The sessions run on the command's OWN run record (created above, before
+  // the gates), so the seams are handed its driver and persistence and create
+  // none of their own. The driver is built LAZILY: a fully-cached run resolves
+  // nothing, and an injected one (a hosted run, the workspace's provider) is
+  // used as-is. Whichever it is, it states what it calls on the record —
+  // unless the caller already did.
+  let sessionContext: Promise<AcquiredContext> | null = null;
+  const acquireSessionContext = (): Promise<AcquiredContext> =>
+    (sessionContext ??= (async () => {
+      if (options.driver) {
+        if (!options.attribution) run.setLlm({ mode, ...options.driver.attribution });
+        return { driver: options.driver, persistence: run.persistence };
+      }
+      const configured = createConfiguredSessionDriver({
+        ...(options.llm === 'cli' || options.llm === 'api' ? { transport: options.llm } : {}),
+        cwd: repoRoot,
+        providerStateDir: path.join(run.dir, 'provider'),
+      });
+      if (!options.attribution) run.setLlm({ mode: configured.mode, ...configured.attribution });
+      return { driver: configured.driver, persistence: run.persistence };
+    })().catch((e) => ((sessionContext = null), Promise.reject(e))));
+  const sessionSeams =
+    options.llm === 'agent'
+      ? null
+      : createGuardGenerateSessionSeams({
+          repoRoot,
+          driver: acquireSessionContext,
+          // Single-step mode: the seams enforce the cache-only replay of every
+          // step before the chosen one (the engine enforces the stop after it).
+          ...(options.only ? { only: options.only } : {}),
+        });
+  const extractSession = options.extractSession ?? sessionSeams!.extractSession;
+  // An injected extraction seam owns no cache, so the production reuse seam
+  // would address entries the injected seam never wrote: the gate only rides
+  // with the seam it was injected beside, or with production extraction.
+  const reuseExtraction =
+    options.reuseExtraction ?? (options.extractSession ? undefined : sessionSeams?.reuseExtraction);
+  const flowsAreaSession = options.flowsAreaSession ?? sessionSeams!.flowsAreaSession;
+  const flowsEpicSession = options.flowsEpicSession ?? sessionSeams!.flowsEpicSession;
+  const flowWorkerSession = options.flowWorkerSession ?? sessionSeams!.flowWorkerSession;
 
   tracker?.start('index');
   try {
@@ -495,14 +555,13 @@ export async function guardGenerateInProcess(
       // where the caller materialized setup's bundle itself (the hosted job). A
       // gate generate over a bare checkout keeps deriving its own recipe.
       requireExistingRecipe: options.requireExistingRecipe ?? guardsMaterializeInPlace(),
-      extractRunner: options.extractRunner,
-      generateRunner: options.generateRunner,
       recipeRunner: options.recipeRunner,
-      fidelityRunner: options.fidelityRunner,
-      triageRunner: options.triageRunner,
-      flowsRunner: options.flowsRunner,
-      flowsEpicRunner: options.flowsEpicRunner,
       matchRunner: options.matchRunner,
+      extractSession,
+      ...(reuseExtraction ? { reuseExtraction } : {}),
+      flowsAreaSession,
+      flowsEpicSession,
+      flowWorkerSession,
       interfaces:
         options.interfaces ??
         (async () => {
@@ -512,48 +571,46 @@ export async function guardGenerateInProcess(
           const mapped = await mapInterfaces(repoRoot);
           return {
             interfaces: mapped.catalog.interfaces,
+            // The resource registry rides the same seam — the mapper forms the
+            // cli and api places itself now (plan item 102), and a hand-authored
+            // web registry arrives the same way.
+            ...(mapped.catalog.resources ? { resources: mapped.catalog.resources } : {}),
             externalServices: mapped.externalServices,
             database: mapped.database,
             datastoreUrls: mapped.datastoreUrls,
-            requestContracts: mapped.requestContracts,
             outboundRequests: mapped.outboundRequests,
           };
         }),
       ...(options.stopAfterFlows ? { stopAfterFlows: true } : {}),
+      ...(options.only ? { only: options.only } : {}),
+      ...(options.fromScratch ? { fromScratch: true } : {}),
       onPlan: (total, work) => {
         throwIfAborted();
         // Indexing is an instant deterministic pass — mark it done with its result
         // detail immediately (recipe-discovery usage rides its tag), never a live phase.
         tracker?.done('index', withUsage('index', `${work} of ${total} section${total === 1 ? '' : 's'} changed`));
         cur = STEPS.indexOf('extract');
-        // No detail yet — the generator's initial onExtractViewProgress(0, total)
-        // supplies the "0/N views" counter as soon as the view plan is known.
+        // No detail yet — the seam's initial onDoc(0, total) supplies the
+        // "docs 0/N" counter the moment the pool is planned.
         tracker?.start('extract');
-      },
-      onExtractViewProgress: (done, total) => {
-        // The live extraction counter: views are the call unit (a chunked doc is
-        // many parallel calls); docs alone can sit at 0/1 for minutes. The
-        // denominator is planned upfront, so it's visible from the first tick.
-        extractViewsTotal = total;
-        advanceTo('extract');
-        tracker?.detail('extract', withUsage('extract', `views ${done}/${total}`));
       },
       onExtractProgress: (done, total) => {
         advanceTo('extract');
         if (done >= total) {
-          // Completed line keeps both units visible end to end: docs read AND views called.
-          const docs = `${total} doc${total === 1 ? '' : 's'}`;
-          const views = `${extractViewsTotal} view${extractViewsTotal === 1 ? '' : 's'}`;
-          tracker?.done('extract', withUsage('extract', `${docs} · ${views}`));
+          tracker?.done('extract', `${total} doc${total === 1 ? '' : 's'}`);
+        } else {
+          // The session path's live counter. The one-shot path plans views
+          // upfront (extractViewsTotal > 0) and keeps its finer per-view line.
+          tracker?.detail('extract', withUsage('extract', `docs ${done}/${total}`));
         }
       },
-      onJourneys: (journeys, surfaces) => {
+      onInterfaces: (interfaces, surfaces) => {
         // Interface mapping is deterministic and free — it completes as one step with
         // its result, never a live counter with a model tag.
-        advanceTo('journeys');
+        advanceTo('interfaces');
         tracker?.done(
-          'journeys',
-          `${journeys} journey${journeys === 1 ? '' : 's'} · ${surfaces} surface${surfaces === 1 ? '' : 's'}`,
+          'interfaces',
+          `${interfaces} interface${interfaces === 1 ? '' : 's'} · ${surfaces} surface${surfaces === 1 ? '' : 's'}`,
         );
       },
       onFlowProgress: (done, total) => {
@@ -572,74 +629,41 @@ export async function guardGenerateInProcess(
           tracker?.detail('match', withUsage('match', `${done}/${total} flow×surface`));
         }
       },
-      onAuthorProgress: (done, total) => {
-        advanceTo('author');
-        authorDone = done;
-        authorTotal = total;
-        // The author step ticks (grounding + claim counters) until the last claim
-        // resolves, then completes — even if validate (early-section birth) is
-        // already running concurrently. A completed step drops the grounding prefix.
-        if (done >= total) {
-          authorFinished = true;
-          tracker?.done('author', withUsage('author', `${done}/${total} flow scenario${total === 1 ? '' : 's'}`));
+      onWorkerProgress: ({ done, total, settled, blocked }) => {
+        workersDone = done;
+        workersTotal = total;
+        workersSettled = settled;
+        workersBlocked = blocked;
+        workersStarted = true;
+        // The worker line ticks until the last session settles, then completes
+        // with its outcome tally.
+        if (done >= total && total > 0) {
+          tracker?.done('author', workerDetail());
         } else {
-          tracker?.detail('author', authorDetail());
+          renderWorkers();
         }
       },
       onGroundProgress: (captured, planned) => {
         groundCaptured = captured;
         groundPlanned = planned;
-        // Round-2 (retry) grounding fires after authoring finished — it rides the
-        // validate step's retry counter, so never reopen the completed author line.
-        if (authorFinished) return;
-        advanceTo('author');
-        tracker?.detail('author', authorDetail());
+        // Probes are captured while worker briefings render, before the pool's
+        // first tick — the grounding prefix keeps the line honest meanwhile.
+        if (workersStarted && workersDone >= workersTotal && workersTotal > 0) return;
+        renderWorkers();
       },
-      onBirthPhase: (phase, total) => {
+      onBirthPhase: (phase) => {
+        // Only 'build' fires now — the recipe build that precedes the pool.
         building = phase === 'build';
-        if (phase === 'confirm') confirming = total ?? 0;
         renderValidate();
       },
-      onBirthProgress: (done) => {
-        building = false;
-        birthDone = done;
-        renderValidate();
-      },
-      onRetryProgress: (done, total) => {
-        retrySeen = true;
-        retryDone = done;
-        retryTotal = total;
-        renderValidate();
-      },
-      onFidelityProgress: (reviewed) => {
-        fidelitySeen = true;
-        fidelityReviewed = reviewed;
-        // Reviews happen in the settle flow — only render a LIVE validate line.
-        if (validateStarted) renderValidate();
-      },
-      onTriageProgress: (done, total) => {
-        triageSeen = true;
-        triageDone = done;
-        triageTotal = total;
-        // Triage runs after birth settles — the validate line is live by then.
-        if (validateStarted) renderValidate();
-      },
-      onAuthorFailure: options.onAuthorFailure
-        ? (failure) => {
-            // Only a FINAL failure counts a flow as given up on — a corrective
-            // re-ask is still in flight.
-            if (!failure.willRetry) failedFlows.add(`${failure.flowId}\0${failure.surface}`);
-            options.onAuthorFailure!(failure);
-            if (validateStarted) renderValidate();
-          }
-        : undefined,
       onFlowSettled: (settled, total) => {
         throwIfAborted();
+        building = false;
         flowsDone = settled;
         flowsTotal = total;
-        // Gap-only flows settle without ever birthing — only re-render a LIVE
-        // validate line; never start the birth step early.
-        if (validateStarted) renderValidate();
+        // Gap-only flows settle without any worker running — only re-render a
+        // LIVE validate line; never start the step early.
+        if (validateStarted || settled > 0) renderValidate();
       },
     });
 
@@ -651,11 +675,27 @@ export async function guardGenerateInProcess(
     // dashboard popup (same steps payload) would tick them green.
     if (guard.status === 'no-docs' || guard.status === 'recipe-failed' || guard.status === 'llm-failed') {
       tracker?.error(STEPS[cur], firstLine(guard.reason) ?? 'aborted');
-      persistGuardReport(repoRoot, guard);
+      // Single-step mode, before the final step: the same write gate as a clean
+      // stop. This run could never have produced a whole generate's report, so
+      // persisting one would overwrite the LAST FULL generate's `result.json`
+      // (what `guard status` and the dashboard read) with a partial abort. The
+      // caller still gets the failure — loudly, and non-zero.
+      if (!options.only || options.only === 'worker') persistGuardReport(repoRoot, guard);
       run.finish('failed', {
         error: { message: firstLine(guard.reason) ?? `generate ended ${guard.status}`, kind: guard.status },
       });
-      return { guard };
+      return { guard, sessionsRunDir: run.dir };
+    }
+
+    // A single-step run stopped BEFORE the final step: close only the step that
+    // actually opened (the CLI hands the tracker a reduced checklist, so the
+    // later keys don't exist — and StepTracker no-ops on unknown keys anyway),
+    // and persist NOTHING. `guard/result.json` describes a completed generate;
+    // a partial run's counts would read as a whole one's.
+    if (guard.stoppedAfter) {
+      tracker?.done(STEPS[cur], `stopped after ${guard.stoppedAfter}`);
+      run.finish('completed');
+      return { guard, sessionsRunDir: run.dir };
     }
 
     // Mark every remaining step done with a closing detail.
@@ -663,12 +703,9 @@ export async function guardGenerateInProcess(
     if (guard.noChanges) {
       tracker?.done('validate', 'nothing changed');
     } else {
-      tracker?.done(
-        'author',
-        withUsage('author', `${guard.written.length} test${guard.written.length === 1 ? '' : 's'} written`),
-      );
+      tracker?.done('author', `${guard.written.length} test${guard.written.length === 1 ? '' : 's'} written`);
       // Every authored test is committed, so the validate line reports the split:
-      // how many landed green vs. red at birth.
+      // how many landed green vs. red at the worker's confirmation run.
       const failing = guard.written.filter((w) => w.status === 'failing').length;
       const failingTag = failing ? ` · ${failing} failing` : '';
       tracker?.done(
@@ -683,7 +720,7 @@ export async function guardGenerateInProcess(
     persistGuardReport(repoRoot, guard);
     run.finish('completed');
 
-    return { guard };
+    return { guard, sessionsRunDir: run.dir };
   } catch (e) {
     tracker?.error(STEPS[cur], (e as Error).message);
     // A stop the caller asked for is not a failure; anything else lands its
@@ -709,18 +746,14 @@ export class GuardGenerateAborted extends Error {
 }
 
 /**
- * What a run without an injected attribution says it ran on: the saved API
- * provider (or the operator's Claude Code) and the model authoring rides —
- * generate is one-shot calls per stage, so the authoring model is the honest
- * one line about it. Never credentials.
+ * What the run record says before its session driver exists: the saved API
+ * provider (or the operator's Claude Code) and no model yet. The driver's own
+ * attribution replaces it the moment a session is acquired; a fully-cached run
+ * that acquires none keeps this. Never credentials.
  */
-function defaultAttribution(mode: LlmTransportMode, models: GuardGenerateModels): SessionLlm {
+function defaultAttribution(mode: LlmTransportMode): SessionLlm {
   const provider = mode === 'api' ? (readApiLlmConfig()?.provider ?? 'api') : 'claude-code';
-  return {
-    provider,
-    model: models.generate ?? 'default',
-    ...(models.fallback ? { fallbackModel: models.fallback } : {}),
-  };
+  return { provider, model: 'default' };
 }
 
 /** The first line of a (possibly multi-line, guided) abort reason — a step detail
@@ -729,17 +762,14 @@ function firstLine(reason: string | undefined): string | undefined {
   return reason?.split('\n')[0]?.trim() || undefined;
 }
 
-/** The guard LLM stages whose usage the report totals. */
-const GUARD_USAGE_STAGES = [
-  'guard.recipe',
-  'guard.extract',
-  'guard.flows',
-  'guard.match',
-  'guard.generate',
-  'guard.retry',
-  'guard.fidelity',
-  'guard.triage',
-] as const;
+/**
+ * The guard LLM stages whose usage the report totals — the two remaining
+ * ONE-SHOT transport stages. The session stages (extraction, flows, workers,
+ * fidelity children) never reach the stage-usage sink: their spend lives in the
+ * sessions store (`sessions/guard-generate/<runId>/`), so the persisted
+ * `usage` row deliberately covers the transport half only.
+ */
+const GUARD_USAGE_STAGES = ['guard.recipe', 'guard.match'] as const;
 
 /**
  * Sum the run's per-stage usage over the guard LLM stages. Returns `undefined`
@@ -837,6 +867,14 @@ export interface GuardRunInProcessOptions {
   scenario?: string;
   /** Fires with each scenario's result as it settles — the CLI streams non-pass lines from it. */
   onScenarioResult?: (result: GuardScenarioResult) => void;
+  /**
+   * Override the visual judge for a failing web step. An injected judge always
+   * wins (a test that must never reach a model passes its own, or one that
+   * returns `null`). Unset, production gets {@link createGuardVisualJudge} — but
+   * only when {@link guardVisualJudgeEnabled} says so: the judge is parked
+   * (off by default) until its cost/value is settled.
+   */
+  visualJudge?: GuardVisualJudge;
 }
 
 /**
@@ -844,8 +882,17 @@ export interface GuardRunInProcessOptions {
  * curate/generate drivers. Resolves the repo ref, runs the committed scenarios
  * through the guard-runner, and drives a tracker through GUARD_RUN_STEPS (build →
  * run, with a live per-scenario counter) so the CLI terminal and the dashboard
- * popup show the same stream. Deterministic and LLM-free. Returns the runner's
- * discriminated result untouched — the caller decides how to present each status.
+ * popup show the same stream. Returns the runner's discriminated result untouched
+ * — the caller decides how to present each status.
+ *
+ * Deterministic, with ONE opt-in annotation: when {@link guardVisualJudgeEnabled}
+ * (off by default — the judge is parked), a failing WEB step's screenshot is shown
+ * to a vision model, whose verdict is recorded beside the failure (see
+ * {@link createGuardVisualJudge}). It cannot move an outcome and it never fires on
+ * a green run, so a passing run is exactly as LLM-free as it always was. THIS is
+ * the boundary the judge is wired at — the guard-runner takes it as an optional
+ * callback, so every caller that does not come through here (birth validation, the
+ * test suite, a hosted executor) runs with no judge and no model at all.
  */
 export async function guardRunInProcess(
   repoRoot: string,
@@ -861,16 +908,26 @@ export async function guardRunInProcess(
   // resolved recipe + selected scenarios to the executor for actual execution.
   const sourced = sourceGuardRunInputs(repoRoot, options.scenario);
   if ('early' in sourced) return sourced.early;
-  const { loaded, selected, loadErrors } = sourced;
+  const { loaded, selected, corpusIds, loadErrors } = sourced;
+
+  // Failure-only, fail-soft, and unable to change a verdict — see the doc above.
+  // An injected judge always wins; the built one is gated on the opt-in flag.
+  const visualJudge =
+    options.visualJudge ?? (guardVisualJudgeEnabled() ? createGuardVisualJudge(repoRoot) : undefined);
 
   const result = mergeLoadErrors(
     await getGuardExecutor()({
       checkoutDir: repoRoot,
       recipe: loaded.recipe,
       scenarios: selected,
+      // The `--scenario` filter was applied HERE, so the run has to be told what it
+      // filtered out: a scoped run merges into the recorded board, and only the ids
+      // that left the corpus may drop off it.
+      corpusIds,
       branch,
       commit,
       persist: true,
+      ...(visualJudge ? { visualJudge } : {}),
       onPhase: (phase, total) => {
         if (phase === 'build') tracker?.start('build');
         else {

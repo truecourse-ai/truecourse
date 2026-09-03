@@ -472,6 +472,9 @@ export async function guardSetupInProcess(
             externalServices: mapped.externalServices,
             database: mapped.database,
             datastoreUrls: mapped.datastoreUrls,
+            // The cli union's tree-vs-probe disputes — run reporting for the
+            // interfaces step's reconcile session, never snapshotted.
+            diagnostics: mapped.diagnostics,
           };
         }),
       ...(repair ? { repair } : {}),

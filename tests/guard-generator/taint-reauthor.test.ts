@@ -1,31 +1,28 @@
 /**
- * The flow taint. A flow whose test was rejected last run must never be
- * served the byte-identical rejected scenario from the author cache again: the
- * taint bypasses the round-1 cache read, the fresh call carries the prior
- * mismatch as a PRIOR FLAG evidence block, a completed fresh author clears the
- * taint (the poisoned entry was overwritten), and an authoring error keeps it.
+ * The flow taint on the WORKER path (plan 04 step 17). A flow whose test was
+ * rejected last run must never be served the byte-identical rejected scenario
+ * from the `guard/generate` cache again: the engine hands the worker task a
+ * `taint` (core skips the cache read on it — pinned in
+ * `tests/core/guard-generate-worker-seam.test.ts`), the briefing opens with the
+ * prior mismatch as a PRIOR FLAG evidence block, a settled/blocked outcome
+ * clears the taint, and a failed session keeps it.
  */
 import { describe, it, expect, afterEach } from 'vitest'
-import { autoResolutionKey, GUARD_FORMAT_VERSION } from '@truecourse/shared'
+import { autoResolutionKey } from '@truecourse/shared'
+import { readGuardAutoResolutions, writeGuardAutoResolutions, writeManifest } from '@truecourse/guard-runner'
+import type { FlowWorkerTask } from '@truecourse/guard-generator'
 import {
-  readGuardAutoResolutions,
-  writeGuardAutoResolutions,
-  writeManifest,
-} from '@truecourse/guard-runner'
-import type { GenerateRunner, AuthorUserContext } from '@truecourse/guard-generator'
-import {
-  makeTempRepo,
-  rmrf,
-  writeRecipe,
-  writeDoc,
-  writeCorpus,
-  raw,
-  extractBy,
-  authorBy,
-  runGenerate,
-  stampMilestones,
-  FAILING_STEPS,
   PASSING_STEPS,
+  extractSessionBy,
+  flowWorkerSessionOf,
+  makeTempRepo,
+  raw,
+  rmrf,
+  runGenerate,
+  submitWorkerSessions,
+  writeCorpus,
+  writeDoc,
+  writeRecipe,
 } from './helpers.js'
 
 const repos: string[] = []
@@ -55,7 +52,7 @@ function seed(): string {
   return r
 }
 
-const versionCliBgUntestable = extractBy({ background: { untestable: 'design history' } })
+const versionCliBgUntestable = extractSessionBy({ background: { untestable: 'design history' } })
 const KEY = autoResolutionKey('version', 'cli')
 
 function taintedLedger(mismatch: string) {
@@ -74,77 +71,134 @@ function taintedLedger(mismatch: string) {
   }
 }
 
-describe('flow taint — the author-cache bypass', () => {
-  it('a tainted flow re-authors FRESH with the prior rejection as evidence; a faithful pass clears it', async () => {
+describe('flow taint — what the worker is told, and when the taint clears', () => {
+  it('a tainted flow reaches its worker with the taint AND a PRIOR FLAG briefing; a settled outcome clears it', async () => {
     const r = seed()
-    // Warm the author cache with a green run.
-    let calls = 0
-    const seen: AuthorUserContext[] = []
-    const runner = authorBy({ version: raw('green test', PASSING_STEPS) }, (ctx) => {
-      calls++
-      seen.push(ctx)
-    })
-    await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
-    expect(calls).toBe(1)
+    const mismatch = 'asserts exit 0 where the claim quotes exact output'
+    writeGuardAutoResolutions(r, taintedLedger(mismatch))
 
-    // Taint the flow (as a prior run's rejection would) and make it work again.
-    writeGuardAutoResolutions(r, taintedLedger('asserts exit 0 where the claim quotes exact output'))
-    writeManifest(r, { version: GUARD_FORMAT_VERSION, flows: [] })
-
-    await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
-    // The warm cache was BYPASSED: the model was called again, with the evidence.
-    expect(calls).toBe(2)
-    expect(seen[1].priorFlag).toEqual({
-      title: 'the rejected scenario',
-      mismatch: 'asserts exit 0 where the claim quotes exact output',
+    const taints: (FlowWorkerTask['taint'] | undefined)[] = []
+    let briefing = ''
+    await runGenerate({
+      repoRoot: r,
+      extractSession: versionCliBgUntestable,
+      flowWorkerSession: submitWorkerSessions(
+        (task) => {
+          taints.push(task.taint)
+          return raw('a genuinely different scenario', PASSING_STEPS)
+        },
+        {
+          onSubmit: () => undefined,
+        },
+      ),
+      onWorkerProgress: () => undefined,
     })
-    // The fresh pass cleared the taint (the poisoned cache entry is gone).
+
+    expect(taints).toEqual([{ title: 'the rejected scenario', mismatch }])
+    // The settled outcome overwrote the poisoned entry ⇒ the taint clears.
     expect(readGuardAutoResolutions(r).tainted[KEY]).toBeUndefined()
 
-    // And an untainted re-run is a cache hit again — the fresh result was cached.
-    writeManifest(r, { version: GUARD_FORMAT_VERSION, flows: [] })
-    await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: runner })
-    expect(calls).toBe(2)
-  })
+    // …and the BRIEFING the worker would have opened with carries the evidence.
+    writeGuardAutoResolutions(r, taintedLedger(mismatch))
+    writeManifest(r, { flows: [] })
+    await runGenerate({
+      repoRoot: r,
+      extractSession: versionCliBgUntestable,
+      flowWorkerSession: flowWorkerSessionOf(async (task) => {
+        briefing = await task.prepare()
+        return { kind: 'outcome', outcome: { kind: 'retired', attempts: 1, lastEvidence: 'briefing only' } }
+      }),
+    })
+    expect(briefing).toContain('PRIOR FLAG')
+    expect(briefing).toContain('rejected scenario: the rejected scenario')
+    expect(briefing).toContain(`why it was rejected: ${mismatch}`)
+  }, 60_000)
 
-  it('an authoring error KEEPS the taint — the cache is still poisoned', async () => {
+  it('a FAILED worker session keeps the taint — the cache entry is still poisoned', async () => {
     const r = seed()
     writeGuardAutoResolutions(r, taintedLedger('the prior rejection'))
-    const throwing: GenerateRunner = async () => {
-      throw new Error('transport died')
-    }
-    await runGenerate({ repoRoot: r, extractRunner: versionCliBgUntestable, generateRunner: throwing })
+    await runGenerate({
+      repoRoot: r,
+      extractSession: versionCliBgUntestable,
+      flowWorkerSession: flowWorkerSessionOf(async () => ({ kind: 'failed', reason: 'the transport died' })),
+    })
     expect(readGuardAutoResolutions(r).tainted[KEY]).toMatchObject({ mismatch: 'the prior rejection' })
   })
 
-  it('end-to-end: a withheld generation-defect taints, and the NEXT generate authors fresh with the brief', async () => {
+  it('a BLOCKED outcome clears the taint too — the worker answered honestly', async () => {
     const r = seed()
-    const flags: (AuthorUserContext['priorFlag'] | undefined)[] = []
-    const runner: GenerateRunner = async (ctx) => {
-      flags.push(ctx.priorFlag)
-      return { scenario: stampMilestones(raw('always broken', FAILING_STEPS), ctx.milestones.length) }
-    }
-    const brief = 'The scenario asserts an exit code the section never states.'
-    const run = () =>
-      runGenerate({
-        repoRoot: r,
-        extractRunner: versionCliBgUntestable,
-        generateRunner: runner,
-        triageRunner: async () => ({
-          verdict: 'generation-defect',
-          confidence: 'medium',
-          brief,
-          recommendation: 'Author against the documented behavior.',
-        }),
-      })
-
-    await run()
-    expect(readGuardAutoResolutions(r).tainted[KEY]).toMatchObject({ mismatch: brief })
-
-    await run()
-    // The second run's ROUND-1 call happened (no cache serve) and carried the brief.
-    const round1Flags = flags.filter((f) => f !== undefined)
-    expect(round1Flags.length).toBeGreaterThan(0)
-    expect(round1Flags[0]).toMatchObject({ title: 'always broken', mismatch: brief })
+    writeGuardAutoResolutions(r, taintedLedger('the prior rejection'))
+    await runGenerate({
+      repoRoot: r,
+      extractSession: versionCliBgUntestable,
+      flowWorkerSession: submitWorkerSessions(() => ({ blocked: [{ order: 1, capability: 'a live database' }] })),
+    })
+    expect(readGuardAutoResolutions(r).tainted[KEY]).toBeUndefined()
   })
+
+  it('end-to-end: a fidelity rejection taints, and the NEXT generate briefs the worker with the mismatch', async () => {
+    const r = seed()
+    const mismatch = 'the scenario asserts an exit code the section never states'
+
+    // Run 1 — the fidelity judge rejects, and the worker retires.
+    await runGenerate({
+      repoRoot: r,
+      extractSession: versionCliBgUntestable,
+      flowWorkerSession: flowWorkerSessionOf(async (task) => {
+        await task.submitScenario(
+          `title: always broken\nsteps:\n  - run: ["--version"]\n    expect:\n      exit: 0\n    milestone: 1\n`,
+          [],
+          async () => ({ kind: 'flagged', mismatch, confidence: 'low' }),
+        )
+        return { kind: 'outcome', outcome: { kind: 'retired', attempts: 1, lastEvidence: mismatch } }
+      }),
+    })
+    expect(readGuardAutoResolutions(r).tainted[KEY]).toMatchObject({ mismatch })
+
+    // Run 2 — the taint rides the briefing as the prior flag.
+    let briefing = ''
+    await runGenerate({
+      repoRoot: r,
+      extractSession: versionCliBgUntestable,
+      flowWorkerSession: flowWorkerSessionOf(async (task) => {
+        briefing = await task.prepare()
+        return { kind: 'outcome', outcome: { kind: 'retired', attempts: 1, lastEvidence: 'still stuck' } }
+      }),
+    })
+    expect(briefing).toContain('PRIOR FLAG')
+    expect(briefing).toContain(`why it was rejected: ${mismatch}`)
+  }, 60_000)
+
+  it('a tainted flow with a committed scenario is authored from scratch — PRIOR FLAG, never PRIOR SCENARIOS', async () => {
+    const r = seed()
+    // Commit a scenario first, so edit mode WOULD apply on the re-author…
+    const first = await runGenerate({
+      repoRoot: r,
+      extractSession: versionCliBgUntestable,
+      flowWorkerSession: submitWorkerSessions(() => raw('relkit --version prints the version', PASSING_STEPS)),
+    })
+    expect(first.written.length).toBe(1)
+    // …then move the bound section AND taint the flow: the taint wins.
+    writeDoc(r, DOC, DOC_CONTENT.replace('prints the version', 'prints the SEMVER version'))
+    const mismatch = 'asserts exit 0 where the claim quotes exact output'
+    writeGuardAutoResolutions(r, taintedLedger(mismatch))
+
+    let briefing = ''
+    let prior: FlowWorkerTask['prior'] | undefined
+    let mode = ''
+    await runGenerate({
+      repoRoot: r,
+      extractSession: versionCliBgUntestable,
+      flowWorkerSession: flowWorkerSessionOf(async (task) => {
+        prior = task.prior
+        mode = task.cacheMaterial.mode
+        briefing = await task.prepare()
+        return { kind: 'outcome', outcome: { kind: 'retired', attempts: 1, lastEvidence: 'briefing only' } }
+      }),
+    })
+    expect(prior).toBeUndefined()
+    expect(mode).toBe('scratch')
+    expect(briefing).toContain('PRIOR FLAG')
+    expect(briefing).not.toContain('PRIOR SCENARIOS')
+  }, 60_000)
 })

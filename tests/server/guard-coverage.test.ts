@@ -38,7 +38,7 @@ function scenario(over: Partial<GuardScenarioResult> & { id: string; section: st
 }
 
 const latest: GuardLatest = {
-  run: { runId: 'r1', ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'abc', recipeFingerprint: 'sha256:r', scenarioFormat: 2 },
+  run: { runId: 'r1', ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'abc', recipeFingerprint: 'sha256:r' },
   summary: { total: 6, pass: 2, fail: 1, stale: 1, orphaned: 1, error: 1 },
   scenarios: [
     scenario({ id: 'sp', section: 's-pass', outcome: 'pass' }),
@@ -53,13 +53,12 @@ const latest: GuardLatest = {
 };
 
 const manifest: GuardManifest = {
-  version: 2,
   flows: [
     {
       flowId: `${DOC}#s-guarded`,
       flowFingerprint: fp,
       bindings: [{ doc: DOC, anchor: 's-guarded', fingerprint: fp }],
-      scenarios: [{ id: 'sg1', surface: 'cli' }],
+      scenarios: [{ id: 'sg1', drivers: ['cli'] }],
       generationInputsHash: null,
       gaps: [],
     },
@@ -79,7 +78,7 @@ const result: GuardGenerateReport = {
     { doc: DOC, anchor: 's-tui', kind: 'awaiting-driver', driver: 'tui', reason: 'terminal UI only' },
     { doc: DOC, anchor: 's-no-claim', kind: 'no-claim', reason: 'no assertable claim' },
     { doc: DOC, anchor: 's-blocked', kind: 'blocked-on', reason: composeBlockedOnReason(['git', 'db'], 'needs a git repo and a database') },
-    { doc: DOC, anchor: 's-web', kind: 'awaiting-driver', driver: 'web', reason: 'browser-only' },
+    { doc: DOC, anchor: 's-web', kind: 'awaiting-driver', driver: 'desktop', reason: 'desktop-only' },
     { doc: DOC, anchor: 's-untestable', kind: 'untestable', reason: 'no CLI surface' },
   ],
   birthFindings: [],
@@ -148,9 +147,9 @@ describe('composeDocCoverage — per-section join (all statuses)', () => {
     expect(sb.blockedOnCapabilities).toEqual(['git', 'db']);
   });
 
-  it('reads the awaiting-driver / untestable gaps (web driver, untestable)', () => {
-    expect(status('s-web')).toBe('web');
-    expect(byAnchor.get('s-web')!.reason).toBe('browser-only');
+  it('reads the awaiting-driver / untestable gaps (desktop driver, untestable)', () => {
+    expect(status('s-web')).toBe('desktop');
+    expect(byAnchor.get('s-web')!.reason).toBe('desktop-only');
     expect(status('s-untestable')).toBe('untestable');
     expect(byAnchor.get('s-untestable')!.reason).toBe('no CLI surface');
   });
@@ -194,7 +193,7 @@ describe('composeDocCoverage — per-section join (all statuses)', () => {
     expect(cov.generatedAt).toBe('2026-07-06T00:00:00.000Z');
     expect(cov.totals).toMatchObject({
       pass: 2, fail: 1, error: 1, stale: 1, guarded: 1,
-      library: 1, web: 1, tui: 1, untestable: 1, 'no-claim': 1, 'blocked-on': 1,
+      library: 1, desktop: 1, tui: 1, untestable: 1, 'no-claim': 1, 'blocked-on': 1,
       unguarded: 1, orphaned: 0, 'authoring-error': 1,
     });
   });

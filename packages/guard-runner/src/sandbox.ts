@@ -22,13 +22,8 @@ import { DEFAULT_BUILD_TIMEOUT_MS, type BuildResult } from './build.js'
 import { armChildKill } from './child-kill.js'
 import { constructChildEnv, sandboxXdgDirs, DETERMINISM_PINS, overlayStepEnv, BUILD_PASSTHROUGH } from './child-env.js'
 import { executeStep, type StepCapture } from './executor.js'
-import {
-  materializeSupplied,
-  SUPPLIED_DIR,
-  type SuppliedInstance,
-  type SuppliedOmissions,
-  type SuppliedValues,
-} from './dependencies.js'
+import { applySandbox, applySandboxEnv } from './sandbox-token.js'
+import { applySupplied, materializeSupplied, SUPPLIED_DIR, type SuppliedInstance, type SuppliedOmissions, type SuppliedValues } from './dependencies.js'
 import { resolveEntry } from './recipe.js'
 
 // Re-exported for existing importers (evidence `envPins`, index barrel).
@@ -41,7 +36,7 @@ export interface Sandbox {
   root: string
   /** Fully-constructed child env (see the build rules below). */
   env: NodeJS.ProcessEnv
-  /** What each supplied instance resolved to (a copied-in path, the exported env), by name. */
+  /** What `${supplied:<name>.<field>}` resolves to, once instances are copied in. */
   supplied: SuppliedValues
   /** The declared-optional fields this machine left blank. See {@link SuppliedOmissions}. */
   suppliedOmissions: SuppliedOmissions
@@ -76,8 +71,9 @@ export function createSandbox(opts: SandboxOptions = {}): Sandbox {
   const xdg = sandboxXdgDirs(home)
   for (const dir of Object.values(xdg)) fs.mkdirSync(dir, { recursive: true })
 
-  // Supplied instances land BEFORE anything else can name them: copy-in, never a
-  // reference to the host original, and their declared env is exported below.
+  // Supplied instances land BEFORE anything else can name them: the seeded files and
+  // the declared env may both carry `${supplied:…}`, and a step's `cwd` may point
+  // into a copied project. Copy-in, never a reference to the host original.
   const {
     values: supplied,
     env: suppliedEnv,
@@ -86,17 +82,35 @@ export function createSandbox(opts: SandboxOptions = {}): Sandbox {
 
   const shimDir = opts.expose ? writeShims(opts.expose, root, opts.repoRoot ?? process.cwd()) : null
 
+  // `${supplied:…}` then `${sandbox}` — both resolve HERE and nowhere earlier: the
+  // paths they name are the ones just created, so the declared env and seeds are the
+  // first things that can carry them. The recipe-owned env stays verbatim (it is not
+  // scenario-authored).
+  const scenarioEnv = opts.scenarioEnv
+    ? applySandboxEnv(mapValues(opts.scenarioEnv, (v) => applySupplied(v, supplied)), cwd)
+    : undefined
+
   // Allowlist, built from scratch — nothing else from the host reaches the child.
   const env = constructChildEnv({
     sandbox: { home, tmp },
     // A supplied `env` instance is a REGISTERED value, so it layers with the recipe's
     // own env (below the scenario's, which may still override it deliberately).
     recipeEnv: { ...opts.recipeEnv, ...suppliedEnv },
-    scenarioEnv: opts.scenarioEnv,
+    scenarioEnv,
     ...(shimDir ? { pathPrefix: [shimDir] } : {}),
   })
 
-  if (opts.setupFiles) seedFiles(cwd, opts.setupFiles)
+  if (opts.setupFiles) {
+    seedFiles(
+      cwd,
+      Object.fromEntries(
+        Object.entries(opts.setupFiles).map(([k, v]) => [
+          applySandbox(applySupplied(k, supplied), cwd),
+          applySandbox(applySupplied(v, supplied), cwd),
+        ]),
+      ),
+    )
+  }
 
   return {
     cwd,
@@ -111,6 +125,13 @@ export function createSandbox(opts: SandboxOptions = {}): Sandbox {
   }
 }
 
+function mapValues(
+  record: Record<string, string>,
+  fn: (value: string) => string,
+): Record<string, string> {
+  return Object.fromEntries(Object.entries(record).map(([k, v]) => [k, fn(v)]))
+}
+
 /**
  * The directory the recipe's `expose` shims are written into, INSIDE the sandbox
  * root and above the scenario cwd — so it never shows up in the working tree a
@@ -122,8 +143,10 @@ export function createSandbox(opts: SandboxOptions = {}): Sandbox {
  * managers do NOT consult PATH — `npx <name>` walks UP from the working directory
  * looking for `node_modules/.bin/<name>` and, failing that, installs a published
  * copy from the registry. A shim dir that is only on PATH would therefore lose to a
- * download for exactly the case `expose` exists to fix. One directory, discovered
- * two ways, no global mutation.
+ * download for exactly the case `expose` exists to fix: TrueCourse's own pre-commit
+ * hook runs `npx -y truecourse`, and until the shim sat where npx looks, the hook
+ * scenarios graded a published release instead of this build. One directory,
+ * discovered two ways, no global mutation.
  */
 const SHIM_DIR_REL = path.join('node_modules', '.bin')
 
@@ -138,7 +161,8 @@ function writeShims(
   for (const [name, target] of Object.entries(expose)) {
     const argv = resolveEntry(repoRoot, typeof target === 'string' ? [target] : target)
     const script = `#!/bin/sh\nexec ${argv.map(shellQuote).join(' ')} "$@"\n`
-    fs.writeFileSync(path.join(dir, name), script, { mode: 0o755 })
+    const file = path.join(dir, name)
+    fs.writeFileSync(file, script, { mode: 0o755 })
   }
   return dir
 }
@@ -151,8 +175,8 @@ function shellQuote(arg: string): string {
 /**
  * Absolute path of a sandbox-relative path, or a {@link SandboxError} naming the
  * escape. THE containment rule every declared path goes through — a step's `cwd`,
- * a seeded file — so a scenario can never reach the developer's filesystem,
- * whatever it declares.
+ * a `write`/`delete` target, a seeded file — so a scenario can never reach the
+ * developer's filesystem, whatever it declares.
  */
 export function resolveInSandbox(cwd: string, rel: string, what: string): string {
   const target = path.resolve(cwd, rel)
