@@ -51,9 +51,12 @@ import {
   type GuardScenarioResult,
   type CorpusConflict,
 } from '@truecourse/shared';
+import type { RunError, SessionLlm } from '@truecourse/agent-loop';
 import { getGit } from '../lib/git.js';
 import { getGuardExecutor } from '../lib/guard-executor.js';
 import { guardsMaterializeInPlace } from '../lib/guard-store.js';
+import { resolveCommitSha } from '../lib/repo-ref.js';
+import { createSessionRun, type SessionRunStartedInfo } from '../lib/sessions-store.js';
 import {
   agentTransport,
   cliTransport,
@@ -64,7 +67,7 @@ import {
   type LlmTransport,
 } from '@truecourse/shared/llm';
 import { createConfiguredApiTransport } from '../services/llm/install-transport.js';
-import { effectiveLlmMode, type LlmTransportMode } from '../config/global-config.js';
+import { effectiveLlmMode, readApiLlmConfig, type LlmTransportMode } from '../config/global-config.js';
 import { resolveFallbackModel, resolveModel, type StageId } from '../config/llm-models.js';
 import { createLlmCallLogger } from '../lib/llm-call-log.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
@@ -207,6 +210,34 @@ export interface GuardGenerateInProcessOptions {
    * the estimate panel; the dashboard passes `estimateStepPhase(tracker)`.
    */
   onEstimatePhase?: EstimatePhase;
+  /**
+   * Where the run record is keyed — the repo IDENTITY when `repoRoot` is an
+   * ephemeral clone deleted after the run (a hosted job). Defaults to `repoRoot`.
+   */
+  sessionsKey?: string;
+  /**
+   * What the run record says it ran on. A caller that built the transport
+   * itself knows (the workspace's provider); unset, the saved selection's
+   * provider and this run's authoring model are stamped.
+   */
+  attribution?: SessionLlm;
+  /** The run record just came into being — before the gates, so a generate the
+   *  gates stop is on record too. The CLI prints its "watch live" link from it. */
+  onRunStarted?: (info: SessionRunStartedInfo) => void;
+  /**
+   * Stop the run. The generator has no abort seam of its own, so this is honored
+   * at the step boundaries: the next phase transition throws
+   * {@link GuardGenerateAborted} and nothing further is authored or written.
+   * Work already inside a phase (an extraction batch, a birth sandbox) runs to
+   * its end first.
+   */
+  signal?: AbortSignal;
+  /**
+   * Refuse to derive a recipe: generate loads what `guard setup` left and stops
+   * without one. Defaults to "where a user could have run setup" — the in-place
+   * file store. A hosted job materializes setup's bundle first and passes true.
+   */
+  requireExistingRecipe?: boolean;
   // --- test seams (production injects none; runners bypass the transport) ---
   extractRunner?: ExtractRunner;
   generateRunner?: GenerateRunner;
@@ -300,22 +331,56 @@ export async function guardGenerateInProcess(
   // provider block is api mode whatever the local config file says; the
   // operator's Claude Code keeps the tier aliases).
   const mode = options.transport ? (options.transportMode ?? 'api') : effectiveLlmMode(options.llm);
+  const models = resolveGuardModels(repoRoot, mode);
 
-  // Hard-fail on unresolved spec conflicts BEFORE the estimate — never ask to
-  // spend, then fail. Extracting both sides of an open overlap births noise.
-  assertNoOpenConflicts(repoRoot);
+  // The run record: `sessions/guard-generate/<runId>/`. Generate spends
+  // one-shot calls rather than sessions, so the record carries no transcripts —
+  // it carries the step checklist, what it ran on and how it ended, which is all
+  // a surface that never saw the process can read. Created FIRST: a generate
+  // that started and was stopped by a gate — a blocked corpus, a declined
+  // estimate, an unusable provider config — is still a generate that started,
+  // and Activity must say so and why.
+  const run = createSessionRun(options.sessionsKey ?? repoRoot, {
+    command: 'guard-generate',
+    gitRef: await resolveCommitSha(repoRoot),
+  });
+  run.setLlm({ mode, ...(options.attribution ?? defaultAttribution(mode, models)) });
+  options.onRunStarted?.({ command: 'guard-generate', runId: run.runId, dir: run.dir });
+  const untap = tracker?.tap((progress) => {
+    if (progress.steps) run.setChecklist(progress.steps);
+  });
 
-  // Pre-flight cost estimate + confirm, before any LLM call. No stages ⇒ nothing
-  // changed ⇒ skip the prompt and run the deterministic no-op. Decline → abort.
-  if (options.onLlmEstimate) {
-    const prices = await getModelPrices();
-    const estimate = await withEstimatePhase(options.onEstimatePhase, () =>
-      estimateGuardTokens(repoRoot, prices, { mode }),
-    );
-    if ((estimate.stages?.length ?? 0) > 0) {
-      const proceed = await options.onLlmEstimate(estimate);
-      if (!proceed) throw new EstimateDeclined('guard');
+  let transport: LlmTransport | undefined;
+  try {
+    // Hard-fail on unresolved spec conflicts BEFORE the estimate — never ask to
+    // spend, then fail. Extracting both sides of an open overlap births noise.
+    assertNoOpenConflicts(repoRoot);
+
+    // Pre-flight cost estimate + confirm, before any LLM call. No stages ⇒ nothing
+    // changed ⇒ skip the prompt and run the deterministic no-op. Decline → abort.
+    if (options.onLlmEstimate) {
+      const prices = await getModelPrices();
+      const estimate = await withEstimatePhase(options.onEstimatePhase, () =>
+        estimateGuardTokens(repoRoot, prices, { mode }),
+      );
+      if ((estimate.stages?.length ?? 0) > 0) {
+        const proceed = await options.onLlmEstimate(estimate);
+        if (!proceed) throw new EstimateDeclined('guard');
+      }
     }
+
+    transport = resolveTransport(options);
+  } catch (e) {
+    untap?.();
+    // A stop the user asked for is not a failure; a gate that refused is, and
+    // the record carries its reason under the gate's own kind.
+    if (e instanceof EstimateDeclined) run.finish('interrupted');
+    else if (e instanceof OpenConflictsError) {
+      run.finish('failed', { error: { message: firstLine(e.message) ?? e.message, kind: 'open-conflicts' } });
+    } else {
+      run.finish('failed', { error: { message: (e as Error).message, kind: 'llm-config' } });
+    }
+    throw e;
   }
 
   resetStageUsage();
@@ -323,9 +388,14 @@ export async function guardGenerateInProcess(
   if (llmLog) setLlmCallSink(llmLog.sink);
   const startedAt = Date.now();
 
+  const throwIfAborted = (): void => {
+    if (options.signal?.aborted) throw new GuardGenerateAborted();
+  };
+
   const STEPS: string[] = GUARD_GENERATE_STEPS.map((s) => s.key);
   let cur = 0;
   const advanceTo = (key: string): void => {
+    throwIfAborted();
     const ni = STEPS.indexOf(key);
     if (ni <= cur) return;
     for (let i = cur; i < ni; i++) tracker?.done(STEPS[i]);
@@ -413,15 +483,18 @@ export async function guardGenerateInProcess(
 
   tracker?.start('index');
   try {
+    // A stop asked for before the first step ends the run as interrupted, on
+    // the record, like one asked for at any later boundary.
+    throwIfAborted();
     const guard = await generateGuards({
       repoRoot,
-      transport: resolveTransport(options),
-      models: resolveGuardModels(repoRoot, mode),
+      transport,
+      models,
       executor: getGuardExecutor(),
-      // The require-a-recipe gate — but ONLY where a user could have run `guard setup`.
-      // A hosted/EE generate works in an ephemeral checkout nobody has a terminal
-      // in, so it keeps deriving its own recipe exactly as it always has.
-      requireExistingRecipe: guardsMaterializeInPlace(),
+      // The require-a-recipe gate — where a user could have run `guard setup`, or
+      // where the caller materialized setup's bundle itself (the hosted job). A
+      // gate generate over a bare checkout keeps deriving its own recipe.
+      requireExistingRecipe: options.requireExistingRecipe ?? guardsMaterializeInPlace(),
       extractRunner: options.extractRunner,
       generateRunner: options.generateRunner,
       recipeRunner: options.recipeRunner,
@@ -448,6 +521,7 @@ export async function guardGenerateInProcess(
         }),
       ...(options.stopAfterFlows ? { stopAfterFlows: true } : {}),
       onPlan: (total, work) => {
+        throwIfAborted();
         // Indexing is an instant deterministic pass — mark it done with its result
         // detail immediately (recipe-discovery usage rides its tag), never a live phase.
         tracker?.done('index', withUsage('index', `${work} of ${total} section${total === 1 ? '' : 's'} changed`));
@@ -560,6 +634,7 @@ export async function guardGenerateInProcess(
           }
         : undefined,
       onFlowSettled: (settled, total) => {
+        throwIfAborted();
         flowsDone = settled;
         flowsTotal = total;
         // Gap-only flows settle without ever birthing — only re-render a LIVE
@@ -577,6 +652,9 @@ export async function guardGenerateInProcess(
     if (guard.status === 'no-docs' || guard.status === 'recipe-failed' || guard.status === 'llm-failed') {
       tracker?.error(STEPS[cur], firstLine(guard.reason) ?? 'aborted');
       persistGuardReport(repoRoot, guard);
+      run.finish('failed', {
+        error: { message: firstLine(guard.reason) ?? `generate ended ${guard.status}`, kind: guard.status },
+      });
       return { guard };
     }
 
@@ -603,17 +681,46 @@ export async function guardGenerateInProcess(
     // on every completed generate (including the noChanges no-op); NOT on a thrown
     // error, which never reaches here — the report describes a completed generate.
     persistGuardReport(repoRoot, guard);
+    run.finish('completed');
 
     return { guard };
   } catch (e) {
     tracker?.error(STEPS[cur], (e as Error).message);
+    // A stop the caller asked for is not a failure; anything else lands its
+    // reason on the record, the only place a watcher can read it.
+    if (options.signal?.aborted) run.finish('interrupted');
+    else run.finish('failed', { error: { message: (e as Error).message, kind: 'generate' } });
     throw e;
   } finally {
+    untap?.();
     if (llmLog) {
       setLlmCallSink(undefined);
       llmLog.finish(Date.now() - startedAt);
     }
   }
+}
+
+/** Thrown at the next step boundary once `options.signal` aborted. */
+export class GuardGenerateAborted extends Error {
+  constructor() {
+    super('guard generate was cancelled');
+    this.name = 'GuardGenerateAborted';
+  }
+}
+
+/**
+ * What a run without an injected attribution says it ran on: the saved API
+ * provider (or the operator's Claude Code) and the model authoring rides —
+ * generate is one-shot calls per stage, so the authoring model is the honest
+ * one line about it. Never credentials.
+ */
+function defaultAttribution(mode: LlmTransportMode, models: GuardGenerateModels): SessionLlm {
+  const provider = mode === 'api' ? (readApiLlmConfig()?.provider ?? 'api') : 'claude-code';
+  return {
+    provider,
+    model: models.generate ?? 'default',
+    ...(models.fallback ? { fallbackModel: models.fallback } : {}),
+  };
 }
 
 /** The first line of a (possibly multi-line, guided) abort reason — a step detail

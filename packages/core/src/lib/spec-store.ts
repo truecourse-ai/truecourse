@@ -27,7 +27,13 @@ export type SpecArtifact =
   // Structured inferred decisions (kind/identity/loc/reason/contractPath) — the
   // dashboard's Inferred tab reads this; written by `inferInProcess` for both OSS
   // (file) and EE (Postgres).
-  | 'inferredDecisions';
+  | 'inferredDecisions'
+  // The DOCUMENT SNAPSHOT of a scan: `{ v, files: { <doc ref>: <content sha> } }`
+  // over the kept documents' bodies, so a hosted repository — which has no
+  // working tree — can show a document exactly as the scan read it. Written
+  // through `saveSpecDocs`, read through `loadSpecDoc`; the file impl needs
+  // neither (the tree IS the snapshot).
+  | 'docs';
 
 /** Pluggable spec store. File-backed by default; EE injects Postgres. */
 export interface SpecStore {
@@ -60,6 +66,19 @@ export interface SpecStore {
    * `null` (so a future effective-spec read degrades to repo-only in OSS).
    */
   loadWorkspaceSpec<T = unknown>(ref: WorkspaceRef, artifact: SpecArtifact): Promise<T | null>;
+  /**
+   * Snapshot the kept documents' bodies for `ref` — `{ repoRelativeRef: body }`,
+   * source refs (`.truecourse/specs/sources/…`) included. The hosted store
+   * content-addresses the bodies and writes the `docs` manifest; the file impl
+   * is a no-op, since the tree already holds every document.
+   */
+  saveSpecDocs(ref: RepoRef, files: Record<string, string>): Promise<void>;
+  /**
+   * One document's body as the scan read it: the snapshot at `commitSha` when
+   * given, else the newest snapshot's. `null` when the document is not in it.
+   * The file impl reads the live tree (confined to the repo root).
+   */
+  loadSpecDoc(repoKey: string, docRef: string, commitSha?: string): Promise<string | null>;
   /** `true` when load returns the live repo file (file impl). */
   readonly materializesInPlace: boolean;
 }
@@ -132,6 +151,18 @@ class FileSpecStore implements SpecStore {
     return null;
   }
 
+  async saveSpecDocs(): Promise<void> {
+    // The working tree holds every document the corpus references.
+  }
+
+  async loadSpecDoc(repoKey: string, docRef: string): Promise<string | null> {
+    const root = path.resolve(repoKey);
+    const full = path.resolve(root, docRef);
+    if (full !== root && !full.startsWith(root + path.sep)) return null;
+    if (!fs.existsSync(full) || !fs.statSync(full).isFile()) return null;
+    return fs.readFileSync(full, 'utf-8');
+  }
+
   // OSS/local has no workspace concept. Writing throws (fail loud — a caller
   // that reached here is mis-wired); reading is empty so an effective-spec read
   // degrades cleanly to repo-only without special-casing the file edition.
@@ -175,6 +206,13 @@ export const loadLatestSpec = <T = unknown>(
 ): Promise<T | null> => active.loadLatest<T>(repoKey, artifact);
 export const latestSpecCommit = (repoKey: string): Promise<string | null> =>
   active.latestCommit(repoKey);
+export const saveSpecDocs = (ref: RepoRef, files: Record<string, string>): Promise<void> =>
+  active.saveSpecDocs(ref, files);
+export const loadSpecDoc = (
+  repoKey: string,
+  docRef: string,
+  commitSha?: string,
+): Promise<string | null> => active.loadSpecDoc(repoKey, docRef, commitSha);
 export const saveWorkspaceSpec = (
   ref: WorkspaceRef,
   artifact: SpecArtifact,

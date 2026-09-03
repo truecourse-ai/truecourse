@@ -79,6 +79,12 @@ export const guardResults = pgTable(
      * copied out of the (ephemeral) checkout by the EE generate jobs.
      */
     evidence: jsonb('evidence').$type<unknown>().notNull().default({}),
+    /**
+     * A DEFAULT-BRANCH generate. The repo-level guard views anchor on the newest
+     * flagged row when the repo has no analyze baseline; a PR head's regenerate
+     * is written unflagged and never becomes the anchor.
+     */
+    isBaseline: boolean('is_baseline').notNull().default(false),
     generatedAt: ts('generated_at').notNull(),
     createdAt: ts('created_at').notNull(),
     updatedAt: ts('updated_at').notNull(),

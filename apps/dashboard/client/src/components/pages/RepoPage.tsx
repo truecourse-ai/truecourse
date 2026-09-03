@@ -1788,15 +1788,6 @@ function RepoPageInner() {
           onCancel={() => respondToLlmEstimate(llmEstimate.repoId, false)}
         />
       )}
-      {/* The guard Generate estimate gate — fetched via GET, confirmed → POST. Same
-          modal, same numbers as the CLI. */}
-      {guardGen.modalOpen && guardGen.estimate && (
-        <LlmEstimateModal
-          estimate={guardGen.estimate}
-          onConfirm={guardGen.confirm}
-          onCancel={guardGen.cancel}
-        />
-      )}
       {analysisProgress && (
         <div
           className={`fixed bottom-4 left-1/2 z-40 w-80 -translate-x-1/2 rounded-lg border bg-card p-3 shadow-lg ${

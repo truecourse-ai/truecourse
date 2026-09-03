@@ -14,6 +14,8 @@ import { setRepoJobsCanceller } from './services/repo-removal.service.js';
 import { stopAllWatchers } from './services/watcher.service.js';
 import { stopAllRunTails } from './services/session-tailer.service.js';
 import { wipeLegacyPostgresData, getLogDir } from '@truecourse/core/config/paths';
+import { getProjectByPath } from '@truecourse/core/config/registry';
+import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { closeLogger, configureLogger, log } from '@truecourse/core/lib/logger';
 
 const port = parseInt(process.env.PORT || '3001', 10);
@@ -94,6 +96,21 @@ async function main() {
   });
   if (github) {
     log.info('[Server] GitHub connect enabled');
+    // A decision that clears the last block on a generate (the final conflict
+    // resolved, the last active finding dismissed) re-generates on its own. The
+    // seam is keyed by repo identity alone, so the workspace and the slug are
+    // looked up from the link and the registry; a repo nobody connected is
+    // silently left alone — the seam is best-effort by contract.
+    setGuardGenerateEnqueue(async (repoKey) => {
+      const [link, entry] = await Promise.all([github.store.getRepo(repoKey), getProjectByPath(repoKey)]);
+      if (!link?.workspaceOrgId || !entry) return;
+      await jobs.enqueueGuardGenerate({
+        repoId: entry.slug,
+        repoFullName: repoKey,
+        workspaceOrgId: link.workspaceOrgId,
+        source: 'chain',
+      });
+    });
   } else {
     log.info('[Server] GitHub connect disabled — set GITHUB_APP_* to enable');
   }

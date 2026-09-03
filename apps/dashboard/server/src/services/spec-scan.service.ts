@@ -18,11 +18,14 @@
  * watcher sees every write and the transcripts outlive the clone.
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import type { RunError } from '@truecourse/agent-loop';
+import type { CuratedCorpus } from '@truecourse/spec-consolidator';
 import { log } from '@truecourse/core/lib/logger';
 import { createSessionRun, openSessionRun } from '@truecourse/core/lib/sessions-store';
 import { resolveCommitSha } from '@truecourse/core/lib/repo-ref';
-import { saveSpec, specsMaterializeInPlace } from '@truecourse/core/lib/spec-store';
+import { saveSpec, saveSpecDocs, specsMaterializeInPlace } from '@truecourse/core/lib/spec-store';
 import {
   curateInProcess,
   getDecisions,
@@ -92,6 +95,11 @@ export async function runStoredSpecScan(
     if (!specsMaterializeInPlace()) {
       const commitSha = await resolveCommitSha(tree.dir);
       await saveSpec({ repoKey, commitSha }, 'corpus', result.curate.corpus);
+      // And the documents themselves, as the scan read them: the corpus names
+      // them by path, and the clone that holds those paths is about to go.
+      // Without this a hosted repository has a corpus and no way to open a
+      // document in it.
+      await saveSpecDocs({ repoKey, commitSha }, snapshotDocs(tree.dir, result.curate.corpus));
       // Same for the decisions the run produced: the scan folds auto scope
       // verdicts, standing instructions and auto-applied conflict resolutions
       // into the document it started from, then writes it into the clone —
@@ -110,6 +118,28 @@ export async function runStoredSpecScan(
   } finally {
     tree.dispose();
   }
+}
+
+/**
+ * The kept documents' bodies, read out of the scan's tree by the refs the
+ * corpus carries — repository docs and llms.txt source pages alike, since a
+ * source ref is the snapshot's own repo-relative path. A ref that does not
+ * resolve to a file inside the tree is skipped: the corpus still names it, and
+ * a reader answers absent rather than the job failing over one document.
+ */
+export function snapshotDocs(treeDir: string, corpus: CuratedCorpus): Record<string, string> {
+  const root = path.resolve(treeDir);
+  const files: Record<string, string> = {};
+  for (const doc of corpus.docs) {
+    const full = path.resolve(root, doc.ref);
+    if (full === root || !full.startsWith(root + path.sep)) continue;
+    try {
+      if (fs.statSync(full).isFile()) files[doc.ref] = fs.readFileSync(full, 'utf-8');
+    } catch {
+      /* not in the tree */
+    }
+  }
+  return files;
 }
 
 /**

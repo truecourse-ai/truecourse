@@ -199,23 +199,41 @@ export class PgGuardStore implements GuardStore {
     return rows[0] ? (rows[0].report as GuardGenerateReport) : null;
   }
 
-  async writeGuardResult(ref: RepoRef, report: GuardGenerateReport): Promise<void> {
+  async writeGuardResult(
+    ref: RepoRef,
+    report: GuardGenerateReport,
+    opts: { baseline?: boolean } = {},
+  ): Promise<void> {
     const commitSha = requireCommit(ref, 'writeGuardResult');
     const now = new Date().toISOString();
+    const isBaseline = opts.baseline === true;
     await this.db
       .insert(guardResults)
       .values({
         repoKey: ref.repoKey,
         commitSha,
         report,
+        isBaseline,
         generatedAt: report.generatedAt,
         createdAt: now,
         updatedAt: now,
       })
       .onConflictDoUpdate({
         target: [guardResults.repoKey, guardResults.commitSha],
-        set: { report, generatedAt: report.generatedAt, updatedAt: now },
+        set: { report, isBaseline, generatedAt: report.generatedAt, updatedAt: now },
       });
+  }
+
+  /** The newest baseline-flagged generate's commit — by when it was generated,
+   *  so a re-run over an older commit never outranks a later default-branch one. */
+  async readGuardBaselineCommit(repoKey: string): Promise<string | null> {
+    const rows = await this.db
+      .select({ commitSha: guardResults.commitSha })
+      .from(guardResults)
+      .where(and(eq(guardResults.repoKey, repoKey), eq(guardResults.isBaseline, true)))
+      .orderBy(desc(guardResults.generatedAt), desc(guardResults.createdAt))
+      .limit(1);
+    return rows[0]?.commitSha ?? null;
   }
 
   /**

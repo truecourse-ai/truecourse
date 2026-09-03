@@ -8,13 +8,14 @@
  * up by adding their call here, and nothing else changes.
  */
 
-import { startGuardSetup, startSpecScan, type RunStart } from './scan';
+import { startGuardGenerate, startGuardSetup, startSpecScan, type RunStart } from './scan';
 
 export type RunTrigger = (repoId: string) => Promise<RunStart>;
 
 const RUN_TRIGGERS: Record<string, RunTrigger> = {
   'spec-scan': startSpecScan,
   'guard-setup': startGuardSetup,
+  'guard-generate': startGuardGenerate,
 };
 
 export const triggerFor = (command: string): RunTrigger | null =>

@@ -37,7 +37,7 @@ vi.mock('@/lib/socket', () => {
 });
 
 import PreviewApp from '@/preview/PreviewApp';
-import { startGuardSetup, startSpecScan } from '@/preview/data/scan';
+import { startGuardGenerate, startGuardSetup, startSpecScan } from '@/preview/data/scan';
 import { triggerFor } from '@/preview/data/run-triggers';
 import type { PublicSessionRun } from '@/lib/api';
 
@@ -77,10 +77,12 @@ function serve(options: {
   config?: unknown;
   scan?: () => Response;
   setup?: () => Response;
+  generate?: () => Response;
 }) {
   const calls: string[] = [];
   const scan = options.scan ?? (() => json({ jobId: 'job_1' }, 202));
   const setup = options.setup ?? (() => json({ jobId: 'job_2' }, 202));
+  const generate = options.generate ?? (() => json({ jobId: 'job_3' }, 202));
   window.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const url = new URL(href, window.location.origin);
@@ -93,6 +95,7 @@ function serve(options: {
     if (url.pathname === `/api/repos/${REAL.id}/sessions/runs`) return json({ runs: options.runs ?? [] });
     if (url.pathname === `/api/repos/${REAL.id}/spec/corpus/scan`) return scan();
     if (url.pathname === `/api/repos/${REAL.id}/guard/setup`) return setup();
+    if (url.pathname === `/api/repos/${REAL.id}/guard/generate`) return generate();
     return json({ error: 'not found' }, 404);
   }) as unknown as typeof window.fetch;
   return calls;
@@ -164,10 +167,17 @@ describe('starting a run', () => {
     expect(calls).toContain('POST /api/repos/linkwarden/guard/setup');
   });
 
-  it('offers a trigger for the scan and for guard setup, none for one with no start yet', () => {
+  it('starts scenario generation through the same route shape', async () => {
+    const calls = serve({ generate: () => json({ jobId: 'job_3' }, 202) });
+    expect(await startGuardGenerate('linkwarden')).toEqual({ kind: 'started' });
+    expect(calls).toContain('POST /api/repos/linkwarden/guard/generate');
+  });
+
+  it('offers a trigger for the scan, guard setup and generate, none for one with no start yet', () => {
     expect(triggerFor('spec-scan')).not.toBeNull();
     expect(triggerFor('guard-setup')).not.toBeNull();
-    expect(triggerFor('guard-generate')).toBeNull();
+    expect(triggerFor('guard-generate')).not.toBeNull();
+    expect(triggerFor('guard-adjudicate')).toBeNull();
   });
 });
 

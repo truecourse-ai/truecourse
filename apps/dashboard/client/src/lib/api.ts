@@ -18,7 +18,6 @@ import type {
 } from '@truecourse/shared';
 import type { GuardExternalPatch, GuardExternalsView } from '@/types/guard-externals';
 import type { RunRecord, SessionCommand, SessionEvent } from '@truecourse/agent-loop';
-import type { LlmEstimateData } from '@/hooks/useSocket';
 import { getServerUrl } from './server-url';
 
 const BASE_URL = getServerUrl();
@@ -1328,35 +1327,15 @@ export function undismissGuardFlow(
   });
 }
 
-// Guard actions — trigger `guard generate` / `guard run` from the dashboard. The
-// estimate is the SAME estimateGuardTokens the CLI prompt renders (no re-derive);
-// progress streams over `spec:progress` and completes with `spec:complete`
+// Guard actions — trigger `guard generate` / `guard run` from the dashboard.
+// Progress streams over `spec:progress` and completes with `spec:complete`
 // (`kind: guard-generate | guard-run`).
 
-/** The pre-flight guard-generate estimate. `stages: []` ⇒ nothing changed ⇒ the
- *  client skips the modal and triggers directly. */
-export function getGuardEstimate(repoId: string): Promise<{ estimate: LlmEstimateData }> {
-  return fetchApi<{ estimate: LlmEstimateData }>(`/api/repos/${repoId}/guard/estimate`);
-}
-
-export interface GuardGenerateTriggerResult {
-  status?: string;
-  noChanges?: boolean;
-  written?: number;
-  birthFindings?: number;
-  /** Present on an abort status — why the run generated nothing. */
-  reason?: string;
-  /** True when the user declined the estimate — a clean no-op, not an error. */
-  cancelled?: boolean;
-}
-
-/** Trigger `guard generate`. `confirmed` is the user's answer to the estimate modal
- *  (always true once the modal is confirmed, or when there were no stages). */
-export function triggerGuardGenerate(repoId: string, confirmed: boolean): Promise<GuardGenerateTriggerResult> {
-  return fetchApi<GuardGenerateTriggerResult>(`/api/repos/${repoId}/guard/generate`, {
-    method: 'POST',
-    body: JSON.stringify({ confirmed }),
-  });
+/** Enqueue `guard generate`. Answers 202 with the job id; 409 while the
+ *  repository is already working (or the workspace has no provider — the body's
+ *  `error` code tells them apart), 422 while the corpus carries open conflicts. */
+export function triggerGuardGenerate(repoId: string): Promise<{ jobId: string }> {
+  return fetchApi<{ jobId: string }>(`/api/repos/${repoId}/guard/generate`, { method: 'POST' });
 }
 
 export interface GuardRunTriggerResult {

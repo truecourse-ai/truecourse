@@ -179,7 +179,7 @@ describe('a workspace with no provider configured', () => {
     await start('guard generate').expect(409);
     expect(probe).not.toHaveBeenCalled();
     expect(jobs.scans).toEqual([]);
-    expect(vi.mocked(guardGenerateInProcess)).not.toHaveBeenCalled();
+    expect(jobs.guardGenerates).toEqual([]);
     expect(listSessionRuns(fixture.repoPath, 'spec-scan')).toHaveLength(0);
   });
 });
@@ -193,7 +193,7 @@ describe('a provider that will not answer', () => {
     const res = await start(entry).expect(502);
     expect(res.body).toMatchObject({ error: 'llm-probe-failed', message: '401 invalid x-api-key' });
     expect(jobs.scans).toEqual([]);
-    expect(vi.mocked(guardGenerateInProcess)).not.toHaveBeenCalled();
+    expect(jobs.guardGenerates).toEqual([]);
     expect(vi.mocked(analyzeInProcess)).not.toHaveBeenCalled();
     expect(vi.mocked(enrichFlowWithLLM)).not.toHaveBeenCalled();
   });
@@ -236,10 +236,21 @@ describe('a configured, answering provider', () => {
     expect(res.body.error).toMatch(/already running/i);
   });
 
-  it('runs guard generate on the transport built from the workspace config', async () => {
-    await start('guard generate').expect(200);
+  it('proves the workspace provider, then queues the generate', async () => {
+    const res = await start('guard generate').expect(202);
 
-    expect(vi.mocked(guardGenerateInProcess).mock.calls[0][1]).toMatchObject({ transport });
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(res.body).toEqual({ jobId: 'job_test' });
+    expect(jobs.guardGenerates).toEqual([
+      {
+        repoId: fixture.project.slug,
+        repoFullName: fixture.repoPath,
+        workspaceOrgId: TEST_ORG,
+        source: 'manual',
+      },
+    ]);
+    // The job body, not the route, runs the engine on the workspace transport.
+    expect(vi.mocked(guardGenerateInProcess)).not.toHaveBeenCalled();
   });
 
   it('gives the analyze LLM rules that same transport', async () => {
@@ -320,13 +331,12 @@ describe("operator mode — the server's own Claude Code", () => {
     expect(jobs.scans).toHaveLength(1);
   });
 
-  it('runs guard generate on `claude -p`, in claude-code mode so the tier aliases stay', async () => {
-    await start('guard generate').expect(200);
+  it('queues the generate on the operator’s login too', async () => {
+    await start('guard generate').expect(202);
 
-    expect(vi.mocked(guardGenerateInProcess).mock.calls[0][1]).toMatchObject({
-      transport: claudeTransport,
-      transportMode: 'claude-code',
-    });
+    expect(claudeProbe).toHaveBeenCalledTimes(1);
+    expect(probe).not.toHaveBeenCalled();
+    expect(jobs.guardGenerates).toHaveLength(1);
   });
 
   it('answers a logged-out `claude` with the probe failure, before any spend', async () => {

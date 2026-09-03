@@ -6,15 +6,24 @@
  * `/corpus/conflict/:id`, see ./CorpusPage.tsx). Search by title or path; Type,
  * Status and Area are the filters. On a pull request's version each row carries
  * what that version changed against its parent.
+ *
+ * A CONNECTED repository reads the real corpus through the server's spec
+ * source, and its rows roll up the real scenario inventory: the sections a
+ * document has scenarios bound to, how many, and the worst of their last
+ * outcomes. A fixture repository reads its fixtures. The corpus arrives from a
+ * scan that runs in the background, so a real repository's table re-reads
+ * itself when the scan's completion lands on the socket.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { buildCorpusConflicts } from '@/preview/vendor/shared';
-import { SpecSourceProvider } from '@/components/spec/spec-source';
+import { createRepoSpecSource, SpecSourceProvider, type SpecSource } from '@/components/spec/spec-source';
+import { connectSocket } from '@/lib/socket';
 import { CHIP_CLASS, PageHeader } from '@/preview/ui/bits';
 import { FilterBar } from '@/preview/ui/filter-bar';
 import { useSpecCorpus } from '@/preview/vendor/components/spec/SpecCorpusView';
+import { useGuardScenarios, type GuardScenarioRowData } from '@/preview/vendor/hooks/useGuardScenarios';
 import { formatRelativeTime } from '@/preview/vendor/shared/format/relative-time';
 import { StatusWord, TEST_TONE, TEST_WORD } from '@/preview/ui/status-word';
 import { createPreviewSpecSource } from '@/preview/data/fake-api';
@@ -29,6 +38,67 @@ function docStatus(doc: SpecDoc | undefined): TestStatus {
   if (!doc) return 'never-run';
   for (const status of RANK) if (doc.sections.some((s) => s.status === status)) return status;
   return 'passing';
+}
+
+/** What a document's rows say about it, rolled up from the real scenario inventory. */
+interface DocRollup {
+  sections: number;
+  claims: number;
+  status: TestStatus;
+}
+
+/** One scenario's reading: its last outcome, else what birth found, else never run. */
+function scenarioStatus(row: GuardScenarioRowData): TestStatus {
+  const outcome = row.lastResult?.outcome;
+  if (outcome === 'fail' || outcome === 'error') return 'failing';
+  if (outcome === 'pass') return 'passing';
+  if (!outcome && row.status === 'failing') return 'failing';
+  return 'never-run';
+}
+
+/** Per document: the sections its scenarios bind, the scenarios proving it, the worst outcome. */
+function rollupByDoc(rows: GuardScenarioRowData[]): Map<string, DocRollup> {
+  const anchors = new Map<string, Set<string>>();
+  const statuses = new Map<string, TestStatus[]>();
+  for (const row of rows) {
+    if (!anchors.has(row.doc)) anchors.set(row.doc, new Set());
+    anchors.get(row.doc)!.add(row.anchor);
+    if (!statuses.has(row.doc)) statuses.set(row.doc, []);
+    statuses.get(row.doc)!.push(scenarioStatus(row));
+  }
+  const out = new Map<string, DocRollup>();
+  for (const [doc, set] of anchors) {
+    const seen = statuses.get(doc) ?? [];
+    const status = RANK.find((s) => seen.includes(s)) ?? 'never-run';
+    out.set(doc, { sections: set.size, claims: seen.length, status });
+  }
+  return out;
+}
+
+/**
+ * Re-read the corpus when a scan of this repository lands — the scan is a job,
+ * and its completion is the only signal the table gets. Real repositories only.
+ * Listens on the socket the shell already holds; the shell joins every real
+ * repository's room for its run stream and owns that membership, so this never
+ * joins or leaves one.
+ */
+function useCorpusRefreshOnScan(repo: Repo, refetch: () => Promise<void>): void {
+  useEffect(() => {
+    if (!repo.real) return;
+    let socket: ReturnType<typeof connectSocket> | null = null;
+    const onComplete = (payload: { repoId?: string; kind?: string }): void => {
+      if (payload.repoId === repo.id && payload.kind === 'scan') void refetch();
+    };
+    try {
+      socket = connectSocket();
+      socket.on('spec:complete', onComplete);
+    } catch {
+      socket = null; // no socket transport here — the page still reads once
+    }
+    return () => {
+      socket?.off('spec:complete', onComplete);
+    };
+  }, [repo.id, repo.real, refetch]);
 }
 
 type Row =
@@ -51,6 +121,11 @@ function CorpusBody({ repo, versions }: { repo: Repo; versions: ReturnType<typeo
   useGuardTabJump();
   const navigate = useNavigate();
   const corpus = useSpecCorpus(repo.id, true);
+  useCorpusRefreshOnScan(repo, corpus.refetch);
+  // The real inventory, for a connected repository's rollups; a fixture
+  // repository's come from its hand-written sections.
+  const scenarios = useGuardScenarios(repo.id, repo.real === true);
+  const rollups = useMemo(() => rollupByDoc(scenarios.rows), [scenarios.rows]);
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
@@ -65,16 +140,17 @@ function CorpusBody({ repo, versions }: { repo: Repo; versions: ReturnType<typeo
     const areaOf = (tag: string) => tag.split('/').pop() ?? tag;
     const docs: Row[] = data.corpus.docs.map((d) => {
       const doc = docsHere.find((x) => x.path === d.ref);
+      const rollup = repo.real ? rollups.get(d.ref) : undefined;
       return {
         kind: 'doc',
         id: d.ref,
         ref: d.ref,
         title: doc?.title ?? d.ref.split('/').pop() ?? d.ref,
         area: areaOf(d.areaTags[0] ?? ''),
-        status: docStatus(doc),
-        sections: doc?.sections.length ?? 0,
-        claims: doc?.sections.reduce((n, s) => n + s.claims, 0) ?? 0,
-        touched: formatRelativeTime(d.lastTouched),
+        status: rollup?.status ?? docStatus(doc),
+        sections: rollup?.sections ?? doc?.sections.length ?? 0,
+        claims: rollup?.claims ?? doc?.sections.reduce((n, s) => n + s.claims, 0) ?? 0,
+        touched: d.lastTouched ? formatRelativeTime(d.lastTouched) : '',
         change: version?.docChanges[d.ref]?.change,
         web: d.origin === 'web',
       };
@@ -93,7 +169,7 @@ function CorpusBody({ repo, versions }: { repo: Repo; versions: ReturnType<typeo
         version?.conflictChanges[`overlap::${cf.area}::${cf.b}::${cf.a}`],
     }));
     return [...conflicts, ...docs];
-  }, [corpus.data, docsHere, version]);
+  }, [corpus.data, docsHere, version, repo.real, rollups]);
 
   const typeOptions = useMemo(
     () =>
@@ -212,7 +288,13 @@ function CorpusBody({ repo, versions }: { repo: Repo; versions: ReturnType<typeo
             {shown.length === 0 && (
               <tr>
                 <td colSpan={7} className="px-6 py-8 text-center text-muted-foreground">
-                  {corpus.hydrating ? 'Loading the corpus.' : 'Nothing matches.'}
+                  {corpus.hydrating
+                    ? 'Loading the corpus.'
+                    : corpus.error
+                      ? `The corpus could not be read: ${corpus.error}`
+                      : !corpus.data
+                        ? 'No corpus yet. The spec scan writes it; start one from Activity.'
+                        : 'Nothing matches.'}
                 </td>
               </tr>
             )}
@@ -223,10 +305,16 @@ function CorpusBody({ repo, versions }: { repo: Repo; versions: ReturnType<typeo
   );
 }
 
+/** The corpus source a repository reads: the server's for a connected one, the
+ *  fixtures' (at the picked version) for a fixture one. */
+export function corpusSourceFor(repo: Repo, versionId: string | null): SpecSource {
+  return repo.real ? createRepoSpecSource(repo.id) : createPreviewSpecSource(repo.id, versionId);
+}
+
 export function CorpusTab({ repo }: { repo: Repo }) {
   const versions = useCoverageVersion(repo.id);
   const versionId = versions.version?.id ?? null;
-  const source = useMemo(() => createPreviewSpecSource(repo.id, versionId), [repo.id, versionId]);
+  const source = useMemo(() => corpusSourceFor(repo, versionId), [repo, versionId]);
   return (
     <SpecSourceProvider source={source}>
       <CorpusBody repo={repo} versions={versions} />

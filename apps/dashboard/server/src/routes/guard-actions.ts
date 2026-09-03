@@ -8,10 +8,12 @@
  *
  *   GET  /:id/guard/estimate   the pre-flight token/cost estimate (same
  *                              estimateGuardTokens the CLI prompt renders).
- *   POST /:id/guard/generate   author scenarios from the spec sections. The
- *                              client shows the estimate modal first, then POSTs
- *                              `{ confirmed: true }`; the driver's gate honors it
- *                              (no stages ⇒ deterministic no-op, gate skipped).
+ *   POST /:id/guard/generate   enqueue `guard generate` (author scenarios from
+ *                              the spec sections) as a background job; 202
+ *                              { jobId }, 409 when the repository is already
+ *                              working, 422 while the corpus carries an open
+ *                              conflict (the same gate the CLI hits, answered
+ *                              before anything is queued).
  *   POST /:id/guard/run        run the committed scenarios (deterministic,
  *                              LLM-free — no estimate).
  *   POST /:id/guard/setup      enqueue `guard setup` (recipe, dependencies, seed)
@@ -33,24 +35,23 @@
  *                              declarations to the committed recipe.json, secret
  *                              values to the gitignored externals.local.json.
  *
- * Concurrency: one guard job per repo at a time. A second trigger while one is in
- * flight is rejected with 409 (the client also disables the buttons). The spec
- * scan route relies on the disabled button alone; guard adds the server guard so
- * a duplicate POST can never double-run the engine. Dismiss/undismiss are instant
- * file writes (no job, no lock) — they never mutate the store the engine touches.
+ * Concurrency: one guard job per repo at a time. Generate and setup are queued
+ * jobs, so the queue's single-flight key (plus the store-wide look at the repo's
+ * runs) answers 409 for them; run and map still execute inside the request, so
+ * they share an in-process lock and a duplicate POST can never double-run the
+ * engine. Dismiss/undismiss are instant file writes (no job, no lock) — they
+ * never mutate the store the engine touches.
  */
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
 import {
   estimateGuard,
-  guardGenerateInProcess,
   guardRunInProcess,
-  GUARD_GENERATE_STEPS,
   GUARD_RUN_STEPS,
-  EstimateDeclined,
   OpenConflictsError,
 } from '@truecourse/core/commands/guard-in-process';
+import { getCorpus, getDecisions } from '@truecourse/core/commands/spec-in-process';
 import {
   dismissGuardClaim,
   undismissGuardClaim,
@@ -81,7 +82,7 @@ import { GUARD_SETUP_ONLY_STEPS } from '@truecourse/core/commands/guard-setup';
 import { hostedDependenciesView } from './guard-dependencies-hosted.js';
 import { estimateStepPhase } from '@truecourse/core/progress';
 import { runFailureMessage } from '@truecourse/guard-runner';
-import { dismissedClaimKey, type GuardDecisions } from '@truecourse/shared';
+import { dismissedClaimKey, openConflicts, type GuardDecisions } from '@truecourse/shared';
 import {
   createSocketSpecTracker,
   emitSpecComplete,
@@ -178,10 +179,32 @@ function allFindingsDismissed(
   );
 }
 
-// A guard generate/run is in flight for this repo id. Both actions share the set:
+// A guard run/map is in flight for this repo id. Both actions share the set:
 // they mutate the same store, so they must never overlap (and the client disables
-// both buttons while either runs). A trigger while the id is present → 409.
+// the buttons while either runs). A trigger while the id is present → 409.
 const guardJobs = new Set<string>();
+
+/**
+ * The provider check every spending entry answers with: unconfigured is a
+ * setting to fill in (409 + code), a provider that will not answer is an outage
+ * (502 + its own words). True when the response was written.
+ */
+async function refusedWithoutLlm(req: Request, res: Response): Promise<boolean> {
+  try {
+    await startWorkspaceLlm(orgOf(req));
+    return false;
+  } catch (e) {
+    if (e instanceof LlmNotConfiguredError) {
+      res.status(409).json({ error: e.code, message: e.message });
+      return true;
+    }
+    if (e instanceof LlmProbeFailedError) {
+      res.status(502).json({ error: e.code, message: e.message });
+      return true;
+    }
+    throw e;
+  }
+}
 
 // GET the pre-flight estimate — the SAME estimateGuardTokens call the CLI prompt
 // renders (deterministic token math + ceiling cost, cache-aware, "N of M sections
@@ -197,80 +220,40 @@ router.get('/:id/guard/estimate', async (req: Request, res: Response, next: Next
   }
 });
 
-// POST — author scenarios. `confirmed` is the client's answer to the estimate
-// modal; it flows into the driver's `onLlmEstimate` gate, which only fires when the
-// estimate has stages (nothing changed ⇒ the gate is skipped and the deterministic
-// no-op runs regardless). Declining (or a no-answer POST) throws EstimateDeclined,
-// returned as a clean `{ cancelled: true }` — never an error.
+// POST — author scenarios. Minutes of LLM work plus a sandbox build, so it is a
+// QUEUED JOB rather than work inside the request: the route answers the two
+// refusals a user can act on now — the open-conflict gate (the same one the CLI
+// hits, read through the store so a hosted repo is gated too) and the
+// provider check — then enqueues and answers 202 with the job id. There is no
+// estimate gate: an unchanged corpus is the engine's own deterministic no-op.
 router.post('/:id/guard/generate', async (req: Request, res: Response, next: NextFunction) => {
-  const repoId = req.params.id as string;
-  let held = false;
   try {
-    const repo = await resolveProjectForRequest(repoId);
-    if (guardJobs.has(repoId)) {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    // Extracting both sides of an unresolved overlap births a paid finding that
+    // is really the dispute. Answered BEFORE the provider check: nothing about a
+    // blocked corpus is fixed by a provider, and the full report is the remedy.
+    const corpus = await getCorpus(repo.path);
+    if (corpus) {
+      const open = openConflicts(corpus, await getDecisions(repo.path));
+      if (open.length > 0) {
+        res.status(422).json({ error: new OpenConflictsError(open).message });
+        return;
+      }
+    }
+    if (await refusedWithoutLlm(req, res)) return;
+    const outcome = await requireJobs().enqueueGuardGenerate({
+      repoId: req.params.id as string,
+      repoFullName: repo.path,
+      workspaceOrgId: orgOf(req),
+      source: 'manual',
+    });
+    if (outcome.status === 'busy') {
       res.status(409).json({ error: 'A guard job is already running for this repo.' });
       return;
     }
-    guardJobs.add(repoId);
-    held = true;
-
-    const confirmed =
-      (req.body as { confirmed?: boolean } | undefined)?.confirmed === true ||
-      req.query.confirmed === 'true';
-
-    // The asking workspace's provider, loaded and proved before any spend.
-    const llm = await startWorkspaceLlm(orgOf(req));
-    const tracker = createSocketSpecTracker(repoId, GUARD_GENERATE_STEPS.map((s) => ({ ...s })));
-    const { guard } = await guardGenerateInProcess(repo.path, {
-      tracker,
-      transport: llm.transport(),
-      transportMode: llm.mode,
-      // The popup replaces in place, so the estimate rides the checklist here as
-      // a leading step (the terminal renders it as its own line instead).
-      onEstimatePhase: estimateStepPhase(tracker),
-      onLlmEstimate: async () => confirmed,
-    });
-    emitSpecComplete(repoId, 'guard-generate');
-    res.json({
-      status: guard.status,
-      noChanges: guard.noChanges,
-      written: guard.written.length,
-      birthFindings: guard.birthFindings.length,
-      // An abort status (`llm-failed` / `recipe-failed` / `no-docs`) generated
-      // NOTHING — the client must say so instead of toasting "wrote 0 scenarios".
-      ...(guard.reason ? { reason: guard.reason } : {}),
-    });
+    res.status(202).json({ jobId: outcome.jobId });
   } catch (e) {
-    // No provider set / one that won't answer: a setting to fill in and a
-    // provider outage respectively, each with its own machine-readable code —
-    // never the generic 500 an unexpected failure gets. Nothing was spent.
-    if (e instanceof LlmNotConfiguredError) {
-      res.status(409).json({ error: e.code, message: e.message });
-      return;
-    }
-    if (e instanceof LlmProbeFailedError) {
-      res.status(502).json({ error: e.code, message: e.message });
-      return;
-    }
-    // User declined the cost estimate — a clean cancel, not an error (mirrors the
-    // spec scan route's EstimateDeclined branch).
-    if (e instanceof EstimateDeclined) {
-      emitSpecComplete(repoId, 'guard-generate');
-      res.json({ cancelled: true });
-      return;
-    }
-    // Open spec conflicts hard-fail before any spend (same gate the CLI hits) —
-    // before any progress is emitted, so there is no popup lifecycle to clear.
-    // Return the full conflict report as a plain error the client's generate-error
-    // toast surfaces.
-    if (e instanceof OpenConflictsError) {
-      res.status(422).json({ error: e.message });
-      return;
-    }
-    emitSpecProgress(repoId, { step: 'error', percent: 100, detail: (e as Error).message });
     next(e);
-  } finally {
-    if (held) guardJobs.delete(repoId);
   }
 });
 
@@ -291,21 +274,8 @@ router.post('/:id/guard/setup', async (req: Request, res: Response, next: NextFu
       });
       return;
     }
-    // The asking workspace's provider, proved before anything is queued — the
-    // same two coded refusals every spending entry answers with.
-    try {
-      await startWorkspaceLlm(orgOf(req));
-    } catch (e) {
-      if (e instanceof LlmNotConfiguredError) {
-        res.status(409).json({ error: e.code, message: e.message });
-        return;
-      }
-      if (e instanceof LlmProbeFailedError) {
-        res.status(502).json({ error: e.code, message: e.message });
-        return;
-      }
-      throw e;
-    }
+    // The asking workspace's provider, proved before anything is queued.
+    if (await refusedWithoutLlm(req, res)) return;
     const outcome = await requireJobs().enqueueGuardSetup({
       repoId: req.params.id as string,
       repoFullName: repo.path,

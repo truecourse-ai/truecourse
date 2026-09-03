@@ -60,3 +60,6 @@ export const startSpecScan = (repoId: string): Promise<RunStart> =>
 
 export const startGuardSetup = (repoId: string): Promise<RunStart> =>
   startRun(repoId, 'guard/setup');
+
+export const startGuardGenerate = (repoId: string): Promise<RunStart> =>
+  startRun(repoId, 'guard/generate');

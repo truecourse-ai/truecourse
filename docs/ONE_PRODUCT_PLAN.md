@@ -757,8 +757,11 @@ out of the deleted context router into the estimator.
 harness, events hub, cancellation, the notifications feed and its routers — now
 lives in `packages/jobs` and `packages/data-store`, and `ee/` re-exports it.
 Onboarding is the first base consumer: connecting a repository enqueues
-`repo.scan`, which chains `repo.guard-setup` on success. Chains, coalescing and
-backfill stay in `ee/`; the client jobs context, popup and bell have not moved.
+`repo.scan`, which chains `repo.guard-setup` on success, which chains
+`repo.guard-generate` when its recipe gate held (2026-09-03; the generate
+persists the scenario set, the report as the repo's guard baseline, and the
+birth evidence). The baseline run is the next link. Coalescing and backfill
+stay in `ee/`; the client jobs context, popup and bell have not moved.
 Supplied dependency values are row-backed (2026-09-03): a connected repository's
 Interfaces and Dependencies tabs read its stored setup bundle, a registration
 lands as one encrypted row per repository and is injected into every hosted
