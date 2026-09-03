@@ -15,9 +15,18 @@ import type { ZodRawShape } from 'zod';
 // messages (subset of SDKMessage)
 // ---------------------------------------------------------------------------
 
+/** A user content block — text, or one base64 image the model must look at. */
+export type SdkUserContentBlock =
+  | { type: 'text'; text: string }
+  | {
+      type: 'image';
+      source: { type: 'base64'; media_type: string; data: string };
+    };
+
 export interface SdkUserMessage {
   type: 'user';
-  message: { role: 'user'; content: string };
+  /** A plain string for the text-only case; blocks only when an image rides along. */
+  message: { role: 'user'; content: string | SdkUserContentBlock[] };
   parent_tool_use_id: string | null;
   session_id?: string;
   [k: string]: unknown;
@@ -155,6 +164,8 @@ export interface SdkQueryOptions {
   model?: string;
   fallbackModel?: string;
   maxTurns?: number;
+  /** Stream the token-level `stream_event` messages too — liveness for a stall clock. */
+  includePartialMessages?: boolean;
   pathToClaudeCodeExecutable?: string;
   cwd?: string;
   resume?: string;
@@ -193,7 +204,8 @@ export interface SdkSessionStore {
 // ---------------------------------------------------------------------------
 
 export interface SdkModule {
-  query(params: { prompt: AsyncIterable<SdkUserMessage>; options?: SdkQueryOptions }): SdkQuery;
+  /** A string prompt is one user turn; an iterable is the streaming-input session. */
+  query(params: { prompt: string | AsyncIterable<SdkUserMessage>; options?: SdkQueryOptions }): SdkQuery;
   tool(
     name: string,
     description: string,

@@ -1055,7 +1055,7 @@ Every LLM-powered step — `analyze`'s LLM rules, and the whole Spec → Guard p
 
 | Mode | How it reaches the model | Needs |
 |---|---|---|
-| **Claude Code** — `cli` *(default)* | spawns `claude -p …` per call | the `claude` binary on PATH, signed in. No API key. |
+| **Claude Code** — `claude-code` *(default)* | one Agent SDK `query()` per call on your `claude` login (`--llm-transport cli` spawns `claude -p …` instead) | the `claude` binary on PATH, signed in. No API key. |
 | **API** — `api` | calls your provider directly: **Anthropic, OpenAI, AWS Bedrock, or GitHub Copilot** | a model id + an API key. No `claude` binary. |
 | **`agent`** | a **filesystem mailbox** under `--io <dir>` | nothing — no `claude` binary, no API key |
 

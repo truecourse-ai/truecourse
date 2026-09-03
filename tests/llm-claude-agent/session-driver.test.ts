@@ -61,6 +61,7 @@ function fakeSdk(script: (ctx: FakeCtx) => AsyncGenerator<SdkMessage, void>) {
     query({ prompt, options }) {
       captured.options = options ?? {};
       let interrupted = false;
+      if (typeof prompt === 'string') throw new Error('the session driver streams its input');
       const iterator = prompt[Symbol.asyncIterator]();
       const ctx: FakeCtx = {
         options: options ?? {},
@@ -632,6 +633,37 @@ describe('claude agent session driver provider retries', () => {
     const delaySec = (retries[0] as { delayMs: number }).delayMs / 1000;
     expect(delaySec).toBeGreaterThan(25);
     expect(delaySec).toBeLessThanOrEqual(30);
+  });
+
+  it('a session the provider rejected and then ended without output is a provider refusal, not malformed', async () => {
+    const { sdk } = fakeSdk(async function* (ctx) {
+      await ctx.nextUserMessage();
+      yield init();
+      yield {
+        type: 'rate_limit_event',
+        rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour' },
+        session_id: 'prov-1',
+      } as SdkMessage;
+      // The harness's own notice, stamped synthetic, and a success with nothing in it.
+      yield {
+        type: 'assistant',
+        parent_tool_use_id: null,
+        session_id: 'prov-1',
+        message: { model: '<synthetic>', content: [{ type: 'text', text: "You've hit your session limit" }] },
+      } as SdkMessage;
+      yield success();
+    });
+    const { handle } = runSession(sdk);
+    const result = await handle.done;
+
+    expect(result.kind).toBe('failure');
+    if (result.kind !== 'failure') return;
+    expect(result.failure).toMatchObject({
+      kind: 'transport',
+      class: 'provider',
+      retryability: 'transient',
+      detail: expect.stringContaining('rate limited (five_hour)'),
+    });
   });
 });
 

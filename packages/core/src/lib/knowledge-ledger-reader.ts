@@ -7,7 +7,7 @@
  * `layer: 'workspace'` and — hosted only — enriches them with the ledger's human
  * title + source URL for display. The OSS dashboard route hands the repoKey + the
  * inherited doc paths through this seam without importing any EE package (a sibling
- * adapter over core — same rule as `repo-doc-reader` / `spec-conflicts-resolved-hook`).
+ * adapter over core — same rule as `repo-doc-reader` / `spec-inheritance-hook`).
  *
  * Installed by the enterprise edition (which resolves the repo's workspace org from
  * its stored gate records and batches one ledger query); unset in OSS/tests → the

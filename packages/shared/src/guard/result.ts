@@ -75,6 +75,10 @@ function dropLegacyScenarioFormat(value: unknown): unknown {
   return rest
 }
 
+/** Where a run executed. */
+export const GuardRunOriginSchema = z.enum(['hosted', 'local'])
+export type GuardRunOrigin = z.infer<typeof GuardRunOriginSchema>
+
 /** Run envelope — provenance for the whole run. */
 export const GuardRunEnvelopeSchema = z.preprocess(
   dropLegacyScenarioFormat,
@@ -103,6 +107,13 @@ export const GuardRunEnvelopeSchema = z.preprocess(
        * it. The honest warning, on the record a reader actually opens.
        */
       worldLeftDirty: z.boolean().optional(),
+      /** The pull request this run gated; absent on a default-branch run. */
+      pullRequest: z.number().int().positive().optional(),
+      /**
+       * Where the run executed: the hosted runner, or a developer's machine
+       * through the CLI. Absent reads as `hosted`.
+       */
+      origin: GuardRunOriginSchema.optional(),
     })
     .strict(),
 )
@@ -365,6 +376,9 @@ export const GuardHistoryEntrySchema = z
     branch: z.string().nullable(),
     commit: z.string().nullable(),
     summary: GuardSummarySchema,
+    /** The envelope's provenance, carried so a run list needs no snapshot read. */
+    pullRequest: z.number().int().positive().optional(),
+    origin: GuardRunOriginSchema.optional(),
   })
   .strict()
 export type GuardHistoryEntry = z.infer<typeof GuardHistoryEntrySchema>
@@ -373,6 +387,20 @@ export const GuardHistorySchema = z
   .object({ runs: z.array(GuardHistoryEntrySchema) })
   .strict()
 export type GuardHistory = z.infer<typeof GuardHistorySchema>
+
+/** A run snapshot's history row: the envelope's identity and provenance plus its summary. */
+export function guardHistoryEntryOf(latest: GuardLatest): GuardHistoryEntry {
+  const { runId, ranAt, branch, commit, pullRequest, origin } = latest.run
+  return {
+    runId,
+    ranAt,
+    branch,
+    commit,
+    summary: latest.summary,
+    ...(pullRequest !== undefined ? { pullRequest } : {}),
+    ...(origin !== undefined ? { origin } : {}),
+  }
+}
 
 /**
  * Section status precedence — the worst scenario outcome wins. A section is green

@@ -67,7 +67,10 @@ import {
   setLlmCallSink,
   type LlmTransport,
 } from '@truecourse/shared/llm';
-import { createConfiguredApiTransport } from '../services/llm/install-transport.js';
+import {
+  createConfiguredApiTransport,
+  createClaudeCodeTransport,
+} from '../services/llm/install-transport.js';
 import { createGuardVisualJudge, guardVisualJudgeEnabled } from '../services/llm/guard-visual-judge.js';
 import type { GuardVisualJudge } from '@truecourse/guard-runner';
 import { effectiveLlmMode, readApiLlmConfig, type LlmTransportMode } from '../config/global-config.js';
@@ -77,7 +80,14 @@ import { createLlmCallLogger } from '../lib/llm-call-log.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
 import { estimateGuardTokens } from '../services/llm/spec-estimate.js';
 import { mapInterfaces } from '../services/interface.service.js';
-import { createGuardGenerateSessionSeams, type AcquiredContext } from '../services/guard-generate/index.js';
+import {
+  createGuardGenerateSessionSeams,
+  EXTRACT_SESSION_KIND,
+  FIDELITY_SESSION_KIND,
+  FLOW_WORKER_SESSION_KIND,
+  FLOWS_SESSION_KIND,
+  type AcquiredContext,
+} from '../services/guard-generate/index.js';
 export { GenerateStepNotReadyError } from '../services/guard-generate/index.js';
 export { GENERATE_SESSION_STEPS, type GenerateStep } from '@truecourse/guard-generator';
 import { readGuardRecipeCard } from './guard-read.js';
@@ -153,6 +163,23 @@ export const GUARD_GENERATE_STEPS = [
   { key: 'author', label: 'Working flows' },
   { key: 'validate', label: 'Settling flows' },
 ] as const;
+
+/**
+ * Which session kinds do each step's work — stamped onto the run record's
+ * checklist so a surface reading run.json can file every session under its
+ * step. The fidelity judge is a child the flow worker dispatches, so it rides
+ * the author step with its parent. A step listed empty is deterministic (or a
+ * direct LLM stage, like `match`) and owns no session.
+ */
+const GUARD_GENERATE_STEP_SESSION_KINDS: Record<string, readonly string[]> = {
+  index: [],
+  extract: [EXTRACT_SESSION_KIND],
+  interfaces: [],
+  flows: [FLOWS_SESSION_KIND],
+  match: [],
+  author: [FLOW_WORKER_SESSION_KIND, FIDELITY_SESSION_KIND],
+  validate: [],
+};
 
 /**
  * Which LLM stage(s) each guard step covers — so a step line shows the model +
@@ -345,7 +372,7 @@ function resolveTransport(options: {
   }
   if (options.llm === 'api') return createConfiguredApiTransport();
   if (options.llm === 'cli') return cliTransport();
-  return getDefaultTransport();
+  return getDefaultTransport() ?? createClaudeCodeTransport();
 }
 
 export interface GuardGenerateInProcessResult {
@@ -383,7 +410,13 @@ export async function guardGenerateInProcess(
   run.setLlm({ mode, ...(options.attribution ?? defaultAttribution(mode)) });
   options.onRunStarted?.({ command: 'guard-generate', runId: run.runId, dir: run.dir });
   const untap = tracker?.tap((progress) => {
-    if (progress.steps) run.setChecklist(progress.steps);
+    if (!progress.steps) return;
+    run.setChecklist(
+      progress.steps.map((step) => {
+        const kinds = GUARD_GENERATE_STEP_SESSION_KINDS[step.key];
+        return kinds ? { ...step, sessionKinds: [...kinds] } : step;
+      }),
+    );
   });
 
   let transport: LlmTransport | undefined;

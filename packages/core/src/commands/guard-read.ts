@@ -121,6 +121,7 @@ import {
   type GuardInterfaceSurface,
   type InterfaceCatalogSource,
   InterfacesFileSchema,
+  InterfacesFragmentSchema,
   type InterfacesFile,
   type GuardLatest,
   type GuardExternalSetupIndex,
@@ -144,6 +145,7 @@ import {
   type GuardSectionCoverageStatus,
   type GuardSectionFlow,
   type GuardHistory,
+  guardHistoryEntryOf,
   type GuardHistoryEntry,
   type GuardSectionScenario,
   type GuardStaleness,
@@ -1882,13 +1884,15 @@ async function bundledInterfaceCatalog(
 ): Promise<InterfacesFile | null | undefined> {
   const bundle = await loadGuardSetupBundle(repoKey, ref)
   if (!bundle) return undefined
-  const derived = parseInterfacesFile(bundle[GUARD_SETUP_INTERFACES_FILE])
-  const authored = parseInterfacesFile(bundle[GUARD_SETUP_AUTHORED_INTERFACES_FILE])
+  const derived = parseDerivedInterfaces(bundle[GUARD_SETUP_INTERFACES_FILE])
+  const authored = parseAuthoredInterfaces(bundle[GUARD_SETUP_AUTHORED_INTERFACES_FILE])
   if (!derived && !authored) return null
   return mergeInterfaceCatalogs(derived, authored)
 }
 
-function parseInterfacesFile(text: string | undefined): InterfacesFile | null {
+// The derived half is held to the full catalog schema; a corrupt one reads as
+// absent, the way the working-tree reader treats a file the next mapping rewrites.
+function parseDerivedInterfaces(text: string | undefined): InterfacesFile | null {
   if (text === undefined) return null
   try {
     const parsed = InterfacesFileSchema.safeParse(JSON.parse(text))
@@ -1896,6 +1900,23 @@ function parseInterfacesFile(text: string | undefined): InterfacesFile | null {
   } catch {
     return null
   }
+}
+
+// The authored half is checked for SHAPE only: its tasks stand on places the
+// derived half defines, so the cross-reference rules hold for the MERGED catalog,
+// never for this file alone. It is also the only home of the hand-authored
+// surfaces, so an invalid one is an error, never "nothing authored".
+function parseAuthoredInterfaces(text: string | undefined): InterfacesFile | null {
+  if (text === undefined) return null
+  const parsed = InterfacesFragmentSchema.safeParse(JSON.parse(text))
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0]
+    throw new Error(
+      `the stored ${GUARD_SETUP_AUTHORED_INTERFACES_FILE} is not a valid interface catalog: ` +
+        (issue ? `${issue.path.join('.')} — ${issue.message}` : 'schema validation failed'),
+    )
+  }
+  return parsed.data
 }
 
 /**
@@ -2303,13 +2324,7 @@ export async function readGuardHistoryForPr(repoKey: string, pr: number): Promis
   for (const head of new Set(await lookup(repoKey, pr))) {
     const run = await readGuardRunForCommitStore(repoKey, head)
     if (!run) continue
-    runs.push({
-      runId: run.run.runId,
-      ranAt: run.run.ranAt,
-      branch: run.run.branch,
-      commit: run.run.commit,
-      summary: run.summary,
-    })
+    runs.push(guardHistoryEntryOf(run))
   }
   runs.sort((a, b) => a.ranAt.localeCompare(b.ranAt))
   return { runs }

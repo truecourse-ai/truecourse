@@ -25,6 +25,7 @@ import {
   type GuardScenario,
   type GuardScenarioResult,
   type GuardSectionRollup,
+  guardHistoryEntryOf,
 } from '@truecourse/shared'
 import { responseJsonSchema, openApiServerBasePath } from '@truecourse/shared/openapi'
 import {
@@ -1349,13 +1350,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       board = mergeGuardBoard(readGuardLatest(repoRoot), latest, corpusIds)
       latestPath = writeGuardLatest(repoRoot, board)
       writeGuardRun(repoRoot, latest)
-      appendGuardHistory(repoRoot, {
-        runId: latest.run.runId,
-        ranAt: latest.run.ranAt,
-        branch: latest.run.branch,
-        commit: latest.run.commit,
-        summary: latest.summary,
-      })
+      appendGuardHistory(repoRoot, guardHistoryEntryOf(latest))
     }
     const finalStepStats = stepStats.snapshot()
     return {

@@ -277,10 +277,11 @@ export interface EnvelopeUsage {
 
 /**
  * Pull token/cost/timing/model usage out of the terminal `result` event (same
- * shape as the buffered `claude -p --output-format json` envelope). The `agent`
- * transport has no such envelope, so usage there is simply absent (returns null).
+ * shape as the buffered `claude -p --output-format json` envelope, and as the
+ * Agent SDK's own result message). The `agent` transport has no such envelope,
+ * so usage there is simply absent (returns null).
  */
-function parseEnvelopeUsage(req: LlmRequest, envelope: unknown): EnvelopeUsage | null {
+export function parseEnvelopeUsage(req: LlmRequest, envelope: unknown): EnvelopeUsage | null {
   if (!envelope || typeof envelope !== 'object') return null;
   const env = envelope as Record<string, unknown>;
   const usage = (env.usage ?? {}) as Record<string, unknown>;
@@ -320,7 +321,7 @@ function parseEnvelopeUsage(req: LlmRequest, envelope: unknown): EnvelopeUsage |
 }
 
 /** Parse + record one call's usage under its stage. Returns the parsed usage. */
-function recordUsageFromEnvelope(req: LlmRequest, envelope: unknown): EnvelopeUsage | null {
+export function recordUsageFromEnvelope(req: LlmRequest, envelope: unknown): EnvelopeUsage | null {
   const u = parseEnvelopeUsage(req, envelope);
   if (u) recordStageUsage(req.stage, u);
   return u;
@@ -410,7 +411,13 @@ export function getLlmCallSink(): ((rec: LlmCallRecord) => void) | undefined {
   return callSink;
 }
 
-function emitCall(rec: LlmCallRecord): void {
+/**
+ * Hand one call record to the installed sink. Every `claude`-backed transport
+ * reports through here — the `-p` spawn below and the Agent SDK one-shot in
+ * `@truecourse/llm-claude-agent` — so the call log reads the same whichever
+ * produced the call.
+ */
+export function emitLlmCallRecord(rec: LlmCallRecord): void {
   if (!callSink) return;
   try {
     callSink(rec);
@@ -716,7 +723,7 @@ export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
         if (reported) return;
         reported = true;
         clearTimers();
-        emitCall({
+        emitLlmCallRecord({
           ts, stage, model: req.model ?? '', id, itemCount,
           ok: false, outcome, error, exitCode, wallMs: Date.now() - t0,
           timeoutMs, stallTimeoutMs: stallMs,
@@ -731,7 +738,7 @@ export function cliTransport(opts: CliTransportOptions = {}): LlmTransport {
         if (reported) return;
         reported = true;
         clearTimers();
-        emitCall({
+        emitLlmCallRecord({
           ts, stage, model: usage?.model || req.model || '', id, itemCount,
           ok: true, outcome: 'ok', exitCode: 0, wallMs: Date.now() - t0,
           timeoutMs, stallTimeoutMs: stallMs,

@@ -59,6 +59,11 @@ import type { RepoRef } from './contract-store.js';
 // convention spec-store.ts follows.
 export type { RepoRef } from './contract-store.js';
 
+/** How wide a history read is: the baseline trend (default) or every stored run. */
+export interface GuardHistoryReadOptions {
+  all?: boolean;
+}
+
 /** A written run snapshot — the runId it is keyed by plus the stored state. */
 export interface WrittenGuardRun {
   runId: string;
@@ -92,7 +97,12 @@ export interface GuardStore {
   readGuardRun(repoPath: string, runId: string): Promise<GuardLatest | null>;
   /** Stored run for an exact commit (base-run reuse + webhook-redelivery dedupe), or null. */
   readGuardRunForCommit(repoPath: string, commitSha: string): Promise<GuardLatest | null>;
-  readGuardHistory(repoPath: string): Promise<GuardHistory>;
+  /**
+   * The run trend: the repo's baseline runs, oldest-first. `all` widens it to
+   * EVERY stored run — a pull request's head runs included — for a run list.
+   * The file store holds one history and ignores the option.
+   */
+  readGuardHistory(repoPath: string, opts?: GuardHistoryReadOptions): Promise<GuardHistory>;
   appendGuardHistory(repoPath: string, entry: GuardHistoryEntry): Promise<void>;
   /**
    * The `guard generate` report. EE: `commitSha` reads that commit's report;
@@ -512,8 +522,10 @@ export const readGuardRunForCommit = (
   repoPath: string,
   commitSha: string,
 ): Promise<GuardLatest | null> => active.readGuardRunForCommit(repoPath, commitSha);
-export const readGuardHistory = (repoPath: string): Promise<GuardHistory> =>
-  active.readGuardHistory(repoPath);
+export const readGuardHistory = (
+  repoPath: string,
+  opts?: GuardHistoryReadOptions,
+): Promise<GuardHistory> => active.readGuardHistory(repoPath, opts);
 export const appendGuardHistory = (repoPath: string, entry: GuardHistoryEntry): Promise<void> =>
   active.appendGuardHistory(repoPath, entry);
 export const readGuardResult = (

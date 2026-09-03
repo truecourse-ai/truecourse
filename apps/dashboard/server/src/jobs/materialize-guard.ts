@@ -150,8 +150,10 @@ async function persistBirthEvidence(
 export async function persistGuardRun(
   ref: RepoRef,
   treeDir: string,
-  latest: GuardLatest,
+  run: GuardLatest,
 ): Promise<void> {
+  // The stored record says where it ran: this is the hosted runner's run.
+  const latest: GuardLatest = { ...run, run: { ...run.run, origin: 'hosted' } };
   await writeGuardLatest(ref.repoKey, latest);
   const runId = latest.run.runId;
   for (const scenario of latest.scenarios) {

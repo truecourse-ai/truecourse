@@ -107,6 +107,10 @@ interface SessionContextBase {
    * run.json carries, and setup's steps are minutes of work each.
    */
   tracker?: StepTracker;
+  /** Which session kinds do each checklist step's work, by step key — stamped
+   *  onto the mirrored checklist so a surface reading run.json can file each
+   *  session under its step. A key left out claims no session. */
+  stepSessionKinds?: Record<string, readonly string[]>;
   /**
    * Create the run record at construction instead of on the first session. A
    * hosted run must be watchable from the moment it starts — including one
@@ -166,7 +170,13 @@ export function createGuardSetupSessionContext(
     run = store;
     untap =
       opts.tracker?.tap((progress) => {
-        if (progress.steps) store.setChecklist(progress.steps);
+        if (!progress.steps) return;
+        store.setChecklist(
+          progress.steps.map((step) => {
+            const kinds = opts.stepSessionKinds?.[step.key];
+            return kinds ? { ...step, sessionKinds: [...kinds] } : step;
+          }),
+        );
       }) ?? null;
     opts.onRunStarted?.({ command: 'guard-setup', runId: store.runId, dir: store.dir });
     return { run: store, driver };

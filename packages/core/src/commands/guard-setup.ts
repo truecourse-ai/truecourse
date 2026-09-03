@@ -55,6 +55,8 @@ import {
   LlmApiConfigError,
   createConfiguredApiTransport,
   getConfiguredLlmMode,
+  createClaudeCodeTransport,
+  isClaudeCodeTransport,
 } from '../services/llm/install-transport.js';
 import { isCliBinaryAvailable } from '../lib/cli-binary.js';
 import { createLlmCallLogger } from '../lib/llm-call-log.js';
@@ -65,12 +67,17 @@ import { estimateGuardSetup } from '../services/llm/spec-estimate.js';
 import { mapInterfaces } from '../services/interface.service.js';
 import { sessionRunDir, type SessionRunStartedInfo } from '../lib/sessions-store.js';
 import {
+  AUTH_PROOF_SESSION_KIND,
   buildAuthProof,
   buildCatalogSession,
   buildInterfacesStep,
   buildRecipeRepair,
   buildSeedSession,
   createGuardSetupSessionContext,
+  DEPENDENCY_CATALOG_SESSION_KIND,
+  RECIPE_REPAIR_SESSION_KIND,
+  RECONCILE_INTERFACES_SESSION_KIND,
+  SEED_SESSION_KIND,
 } from '../services/guard-setup/index.js';
 import { runGuardInterfaceAuthoring } from './guard-interfaces.js';
 import type { LlmEstimate } from './analyze-core.js';
@@ -191,13 +198,14 @@ export interface GuardSetupInProcessResult {
 
 /**
  * STEP 0 — a usable LLM provider must exist. Cheap and call-free: the EE
- * no-provider sentinel is a hard refusal, and the Claude Code fallback (spawn the
- * `claude` CLI) only has to be ON PATH here — the CLI command additionally runs the
- * full auth round-trip, exactly as `guard generate` does.
+ * no-provider sentinel is a hard refusal, and the Claude Code transports (the
+ * Agent SDK one-shot, or an explicit `--llm-transport cli` spawn) only need the
+ * `claude` binary ON PATH here — the CLI command additionally runs the full auth
+ * round-trip, exactly as `guard generate` does.
  *
  * The binary is demanded of exactly the runs that SPAWN it: one that resolved no
- * transport at all (the Claude Code fallback), and one whose resolved transport IS
- * `cliTransport` — an explicit `--llm-transport cli`. Resolving a transport is not
+ * transport at all, and one whose resolved transport runs on `claude` — the SDK
+ * default of claude-code mode, or `cliTransport`. Resolving a transport is not
  * evidence the thing it spawns exists, and letting that count would move the missing
  * binary from step 0 to minutes later, after the install, build, boot and analysis
  * this gate exists to protect. In API mode {@link resolveTransport} answers from the
@@ -260,11 +268,10 @@ function resolveTransport(options: {
   // `claude`, and a transport object is no evidence that binary exists.
   if (options.llm === 'cli') return { transport: cliTransport(), spawnsClaudeCli: true };
   const installed = getDefaultTransport();
-  if (installed) return { transport: installed };
+  if (installed) return { transport: installed, spawnsClaudeCli: isClaudeCodeTransport(installed) };
   return getConfiguredLlmMode() === 'api'
     ? { transport: createConfiguredApiTransport() }
-    : // Nothing resolved — the run falls through to each runner's own `cliTransport()`.
-      { spawnsClaudeCli: true };
+    : { transport: createClaudeCodeTransport(), spawnsClaudeCli: true };
 }
 
 /** What a run resolved, plus whether that answer is the `claude`-spawning transport. */
@@ -295,6 +302,22 @@ export async function estimateGuardSetupCost(
  * split, so it rides `usage.sessions` instead of being forced into these fields.
  */
 const SETUP_USAGE_STAGES = ['guard.recipe'] as const;
+
+/**
+ * Which session kinds do each setup step's work — stamped onto the run
+ * record's checklist so a surface reading run.json can file every session
+ * under its step. `detect` is deterministic and owns no session; the
+ * interfaces step's authoring sessions live under `guard interfaces author`'s
+ * own run, so only its reconcile session is setup's.
+ */
+const GUARD_SETUP_STEP_SESSION_KINDS: Record<string, readonly string[]> = {
+  recipe: [RECIPE_REPAIR_SESSION_KIND],
+  detect: [],
+  catalog: [DEPENDENCY_CATALOG_SESSION_KIND],
+  interfaces: [RECONCILE_INTERFACES_SESSION_KIND],
+  seed: [SEED_SESSION_KIND],
+  auth: [AUTH_PROOF_SESSION_KIND],
+};
 
 export async function guardSetupInProcess(
   repoRoot: string,
@@ -347,6 +370,7 @@ export async function guardSetupInProcess(
   const sessionsAvailable = options.llm !== 'agent' && options.recipeRunner === undefined;
   const sessionContextOptions = {
     repoRoot,
+    stepSessionKinds: GUARD_SETUP_STEP_SESSION_KINDS,
     ...(options.sessionsKey ? { sessionsKey: options.sessionsKey } : {}),
     ...(options.tracker ? { tracker: options.tracker } : {}),
     ...(options.eagerRun ? { eager: true } : {}),

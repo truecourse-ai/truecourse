@@ -22,6 +22,11 @@ import { guardAuthoredInterfacesPath, guardInterfacesPath } from '@truecourse/gu
 import type { InterfacesFile } from '../../packages/shared/src/index';
 import { GuardInterfacesViewSchema } from '../../packages/shared/src/index';
 import { readGuardInterfaces, readGuardInterfaceRaw } from '../../packages/core/src/commands/guard-read';
+import { resetGuardStore, setGuardStore, type GuardStore } from '../../packages/core/src/lib/guard-store';
+import {
+  GUARD_SETUP_AUTHORED_INTERFACES_FILE,
+  GUARD_SETUP_INTERFACES_FILE,
+} from '../../packages/core/src/services/guard-setup/bundle';
 
 let repo: string;
 
@@ -219,5 +224,43 @@ describe('the raw interface source over a split catalog', () => {
     const raw = await readGuardInterfaceRaw(repo, 'api/post-tasks');
     expect(raw!.file).toBe('.truecourse/guard/interfaces.authored.json');
     expect(JSON.parse(raw!.content).title).toBe('create a task');
+  });
+});
+
+// The hosted read composes the same view from the STORED setup bundle. The
+// authored half's tasks stand on places the DERIVED half defines, so it can only
+// be checked for shape on its own — held to the whole-catalog rules it fails,
+// and the view silently showed a repo with no web surfaces at all.
+describe('the Interfaces view over a stored setup bundle (hosted)', () => {
+  const install = (files: Record<string, string>): void =>
+    setGuardStore({
+      materializesInPlace: false,
+      loadGuardSetupBundle: async () => files,
+      readGuardBaselineCommit: async () => null,
+    } as unknown as GuardStore);
+  afterEach(() => resetGuardStore());
+
+  it('shows the authored web tasks that stand on derived places', async () => {
+    install({
+      [GUARD_SETUP_INTERFACES_FILE]: JSON.stringify(
+        catalog({ interfaces: [DERIVED_API], resources: WEB_RESOURCES }),
+      ),
+      [GUARD_SETUP_AUTHORED_INTERFACES_FILE]: JSON.stringify(catalog({ interfaces: [AUTHORED_WEB] })),
+    });
+    const view = await readGuardInterfaces('acme/app');
+    expect(view.unavailable).toBeUndefined();
+    expect(view.interfaces.map((i) => [i.id, i.origin])).toEqual([
+      ['api/post-tasks', 'derived'],
+      ['web/silence-rule', 'authored'],
+    ]);
+    expect(view.resources?.web?.map((r) => r.id)).toEqual(['repo-report', 'rules-dialog']);
+  });
+
+  it('refuses a malformed authored half instead of reading it as nothing authored', async () => {
+    install({
+      [GUARD_SETUP_INTERFACES_FILE]: JSON.stringify(catalog({ interfaces: [DERIVED_API] })),
+      [GUARD_SETUP_AUTHORED_INTERFACES_FILE]: JSON.stringify({ version: 2, interfaces: 'nope' }),
+    });
+    await expect(readGuardInterfaces('acme/app')).rejects.toThrow(/interfaces\.authored\.json/);
   });
 });

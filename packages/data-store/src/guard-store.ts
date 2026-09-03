@@ -64,6 +64,7 @@ import {
 } from '@truecourse/db';
 import { guardEvidenceVisual } from '@truecourse/shared';
 import type {
+  GuardHistoryReadOptions,
   GuardStore,
   RepoRef,
   SaveScenariosResult,
@@ -72,6 +73,7 @@ import type {
 import {
   GuardManifestSchema,
   EMPTY_GUARD_DECISIONS,
+  guardHistoryEntryOf,
   type GuardDecisions,
   type GuardGenerateReport,
   type GuardHistory,
@@ -179,23 +181,22 @@ export class PgGuardStore implements GuardStore {
     return rows[0] ? (rows[0].snapshot as GuardLatest) : null;
   }
 
-  /** The run trend: every baseline run for the repo, oldest-first. */
-  async readGuardHistory(repoKey: string): Promise<GuardHistory> {
+  /**
+   * The run trend: every baseline run for the repo, oldest-first. With `all`,
+   * every stored run — the pull-request head runs the gate wrote included —
+   * each entry carrying the envelope's provenance (`pullRequest`, `origin`).
+   */
+  async readGuardHistory(repoKey: string, opts: GuardHistoryReadOptions = {}): Promise<GuardHistory> {
     const rows = await this.db
       .select({ snapshot: guardRuns.snapshot })
       .from(guardRuns)
-      .where(and(eq(guardRuns.repoKey, repoKey), eq(guardRuns.isBaseline, true)))
+      .where(
+        opts.all
+          ? eq(guardRuns.repoKey, repoKey)
+          : and(eq(guardRuns.repoKey, repoKey), eq(guardRuns.isBaseline, true)),
+      )
       .orderBy(asc(guardRuns.ranAt));
-    const runs: GuardHistoryEntry[] = rows.map((r) => {
-      const latest = r.snapshot as GuardLatest;
-      return {
-        runId: latest.run.runId,
-        ranAt: latest.run.ranAt,
-        branch: latest.run.branch,
-        commit: latest.run.commit,
-        summary: latest.summary,
-      };
-    });
+    const runs: GuardHistoryEntry[] = rows.map((r) => guardHistoryEntryOf(r.snapshot as GuardLatest));
     return { runs };
   }
 

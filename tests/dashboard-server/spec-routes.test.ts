@@ -32,24 +32,19 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
   };
 });
 
-// Include/exclude routes re-curate server-side. The curate engine has its own
-// suite (tests/spec-consolidator), so stub it to a no-op here — leaving the
-// seeded corpus.json intact — and assert the routes INVOKE it (the recheck is
-// server-driven, not client-driven).
+// The curate engine has its own suite (tests/spec-consolidator), so stub it to a
+// no-op here — leaving the seeded corpus.json intact. A decision route must NEVER
+// invoke it: a decision is not a corpus change.
 vi.mock('@truecourse/core/commands/spec-in-process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@truecourse/core/commands/spec-in-process')>();
   return {
     ...actual,
     curateInProcess: vi.fn(async () => ({ noChanges: false })),
-    // EE include/exclude re-curates the stored corpus in-process (its own suite in
-    // tests/core covers the docSource wiring). Stub it here so the route test asserts
-    // the route INVOKES it.
-    recurateStoredCorpus: vi.fn(async () => null),
   };
 });
 
 import { createTestApp } from '../helpers/test-app';
-import { curateInProcess, recurateStoredCorpus } from '@truecourse/core/commands/spec-in-process';
+import { curateInProcess } from '@truecourse/core/commands/spec-in-process';
 import {
   setBackgroundTaskRunner,
   type BackgroundTask,
@@ -68,7 +63,6 @@ import {
 } from '@truecourse/core/lib/spec-store';
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { writeLatest } from '@truecourse/core/lib/analysis-store';
-import type { CuratedCorpus } from '@truecourse/spec-consolidator';
 import {
   readSourcesFile,
   sourceDirPath,
@@ -316,11 +310,10 @@ describe('corpus routes (spec-scan redesign)', () => {
 
 });
 
-// EE (hosted): repo.path is a repoKey, the corpus lives in the store, and there
-// is no local git tree. The decision routes must NOT gate on git. They re-curate
-// the stored corpus in-process (the SAME curate OSS runs, docs sourced through the
-// repo-doc seam), and — only if that leaves the spec conflict-free — chain the
-// baseline re-scan and the blocked guard generate.
+// DB mode (hosted): repo.path is a repoKey, the corpus lives in the store, and
+// there is no local git tree. The decision routes must NOT gate on git and must
+// NOT re-curate (a decision is not a corpus change); only when a decision leaves
+// the stored corpus conflict-free do they unblock a stalled guard generate.
 //
 // This mirrors LIVE EE wiring: a hosted SPEC store is installed (decisions writes +
 // corpus reads flow through it) and NO contract store, so the file-default contract
@@ -331,30 +324,53 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
   let fixture: TestFixture;
   let memSpec: SpecStore;
 
-  // Seed the hosted spec store's current corpus (the store the EE routes read
-  // through), not the working tree — EE has no live `corpus.json`.
-  const seedCorpus = (): void => {
+  // Seed the hosted spec store's current corpus (the store the DB-mode routes read
+  // through), not the working tree — a hosted repo has no live `corpus.json`.
+  // `conflict` flags a v1/v2 disagreement so the repo has ONE open conflict.
+  const seedCorpus = (opts: { conflict?: boolean } = {}): void => {
     void memSpec.saveSpec(
       { repoKey: fixture.repoPath, commitSha: 'seed' },
       'corpus',
       {
         version: 3,
         generatedAt: '2026-01-01T00:00:00Z',
-        docs: [{ ref: 'docs/v2.md', kind: 'prd', lastTouched: '2026-02-01T00:00:00Z', areaTags: ['booking/appointments'] }],
-        areas: [{ id: 'booking/appointments', product: 'booking', concern: 'appointments', docRefs: ['docs/v2.md'], overlaps: [] }],
+        docs: [
+          { ref: 'docs/v1.md', kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['booking/appointments'] },
+          { ref: 'docs/v2.md', kind: 'prd', lastTouched: '2026-02-01T00:00:00Z', areaTags: ['booking/appointments'] },
+        ],
+        areas: [
+          {
+            id: 'booking/appointments',
+            product: 'booking',
+            concern: 'appointments',
+            docRefs: ['docs/v1.md', 'docs/v2.md'],
+            overlaps: opts.conflict
+              ? [
+                  {
+                    docs: ['docs/v1.md', 'docs/v2.md'],
+                    note: '24h vs 48h',
+                    sections: [
+                      { doc: 'docs/v1.md', heading: 'Cancellation' },
+                      { doc: 'docs/v2.md', heading: 'Cancellation policy' },
+                    ],
+                  },
+                ]
+              : [],
+          },
+        ],
         relations: [],
-        skippedDocs: [],
+        skippedDocs: [{ ref: 'docs/dropped.md', reason: 'changelog' }],
       },
     );
   };
 
-  // Stub the in-process re-curate's outcome (its own docSource wiring is covered in
-  // tests/core). `openConflicts` drives the regenerate-or-not decision.
-  const stubRecurate = (openConflicts: number): void => {
-    vi.mocked(recurateStoredCorpus).mockResolvedValueOnce({
-      corpus: { docs: [{ ref: 'docs/keep.md' }] } as unknown as CuratedCorpus,
-      openConflicts,
-    });
+  // The verdict that resolves the seeded v1/v2 dispute.
+  const VERDICT = {
+    docA: 'docs/v1.md',
+    anchorA: 'Cancellation',
+    docB: 'docs/v2.md',
+    anchorB: 'Cancellation policy',
+    verdict: 'b',
   };
 
   // A guard store whose generate report is `status`. `open-conflicts` = a generate
@@ -399,12 +415,12 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
 
   beforeEach(async () => {
     fixture = await setupTestFixture(); // deliberately NOT git-initialized
-    // Live EE wiring: a hosted SPEC store installed, NO contract store (the
+    // Live DB-mode wiring: a hosted SPEC store installed, NO contract store (the
     // file-default contract flag stays TRUE). The spec routes must key their
-    // edition check on the spec store — mirroring what EE actually installs.
+    // edition check on the spec store — mirroring what boot actually installs.
     memSpec = makeMemSpecStore();
     setSpecStore(memSpec);
-    vi.mocked(recurateStoredCorpus).mockReset();
+    vi.mocked(curateInProcess).mockClear();
     app = createTestApp();
   });
   afterEach(async () => {
@@ -415,93 +431,74 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
     await teardownTestFixture(fixture.project.slug);
   });
 
-  // LIVE EE wiring reproduction (the regression this suite missed): EE installs a
-  // hosted SPEC store and — since the verify-gate retirement — NO contract store, so
-  // the file-default contract flag is TRUE while the spec store is hosted (the fixture
-  // wires exactly that). The spec routes must key their edition check on the SPEC
-  // store: clearing the last conflict with a BLOCKED (open-conflicts) generate report
-  // must re-curate AND fire the guard-generate seam.
-  it('LIVE EE wiring (hosted spec store, no contract store): clearing the last conflict re-curates and fires guard generate', async () => {
-    const enqueued: string[] = [];
-    setGuardGenerateEnqueue(async (repoKey) => {
-      enqueued.push(repoKey);
-    });
-    seedCorpus();
-    await seedAnalyzeBaseline('basesha1111');
-    stubGuardReport('open-conflicts');
-    stubRecurate(0);
-    await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
-      .send({ ref: 'docs/v2.md' })
-      .expect(200);
-    expect(vi.mocked(recurateStoredCorpus)).toHaveBeenCalledWith(fixture.repoPath);
-    expect(enqueued).toEqual([fixture.repoPath]);
-  });
-
-  it('POST /spec/excludes re-curates the stored corpus (no git gate) and enqueues no repo-scope job', async () => {
+  it('POST /spec/excludes persists the decision without a git gate, a re-curate or a repo-scope job', async () => {
     const tasks: BackgroundTask[] = [];
     setBackgroundTaskRunner(async (t) => {
       tasks.push(t);
     });
     seedCorpus();
-    stubRecurate(0);
     const res = await request(app)
       .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
       .send({ ref: 'docs/v2.md' })
       .expect(200); // was 400 "not a git repository" before the fix
     expect(res.body.manualExcludes).toContain('docs/v2.md');
-    expect(vi.mocked(recurateStoredCorpus)).toHaveBeenCalledWith(fixture.repoPath);
-    // Repo-scope decisions chain the baseline re-scan / guard generate seams, never
-    // the background queue — that carries PR-scoped re-gates only.
+    expect(res.body).not.toHaveProperty('corpus'); // the ack, not a re-curated corpus
+    expect(vi.mocked(curateInProcess)).not.toHaveBeenCalled();
     expect(tasks).toEqual([]);
   });
 
-  it('POST /spec/excludes re-curates while conflicts remain', async () => {
-    const tasks: BackgroundTask[] = [];
-    setBackgroundTaskRunner(async (t) => {
-      tasks.push(t);
-    });
+  it('DELETE /spec/excludes restores the doc', async () => {
     seedCorpus();
-    stubRecurate(2);
     await request(app)
       .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
       .send({ ref: 'docs/v2.md' })
       .expect(200);
-    expect(vi.mocked(recurateStoredCorpus)).toHaveBeenCalledWith(fixture.repoPath);
-    expect(tasks).toEqual([]); // conflicts remain → cheap re-curate only
-  });
-
-  it('DELETE /spec/excludes restores the doc (re-curate; chaining still gated on conflict-free)', async () => {
-    const tasks: BackgroundTask[] = [];
-    setBackgroundTaskRunner(async (t) => {
-      tasks.push(t);
-    });
-    seedCorpus();
-    stubRecurate(0);
-    await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
-      .send({ ref: 'docs/v2.md' })
-      .expect(200);
-    stubRecurate(0);
     const del = await request(app)
       .delete(`/api/repos/${fixture.project.slug}/spec/excludes`)
       .send({ ref: 'docs/v2.md' })
       .expect(200);
     expect(del.body.manualExcludes ?? []).not.toContain('docs/v2.md');
+    expect(vi.mocked(curateInProcess)).not.toHaveBeenCalled();
   });
 
-  // A decision clearing the last conflict must ALSO unblock a guard generate that
+  it('a conflict verdict acks the persisted verdicts and never runs a scan', async () => {
+    seedCorpus({ conflict: true });
+    const res = await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`)
+      .send(VERDICT)
+      .expect(200);
+    expect(res.body.conflictResolutions).toHaveLength(1);
+    expect(res.body.conflictResolutions[0]).toMatchObject({ docA: 'docs/v1.md', docB: 'docs/v2.md', verdict: 'b' });
+    expect(res.body).not.toHaveProperty('corpus');
+    expect(vi.mocked(curateInProcess)).not.toHaveBeenCalled();
+  });
+
+  // A decision clearing the last conflict must unblock a guard generate that
   // stalled on that conflict: when the repo's current generate report is
   // `open-conflicts`, the installed guard-generate seam fires with the repoKey.
-  it('clearing the last conflict with a BLOCKED (open-conflicts) generate report enqueues a guard generate', async () => {
+  it('a verdict clearing the last conflict with a BLOCKED (open-conflicts) report enqueues a guard generate', async () => {
     const enqueued: string[] = [];
     setGuardGenerateEnqueue(async (repoKey) => {
       enqueued.push(repoKey);
     });
-    seedCorpus();
+    seedCorpus({ conflict: true });
     await seedAnalyzeBaseline('basesha1111');
     stubGuardReport('open-conflicts');
-    stubRecurate(0);
+    await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`)
+      .send(VERDICT)
+      .expect(200);
+    expect(enqueued).toEqual([fixture.repoPath]);
+  });
+
+  it('an exclude that removes one side of the last conflict enqueues the guard generate too', async () => {
+    const enqueued: string[] = [];
+    setGuardGenerateEnqueue(async (repoKey) => {
+      enqueued.push(repoKey);
+    });
+    seedCorpus({ conflict: true });
+    await seedAnalyzeBaseline('basesha1111');
+    stubGuardReport('open-conflicts');
     await request(app)
       .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
       .send({ ref: 'docs/v2.md' })
@@ -514,7 +511,7 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
     setGuardGenerateEnqueue(async (repoKey) => {
       enqueued.push(repoKey);
     });
-    seedCorpus();
+    seedCorpus({ conflict: true });
     await seedAnalyzeBaseline('basesha1111');
     // Commit-aware guard stub: the BASELINE row is the blocked open-conflicts
     // report; any commit-less ("newest by createdAt") read sees a PR regen's ok
@@ -526,10 +523,9 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
           status: commitSha === 'basesha1111' ? 'open-conflicts' : 'ok',
         }) as unknown as GuardGenerateReport,
     } as unknown as GuardStore);
-    stubRecurate(0);
     await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
-      .send({ ref: 'docs/v2.md' })
+      .post(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`)
+      .send(VERDICT)
       .expect(200);
     expect(enqueued).toEqual([fixture.repoPath]);
   });
@@ -539,13 +535,12 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
     setGuardGenerateEnqueue(async (repoKey) => {
       enqueued.push(repoKey);
     });
-    seedCorpus();
+    seedCorpus({ conflict: true });
     await seedAnalyzeBaseline('basesha1111');
     stubGuardReport('ok');
-    stubRecurate(0);
     await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
-      .send({ ref: 'docs/v2.md' })
+      .post(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`)
+      .send(VERDICT)
       .expect(200);
     expect(enqueued).toEqual([]);
   });
@@ -563,32 +558,51 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
         return { status: 'open-conflicts' } as unknown as GuardGenerateReport;
       },
     } as unknown as GuardStore);
-    seedCorpus();
-    stubRecurate(2); // conflicts remain
+    seedCorpus({ conflict: true });
+    // Excluding a doc outside the dispute leaves the v1/v2 conflict open.
     await request(app)
       .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
-      .send({ ref: 'docs/v2.md' })
+      .send({ ref: 'docs/other.md' })
       .expect(200);
     expect(enqueued).toEqual([]);
     expect(guardRead).toBe(false); // hot path stays cheap — the store is never read
   });
 
-  it('a BLOCKED report with no guard-generate seam installed (OSS) is a no-op, not an error', async () => {
+  it('a BLOCKED report with no guard-generate seam installed is a no-op, not an error', async () => {
     // No setGuardGenerateEnqueue → getGuardGenerateEnqueue() is null; the route must
     // simply skip it and still answer 200.
     const tasks: BackgroundTask[] = [];
     setBackgroundTaskRunner(async (t) => {
       tasks.push(t);
     });
-    seedCorpus();
+    seedCorpus({ conflict: true });
     await seedAnalyzeBaseline('basesha1111');
     stubGuardReport('open-conflicts');
-    stubRecurate(0);
+    await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`)
+      .send(VERDICT)
+      .expect(200);
+    expect(tasks).toEqual([]);
+  });
+
+  // The Rescan dot: an include/exclude the stored corpus has not absorbed pends
+  // (a Scan would materialize it); a verdict derives live and never does.
+  it('GET /spec/staleness reports decisionsPending for an unabsorbed exclude, not for a verdict', async () => {
+    seedCorpus({ conflict: true });
+    const before = await request(app).get(`/api/repos/${fixture.project.slug}/spec/staleness`).expect(200);
+    expect(before.body.decisionsPending).toBe(false);
+    await request(app)
+      .post(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`)
+      .send(VERDICT)
+      .expect(200);
+    const afterVerdict = await request(app).get(`/api/repos/${fixture.project.slug}/spec/staleness`).expect(200);
+    expect(afterVerdict.body.decisionsPending).toBe(false);
     await request(app)
       .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
       .send({ ref: 'docs/v2.md' })
       .expect(200);
-    expect(tasks).toEqual([]);
+    const afterExclude = await request(app).get(`/api/repos/${fixture.project.slug}/spec/staleness`).expect(200);
+    expect(afterExclude.body.decisionsPending).toBe(true);
   });
 });
 

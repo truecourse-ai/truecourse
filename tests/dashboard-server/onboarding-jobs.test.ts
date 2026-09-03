@@ -999,6 +999,8 @@ describe('the guard run job', () => {
     // The durable half: the run is the repo's baseline, and the bundle came with it.
     const latest = await readGuardLatest(REPO);
     expect(latest?.run.runId).toBe(RUN_ID);
+    // The stored record says where it ran.
+    expect(latest?.run.origin).toBe('hosted');
     expect(latest?.scenarios.map((s) => s.outcome)).toEqual(['fail']);
     const store = new PgGuardStore(db);
     const dir = `.truecourse/guard/evidence/${RUN_ID}/a1`;

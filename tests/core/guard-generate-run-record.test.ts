@@ -67,11 +67,22 @@ describe('guard generate run record', () => {
     expect(run.finishedAt).toBeDefined();
     // The checklist mirrors the tracker: the step it died in errored, the rest pending.
     const checklist = run.display?.blocks.find((b) => b.kind === 'checklist') as
-      | { items: { key: string; status: string }[] }
+      | { items: { key: string; status: string; sessionKinds?: string[] }[] }
       | undefined;
     expect(checklist?.items.map((i) => i.key)).toEqual(GUARD_GENERATE_STEPS.map((s) => s.key));
     expect(checklist?.items[0]).toMatchObject({ key: 'index', status: 'error' });
     expect(checklist?.items.slice(1).every((i) => i.status === 'pending')).toBe(true);
+    // Each step claims the session kinds that do its work, so a surface reading
+    // run.json files every session under its step instead of after the list.
+    expect(checklist?.items.map((i) => [i.key, i.sessionKinds])).toEqual([
+      ['index', []],
+      ['extract', ['guard-generate.extract']],
+      ['interfaces', []],
+      ['flows', ['guard-generate.flows']],
+      ['match', []],
+      ['author', ['guard-generate.flow-worker', 'guard-generate.fidelity']],
+      ['validate', []],
+    ]);
   });
 
   it('defaults the record to the working tree, and names the saved provider', async () => {

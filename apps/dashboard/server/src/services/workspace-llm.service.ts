@@ -18,8 +18,9 @@
  * in the server's environment runs EVERY workspace on the operator's own
  * `claude` login — the self-hosted, single-operator deployment. The store is
  * never consulted, the Models page is read-only, and the probe is the `claude`
- * login check plus the Agent SDK load. Hosted deploys never set it: they keep
- * per-workspace credentials.
+ * login check plus the Agent SDK load. Both halves of a run — the agent
+ * sessions and the one-shot leaf calls — ride the Agent SDK on that login.
+ * Hosted deploys never set it: they keep per-workspace credentials.
  *
  * The store and the backend are seams: boot installs the Postgres store and the
  * real provider calls; tests install their own.
@@ -29,9 +30,12 @@ import type { Request } from 'express';
 import type { SessionDriver } from '@truecourse/agent-loop';
 import { createAppError } from '@truecourse/core/lib/errors';
 import type { LlmConfigUpdate, LlmOperatorProvider, LlmProviderConfigView } from '@truecourse/shared';
-import { cliTransport, type LlmTransport } from '@truecourse/shared/llm';
+import type { LlmTransport } from '@truecourse/shared/llm';
 import type { GlobalApiLlmConfig, LlmTransportMode } from '@truecourse/core/config/global-config';
-import { createApiTransportFor } from '@truecourse/core/services/llm/install-transport';
+import {
+  createApiTransportFor,
+  createClaudeCodeTransport,
+} from '@truecourse/core/services/llm/install-transport';
 import {
   createApiSessionDriverFor,
   createClaudeCodeSessionDriver,
@@ -135,8 +139,9 @@ const REAL_BACKEND: WorkspaceLlmBackend = {
     // the `claude` subprocess inherits the server's. Fine for a single
     // operator; pass the clone dir if this ever becomes a hosted feature.
     driver: () => createClaudeCodeSessionDriver().driver,
-    // `claude -p` honors the per-stage tier aliases, exactly as the CLI does.
-    transport: () => cliTransport(),
+    // The Agent SDK one-shot, on the same login; it honors the per-stage tier
+    // aliases exactly as the CLI does.
+    transport: () => createClaudeCodeTransport(),
   },
 };
 

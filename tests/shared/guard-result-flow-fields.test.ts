@@ -1,8 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import {
+  GuardHistoryEntrySchema,
   GuardLatestSchema,
+  GuardRunEnvelopeSchema,
   GuardScenarioResultSchema,
   blockedPreconditionAnnotation,
+  guardHistoryEntryOf,
 } from '../../packages/shared/src/guard/index'
 
 // A run result gained three optional flow-era annotations — `flowId`, the failing
@@ -80,6 +83,56 @@ describe('GuardScenarioResultSchema — flow annotations', () => {
       blockedPrecondition: true,
     })
     expect(GuardScenarioResultSchema.parse(base).blockedPrecondition).toBeUndefined()
+  })
+})
+
+// The envelope's provenance: which pull request a run gated and where it ran.
+// Both optional, so every run stored before them keeps parsing, and both ride
+// the history row so a run list needs no snapshot read.
+describe('run provenance — pullRequest and origin', () => {
+  const envelope = {
+    runId: '2026-07-24T00-00-00Z_abcd1234',
+    ranAt: '2026-07-24T00:00:00.000Z',
+    branch: 'feature',
+    commit: 'head1',
+    recipeFingerprint: 'sha256:r',
+  }
+  const summary = { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 }
+
+  it('parses an envelope and a history entry carrying both, and leaves them absent when unset', () => {
+    const stamped = { ...envelope, pullRequest: 7, origin: 'hosted' }
+    expect(GuardRunEnvelopeSchema.parse(stamped)).toMatchObject({ pullRequest: 7, origin: 'hosted' })
+    const { recipeFingerprint: _fingerprint, ...identity } = stamped
+    expect(GuardHistoryEntrySchema.parse({ ...identity, summary })).toMatchObject({
+      pullRequest: 7,
+      origin: 'hosted',
+    })
+    const plain = GuardRunEnvelopeSchema.parse(envelope)
+    expect(plain.pullRequest).toBeUndefined()
+    expect(plain.origin).toBeUndefined()
+  })
+
+  it('rejects an origin outside the two runners and a non-positive pull request', () => {
+    expect(GuardRunEnvelopeSchema.safeParse({ ...envelope, origin: 'ci' }).success).toBe(false)
+    expect(GuardRunEnvelopeSchema.safeParse({ ...envelope, pullRequest: 0 }).success).toBe(false)
+  })
+
+  it('guardHistoryEntryOf carries the provenance and only the provenance that is set', () => {
+    const latest = (run: Record<string, unknown>) =>
+      GuardLatestSchema.parse({ run, summary, scenarios: [], sections: [] })
+    const stamped = latest({ ...envelope, pullRequest: 7, origin: 'hosted' })
+    expect(guardHistoryEntryOf(stamped)).toEqual({
+      runId: envelope.runId,
+      ranAt: envelope.ranAt,
+      branch: 'feature',
+      commit: 'head1',
+      summary: stamped.summary,
+      pullRequest: 7,
+      origin: 'hosted',
+    })
+    const bare = guardHistoryEntryOf(latest(envelope))
+    expect('pullRequest' in bare).toBe(false)
+    expect('origin' in bare).toBe(false)
   })
 })
 

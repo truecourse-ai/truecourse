@@ -164,10 +164,6 @@
       "types": "./dist/lib/repo-lifecycle.d.ts",
       "import": "./dist/lib/repo-lifecycle.js"
     },
-    "./lib/spec-conflicts-resolved-hook": {
-      "types": "./dist/lib/spec-conflicts-resolved-hook.d.ts",
-      "import": "./dist/lib/spec-conflicts-resolved-hook.js"
-    },
     "./lib/spec-inheritance-hook": {
       "types": "./dist/lib/spec-inheritance-hook.d.ts",
       "import": "./dist/lib/spec-inheritance-hook.js"

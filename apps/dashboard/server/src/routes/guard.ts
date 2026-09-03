@@ -5,7 +5,7 @@
  *
  *   GET /:id/guard/status        composed status summary (coverage / last run / last generate)
  *   GET /:id/guard/latest        the last run's per-scenario results (+ failure/evidence + runFlows)
- *   GET /:id/guard/history       append-only run-summary history
+ *   GET /:id/guard/history       the baseline run trend (?all=1: every stored run, PR heads included)
  *   GET /:id/guard/runs/:runId   one past run snapshot (+ runFlows)
  *   GET /:id/guard/report        the last `guard generate` report
  *   GET /:id/guard/coverage      per-section coverage join for ?doc=<path> (over the live doc)
@@ -142,9 +142,15 @@ router.get('/:id/guard/history', async (req: Request, res: Response, next: NextF
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
     // `?pr=` (EE): the PR's own run timeline — one run per pushed head, via the
-    // gate-heads seam — never the repo baseline history under a PR view.
+    // gate-heads seam — never the repo baseline history under a PR view. `?all=1`:
+    // every run the store holds, baseline and pull-request heads alike, each
+    // naming its pull request — the Runs list of a connected repository.
     const pr = prOf(req);
-    res.json(pr !== undefined ? await readGuardHistoryForPr(repo.path, pr) : await readGuardHistory(repo.path));
+    res.json(
+      pr !== undefined
+        ? await readGuardHistoryForPr(repo.path, pr)
+        : await readGuardHistory(repo.path, { all: req.query.all === '1' }),
+    );
   } catch (e) {
     next(e);
   }

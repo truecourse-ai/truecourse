@@ -18,6 +18,7 @@ import { createHash } from 'node:crypto';
 import { resetKvCacheStore } from '@truecourse/llm';
 import type { GuardVisualJudgeInput } from '@truecourse/guard-runner';
 import { getDefaultTransport, setDefaultTransport, type LlmRequest } from '@truecourse/shared/llm';
+import { isClaudeCodeTransport } from '../../packages/core/src/services/llm/install-transport.js';
 import {
   buildVisualJudgeUserPrompt,
   MAX_SCREENSHOT_BYTES,
@@ -311,9 +312,11 @@ describe('resolveVisualJudgeTransport — the judge respects the configured mode
     expect(getDefaultTransport()).toBe(transport);
   });
 
-  it('claude-code mode resolves nothing — the runner falls back to `claude -p`', () => {
+  it('claude-code mode resolves the Agent SDK one-shot transport and installs it', () => {
     // An empty home: no config.json is the claude-code default.
-    expect(resolveVisualJudgeTransport()).toBeUndefined();
-    expect(getDefaultTransport()).toBeUndefined();
+    const transport = resolveVisualJudgeTransport();
+    expect(transport).toBeTypeOf('function');
+    expect(isClaudeCodeTransport(transport)).toBe(true);
+    expect(getDefaultTransport()).toBe(transport);
   });
 });

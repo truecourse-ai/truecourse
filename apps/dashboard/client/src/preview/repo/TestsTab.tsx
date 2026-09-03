@@ -3,10 +3,14 @@
  * repositories. A row opens the test as its own page (`/tests/:flowId`, see
  * ./TestPage.tsx), never a nested column. Search by title; Status and Driver are
  * the filters.
+ *
+ * A CONNECTED repository reads the flows its generate stored on the server and
+ * re-reads them when a generate or a run of it lands on the socket; a fixture
+ * repository reads its fixtures.
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import type { GuardFlowListItem } from '@/preview/vendor/shared';
 import { guardDriver } from '@/preview/vendor/shared';
 import { CHIP_CLASS, PageHeader } from '@/preview/ui/bits';
@@ -16,7 +20,9 @@ import { useGuardDecisions } from '@/preview/vendor/hooks/useGuardDecisions';
 import { useGuardFlows } from '@/preview/vendor/hooks/useGuardFlows';
 import { GUARD_FLOW_STATUS_ORDER, GUARD_FLOW_STATUS_WORD, guardFlowPlainStatus } from '@/preview/vendor/lib/guard-flow-status';
 import type { Repo } from '@/preview/data/types';
+import { PREVIEW_BASE } from '@/preview/shell/base';
 import { useGuardTabJump } from './tab-jump';
+import { useGuardRefresh } from './use-guard-refresh';
 
 export function TestsTab({ repo }: { repo: Repo }) {
   useGuardTabJump();
@@ -28,8 +34,9 @@ export function TestsTab({ repo }: { repo: Repo }) {
   useEffect(() => {
     if (jumpTo) navigate(`/preview/repos/${repo.id}/tests/${encodeURIComponent(jumpTo)}`, { replace: true });
   }, [jumpTo, navigate, repo.id]);
-  const flows = useGuardFlows(repo.id, true);
-  const decisions = useGuardDecisions(repo.id, true);
+  const reloadKey = useGuardRefresh(repo, ['guard-generate', 'guard-run']);
+  const flows = useGuardFlows(repo.id, true, reloadKey);
+  const decisions = useGuardDecisions(repo.id, true, reloadKey);
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [driverFilter, setDriverFilter] = useState<string[]>([]);
@@ -142,7 +149,21 @@ export function TestsTab({ repo }: { repo: Repo }) {
             {rows.length === 0 && (
               <tr>
                 <td colSpan={5} className="px-6 py-8 text-center text-muted-foreground">
-                  {flows.loading ? 'Loading tests.' : 'No test matches.'}
+                  {flows.loading ? (
+                    'Loading tests.'
+                  ) : flows.error ? (
+                    flows.error
+                  ) : all.length === 0 ? (
+                    <>
+                      No tests generated yet. Generation runs in{' '}
+                      <Link to={`${PREVIEW_BASE}/repos/${repo.id}/activity`} className="text-primary hover:underline">
+                        Activity
+                      </Link>
+                      .
+                    </>
+                  ) : (
+                    'No test matches.'
+                  )}
                 </td>
               </tr>
             )}

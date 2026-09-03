@@ -313,6 +313,9 @@ async function runClaudeAgentSession(
 
   let preflightDone = false;
   let lastResult: SdkResultMessage | undefined;
+  // The provider holding this session back — a session that then ends with no
+  // outcome was REFUSED, not malformed, and the run must be able to tell.
+  let rateLimited: SdkRateLimitEvent['rate_limit_info'] | undefined;
   // The iterator THROWS after yielding an error-subtype result — always
   // wrapped, and a result we already hold wins over the trailing throw.
   try {
@@ -373,6 +376,7 @@ async function runClaudeAgentSession(
           // provider actually holding this session back.
           const info = (message as SdkRateLimitEvent).rate_limit_info;
           if (info?.status !== 'rejected') break;
+          rateLimited = info;
           onEvent({
             type: 'provider-retry',
             attempt: 1,
@@ -393,6 +397,18 @@ async function runClaudeAgentSession(
           // same way; the shell rewrites it into the semantic failure.
           if (wiring.interrupted()) return endedWithoutOutcome();
           if (lastResult.subtype === 'success') {
+            if (rateLimited) {
+              const type = rateLimited.rateLimitType ? ` (${rateLimited.rateLimitType})` : '';
+              return failure(
+                {
+                  kind: 'transport',
+                  detail: `rate limited${type}: the provider refused the session before it produced structured output`,
+                  class: 'provider',
+                  retryability: 'transient',
+                },
+                cursorOut(),
+              );
+            }
             return failure(
               {
                 kind: 'malformed',
