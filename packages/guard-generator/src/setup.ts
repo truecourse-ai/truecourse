@@ -422,9 +422,11 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   // phase is reported from here, against whichever step is running when the pass
   // actually starts.
   let mappedOnce: ReturnType<typeof mapSafely> | null = null
+  let mappedWithRecipe = false
   const mapOnce = (): ReturnType<typeof mapSafely> => {
     if (!mappedOnce) {
       phases.enter({ running: 'analyzing the repository', done: 'analysis' })
+      mappedWithRecipe = fs.existsSync(recipePath(repoRoot))
       mappedOnce = mapSafely(opts.interfaces)
     }
     return mappedOnce
@@ -571,6 +573,11 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   // ---- Step 2: detect. Deterministic, free, no LLM — always runs. ----------
   opts.onStep?.('detect')
   phases.step('detect')
+  // Discovery may have mapped the tree BEFORE the recipe existed (its route and
+  // datastore reads feed the proposal). A mapping with no recipe has no entry to
+  // probe, so a cli no extractor reads came out empty — map again now that the
+  // recipe is on disk and the verification build left its entry runnable.
+  if (mappedOnce && !mappedWithRecipe) mappedOnce = null
   const mapped = await mapOnce()
   const detectedExternals = mapped.externalServices ?? []
   const database = mapped.database ?? null

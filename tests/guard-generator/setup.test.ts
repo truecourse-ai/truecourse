@@ -411,6 +411,50 @@ describe('runGuardSetup — skip when settled (plan 03 step 8)', () => {
     expect(probe.calls).toBe(2)
   }, 120_000)
 
+  // Discovery maps the tree BEFORE a recipe exists (its route and datastore reads
+  // feed the proposal), and a mapping with no entry to probe empties the cli
+  // catalog of any program no extractor reads. The detect step must therefore
+  // map AGAIN once the derived recipe is on disk — and only then.
+  it('maps the tree again at detect when the first mapping predates the recipe', async () => {
+    const r = fixtureRepo()
+    const recipeSeen: boolean[] = []
+    const counting: InterfaceProvider = async () => {
+      recipeSeen.push(fs.existsSync(recipePath(r)))
+      return interfaces()()
+    }
+    const derived = await runGuardSetup(
+      baseOpts(r, {
+        interfaces: counting,
+        repair: async () => ({
+          proposal: {
+            build: 'true',
+            api: {
+              serve: ['node', path.join(r, 'server.mjs')],
+              healthPath: '/health',
+              env: { SEED_STORE: path.join(r, 'store.json') },
+            },
+          },
+        }),
+      }),
+    )
+    expect(derived.report.recipe.outcome).toBe('discovered')
+    expect(recipeSeen).toEqual([false, true])
+
+    // A recipe that already exists is mapped once — the repeat is not a habit.
+    const again = fixtureRepo()
+    writeRecipe(again)
+    const seenAgain: boolean[] = []
+    await runGuardSetup(
+      baseOpts(again, {
+        interfaces: async () => {
+          seenAgain.push(fs.existsSync(recipePath(again)))
+          return interfaces()()
+        },
+      }),
+    )
+    expect(seenAgain).toEqual([true])
+  }, 120_000)
+
   // A refresh re-derives, and discovery knows nothing about the blocks it never
   // proposes. Losing them would be silent data loss — and it would defeat the seed
   // confirmation too (a wiped `api.seed` is not a seed anyone is asked about).

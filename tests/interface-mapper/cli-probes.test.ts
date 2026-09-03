@@ -34,6 +34,12 @@ Commands:
   help [command]               display help for command
 `
 
+/** A hand-rolled cli's whole help: usage lines, no `Commands:` section. */
+const USAGE_ONLY_HELP = `Usage:
+  filecli write <path> <content>   Write content to a file
+  filecli read <path>              Read a file and print its content
+`
+
 const DEPLOY_HELP = `Usage: shipit deploy [options] <service>
 
 Deploy a service to an environment
@@ -241,6 +247,42 @@ Deploy services. Run shipit deploy to ship the current branch, or read
 the manual at https://example.com/docs for the full workflow.
 `
     expect(parseCliHelp(help).subcommands).toEqual([])
+    // Naming the program changes nothing here: `<service>` is a placeholder, and
+    // the prose mention of `shipit deploy` is not a usage line.
+    expect(parseCliHelp(help, { usageProgram: 'shipit' }).subcommands).toEqual([])
+  })
+
+  it('reads bare command words off Usage lines when told the program name', () => {
+    expect(parseCliHelp(USAGE_ONLY_HELP, { usageProgram: 'filecli' }).subcommands).toEqual(['write', 'read'])
+    // Without the name the section is never read — the dialect is gated on it.
+    expect(parseCliHelp(USAGE_ONLY_HELP).subcommands).toEqual([])
+  })
+
+  it('reads a usage line that shares the heading line, and ignores option placeholders', () => {
+    const help = `Usage: tasks add <title>\n       tasks [options] list\n`
+    expect(parseCliHelp(help, { usageProgram: 'tasks' }).subcommands).toEqual(['add'])
+  })
+})
+
+describe('deriveCliInterfacesFromProbes — the usage-only dialect', () => {
+  it('maps a hand-rolled cli that prints usage lines and no command section', async () => {
+    const usageError = (extra: string): CliProbeCapture => ({
+      stdout: '',
+      stderr: `${extra}${USAGE_ONLY_HELP}`,
+      exitCode: 2,
+    })
+    const exec: CliProbeExec = async (argv) => {
+      const args = argv.slice(ENTRY.length)
+      if (args.length === 0) return usageError('')
+      if (args[0] === '--help') return usageError("Error: unknown command '--help'\n")
+      // A command's own --help is just an argument error: no flags, no children.
+      return { stdout: '', stderr: `Error: ${args[0]} requires a <path> argument\n`, exitCode: 1 }
+    }
+    const interfaces = await deriveCliInterfacesFromProbes({ entry: ENTRY, exec, programName: 'filecli' })
+    expect(interfaces.map((j) => j.entry.command)).toEqual([
+      ['read'],
+      ['write'],
+    ])
   })
 })
 

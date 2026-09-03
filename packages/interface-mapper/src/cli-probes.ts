@@ -65,7 +65,9 @@ export async function deriveCliInterfacesFromProbes(opts: CliProbeOptions): Prom
 
   const bare = await probe([])
   const help = await probe(['--help'])
-  const root = parseCliHelp(`${transcript(bare)}\n${transcript(help)}`)
+  // The usage dialect is read at the ROOT only: a command's own help opens with
+  // `<prog> <command> …`, which names the command being probed, not a child.
+  const root = parseCliHelp(`${transcript(bare)}\n${transcript(help)}`, { usageProgram: programName })
 
   if (root.subcommands.length === 0) return [buildRootCliInterface(programName, root.flags)]
 
@@ -120,16 +122,30 @@ const EMPTY_HELP: ParsedCliHelp = { subcommands: [], flags: [] }
 
 /** A section heading introducing a command list, across the common help dialects. */
 const COMMANDS_HEADING = /^[a-z ]*\b(sub)?commands\b\s*:?\s*$/i
+/** A `Usage:` heading, with or without the first usage line on the same line. */
+const USAGE_HEADING = /^usage\s*:?\s*(.*)$/i
 /** A command word in a help listing (`add`, `db:migrate`, `check-config`). */
 const HELP_COMMAND_WORD = /^[a-z][a-z0-9:_-]+$/i
 
+export interface ParseCliHelpOptions {
+  /**
+   * The program's own name. When given, a `Usage:` section is read as well: each
+   * usage line of the form `<program> <word> …` names `<word>` as a command — the
+   * hand-rolled dialect (`filecli write <path> <content>`) that prints no
+   * `Commands:` section at all. Without the name the section is never read, so
+   * `Usage: prog <service>` and prose stay exactly as silent as before.
+   */
+  usageProgram?: string
+}
+
 /**
  * Read the command list and flag set out of one help transcript. Commands come
- * from an explicit `Commands:` / `Available Commands:` / `SUBCOMMANDS:` section or
- * from an argparse-style `{add,list,done}` brace list — never from a blind scan of
- * indented lines, which turns wrapped prose into phantom commands.
+ * from an explicit `Commands:` / `Available Commands:` / `SUBCOMMANDS:` section,
+ * from an argparse-style `{add,list,done}` brace list, or — given the program's
+ * name — from `Usage:` lines that invoke it with a bare command word; never from
+ * a blind scan of indented lines, which turns wrapped prose into phantom commands.
  */
-export function parseCliHelp(text: string): ParsedCliHelp {
+export function parseCliHelp(text: string, opts: ParseCliHelpOptions = {}): ParsedCliHelp {
   const lines = text.split('\n')
   const subcommands: string[] = []
   const seen = new Set<string>()
@@ -143,15 +159,27 @@ export function parseCliHelp(text: string): ParsedCliHelp {
   // Section lines, grouped so a wrapped description (indented deeper than its own
   // command) cannot register as a command of its own.
   let inCommands = false
+  let inUsage = false
   const sectionLines: { indent: number; text: string }[] = []
+  const usageLines: string[] = []
   for (const line of lines) {
     if (line.trim() === '') continue
     const indent = line.length - line.trimStart().length
     if (indent === 0) {
       inCommands = COMMANDS_HEADING.test(line.trim())
+      const usage = USAGE_HEADING.exec(line.trim())
+      inUsage = usage !== null
+      if (usage?.[1]) usageLines.push(usage[1].trim())
       continue
     }
     if (inCommands) sectionLines.push({ indent, text: line.trim() })
+    if (inUsage) usageLines.push(line.trim())
+  }
+  if (opts.usageProgram) {
+    for (const usage of usageLines) {
+      const [program, word] = usage.split(/\s+/)
+      if (program === opts.usageProgram && word) add(word)
+    }
   }
   if (sectionLines.length > 0) {
     const base = Math.min(...sectionLines.map((l) => l.indent))
