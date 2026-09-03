@@ -24,8 +24,17 @@ import { useSessionRuns } from '@/hooks/useSessionRuns';
 import { useRunStream } from '@/hooks/useRunStream';
 import { RunConversation } from './RunConversation';
 import { RunsIndex } from './RunsIndex';
+import type { RunStarter } from './run-model';
 
-export function SessionsActivityView({ repoId }: { repoId: string }) {
+export function SessionsActivityView({
+  repoId,
+  starter,
+}: {
+  repoId: string;
+  /** Given when the mounting surface can start a run itself: an empty store
+   *  then offers the first one, and a run that ended badly offers another. */
+  starter?: RunStarter;
+}) {
   const { runs, error, refetch } = useSessionRuns(repoId, true);
   const [params, setParams] = useSearchParams();
 
@@ -95,9 +104,18 @@ export function SessionsActivityView({ repoId }: { repoId: string }) {
         openSessionId={sesParam}
         onOpenSession={openSession}
         onBack={() => openRun(null)}
+        {...(starter ? { starter } : {})}
       />
     );
   }
 
-  return <RunsIndex runs={runs} error={error} notFound={notFound} onOpen={openRun} />;
+  return (
+    <RunsIndex
+      runs={runs}
+      error={error}
+      notFound={notFound}
+      onOpen={openRun}
+      {...(starter ? { starter } : {})}
+    />
+  );
 }

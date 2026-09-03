@@ -32,7 +32,8 @@ export class ApiError extends Error {
   }
 }
 
-async function fetchApi<T>(
+/** The client's one transport: JSON in, JSON out, `ApiError` on any non-2xx. */
+export async function fetchApi<T>(
   endpoint: string,
   options?: RequestInit,
 ): Promise<T> {
@@ -70,7 +71,7 @@ export type RepoResponse = {
   id: string;
   name: string;
   path: string;
-  /** Set when the repo was connected by git URL; `path` is then a managed clone. */
+  /** Set when the repo was connected through a provider; `path` is then a managed clone. */
   remoteUrl?: string | null;
   lastAnalyzed?: string;
   /** Most recent lifecycle event across features (home-page card), or null. */
@@ -193,18 +194,6 @@ export function addRepo(path: string): Promise<RepoResponse> {
   return fetchApi<RepoResponse>('/api/repos', {
     method: 'POST',
     body: JSON.stringify({ path }),
-  });
-}
-
-/**
- * Connect a public repository by its https git URL. The server clones it and
- * registers the clone, so the call is slow (seconds to minutes) — callers must
- * show a pending state. A 409 means the repo is already connected.
- */
-export function connectRepo(url: string): Promise<RepoResponse> {
-  return fetchApi<RepoResponse>('/api/repos/connect', {
-    method: 'POST',
-    body: JSON.stringify({ url }),
   });
 }
 

@@ -3,7 +3,7 @@
  *
  * Workspace Knowledge is the curated-corpus spec derived from connected tools
  * (Confluence/…), shared by every repo in the workspace. Every route is scoped to
- * the signed-in user's WorkOS organization (`req.eeUser.organizationId`).
+ * the signed-in user's WorkOS organization (`req.user.organizationId`).
  *
  * Two stages: `/estimate` ("Sync now") is the only stage that talks to a source —
  * it fetches every doc, PERSISTS each body (content-addressed) + reconciles the
@@ -15,7 +15,7 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import type { AuthUser, EeServerRegistry } from '@truecourse/shared';
-import type { EeDb } from '@truecourse/ee-db';
+import type { Db } from '@truecourse/db';
 import { PgKnowledgeStore, ActiveJobExistsError } from '@truecourse/ee-data-store';
 import { IntegrationStore } from '../integrations/store.js';
 import { CONNECTORS } from './connectors/registry.js';
@@ -31,7 +31,7 @@ import { registerKnowledgeSpecRoutes, parsePageParams } from './spec-routes.js';
 
 /** The OSS auth gate attaches the resolved user; read it without the augmentation. */
 function orgIdOf(req: Request): string | null {
-  const user = (req as Request & { eeUser?: AuthUser }).eeUser;
+  const user = (req as Request & { user?: AuthUser }).user;
   return user?.organizationId ?? null;
 }
 
@@ -40,7 +40,7 @@ function orgIdOf(req: Request): string | null {
 // gets a clean 400 from the registry lookup below.
 const syncSchema = z.object({ kind: z.string().min(1) });
 
-export function createKnowledgeRouter(db: EeDb, masterSecret: string, jobs: JobsApi): Router {
+export function createKnowledgeRouter(db: Db, masterSecret: string, jobs: JobsApi): Router {
   const router = Router();
   const knowledge = new PgKnowledgeStore(db);
   const integrations = new IntegrationStore(db, masterSecret);
@@ -179,7 +179,7 @@ export function createKnowledgeRouter(db: EeDb, masterSecret: string, jobs: Jobs
 /** Mount the Knowledge API. Protected by default (behind the enterprise auth gate). */
 export function registerKnowledge(
   registry: EeServerRegistry,
-  opts: { db: EeDb; masterSecret: string; jobs: JobsApi },
+  opts: { db: Db; masterSecret: string; jobs: JobsApi },
 ): void {
   registry.registerRouter('/api/ee/knowledge', createKnowledgeRouter(opts.db, opts.masterSecret, opts.jobs));
 }

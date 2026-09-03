@@ -2,7 +2,7 @@
  * The Admin console API (enterprise) — a cross-org operator surface.
  *
  * Every route is gated by `requireOperator`: only a platform operator (a WorkOS
- * user with `metadata.role === 'operator'`, surfaced as `eeUser.isOperator`) may
+ * user with `metadata.role === 'operator'`, surfaced as `user.isOperator`) may
  * call it. Operators see ALL workspaces' data; an optional `?org=` narrows to one
  * tenant. Regular members never reach these routes (403) and never see the nav.
  *
@@ -15,17 +15,17 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import type { AuthUser, EeServerRegistry, TraceStatus, JobStatus } from '@truecourse/shared';
 import { log } from '@truecourse/core/lib/logger';
-import type { EeDb } from '@truecourse/ee-db';
+import type { Db } from '@truecourse/db';
 import { JobStore, type PgTraceStore } from '@truecourse/ee-data-store';
 import { captureEeException } from '../observability/sentry.js';
 
-function eeUserOf(req: Request): AuthUser | undefined {
-  return (req as Request & { eeUser?: AuthUser }).eeUser;
+function userOf(req: Request): AuthUser | undefined {
+  return (req as Request & { user?: AuthUser }).user;
 }
 
 /** Gate: platform operators only. Everyone else gets 403. */
 function requireOperator(req: Request, res: Response, next: NextFunction): void {
-  if (!eeUserOf(req)?.isOperator) {
+  if (!userOf(req)?.isOperator) {
     res.status(403).json({ error: 'Operator access required.' });
     return;
   }
@@ -43,7 +43,7 @@ const jobStatus = (v: unknown): JobStatus | undefined =>
   v === 'queued' || v === 'running' || v === 'succeeded' || v === 'failed' ? v : undefined;
 
 export interface RegisterAdminOptions {
-  db: EeDb;
+  db: Db;
   /** The LLM trace store (built in `installEeStores`, shared with the transport). */
   traceStore: PgTraceStore;
 }
@@ -57,7 +57,7 @@ export function createAdminRouter(opts: RegisterAdminOptions): Router {
 
   const fail = (req: Request, res: Response, err: unknown, route: string): void => {
     log.error(`[ee-admin] ${route} failed: ${(err as Error).message}`);
-    captureEeException(err, { component: 'admin', orgId: eeUserOf(req)?.organizationId ?? undefined, route });
+    captureEeException(err, { component: 'admin', orgId: userOf(req)?.organizationId ?? undefined, route });
     res.status(500).json({ error: 'admin request failed' });
   };
 

@@ -16,7 +16,7 @@
  */
 
 import { run, type Runner, type Task } from 'graphile-worker';
-import type { EeDb } from '@truecourse/ee-db';
+import type { Db } from '@truecourse/db';
 import { JobStore, NotificationStore, PgKnowledgeStore, WorkspaceSettingsStore } from '@truecourse/ee-data-store';
 import { runWithTrace, type TraceContext } from '@truecourse/ee-llm';
 import { log } from '@truecourse/core/lib/logger';
@@ -131,7 +131,7 @@ function stepBridge(
 }
 
 export interface StartWorkerDeps {
-  db: EeDb;
+  db: Db;
   connectionString: string;
   masterSecret: string;
   jobStore: JobStore;
@@ -251,7 +251,7 @@ export interface ConflictsEmailSeam {
  * tab) is resolved best-effort — omitted when the repo has no dashboard slug yet.
  */
 async function emailConflictsBlocked(
-  db: EeDb,
+  db: Db,
   repoFullName: string,
   conflicts: number,
   seam: ConflictsEmailSeam,
@@ -302,7 +302,7 @@ export function pendingFromEstimate(
 
 /** Shared deps the workspace knowledge job bodies close over (built in startWorker). */
 interface JobBodyDeps {
-  db: EeDb;
+  db: Db;
   integrations: IntegrationStore;
   knowledge: PgKnowledgeStore;
 }
@@ -442,7 +442,7 @@ function knowledgeEstimateJob(d: JobBodyDeps): JobDefinition<EstimateJobPayload>
 /** Initial / refresh scan of a connected repo: spec (conflict detection) + the
  *  Code Quality analyze pass — all via runBaseline. */
 function repoBaselineJob(
-  db: EeDb,
+  db: Db,
   onSettled?: (payload: BaselineJobPayload, outcome: JobOutcomeStatus) => Promise<void>,
 ): JobDefinition<BaselineJobPayload> {
   return {
@@ -515,7 +515,7 @@ function repoBaselineJob(
 /** Deps the guard-generate job needs: the shared db (repo-link lookup for the
  *  conflicts email) + the onboarding pipeline + the conflicts-email seam. */
 export interface GuardGenerateJobDeps extends ConflictsEmailSeam {
-  db: EeDb;
+  db: Db;
   pipeline: GuardOnboardingPipeline;
   onSettled?: (
     payload: GuardGenerateJobPayload,
@@ -607,7 +607,7 @@ export function guardGenerateJob(deps: GuardGenerateJobDeps): JobDefinition<Guar
  *  pipeline. `octokitFor` is injectable so tests fake the crash-path Check post;
  *  the default builds an installation client from the app config per invocation. */
 export interface GuardGateJobDeps {
-  db: EeDb;
+  db: Db;
   pipeline: GuardGatePipeline;
   octokitFor?: (installationId: number) => OctokitClient;
 }
@@ -789,7 +789,7 @@ export function guardBaselineJob(deps: GuardBaselineJobDeps): JobDefinition<Guar
  *  corpus injected + `force`) and `octokitFor` (the checkbox-comment updater) are
  *  injectable so tests drive the body without a network or the executor. */
 export interface GuardSpecRegenJobDeps extends ConflictsEmailSeam {
-  db: EeDb;
+  db: Db;
   headRegenPipeline: GuardHeadRegenPipeline;
   regate?: (corpus: GuardGateCorpus, gateReq: GuardGateRunRequest, signal?: AbortSignal) => Promise<void>;
   octokitFor?: (installationId: number) => OctokitClient;
@@ -965,7 +965,7 @@ function registerJob<P extends { jobId: string }>(
  *  onboarding pipeline (faked in tests; `defaultGuardOnboardingPipeline` live).
  *  `signal` stands in for graphile's per-job `helpers.abortSignal`. */
 export interface RunGuardGenerateDeps extends ConflictsEmailSeam {
-  db: EeDb;
+  db: Db;
   jobStore: JobStore;
   notifications: NotificationStore;
   pipeline: GuardOnboardingPipeline;
@@ -998,7 +998,7 @@ export async function runGuardGenerate(
  *  fakes the crash-path error-Check post; `signal` stands in for graphile's
  *  per-job `helpers.abortSignal`. */
 export interface RunGuardGateDeps {
-  db: EeDb;
+  db: Db;
   jobStore: JobStore;
   notifications: NotificationStore;
   pipeline: GuardGatePipeline;
@@ -1027,7 +1027,7 @@ export async function runGuardGate(
  *  `onSettled` stands in for the pending-buffer replay; `signal` for graphile's
  *  per-job `helpers.abortSignal`. */
 export interface RunGuardBaselineDeps {
-  db: EeDb;
+  db: Db;
   jobStore: JobStore;
   notifications: NotificationStore;
   pipeline: GuardBaselinePipeline;
@@ -1057,7 +1057,7 @@ export async function runGuardBaseline(
 /** Deps the exported `runGuardSpecRegen` test seam needs — the stores + the
  *  head-regen pipeline (faked in tests) + the injectable re-gate / comment updater. */
 export interface RunGuardSpecRegenDeps extends ConflictsEmailSeam {
-  db: EeDb;
+  db: Db;
   jobStore: JobStore;
   notifications: NotificationStore;
   headRegenPipeline: GuardHeadRegenPipeline;
@@ -1092,7 +1092,7 @@ export async function runGuardSpecRegen(
 /** Deps the exported `runKnowledgeEstimate` / `runKnowledgeSync` test seams need —
  *  the job-body deps plus the harness stores. */
 export interface RunKnowledgeDeps {
-  db: EeDb;
+  db: Db;
   jobStore: JobStore;
   notifications: NotificationStore;
   integrations: IntegrationStore;

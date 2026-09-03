@@ -9,7 +9,7 @@
 #   export DATABASE_URL='postgres://tcadmin:<pw>@<pgFqdn>:5432/truecourse?sslmode=require'
 #   export TRUECOURSE_SECRET_KEY="$(node -e "console.log(require('crypto').randomBytes(32).toString('base64'))")"
 #   export WORKOS_API_KEY=... WORKOS_CLIENT_ID=... WORKOS_COOKIE_PASSWORD=... \
-#          WORKOS_REDIRECT_URI=https://<app-fqdn>/api/ee/auth/callback WORKOS_APP_URL=https://<app-fqdn>
+#          WORKOS_REDIRECT_URI=https://<app-fqdn>/api/auth/callback WORKOS_APP_URL=https://<app-fqdn>
 #   export GITHUB_APP_ID=... GITHUB_APP_PRIVATE_KEY="$(base64 -i app.private-key.pem | tr -d '\n')" \
 #          GITHUB_APP_WEBHOOK_SECRET=... GITHUB_APP_SLUG=truecourse-gate
 #   ./infra/azure/set-secrets.sh

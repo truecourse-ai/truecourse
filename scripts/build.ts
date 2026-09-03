@@ -78,8 +78,11 @@ fs.mkdirSync(DIST, { recursive: true });
 // its @truecourse/llm dependency wasn't built yet.
 console.log('\n=== Building packages ===');
 run('pnpm --filter @truecourse/shared build');
+run('pnpm --filter @truecourse/db build');
 run('pnpm --filter @truecourse/llm build');
+run('pnpm --filter @truecourse/agent-loop build');
 run('pnpm --filter @truecourse/llm-api build');
+run('pnpm --filter @truecourse/llm-claude-agent build');
 run('pnpm --filter @truecourse/analyzer build');
 run('pnpm --filter @truecourse/spec-consolidator build');
 run('pnpm --filter @truecourse/contract-verifier build');
@@ -87,6 +90,8 @@ run('pnpm --filter @truecourse/contract-extractor build');
 run('pnpm --filter @truecourse/guard-runner build');
 run('pnpm --filter @truecourse/guard-generator build');
 run('pnpm --filter @truecourse/core build');
+run('pnpm --filter @truecourse/data-store build');
+run('pnpm --filter @truecourse/github-app build');
 
 // 2. Build dashboard client (static export)
 console.log('\n=== Building dashboard client (static export) ===');
@@ -119,6 +124,12 @@ run(
     '--banner:js="import { createRequire } from \'node:module\'; const require = createRequire(import.meta.url);"',
   ].join(' '),
 );
+
+// 3b. Copy the drizzle migrations next to the bundle. The server runs them at
+// boot; @truecourse/db is inlined into server.mjs, whose MIGRATIONS_DIR probe
+// finds them at `<install>/drizzle` (see packages/db/src/db.ts).
+console.log('\n=== Copying drizzle migrations ===');
+copyDir(path.join(ROOT, 'packages/db/drizzle'), path.join(DIST, 'drizzle'));
 
 // 4. Copy static frontend
 console.log('\n=== Copying frontend to dist/public/ ===');

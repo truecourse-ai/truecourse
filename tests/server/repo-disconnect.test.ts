@@ -1,0 +1,175 @@
+import { describe, it, expect, beforeAll, afterEach, afterAll, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import request from 'supertest';
+import type { Express } from 'express';
+
+// app.ts pulls the analyses router, which imports the socket-handlers module;
+// stub it so nothing tries to open a real socket (same shape as the other
+// route suites).
+vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../apps/dashboard/server/src/socket/handlers')>();
+  class NoopTracker {
+    start() {}
+    done() {}
+    error() {}
+    detail() {}
+  }
+  return {
+    ...actual,
+    emitAnalysisProgress: vi.fn(),
+    emitAnalysisComplete: vi.fn(),
+    emitViolationsReady: vi.fn(),
+    emitFilesChanged: vi.fn(),
+    emitAnalysisCanceled: vi.fn(),
+    createSocketTracker: () => new NoopTracker(),
+    createSocketSpecTracker: () => new NoopTracker(),
+    createSocketLlmEstimateHandler: () => () => Promise.resolve(true),
+    createSocketStashConfirmHandler: () => () => Promise.resolve('stash'),
+    emitSpecProgress: vi.fn(),
+    emitSpecComplete: vi.fn(),
+  };
+});
+
+// The scan engine, stubbed so a test can hold a scan open and watch the
+// disconnect cancel it. The stub gets the real options, `signal` included —
+// cancellation is what a disconnect under a scan relies on.
+const scan = vi.hoisted(() => ({
+  impl: (async () => ({})) as (
+    repoRoot: string,
+    options?: { signal?: AbortSignal },
+  ) => Promise<unknown>,
+}));
+
+vi.mock('@truecourse/core/commands/spec-in-process', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@truecourse/core/commands/spec-in-process')>();
+  return {
+    ...actual,
+    curateInProcess: (repoRoot: string, options?: { signal?: AbortSignal }) =>
+      scan.impl(repoRoot, options),
+  };
+});
+
+import { createTestApp, TEST_ORG } from '../helpers/test-app';
+import {
+  readRegistry,
+  registerProject,
+  unregisterProject,
+} from '@truecourse/core/config/registry';
+import { createSessionRun } from '@truecourse/core/lib/sessions-store';
+import { startOnboardingScan, isSpecScanRunning } from '../../apps/dashboard/server/src/services/onboarding-scan.service';
+
+/**
+ * Disconnecting a repository (`DELETE /api/repos/:id`).
+ *
+ * There is no working copy to clean up — durable state lives in the stores and
+ * runs clone ephemerally — so what disconnect owns is the RUNNING SCAN: one
+ * this process started is cancelled to let the disconnect through; one another
+ * process owns still blocks it. The GitHub-unlink half of disconnect lives in
+ * tests/dashboard-server/github-mount.test.ts.
+ */
+
+const tmpDirs: string[] = [];
+
+function makeTmpDir(prefix: string): string {
+  // realpath: macOS /tmp is a symlink, and the registry stores resolved paths.
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+  tmpDirs.push(dir);
+  return dir;
+}
+
+const git = (cwd: string, ...args: string[]): string =>
+  execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim();
+
+/** A git repo standing in for the scan's work tree. */
+function makeGitRepo(prefix: string): string {
+  const repo = makeTmpDir(prefix);
+  git(repo, 'init', '--initial-branch=main');
+  // The suite hides the developer's global git config, so identity is per-repo.
+  git(repo, 'config', 'user.name', 'Test');
+  git(repo, 'config', 'user.email', 'test@example.com');
+  fs.writeFileSync(path.join(repo, 'README.md'), '# one\n');
+  git(repo, 'add', '.');
+  git(repo, 'commit', '-m', 'one');
+  return repo;
+}
+
+const settle = (ms = 50): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+async function until(predicate: () => boolean, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate() && Date.now() < deadline) await settle(10);
+}
+
+let app: Express;
+
+beforeAll(() => {
+  // The registry hangs off TRUECOURSE_HOME; point it at a throwaway dir.
+  process.env.TRUECOURSE_HOME = makeTmpDir('tc-disconnect-home-');
+  app = createTestApp();
+});
+
+afterEach(async () => {
+  for (const entry of await readRegistry()) await unregisterProject(entry.slug);
+  scan.impl = async () => ({});
+});
+
+afterAll(() => {
+  for (const dir of tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
+
+describe('POST /api/repos/connect', () => {
+  it('is gone — a repository arrives through the GitHub App, not a pasted URL', async () => {
+    await request(app)
+      .post('/api/repos/connect')
+      .send({ url: 'https://github.com/acme/widgets' })
+      .expect(404);
+
+    expect(await readRegistry()).toHaveLength(0);
+  });
+});
+
+describe('DELETE /api/repos/:id', () => {
+  it('cancels the scan THIS process is running and disconnects anyway', async () => {
+    const local = makeGitRepo('tc-disconnect-scanning-');
+    const entry = await registerProject(local);
+
+    // A scan that ends only when it is cancelled — the disconnect's job.
+    let reached = false;
+    scan.impl = (_repoRoot, options) =>
+      new Promise((_resolve, reject) => {
+        reached = true;
+        const stop = (): void => reject(new Error('the spec scan was cancelled'));
+        if (options?.signal?.aborted) stop();
+        else options?.signal?.addEventListener('abort', stop, { once: true });
+      });
+
+    expect(startOnboardingScan(entry.slug, local, TEST_ORG)).toBe(true);
+    await until(() => reached);
+    expect(isSpecScanRunning(local)).toBe(true);
+
+    // Disconnecting IS the answer to "is this scan still wanted": it is not.
+    await request(app).delete(`/api/repos/${entry.slug}`).expect(204);
+
+    expect(isSpecScanRunning(local)).toBe(false);
+    // The source tree is not the server's to delete.
+    expect(fs.existsSync(local)).toBe(true);
+    expect(await readRegistry()).toHaveLength(0);
+  });
+
+  it('refuses while ANOTHER process is scanning — that scan is not ours to stop', async () => {
+    const local = makeGitRepo('tc-disconnect-foreign-');
+    const entry = await registerProject(local);
+    // A run record left `running` by a live process: a CLI `spec scan` in the
+    // same tree. Nothing here can abort it, so the repo must stay connected.
+    createSessionRun(local, { command: 'spec-scan', gitRef: 'HEAD' });
+
+    const refused = await request(app).delete(`/api/repos/${entry.slug}`).expect(409);
+    expect(refused.body.error).toMatch(/another process/i);
+    expect((await readRegistry()).map((e) => e.slug)).toEqual([entry.slug]);
+  });
+});

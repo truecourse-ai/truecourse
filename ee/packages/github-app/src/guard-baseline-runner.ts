@@ -18,7 +18,7 @@ import path from 'node:path';
 import type { GuardStore, RepoRef } from '@truecourse/core/lib/guard-store';
 import type { GuardExecReport, GuardExecutor } from '@truecourse/guard-runner';
 import { boundedCloneSignal, cloneRepoAtCommit } from './guard-onboarding.js';
-import type { GithubAuth } from './github.js';
+import type { GithubAuth } from '@truecourse/github-app';
 import {
   defaultLoadCorpus,
   GUARD_GATE_RUN_TIMEOUT_MS,

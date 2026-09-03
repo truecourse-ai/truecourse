@@ -9,9 +9,12 @@
  * route degrades to a clean 404.
  */
 
-import type { GithubAppConfig } from './config.js';
-import type { GateStore } from './store/types.js';
-import { installationOctokit, splitRepo } from './octokit.js';
+import {
+  type GithubAppConfig,
+  type GateStore,
+  installationOctokit,
+  splitRepo,
+} from '@truecourse/github-app';
 
 export async function readRepoDocFromGithub(
   cfg: GithubAppConfig,

@@ -4,7 +4,7 @@ import path from 'node:path';
 import request from 'supertest';
 import { type Express } from 'express';
 import { z } from 'zod';
-import { createApp } from '../../apps/dashboard/server/src/app';
+import { createTestApp } from '../helpers/test-app';
 import {
   GuardFlowDetailSchema,
   GuardFlowsViewCoreSchema,
@@ -340,7 +340,7 @@ describe('Guard flow read surfaces', () => {
   beforeEach(async () => {
     fixture = await setupTestFixture();
     root = fixture.repoPath;
-    app = createApp({ serveStatic: false });
+    app = createTestApp();
   });
   afterEach(async () => {
     await teardownTestFixture(fixture.project.slug);

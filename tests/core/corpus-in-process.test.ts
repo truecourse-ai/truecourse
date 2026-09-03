@@ -171,6 +171,35 @@ describe('curateInProcess', () => {
     expect(activeAt('estimate')).toBeLessThan(activeAt('discover'));
   });
 
+  // The confirm can wait on a human for minutes, and disconnecting the repo
+  // aborts the scan while it waits — the wait must observe the signal, or the
+  // cancel times out and the poisoned scan dies later, when someone confirms.
+  it('a cancel reaches a scan parked at the estimate confirm — it ends now, aborted', async () => {
+    const controller = new AbortController();
+    let confirmOpened!: () => void;
+    const opened = new Promise<void>((resolve) => (confirmOpened = resolve));
+
+    const scan = curateInProcess(repo, {
+      signal: controller.signal,
+      // A confirm nobody ever answers — the estimate modal sitting open.
+      onLlmEstimate: () =>
+        new Promise<boolean>(() => {
+          confirmOpened();
+        }),
+      ...scanOptions(),
+    });
+    scan.catch(() => {}); // asserted below; don't let the rejection go unhandled first
+
+    await opened;
+    controller.abort();
+
+    await expect(scan).rejects.toThrow('the spec scan was cancelled');
+    // The gate sits before the run record, so the aborted scan left none —
+    // and no corpus.
+    expect(fs.existsSync(path.join(repo, '.truecourse', 'sessions'))).toBe(false);
+    expect(readCorpus(repo)).toBeNull();
+  });
+
   it('reports no estimate phase when the caller does not gate on one', async () => {
     const frames: AnalysisStep[][] = [];
     const tracker = new StepTracker(

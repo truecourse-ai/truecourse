@@ -21,7 +21,7 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
   };
 });
 
-import { createApp } from '../../apps/dashboard/server/src/app';
+import { createTestApp } from '../helpers/test-app';
 import { emitSpecComplete } from '../../apps/dashboard/server/src/socket/handlers';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 
@@ -51,7 +51,7 @@ describe('Guard externals routes', () => {
     fixture = await setupTestFixture();
     root = fixture.repoPath;
     vi.mocked(emitSpecComplete).mockClear();
-    app = createApp({ serveStatic: false });
+    app = createTestApp();
   });
   afterEach(async () => {
     await teardownTestFixture(fixture.project.slug);

@@ -10,7 +10,12 @@ import {
   readActiveViolationsForAnalysisId,
   resolveGraphForAnalysisId,
 } from '@truecourse/core/services/violation-query';
-import { ensureLlmTransport } from '../services/llm-transport.service.js';
+import {
+  LlmNotConfiguredError,
+  LlmProbeFailedError,
+  orgOf,
+  startWorkspaceLlm,
+} from '../services/workspace-llm.service.js';
 
 const router: Router = Router();
 
@@ -74,11 +79,22 @@ router.post(
       const existing = await getFlowFromLatest(repo.path, flowId);
       if (!existing) throw createAppError('Flow not found', 404);
 
-      // Refresh the saved LLM selection (mtime-cached — a `stat` when unchanged),
-      // so a `config llm setup` since boot needs no restart. An unusable API
-      // config surfaces like any enrichment failure.
-      ensureLlmTransport();
-      await enrichFlowWithLLM(repo.path, flowId);
+      // The asking workspace's provider, loaded and proved before any spend.
+      let transport;
+      try {
+        transport = (await startWorkspaceLlm(orgOf(req))).transport();
+      } catch (e) {
+        if (e instanceof LlmNotConfiguredError) {
+          res.status(409).json({ error: e.code, message: e.message });
+          return;
+        }
+        if (e instanceof LlmProbeFailedError) {
+          res.status(502).json({ error: e.code, message: e.message });
+          return;
+        }
+        throw e;
+      }
+      await enrichFlowWithLLM(repo.path, flowId, transport);
 
       const enriched = await getFlowFromLatest(repo.path, flowId);
       res.json(enriched);

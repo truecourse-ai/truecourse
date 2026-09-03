@@ -1,6 +1,7 @@
-# Boot the image locally (app + Postgres) to validate the build before it ships
-# to Azure Container Apps. Every credential comes from the environment — nothing
-# is hardcoded here. Put values in a gitignored .env (compose auto-loads it) or
+# Self-host TrueCourse: app + Postgres in one `docker compose up --build`.
+# Every credential comes from the environment — nothing is hardcoded here.
+# Bring a WorkOS environment (session auth) and a GitHub App (repo connect +
+# webhooks); put values in a gitignored .env (compose auto-loads it) or
 # export them inline:
 #
 #   POSTGRES_PASSWORD=$(openssl rand -hex 16) \
@@ -9,9 +10,10 @@
 #   GITHUB_APP_ID=... GITHUB_APP_PRIVATE_KEY=... GITHUB_APP_WEBHOOK_SECRET=... GITHUB_APP_SLUG=... \
 #   docker compose up --build
 #
-# EE activates when WORKOS_* + TRUECOURSE_SECRET_KEY are present; with WORKOS_*
-# unset it runs the community (file-based) edition. In EE the GitHub App PR gate
-# is required — all four GITHUB_APP_* vars must be set or the server won't boot.
+# WORKOS_* and DATABASE_URL are required — the server boots authenticated and
+# on Postgres or not at all. For just a local database (the usual dev case):
+#
+#   POSTGRES_PASSWORD=truecourse docker compose up -d db
 
 services:
   db:
@@ -23,6 +25,10 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-truecourse}
     volumes:
       - tc-pgdata:/var/lib/postgresql/data
+    ports:
+      # Published for local dev (`pnpm dev` reads DATABASE_URL=localhost:5432).
+      # Loopback-only so the database is never reachable from the network.
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-truecourse}"]
       interval: 5s
@@ -40,17 +46,19 @@ services:
       - "3001:3001"
     environment:
       PORT: "3001"
-      TRUECOURSE_EDITION: enterprise
       DATABASE_URL: postgres://${POSTGRES_USER:-truecourse}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-truecourse}
-      # Required for EE — generate a strong 32+ char value (see header).
+      # Generate a strong 32+ char value (see header).
       TRUECOURSE_SECRET_KEY: ${TRUECOURSE_SECRET_KEY:?set a 32+ char secret}
-      # SSO (WorkOS). Leave unset to run the community edition instead.
+      # Session auth (WorkOS) — required; the server refuses to boot without it.
       WORKOS_API_KEY: ${WORKOS_API_KEY:-}
       WORKOS_CLIENT_ID: ${WORKOS_CLIENT_ID:-}
       WORKOS_COOKIE_PASSWORD: ${WORKOS_COOKIE_PASSWORD:-}
       WORKOS_REDIRECT_URI: ${WORKOS_REDIRECT_URI:-}
       WORKOS_APP_URL: ${WORKOS_APP_URL:-}
-      # GitHub App PR gate — required for EE; the server refuses to boot without it.
+      # GitHub App connect. The server itself treats these as optional (it boots
+      # and answers /api/github with a 503 naming them), but the image exists to
+      # serve connected repos, so the compose contract requires all four up
+      # front rather than shipping a container that can't connect.
       GITHUB_APP_ID: ${GITHUB_APP_ID:?set the GitHub App id}
       GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:?set the GitHub App private key}
       GITHUB_APP_WEBHOOK_SECRET: ${GITHUB_APP_WEBHOOK_SECRET:?set the GitHub App webhook secret}

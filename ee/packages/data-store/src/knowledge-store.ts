@@ -12,8 +12,8 @@
  */
 
 import { and, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm';
-import { knowledgeDocuments, type EeDb } from '@truecourse/ee-db';
-import { ContentStore, contentScope } from './content-store.js';
+import { knowledgeDocuments, type Db } from '@truecourse/db';
+import { ContentStore, contentScope } from '@truecourse/data-store';
 
 export interface KnowledgeDocRow {
   workspaceOrgId: string;
@@ -42,7 +42,7 @@ export interface ListDocumentsPageOptions {
 export class PgKnowledgeStore {
   private readonly content: ContentStore;
 
-  constructor(private readonly db: EeDb) {
+  constructor(private readonly db: Db) {
     this.content = new ContentStore(db);
   }
 

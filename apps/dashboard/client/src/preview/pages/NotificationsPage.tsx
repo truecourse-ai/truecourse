@@ -7,7 +7,7 @@
  * and unread is a dot on the row itself. Reading one clears its dot; "Mark all
  * read" clears the badge.
  *
- * The rows of the REAL (URL-connected) repositories are derived client-side from
+ * The rows of the REAL (provider-connected) repositories are derived client-side from
  * the runs the shell is watching — there is no server-side notification store —
  * and they carry an address: opening one goes to that repository's Activity.
  */

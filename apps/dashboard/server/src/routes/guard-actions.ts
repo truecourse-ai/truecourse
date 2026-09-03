@@ -73,7 +73,12 @@ import {
   emitSpecProgress,
 } from '../socket/handlers.js';
 import { parsePr } from './route-params.js';
-import { ensureLlmTransport } from '../services/llm-transport.service.js';
+import {
+  LlmNotConfiguredError,
+  LlmProbeFailedError,
+  orgOf,
+  startWorkspaceLlm,
+} from '../services/workspace-llm.service.js';
 
 const router: Router = Router();
 
@@ -197,13 +202,12 @@ router.post('/:id/guard/generate', async (req: Request, res: Response, next: Nex
       (req.body as { confirmed?: boolean } | undefined)?.confirmed === true ||
       req.query.confirmed === 'true';
 
-    // Refresh the saved LLM selection (mtime-cached — a `stat` when unchanged),
-    // so a `config llm setup` since boot needs no restart. An unusable API config
-    // fails here, before any spend, and surfaces like any generate failure.
-    ensureLlmTransport();
+    // The asking workspace's provider, loaded and proved before any spend.
+    const llm = await startWorkspaceLlm(orgOf(req));
     const tracker = createSocketSpecTracker(repoId, GUARD_GENERATE_STEPS.map((s) => ({ ...s })));
     const { guard } = await guardGenerateInProcess(repo.path, {
       tracker,
+      transport: llm.transport(),
       // The popup replaces in place, so the estimate rides the checklist here as
       // a leading step (the terminal renders it as its own line instead).
       onEstimatePhase: estimateStepPhase(tracker),
@@ -220,6 +224,17 @@ router.post('/:id/guard/generate', async (req: Request, res: Response, next: Nex
       ...(guard.reason ? { reason: guard.reason } : {}),
     });
   } catch (e) {
+    // No provider set / one that won't answer: a setting to fill in and a
+    // provider outage respectively, each with its own machine-readable code —
+    // never the generic 500 an unexpected failure gets. Nothing was spent.
+    if (e instanceof LlmNotConfiguredError) {
+      res.status(409).json({ error: e.code, message: e.message });
+      return;
+    }
+    if (e instanceof LlmProbeFailedError) {
+      res.status(502).json({ error: e.code, message: e.message });
+      return;
+    }
     // User declined the cost estimate — a clean cancel, not an error (mirrors the
     // spec scan route's EstimateDeclined branch).
     if (e instanceof EstimateDeclined) {

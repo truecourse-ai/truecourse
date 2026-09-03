@@ -1,15 +1,13 @@
 import express, { type Express } from 'express';
 import request from 'supertest';
 import crypto from 'node:crypto';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   createWebhookRouter,
-  FileGateStore,
   type BaselineTrigger,
-} from '../../ee/packages/github-app/src/index';
+  type RepoLinkRecord,
+} from '../../packages/github-app/src/index';
+import { MemoryGateStore } from './memory-store';
 
 const SECRET = 'whsec';
 
@@ -17,19 +15,19 @@ function sign(body: string, secret = SECRET): string {
   return 'sha256=' + crypto.createHmac('sha256', secret).update(body).digest('hex');
 }
 
-let dir: string;
-let store: FileGateStore;
+let store: MemoryGateStore;
 let baselineCalls: BaselineTrigger[];
 let prCalls: unknown[];
 let commentCalls: unknown[];
+let removedCalls: RepoLinkRecord[];
 let app: Express;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-gate-wh-'));
-  store = new FileGateStore(dir);
+  store = new MemoryGateStore();
   baselineCalls = [];
   prCalls = [];
   commentCalls = [];
+  removedCalls = [];
   app = express();
   app.use(
     express.json({
@@ -44,15 +42,27 @@ beforeEach(() => {
       secret: SECRET,
       store,
       onBaseline: (t) => baselineCalls.push(t),
+      onRepoRemoved: async (link) => {
+        removedCalls.push(link);
+      },
       onPullRequest: (p) => prCalls.push(p),
       onCommentEdited: (p) => commentCalls.push(p),
     }),
   );
 });
 
-afterEach(() => {
-  fs.rmSync(dir, { recursive: true, force: true });
-});
+function repoLink(repoFullName: string, installationId: number): RepoLinkRecord {
+  return {
+    repoFullName,
+    installationId,
+    workspaceOrgId: 'org_A',
+    defaultBranch: 'main',
+    blocking: true,
+    enabled: true,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+}
 
 function post(event: string, payloadObj: unknown, signature?: string) {
   const body = JSON.stringify(payloadObj);
@@ -80,7 +90,7 @@ describe('webhook router', () => {
     expect(rec?.accountLogin).toBe('acme');
   });
 
-  it('removes an installation (and cascades repos) on installation.deleted', async () => {
+  it('removes an installation on installation.deleted', async () => {
     await store.saveInstallation({
       installationId: 7,
       accountLogin: 'acme',
@@ -89,24 +99,43 @@ describe('webhook router', () => {
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
     });
-    await store.linkRepo({
-      repoFullName: 'acme/api',
-      installationId: 7,
-      workspaceOrgId: 'org_A',
-      defaultBranch: 'main',
-      blocking: true,
-      enabled: true,
-      createdAt: '2026-01-01T00:00:00.000Z',
-      updatedAt: '2026-01-01T00:00:00.000Z',
-    });
-
     await post('installation', {
       action: 'deleted',
       installation: { id: 7, account: { login: 'acme', type: 'Organization' } },
     }).expect(202);
 
     expect(await store.getInstallation(7)).toBeNull();
+  });
+
+  it('runs per-repo cleanup for every linked repo on installation.deleted', async () => {
+    await store.linkRepo(repoLink('acme/api', 7));
+    await store.linkRepo(repoLink('acme/web', 7));
+    await store.linkRepo(repoLink('other/repo', 8));
+
+    await post('installation', {
+      action: 'deleted',
+      installation: { id: 7, account: { login: 'acme', type: 'Organization' } },
+    }).expect(202);
+
+    expect(removedCalls.map((l) => l.repoFullName).sort()).toEqual(['acme/api', 'acme/web']);
     expect(await store.getRepo('acme/api')).toBeNull();
+    // Another installation's link is untouched.
+    expect(await store.getRepo('other/repo')).not.toBeNull();
+  });
+
+  it('disconnects a linked repo removed from its installation', async () => {
+    await store.linkRepo(repoLink('acme/api', 7));
+    await store.linkRepo(repoLink('acme/web', 7));
+
+    await post('installation_repositories', {
+      action: 'removed',
+      installation: { id: 7 },
+      repositories_removed: [{ full_name: 'acme/api' }, { full_name: 'never/linked' }],
+    }).expect(202);
+
+    expect(removedCalls.map((l) => l.repoFullName)).toEqual(['acme/api']);
+    expect(await store.getRepo('acme/api')).toBeNull();
+    expect(await store.getRepo('acme/web')).not.toBeNull();
   });
 
   it('triggers a baseline on push to the default branch of a connected repo', async () => {

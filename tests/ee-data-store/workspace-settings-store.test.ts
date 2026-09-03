@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import { WorkspaceSettingsStore } from '../../ee/packages/data-store/src/index';
 
 let client: PGlite;
@@ -13,7 +13,7 @@ beforeEach(async () => {
   const d = drizzle(client, { schema });
   // Also asserts the 0003_workspace_settings migration applies cleanly.
   await migrate(d, { migrationsFolder: MIGRATIONS_DIR });
-  store = new WorkspaceSettingsStore(d as unknown as EeDb);
+  store = new WorkspaceSettingsStore(d as unknown as Db);
 });
 afterEach(async () => {
   await client.close();

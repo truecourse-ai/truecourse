@@ -16,7 +16,7 @@ import path from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import { PgGuardStore, PgSpecStore } from '../../ee/packages/data-store/src/index';
 import {
   setGuardStore,
@@ -78,7 +78,7 @@ const REPORT = (over: Partial<GuardGenerateReport> = {}): GuardGenerateReport =>
 });
 
 let client: PGlite;
-let db: EeDb;
+let db: Db;
 let guardStore: PgGuardStore;
 
 /** Snapshot a scenario set (recipe + yaml + manifest) into the store at `commit`. */
@@ -167,7 +167,7 @@ const RUN = (runId: string, commit: string, ranAt = '2026-07-08T00:00:00.000Z') 
 
 beforeEach(async () => {
   client = new PGlite();
-  db = drizzle(client, { schema }) as unknown as EeDb;
+  db = drizzle(client, { schema }) as unknown as Db;
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
   guardStore = new PgGuardStore(db);
   setGuardStore(guardStore);

@@ -20,7 +20,7 @@
     "@aws-sdk/client-s3": "^3.1059.0",
     "@azure/identity": "^4.13.0",
     "@azure/storage-blob": "^12.31.0",
-    "@truecourse/ee-db": "workspace:*",
+    "@truecourse/db": "workspace:*",
     "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {

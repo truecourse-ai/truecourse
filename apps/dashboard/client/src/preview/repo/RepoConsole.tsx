@@ -1,6 +1,6 @@
-// PREVIEW (UI mock, fake data) with one exception: on a REAL (URL-connected)
-// repository the Activity tab is the real thing, reading and live-tailing the
-// repository's sessions store.
+// PREVIEW (UI mock, fake data) with one exception: on a REAL
+// (provider-connected) repository the Activity tab is the real thing, reading
+// and live-tailing the repository's sessions store.
 
 /**
  * The repository console: one header, ONE menu, no toggle.
@@ -26,6 +26,7 @@ import { ProviderIcon, SideMenu } from '@/preview/ui/bits';
 import { StatusWord, CONCLUSION_TONE } from '@/preview/ui/status-word';
 import { guardForRepo } from '@/preview/data';
 import { usePreviewState } from '@/preview/shell/preview-state';
+import { useRunTrigger } from '@/preview/shell/use-run-trigger';
 import { PREVIEW_BASE } from '@/preview/shell/PreviewShell';
 import { CorpusPage } from './CorpusPage';
 import { CorpusTab } from './CorpusTab';
@@ -69,8 +70,11 @@ export default function RepoConsole() {
     docRef?: string;
     conflictId?: string;
   }>();
-  const { repos, workspace } = usePreviewState();
+  const { repos, workspace, llmProvider } = usePreviewState();
   const repo = repos.find((r) => r.id === slug);
+  // Built for every repository, used only by a real one: a fixture repository's
+  // Activity is a mock and has nothing to start.
+  const starter = useRunTrigger(slug ?? '');
   const guard = guardForRepo(slug);
   const implied = runId
     ? 'runs'
@@ -129,6 +133,17 @@ export default function RepoConsole() {
         </span>
       </header>
 
+      {/* A real repository with no provider set cannot scan at all, and every
+          tab below it is waiting on a scan. Said once, where the work is. */}
+      {repo.real && llmProvider === 'missing' && (
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-amber-500/30 px-6 py-1.5 text-[11px] text-amber-500">
+          No LLM provider configured. Spec scans cannot run until one is set.
+          <Link to={`${PREVIEW_BASE}/settings/models`} className="font-medium underline">
+            Set one in Settings
+          </Link>
+        </div>
+      )}
+
       <div className="flex min-h-0 flex-1">
         <SideMenu
           label="Repository sections"
@@ -148,17 +163,39 @@ export default function RepoConsole() {
           {active === 'settings' ? (
             <SettingsTab repo={repo} />
           ) : active === 'activity' && repo.real ? (
-            // REAL, not mock: a URL-connected repository is a real registry
+            // REAL, not mock: a provider-connected repository is a real registry
             // entry, so its Activity reads the real sessions store over
             // `/api/repos/<id>/sessions/*` and live-tails it over the socket.
             // A `truecourse spec scan` in that clone shows up here as it runs.
             // The fixture repositories keep the mock below.
-            <RealSessionsActivityView repoId={repo.id} />
+            <RealSessionsActivityView repoId={repo.id} starter={starter} />
           ) : !guard ? (
+            // A real repository with nothing in flight has not started, rather
+            // than not finished: promising a run that is not running would be
+            // the one thing this page could get wrong.
             <EmptyState
               icon={FolderGit2}
-              title="Onboarding has not produced anything yet"
-              body="The first scan, setup and generation are still running. Watch them in Activity."
+              title={
+                repo.real && !repo.onboarding
+                  ? 'Nothing has run on this repository yet'
+                  : 'Onboarding has not produced anything yet'
+              }
+              body={
+                repo.real && !repo.onboarding ? (
+                  <>
+                    Start the first scan from{' '}
+                    <Link
+                      to={`${PREVIEW_BASE}/repos/${repo.id}/activity`}
+                      className="text-primary hover:underline"
+                    >
+                      Activity
+                    </Link>
+                    .
+                  </>
+                ) : (
+                  'The first scan, setup and generation are still running. Watch them in Activity.'
+                )
+              }
             />
           ) : active === 'coverage' ? (
             <CoverageTab repo={repo} />

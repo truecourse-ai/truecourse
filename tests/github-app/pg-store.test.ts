@@ -8,8 +8,8 @@ import {
   type InstallationRecord,
   type RepoLinkRecord,
   type GateRunRecord,
-} from '../../ee/packages/github-app/src/index';
-import { schema, MIGRATIONS_DIR } from '@truecourse/ee-db';
+} from '../../packages/github-app/src/index';
+import { schema, MIGRATIONS_DIR } from '@truecourse/db';
 
 let client: PGlite;
 let db: ReturnType<typeof drizzle>;

@@ -6,7 +6,7 @@
  */
 
 import { eq } from 'drizzle-orm';
-import { workspaceSettings, type EeDb } from '@truecourse/ee-db';
+import { workspaceSettings, type Db } from '@truecourse/db';
 
 export interface WorkspaceSettings {
   /** Run the LLM (semantic) code-analysis rules. Off by default. */
@@ -16,7 +16,7 @@ export interface WorkspaceSettings {
 const DEFAULTS: WorkspaceSettings = { codeAnalysisLlm: false };
 
 export class WorkspaceSettingsStore {
-  constructor(private readonly db: EeDb) {}
+  constructor(private readonly db: Db) {}
 
   /** Full settings for a workspace, falling back to defaults when no row exists. */
   async get(orgId: string): Promise<WorkspaceSettings> {

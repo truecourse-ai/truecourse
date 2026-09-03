@@ -7,7 +7,7 @@
  */
 
 import { and, eq, sql } from 'drizzle-orm';
-import { integrationConnections, type EeDb } from '@truecourse/ee-db';
+import { integrationConnections, type Db } from '@truecourse/db';
 import type { IntegrationPendingView } from '@truecourse/shared';
 import { encryptSecret, decryptSecret, maskKey } from '../llm/crypto.js';
 
@@ -35,7 +35,7 @@ export interface SaveIntegrationInput {
 
 export class IntegrationStore {
   constructor(
-    private readonly db: EeDb,
+    private readonly db: Db,
     private readonly masterSecret: string,
   ) {}
 

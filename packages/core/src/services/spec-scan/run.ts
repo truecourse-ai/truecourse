@@ -34,6 +34,12 @@
  *   {@link LlmStageFailureError} BEFORE `writeCorpus`; the previous corpus
  *   stays untouched.
  *
+ * CANCELLATION follows the same shape: a caller's `signal` reaches every
+ * session, and the run throws {@link ScanAbortedError} before any write rather
+ * than folding a half-run corpus out of the fail-open defaults. What completed
+ * before the cancel keeps its cache entry; what died does not (failures are
+ * never cached), so resuming costs only the unfinished docs.
+ *
  * CACHING: each kind goes through `cachedSessionOutcome` (author-class — these
  * sessions produce artifacts from their inputs). The cache is probed BEFORE a
  * session is spent; only cache-missing items enter the pool, and only
@@ -165,6 +171,21 @@ export type ScanStep = (typeof SCAN_STEPS)[number]
  * re-run here would mask exactly the cache-key drift a stepwise run exists to
  * expose. The fix is always `truecourse spec scan --only-<step>`.
  */
+/**
+ * The caller cancelled the run through its `signal` (the dashboard does this
+ * when a repository is disconnected under its own onboarding scan). Thrown
+ * BEFORE anything is written: an aborted session fails, and a kind's fail-open
+ * defaults over sessions that never ran would assemble a degenerate corpus —
+ * every unfinished doc kept untagged — indistinguishable from a healthy one.
+ * Same discipline as the one-abort rule, on a different trigger.
+ */
+export class ScanAbortedError extends Error {
+  constructor() {
+    super('the spec scan was cancelled')
+    this.name = 'ScanAbortedError'
+  }
+}
+
 export class ScanStepNotReadyError extends Error {
   constructor(
     readonly step: ScanStep,
@@ -217,6 +238,12 @@ export interface SpecScanSessionsOptions {
    * every earlier stop returns `stoppedAfter` and touches no corpus.
    */
   only?: ScanStep
+  /**
+   * Cancel the run. In-flight sessions get the signal (they end as failures),
+   * queued ones never start, and the run throws {@link ScanAbortedError}
+   * instead of folding what it has — nothing is written.
+   */
+  signal?: AbortSignal
   // --- progress hooks -------------------------------------------------------
   onDiscover?: (docs: number, toCurate: number) => void
   /**
@@ -290,6 +317,7 @@ interface CachedPoolOptions<TItem, TOutcome> {
   driver(): Promise<SessionDriver>
   persistence: SessionPersistence
   concurrency?: number
+  signal?: AbortSignal
   onProgress?: (done: number, total: number) => void
   onSessionEvent?: (workItem: string, event: SessionEvent) => void
   mintSessionId?: () => string
@@ -395,6 +423,7 @@ async function runCachedSessionPool<TItem, TOutcome>(
       driver,
       persistence: opts.persistence,
       ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
+      ...(opts.signal ? { signal: opts.signal } : {}),
       ...(opts.onSessionEvent ? { onSessionEvent: opts.onSessionEvent } : {}),
       ...(opts.mintSessionId ? { mintSessionId: opts.mintSessionId } : {}),
       ...(opts.now ? { now: opts.now } : {}),
@@ -421,6 +450,10 @@ async function runCachedSessionPool<TItem, TOutcome>(
         resolvers.get(opts.workItem(item))!(finalized)
       },
     })
+    // A cancelled pool leaves the items it skipped un-folded, so their parked
+    // promises never settle — abandoned exactly as a cache-only replay
+    // abandons its misses. Nothing below may await them.
+    if (opts.signal?.aborted) throw new ScanAbortedError()
   }
   await Promise.all(finals)
   return summary
@@ -485,6 +518,11 @@ export async function runSpecScanSessions(
 ): Promise<SpecScanSessionsResult> {
   const { repoRoot } = opts
   const only = opts.only
+  /** Stop the run where it stands — the pools own the gaps between the steps. */
+  const throwIfAborted = (): void => {
+    if (opts.signal?.aborted) throw new ScanAbortedError()
+  }
+  throwIfAborted()
   /** Single-step mode: is `step` PRIOR to the chosen one (replay, never spend)? */
   const replayOnly = (step: ScanStep): boolean =>
     only !== undefined && SCAN_STEPS.indexOf(step) < SCAN_STEPS.indexOf(only)
@@ -567,6 +605,7 @@ export async function runSpecScanSessions(
         driver: await opts.driver(),
         persistence: opts.persistence,
         concurrency: 1,
+        ...(opts.signal ? { signal: opts.signal } : {}),
         ...(opts.onSessionEvent
           ? { onSessionEvent: (workItem, event) => opts.onSessionEvent?.(workItem, event) }
           : {}),
@@ -592,6 +631,7 @@ export async function runSpecScanSessions(
         },
       })
       orchestrateSummary = summary
+      throwIfAborted() // before the verdicts are persisted below
       assertKindHealthy(summary)
       // Persist the merged verdicts + instructions in decisions.json (atomic,
       // same channel every decisions write uses) — user rows untouched by the
@@ -713,6 +753,7 @@ export async function runSpecScanSessions(
     persistence: opts.persistence,
     ...(replayOnly('curate') ? { cacheOnly: 'curate' as const } : {}),
     ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
+    ...(opts.signal ? { signal: opts.signal } : {}),
     ...(opts.onCurateProgress ? { onProgress: opts.onCurateProgress } : {}),
     ...(opts.onSessionEvent ? { onSessionEvent: opts.onSessionEvent } : {}),
     ...(opts.mintSessionId ? { mintSessionId: opts.mintSessionId } : {}),
@@ -840,6 +881,7 @@ export async function runSpecScanSessions(
       persistence: opts.persistence,
       concurrency: 1,
       ...(replayOnly('settle') ? { cacheOnly: 'settle' as const } : {}),
+      ...(opts.signal ? { signal: opts.signal } : {}),
       ...(opts.onSessionEvent ? { onSessionEvent: opts.onSessionEvent } : {}),
       ...(opts.mintSessionId ? { mintSessionId: opts.mintSessionId } : {}),
       ...(opts.now ? { now: opts.now } : {}),
@@ -962,6 +1004,7 @@ export async function runSpecScanSessions(
     driver: opts.driver,
     persistence: opts.persistence,
     ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
+    ...(opts.signal ? { signal: opts.signal } : {}),
     ...(opts.onOverlapProgress ? { onProgress: opts.onOverlapProgress } : {}),
     ...(opts.onSessionEvent ? { onSessionEvent: opts.onSessionEvent } : {}),
     ...(opts.mintSessionId ? { mintSessionId: opts.mintSessionId } : {}),
@@ -1072,6 +1115,9 @@ export async function runSpecScanSessions(
   }
   let effectiveDecisions = decisions
   let autoResolvedConflicts: CurateStats['autoResolvedConflicts'] = []
+  // The last gate before the only write of the run: a cancellation that landed
+  // in the deterministic fold above must not reach corpus.json either.
+  throwIfAborted()
   if (!opts.skipCorpusWrite) {
     writeCorpus(repoRoot, {
       docs: corpus.docs,

@@ -20,7 +20,7 @@ vi.mock('@truecourse/core/services/journey', async (importOriginal) => {
   return { ...actual, mapJourneys: vi.fn(actual.mapJourneys) };
 });
 
-import { createApp } from '../../apps/dashboard/server/src/app';
+import { createTestApp } from '../helpers/test-app';
 import { mapJourneys } from '@truecourse/core/services/journey';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 
@@ -57,7 +57,7 @@ describe('Guard map action', () => {
   beforeEach(async () => {
     fixture = await setupTestFixture();
     root = fixture.repoPath;
-    app = createApp({ serveStatic: false });
+    app = createTestApp();
     vi.mocked(mapJourneys).mockClear();
     fs.mkdirSync(path.join(root, 'src'), { recursive: true });
     fs.writeFileSync(path.join(root, 'src', 'cli.ts'), CLI_SOURCE);

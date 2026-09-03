@@ -41,8 +41,8 @@ export interface RegistryEntry {
    */
   defaultBranch?: string;
   /**
-   * The https git URL this project was connected from, when it was connected by
-   * URL rather than by local path (`POST /api/repos/connect`). `path` then points
+   * The https git URL this project was connected from, set when it was connected
+   * through a provider rather than registered by local path. `path` then points
    * at a clone the dashboard manages, and disconnecting deletes that clone.
    * Absent for repos the user registered by path — their source is never touched.
    */
@@ -55,7 +55,7 @@ interface RegistryFile {
 
 /** Extra fields to stamp on the entry when registering. */
 export interface RegisterProjectOptions {
-  /** See `RegistryEntry.remoteUrl`. Only set by the connect-by-URL flow. */
+  /** See `RegistryEntry.remoteUrl`. Only set when connecting through a provider. */
   remoteUrl?: string;
 }
 

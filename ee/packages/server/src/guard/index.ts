@@ -26,7 +26,7 @@ import type {
 } from '../jobs/constants.js';
 
 function orgIdOf(req: Request): string | null {
-  return (req as Request & { eeUser?: AuthUser }).eeUser?.organizationId ?? null;
+  return (req as Request & { user?: AuthUser }).user?.organizationId ?? null;
 }
 
 export interface GuardRouterDeps {

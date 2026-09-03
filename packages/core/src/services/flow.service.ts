@@ -3,6 +3,7 @@ import { log } from '../lib/logger.js';
 import { traceFlows, normalizeUrl, AnalysisGraph, type CrossServiceCall, type RouteHandler } from '@truecourse/analyzer';
 import type { AnalysisResult } from './analyzer.service.js';
 import type { FileAnalysis, SupportedLanguage } from '@truecourse/shared';
+import type { LlmTransport } from '@truecourse/shared/llm';
 import type { FlowRecord, FlowStepRecord, LatestSnapshot, ViolationWithNames } from '../types/snapshot.js';
 import { readLatest, writeLatest } from '../lib/analysis-store.js';
 
@@ -299,7 +300,16 @@ export function computeFlowSeverities(
 // Flow enrichment (LLM) — mutates LATEST.json in place
 // ---------------------------------------------------------------------------
 
-export async function enrichFlowWithLLM(repoPath: string, flowId: string): Promise<void> {
+/**
+ * `transport` runs the enrichment on a caller-supplied transport instead of the
+ * installed default — the dashboard server passes the one it built from the
+ * asking workspace's provider config.
+ */
+export async function enrichFlowWithLLM(
+  repoPath: string,
+  flowId: string,
+  transport?: LlmTransport,
+): Promise<void> {
   const { createLLMProvider } = await import('./llm/provider.js');
 
   const latest = await readLatest(repoPath);
@@ -307,7 +317,7 @@ export async function enrichFlowWithLLM(repoPath: string, flowId: string): Promi
   const flow = latest.graph.flows.find((f) => f.id === flowId);
   if (!flow) return;
 
-  const provider = createLLMProvider();
+  const provider = createLLMProvider(transport);
   const enriched = await provider.enrichFlow({
     flowName: flow.name,
     entryService: flow.entryService,

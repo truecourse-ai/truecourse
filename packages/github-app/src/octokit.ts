@@ -1,0 +1,416 @@
+/**
+ * GitHub REST clients — installation-scoped (the usual one) and app-scoped (for
+ * the App's own endpoints) — plus the narrow helpers their callers need: an
+ * installation's account, a PR's changed files, repo file contents, our bot
+ * comments, Check runs, inline review comments, and PR lookups.
+ */
+
+import { Octokit } from '@octokit/rest';
+import { createAppAuth } from '@octokit/auth-app';
+import type { GithubAppConfig } from './config.js';
+
+export type OctokitClient = Octokit;
+
+export interface RepoCoords {
+  owner: string;
+  repo: string;
+}
+
+export function splitRepo(fullName: string): RepoCoords {
+  const [owner, repo] = fullName.split('/');
+  return { owner, repo };
+}
+
+export function installationOctokit(
+  cfg: GithubAppConfig,
+  installationId: number,
+): Octokit {
+  return new Octokit({
+    authStrategy: createAppAuth,
+    auth: {
+      appId: cfg.appId,
+      privateKey: cfg.privateKey,
+      installationId,
+    },
+  });
+}
+
+/**
+ * App-level client (JWT auth, no installation). Only the App's own endpoints
+ * answer to it — an installation token cannot read the App's installation list.
+ */
+export function appOctokit(cfg: GithubAppConfig): Octokit {
+  return new Octokit({
+    authStrategy: createAppAuth,
+    auth: { appId: cfg.appId, privateKey: cfg.privateKey },
+  });
+}
+
+/**
+ * The account an installation belongs to — its login and whether it is a user or
+ * an organization. Read from the App API so the identity of an installation never
+ * depends on the `installation` webhook being delivered (a webhook URL that is
+ * misconfigured at install time never delivers at all).
+ *
+ * Best-effort: null when the installation is gone or the call fails. Callers show
+ * the installation id instead; nobody's request fails for want of a display name.
+ */
+export async function fetchInstallationAccount(
+  cfg: GithubAppConfig,
+  installationId: number,
+): Promise<{ accountLogin: string; accountType: string } | null> {
+  try {
+    const { data } = await appOctokit(cfg).apps.getInstallation({
+      installation_id: installationId,
+    });
+    // `account` is a user/org (login + type) or an enterprise (slug, no type).
+    const account = data.account as
+      | { login?: string; slug?: string; type?: string }
+      | null;
+    const accountLogin = account?.login ?? account?.slug ?? '';
+    if (!accountLogin) return null;
+    return {
+      accountLogin,
+      accountType: account?.type ?? (account?.slug ? 'Enterprise' : ''),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** All changed file paths in a PR (added/modified/removed), paginated. */
+export async function listPrFiles(
+  octokit: Octokit,
+  { owner, repo }: RepoCoords,
+  prNumber: number,
+): Promise<string[]> {
+  const files = await octokit.paginate(octokit.pulls.listFiles, {
+    owner,
+    repo,
+    pull_number: prNumber,
+    per_page: 100,
+  });
+  return files.map((f) => f.filename);
+}
+
+/**
+ * Raw text of a repo file at `ref` (default branch when omitted), or null when
+ * it's missing / unreadable. Used to read `.truecourse/config.json` before any
+ * clone; the caller degrades a null to "no config".
+ */
+export async function getFileContent(
+  octokit: Octokit,
+  { owner, repo }: RepoCoords,
+  filePath: string,
+  ref?: string,
+): Promise<string | null> {
+  try {
+    const res = await octokit.repos.getContent({
+      owner,
+      repo,
+      path: filePath,
+      ...(ref ? { ref } : {}),
+      // `format: 'raw'` returns the file body directly as text.
+      mediaType: { format: 'raw' },
+    });
+    return typeof res.data === 'string' ? res.data : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Our bot-authored comment carrying `marker` on the PR, or null. */
+export async function findComment(
+  octokit: Octokit,
+  { owner, repo }: RepoCoords,
+  prNumber: number,
+  marker: string,
+): Promise<{ id: number; body: string } | null> {
+  const comments = await octokit.paginate(octokit.issues.listComments, {
+    owner,
+    repo,
+    issue_number: prNumber,
+    per_page: 100,
+  });
+  // Require a Bot author so a user can't hijack the slot by pasting our marker.
+  const found = comments.find(
+    (c) => c.user?.type === 'Bot' && (c.body ?? '').includes(marker),
+  );
+  return found ? { id: found.id, body: found.body ?? '' } : null;
+}
+
+/** The actor's permission on the repo: 'admin' | 'write' | 'read' | 'none'. */
+export async function getActorPermission(
+  octokit: Octokit,
+  { owner, repo }: RepoCoords,
+  username: string,
+): Promise<string> {
+  try {
+    const res = await octokit.repos.getCollaboratorPermissionLevel({
+      owner,
+      repo,
+      username,
+    });
+    return res.data.permission;
+  } catch {
+    return 'none';
+  }
+}
+
+export async function createComment(
+  octokit: Octokit,
+  { owner, repo }: RepoCoords,
+  prNumber: number,
+  body: string,
+): Promise<number> {
+  const res = await octokit.issues.createComment({
+    owner,
+    repo,
+    issue_number: prNumber,
+    body,
+  });
+  return res.data.id;
+}
+
+export async function updateComment(
+  octokit: Octokit,
+  { owner, repo }: RepoCoords,
+  commentId: number,
+  body: string,
+): Promise<void> {
+  await octokit.issues.updateComment({
+    owner,
+    repo,
+    comment_id: commentId,
+    body,
+  });
+}
+
+/**
+ * An existing queued/in-progress Check run for `(headSha, name)`, or null. Used to
+ * make the gate handler idempotent per head: GitHub evaluates the NEWEST run per
+ * name+sha, so a duplicate delivery that created a second run would shadow the
+ * verdict later posted to the first. Best-effort (a listing failure → null → the
+ * caller creates a fresh run, the pre-existing behavior).
+ */
+export async function findActiveCheck(
+  octokit: Octokit,
+  { owner, repo }: RepoCoords,
+  name: string,
+  headSha: string,
+): Promise<number | null> {
+  try {
+    const { data } = await octokit.checks.listForRef({
+      owner,
+      repo,
+      ref: headSha,
+      check_name: name,
+      per_page: 100,
+    });
+    const active = data.check_runs.find(
+      (r) => r.status === 'queued' || r.status === 'in_progress',
+    );
+    return active?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Open an in-progress Check run for a head sha so the PR shows "running" while the
+ * gate works; returns its id to complete later with {@link postCheck}. Best-effort:
+ * a failure just means no live "running" pill (the completed Check is still posted).
+ */
+export async function startCheck(
+  octokit: Octokit,
+  { owner, repo }: RepoCoords,
+  name: string,
+  headSha: string,
+): Promise<number | null> {
+  try {
+    const { data } = await octokit.checks.create({
+      owner,
+      repo,
+      name,
+      head_sha: headSha,
+      status: 'in_progress',
+      started_at: new Date().toISOString(),
+    });
+    return data.id;
+  } catch {
+    return null;
+  }
+}
+
+export type CheckConclusion =
+  | 'success'
+  | 'failure'
+  | 'neutral'
+  | 'action_required'
+  | 'timed_out';
+
+/** One inline annotation on a completed Check. GitHub caps them at 50 per request. */
+export interface CheckAnnotation {
+  path: string;
+  start_line: number;
+  end_line: number;
+  annotation_level: 'notice' | 'warning' | 'failure';
+  title?: string;
+  message: string;
+}
+
+/**
+ * Post a Check run's result (the conclusion is authoritative). When `checkRunId` is
+ * given, UPDATES that in-progress run (from {@link startCheck}) to completed instead
+ * of creating a fresh one — so a single Check transitions running → done.
+ */
+export async function postCheck(
+  octokit: Octokit,
+  { owner, repo }: RepoCoords,
+  name: string,
+  headSha: string,
+  conclusion: CheckConclusion,
+  output: { title: string; summary: string; annotations?: CheckAnnotation[] },
+  checkRunId?: number | null,
+): Promise<void> {
+  if (checkRunId != null) {
+    await octokit.checks.update({
+      owner,
+      repo,
+      check_run_id: checkRunId,
+      status: 'completed',
+      conclusion,
+      completed_at: new Date().toISOString(),
+      output,
+    });
+    return;
+  }
+  await octokit.checks.create({
+    owner,
+    repo,
+    name,
+    head_sha: headSha,
+    status: 'completed',
+    conclusion,
+    completed_at: new Date().toISOString(),
+    output,
+  });
+}
+
+/** Existing review comments on a PR (for dedup): path + line + author type. */
+export async function listReviewComments(
+  octokit: Octokit,
+  { owner, repo }: RepoCoords,
+  prNumber: number,
+): Promise<{ path: string; line: number | null; userType: string | undefined }[]> {
+  const comments = await octokit.paginate(octokit.pulls.listReviewComments, {
+    owner,
+    repo,
+    pull_number: prNumber,
+    per_page: 100,
+  });
+  return comments.map((c) => ({
+    path: c.path,
+    line: c.line ?? null,
+    userType: c.user?.type,
+  }));
+}
+
+/** Post an inline review comment on a head-side line (throws if not in the diff). */
+export async function createReviewComment(
+  octokit: Octokit,
+  { owner, repo }: RepoCoords,
+  prNumber: number,
+  params: { commitId: string; path: string; line: number; body: string },
+): Promise<void> {
+  await octokit.pulls.createReviewComment({
+    owner,
+    repo,
+    pull_number: prNumber,
+    commit_id: params.commitId,
+    path: params.path,
+    line: params.line,
+    side: 'RIGHT',
+    body: params.body,
+  });
+}
+
+/** Open PRs targeting this repo, with the fields the gate needs to re-verify. */
+export async function listOpenPrs(
+  octokit: Octokit,
+  { owner, repo }: RepoCoords,
+): Promise<
+  Array<{
+    number: number;
+    headSha: string;
+    headRef: string;
+    /** Head repo full name; null/differs from base on a fork PR. */
+    headRepoFullName: string | null;
+    headRepoIsFork: boolean;
+    baseSha: string;
+    baseRef: string;
+  }>
+> {
+  const prs = await octokit.paginate(octokit.pulls.list, {
+    owner,
+    repo,
+    state: 'open',
+    per_page: 100,
+  });
+  return prs.map((p) => ({
+    number: p.number,
+    headSha: p.head.sha,
+    headRef: p.head.ref,
+    headRepoFullName: p.head.repo?.full_name ?? null,
+    headRepoIsFork: p.head.repo?.fork ?? false,
+    baseSha: p.base.sha,
+    baseRef: p.base.ref,
+  }));
+}
+
+/**
+ * Pull requests associated with a commit (GitHub's "list pull requests
+ * associated with a commit"), reduced to what identifies a merged PR: its number,
+ * whether it merged, the merge commit it produced, and its head sha. Used on a
+ * default-branch push to map the merge/squash commit back to the PR it landed.
+ */
+export async function listPrsForCommit(
+  octokit: Octokit,
+  { owner, repo }: RepoCoords,
+  commitSha: string,
+): Promise<
+  Array<{ number: number; merged: boolean; mergeCommitSha: string | null; headSha: string }>
+> {
+  const prs = await octokit.paginate(
+    octokit.repos.listPullRequestsAssociatedWithCommit,
+    { owner, repo, commit_sha: commitSha, per_page: 100 },
+  );
+  return prs.map((p) => ({
+    number: p.number,
+    merged: p.merged_at != null,
+    mergeCommitSha: p.merge_commit_sha ?? null,
+    headSha: p.head.sha,
+  }));
+}
+
+export async function getPullRequest(
+  octokit: Octokit,
+  { owner, repo }: RepoCoords,
+  prNumber: number,
+): Promise<{
+  headRef: string;
+  headSha: string;
+  /** Head repo full name; differs from the base on a fork PR. */
+  headRepoFullName: string | null;
+  baseRef: string;
+  baseSha: string;
+}> {
+  const res = await octokit.pulls.get({ owner, repo, pull_number: prNumber });
+  return {
+    headRef: res.data.head.ref,
+    headSha: res.data.head.sha,
+    headRepoFullName: res.data.head.repo?.full_name ?? null,
+    baseRef: res.data.base?.ref ?? '',
+    baseSha: res.data.base?.sha ?? '',
+  };
+}

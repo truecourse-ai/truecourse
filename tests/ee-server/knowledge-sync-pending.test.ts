@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 
 // The sweep/estimate + union processing engines have their own tests; here we
 // exercise the Sync/Process flow wiring: the pending-derivation logic and the job
@@ -102,13 +102,13 @@ describe('pendingFromEstimate — pending record + completion toast', () => {
 
 describe('knowledge jobs — pending persist/clear through the harness', () => {
   let client: PGlite;
-  let db: EeDb;
+  let db: Db;
   let deps: RunKnowledgeDeps;
   let integrations: IntegrationStore;
 
   beforeEach(async () => {
     client = new PGlite();
-    db = drizzle(client, { schema }) as unknown as EeDb;
+    db = drizzle(client, { schema }) as unknown as Db;
     await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
     vi.mocked(syncSource).mockReset();
     vi.mocked(processWorkspaceKnowledge).mockReset();

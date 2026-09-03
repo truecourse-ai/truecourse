@@ -1,16 +1,15 @@
 import express, { type Express, type Request } from 'express';
 import request from 'supertest';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import type {
   AuthUser,
   GithubConnectStatusResponse,
   GithubInstallationReposResponse,
 } from '@truecourse/shared';
-import { createConnectRouter, FileGateStore } from '../../ee/packages/github-app/src/index';
-import type { OctokitClient } from '../../ee/packages/github-app/src/octokit';
+import { createConnectRouter } from '../../packages/github-app/src/index';
+import type { ConnectDeps } from '../../packages/github-app/src/connect';
+import type { OctokitClient } from '../../packages/github-app/src/octokit';
+import { MemoryGateStore } from './memory-store';
 // Shared via the bare specifier so this overrides the singleton `connect.ts` uses.
 import {
   setRegistryStore,
@@ -18,10 +17,14 @@ import {
   type RegistryStore,
 } from '@truecourse/core/config/registry';
 
-let dir: string;
-let store: FileGateStore;
+type AccountLookup = NonNullable<ConnectDeps['lookupInstallationAccount']>;
+
+let store: MemoryGateStore;
 let app: Express;
 let currentOrg: string | null;
+// The App-level account lookup the host injects. A row that already carries a
+// login must never reach it — that is half of what these tests pin.
+let lookupAccount: Mock<AccountLookup>;
 // Repos the stubbed installation client returns (the connect router paginates it).
 let installRepos: Array<{ full_name: string; default_branch: string; private: boolean }>;
 const stubOctokit = {
@@ -29,9 +32,8 @@ const stubOctokit = {
   paginate: async () => installRepos,
 } as unknown as OctokitClient;
 
-// In hosted EE the registry is Postgres; stub it here so the connect router's
-// `registerProject(repoFullName)` doesn't create an `<cwd>/owner/repo/.truecourse`
-// dir with the file-backed default.
+// The repo overview resolves each repo's dashboard slug; stub the registry so the
+// test never reads (or writes) the developer's real project list.
 const stubRegistry: RegistryStore = {
   readRegistry: async () => [],
   pruneStaleProjects: async () => [],
@@ -44,18 +46,21 @@ const stubRegistry: RegistryStore = {
 };
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-gate-connect-'));
-  store = new FileGateStore(dir);
+  store = new MemoryGateStore();
   currentOrg = 'org_A';
   installRepos = [
     { full_name: 'acme/api', default_branch: 'main', private: true },
     { full_name: 'acme/web', default_branch: 'develop', private: false },
   ];
+  lookupAccount = vi.fn<AccountLookup>(async () => ({
+    accountLogin: 'acme',
+    accountType: 'Organization',
+  }));
   app = express();
   app.use(express.json());
-  // Stand in for the enterprise auth gate: attach req.eeUser.
+  // Stand in for the auth gate: attach req.user.
   app.use((req, _res, next) => {
-    (req as Request & { eeUser?: AuthUser }).eeUser = {
+    (req as Request & { user?: AuthUser }).user = {
       id: 'u1',
       email: 'u@acme.test',
       organizationId: currentOrg,
@@ -68,7 +73,9 @@ beforeEach(() => {
       store,
       appSlug: 'tc-gate',
       appUrl: 'http://localhost:3000',
+      setupRedirectPath: '/preview?connect=1',
       octokitFor: () => stubOctokit,
+      lookupInstallationAccount: lookupAccount,
     }),
   );
   setRegistryStore(stubRegistry);
@@ -76,7 +83,6 @@ beforeEach(() => {
 
 afterEach(() => {
   resetRegistryStore();
-  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 async function seedInstallation(org: string | null = 'org_A') {
@@ -142,7 +148,7 @@ describe('connect router', () => {
       .get('/api/ee/github/setup')
       .query({ installation_id: '100', state: 'org_A' })
       .expect(302)
-      .expect('location', 'http://localhost:3000/repositories');
+      .expect('location', 'http://localhost:3000/preview?connect=1');
     // Ownership is unchanged.
     expect((await store.getInstallation(100))?.workspaceOrgId).toBe('org_OTHER');
   });
@@ -176,7 +182,7 @@ describe('connect router', () => {
     expect((await store.getRepo('acme/api'))?.workspaceOrgId).toBe('org_OTHER');
   });
 
-  it('links, toggles blocking, lists, and unlinks a repo', async () => {
+  it('links, lists, and unlinks a repo', async () => {
     await seedInstallation('org_A');
 
     await request(app)
@@ -187,14 +193,12 @@ describe('connect router', () => {
     let res = await request(app).get('/api/ee/github/status').expect(200);
     expect((res.body as GithubConnectStatusResponse).repos).toHaveLength(1);
     expect((res.body as GithubConnectStatusResponse).repos[0].blocking).toBe(true);
-
-    await request(app)
-      .patch('/api/ee/github/repos/config')
-      .send({ repoFullName: 'acme/api', blocking: false })
-      .expect(200);
-
-    res = await request(app).get('/api/ee/github/status').expect(200);
-    expect((res.body as GithubConnectStatusResponse).repos[0].blocking).toBe(false);
+    // Unset on the record → the API resolves every notification type on.
+    expect((res.body as GithubConnectStatusResponse).repos[0].notifications).toEqual({
+      gateFailure: true,
+      conflicts: true,
+      specRegen: true,
+    });
 
     await request(app)
       .delete('/api/ee/github/repos/link')
@@ -205,6 +209,65 @@ describe('connect router', () => {
     expect((res.body as GithubConnectStatusResponse).repos).toEqual([]);
   });
 
+  it('lands the setup callback on the path its host declared', async () => {
+    await seedInstallation(null);
+    // A second host, whose SPA has no /preview at all.
+    const eeApp = express();
+    eeApp.use(express.json());
+    eeApp.use((req, _res, next) => {
+      (req as Request & { user?: AuthUser }).user = {
+        id: 'u1',
+        email: 'u@acme.test',
+        organizationId: 'org_A',
+      };
+      next();
+    });
+    eeApp.use(
+      '/api/ee/github',
+      createConnectRouter({
+        store,
+        appSlug: 'tc-gate',
+        appUrl: 'https://app.truecourse.test',
+        setupRedirectPath: '/repositories?connect=1',
+        octokitFor: () => stubOctokit,
+      }),
+    );
+
+    await request(eeApp)
+      .get('/api/ee/github/setup')
+      .query({ installation_id: '100', state: 'org_A' })
+      .expect(302)
+      .expect('location', 'https://app.truecourse.test/repositories?connect=1');
+  });
+
+  it('skips the per-repo spec reads on ?slim=1', async () => {
+    await seedInstallation('org_A');
+    await request(app)
+      .post('/api/ee/github/repos/link')
+      .send({ repoFullName: 'acme/api', installationId: 100, defaultBranch: 'main' })
+      .expect(201);
+
+    const getBaseline = vi.spyOn(store, 'getBaseline');
+
+    const slim = await request(app)
+      .get('/api/ee/github/status')
+      .query({ slim: '1' })
+      .expect(200);
+    const body = slim.body as GithubConnectStatusResponse;
+    // Everything the connect dialog reads is still there.
+    expect(body.installUrl).toContain('state=org_A');
+    expect(body.installations.map((i) => i.installationId)).toEqual([100]);
+    expect(body.repos.map((r) => r.repoFullName)).toEqual(['acme/api']);
+    // The enrichment did not run: no baseline read, so no corpus read either.
+    expect(getBaseline).not.toHaveBeenCalled();
+    expect(body.repos[0]!.slug).toBeNull();
+    expect(body.repos[0]!.openConflicts).toBe(0);
+
+    // The full read still enriches.
+    await request(app).get('/api/ee/github/status').expect(200);
+    expect(getBaseline).toHaveBeenCalledWith('acme/api');
+  });
+
   it('rejects an invalid link payload with 400', async () => {
     await seedInstallation('org_A');
     await request(app)
@@ -212,246 +275,106 @@ describe('connect router', () => {
       .send({ repoFullName: 'acme/api' }) // missing installationId + defaultBranch
       .expect(400);
   });
+});
 
-  it('defaults all notification types on, and a partial PATCH flips only what it sends', async () => {
-    await seedInstallation('org_A');
-    await request(app)
-      .post('/api/ee/github/repos/link')
-      .send({ repoFullName: 'acme/api', installationId: 100, defaultBranch: 'main' })
-      .expect(201);
-
-    // Unset on the record → API resolves every type on.
-    let res = await request(app).get('/api/ee/github/status').expect(200);
-    expect((res.body as GithubConnectStatusResponse).repos[0].notifications).toEqual({
-      gateFailure: true,
-      conflicts: true,
-      specRegen: true,
+/**
+ * Who an installation belongs to comes from the App API, not from the
+ * `installation` webhook: a webhook that is late — or misconfigured, so it never
+ * arrives at all — used to leave the row anonymous and the UI showing `#<id>`.
+ */
+describe('the account behind an installation', () => {
+  /** A row created by /setup before this fix: linked, but nameless. */
+  async function seedAnonymous(installationId = 157207108) {
+    await store.saveInstallation({
+      installationId,
+      accountLogin: '',
+      accountType: '',
+      workspaceOrgId: 'org_A',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
     });
+  }
 
-    // Partial PATCH only flips gateFailure; the rest stay on.
+  it('names a fresh installation at /setup, without waiting for the webhook', async () => {
+    lookupAccount.mockResolvedValue({ accountLogin: 'octo-org', accountType: 'Organization' });
+
     await request(app)
-      .patch('/api/ee/github/repos/config')
-      .send({ repoFullName: 'acme/api', notifications: { gateFailure: false } })
-      .expect(200);
+      .get('/api/ee/github/setup')
+      .query({ installation_id: '157207108', state: 'org_A' })
+      .expect(302);
 
-    res = await request(app).get('/api/ee/github/status').expect(200);
-    expect((res.body as GithubConnectStatusResponse).repos[0].notifications).toEqual({
-      gateFailure: false,
-      conflicts: true,
-      specRegen: true,
-    });
-
-    // specRegen is PATCHable like its siblings.
-    await request(app)
-      .patch('/api/ee/github/repos/config')
-      .send({ repoFullName: 'acme/api', notifications: { specRegen: false } })
-      .expect(200);
-
-    res = await request(app).get('/api/ee/github/status').expect(200);
-    expect((res.body as GithubConnectStatusResponse).repos[0].notifications).toEqual({
-      gateFailure: false,
-      conflicts: true,
-      specRegen: false,
+    expect(lookupAccount).toHaveBeenCalledWith(157207108);
+    expect(await store.getInstallation(157207108)).toMatchObject({
+      accountLogin: 'octo-org',
+      accountType: 'Organization',
+      workspaceOrgId: 'org_A',
     });
   });
 
-  it('sets notifyEmails (normalized + deduped) and rejects invalid ones', async () => {
-    await seedInstallation('org_A');
-    await request(app)
-      .post('/api/ee/github/repos/link')
-      .send({ repoFullName: 'acme/api', installationId: 100, defaultBranch: 'main' })
-      .expect(201);
+  it('keeps what the webhook already wrote, and does not call the API for it', async () => {
+    await seedInstallation(null); // the webhook's row: 'acme' / Organization, unlinked
 
-    // Valid: normalized (lowercased) + deduped.
     await request(app)
-      .patch('/api/ee/github/repos/config')
-      .send({ repoFullName: 'acme/api', notifyEmails: ['A@x.com', 'a@x.com', 'b@y.com'] })
+      .get('/api/ee/github/setup')
+      .query({ installation_id: '100', state: 'org_A' })
+      .expect(302);
+
+    expect(lookupAccount).not.toHaveBeenCalled();
+    expect(await store.getInstallation(100)).toMatchObject({
+      accountLogin: 'acme',
+      accountType: 'Organization',
+      workspaceOrgId: 'org_A',
+    });
+  });
+
+  it('names a row left anonymous by /setup on the next status read, once', async () => {
+    await seedAnonymous();
+    lookupAccount.mockResolvedValue({ accountLogin: 'octo-org', accountType: 'Organization' });
+
+    const first = await request(app)
+      .get('/api/ee/github/status')
+      .query({ slim: '1' })
       .expect(200);
-    const res = await request(app).get('/api/ee/github/status').expect(200);
-    expect((res.body as GithubConnectStatusResponse).repos[0].notifyEmails).toEqual([
-      'a@x.com',
-      'b@y.com',
+    expect((first.body as GithubConnectStatusResponse).installations).toEqual([
+      { installationId: 157207108, accountLogin: 'octo-org', accountType: 'Organization' },
     ]);
+    // Persisted, so the next read is already named and costs no API call.
+    expect(await store.getInstallation(157207108)).toMatchObject({
+      accountLogin: 'octo-org',
+      workspaceOrgId: 'org_A',
+    });
 
-    // Invalid address → 400 (not silently dropped).
-    await request(app)
-      .patch('/api/ee/github/repos/config')
-      .send({ repoFullName: 'acme/api', notifyEmails: ['ok@x.com', 'not-an-email'] })
-      .expect(400);
-
-    // Over the cap → 400.
-    await request(app)
-      .patch('/api/ee/github/repos/config')
-      .send({
-        repoFullName: 'acme/api',
-        notifyEmails: Array.from({ length: 21 }, (_, i) => `u${i}@x.com`),
-      })
-      .expect(400);
+    const second = await request(app)
+      .get('/api/ee/github/status')
+      .query({ slim: '1' })
+      .expect(200);
+    expect((second.body as GithubConnectStatusResponse).installations[0]!.accountLogin).toBe(
+      'octo-org',
+    );
+    expect(lookupAccount).toHaveBeenCalledTimes(1);
   });
 
-  it('returns runs only for a repo in the caller workspace', async () => {
-    await seedInstallation('org_A');
-    await store.linkRepo({
-      repoFullName: 'acme/api',
-      installationId: 100,
-      workspaceOrgId: 'org_A',
-      defaultBranch: 'main',
-      blocking: true,
-      enabled: true,
-      createdAt: '2026-01-01T00:00:00.000Z',
-      updatedAt: '2026-01-01T00:00:00.000Z',
-    });
-    await store.recordRun({
-      id: 'run1',
-      repoFullName: 'acme/api',
-      prNumber: 3,
-      headSha: 'sha',
-      baseSha: 'base',
-      conclusion: 'failure',
-      addedCount: 2,
-      resolvedCount: 1,
-      createdAt: '2026-01-02T00:00:00.000Z',
-    });
+  it('names it on the full status read too', async () => {
+    await seedAnonymous();
+    lookupAccount.mockResolvedValue({ accountLogin: 'octo-org', accountType: 'User' });
+
+    const res = await request(app).get('/api/ee/github/status').expect(200);
+    expect((res.body as GithubConnectStatusResponse).installations).toEqual([
+      { installationId: 157207108, accountLogin: 'octo-org', accountType: 'User' },
+    ]);
+    expect(await store.getInstallation(157207108)).toMatchObject({ accountLogin: 'octo-org' });
+  });
+
+  it('still answers when the lookup fails, leaving the row as it is', async () => {
+    await seedAnonymous();
+    lookupAccount.mockRejectedValue(new Error('GitHub is down'));
 
     const res = await request(app)
-      .get('/api/ee/github/repos/acme/api/runs')
+      .get('/api/ee/github/status')
+      .query({ slim: '1' })
       .expect(200);
-    expect(res.body.runs).toHaveLength(1);
-    expect(res.body.runs[0].conclusion).toBe('failure');
-
-    // A different org sees nothing.
-    currentOrg = 'org_B';
-    const res2 = await request(app)
-      .get('/api/ee/github/repos/acme/api/runs')
-      .expect(200);
-    expect(res2.body.runs).toEqual([]);
-  });
-
-  it('workspace runs feed shows one row per PR — newest run wins', async () => {
-    await seedInstallation('org_A');
-    await store.linkRepo({
-      repoFullName: 'acme/api',
-      installationId: 100,
-      workspaceOrgId: 'org_A',
-      defaultBranch: 'main',
-      blocking: true,
-      enabled: true,
-      createdAt: '2026-01-01T00:00:00.000Z',
-      updatedAt: '2026-01-01T00:00:00.000Z',
-    });
-    // Two gate runs on the SAME PR (one per pushed commit).
-    await store.recordRun({
-      id: 'run-old',
-      repoFullName: 'acme/api',
-      prNumber: 7,
-      headSha: 'aaaaaaa',
-      baseSha: 'base',
-      conclusion: 'failure',
-      addedCount: 2,
-      resolvedCount: 0,
-      createdAt: '2026-01-02T00:00:00.000Z',
-    });
-    await store.recordRun({
-      id: 'run-new',
-      repoFullName: 'acme/api',
-      prNumber: 7,
-      headSha: 'bbbbbbb',
-      baseSha: 'base',
-      conclusion: 'success',
-      addedCount: 0,
-      resolvedCount: 2,
-      createdAt: '2026-01-03T00:00:00.000Z',
-    });
-
-    const res = await request(app).get('/api/ee/github/runs').expect(200);
-    // One row for the PR, carrying the latest run's verdict + head.
-    expect(res.body.runs).toHaveLength(1);
-    expect(res.body.runs[0].prNumber).toBe(7);
-    expect(res.body.runs[0].id).toBe('run-new');
-    expect(res.body.runs[0].conclusion).toBe('success');
-  });
-
-  it('annotates the per-repo runs feed with PR state + title (null when untracked)', async () => {
-    await seedInstallation('org_A');
-    await store.linkRepo({
-      repoFullName: 'acme/api',
-      installationId: 100,
-      workspaceOrgId: 'org_A',
-      defaultBranch: 'main',
-      blocking: true,
-      enabled: true,
-      createdAt: '2026-01-01T00:00:00.000Z',
-      updatedAt: '2026-01-01T00:00:00.000Z',
-    });
-    const mkRun = (id: string, pr: number) => ({
-      id,
-      repoFullName: 'acme/api',
-      prNumber: pr,
-      headSha: `sha-${pr}`,
-      baseSha: 'base',
-      conclusion: 'success' as const,
-      addedCount: 0,
-      resolvedCount: 0,
-      createdAt: `2026-01-0${pr}T00:00:00.000Z`,
-    });
-    await store.recordRun(mkRun('run-merged', 1));
-    await store.recordRun(mkRun('run-untracked', 2));
-    await store.upsertPr({
-      repoFullName: 'acme/api',
-      prNumber: 1,
-      title: 'Add widget',
-      state: 'merged',
-      headSha: 'sha-1',
-      updatedAt: '2026-01-02T00:00:00.000Z',
-    });
-
-    const res = await request(app)
-      .get('/api/ee/github/repos/acme/api/runs')
-      .expect(200);
-    const byId = Object.fromEntries(res.body.runs.map((r: any) => [r.id, r]));
-    expect(byId['run-merged'].prState).toBe('merged');
-    expect(byId['run-merged'].title).toBe('Add widget');
-    // A run whose PR has no gh_prs row (pre-tracking history) → null state/title.
-    expect(byId['run-untracked'].prState).toBeNull();
-    expect(byId['run-untracked'].title).toBeNull();
-  });
-
-  it('carries PR state + title on the workspace feed (one row per PR)', async () => {
-    await seedInstallation('org_A');
-    await store.linkRepo({
-      repoFullName: 'acme/api',
-      installationId: 100,
-      workspaceOrgId: 'org_A',
-      defaultBranch: 'main',
-      blocking: true,
-      enabled: true,
-      createdAt: '2026-01-01T00:00:00.000Z',
-      updatedAt: '2026-01-01T00:00:00.000Z',
-    });
-    await store.recordRun({
-      id: 'run-open',
-      repoFullName: 'acme/api',
-      prNumber: 5,
-      headSha: 'sha-5',
-      baseSha: 'base',
-      conclusion: 'failure',
-      addedCount: 1,
-      resolvedCount: 0,
-      createdAt: '2026-01-02T00:00:00.000Z',
-    });
-    await store.upsertPr({
-      repoFullName: 'acme/api',
-      prNumber: 5,
-      title: 'Open work',
-      state: 'open',
-      headSha: 'sha-5',
-      updatedAt: '2026-01-02T00:00:00.000Z',
-    });
-
-    const res = await request(app).get('/api/ee/github/runs').expect(200);
-    expect(res.body.runs).toHaveLength(1);
-    expect(res.body.runs[0].prNumber).toBe(5);
-    expect(res.body.runs[0].prState).toBe('open');
-    expect(res.body.runs[0].title).toBe('Open work');
+    // The dialog falls back to `#<id>` on an empty login — nothing 502s.
+    expect((res.body as GithubConnectStatusResponse).installations[0]!.accountLogin).toBe('');
+    expect(await store.getInstallation(157207108)).toMatchObject({ accountLogin: '' });
   });
 });

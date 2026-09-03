@@ -6,7 +6,7 @@ import {
   LlmConfigStore,
   type LlmDb,
 } from '../../ee/packages/server/src/llm/store';
-import { schema, MIGRATIONS_DIR } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR } from '@truecourse/db';
 
 const SECRET = 'master-secret-at-least-32-chars-long!!';
 

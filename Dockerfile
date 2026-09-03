@@ -1,10 +1,11 @@
-# TrueCourse server image (dashboard server + EE plugin + built client).
-# Runs on Azure Container Apps. Deliberately cloud-neutral — env vars + a Postgres
-# DATABASE_URL, no cloud SDK at runtime — so it stays portable for later. Boot it
-# locally with `docker compose up --build`.
+# TrueCourse server image (dashboard server + built client) — the one deployment
+# artifact, for self-hosting and the hosted product alike. Deliberately
+# cloud-neutral: configuration is env vars + a Postgres DATABASE_URL, no cloud
+# SDK at runtime. `docker compose up --build` boots it with a database (see
+# docker-compose.yml for the required env vars).
 
 ############################################
-# 1. Builder — install + build the whole pnpm/turbo workspace (incl. ee/)
+# 1. Builder — install + build the whole pnpm/turbo workspace
 ############################################
 # Pinned to the exact patch in .node-version — bump both together. A floating
 # `node:22` tag would silently drift the container off the version CI runs.
@@ -28,11 +29,7 @@ COPY . .
 # CI builds anyway.
 RUN pnpm install --frozen-lockfile
 
-# Build every workspace package (tsc/turbo) AND the client with the EE overlay.
-# VITE_TC_EE=true is REQUIRED — a production client build excludes @truecourse/ee-client
-# unless this is set (apps/dashboard/client/vite.config.ts). Builder cache is cold,
-# so turbo runs the client build with this env honored.
-ENV VITE_TC_EE=true
+# Build every workspace package (tsc/turbo) and the client.
 RUN pnpm build
 
 # The server serves static assets from `<server>/dist/public`
@@ -61,8 +58,8 @@ WORKDIR /app
 # pruning would break `analyze`. (Image-size trimming is a later optimization.)
 COPY --from=builder /app /app
 
-# Writable data dir: community-mode file store (./.truecourse) + logs land here.
-# EE mode stores everything in Postgres and never writes it.
+# Writable data dir for logs. Durable state lives in Postgres; per-run clones
+# and session transcripts go under the node user's home (~/.truecourse).
 RUN mkdir -p /data/logs && chown -R node:node /data
 USER node
 WORKDIR /data

@@ -162,6 +162,32 @@ export function progressSentence(steps: readonly ChecklistItem[], runStatus: Run
   return `${steps.length} step${steps.length === 1 ? '' : 's'}`;
 }
 
+/**
+ * The row's one line about a run: why it ended badly when the record says so,
+ * and how far it got otherwise. A run that died before opening a step has only
+ * its error to tell — and when it has both, the error is the part worth the
+ * one line the row has.
+ */
+export function runStory(run: PublicSessionRun, steps: readonly ChecklistItem[]): string {
+  return run.error?.message ?? progressSentence(steps, run.status);
+}
+
+/**
+ * What a run surface needs to offer "run it again". Supplied by whoever mounts
+ * the surface — the sessions views know nothing about how a command is started,
+ * only whether this one can be.
+ */
+export interface RunStarter {
+  /** Whether a run of this command can be started from here. */
+  supports: (command: string) => boolean;
+  /** Fire it. Refusals are announced by the starter, so there is nothing to catch. */
+  start: (command: string) => void;
+  /** A start is in flight. */
+  pending: boolean;
+  /** What a repository with no runs at all is offered, when there is an offer. */
+  first: { command: string; label: string } | null;
+}
+
 // ---------------------------------------------------------------------------
 // step ↔ session mapping
 // ---------------------------------------------------------------------------

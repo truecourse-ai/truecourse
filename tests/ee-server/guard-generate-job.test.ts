@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import type {
   GuardConflictsBlockedEmail,
   GuardOnboardingPipeline,
@@ -35,7 +35,7 @@ function fakeNotifier() {
 }
 
 async function linkRepo(
-  db: EeDb,
+  db: Db,
   over: Partial<Parameters<ReturnType<typeof selectGateStore>['linkRepo']>[0]> = {},
 ): Promise<void> {
   await selectGateStore(db).linkRepo({
@@ -68,12 +68,12 @@ const GITHUB_ENV = {
 } as const;
 
 let client: PGlite;
-let db: EeDb;
+let db: Db;
 let savedEnv: Record<string, string | undefined>;
 
 beforeEach(async () => {
   client = new PGlite();
-  db = drizzle(client, { schema }) as unknown as EeDb;
+  db = drizzle(client, { schema }) as unknown as Db;
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
   savedEnv = {};
   for (const [k, v] of Object.entries(GITHUB_ENV)) {

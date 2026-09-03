@@ -139,11 +139,14 @@ export function acquireRunsWatch(repoPath: string, onChange: () => void): void {
   // no add/change/error events, even after the tree appears later. A fresh
   // repo has no `sessions/` until its first run, so without this the watch
   // would sit dead and the first run would never reach the room. Guarded on
-  // the repo root existing — a repo identity that is not a local path (hosted)
-  // must not mint directories — and best-effort: an unwritable tree just
+  // the RESOLVED dir being absolute: a hosted repo identity resolves under the
+  // global dir (mkdir there is fine — the scan mints the same path), while a
+  // bare identity with no resolver installed resolves relative to cwd, and a
+  // relative mkdir is nobody's intent. Best-effort: an unwritable tree just
   // leaves the watch as dead as it was before.
   try {
-    if (fs.existsSync(repoPath)) fs.mkdirSync(sessionsDir(repoPath), { recursive: true });
+    const dir = sessionsDir(repoPath);
+    if (path.isAbsolute(dir)) fs.mkdirSync(dir, { recursive: true });
   } catch {
     /* the watcher's own error handler reports anything further */
   }

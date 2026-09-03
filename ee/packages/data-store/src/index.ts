@@ -1,22 +1,28 @@
 /**
- * Hosted (Postgres) implementations of core's spec/contract store seams.
- * The enterprise server installs these via `setContractStore` / `setSpecStore`
- * so the whole pipeline reads and writes server-side instead of the customer's
- * `.truecourse/` tree. All content lives in Postgres — bulky bodies are
- * content-addressed in the `content` table; no blob store. Wired in
- * `@truecourse/ee-server`.
+ * EE-only Postgres stores. The shared store implementations (analyses, specs,
+ * guard, config, registry, caches, locks, and the content-addressed pool they
+ * build on) live in `@truecourse/data-store` in the base product and are
+ * re-exported here so EE consumers keep a single import surface. What remains
+ * in this package is hosted-edition machinery: the job queue, workspace
+ * knowledge, LLM traces, and workspace settings.
  */
 
-export { ContentStore, contentScope } from './content-store.js';
-export { sha256 } from './pack.js';
-export { PgAnalysisStore } from './analysis-store.js';
-export { PgRepoConfigStore, PgUiStateStore } from './config-store.js';
-export { PgRegistryStore } from './registry-store.js';
-export { GhReposRegistryStore } from './gh-repos-registry-store.js';
-export { PgSpecStore } from './spec-store.js';
+export {
+  ContentStore,
+  contentScope,
+  sha256,
+  PgAnalysisStore,
+  PgRepoConfigStore,
+  PgUiStateStore,
+  PgRegistryStore,
+  GhReposRegistryStore,
+  PgSpecStore,
+  PgGuardStore,
+  PgInferredActionStore,
+  PgKvCacheStore,
+  PgAnalyzeLock,
+} from '@truecourse/data-store';
 export { PgKnowledgeStore, type KnowledgeDocRow } from './knowledge-store.js';
-export { PgGuardStore } from './guard-store.js';
-export { PgInferredActionStore } from './inferred-action-store.js';
 export {
   JobStore,
   NotificationStore,
@@ -30,7 +36,5 @@ export {
   type PendingGuardBaselineInput,
   type PendingGuardBaselineView,
 } from './jobs-store.js';
-export { PgKvCacheStore } from './cache-store.js';
 export { PgTraceStore } from './trace-store.js';
-export { PgAnalyzeLock } from './analyze-lock.js';
 export { WorkspaceSettingsStore, type WorkspaceSettings } from './workspace-settings-store.js';

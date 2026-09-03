@@ -198,8 +198,8 @@ describe('a run record as the shell reads it', () => {
 // ---------------------------------------------------------------------------
 
 describe('a real run in the shell', () => {
-  it('announces itself on whatever page is open, and marks the row onboarding', async () => {
-    const state = serve([runningScan()]);
+  it('announces a run that starts while the page is open, and marks the row onboarding', async () => {
+    const state = serve([]);
     // Home is not where the subscription lives — the shell is — so any address
     // would do here. This one is also the address that shows the marker.
     renderAt('/preview');
@@ -207,19 +207,35 @@ describe('a real run in the shell', () => {
     // The room is joined for the real repository — that is what makes the
     // server watch its store at all.
     await waitFor(() => expect(socketMock.joins).toContain('linkwarden'));
+    // The world is loaded and idle; NOW the scan starts.
+    const row = (await screen.findByText('linkwarden/linkwarden')).closest('tr')!;
+    state.runs = [runningScan()];
+    fireSocket('session:runs-changed', { repoId: 'linkwarden' });
 
     // The toast: one announcement, pointing at the preview's own Activity.
     expect(await screen.findByText('Onboarding linkwarden/linkwarden')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Open Activity/ })).toBeInTheDocument();
 
     // The row says onboarding while the first scan is up.
-    const row = (await screen.findByText('linkwarden/linkwarden')).closest('tr')!;
-    expect(within(row).getByText('onboarding')).toBeInTheDocument();
+    await waitFor(() => expect(within(row).getByText('onboarding')).toBeInTheDocument());
 
     // The same page, when the run settles: the marker is gone, no reload.
     state.runs = [runningScan({ status: 'completed', finishedAt: new Date().toISOString() })];
     fireSocket('session:runs-changed', { repoId: 'linkwarden' });
     await waitFor(() => expect(within(row).queryByText('onboarding')).toBeNull());
+  });
+
+  it('stays silent for a run already in flight when the page loads (every sign-in reloads)', async () => {
+    serve([runningScan()]);
+    renderAt('/preview');
+
+    // The run is known — the row carries the onboarding marker — but it was
+    // in flight on arrival, so it never toasts. The runs arrive AFTER the
+    // fixture jobs do (two async hops), which is exactly the window the
+    // announce snapshot has to wait out.
+    const row = (await screen.findByText('linkwarden/linkwarden')).closest('tr')!;
+    await waitFor(() => expect(within(row).getByText('onboarding')).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: /Open Activity/ })).toBeNull();
   });
 
   it('files a notification when the run starts and another when it settles', async () => {

@@ -14,14 +14,14 @@ import { analyzeCore } from '@truecourse/core/commands/analyze-core';
 import { persistDiffAnalysis } from '@truecourse/core/commands/analyze-persist';
 import { log } from '@truecourse/core/lib/logger';
 import type { ViolationRecord } from '@truecourse/core/types/snapshot';
-import type { GateStore } from './store/types.js';
 import {
+  type GateStore,
   getInstallationToken,
   cloneUrl,
   cloneAuthArgs,
   stripEmbeddedAuth,
   type GithubAuth,
-} from './github.js';
+} from '@truecourse/github-app';
 
 export interface GateAnalyzeDeps {
   store: GateStore;

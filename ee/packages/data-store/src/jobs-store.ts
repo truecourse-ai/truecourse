@@ -20,8 +20,8 @@ import {
   pendingBaselines,
   pendingGuardBaselines,
   guardBackfillMarkers,
-  type EeDb,
-} from '@truecourse/ee-db';
+  type Db,
+} from '@truecourse/db';
 import type { JobView, JobStatus, NotificationLevel, NotificationView } from '@truecourse/shared';
 
 /** Thrown by `JobStore.create` when an active job already holds the (org, key). */
@@ -66,7 +66,7 @@ function toJobView(r: JobRow): JobView {
 }
 
 export class JobStore {
-  constructor(private readonly db: EeDb) {}
+  constructor(private readonly db: Db) {}
 
   /**
    * Create a `queued` job. Throws `ActiveJobExistsError` (carrying the existing
@@ -267,7 +267,7 @@ function toPendingView(r: PendingBaselineRow): PendingBaselineView {
  * `upsert` = latest wins; `take`/`drain` are read-and-delete (replay is one-shot).
  */
 export class PendingBaselineStore {
-  constructor(private readonly db: EeDb) {}
+  constructor(private readonly db: Db) {}
 
   /** Record (or replace) the repo's pending follow-up baseline — latest wins. */
   async upsert(input: PendingBaselineInput): Promise<void> {
@@ -349,7 +349,7 @@ function toPendingGuardView(r: PendingGuardBaselineRow): PendingGuardBaselineVie
  * `upsert` = latest wins; `take`/`drain` are read-and-delete (replay is one-shot).
  */
 export class PendingGuardBaselineStore {
-  constructor(private readonly db: EeDb) {}
+  constructor(private readonly db: Db) {}
 
   /** Record (or replace) the repo's pending follow-up guard baseline — latest wins. */
   async upsert(input: PendingGuardBaselineInput): Promise<void> {
@@ -399,7 +399,7 @@ export class PendingGuardBaselineStore {
  * durable analogue of a run-once flag that survives restarts.
  */
 export class GuardBackfillMarkerStore {
-  constructor(private readonly db: EeDb) {}
+  constructor(private readonly db: Db) {}
 
   /** Whether the repo was already processed by a prior backfill. */
   async isMarked(repoFullName: string): Promise<boolean> {
@@ -436,7 +436,7 @@ function toNotificationView(r: NotificationRow): NotificationView {
 }
 
 export class NotificationStore {
-  constructor(private readonly db: EeDb) {}
+  constructor(private readonly db: Db) {}
 
   async add(input: {
     org: string;

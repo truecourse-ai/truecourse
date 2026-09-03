@@ -16,7 +16,7 @@
 import type { Response } from 'express';
 import { Client } from 'pg';
 import { sql } from 'drizzle-orm';
-import type { EeDb } from '@truecourse/ee-db';
+import type { Db } from '@truecourse/db';
 import type { ServerEvent } from '@truecourse/shared';
 import { log } from '@truecourse/core/lib/logger';
 
@@ -112,7 +112,7 @@ export class EventHub {
  * Payload must stay under Postgres's 8KB NOTIFY limit — pass IDs + small fields,
  * never large bodies. Best-effort: a publish failure must not fail the job.
  */
-export async function publishEvent(db: EeDb, orgId: string, event: ServerEvent): Promise<void> {
+export async function publishEvent(db: Db, orgId: string, event: ServerEvent): Promise<void> {
   const payload = JSON.stringify({ orgId, event } satisfies EventEnvelope);
   try {
     await db.execute(sql`select pg_notify(${CHANNEL}, ${payload})`);

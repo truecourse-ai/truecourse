@@ -41,7 +41,7 @@ import type { JobsApi } from '../jobs/index.js';
 import { KNOWLEDGE_SYNC_TASK, workspaceSyncJobKey } from '../jobs/constants.js';
 
 function orgIdOf(req: Request): string | null {
-  return (req as Request & { eeUser?: AuthUser }).eeUser?.organizationId ?? null;
+  return (req as Request & { user?: AuthUser }).user?.organizationId ?? null;
 }
 
 const CONFLICT_VERDICTS = ['a', 'b', 'dismissed'] as const;

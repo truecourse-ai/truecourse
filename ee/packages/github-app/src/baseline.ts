@@ -19,15 +19,17 @@ import { readLatest } from '@truecourse/core/lib/analysis-store';
 import type { StepTracker } from '@truecourse/core/progress';
 import type { RepoRef } from '@truecourse/core/lib/contract-store';
 import { log } from '@truecourse/core/lib/logger';
-import type { GateStore } from './store/types.js';
 import {
+  type GateStore,
   getInstallationToken,
   cloneUrl,
   cloneAuthArgs,
   stripEmbeddedAuth,
   type GithubAuth,
-} from './github.js';
-import { splitRepo, listPrsForCommit, type OctokitClient } from './octokit.js';
+  splitRepo,
+  listPrsForCommit,
+  type OctokitClient,
+} from '@truecourse/github-app';
 import { defaultSpecScanPipeline, type SpecScanPipeline } from './spec-scan.js';
 
 export interface BaselineDeps {

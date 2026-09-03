@@ -4,6 +4,10 @@ Commercial-licensed enterprise features that layer onto the open-source
 core. **Everything in this directory is governed by [`ee/LICENSE`](./LICENSE),
 not the repository's root MIT license.**
 
+> WorkOS authentication and the Postgres package (`@truecourse/db`) have moved
+> into the base product — they now live in `apps/dashboard/server/src/auth/`
+> and `packages/db/`, and are required for every deployment.
+
 ## Boundary rule
 
 Imports are one-way: **`ee/` may import from OSS packages; OSS code must
@@ -16,8 +20,9 @@ edition run with `ee/` absent.
 ## Packages
 
 - `packages/server` (`@truecourse/ee-server`) — enterprise server code
-  (WorkOS SSO/auth) that registers into the dashboard server's plugin seam.
-  It also composes the GitHub App package below.
+  (workspace, knowledge, admin, jobs, LLM config) that registers into the
+  dashboard server's plugin seam. It also composes the GitHub App package
+  below. Auth is no longer here — see the note above.
 - `packages/client` (`@truecourse/ee-client`) — enterprise UI (the
   Workspace page, the GitHub integration page, and the Models page)
   contributed into the dashboard client's route + nav registries.
@@ -210,7 +215,7 @@ Set `SENTRY_DSN` (EU-region DSN for EU residency) to enable; unset ⇒ no-op. Se
 
 ## Enablement
 
-Enterprise mode turns on when WorkOS is configured (or
-`TRUECOURSE_EDITION=enterprise`). When off, the dashboard runs exactly as
-the community edition with no authentication. The GitHub App additionally
-requires the `GITHUB_APP_*` env vars to light up `github-gate`.
+The enterprise plugin loads when `ee/` is present and built. Authentication
+and Postgres are no longer the switch — the base dashboard server requires
+both to boot. The GitHub App additionally requires the `GITHUB_APP_*` env
+vars to light up `github-gate`.

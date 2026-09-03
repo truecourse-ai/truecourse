@@ -7,16 +7,16 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import type { AuthUser, LlmTraceInput } from '@truecourse/shared';
 import { FsBlobStore } from '../../ee/packages/storage/src/index';
 import { PgTraceStore, JobStore } from '../../ee/packages/data-store/src/index';
 import { createAdminRouter } from '../../ee/packages/server/src/admin/index';
 
-async function makeDb(client: PGlite): Promise<EeDb> {
+async function makeDb(client: PGlite): Promise<Db> {
   const db = drizzle(client, { schema });
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
-  return db as unknown as EeDb;
+  return db as unknown as Db;
 }
 
 function trace(over: Partial<LlmTraceInput> = {}): LlmTraceInput {
@@ -76,7 +76,7 @@ beforeEach(async () => {
   app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
-    (req as Request & { eeUser?: AuthUser }).eeUser = currentUser
+    (req as Request & { user?: AuthUser }).user = currentUser
       ? ({ organizationId: 'org_A', ...currentUser } as AuthUser)
       : undefined;
     next();

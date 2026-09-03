@@ -14,7 +14,7 @@ import { type Express } from 'express';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import { PgGuardStore, PgSpecStore } from '../../ee/packages/data-store/src/index';
 // Import the store setters from the PACKAGE (dist) specifiers — the SAME module
 // instances the dashboard route uses, so setGuardStore actually swaps the store
@@ -24,7 +24,7 @@ import { setSpecStore, resetSpecStore } from '@truecourse/core/lib/spec-store';
 import { setRepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
 import { setGuardGatePendingLookup } from '@truecourse/core/lib/guard-gate-pending';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
-import { createApp } from '../../apps/dashboard/server/src/app';
+import { createTestApp } from '../helpers/test-app';
 import { writeLatest } from '@truecourse/core/lib/analysis-store';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 import type { GuardLatest } from '../../packages/shared/src/index';
@@ -59,7 +59,7 @@ const runAt = (commit: string, id: string, outcome: GuardLatest['scenarios'][num
 });
 
 let client: PGlite;
-let db: EeDb;
+let db: Db;
 let guardStore: PgGuardStore;
 let app: Express;
 let fixture: TestFixture;
@@ -93,12 +93,12 @@ const url = (suffix: string) => `/api/repos/${fixture.project.slug}/guard/${suff
 
 beforeEach(async () => {
   fixture = await setupTestFixture();
-  app = createApp({ serveStatic: false });
+  app = createTestApp();
   // The hosted store keys by the SAME canonical path the route resolves (the Pg
   // store matches keys by exact string, unlike the FS store's symlink-following).
   repoKey = (await resolveProjectForRequest(fixture.project.slug)).path;
   client = new PGlite();
-  db = drizzle(client, { schema }) as unknown as EeDb;
+  db = drizzle(client, { schema }) as unknown as Db;
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
   guardStore = new PgGuardStore(db);
   setGuardStore(guardStore);

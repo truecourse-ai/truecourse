@@ -7,15 +7,15 @@
  * a durable row.
  */
 
-import type { GateStore } from './store/types.js';
-import type { PullRequestPayload } from './webhook.js';
 import {
+  type GateStore,
+  type PullRequestPayload,
   splitRepo,
   findActiveCheck,
   startCheck,
   postCheck,
   type OctokitClient,
-} from './octokit.js';
+} from '@truecourse/github-app';
 import { PR_TRIGGER_ACTIONS } from './pr-events.js';
 import { GUARD_GATE_CHECK_NAME } from './guard-gate-comment.js';
 import { postGuardGateErrorCheck, type GuardGateRunRequest } from './guard-gate-runner.js';

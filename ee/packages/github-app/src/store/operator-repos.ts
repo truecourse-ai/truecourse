@@ -8,7 +8,7 @@
  * across ALL workspaces and MUST only be used by boot-time operator machinery
  * (the deploy-time guard backfill). Never inject it into a request path.
  *
- * It exists ONLY as a Postgres query behind the hosted `EeDb` — there is no file
+ * It exists ONLY as a Postgres query behind the hosted `Db` — there is no file
  * adapter, because the only caller (the deploy backfill) runs solely in the hosted
  * server where the db is always present. So the cross-tenant surface has exactly
  * one implementation, gated on holding the shared db handle; a caller with no db
@@ -20,8 +20,8 @@
  */
 
 import { eq } from 'drizzle-orm';
-import type { EeDb } from '@truecourse/ee-db';
-import { ghRepos } from '@truecourse/ee-db';
+import type { Db } from '@truecourse/db';
+import { ghRepos } from '@truecourse/db';
 
 /** The minimal projection the backfill needs to enqueue per-repo guard jobs. */
 export interface OperatorRepoRef {
@@ -38,7 +38,7 @@ export interface OperatorRepoEnumeration {
 }
 
 class PostgresOperatorRepoEnumeration implements OperatorRepoEnumeration {
-  constructor(private readonly db: EeDb) {}
+  constructor(private readonly db: Db) {}
 
   async listAllRepos(): Promise<OperatorRepoRef[]> {
     const rows = await this.db
@@ -60,6 +60,6 @@ class PostgresOperatorRepoEnumeration implements OperatorRepoEnumeration {
  * doc. Takes the shared db non-nullably: the cross-tenant surface only ever runs
  * hosted, so there is no local/file fallback to select between.
  */
-export function selectOperatorRepoEnumeration(db: EeDb): OperatorRepoEnumeration {
+export function selectOperatorRepoEnumeration(db: Db): OperatorRepoEnumeration {
   return new PostgresOperatorRepoEnumeration(db);
 }

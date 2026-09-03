@@ -9,7 +9,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import type { GuardGatePipeline } from '@truecourse/ee-github-app';
 import { JobStore, NotificationStore } from '../../ee/packages/data-store/src/index';
 import {
@@ -33,12 +33,12 @@ const GITHUB_ENV = {
 } as const;
 
 let client: PGlite;
-let db: EeDb;
+let db: Db;
 let savedEnv: Record<string, string | undefined>;
 
 beforeEach(async () => {
   client = new PGlite();
-  db = drizzle(client, { schema }) as unknown as EeDb;
+  db = drizzle(client, { schema }) as unknown as Db;
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
   savedEnv = {};
   for (const [k, v] of Object.entries(GITHUB_ENV)) {

@@ -56,7 +56,7 @@ import {
   cloneAuthArgs,
   stripEmbeddedAuth,
   type GithubAuth,
-} from './github.js';
+} from '@truecourse/github-app';
 
 export interface GuardOnboardingRequest {
   repoFullName: string;

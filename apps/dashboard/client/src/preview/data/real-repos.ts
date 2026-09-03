@@ -1,26 +1,67 @@
-// PREVIEW: the repo list and connect-by-URL here are REAL (they talk to the
-// dashboard server); everything else in the preview is fake data.
+// PREVIEW: the repository list and the GitHub connect flow here are REAL (they
+// talk to the dashboard server); everything else in the preview is fake data.
 
 /**
  * The one seam where the preview touches the real server.
  *
- * `POST /api/repos/connect` clones a public repository and registers it, so a
- * URL-connected repo is a real row on the real registry. The preview shows those
- * rows beside its fixtures: they carry no coverage, no runs and no corpus (the
- * fixture lookups all fall back to empty), so they render as a freshly connected
- * repository would.
+ * A repository connected on the server is a real row on the real registry. The
+ * preview shows those rows beside its fixtures: they carry no coverage, no runs
+ * and no corpus (the fixture lookups all fall back to empty), so they render as
+ * a freshly connected repository would.
  *
  * Only repos with a `remoteUrl` are shown. A developer's own path-registered
  * repos are their local dashboard's business, not the product preview's.
  *
- * Every call degrades to nothing: with no server behind it (a static preview, a
- * test) the list is simply empty rather than an error the mock has no place for.
+ * The GitHub App is how one gets there: the status read says which installations
+ * this workspace has and which repositories are already linked, an installation
+ * lists what it can see, and linking one CLONES IT INSIDE THE REQUEST — minutes,
+ * not milliseconds, which is why its caller has to say so.
+ *
+ * The registry reads degrade to nothing: with no server behind them (a static
+ * preview, a test) the list is simply empty rather than an error the mock has no
+ * place for. The GitHub calls do the opposite and reject, because the reason is
+ * the whole answer — an unconfigured server names the variables it wants.
  */
 
-import { connectRepo, deleteRepo, getRepos, type RepoResponse } from '@/lib/api';
+import { deleteRepo, fetchApi, getRepos, type RepoResponse } from '@/lib/api';
+import type {
+  GithubConnectStatusResponse,
+  GithubInstallableRepo,
+  GithubInstallationReposResponse,
+} from '@truecourse/shared';
 import type { ProviderId, Repo } from './types';
 
-export { connectRepo };
+/**
+ * The App's installations on this workspace, and the repositories already
+ * linked. `slim` because the dialog only needs the names: the full read walks
+ * each repo's spec store, which the dialog would pay for on every open.
+ */
+export function fetchGithubStatus(): Promise<GithubConnectStatusResponse> {
+  return fetchApi<GithubConnectStatusResponse>('/api/github/status?slim=1');
+}
+
+/** Everything one installation can see, linked or not. */
+export async function fetchInstallationRepos(
+  installationId: number,
+): Promise<GithubInstallableRepo[]> {
+  const body = await fetchApi<GithubInstallationReposResponse>(
+    `/api/github/installations/${installationId}/repos`,
+  );
+  return body.repos;
+}
+
+/** Link one repository. The row is the connection — the onboarding scan clones
+ *  for itself in the background, so this returns as soon as the row is written. */
+export async function linkGithubRepo(link: {
+  repoFullName: string;
+  installationId: number;
+  defaultBranch: string;
+}): Promise<void> {
+  await fetchApi<{ ok: boolean }>('/api/github/repos/link', {
+    method: 'POST',
+    body: JSON.stringify(link),
+  });
+}
 
 /** The provider of a remote, by host. An unknown host reads as github: the preview has no fourth icon. */
 function providerOf(host: string): ProviderId {
@@ -71,7 +112,7 @@ export function toPreviewRepo(entry: RepoResponse): Repo {
   };
 }
 
-/** The URL-connected repos of the real registry. Empty when there is no server to ask. */
+/** The connected repos of the real registry. Empty when there is no server to ask. */
 export async function fetchRealRepos(): Promise<Repo[]> {
   try {
     const entries = await getRepos();
@@ -81,11 +122,12 @@ export async function fetchRealRepos(): Promise<Repo[]> {
   }
 }
 
-/** Disconnect a real repo. Failure is swallowed: the caller refreshes either way. */
-export async function disconnectRealRepo(id: string): Promise<void> {
-  try {
-    await deleteRepo(id);
-  } catch {
-    // The refresh that follows shows whether it actually went.
-  }
+/**
+ * Disconnect a real repo. REJECTS with the server's reason (an `ApiError`
+ * carrying its message): the server refuses a disconnect it cannot make safely
+ * — a spec scan another process is running holds the tree — and a caller that
+ * swallowed that would show the row snap back with nothing said.
+ */
+export function disconnectRealRepo(id: string): Promise<void> {
+  return deleteRepo(id);
 }

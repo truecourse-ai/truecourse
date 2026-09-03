@@ -50,17 +50,19 @@ import {
   persistBirthEvidence,
   type GuardGenerateFn,
 } from './guard-onboarding.js';
-import type { GateStore } from './store/types.js';
 import {
+  type GateStore,
   getInstallationToken,
   cloneUrl,
   cloneAuthArgs,
   stripEmbeddedAuth,
   type GithubAuth,
-} from './github.js';
-import { splitRepo, postCheck, type OctokitClient } from './octokit.js';
+  splitRepo,
+  postCheck,
+  type OctokitClient,
+  wantsNotification,
+} from '@truecourse/github-app';
 import { decideGuardGate, emptyGuardGateDiff, type GuardGateDecision } from './guard-gate.js';
-import { wantsNotification } from './notifications.js';
 import { prGuardUrl } from './links.js';
 import type { EmailNotifier } from './email.js';
 import {

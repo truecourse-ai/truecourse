@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import request from 'supertest';
 import { type Express } from 'express';
-import { createApp } from '../../apps/dashboard/server/src/app';
+import { createTestApp } from '../helpers/test-app';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 
 /**
@@ -25,7 +25,7 @@ describe('guard generate route — open-conflict gate', () => {
   beforeEach(async () => {
     fixture = await setupTestFixture();
     root = fixture.repoPath;
-    app = createApp({ serveStatic: false });
+    app = createTestApp();
 
     fs.mkdirSync(path.join(root, '.truecourse', 'specs'), { recursive: true });
     fs.mkdirSync(path.join(root, 'docs'), { recursive: true });

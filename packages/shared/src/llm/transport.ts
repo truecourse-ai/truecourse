@@ -108,6 +108,11 @@ export interface StageUsage {
 
 // Process-wide, keyed by stage. A CLI run is one process, so this scopes
 // naturally to the run; call resetStageUsage() up front to be safe.
+//
+// The dashboard server no longer shares one process-wide transport — each run
+// carries the credentials of the workspace that asked for it — but this tally
+// is still process-global, so it is only accurate while ONE run is in flight.
+// Scoping usage per run is the remaining half of that move.
 const stageUsage = new Map<string, StageUsage>();
 
 /** Clear accumulated usage — call once at the start of a run. */

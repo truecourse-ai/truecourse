@@ -13,7 +13,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { eq } from 'drizzle-orm';
-import { schema, MIGRATIONS_DIR, content, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, content, type Db } from '@truecourse/db';
 import { PgGuardStore, contentScope } from '../../ee/packages/data-store/src/index';
 import type { RepoRef } from '@truecourse/core/lib/guard-store';
 import { EMPTY_GUARD_DECISIONS, type GuardGenerateReport, type GuardLatest } from '@truecourse/shared';
@@ -21,10 +21,10 @@ import { EMPTY_GUARD_DECISIONS, type GuardGenerateReport, type GuardLatest } fro
 const REPO = 'acme/api';
 const refAt = (sha: string): RepoRef => ({ repoKey: REPO, commitSha: sha });
 
-async function makeDb(client: PGlite): Promise<EeDb> {
+async function makeDb(client: PGlite): Promise<Db> {
   const db = drizzle(client, { schema });
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
-  return db as unknown as EeDb;
+  return db as unknown as Db;
 }
 
 function writeFile(root: string, rel: string, body: string): void {
@@ -85,7 +85,7 @@ function makeReport(over: Partial<GuardGenerateReport> = {}): GuardGenerateRepor
 }
 
 /** Count the deduped bodies stored under a content scope. */
-async function scopeCount(db: EeDb, scope: string): Promise<number> {
+async function scopeCount(db: Db, scope: string): Promise<number> {
   const rows = await db.select({ sha: content.sha }).from(content).where(eq(content.scope, scope));
   return rows.length;
 }
@@ -133,7 +133,7 @@ function seedScenarios(srcDir: string): string {
 
 describe('PgGuardStore — run state (pglite)', () => {
   let client: PGlite;
-  let db: EeDb;
+  let db: Db;
   let store: PgGuardStore;
   beforeEach(async () => {
     client = new PGlite();
@@ -277,7 +277,7 @@ describe('PgGuardStore — run state (pglite)', () => {
 
 describe('PgGuardStore — evidence (pglite + Postgres content)', () => {
   let client: PGlite;
-  let db: EeDb;
+  let db: Db;
   let store: PgGuardStore;
   beforeEach(async () => {
     client = new PGlite();
@@ -373,7 +373,7 @@ describe('PgGuardStore — evidence (pglite + Postgres content)', () => {
 
 describe('PgGuardStore — birth-finding (result) evidence (pglite + Postgres content)', () => {
   let client: PGlite;
-  let db: EeDb;
+  let db: Db;
   let store: PgGuardStore;
   beforeEach(async () => {
     client = new PGlite();
@@ -465,7 +465,7 @@ describe('PgGuardStore — birth-finding (result) evidence (pglite + Postgres co
 
 describe('PgGuardStore — scenario corpus (pglite + Postgres content)', () => {
   let client: PGlite;
-  let db: EeDb;
+  let db: Db;
   let store: PgGuardStore;
   let srcDir: string;
   beforeEach(async () => {

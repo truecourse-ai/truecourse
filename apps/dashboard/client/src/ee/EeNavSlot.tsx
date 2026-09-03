@@ -8,13 +8,13 @@
 import { Link, useLocation } from 'react-router-dom';
 import { Home, FolderGit2, Settings, Building2, Github, Cpu, GitPullRequest, BookOpen, ShieldCheck, type LucideIcon } from 'lucide-react';
 import { useEeModule } from '@/ee/EeModuleContext';
-import { useEeAuth } from '@/ee/EeAuthContext';
+import { useAuth } from '@/ee/AuthContext';
 
 const ICONS: Record<string, LucideIcon> = { Home, FolderGit2, Settings, Building2, Github, Cpu, GitPullRequest, BookOpen, ShieldCheck };
 
 export function EeNavSlot() {
   const { navItems } = useEeModule();
-  const { user } = useEeAuth();
+  const { user } = useAuth();
   const { pathname } = useLocation();
   // Operator-only items (Admin) are hidden for regular members.
   const visibleNav = navItems.filter((n) => !n.requiresOperator || user?.isOperator);

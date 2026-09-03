@@ -16,7 +16,7 @@
  *   - capture the failure to Sentry and re-throw (maxAttempts:1 ⇒ permanent fail)
  */
 
-import type { EeDb } from '@truecourse/ee-db';
+import type { Db } from '@truecourse/db';
 import type { JobStore, NotificationStore } from '@truecourse/ee-data-store';
 import type { JobStep, JobView, NotificationLevel } from '@truecourse/shared';
 import { JobStepTracker, type StepEmit } from './steps.js';
@@ -100,7 +100,7 @@ export type JobOutcomeStatus = 'succeeded' | 'failed';
 
 /** The stores the envelope needs — the same for every job. */
 export interface JobRuntime {
-  db: EeDb;
+  db: Db;
   jobStore: JobStore;
   notifications: NotificationStore;
 }

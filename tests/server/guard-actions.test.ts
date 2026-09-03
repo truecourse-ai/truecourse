@@ -39,9 +39,9 @@ vi.mock('@truecourse/core/commands/guard-in-process', async (importOriginal) => 
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import { PgGuardStore } from '../../ee/packages/data-store/src/index';
-import { createApp } from '../../apps/dashboard/server/src/app';
+import { createTestApp } from '../helpers/test-app';
 import { emitSpecComplete } from '../../apps/dashboard/server/src/socket/handlers';
 import {
   estimateGuard,
@@ -92,7 +92,7 @@ describe('Guard action routes', () => {
     vi.mocked(guardGenerateInProcess).mockReset();
     vi.mocked(guardRunInProcess).mockReset();
     vi.mocked(emitSpecComplete).mockClear();
-    app = createApp({ serveStatic: false });
+    app = createTestApp();
   });
   afterEach(async () => {
     await teardownTestFixture(fixture.project.slug);
@@ -256,9 +256,9 @@ describe('Guard dismiss/undismiss routes — PR overlay (hosted)', () => {
 
   beforeEach(async () => {
     fixture = await setupTestFixture();
-    app = createApp({ serveStatic: false });
+    app = createTestApp();
     client = new PGlite();
-    const db = drizzle(client, { schema }) as unknown as EeDb;
+    const db = drizzle(client, { schema }) as unknown as Db;
     await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
     setGuardStore(new PgGuardStore(db));
   });
@@ -406,7 +406,7 @@ describe('Guard dismiss → hosted auto-regenerate (repo scope)', () => {
   beforeEach(async () => {
     fixture = await setupTestFixture();
     root = fixture.repoPath;
-    app = createApp({ serveStatic: false });
+    app = createTestApp();
     enqueue = vi.fn().mockResolvedValue(undefined);
     setGuardGenerateEnqueue(enqueue);
   });
@@ -465,7 +465,7 @@ describe('Guard dismiss → hosted auto-regenerate (repo scope)', () => {
 
     beforeEach(async () => {
       client = new PGlite();
-      const db = drizzle(client, { schema }) as unknown as EeDb;
+      const db = drizzle(client, { schema }) as unknown as Db;
       await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
       setGuardStore(new PgGuardStore(db));
       // Anchor the repo baseline (the analyze LATEST commit) at `basesha1111`.
@@ -567,9 +567,9 @@ describe('Guard dismiss → hosted PR-head regenerate (PR scope)', () => {
   beforeEach(async () => {
     fixture = await setupTestFixture();
     root = fixture.repoPath;
-    app = createApp({ serveStatic: false });
+    app = createTestApp();
     client = new PGlite();
-    const db = drizzle(client, { schema }) as unknown as EeDb;
+    const db = drizzle(client, { schema }) as unknown as Db;
     await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
     setGuardStore(new PgGuardStore(db));
     enqueue = vi.fn().mockResolvedValue(undefined);

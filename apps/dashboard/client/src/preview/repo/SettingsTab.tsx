@@ -14,11 +14,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { useNavigate } from 'react-router-dom';
 import type { GatePolicy, Repo } from '@/preview/data/types';
 import { usePreviewState } from '@/preview/shell/preview-state';
+import { PREVIEW_BASE } from '@/preview/shell/base';
 
 export function SettingsTab({ repo }: { repo: Repo }) {
   const { updateRepo, unlinkRepo } = usePreviewState();
+  const navigate = useNavigate();
   const [policy, setPolicy] = useState<GatePolicy>(repo.policy);
   const [emails, setEmails] = useState(repo.notifyEmails.join(', '));
   const [confirmUnlink, setConfirmUnlink] = useState(false);
@@ -127,6 +130,8 @@ export function SettingsTab({ repo }: { repo: Repo }) {
               onClick={() => {
                 setConfirmUnlink(false);
                 unlinkRepo(repo.id);
+                // The repo route below our feet just died — land on Home.
+                navigate(PREVIEW_BASE);
               }}
               className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
             >

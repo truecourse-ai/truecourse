@@ -5,13 +5,13 @@
  * specs, and the LLM-stage caches — reads and writes server-side instead of the
  * customer's `.truecourse/` tree.
  *
- * Called once at boot when `DATABASE_URL` is set (the shared `ee-db`).
+ * Called once at boot when `DATABASE_URL` is set (the shared `db`).
  */
 
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { EeDbHandle } from '@truecourse/ee-db';
+import type { DbHandle } from '@truecourse/db';
 import { log } from '@truecourse/core/lib/logger';
 import { setAnalysisStore } from '@truecourse/core/lib/analysis-store';
 import { setSpecStore } from '@truecourse/core/lib/spec-store';
@@ -42,7 +42,7 @@ export interface EeStoreHandles {
 }
 
 /** Swap every core/llm storage seam for its Postgres/Blob hosted impl. */
-export function installEeStores({ db, lockPool }: EeDbHandle): EeStoreHandles {
+export function installEeStores({ db, lockPool }: DbHandle): EeStoreHandles {
   // All hosted content lives in Postgres — bulky bodies (spec artifacts, trace
   // payloads) are content-addressed in the `content` table; metadata + manifests
   // are their own rows. No blob store.
@@ -75,8 +75,11 @@ export function installEeStores({ db, lockPool }: EeDbHandle): EeStoreHandles {
   return { traceStore };
 }
 
-// Prefixes our clone temp dirs use: the gate runners → `tc-gate-*`.
-const TEMP_PREFIXES = ['tc-gate-'];
+// Prefix every materialize/clone temp dir uses (`tc-gate-*`, `tc-guard-*`,
+// `tc-ws-*`, ...). Matching the shared `tc-` stem keeps the sweep covering new
+// runners automatically — the guard-side prefixes were silently missed when
+// this listed `tc-gate-` alone.
+const TEMP_PREFIXES = ['tc-'];
 const STALE_MS = 60 * 60 * 1000; // 1 hour
 
 /**

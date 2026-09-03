@@ -3,10 +3,13 @@ import path from 'node:path';
 import '@truecourse/core/config/env';
 import { setupSocket } from './socket/index.js';
 import { createApp } from './app.js';
-import { loadEnterprise } from './ee-loader.js';
+import { createAuth } from './auth/index.js';
+import { createGithubConnection } from './github/index.js';
+import { closeDb, getDbHandle, initDb } from './db.js';
+import { installDbStores } from './stores.js';
+import { sweepStaleRunClones } from './services/run-clone.service.js';
 import { stopAllWatchers } from './services/watcher.service.js';
 import { stopAllRunTails } from './services/session-tailer.service.js';
-import { installLlmTransportAtBoot } from './services/llm-transport.service.js';
 import { wipeLegacyPostgresData, getLogDir } from '@truecourse/core/config/paths';
 import { closeLogger, configureLogger, log } from '@truecourse/core/lib/logger';
 
@@ -31,21 +34,52 @@ async function main() {
     log.info('[Storage] Legacy Postgres data wiped. Re-analyze to repopulate.');
   }
 
-  // 2. Load the enterprise plugin (no-op in community) before building
-  //    the app so its routers + auth gate are registered at mount time.
-  await loadEnterprise();
+  // 2. Postgres. All server state lives there — there is no file fallback, so
+  //    DATABASE_URL is required and createDb applies the migrations at boot.
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error(
+      'DATABASE_URL is required: the dashboard server stores its state in Postgres. ' +
+        'Set DATABASE_URL to a Postgres connection string (e.g. postgres://user:pass@localhost:5432/truecourse).',
+    );
+  }
+  // TRUECOURSE_SECRET_KEY derives the AES key the workspace's LLM provider key
+  // is encrypted with, so — like DATABASE_URL — it is REQUIRED. A missing or
+  // weak secret fails boot rather than running half-secure.
+  const masterSecret = process.env.TRUECOURSE_SECRET_KEY;
+  if (!masterSecret || masterSecret.length < 32) {
+    throw new Error(
+      'TRUECOURSE_SECRET_KEY (32+ characters) is required: the dashboard server stores each ' +
+        "workspace's LLM provider key encrypted in Postgres. Set TRUECOURSE_SECRET_KEY to a strong secret.",
+    );
+  }
 
-  // 3. Install the LLM transport the CLI config selects (community only —
-  //    enterprise installed its own from its encrypted store above). Never
-  //    fatal: an unusable API config warns and the pipeline routes surface it.
-  installLlmTransportAtBoot();
+  await initDb(databaseUrl);
+  log.info('[Server] db ready (Postgres, migrations applied)');
+  // Swap the file storage seams for Postgres before anything reads or writes
+  // repo state, and clear run-clone debris a crashed process left behind.
+  installDbStores(getDbHandle(), { masterSecret });
+  sweepStaleRunClones();
 
-  // 4. Setup Express app + socket.io
-  const app = createApp();
+  // 3. WorkOS session auth. Throws if the WORKOS_* env is incomplete — the
+  //    server boots authenticated or not at all.
+  const auth = createAuth();
+
+  // 4. GitHub App connection. Optional: without GITHUB_APP_* the server still
+  //    boots, and /api/github answers 503 with the vars to set.
+  const github = createGithubConnection();
+  if (github) {
+    log.info('[Server] GitHub connect enabled');
+  } else {
+    log.info('[Server] GitHub connect disabled — set GITHUB_APP_* to enable');
+  }
+
+  // 5. Setup Express app + socket.io
+  const app = createApp({ authVerifier: auth.verify, authRouter: auth.router, github });
   const httpServer = createServer(app);
   setupSocket(httpServer);
 
-  // 5. Start listening
+  // 6. Start listening
   await new Promise<void>((resolve, reject) => {
     httpServer.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRINUSE') {
@@ -88,6 +122,7 @@ async function main() {
     stopAllRunTails();
     httpServer.closeAllConnections();
     httpServer.close();
+    await closeDb();
     log.info('[Server] Closed');
     await closeLogger();
     process.exit(0);

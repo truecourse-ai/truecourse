@@ -17,6 +17,9 @@
 - `packages/agent-loop/` — The agent loop, defined in ONE package: the session contract (transcript events, session defs, the `SessionDriver` seam, sessions-store shapes) and the policy shell `runAgentLoop` (budgets, ceilings, resume grants, malformed-outcome policy, seq/ts stamping, depth-1 children). Driver-agnostic by construction — imports neither `ai` nor the Agent SDK nor node builtins; one package per backend implements the seam (`llm-api`, `llm-claude-agent`).
 - `packages/core/src/services/spec-scan/` — The spec scan as agent sessions, the loop's first production consumer: `orchestrate` (≤1 scope session whose standing instructions ride every downstream briefing and cache key), `curate-doc` (pooled, one coherent keep/skip/tag judgment per doc — it may page a long doc and peek at a referenced one), `settle-areas` (a true barrier, concurrency 1) and `overlap` (pooled, one session per deterministic COLLISION CLUSTER). `run.ts` is the whole scan: discovery → prefilter → the four steps → the deterministic fold (pointer re-anchoring, cross-area dedup, high-confidence auto-apply) → `writeCorpus`. Two invariants: FAIL-OPEN per item (a dead session never drops a doc), and the ONE-ABORT rule — a kind whose every session died transport-class throws BEFORE anything is written. `@truecourse/spec-consolidator` keeps the deterministic half (discovery, prefilter, collision pairing, pointer verification, area grouping, the corpus/decisions stores); it holds no LLM runner and no `LlmTransport` reference at all.
 - `packages/shared/` — Shared Zod schemas and TypeScript types
+- `packages/db/` — `@truecourse/db`: the Postgres schema (drizzle) + `createDb` (one pool, migrations at boot, a dedicated advisory-lock pool). Used by the dashboard server and EE.
+- `packages/data-store/` — `@truecourse/data-store`: Postgres implementations of core's storage seams (analyses, specs, guard, config/ui-state, the gh_repos-derived registry, the LLM KV cache, the advisory analyze lock) over a content-addressed `content` table. Installed by the dashboard server at boot (`apps/dashboard/server/src/stores.ts`); `@truecourse/ee-data-store` re-exports it and keeps only EE-only stores (jobs, knowledge, traces, workspace settings).
+- `packages/github-app/` — The GitHub App protocol: webhook receiver, connect API, the `gh_repos`/installations link store (`PostgresGateStore`).
 - `tools/cli/` — CLI commands (analyze, dashboard, list, add, rules). Thin adapter over `@truecourse/core` — does NOT depend on the dashboard server.
 - `tests/` — All tests (centralized, not colocated). Organized by package: `tests/shared/`, `tests/analyzer/`, `tests/server/` (covers both dashboard-server routes and core services), `tests/cli/`.
 - `tests/fixtures/` — Fixture repos the tests drive: `sample-{js,python,csharp}-project-{positive,negative,il}/` (analyzer rule fixtures), `sample-scheduling-saas/`, `guard-fixture-cli/` (the `relkit` CLI) and `guard-fixture-api/` (the `todos` + `api-v2` HTTP servers) for the guard drivers, `recipe-propose/` and `route-manifest-monorepo/` for the deterministic recipe/route derivations
@@ -32,7 +35,12 @@ pnpm test         # Run all tests (vitest)
 
 ## Storage
 
-Analyses are stored as JSON files. **No database.**
+Two storage modes, one set of seams (`setAnalysisStore`/`setSpecStore`/... in core):
+
+- **CLI (file mode, the default)** — analyses and all other state are JSON files under `<repo>/.truecourse/`, as described below. No database.
+- **Dashboard server (DB mode)** — requires `DATABASE_URL` + WorkOS auth. Boot installs the `@truecourse/data-store` Postgres stores over every seam, the registry becomes a live view of `gh_repos` (a repo exists by being connected through the GitHub App, scoped to its workspace), and repos are identified by `owner/repo` keys, not paths. There is **no persistent working copy**: each run clones the repo into an ephemeral per-workspace dir under `~/.truecourse/run-clones/` (`run-clone.service.ts`, swept at boot) and deletes it when the run settles. Session transcripts are the one store still on disk — keyed by repo identity under `~/.truecourse/sessions/` so the run watcher can tail them.
+
+The file layout below applies to file mode (and to what a run materializes into its ephemeral clone).
 
 Per-repo layout under `<repo>/.truecourse/`:
 - `analyses/` — per-analysis snapshot files, filenames `<iso>_<short-uuid>.json` (gitignored)

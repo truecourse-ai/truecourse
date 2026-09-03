@@ -7,10 +7,11 @@
 import { eq, sql } from 'drizzle-orm';
 import type { PgDatabase } from 'drizzle-orm/pg-core';
 import type { ProviderConfig, LlmProviderKind } from '@truecourse/ee-llm';
-import { llmProviderConfig } from '@truecourse/ee-db';
+import { llmProviderConfig } from '@truecourse/db';
 import { encryptSecret, decryptSecret, maskKey } from './crypto.js';
 
-/** The single row's fixed id — config is instance-wide. */
+/** The single row's fixed key — enterprise config is instance-wide, so it
+ *  occupies one reserved `org_id` rather than one per workspace. */
 const ROW_ID = 'default';
 
 export type LlmDb = PgDatabase<any, any, any>;
@@ -53,7 +54,7 @@ export class LlmConfigStore {
     const rows = await this.db
       .select()
       .from(llmProviderConfig)
-      .where(eq(llmProviderConfig.id, ROW_ID))
+      .where(eq(llmProviderConfig.orgId, ROW_ID))
       .limit(1);
     return rows[0] ?? null;
   }
@@ -117,7 +118,7 @@ export class LlmConfigStore {
     await this.db
       .insert(llmProviderConfig)
       .values({
-        id: ROW_ID,
+        orgId: ROW_ID,
         provider: input.provider,
         model: input.model,
         fallbackModel: input.fallbackModel ?? null,
@@ -129,7 +130,7 @@ export class LlmConfigStore {
         updatedAt: now,
       })
       .onConflictDoUpdate({
-        target: llmProviderConfig.id,
+        target: llmProviderConfig.orgId,
         set: {
           provider: sql`excluded.provider`,
           model: sql`excluded.model`,

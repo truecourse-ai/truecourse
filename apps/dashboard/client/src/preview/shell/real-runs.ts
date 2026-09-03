@@ -138,8 +138,11 @@ export function toNotifications(
       id: `real-${repo.id}-${run.runId}-settled`,
       level: failed ? 'failure' : 'success',
       title: `${noun} ${run.status} on ${repo.fullName}`,
+      // The record's own reason when it has one: "it failed" is the title, and
+      // the body is the only room the feed has to say why.
       body: failed
-        ? `The run ended ${run.status}. Its sessions and their transcripts are in Activity.`
+        ? (run.error?.message ??
+          `The run ended ${run.status}. Its sessions and their transcripts are in Activity.`)
         : `${run.sessions.length} session${run.sessions.length === 1 ? '' : 's'} ran.`,
       at: relativeTime(run.finishedAt ?? run.startedAt, now),
       read: false,
@@ -148,6 +151,29 @@ export function toNotifications(
     });
   }
   return rows;
+}
+
+/**
+ * A run that ended badly, as the shell announces it: once, when it lands.
+ * The address is the run itself — a failure is worth opening, not just
+ * hearing about.
+ */
+export interface RunFailure {
+  /** One per run, so the announcement can't repeat on a re-read. */
+  id: string;
+  title: string;
+  body: string;
+  href: string;
+}
+
+export function toFailure(repo: RunRepoRef, run: PublicSessionRun): RunFailure | null {
+  if (run.status !== 'failed') return null;
+  return {
+    id: `real-${repo.id}-${run.runId}`,
+    title: `${nounFor(run.command)} failed on ${repo.fullName}`,
+    body: run.error?.message ?? 'Its sessions and their transcripts are in Activity.',
+    href: `${activityHref(repo.id)}?run=${encodeURIComponent(run.runId)}`,
+  };
 }
 
 /** What a repository's runs say about the repository row itself. */
@@ -189,8 +215,17 @@ export interface RealRunStream {
   jobs: JobChain[];
   /** Every start and settle this session watched, newest first. */
   notifications: PreviewNotification[];
+  /** The runs that ended badly, newest first — one entry per failed run. */
+  failures: RunFailure[];
   /** Per repo id: the onboarding marker and the honest last check. */
   repoState: ReadonlyMap<string, RealRepoRunState>;
+  /**
+   * The initial reads are in: the repo list arrived AND every listed repo's
+   * runs have been read once. What `jobs` holds at this moment was already in
+   * flight on arrival — the distinction the toast surface needs, since it must
+   * stay silent for those and announce only what starts later.
+   */
+  ready: boolean;
   markRead: (id: string) => void;
   markAllRead: () => void;
 }
@@ -199,11 +234,18 @@ export interface RealRunStream {
  * Follow the runs of every real repository. Re-subscribes when the real repo
  * list changes (a connect adds a row) and never throws: the reads are guarded
  * and the socket calls are inert when there is nothing to connect to.
+ *
+ * `reposLoaded` says the CALLER's repo fetch has settled — `repos` being empty
+ * is ambiguous on its own (not fetched yet vs. genuinely none), and `ready`
+ * must not report an empty world as a loaded one.
  */
-export function useRealRunStream(repos: Repo[]): RealRunStream {
+export function useRealRunStream(repos: Repo[], reposLoaded = true): RealRunStream {
   const [runsByRepo, setRunsByRepo] = useState<ReadonlyMap<string, PublicSessionRun[]>>(
     () => new Map(),
   );
+  // Repo ids whose runs have been read at least once (success or failure) —
+  // with `reposLoaded`, the two halves of `ready`.
+  const [readRepoIds, setReadRepoIds] = useState<ReadonlySet<string>>(() => new Set());
   const [readIds, setReadIds] = useState<ReadonlySet<string>>(() => new Set());
   // A clock, not an animation: re-read the wording every 30s so "just now"
   // becomes "4 minutes ago" without a socket event to prompt it.
@@ -247,6 +289,12 @@ export function useRealRunStream(repos: Repo[]): RealRunStream {
         setRunsByRepo((prev) => new Map(prev).set(repoId, runs));
       } catch {
         // No server, or a repository it no longer knows: nothing to show.
+      } finally {
+        // Read once, however it went — a failed read is still an answered one
+        // for readiness (there is nothing more to wait for).
+        if (alive.current) {
+          setReadRepoIds((prev) => (prev.has(repoId) ? prev : new Set(prev).add(repoId)));
+        }
       }
     };
 
@@ -296,6 +344,7 @@ export function useRealRunStream(repos: Repo[]): RealRunStream {
   const derived = useMemo(() => {
     const jobs: { run: PublicSessionRun; chain: JobChain }[] = [];
     const notifications: TimedNotification[] = [];
+    const failures: { at: string; failure: RunFailure }[] = [];
     const repoState = new Map<string, RealRepoRunState>();
 
     for (const repo of repoRefs) {
@@ -308,12 +357,20 @@ export function useRealRunStream(repos: Repo[]): RealRunStream {
           jobs.push({ run, chain: toJobChain(repo, run, run.runId === onboardingRunId) });
         }
         notifications.push(...toNotifications(repo, run, now));
+        const failure = toFailure(repo, run);
+        if (failure) failures.push({ at: run.finishedAt ?? run.startedAt, failure });
       }
     }
 
     jobs.sort((a, b) => b.run.startedAt.localeCompare(a.run.startedAt));
     notifications.sort((a, b) => b.sortAt.localeCompare(a.sortAt));
-    return { jobs: jobs.map((j) => j.chain), notifications, repoState };
+    failures.sort((a, b) => b.at.localeCompare(a.at));
+    return {
+      jobs: jobs.map((j) => j.chain),
+      notifications,
+      failures: failures.map((f) => f.failure),
+      repoState,
+    };
   }, [repoRefs, runsByRepo, now]);
 
   const markRead = useCallback((id: string) => {
@@ -324,16 +381,20 @@ export function useRealRunStream(repos: Repo[]): RealRunStream {
     setReadIds((prev) => new Set([...prev, ...derived.notifications.map((n) => n.id)]));
   }, [derived.notifications]);
 
+  const ready = reposLoaded && repoRefs.every((r) => readRepoIds.has(r.id));
+
   return useMemo(
     () => ({
       jobs: derived.jobs,
       notifications: derived.notifications.map(
         ({ sortAt: _sortAt, ...n }): PreviewNotification => ({ ...n, read: readIds.has(n.id) }),
       ),
+      failures: derived.failures,
       repoState: derived.repoState,
+      ready,
       markRead,
       markAllRead,
     }),
-    [derived, readIds, markRead, markAllRead],
+    [derived, readIds, ready, markRead, markAllRead],
   );
 }

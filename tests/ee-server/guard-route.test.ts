@@ -37,7 +37,7 @@ function makeApp(overrides: {
   app.use(express.json());
   app.use((req, _res, next) => {
     const org = overrides.org === undefined ? ORG : overrides.org;
-    (req as Request & { eeUser?: AuthUser }).eeUser = org
+    (req as Request & { user?: AuthUser }).user = org
       ? { id: 'u1', email: 'u@acme.test', organizationId: org }
       : undefined;
     next();

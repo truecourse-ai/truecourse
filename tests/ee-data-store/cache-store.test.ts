@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import {
   getCacheEntry,
   setCacheEntry,
@@ -44,7 +44,7 @@ describe('PgKvCacheStore (pglite) — global, content-addressed', () => {
     client = new PGlite();
     const db = drizzle(client, { schema });
     await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
-    setKvCacheStore(new PgKvCacheStore(db as unknown as EeDb));
+    setKvCacheStore(new PgKvCacheStore(db as unknown as Db));
   });
   afterEach(async () => {
     resetKvCacheStore();

@@ -5,8 +5,11 @@
  * flow — it runs first and is non-fatal on failure.
  */
 
-import type { GateStore, PrState } from './store/types.js';
-import type { PullRequestPayload } from './webhook.js';
+import {
+  type GateStore,
+  type PrState,
+  type PullRequestPayload,
+} from '@truecourse/github-app';
 
 /**
  * Derive the tracked state from the webhook: a `closed` action resolves to

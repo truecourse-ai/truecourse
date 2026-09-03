@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { PgAnalyzeLock } from '@truecourse/ee-data-store';
-import type { EeDbHandle } from '@truecourse/ee-db';
+import type { DbHandle } from '@truecourse/db';
 
 /**
  * The advisory lock's correctness is its connection lifecycle: acquire + unlock
@@ -41,7 +41,7 @@ function fakePool(opts: { failOn?: 'lock' | 'unlock' } = {}) {
         },
       };
     },
-  } as unknown as EeDbHandle['lockPool'];
+  } as unknown as DbHandle['lockPool'];
   return { pool, queries, released, releaseArgs };
 }
 

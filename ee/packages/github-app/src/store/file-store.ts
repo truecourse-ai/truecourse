@@ -17,7 +17,7 @@ import type {
   BaselineRecord,
   GateRunRecord,
   PrRecord,
-} from './types.js';
+} from '@truecourse/github-app';
 
 function atomicWriteJson(file: string, data: unknown): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -149,6 +149,14 @@ export class FileGateStore implements GateStore {
   ): Promise<RepoLinkRecord[]> {
     return Object.values(this.readRepos())
       .filter((r) => r.workspaceOrgId === workspaceOrgId)
+      .sort((a, b) => a.repoFullName.localeCompare(b.repoFullName));
+  }
+
+  async listReposForInstallation(
+    installationId: number,
+  ): Promise<RepoLinkRecord[]> {
+    return Object.values(this.readRepos())
+      .filter((r) => r.installationId === installationId)
       .sort((a, b) => a.repoFullName.localeCompare(b.repoFullName));
   }
 

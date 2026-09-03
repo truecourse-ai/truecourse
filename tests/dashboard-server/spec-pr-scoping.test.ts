@@ -4,7 +4,7 @@ import { type Express } from 'express';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import { PgSpecStore } from '../../ee/packages/data-store/src/index';
 import type { LatestSnapshot } from '@truecourse/core/types/snapshot';
 
@@ -27,7 +27,7 @@ vi.mock('@truecourse/core/commands/spec-in-process', async (importOriginal) => {
   return { ...actual, recuratePrCorpus: vi.fn() };
 });
 
-import { createApp } from '../../apps/dashboard/server/src/app';
+import { createTestApp } from '../helpers/test-app';
 import { recuratePrCorpus, getDecisions } from '@truecourse/core/commands/spec-in-process';
 import { setSpecStore, resetSpecStore } from '@truecourse/core/lib/spec-store';
 import { resetAnalysisStore, writeLatest } from '@truecourse/core/lib/analysis-store';
@@ -35,10 +35,10 @@ import { setRepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
 import { setBackgroundTaskRunner, type BackgroundTask } from '@truecourse/core/lib/background-tasks';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 
-async function makeDb(client: PGlite): Promise<EeDb> {
+async function makeDb(client: PGlite): Promise<Db> {
   const db = drizzle(client, { schema });
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
-  return db as unknown as EeDb;
+  return db as unknown as Db;
 }
 
 // A minimal LATEST analysis stamped at `commit` — the baseline the corpus reader
@@ -90,7 +90,7 @@ describe('GET /spec/corpus?ref (EE, commit-scoped)', () => {
     await writeLatest(fixture.repoPath, baselineLatest('base1'));
     await spec.saveSpec({ repoKey: fixture.repoPath, commitSha: 'base1' }, 'corpus', corpusWithArea('base/area'));
     await spec.saveSpec({ repoKey: fixture.repoPath, commitSha: 'head1' }, 'corpus', corpusWithArea('head/area'));
-    app = createApp({ serveStatic: false });
+    app = createTestApp();
   });
   afterEach(async () => {
     resetSpecStore();
@@ -135,7 +135,7 @@ describe('GET /spec/corpus?ref — 404 when neither ref nor baseline has a corpu
     const db = await makeDb(client);
     setSpecStore(new PgSpecStore(db));
     // No baseline analysis written → baselineCommit resolves to null.
-    app = createApp({ serveStatic: false });
+    app = createTestApp();
   });
   afterEach(async () => {
     resetSpecStore();
@@ -168,7 +168,7 @@ describe('GET /spec/doc?ref=<path>&commit=<sha>', () => {
       seen.push({ docPath, commit: opts?.commit });
       return `# doc ${docPath} @ ${opts?.commit ?? 'default'}`;
     });
-    app = createApp({ serveStatic: false });
+    app = createTestApp();
   });
   afterEach(async () => {
     setRepoDocReader(async () => null);
@@ -212,7 +212,7 @@ describe('mutation routes — PR scope', () => {
     setBackgroundTaskRunner(async (t) => {
       tasks.push(t);
     });
-    app = createApp({ serveStatic: false });
+    app = createTestApp();
   });
   afterEach(async () => {
     setBackgroundTaskRunner(null);

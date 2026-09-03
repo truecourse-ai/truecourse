@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import { schema, MIGRATIONS_DIR, type EeDb } from '@truecourse/ee-db';
+import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import type { EeServerRegistry } from '@truecourse/shared';
 import { setBackgroundTaskRunner } from '@truecourse/core/lib/background-tasks';
 import { setRepoLifecycleEmitter } from '@truecourse/core/lib/repo-lifecycle';
@@ -57,7 +57,7 @@ const registry: EeServerRegistry = {
 };
 
 let client: PGlite;
-let db: EeDb;
+let db: Db;
 
 function makeReport(): GuardGenerateReport {
   return {
@@ -78,7 +78,7 @@ function makeReport(): GuardGenerateReport {
 
 beforeEach(async () => {
   client = new PGlite();
-  db = drizzle(client, { schema }) as unknown as EeDb;
+  db = drizzle(client, { schema }) as unknown as Db;
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
   setGuardStore(new PgGuardStore(db));
   startWorkerMock.mockReset();
