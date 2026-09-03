@@ -1,9 +1,11 @@
 /**
  * Postgres implementation of core's `SpecStore`. Routes each artifact to its
  * proper home:
- *   - immutable per-commit artifacts (corpus / inferredDecisions)
- *     → content-addressed in `content`, with a `spec_sets` manifest row pointing
- *       in by sha (deduped: an unchanged artifact across commits is stored once);
+ *   - immutable per-commit artifacts (corpus / inferredDecisions / the docs
+ *     snapshot manifest) → content-addressed in `content`, with a `spec_sets`
+ *     manifest row pointing in by sha (deduped: an unchanged artifact across
+ *     commits is stored once); the document bodies the snapshot points at live
+ *     in the same scope, one object per distinct body;
  *   - decisions → the per-scope `decisions` ledger (mutable, always-latest, NOT
  *     per-commit — the core's `_repo` sentinel commit is ignored here).
  */
@@ -22,6 +24,12 @@ import type {
   SpecStore,
 } from '@truecourse/core/lib/spec-store';
 import { ContentStore, contentScope } from './content-store.js';
+
+/** The `docs` artifact: the scan's document snapshot, bodies by content sha. */
+interface SpecDocsManifest {
+  v: 1;
+  files: Record<string, string>;
+}
 
 function requireCommit(ref: RepoRef): string {
   if (!ref.commitSha) {
@@ -106,6 +114,26 @@ export class PgSpecStore implements SpecStore {
       .limit(1);
     if (!rows[0]) return null;
     return this.content.getJson<T>(contentScope.spec(repoKey), rows[0].contentSha);
+  }
+
+  /** Every body content-addressed once (an unchanged document across scans costs
+   *  a manifest entry), the manifest stored as the `docs` artifact of `ref`. */
+  async saveSpecDocs(ref: RepoRef, files: Record<string, string>): Promise<void> {
+    const scope = contentScope.spec(ref.repoKey);
+    const manifest: Record<string, string> = {};
+    for (const [docRef, body] of Object.entries(files)) {
+      manifest[docRef] = await this.content.putText(scope, body);
+    }
+    await this.saveSpec(ref, 'docs', { v: 1, files: manifest });
+  }
+
+  async loadSpecDoc(repoKey: string, docRef: string, commitSha?: string): Promise<string | null> {
+    const manifest = commitSha
+      ? await this.loadSpec<SpecDocsManifest>({ repoKey, commitSha }, 'docs')
+      : await this.loadLatest<SpecDocsManifest>(repoKey, 'docs');
+    const sha = manifest?.files?.[docRef];
+    if (!sha) return null;
+    return this.content.get(contentScope.spec(repoKey), sha);
   }
 
   // The commit of the latest stored `corpus` — i.e. the latest scanned commit,

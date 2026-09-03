@@ -4,8 +4,9 @@
  * Two seams, and only two. The spec components read through `SpecSource`, so the
  * preview supplies one over the corpus and web-source fixtures; everything else
  * calls the API client directly, so while the preview is mounted `window.fetch`
- * answers the per-repo guard and spec routes from the fixtures and passes every
- * other request through untouched.
+ * answers the per-repo guard and spec routes of the FIXTURE repositories from
+ * the fixtures and passes every other request through untouched — a connected
+ * repository's included, which is how the reused components read real data.
  *
  * The routes answered here are exactly the ones the vendored components read or
  * write: the flows inventory and a flow's detail, the committed test inventory,
@@ -452,14 +453,12 @@ export function installPreviewFetch(): void {
     // state and its runs are the server's, and no fixture stands in for any of
     // it. Only the repositories the fixtures describe are answered here.
     if (!FIXTURE_REPO_IDS.has(repoId)) return real(input, init);
-    // The agent-sessions store is REAL for every repository: the shell follows
-    // the real repos' runs through it, and a real repository's Activity tab is
-    // the real view. There are no session fixtures to answer with, so these go
-    // to the server — and a repository the server does not know simply 404s,
-    // which is what the callers already expect.
+    // The agent-sessions store is REAL for every repository: there are no
+    // session fixtures to answer with, so these go to the server — and a
+    // repository the server does not know simply 404s, which is what the
+    // callers already expect.
     if (rest === 'sessions' || rest.startsWith('sessions/')) return real(input, init);
-    // So is starting a run: a connected repository's Activity starts a real one
-    // through the server, and no fixture could stand in for the answer — it is
+    // So is starting a run: no fixture could stand in for the answer — it is
     // where "this workspace has no provider" is found out.
     if (rest === 'spec/corpus/scan' || rest === 'guard/setup' || rest === 'guard/generate') {
       return real(input, init);

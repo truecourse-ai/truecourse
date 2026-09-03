@@ -1,8 +1,9 @@
-// PREVIEW (UI mock, fake data) with three exceptions: on a REAL
+// PREVIEW (UI mock, fake data) with four exceptions: on a REAL
 // (provider-connected) repository the Activity tab is the real thing, reading
 // and live-tailing the repository's sessions store, the Interfaces tab reads
-// the server's own interface catalog for that repository, and the Dependencies
-// tab reads and registers against its stored dependency catalog.
+// the server's own interface catalog for that repository, the Dependencies
+// tab reads and registers against its stored dependency catalog, and the
+// Corpus tab reads the corpus its scan stored.
 
 /**
  * The repository console: one header, ONE menu, no toggle.
@@ -191,6 +192,18 @@ export default function RepoConsole() {
               <DependencyPage repo={repo} name={decodeURIComponent(dependencyName)} />
             ) : (
               <DependenciesTab repo={repo} />
+            )
+          ) : active === 'corpus' && repo.real ? (
+            // REAL, not mock: the corpus of a connected repository is what its
+            // scan stored on the server, read over `/api/repos/<id>/spec/*`,
+            // with the same two views the fixture repositories get — the table,
+            // and one document or conflict as its own page.
+            docRef ? (
+              <CorpusPage repo={repo} kind="doc" itemId={decodeURIComponent(docRef)} />
+            ) : conflictId ? (
+              <CorpusPage repo={repo} kind="conflict" itemId={decodeURIComponent(conflictId)} />
+            ) : (
+              <CorpusTab repo={repo} />
             )
           ) : !guard ? (
             // A real repository with nothing in flight has not started, rather

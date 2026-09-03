@@ -4,7 +4,8 @@
  * opened in rides `?version=`), then the agentic coverage pane
  * (`GuardCoveragePage`: the document painted by section status with the
  * section and claim details, or the conflict's assessment and verdict), pinned
- * to this one item.
+ * to this one item. A connected repository reads the real corpus, document
+ * and staleness; a fixture repository reads its fixtures.
  */
 
 import { useMemo } from 'react';
@@ -16,10 +17,11 @@ import { GuardCoveragePage } from '@/preview/vendor/components/guard/GuardCovera
 import { useGuardClaims } from '@/preview/vendor/hooks/useGuardClaims';
 import { useGuardCoverageTabs, type GuardCoverageTabsState } from '@/preview/vendor/hooks/useGuardCoverageTabs';
 import { guardUntestableEntries } from '@/preview/vendor/lib/guard-claims';
-import { createPreviewSpecSource } from '@/preview/data/fake-api';
+import { useGuardStaleness } from '@/hooks/useGuardStaleness';
 import { stalenessFor } from '@/preview/data/corpus-fixtures';
 import type { Repo } from '@/preview/data/types';
 import { useGuardTabJump } from './tab-jump';
+import { corpusSourceFor } from './CorpusTab';
 import { useCoverageVersion } from './CoverageVersions';
 
 function CorpusItemBody({
@@ -36,9 +38,15 @@ function CorpusItemBody({
   useGuardTabJump();
   const navigate = useNavigate();
   const corpus = useSpecCorpus(repo.id, true);
-  const claims = useGuardClaims(repo.id, true);
+  // The claim corpus is a fixture-only read for now: the server has no claims
+  // route yet, so a connected repository's page paints from the coverage join.
+  const claims = useGuardClaims(repo.id, !repo.real);
   const urlTabs = useGuardCoverageTabs(repo.id);
-  const staleness = useMemo(() => stalenessFor(repo.id), [repo.id]);
+  const realStaleness = useGuardStaleness(repo.real ? repo.id : undefined);
+  const staleness = useMemo(
+    () => (repo.real ? realStaleness.staleness : stalenessFor(repo.id)),
+    [repo.id, repo.real, realStaleness.staleness],
+  );
   const untestable = useMemo(() => guardUntestableEntries(claims.view), [claims.view]);
 
   const base = `/preview/repos/${repo.id}/corpus`;
@@ -99,7 +107,7 @@ export function CorpusPage({ repo, kind, itemId }: { repo: Repo; kind: 'doc' | '
   const versions = useCoverageVersion(repo.id);
   const versionId = versions.version?.id ?? null;
   const versionQuery = versions.version && versions.version.parentId ? `?version=${encodeURIComponent(versions.version.id)}` : '';
-  const source = useMemo(() => createPreviewSpecSource(repo.id, versionId), [repo.id, versionId]);
+  const source = useMemo(() => corpusSourceFor(repo, versionId), [repo, versionId]);
   return (
     <SpecSourceProvider source={source}>
       <CorpusItemBody repo={repo} itemId={itemId} kind={kind} versionQuery={versionQuery} />
