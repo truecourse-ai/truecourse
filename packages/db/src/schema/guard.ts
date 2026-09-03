@@ -17,6 +17,8 @@
  *                         tree (yaml + recipe.json + manifest.json), exactly like
  *                         `contract_sets`: bodies live once in `content` (scope
  *                         guard), this holds the `{ relPath: sha }` map.
+ *   guard_setup_sets    — the same shape for what `guard setup` leaves behind, so a
+ *                         hosted run's settle spine survives its ephemeral clone.
  *
  * The mutable guard decisions ledger (`dismissedClaims`) is NOT here — it reuses the
  * generic `decisions` table under a `guard:<repoKey>` (+ `#pr/<n>` overlay) scope,
@@ -84,6 +86,29 @@ export const guardResults = pgTable(
   (t) => [primaryKey({ columns: [t.repoKey, t.commitSha] })],
 );
 
+/**
+ * The `guard setup` bundle — what a setup run leaves in a repo (`guard/setup.json`,
+ * the findings ledger, the recipe, the dependency catalog + settle record, the seed
+ * script, the generated compose file), keyed and content-addressed exactly like
+ * `guard_scenario_sets`. A hosted run's working tree is an ephemeral clone, so this
+ * is what carries setup's per-step settle spine forward from commit to commit.
+ */
+export const guardSetupSets = pgTable(
+  'guard_setup_sets',
+  {
+    repoKey: text('repo_key').notNull(),
+    commitSha: text('commit_sha').notNull(),
+    /** `{ v: 1, files: { relPath: 'sha256-…' } }` — the bundle's content manifest. */
+    manifest: jsonb('manifest').$type<unknown>().notNull(),
+    /** sha256 over the canonical (sorted) manifest — stable bundle identity. */
+    manifestHash: text('manifest_hash').notNull(),
+    fileCount: integer('file_count').notNull(),
+    createdAt: ts('created_at').notNull(),
+    updatedAt: ts('updated_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.repoKey, t.commitSha] })],
+);
+
 export const guardScenarioSets = pgTable(
   'guard_scenario_sets',
   {
@@ -99,3 +124,19 @@ export const guardScenarioSets = pgTable(
   },
   (t) => [primaryKey({ columns: [t.repoKey, t.commitSha] })],
 );
+
+/**
+ * The supplied-dependency OVERLAYS of a hosted repo — what a working tree keeps
+ * in the gitignored `scenarios/dependencies.local.json` and
+ * `scenarios/externals.local.json`: the registered instances (API keys, base
+ * URLs, tokens, headers). One row per repo, both overlays as ONE JSON blob
+ * encrypted under the deployment's master secret, decrypted only to materialize
+ * into a run's ephemeral clone. Deliberately not content-addressed: a secret must
+ * never sit in the shared `content` pool.
+ */
+export const guardDependencyOverlays = pgTable('guard_dependency_overlays', {
+  repoKey: text('repo_key').primaryKey(),
+  /** `encryptSecret(JSON.stringify({ dependencies, externals }))`. */
+  overlaysEnc: text('overlays_enc').notNull(),
+  updatedAt: ts('updated_at').notNull(),
+});

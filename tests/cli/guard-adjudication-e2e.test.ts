@@ -24,7 +24,7 @@ import { guardGenerateInProcess } from '@truecourse/core/commands/guard-in-proce
 import { readManifest } from '@truecourse/guard-runner'
 import { getDefaultTransport, setDefaultTransport, type LlmTransport } from '@truecourse/shared/llm'
 import { resolveModel } from '../../packages/core/src/config/llm-models.js'
-import { makeTempRepo, rmrf, writeRecipe, writeDoc, writeCorpus, DEFAULT_JOURNEYS } from '../guard-generator/helpers.js'
+import { makeTempRepo, rmrf, writeRecipe, writeDoc, writeCorpus, DEFAULT_INTERFACES } from '../guard-generator/helpers.js'
 
 const FAKE_CLAUDE = fileURLToPath(new URL('../fixtures/fake-claude/claude.mjs', import.meta.url))
 
@@ -174,7 +174,7 @@ describe('guardGenerateInProcess — the adjudication stages reach the model', (
   it('triages the birth-failing test and fidelity-reviews the green one, on their own models', async () => {
     const r = seed()
 
-    const { guard } = await guardGenerateInProcess(r, { journeys: DEFAULT_JOURNEYS(r) })
+    const { guard } = await guardGenerateInProcess(r, { interfaces: DEFAULT_INTERFACES(r) })
 
     expect(guard.status).toBe('ok')
 

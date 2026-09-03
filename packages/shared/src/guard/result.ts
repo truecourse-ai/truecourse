@@ -159,14 +159,14 @@ export const GuardScenarioResultSchema = z
      */
     failedMilestone: z.number().int().positive().optional(),
     /**
-     * Journey-drift ANNOTATION (always `true` when present): the live journey
+     * Interface-drift ANNOTATION (always `true` when present): the live interface
      * catalog no longer matches the fingerprints this scenario was grounded on —
      * the code surface it was derived from moved. Never an outcome and never a
      * pass/fail input: the steps are frozen and remain a valid probe of the spec
      * claims; it only suggests re-generating. Absent when the scenario carries no
-     * journey refs, when no catalog snapshot exists, or when nothing drifted.
+     * interface refs, when no catalog snapshot exists, or when nothing drifted.
      */
-    journeyDrifted: z.boolean().optional(),
+    interfaceDrifted: z.boolean().optional(),
     /**
      * Blocked-precondition ANNOTATION (always `true` when present): the step that
      * failed carries NO milestone — it only prepared the world (a seeding POST, a

@@ -29,7 +29,7 @@ import {
   type FlowsRunner,
   type FlowsEpicRunner,
   type MatchRunner,
-  type JourneyProvider,
+  type InterfaceProvider,
   type AuthorFailure,
 } from '@truecourse/guard-generator';
 import {
@@ -69,7 +69,7 @@ import { resolveFallbackModel, resolveModel, type StageId } from '../config/llm-
 import { createLlmCallLogger } from '../lib/llm-call-log.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
 import { estimateGuardTokens } from '../services/llm/spec-estimate.js';
-import { mapJourneys } from '../services/journey.service.js';
+import { mapInterfaces } from '../services/interface.service.js';
 import { readGuardRecipeCard } from './guard-read.js';
 import { readCorpus, readDecisions } from '@truecourse/spec-consolidator';
 import type { LlmEstimate } from './analyze-core.js';
@@ -150,7 +150,7 @@ export const GUARD_GENERATE_STEPS = [
  * live tokens/$ of the work it's doing (the scan/contracts convention). Recipe
  * discovery rides `index` (the section-indexing window), extraction rides
  * `extract`, synthesis rides `flows`, realization matching rides `match`, and
- * per-(flow, surface) authoring rides `author` (stage `guard.generate`). Journey
+ * per-(flow, surface) authoring rides `author` (stage `guard.generate`). Interface
  * mapping is deterministic tree derivation — no stage, no spend. Birth EXECUTION
  * is deterministic sandbox work, but the one evidence-retry per birth-failed flow
  * is a full re-author (stage `guard.retry`) AND every green scenario's fidelity
@@ -183,6 +183,13 @@ export interface GuardGenerateInProcessOptions {
    */
   transport?: LlmTransport;
   /**
+   * The mode an explicit `transport` runs in, which decides the stage models:
+   * `claude-code` keeps the tier aliases `claude -p` understands, `api` (the
+   * default) substitutes the one configured API model. Ignored without
+   * `transport`.
+   */
+  transportMode?: LlmTransportMode;
+  /**
    * Pre-flight LLM cost estimate gate. Called with the token estimate before any
    * LLM work; return `false` to abort (throws {@link EstimateDeclined}). Skipped
    * when nothing changed (the estimate has no stages).
@@ -209,8 +216,8 @@ export interface GuardGenerateInProcessOptions {
   flowsRunner?: FlowsRunner;
   flowsEpicRunner?: FlowsEpicRunner;
   matchRunner?: MatchRunner;
-  /** Journey mapping seam — defaults to the deterministic analyzer-backed mapper. */
-  journeys?: JourneyProvider;
+  /** Interface mapping seam — defaults to the deterministic analyzer-backed mapper. */
+  interfaces?: InterfaceProvider;
   /**
    * INTERNAL test seam: stop the pipeline after flow synthesis. Never exposed as a
    * command flag — a `--flows-only` review mode was considered and rejected;
@@ -289,9 +296,10 @@ export async function guardGenerateInProcess(
   const { tracker } = options;
   // The transport this run actually uses decides the models — never the saved
   // selection a `--llm-transport` flag just overrode. An explicit transport IS
-  // the selection: it was built from a stored provider block, so the run is in
-  // api mode whatever the local config file says.
-  const mode = options.transport ? 'api' : effectiveLlmMode(options.llm);
+  // the selection, and its caller says which mode it runs in (a stored
+  // provider block is api mode whatever the local config file says; the
+  // operator's Claude Code keeps the tier aliases).
+  const mode = options.transport ? (options.transportMode ?? 'api') : effectiveLlmMode(options.llm);
 
   // Hard-fail on unresolved spec conflicts BEFORE the estimate — never ask to
   // spend, then fail. Extracting both sides of an open overlap births noise.
@@ -422,15 +430,15 @@ export async function guardGenerateInProcess(
       flowsRunner: options.flowsRunner,
       flowsEpicRunner: options.flowsEpicRunner,
       matchRunner: options.matchRunner,
-      journeys:
-        options.journeys ??
+      interfaces:
+        options.interfaces ??
         (async () => {
-          // ONE working-tree analysis feeds every half: the journey catalog, the
+          // ONE working-tree analysis feeds every half: the interface catalog, the
           // repo's detected third-party dependencies, and the code-truth grounding
           // authoring needs.
-          const mapped = await mapJourneys(repoRoot);
+          const mapped = await mapInterfaces(repoRoot);
           return {
-            journeys: mapped.catalog.journeys,
+            interfaces: mapped.catalog.interfaces,
             externalServices: mapped.externalServices,
             database: mapped.database,
             datastoreUrls: mapped.datastoreUrls,
@@ -466,7 +474,7 @@ export async function guardGenerateInProcess(
         }
       },
       onJourneys: (journeys, surfaces) => {
-        // Journey mapping is deterministic and free — it completes as one step with
+        // Interface mapping is deterministic and free — it completes as one step with
         // its result, never a live counter with a model tag.
         advanceTo('journeys');
         tracker?.done(

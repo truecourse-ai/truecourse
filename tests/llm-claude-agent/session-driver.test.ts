@@ -29,6 +29,8 @@ import { defineSessionTool } from '../../packages/agent-loop/src/index';
 interface FakeTool {
   name: string;
   description: string;
+  /** The raw shape the driver advertised to the SDK — what the model sees. */
+  shape: Record<string, unknown>;
   handler: (args: unknown, extra: unknown) => Promise<SdkMcpToolResult>;
 }
 
@@ -48,8 +50,8 @@ function fakeSdk(script: (ctx: FakeCtx) => AsyncGenerator<SdkMessage, void>) {
   const captured: { options?: SdkQueryOptions; received: SdkUserMessage[] } = { received: [] };
   const tools = new Map<string, FakeTool>();
   const sdk: SdkModule = {
-    tool(name, description, _shape, handler) {
-      const t: FakeTool = { name, description, handler };
+    tool(name, description, shape, handler) {
+      const t: FakeTool = { name, description, shape: shape as Record<string, unknown>, handler };
       tools.set(name, t);
       return t;
     },
@@ -630,5 +632,67 @@ describe('claude agent session driver provider retries', () => {
     const delaySec = (retries[0] as { delayMs: number }).delayMs / 1000;
     expect(delaySec).toBeGreaterThan(25);
     expect(delaySec).toBeLessThanOrEqual(30);
+  });
+});
+
+describe('claude agent session driver tool schemas', () => {
+  /** A tool whose schema is a refined strict object — a ZodEffects, not a ZodObject. */
+  const proposeTool = defineSessionTool({
+    name: 'propose',
+    description: 'propose a recipe',
+    kind: 'probe',
+    readOnly: true,
+    destructive: false,
+    inputSchema: z
+      .object({ build: z.string(), entry: z.array(z.string()).optional() })
+      .strict()
+      .refine((r) => r.entry !== undefined, { message: 'entry required' }),
+    async execute(args) {
+      return { content: `build=${args.build}` };
+    },
+  });
+
+  /** A tool with no object root at all. */
+  const echoTool = defineSessionTool({
+    name: 'echo',
+    description: 'echo a string',
+    kind: 'probe',
+    readOnly: true,
+    destructive: false,
+    inputSchema: z.string(),
+    async execute(args) {
+      return { content: `echo:${args}` };
+    },
+  });
+
+  it('advertises a refined object by its own fields and executes flat arguments', async () => {
+    const { sdk, tools } = fakeSdk(async function* (ctx) {
+      await ctx.nextUserMessage();
+      yield init();
+      const tool = ctx.tools.get('propose');
+      if (!tool) throw new Error('propose not registered');
+      const result = await tool.handler({ build: 'npm run build', entry: ['node', 'cli.js'] }, {});
+      expect(result).toEqual({ content: [{ type: 'text', text: 'build=npm run build' }] });
+      yield success({ verdict: 'keep' });
+    });
+    const { handle } = runSession(sdk, { def: makeDef({ tools: [proposeTool] }) });
+    await handle.done;
+    // The model sees `build` / `entry`, never a wrapping `input` field.
+    expect(Object.keys(tools.get('propose')?.shape ?? {})).toEqual(['build', 'entry']);
+  });
+
+  it('wraps a schema with no object root in `input` and unwraps the call', async () => {
+    const { sdk, tools } = fakeSdk(async function* (ctx) {
+      await ctx.nextUserMessage();
+      yield init();
+      const tool = ctx.tools.get('echo');
+      if (!tool) throw new Error('echo not registered');
+      const result = await tool.handler({ input: 'hi' }, {});
+      expect(result).toEqual({ content: [{ type: 'text', text: 'echo:hi' }] });
+      yield success({ verdict: 'keep' });
+    });
+    const { handle } = runSession(sdk, { def: makeDef({ tools: [echoTool] }) });
+    await handle.done;
+    expect(Object.keys(tools.get('echo')?.shape ?? {})).toEqual(['input']);
   });
 });

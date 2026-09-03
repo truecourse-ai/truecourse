@@ -7,7 +7,7 @@
  * tests, so a fresh clone lists its red tests as red), the LEFT PANEL (severity-led
  * rows reading "CLI test · Failing (birth)" plus the flow they serve), the DETAIL,
  * which reads in the order a reader asks: what it checks → result → steps →
- * evidence → the journey it drives, last, and the ONE ruling the detail offers —
+ * evidence → the interface it drives, last, and the ONE ruling the detail offers —
  * "don't test this claim" on a FAILING result, scoped to the failing milestone's
  * claim (a passing test has nothing to rule on).
  *
@@ -33,7 +33,7 @@ import { MemoryRouter, useLocation } from 'react-router-dom';
 import type {
   GuardDismissedClaim,
   GuardFlowDetail,
-  GuardJourneyRow,
+  GuardInterfaceRow,
   GuardScenarioResult,
 } from '@truecourse/shared';
 import { GuardDriftList } from '@/components/guard/GuardDriftList';
@@ -242,7 +242,7 @@ const BIRTH_FLOW_DETAIL: GuardFlowDetail = {
   journeyIds: [],
 };
 
-const JOURNEYS: GuardJourneyRow[] = [
+const INTERFACES: GuardInterfaceRow[] = [
   {
     id: 'cli/tasks-add',
     type: 'cli',
@@ -573,14 +573,14 @@ function TestsHarness({ onOpenFlow = () => {} }: { onOpenFlow?: (id: string) => 
         error={null}
         runId={RUN_ID}
         lastRun={LAST_RUN}
-        journeys={JOURNEYS}
+        interfaces={INTERFACES}
         flowGoals={FLOW_GOALS}
         decisions={decisions}
         tabs={tabs}
         filter={filter}
         onFilter={setFilter}
         onOpenFlow={onOpenFlow}
-        onOpenJourney={() => {}}
+        onOpenInterface={() => {}}
         onOpenSpec={() => {}}
       />
     </div>
@@ -634,11 +634,11 @@ describe('GuardTestsPane — the test detail', () => {
     expect(await findSteps()).toBeInTheDocument();
   });
 
-  it('reads what it checks → verdict → steps → evidence → journey, in that order', async () => {
+  it('reads what it checks → verdict → steps → evidence → interface, in that order', async () => {
     renderPane(`/repos/r?tab=tests&gtest=${PASSING_ID}`);
     const steps = await findSteps();
 
-    const order = ['What it checks', 'Verdict', 'Steps', 'Evidence', 'Journey'];
+    const order = ['What it checks', 'Verdict', 'Steps', 'Evidence', 'Interface'];
     const positions = order.map((label) => {
       const el = screen.getByText(label);
       return { label, top: Array.from(document.querySelectorAll('*')).indexOf(el) };
@@ -662,8 +662,8 @@ describe('GuardTestsPane — the test detail', () => {
     await waitFor(() =>
       expect(screen.getByLabelText('evidence transcript')).toHaveTextContent('$ tasks add "write the spec"'),
     );
-    // The journey renders LAST, as a sequence diagram.
-    const diagram = await screen.findByRole('group', { name: 'Journey cli/tasks-add' });
+    // The interface renders LAST, as a sequence diagram.
+    const diagram = await screen.findByRole('group', { name: 'Interface cli/tasks-add' });
     expect(within(diagram).getByText('User')).toBeInTheDocument();
   });
 

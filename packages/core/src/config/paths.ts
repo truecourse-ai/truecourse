@@ -14,9 +14,11 @@ const TRUECOURSE_DIR = '.truecourse';
 // `contracts/result.json` — the last-generate run result (transient run output
 // the dashboard reads back; the rest of `contracts/` stays tracked) — and the
 // guard run store: `guard/runs/` snapshots, `guard/result.json` (last-generate
-// report), `guard/evidence/` transcripts, `guard/journeys.json` (the journey
+// report), `guard/evidence/` transcripts, `guard/interfaces.json` (the surface
 // catalog, re-derived from the working tree on every mapping — what travels with
-// the repo are the journey fingerprints embedded in scenarios),
+// the repo are the fingerprints embedded in scenarios, plus the hand-authored
+// `guard/interfaces.authored.json` no derivation writes), `guard/.world-dirty`
+// (the transient marker of a world a mutating tail left dirty),
 // `guard/auto-resolutions.json` (the auto-resolve ledger + flow-taint set —
 // transient run memory), and `guard/history.json` (covered by the
 // unanchored `history.json` rule). `guard/LATEST.json` stays committable, same
@@ -27,6 +29,14 @@ const TRUECOURSE_DIR = '.truecourse';
 // accounts a developer provided. Ignored ON PURPOSE — the recipe declares WHICH
 // services exist (and is committed so the team shares the declaration), this file
 // holds the values that must never reach git.
+//
+// `scenarios/dependencies.local.json` is the same split one level up: the committed
+// `scenarios/dependencies.json` declares WHICH classes of starting state the
+// program needs (and travels with the repo), while this file holds the machine's
+// INSTANCES — a path to a real project, a config dir, an API key — which are
+// per-developer by definition and must never reach git. `guard/setup.findings.md`
+// is deliberately NOT listed: the setup sessions' findings are a report about the
+// repository, committed like the rest of `guard/`'s curated files.
 //
 // `sessions/` is the agent-session store — per-run `run.json` plus one
 // append-only JSONL transcript per session. Pure run output, re-derived by the
@@ -46,9 +56,11 @@ export const GITIGNORE_CONTENTS = [
   'guard/result.json',
   'guard/setup.json',
   'guard/evidence/',
-  'guard/journeys.json',
+  'guard/interfaces.json',
   'guard/auto-resolutions.json',
+  'guard/.world-dirty',
   'scenarios/externals.local.json',
+  'scenarios/dependencies.local.json',
   'sessions/',
 ].join('\n') + '\n';
 
@@ -130,8 +142,9 @@ export function resolveRepoDir(startDir: string): string | null {
  *
  * An EXISTING `.gitignore` is upgraded in place: every template line it is
  * missing is appended (user additions are preserved, nothing is removed). The
- * template grows entries over time, and a repo initialized before an entry
- * existed must not be able to `git add` state that was never meant for git.
+ * template grows secret-bearing entries over time — `scenarios/
+ * dependencies.local.json` holds registered API keys — and a repo initialized
+ * before such an entry existed must not be able to `git add` a secret.
  */
 export function ensureRepoTruecourseDir(repoDir: string): string {
   const tcDir = getRepoTruecourseDir(repoDir);

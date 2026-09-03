@@ -57,6 +57,7 @@ const STAGE_LABEL: Record<StageId, string> = {
   "guard.triage": "Guard  · failure triage",
   "guard.recipe": "Guard  · recipe discover",
   "guard.seed": "Guard  · seed draft",
+  "guard.stateReconcile": "Guard  · state reconcile",
   "rules.violationGen": "Rules  · violation gen",
 };
 

@@ -9,7 +9,7 @@
  * definition the engine validates the reply with (and the same one the prompt
  * embeds as its canonical output contract — one source, never two wordings). The
  * API transport submits it as provider-side STRUCTURED OUTPUT; the cli and agent
- * backends treat it as informational. Three stages carry a schema strict output
+ * backends treat it as informational. Two stages carry a schema strict output
  * cannot express (a typed record); each says so with `enforceSchema: false` and a
  * comment naming the construct, never a silent degrade — the gate in
  * `tests/llm-api/stage-schemas.test.ts` pins the list.
@@ -36,7 +36,6 @@ import {
   FlowSynthesisSchema,
   RealizationMatchSchema,
   RecipeProposalSchema,
-  SeedProposalSchema,
 } from './schemas.js'
 import {
   EXTRACT_SYSTEM_PROMPT,
@@ -46,8 +45,6 @@ import {
   buildAuthorUserPrompt,
   RECIPE_SYSTEM_PROMPT,
   buildRecipeUserPrompt,
-  SEED_SYSTEM_PROMPT,
-  buildSeedUserPrompt,
   FIDELITY_SYSTEM_PROMPT,
   buildFidelityUserPrompt,
   FLOWS_SYSTEM_PROMPT,
@@ -59,7 +56,6 @@ import {
   type ExtractUserContext,
   type AuthorUserContext,
   type RecipeDiscoveryInput,
-  type SeedDraftInput,
   type FidelityUserContext,
   type FlowsUserContext,
   type FlowsEpicUserContext,
@@ -77,13 +73,11 @@ const FIDELITY_RESPONSE_SCHEMA = jsonSchemaHint(FidelityReviewSchema)
 const FLOWS_RESPONSE_SCHEMA = jsonSchemaHint(FlowSynthesisSchema)
 const FLOWS_EPIC_RESPONSE_SCHEMA = jsonSchemaHint(EpicSynthesisSchema)
 const MATCH_RESPONSE_SCHEMA = jsonSchemaHint(RealizationMatchSchema)
-const SEED_RESPONSE_SCHEMA = jsonSchemaHint(SeedProposalSchema)
 const RECIPE_RESPONSE_SCHEMA = jsonSchemaHint(RecipeProposalSchema)
 
 export type ExtractRunner = (input: ExtractUserContext) => Promise<unknown>
 export type GenerateRunner = (input: AuthorUserContext) => Promise<unknown>
 export type RecipeRunner = (input: RecipeDiscoveryInput) => Promise<unknown>
-export type SeedRunner = (input: SeedDraftInput) => Promise<unknown>
 export type FidelityRunner = (input: FidelityUserContext) => Promise<unknown>
 export type FlowsRunner = (input: FlowsUserContext) => Promise<unknown>
 export type FlowsEpicRunner = (input: FlowsEpicUserContext) => Promise<unknown>
@@ -257,33 +251,9 @@ export function spawnMatchRunner(opts: SpawnOptions = {}): MatchRunner {
   }
 }
 
-/**
- * Seed drafting — ONE call per repo, and an expensive one: it writes a
- * whole script file, so it gets the authoring-tier ceiling rather than the recipe
- * proposer's two minutes.
- */
-export function spawnSeedRunner(opts: SpawnOptions = {}): SeedRunner {
-  const transport = opts.transport ?? cliTransport()
-  const timeoutMs = opts.timeoutMs ?? 900_000
-  return async (input) => {
-    const raw = await transport({
-      id: `guard.seed${input.retry ? ':retry' : ''}${input.correction ? ':correction' : ''}`,
-      stage: 'guard.seed',
-      model: opts.model,
-      fallbackModel: opts.fallbackModel,
-      system: SEED_SYSTEM_PROMPT,
-      user: buildSeedUserPrompt(input),
-      responseFormat: 'json',
-      schema: SEED_RESPONSE_SCHEMA,
-      // A seed's `provides` names its credentials and fixtures as records (name →
-      // shape), which strict structured output cannot express — the schema stays a
-      // prompt hint and the engine's Zod validates the reply.
-      enforceSchema: false,
-      timeoutMs,
-    })
-    return JSON.parse(extractJsonValue(raw))
-  }
-}
+// The one-shot seed runner (`spawnSeedRunner`) is GONE: the seed is authored by
+// the `guard-setup.seed` agent session in `@truecourse/core`, which reuses this
+// package's SEED_SYSTEM_PROMPT doctrine and `buildSeedUserPrompt` grounding.
 
 export function spawnRecipeRunner(opts: SpawnOptions = {}): RecipeRunner {
   const transport = opts.transport ?? cliTransport()

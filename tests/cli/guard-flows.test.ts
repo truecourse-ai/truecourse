@@ -329,12 +329,12 @@ describe('runGuardFlows --show — the drill-down', () => {
     await seedTaskbird(r)
     await writeGuardLatest(
       r,
-      latest([result({ id: 'task-lifecycle.api.1', outcome: 'fail', failedMilestone: 3, journeyDrifted: true })]),
+      latest([result({ id: 'task-lifecycle.api.1', outcome: 'fail', failedMilestone: 3, interfaceDrifted: true })]),
     )
 
     await runGuardFlows({ cwd: r, show: 'task-lifecycle' })
 
-    expect(out).toContain('api → task-lifecycle.api.1 (fail ✗ · journey drifted)')
+    expect(out).toContain('api → task-lifecycle.api.1 (fail ✗ · interface drifted)')
   })
 
   it('errors with the known ids and exits 1 on an unknown flow id', async () => {
@@ -559,13 +559,13 @@ describe('failureDetailLines', () => {
     ).toEqual(['    failed at step 2'])
   })
 
-  it('annotates journey drift on its own line, never as an outcome', () => {
+  it('annotates interface drift on its own line, never as an outcome', () => {
     const lines = failureDetailLines(
-      result({ id: 'task-lifecycle.api.1', outcome: 'fail', flowId: 'task-lifecycle', failedMilestone: 2, journeyDrifted: true, failure: { step: 2, expected: 'e', actual: 'a' } }),
+      result({ id: 'task-lifecycle.api.1', outcome: 'fail', flowId: 'task-lifecycle', failedMilestone: 2, interfaceDrifted: true, failure: { step: 2, expected: 'e', actual: 'a' } }),
       flows,
     )
     expect(lines).toHaveLength(2)
-    expect(lines[1]).toContain('journey drifted')
+    expect(lines[1]).toContain('interface drifted')
   })
 
   // The blocked-precondition annotation reads as its own line —
@@ -582,12 +582,12 @@ describe('failureDetailLines', () => {
     ]);
     // Both annotations can ride the same failure, blocked-precondition first.
     const both = failureDetailLines(
-      result({ id: 'task-lifecycle.api.1', outcome: 'fail', flowId: 'task-lifecycle', blockedPrecondition: true, journeyDrifted: true, failure: { step: 1, expected: 'e', actual: 'a' } }),
+      result({ id: 'task-lifecycle.api.1', outcome: 'fail', flowId: 'task-lifecycle', blockedPrecondition: true, interfaceDrifted: true, failure: { step: 1, expected: 'e', actual: 'a' } }),
       flows,
     )
     expect(both).toHaveLength(3)
     expect(both[1]).toContain('blocked precondition')
-    expect(both[2]).toContain('journey drifted')
+    expect(both[2]).toContain('interface drifted')
   })
 
   it('adds nothing to a stale/orphaned result (it never executed)', () => {

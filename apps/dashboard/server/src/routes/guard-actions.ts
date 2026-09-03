@@ -14,8 +14,11 @@
  *                              (no stages ⇒ deterministic no-op, gate skipped).
  *   POST /:id/guard/run        run the committed scenarios (deterministic,
  *                              LLM-free — no estimate).
- *   POST /:id/guard/map        derive the journey catalog from the working tree
- *                              (analyzer + journey-mapper: deterministic, free,
+ *   POST /:id/guard/setup      enqueue `guard setup` (recipe, dependencies, seed)
+ *                              as a background job; 202 { jobId }, 409 when the
+ *                              repository is already working.
+ *   POST /:id/guard/map        derive the interface catalog from the working tree
+ *                              (analyzer + interface-mapper: deterministic, free,
  *                              no LLM — so no estimate modal, ever).
  *   POST /:id/guard/dismiss    dismiss a finding's claim (write decisions.json).
  *   POST /:id/guard/undismiss  reverse a dismissal.
@@ -23,6 +26,9 @@
  *                              unit: the next generate drops it with
  *                              its tests. Same file, `dismissedFlows`.
  *   POST /:id/guard/flows/undismiss  reverse a flow dismissal.
+ *   PUT  /:id/guard/dependencies  register ONE dependency's instance: the values
+ *                              go to the gitignored scenarios/dependencies.local.json
+ *                              (a hosted repo: its encrypted overlay row)
  *   PUT  /:id/guard/externals  declare/clear external API accounts:
  *                              declarations to the committed recipe.json, secret
  *                              values to the gitignored externals.local.json.
@@ -51,10 +57,10 @@ import {
   dismissGuardFlow,
   undismissGuardFlow,
   getGuardDecisions,
-  readGuardJourneys,
+  readGuardInterfaces,
   readGuardResultForView,
 } from '@truecourse/core/commands/guard-read';
-import { mapJourneys } from '@truecourse/core/services/journey';
+import { mapInterfaces } from '@truecourse/core/services/interface';
 import { guardsMaterializeInPlace } from '@truecourse/core/lib/guard-store';
 import { getGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { getGuardPrRegenEnqueue } from '@truecourse/core/lib/guard-pr-regen-enqueue';
@@ -64,6 +70,15 @@ import {
   GuardExternalsWriteError,
   type GuardExternalsWrite,
 } from '@truecourse/core/commands/guard-externals';
+import {
+  writeGuardDependency,
+  GuardDependencyWriteError,
+  type GuardDependencyPatch,
+} from '@truecourse/core/commands/guard-dependencies';
+import { readGuardOverlaysFromTree, writeGuardOverlays } from '@truecourse/core/lib/guard-overlays';
+import { withGuardReadTree } from '@truecourse/core/lib/guard-read-tree';
+import { GUARD_SETUP_ONLY_STEPS } from '@truecourse/core/commands/guard-setup';
+import { hostedDependenciesView } from './guard-dependencies-hosted.js';
 import { estimateStepPhase } from '@truecourse/core/progress';
 import { runFailureMessage } from '@truecourse/guard-runner';
 import { dismissedClaimKey, type GuardDecisions } from '@truecourse/shared';
@@ -73,6 +88,7 @@ import {
   emitSpecProgress,
 } from '../socket/handlers.js';
 import { parsePr } from './route-params.js';
+import { requireJobs } from '../jobs/current.js';
 import {
   LlmNotConfiguredError,
   LlmProbeFailedError,
@@ -208,6 +224,7 @@ router.post('/:id/guard/generate', async (req: Request, res: Response, next: Nex
     const { guard } = await guardGenerateInProcess(repo.path, {
       tracker,
       transport: llm.transport(),
+      transportMode: llm.mode,
       // The popup replaces in place, so the estimate rides the checklist here as
       // a leading step (the terminal renders it as its own line instead).
       onEstimatePhase: estimateStepPhase(tracker),
@@ -257,6 +274,56 @@ router.post('/:id/guard/generate', async (req: Request, res: Response, next: Nex
   }
 });
 
+// POST — prepare the repository for guard: derive the recipe, catalogue the
+// dependencies, draft the seed. Long-running (it installs, builds and boots the
+// program), so it is a QUEUED JOB rather than work inside the request: the route
+// proves the workspace's provider, enqueues, and answers 202 with the job id.
+// The engine's own per-step fingerprints decide what actually re-runs, so there
+// is no estimate gate and a re-trigger over unchanged inputs costs nothing.
+router.post('/:id/guard/setup', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    const body = (req.body ?? {}) as { only?: string; refresh?: boolean };
+    const only = GUARD_SETUP_ONLY_STEPS.find((step) => step === body.only);
+    if (body.only !== undefined && !only) {
+      res.status(400).json({
+        error: `only must be one of ${GUARD_SETUP_ONLY_STEPS.join(', ')}.`,
+      });
+      return;
+    }
+    // The asking workspace's provider, proved before anything is queued — the
+    // same two coded refusals every spending entry answers with.
+    try {
+      await startWorkspaceLlm(orgOf(req));
+    } catch (e) {
+      if (e instanceof LlmNotConfiguredError) {
+        res.status(409).json({ error: e.code, message: e.message });
+        return;
+      }
+      if (e instanceof LlmProbeFailedError) {
+        res.status(502).json({ error: e.code, message: e.message });
+        return;
+      }
+      throw e;
+    }
+    const outcome = await requireJobs().enqueueGuardSetup({
+      repoId: req.params.id as string,
+      repoFullName: repo.path,
+      workspaceOrgId: orgOf(req),
+      source: 'manual',
+      ...(only ? { only } : {}),
+      ...(body.refresh ? { refresh: true } : {}),
+    });
+    if (outcome.status === 'busy') {
+      res.status(409).json({ error: 'A guard job is already running for this repo.' });
+      return;
+    }
+    res.status(202).json({ jobId: outcome.jobId });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // POST — run the committed scenarios. Deterministic and LLM-free, so there is no
 // estimate gate. `ok` emits the completion lifecycle event; a hard problem
 // (no recipe / no scenarios / invalid recipe / build failure) returns its status +
@@ -297,10 +364,10 @@ router.post('/:id/guard/run', async (req: Request, res: Response, next: NextFunc
   }
 });
 
-// POST — map the repo's surfaces to journeys (the Journeys tab's action). The
-// analyzer + journey-mapper are deterministic and LLM-free, so this action has NO
-// estimate gate and costs nothing; it rewrites `guard/journeys.json` and answers
-// with the fresh catalog view (the same shape `GET /guard/journeys` returns), so
+// POST — map the repo's surfaces to interfaces (the Interfaces tab's action). The
+// analyzer + interface-mapper are deterministic and LLM-free, so this action has NO
+// estimate gate and costs nothing; it rewrites `guard/interfaces.json` and answers
+// with the fresh catalog view (the same shape `GET /guard/interfaces` returns), so
 // the tab re-renders from the response without a follow-up fetch. It shares the
 // per-repo job guard with generate/run: they all write the guard store, so a
 // trigger while one is in flight is a 409. Mapping reads the WORKING TREE, so a
@@ -312,7 +379,7 @@ router.post('/:id/guard/map', async (req: Request, res: Response, next: NextFunc
   try {
     const repo = await resolveProjectForRequest(repoId);
     if (!guardsMaterializeInPlace()) {
-      res.status(501).json({ error: 'Journey mapping requires a local working tree.' });
+      res.status(501).json({ error: 'Interface mapping requires a local working tree.' });
       return;
     }
     if (guardJobs.has(repoId)) {
@@ -322,8 +389,8 @@ router.post('/:id/guard/map', async (req: Request, res: Response, next: NextFunc
     guardJobs.add(repoId);
     held = true;
 
-    await mapJourneys(repo.path);
-    res.json(await readGuardJourneys(repo.path));
+    await mapInterfaces(repo.path);
+    res.json(await readGuardInterfaces(repo.path));
   } catch (e) {
     next(e);
   } finally {
@@ -493,6 +560,57 @@ router.put('/:id/guard/externals', async (req: Request, res: Response, next: Nex
     // declaration that would not load) — a plain 422 with the engine's wording,
     // never a 500.
     if (e instanceof GuardExternalsWriteError) {
+      res.status(422).json({ error: e.message });
+      return;
+    }
+    next(e);
+  }
+});
+
+// PUT — register ONE dependency's instance. Body: `{ name, env?, path?, baseUrlEnv?,
+// baseUrl?, mode?, token?, headers? }`. The caller names a dependency, never a file,
+// so the write is confined to the store's own path by construction. Only variables
+// the committed registration DECLARES are accepted (422 otherwise), and nothing
+// stored is ever echoed back: the response is the fresh view, which masks every
+// secret.
+//
+// A working tree writes its gitignored overlays in place. A hosted repo runs the
+// same writer over a scratch tree of its stored state and keeps what the writer
+// left in the two overlay files as its encrypted overlay row — a path (nothing on
+// the server to point at) and a recipe edit (a new variable, a base-URL variable,
+// an account mode) are refused there, since the dashboard edits no recipe.
+//
+// Not a job: an instant write like dismiss/undismiss, so it takes no guard lock —
+// but registering an instance changes what the next generate can author, so it
+// emits the same completion event the externals write does and the client's
+// guard views refetch.
+router.put('/:id/guard/dependencies', async (req: Request, res: Response, next: NextFunction) => {
+  const repoId = req.params.id as string;
+  try {
+    const repo = await resolveProjectForRequest(repoId);
+    const body = (req.body ?? {}) as { name?: unknown } & GuardDependencyPatch;
+    if (typeof body.name !== 'string' || body.name.trim() === '') {
+      res.status(400).json({ error: 'dependency write requires { name, … }.' });
+      return;
+    }
+    const { name, ...patch } = body;
+    const view = guardsMaterializeInPlace()
+      ? writeGuardDependency(repo.path, name, patch as GuardDependencyPatch)
+      : await withGuardReadTree(repo.path, undefined, async (tree) => {
+          const written = writeGuardDependency(tree, name, patch as GuardDependencyPatch, {
+            env: {},
+            hostless: true,
+          });
+          await writeGuardOverlays(repo.path, readGuardOverlaysFromTree(tree));
+          return hostedDependenciesView(tree, written);
+        });
+    emitSpecComplete(repoId, 'guard-externals');
+    res.json(view);
+  } catch (e) {
+    // A refused registration is the user's problem to fix (an undeclared variable,
+    // a class with nothing to register, a broken overlay) — a plain 422 with the
+    // engine's wording, never a 500.
+    if (e instanceof GuardDependencyWriteError || e instanceof GuardExternalsWriteError) {
       res.status(422).json({ error: e.message });
       return;
     }

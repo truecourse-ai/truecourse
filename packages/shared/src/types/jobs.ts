@@ -1,17 +1,17 @@
 /**
- * Background-job + notification contracts shared by the ee server and client.
+ * Background-job + notification contracts shared by every server and client.
  *
- * Long-running work (connector sync today; analyze/verify/gate later) runs in a
+ * Long-running work (spec scan, guard setup, connector sync) runs in a
  * Postgres-backed queue off the request path. The browser learns about progress
- * and outcomes over a single SSE stream (`/api/ee/events`); these types are the
+ * and outcomes over a single SSE stream (`/api/events`); these types are the
  * wire shapes for that stream, the jobs API, and the durable notifications feed.
- *
- * Lives in @truecourse/shared so both sides agree without OSS importing `ee/`.
  */
 
 // --- Jobs -----------------------------------------------------------
 
-export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed';
+/** `cancelled` is a deliberate stop (a disconnect, a superseding request), not a
+ *  failure: no error is recorded and no notification is posted. */
+export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 
 /** Open job-type vocabulary — `knowledge.sync` first; analyze/verify/gate later. */
 export type JobType = string;

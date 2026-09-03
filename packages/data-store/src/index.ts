@@ -14,9 +14,23 @@ export { PgRegistryStore } from './registry-store.js';
 export { GhReposRegistryStore } from './gh-repos-registry-store.js';
 export { PgSpecStore } from './spec-store.js';
 export { PgGuardStore } from './guard-store.js';
+export { PgGuardOverlayStore } from './guard-overlay-store.js';
 export { PgInferredActionStore } from './inferred-action-store.js';
 export { PgKvCacheStore } from './cache-store.js';
 export { PgLlmConfigStore } from './llm-config-store.js';
 export { encryptSecret, decryptSecret, maskKey } from './crypto.js';
 export { PgAnalyzeLock } from './analyze-lock.js';
 export { purgeRepoData } from './repo-purge.js';
+export {
+  JobStore,
+  NotificationStore,
+  ActiveJobExistsError,
+  PendingBaselineStore,
+  PendingGuardBaselineStore,
+  GuardBackfillMarkerStore,
+  type OrphanedJob,
+  type PendingBaselineInput,
+  type PendingBaselineView,
+  type PendingGuardBaselineInput,
+  type PendingGuardBaselineView,
+} from './jobs-store.js';

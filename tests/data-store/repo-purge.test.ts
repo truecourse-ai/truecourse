@@ -10,6 +10,7 @@ import {
   repoConfig,
   specSets,
   guardRuns,
+  guardSetupSets,
   decisions,
   content,
   ghBaselines,
@@ -60,6 +61,15 @@ async function seed(repoKey: string): Promise<void> {
     ranAt: NOW,
     createdAt: NOW,
   });
+  await db.insert(guardSetupSets).values({
+    repoKey,
+    commitSha: 'c1',
+    manifest: { v: 1, files: {} },
+    manifestHash: 'sha',
+    fileCount: 0,
+    createdAt: NOW,
+    updatedAt: NOW,
+  });
   await db.insert(decisions).values([
     { scope: repoKey, payload: {}, updatedAt: NOW },
     { scope: `${repoKey}#pr/3`, payload: {}, updatedAt: NOW },
@@ -85,6 +95,7 @@ describe('purgeRepoData', () => {
     expect(await db.select().from(repoConfig)).toHaveLength(1);
     expect(await db.select().from(specSets)).toHaveLength(1);
     expect(await db.select().from(guardRuns)).toHaveLength(1);
+    expect(await db.select().from(guardSetupSets)).toHaveLength(1);
     expect(await db.select().from(ghBaselines)).toHaveLength(1);
     expect(await scopesOf()).toEqual(['acme/web', 'acme/web#pr/3', 'guard:acme/web']);
     const contentRows = await db.select({ scope: content.scope }).from(content);

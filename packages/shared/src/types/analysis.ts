@@ -216,10 +216,33 @@ export const RequestFieldSchema = z.object({
 export type RequestField = z.infer<typeof RequestFieldSchema>
 
 /**
+ * What ONE route registration's handler statically PRODUCES — the response side
+ * of the contract, the same honesty class as the request side. `statuses` are the
+ * HTTP statuses the source itself names (`res.status(404)`, `c.json(x, 400)`,
+ * Nest's `@HttpCode(…)`) plus the idiom's OWN documented default where the
+ * framework defines one (200 for a body-sending call that names no status, 201
+ * for a Nest POST) — a default is only claimed when the handler demonstrably
+ * sends a response, never invented from nothing. `bodyKeys` are the TOP-LEVEL
+ * literal keys of response bodies written right there (`c.json({ ok: true })` →
+ * `ok`); a body built elsewhere contributes nothing.
+ */
+export const ResponseContractSchema = z.object({
+  /** Statuses the handler answers with, statically visible at the handler. */
+  statuses: z.array(z.number().int()).optional(),
+  /** Top-level literal keys of response bodies the handler writes. */
+  bodyKeys: z.array(z.string()).optional(),
+})
+
+export type ResponseContract = z.infer<typeof ResponseContractSchema>
+
+/**
  * What ONE route registration says about the request it accepts — harvested from
  * the handler's own body, never from a doc. Everything here is statically visible
  * near the handler; anything that would need type-checking or a cross-file
- * inference the analyzer cannot make honestly is left out.
+ * inference the analyzer cannot make honestly is left out. Despite the name it
+ * carries the whole per-route contract — `produces` (the response side) rides
+ * here too, additively, because a second per-route envelope would give one route
+ * two contract homes.
  *
  * `bodyValidatorRefs` / `queryValidatorRefs` are the ONE deliberate indirection: a
  * handler that hands `req.body` to a named function (`parseSignupBody(req.body)`)
@@ -234,6 +257,8 @@ export const RequestContractSchema = z.object({
   bodyValidatorRefs: z.array(z.string()).optional(),
   /** Symbols the handler hands `req.query` to, unresolved at file level. */
   queryValidatorRefs: z.array(z.string()).optional(),
+  /** What the handler statically produces — see {@link ResponseContractSchema}. */
+  produces: ResponseContractSchema.optional(),
 })
 
 export type RequestContract = z.infer<typeof RequestContractSchema>
@@ -256,16 +281,18 @@ export type RequestValidator = z.infer<typeof RequestValidatorSchema>
 /**
  * A request contract keyed by the OPERATION it belongs to — the repo-level product
  * of joining route registrations (path composed with their mount prefix, exactly as
- * journeys compose it) with the validator symbols they name. This is the shape the
- * authoring prompt renders per journey.
+ * interfaces compose it) with the validator symbols they name. This is the shape the
+ * authoring prompt renders per interface.
  */
 export const ApiRequestContractSchema = z.object({
   /** Uppercase HTTP method. */
   method: z.string(),
-  /** Canonical path template — identical to the api journey's `entry.path`. */
+  /** Canonical path template — identical to the api interface's `entry.path`. */
   path: z.string(),
   bodyFields: z.array(RequestFieldSchema).optional(),
   queryFields: z.array(RequestFieldSchema).optional(),
+  /** The operation's response side, merged across its registrations. */
+  produces: ResponseContractSchema.optional(),
 })
 
 export type ApiRequestContract = z.infer<typeof ApiRequestContractSchema>
@@ -356,6 +383,23 @@ export const RouteRegistrationSchema = z.object({
 
 export type RouteRegistration = z.infer<typeof RouteRegistrationSchema>
 
+/**
+ * One `openapi: { method, path }` meta literal — the REST address an RPC
+ * procedure ALSO answers at, declared beside the procedure rather than in any
+ * route table (the `trpc-to-openapi` / `trpc-openapi` idiom, and documenso's
+ * whole public API). The path is relative to wherever the OpenAPI handler is
+ * mounted; the mapper composes it with the base the app serves its document at.
+ */
+export const OpenApiRouteMetaSchema = z.object({
+  httpMethod: z.enum(['GET', 'POST', 'PUT', 'DELETE', 'PATCH']),
+  path: z.string(),
+  /** `summary`/`operationId` when the literal carries one — cosmetic only. */
+  label: z.string().optional(),
+  location: SourceLocationSchema,
+})
+
+export type OpenApiRouteMeta = z.infer<typeof OpenApiRouteMetaSchema>
+
 export const RouterMountSchema = z.object({
   path: z.string(),
   routerName: z.string(),
@@ -363,6 +407,124 @@ export const RouterMountSchema = z.object({
 })
 
 export type RouterMount = z.infer<typeof RouterMountSchema>
+
+// ---------------------------------------------------------------------------
+// Web Route
+//
+// The web surface's analog of {@link RouteRegistrationSchema}, and deliberately
+// the SMALL half of it. Two of the three web-routing idioms — Next.js and
+// remix-flat-routes — declare a route by putting a file in a directory, so
+// there is no syntax to read and no per-file fact to carry: their addresses are
+// derived from the file LIST (`interface-mapper/web-tree.ts`), where the
+// framework roots that gate them are visible. Only React Router writes its
+// routes as code, and this is what the reader gets out of it.
+// ---------------------------------------------------------------------------
+
+/**
+ * One route a React Router declaration NAMES. The path is ABSOLUTE — a
+ * relative fragment is composed onto its enclosing `<Route>` before it is
+ * emitted, and one that composes onto nothing is not emitted at all (the api
+ * extractor's rule: an unaddressable route is not a lesser route, it is a place
+ * no navigate step can reach). Parameters are kept as the framework writes them
+ * (`:repoId`) and canonicalized downstream.
+ */
+export const WebRouteSchema = z.object({
+  path: z.string(),
+  location: SourceLocationSchema,
+})
+
+export type WebRoute = z.infer<typeof WebRouteSchema>
+
+// ---------------------------------------------------------------------------
+// Web Redirect
+//
+// The other half of "what does this address DO": a route can exist and still be
+// somewhere nobody stands, because the framework sends every visitor elsewhere
+// before anything renders. Two forms, and both are read deterministically:
+// a CONFIG table (`next.config.*`'s `redirects()`), and a route module whose
+// whole body is one redirect. Only the config table needs a record per entry —
+// the module form is one bit about the file, `FileAnalysis.redirectsUnconditionally`.
+// ---------------------------------------------------------------------------
+
+/**
+ * One entry of a framework config's redirect table, as the config LITERALLY
+ * writes it. Only entries whose `source` and `destination` are string literals
+ * are recorded — an entry assembled at runtime states nothing a derivation can
+ * act on.
+ */
+export const WebRedirectSchema = z.object({
+  /** The matched address, verbatim: `/bookings`, `/:path*`, `/old/:slug`. */
+  source: z.string(),
+  destination: z.string(),
+  /** 308 rather than 307, when the entry states it as a literal. */
+  permanent: z.boolean().optional(),
+  /**
+   * The entry carries `has` / `missing` conditions, so it fires only for SOME
+   * visitors and the address still renders for the rest. Consumers that drop a
+   * place on a redirect must not drop one on this.
+   */
+  conditional: z.boolean().optional(),
+})
+
+export type WebRedirect = z.infer<typeof WebRedirectSchema>
+
+// ---------------------------------------------------------------------------
+// RPC Router
+//
+// The third way a JS/TS app declares its server surface, beside the routes it
+// CALLS and the ones it DECORATES: a tRPC router is an object literal whose keys
+// are procedures and whose values are builder chains, composed into a tree by
+// nesting one router inside another. Nothing about it is an HTTP route in the
+// source — the address only exists once an adapter mounts the tree — so the
+// per-file fact is the TREE NODE and never a path: this router's own procedures,
+// and the routers it names as children. Composition, the mount and the HTTP
+// method are the mapper's job (`interface-mapper/rpc-interfaces.ts`), because a
+// child router usually lives in another file and the mount lives in a third.
+// ---------------------------------------------------------------------------
+
+/** How a procedure is invoked, which is also what decides its HTTP method downstream. */
+export const RpcProcedureKindSchema = z.enum(['query', 'mutation', 'subscription'])
+export type RpcProcedureKind = z.infer<typeof RpcProcedureKindSchema>
+
+/**
+ * One procedure of one router, named as its OWN router names it — dotted only
+ * when an inline nested router put it a level down (`schedule.create`). The
+ * enclosing router's key path is added by whoever composes the tree.
+ */
+export const RpcProcedureSchema = z.object({
+  name: z.string(),
+  kind: RpcProcedureKindSchema,
+  location: SourceLocationSchema,
+})
+
+export type RpcProcedure = z.infer<typeof RpcProcedureSchema>
+
+/**
+ * A child router this one mounts: the KEY it is mounted under, and the
+ * IDENTIFIER its value names. The identifier is left unresolved on purpose — the
+ * per-file extractor cannot know which module defines it, and a guessed
+ * resolution would compose a procedure path that no server answers.
+ */
+export const RpcRouterRefSchema = z.object({
+  key: z.string(),
+  router: z.string(),
+})
+
+export type RpcRouterRef = z.infer<typeof RpcRouterRefSchema>
+
+/** One `router({…})` / `createTRPCRouter({…})` binding: its symbol, what it offers,
+ *  and the routers it composes. */
+export const RpcRouterSchema = z.object({
+  /** The symbol the router is bound to here (`appRouter`, `bookingsRouter`). */
+  name: z.string(),
+  /** Whether this module exports it — a child router is reached by import. */
+  exported: z.boolean(),
+  procedures: z.array(RpcProcedureSchema),
+  children: z.array(RpcRouterRefSchema),
+  location: SourceLocationSchema,
+})
+
+export type RpcRouter = z.infer<typeof RpcRouterSchema>
 
 // ---------------------------------------------------------------------------
 // CLI Command
@@ -412,6 +574,31 @@ export const FileAnalysisSchema = z.object({
   httpCalls: z.array(HttpCallSchema),
   routeRegistrations: z.array(RouteRegistrationSchema).optional(),
   routerMounts: z.array(RouterMountSchema).optional(),
+  /** `openapi: {method, path}` metas declared here — REST addresses for RPC
+   *  procedures, relative to the OpenAPI mount; absent when none. */
+  openApiRouteMetas: z.array(OpenApiRouteMetaSchema).optional(),
+  /**
+   * Prefixes this file serves with a CATCH-ALL (`app.use('/api/v2/*', handler)`),
+   * wildcard stripped — recorded whatever shape the handler takes, so an inline
+   * one counts. Not a mount: nothing is composed onto it. It says only "this file
+   * answers everything under here", which is what identifies the base of a
+   * handler-served surface. Absent when none.
+   */
+  catchAllPrefixes: z.array(z.string()).optional(),
+  /** tRPC routers this file BINDS (`const appRouter = router({…})`); absent when none. */
+  rpcRouters: z.array(RpcRouterSchema).optional(),
+  /** Routes this file DECLARES as JSX (React Router); absent when none. */
+  webRoutes: z.array(WebRouteSchema).optional(),
+  /** Static redirects this file declares as a framework CONFIG table
+   *  (`next.config.*`'s `redirects()`); absent when it declares none. */
+  webRedirects: z.array(WebRedirectSchema).optional(),
+  /**
+   * This route module's whole job is to redirect: its `loader` — or, for a page
+   * module, its default export — does nothing but `throw redirect(…)`. Absent
+   * when it is not one, which includes every module whose redirect is behind a
+   * condition and therefore renders for somebody.
+   */
+  redirectsUnconditionally: z.boolean().optional(),
   cliCommands: z.array(CliCommandSchema).optional(),
   /** http(s) URL literals naming a third-party host; absent when none. */
   externalHttpRefs: z.array(ExternalHttpRefSchema).optional(),

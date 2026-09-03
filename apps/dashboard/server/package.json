@@ -16,6 +16,7 @@
     "@truecourse/data-store": "workspace:*",
     "@truecourse/db": "workspace:*",
     "@truecourse/github-app": "workspace:*",
+    "@truecourse/jobs": "workspace:*",
     "@truecourse/shared": "workspace:*",
     "@truecourse/spec-consolidator": "workspace:*",
     "@workos-inc/node": "^7.0.0",

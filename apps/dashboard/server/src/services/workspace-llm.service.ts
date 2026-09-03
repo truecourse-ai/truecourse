@@ -14,6 +14,13 @@
  *      resolve ⇒ {@link LlmProbeFailedError} carrying the provider's own words.
  *      Once per start, never twice.
  *
+ * OPERATOR MODE is the one exception: `TRUECOURSE_LLM_TRANSPORT=claude-code`
+ * in the server's environment runs EVERY workspace on the operator's own
+ * `claude` login — the self-hosted, single-operator deployment. The store is
+ * never consulted, the Models page is read-only, and the probe is the `claude`
+ * login check plus the Agent SDK load. Hosted deploys never set it: they keep
+ * per-workspace credentials.
+ *
  * The store and the backend are seams: boot installs the Postgres store and the
  * real provider calls; tests install their own.
  */
@@ -21,12 +28,30 @@
 import type { Request } from 'express';
 import type { SessionDriver } from '@truecourse/agent-loop';
 import { createAppError } from '@truecourse/core/lib/errors';
-import type { LlmConfigUpdate, LlmProviderConfigView } from '@truecourse/shared';
-import type { LlmTransport } from '@truecourse/shared/llm';
-import type { GlobalApiLlmConfig } from '@truecourse/core/config/global-config';
+import type { LlmConfigUpdate, LlmOperatorProvider, LlmProviderConfigView } from '@truecourse/shared';
+import { cliTransport, type LlmTransport } from '@truecourse/shared/llm';
+import type { GlobalApiLlmConfig, LlmTransportMode } from '@truecourse/core/config/global-config';
 import { createApiTransportFor } from '@truecourse/core/services/llm/install-transport';
-import { createApiSessionDriverFor } from '@truecourse/core/services/llm/session-driver';
-import { probeApiConfig } from '@truecourse/core/services/llm/probe';
+import {
+  createApiSessionDriverFor,
+  createClaudeCodeSessionDriver,
+  SESSION_MODEL_CLAUDE_CODE,
+} from '@truecourse/core/services/llm/session-driver';
+import { probeApiConfig, probeClaudeCode } from '@truecourse/core/services/llm/probe';
+
+/**
+ * Whether this instance runs on its operator's Claude Code. Read per call so a
+ * test can flip it; the env is fixed for the life of a real process.
+ */
+export function operatorClaudeCode(): boolean {
+  return process.env.TRUECOURSE_LLM_TRANSPORT?.trim() === 'claude-code';
+}
+
+/** What the Models page shows in operator mode, in place of a stored config. */
+export const OPERATOR_PROVIDER: LlmOperatorProvider = {
+  provider: 'claude-code',
+  model: SESSION_MODEL_CLAUDE_CODE,
+};
 
 /** What the Models settings page and the pipeline entries need from storage. */
 export interface WorkspaceLlmConfigStore {
@@ -90,6 +115,12 @@ export interface WorkspaceLlmBackend {
   probe(config: GlobalApiLlmConfig): Promise<void>;
   driver(config: GlobalApiLlmConfig): SessionDriver;
   transport(config: GlobalApiLlmConfig): LlmTransport;
+  /** Operator mode: the server's own `claude` login. */
+  claudeCode: {
+    probe(): Promise<void>;
+    driver(): SessionDriver;
+    transport(): LlmTransport;
+  };
 }
 
 const REAL_BACKEND: WorkspaceLlmBackend = {
@@ -98,6 +129,15 @@ const REAL_BACKEND: WorkspaceLlmBackend = {
   // The workspace block names ONE model for every stage, so the per-stage tier
   // hints (Claude CLI aliases, meaningless to a provider API) are not honored.
   transport: (config) => createApiTransportFor(config, { honorRequestModel: false }),
+  claudeCode: {
+    probe: () => probeClaudeCode(),
+    // No cwd: runs happen in ephemeral clones the driver never learns about, so
+    // the `claude` subprocess inherits the server's. Fine for a single
+    // operator; pass the clone dir if this ever becomes a hosted feature.
+    driver: () => createClaudeCodeSessionDriver().driver,
+    // `claude -p` honors the per-stage tier aliases, exactly as the CLI does.
+    transport: () => cliTransport(),
+  },
 };
 
 let backend: WorkspaceLlmBackend = REAL_BACKEND;
@@ -110,10 +150,11 @@ export function resetWorkspaceLlmBackend(): void {
   backend = REAL_BACKEND;
 }
 
-/** A probed workspace provider, ready to run on. Built lazily — a step needs
- *  one of the two, never both. */
+/** A probed provider, ready to run on. Built lazily — a step needs one of the
+ *  two, never both. `mode` travels with the transport so the pipeline resolves
+ *  stage models for the backend it will really run on. */
 export interface WorkspaceLlm {
-  config: GlobalApiLlmConfig;
+  mode: LlmTransportMode;
   driver(): SessionDriver;
   transport(): LlmTransport;
 }
@@ -134,6 +175,18 @@ export function probeWorkspaceLlmConfig(config: GlobalApiLlmConfig): Promise<voi
  * surface (a 409/502, or a failed run record).
  */
 export async function startWorkspaceLlm(orgId: string): Promise<WorkspaceLlm> {
+  if (operatorClaudeCode()) {
+    try {
+      await backend.claudeCode.probe();
+    } catch (err) {
+      throw new LlmProbeFailedError(err);
+    }
+    return {
+      mode: 'claude-code',
+      driver: () => backend.claudeCode.driver(),
+      transport: () => backend.claudeCode.transport(),
+    };
+  }
   const config = await workspaceLlmConfigStore().getConfig(orgId);
   if (!config) throw new LlmNotConfiguredError();
   try {
@@ -142,7 +195,7 @@ export async function startWorkspaceLlm(orgId: string): Promise<WorkspaceLlm> {
     throw new LlmProbeFailedError(err);
   }
   return {
-    config,
+    mode: 'api',
     driver: () => backend.driver(config),
     transport: () => backend.transport(config),
   };

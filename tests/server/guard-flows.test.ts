@@ -8,7 +8,7 @@ import { createTestApp } from '../helpers/test-app';
 import {
   GuardFlowDetailSchema,
   GuardFlowsViewCoreSchema,
-  GuardJourneysViewSchema,
+  GuardInterfacesViewSchema,
   GuardRunFlowSchema,
   GuardSectionFlowSchema,
 } from '../../packages/shared/src/index';
@@ -22,7 +22,7 @@ import { setupTestFixture, teardownTestFixture, type TestFixture } from '../help
  * The fixture is a small CLI task manager ("taskbird"): a three-section spec doc,
  * one synthesized flow across all three sections plus a second, unrealized one, a
  * generated cli scenario, a hand-written scenario (the Manual pseudo-flow), a
- * journey catalog with one journey no flow grounds on, and a run where the flow
+ * interface catalog with one entry no flow grounds on, and a run where the flow
  * failed at its third milestone. Temp-repo fixture + supertest over the real app.
  */
 
@@ -215,7 +215,7 @@ const LATEST = {
       evidencePath: `.truecourse/guard/evidence/${RUN_ID}/${SCENARIO_ID}`,
       flowId: FLOW_ID,
       failedMilestone: 3,
-      journeyDrifted: true,
+      interfaceDrifted: true,
     },
     {
       id: MANUAL_ID,
@@ -228,11 +228,11 @@ const LATEST = {
   sections: [],
 };
 
-const JOURNEYS = {
-  version: 1,
+const INTERFACES = {
+  version: 2,
   generatedAt: '2026-07-24T13:39:00.000Z',
   recipeFingerprint: 'sha256:r',
-  journeys: [
+  interfaces: [
     {
       id: 'cli/tasks-add',
       type: 'cli',
@@ -333,7 +333,7 @@ describe('Guard flow read surfaces', () => {
     writeJson('.truecourse/guard/LATEST.json', LATEST);
     writeJson(`.truecourse/guard/runs/${RUN_ID}.json`, LATEST);
     writeJson('.truecourse/guard/result.json', RESULT);
-    writeJson('.truecourse/guard/journeys.json', JOURNEYS);
+    writeJson('.truecourse/guard/interfaces.json', INTERFACES);
     write(`.truecourse/guard/evidence/${RUN_ID}/${SCENARIO_ID}/transcript.txt`, '$ tasks done 1\n');
   }
 
@@ -358,8 +358,8 @@ describe('Guard flow read surfaces', () => {
     const detail = await request(app).get(url(`flows/${FLOW_ID}`)).expect(200);
     expect(() => GuardFlowDetailSchema.parse(detail.body)).not.toThrow();
 
-    const journeys = await request(app).get(url('journeys')).expect(200);
-    expect(() => GuardJourneysViewSchema.parse(journeys.body)).not.toThrow();
+    const interfaces = await request(app).get(url('interfaces')).expect(200);
+    expect(() => GuardInterfacesViewSchema.parse(interfaces.body)).not.toThrow();
 
     const latest = await request(app).get(url('latest')).expect(200);
     expect(() => z.array(GuardRunFlowSchema).parse(latest.body.runFlows)).not.toThrow();
@@ -391,7 +391,7 @@ describe('Guard flow read surfaces', () => {
       // Both surfaces ride the flow: the cli scenario (painted by the run) and the
       // web gap that explains why there is no second scenario.
       expect(creating.flows[0].surfaces).toEqual([
-        expect.objectContaining({ surface: 'cli', scenarioId: SCENARIO_ID, status: 'fail', outcome: 'fail', journeyDrifted: true }),
+        expect.objectContaining({ surface: 'cli', scenarioId: SCENARIO_ID, status: 'fail', outcome: 'fail', interfaceDrifted: true }),
         expect.objectContaining({
           surface: 'web',
           status: 'web',
@@ -473,7 +473,7 @@ describe('Guard flow read surfaces', () => {
         findings: 0,
         toolDefects: 1,
         errors: 0,
-        journeyDrifted: true,
+        interfaceDrifted: true,
       });
       expect(byId.get('task-export')).toMatchObject({
         status: 'no-journey',
@@ -555,7 +555,7 @@ describe('Guard flow read surfaces', () => {
         birthPassed: true,
         outcome: 'fail',
         failedMilestone: 3,
-        journeyDrifted: true,
+        interfaceDrifted: true,
         hasEvidence: true,
         evidencePath: `.truecourse/guard/evidence/${RUN_ID}/${SCENARIO_ID}`,
         journeyPath: ['cli/tasks-add', 'cli/tasks-list', 'cli/tasks-done'],
@@ -729,29 +729,38 @@ describe('Guard flow read surfaces', () => {
     });
   });
 
-  // --- Journeys tab --------------------------------------------------------
+  // --- Interfaces tab ------------------------------------------------------
 
-  describe('journeys', () => {
+  describe('interfaces', () => {
     it('returns the catalog with the reverse index onto the flows', async () => {
       seed();
-      const res = await request(app).get(url('journeys')).expect(200);
-      expect(res.body).toMatchObject({ mapped: true, generatedAt: JOURNEYS.generatedAt, recipeFingerprint: 'sha256:r' });
-      const byId = new Map<string, any>(res.body.journeys.map((j: any) => [j.id, j]));
+      const res = await request(app).get(url('interfaces')).expect(200);
+      expect(res.body).toMatchObject({
+        mapped: true,
+        generatedAt: INTERFACES.generatedAt,
+        recipeFingerprint: 'sha256:r',
+      });
+      const byId = new Map<string, any>(res.body.interfaces.map((i: any) => [i.id, i]));
       expect(byId.get('cli/tasks-add')).toMatchObject({
         type: 'cli',
         title: 'tasks add',
         // This manifest carries no per-surface plan record — usage falls back to
-        // the committed scenario's own journey path, and reads as realized.
+        // the committed scenario's own grounding path, and reads as realized.
         flows: [{ flowId: FLOW_ID, title: FLOWS_FILE.flows[0].title, realized: true }],
         scenarioIds: [SCENARIO_ID],
         source: 'tree',
       });
       // NOTHING references `tasks purge` — no scenario, no plan. The candidate spec gap.
       expect(byId.get('cli/tasks-purge').flows).toEqual([]);
-      expect(res.body.totals).toEqual({ journeys: 4, detectedSurfaces: 1, grounded: 3, ungrounded: 1 });
+      expect(res.body.totals).toEqual({
+        interfaces: 4,
+        detectedSurfaces: 1,
+        grounded: 3,
+        ungrounded: 1,
+      });
     });
 
-    it('counts a flow that MATCHED the journey but was blocked before authoring', async () => {
+    it('counts a flow that MATCHED the interface but was blocked before authoring', async () => {
       seed();
       // `task-export` matched `tasks purge`, then authoring refused: no scenario
       // exists, but the plan record proves the spec reaches this code path.
@@ -773,8 +782,8 @@ describe('Guard flow read surfaces', () => {
         ],
       });
 
-      const res = await request(app).get(url('journeys')).expect(200);
-      const purge = res.body.journeys.find((j: any) => j.id === 'cli/tasks-purge');
+      const res = await request(app).get(url('interfaces')).expect(200);
+      const purge = res.body.interfaces.find((i: any) => i.id === 'cli/tasks-purge');
       expect(purge.flows).toEqual([
         {
           flowId: 'task-export',
@@ -787,7 +796,7 @@ describe('Guard flow read surfaces', () => {
           },
         },
       ]);
-      // No scenario was written — the journey is used, not exercised.
+      // No scenario was written — the interface is used, not exercised.
       expect(purge.scenarioIds).toEqual([]);
       // …and it no longer counts as code the spec never mentions.
       expect(res.body.totals).toMatchObject({ grounded: 4, ungrounded: 0 });
@@ -809,23 +818,45 @@ describe('Guard flow read surfaces', () => {
         ],
       });
 
-      const res = await request(app).get(url('journeys')).expect(200);
-      const add = res.body.journeys.find((j: any) => j.id === 'cli/tasks-add');
+      const res = await request(app).get(url('interfaces')).expect(200);
+      const add = res.body.interfaces.find((i: any) => i.id === 'cli/tasks-add');
       expect(add.flows).toEqual([{ flowId: FLOW_ID, title: FLOWS_FILE.flows[0].title, realized: true }]);
     });
 
     it('banners every registry surface with its runnable flag', async () => {
       seed();
-      const res = await request(app).get(url('journeys')).expect(200);
+      const res = await request(app).get(url('interfaces')).expect(200);
       const bySurface = new Map<string, any>(res.body.surfaces.map((s: any) => [s.surface, s]));
-      expect(bySurface.get('cli')).toMatchObject({ label: 'CLI', runnable: true, journeys: 4, detected: true, source: 'tree' });
-      expect(bySurface.get('web')).toMatchObject({ label: 'Web', runnable: false, waitingLabel: 'Needs web driver', journeys: 0, detected: false });
+      expect(bySurface.get('cli')).toMatchObject({
+        label: 'CLI',
+        runnable: true,
+        interfaces: 4,
+        detected: true,
+        source: 'tree',
+      });
+      expect(bySurface.get('web')).toMatchObject({
+        label: 'Web',
+        runnable: false,
+        waitingLabel: 'Needs web driver',
+        interfaces: 0,
+        detected: false,
+      });
     });
 
     it('is 200 with a clean empty payload when nothing was mapped', async () => {
-      const res = await request(app).get(url('journeys')).expect(200);
-      expect(res.body).toMatchObject({ mapped: false, generatedAt: null, recipeFingerprint: null, journeys: [] });
-      expect(res.body.totals).toEqual({ journeys: 0, detectedSurfaces: 0, grounded: 0, ungrounded: 0 });
+      const res = await request(app).get(url('interfaces')).expect(200);
+      expect(res.body).toMatchObject({
+        mapped: false,
+        generatedAt: null,
+        recipeFingerprint: null,
+        interfaces: [],
+      });
+      expect(res.body.totals).toEqual({
+        interfaces: 0,
+        detectedSurfaces: 0,
+        grounded: 0,
+        ungrounded: 0,
+      });
       // The banner still lists every surface so the tab renders without a null check.
       expect(res.body.surfaces.length).toBeGreaterThan(0);
       expect(res.body.surfaces.every((s: any) => s.detected === false)).toBe(true);
@@ -839,7 +870,7 @@ describe('Guard flow read surfaces', () => {
       seed();
       const res = await request(app).get(url('latest')).expect(200);
       expect(res.body.run.runId).toBe(RUN_ID);
-      expect(res.body.scenarios[0]).toMatchObject({ flowId: FLOW_ID, failedMilestone: 3, journeyDrifted: true });
+      expect(res.body.scenarios[0]).toMatchObject({ flowId: FLOW_ID, failedMilestone: 3, interfaceDrifted: true });
       expect(res.body.runFlows).toHaveLength(1);
       expect(res.body.runFlows[0]).toMatchObject({ flowId: FLOW_ID, title: FLOWS_FILE.flows[0].title, epic: false });
       expect(res.body.runFlows[0].milestones.map((m: any) => m.order)).toEqual([1, 2, 3, 4]);

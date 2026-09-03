@@ -680,17 +680,21 @@ export const GuardScenarioFlowRefSchema = z
   .strict()
 
 /**
- * The journey path that grounds this scenario — the realization plan's journey
+ * The interface path that grounds this scenario — the realization plan's interface
  * ids and their fingerprints at authoring time. A fingerprint mismatch against the
  * live catalog is a DRIFT ANNOTATION, never a run outcome: the steps are frozen
  * and remain a valid probe of the spec claims.
  */
-export const GuardScenarioJourneyRefSchema = z
+export const GuardScenarioInterfaceRefSchema = z
   .object({
     path: z.array(z.string().min(1)).min(1),
     fingerprints: z.array(z.string().min(1)).min(1),
   })
   .strict()
+
+/** The pre-interface spelling of the same ref, still parsed off committed
+ *  scenarios and still read by the consumers that have not moved. */
+export const GuardScenarioJourneyRefSchema = GuardScenarioInterfaceRefSchema
 
 // --- The scenario ---------------------------------------------------
 
@@ -708,13 +712,30 @@ const envelope = {
    * against `flows.json`, which is regenerated and may no longer name it. Written
    * by the engine, never authored by the model. Additive and optional, so no
    * format bump — absent on a hand-written scenario and on any file written
-   * before the field (the `journeyDrifted`/`server` precedent).
+   * before the field (the `interfaceDrifted`/`server` precedent).
    */
   promise: z.string().min(1).optional(),
   /** The flow realized here; absent on a hand-written scenario (Manual pseudo-flow). */
   flow: GuardScenarioFlowRefSchema.optional(),
-  /** The grounding journey path; absent on a hand-written scenario. */
+  /** The grounding interface path; absent on a hand-written scenario. */
+  interface: GuardScenarioInterfaceRefSchema.optional(),
+  /** The pre-interface spelling of the ref above, still on committed scenarios
+   *  written before the rename. */
   journey: GuardScenarioJourneyRefSchema.optional(),
+  /**
+   * SUPPLIED dependencies this scenario binds, by catalog entry name
+   * (`scenarios/dependencies.json`). State the engine must never fabricate — a
+   * codebase to analyze, an authenticated config dir, provider credentials — is
+   * BOUND here, never built: the runner resolves the user-registered instance and
+   * copies it into the sandbox, and with no instance registered the scenario
+   * settles `blocked` naming the dependency instead of running against a stand-in.
+   *
+   * Declared explicitly so a binding that carries no `${supplied:…}` token (an
+   * authenticated HOME the program finds by itself) is still visible; a scenario
+   * that DOES carry tokens binds those names too, whether or not they are listed.
+   * Additive and optional.
+   */
+  needs: z.array(z.string().min(1)).optional(),
   /** Every section the flow's milestones come from — denormalized at write time. */
   binds: z.array(GuardBindsSchema).min(1),
   setup: GuardSetupSchema.optional(),
@@ -738,7 +759,7 @@ export const GuardApiScenarioSchema = z
      * ENGINE-ASSIGNED at authoring from the app that serves the flow's operations;
      * absent ⇒ the recipe's default server, which is what every pre-multi-server
      * scenario means. An additive optional field, so no format bump — the
-     * `journeyDrifted`/`corpusFingerprint` precedent.
+     * `interfaceDrifted`/`corpusFingerprint` precedent.
      */
     server: z.string().min(1).optional(),
     steps: z.array(GuardApiStepSchema).min(1),
@@ -785,7 +806,8 @@ export type GuardExternals = z.infer<typeof GuardExternalsSchema>
 export type GuardSetup = z.infer<typeof GuardSetupSchema>
 export type GuardBinds = z.infer<typeof GuardBindsSchema>
 export type GuardScenarioFlowRef = z.infer<typeof GuardScenarioFlowRefSchema>
-export type GuardScenarioJourneyRef = z.infer<typeof GuardScenarioJourneyRefSchema>
+export type GuardScenarioInterfaceRef = z.infer<typeof GuardScenarioInterfaceRefSchema>
+export type GuardScenarioJourneyRef = GuardScenarioInterfaceRef
 export type GuardCliScenario = z.infer<typeof GuardCliScenarioSchema>
 export type GuardApiScenario = z.infer<typeof GuardApiScenarioSchema>
 export type GuardScenario = z.infer<typeof GuardScenarioSchema>

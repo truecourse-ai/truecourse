@@ -53,6 +53,13 @@ function collectScenarioFiles(dir: string): string[] {
  * decisions store — so it is excluded. This is the corpus-membership rule the
  * file and Pg guard stores share.
  */
+/**
+ * The root-level JSON files that ARE corpus: the recipe, the manifest, and the
+ * committed dependency catalog. `dependencies.local.json` is this machine's
+ * instances and must never be snapshotted — the walk names files, never globs.
+ */
+const CORPUS_ROOT_FILES = new Set(['recipe.json', 'manifest.json', 'dependencies.json'])
+
 export function walkScenarioRelFiles(root: string): string[] {
   const out: string[] = []
   const walk = (rel: string): void => {
@@ -67,9 +74,7 @@ export function walkScenarioRelFiles(root: string): string[] {
       if (e.isDirectory()) walk(childRel)
       else if (e.isFile()) {
         if (/\.ya?ml$/i.test(e.name)) out.push(childRel)
-        else if (rel === '' && (e.name === 'recipe.json' || e.name === 'manifest.json')) {
-          out.push(childRel)
-        }
+        else if (rel === '' && CORPUS_ROOT_FILES.has(e.name)) out.push(childRel)
       }
     }
   }

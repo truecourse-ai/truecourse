@@ -22,8 +22,8 @@ import {
   runGenerate,
   withExternalServices,
   writeApiRecipe,
-  journeysOf,
-  apiJourney,
+  interfacesOf,
+  apiInterface,
   rawApi,
   PASSING_API_STEPS,
 } from './helpers.js'
@@ -49,8 +49,8 @@ async function apiContext(repo: string, detected: { service: string; baseUrlEnv?
   const contexts: AuthorUserContext[] = []
   await runGenerate({
     repoRoot: repo,
-    journeys: withExternalServices(
-      journeysOf(repo, apiJourney('GET', '/todos')),
+    interfaces: withExternalServices(
+      interfacesOf(repo, apiInterface('GET', '/todos')),
       ...detected.map((d) => ({ category: 'ai' as const, ...d })),
     ),
     extractRunner: extractBy({

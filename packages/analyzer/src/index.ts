@@ -37,7 +37,10 @@ export { buildScopedCompilerOptions, resolveModule, analyzeSemantics, extractJsx
 // Extractors
 export { extractCalls, buildFunctionContext } from './extractors/calls.js'
 export { extractHttpCalls } from './extractors/http-calls.js'
-export { extractRouteRegistrations } from './extractors/route-registrations.js'
+export { extractRouteRegistrations, type RouteExtraction } from './extractors/route-registrations.js'
+export { extractTrpcRouters } from './extractors/routes/trpc-routers.js'
+export { extractWebRoutes } from './extractors/web-routes.js'
+export { extractWebRedirects, type WebRedirectExtraction } from './extractors/web-redirects.js'
 export { extractCliCommands } from './extractors/cli-commands.js'
 export { extractOutboundRequests } from './extractors/outbound-requests.js'
 export { extractRequestContracts, type RequestContractExtraction } from './extractors/request-contracts.js'
@@ -85,7 +88,7 @@ export { createPyrightConfig } from './lsp-servers/pyright.js'
 export { getLspServerConfig, hasLspServer } from './lsp-servers/registry.js'
 
 // Database detection
-export { detectDatabases, parseDockerCompose } from './database-detector.js'
+export { detectDatabases, databaseFromManifest, parseDockerCompose } from './database-detector.js'
 export { parsePrismaSchema } from './schema-parsers/prisma.js'
 export { parseDrizzleSchema } from './schema-parsers/drizzle.js'
 export { parseSqlAlchemySchema } from './schema-parsers/sqlalchemy.js'

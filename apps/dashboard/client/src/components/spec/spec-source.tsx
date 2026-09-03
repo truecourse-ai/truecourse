@@ -25,7 +25,6 @@ import type {
   SpecConflictAck,
   SpecCorpusResponse,
   SpecDecisionAck,
-  SpecScanCancelled,
   SpecSkippedDoc,
 } from '@/lib/api';
 
@@ -90,8 +89,12 @@ export interface SpecSource {
   removeExclude(ref: string): Promise<SpecCorpusResponse | SpecDecisionAck>;
   postConflictResolution(payload: ConflictResolutionPayload): Promise<SpecConflictAck | SpecCorpusResponse>;
   deleteConflictResolution(payload: DeleteConflictPayload): Promise<SpecConflictAck | SpecCorpusResponse>;
-  /** Run a fresh curate (repo). The workspace source returns null (no on-demand scan). */
-  scan(): Promise<SpecCorpusResponse | SpecScanCancelled | null>;
+  /**
+   * Start a fresh curate (repo). It runs as a background job, so this resolves
+   * when the scan is QUEUED, never when it ends. A source with no on-demand
+   * scan (the workspace one) does nothing.
+   */
+  scan(): Promise<void>;
 }
 
 /** EE PR view scope (`?pr=&ref=`), baked into a repo source so callers stay scope-free. */
@@ -139,7 +142,9 @@ export function createRepoSpecSource(repoId: string, prScope?: SpecPrScope): Spe
     removeExclude: (ref) => api.removeSpecExclude(repoId, ref, scope),
     postConflictResolution: (payload) => api.postSpecConflictResolution(repoId, payload, scope),
     deleteConflictResolution: (payload) => api.deleteSpecConflictResolution(repoId, payload, scope),
-    scan: () => api.getSpecCorpusScan(repoId),
+    scan: async () => {
+      await api.startSpecCorpusScan(repoId);
+    },
   };
 }
 

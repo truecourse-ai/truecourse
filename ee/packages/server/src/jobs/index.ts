@@ -1,8 +1,8 @@
 /**
  * Background jobs + notifications wiring (enterprise, protected by the auth gate).
  *
- * `registerJobs` reaps orphaned jobs from a prior run, starts the LISTEN/NOTIFY
- * event hub + the in-process graphile-worker runner, and mounts three routers:
+ * `registerJobs` builds the shared runner over EE's task list and mounts its
+ * three routers:
  *   - GET  /api/ee/events            — the per-user SSE stream
  *   - GET  /api/ee/jobs[?active=1]   — job status (seeds the UI's "Syncing" state)
  *   - GET/POST /api/ee/notifications — the durable feed + read-state
@@ -11,24 +11,21 @@
  * gate uses to run a repo scan on the background queue instead of inline.
  */
 
-import { Router, type Request, type Response } from 'express';
-import { z } from 'zod';
-import { openConflicts, type AuthUser, type EeServerRegistry } from '@truecourse/shared';
+import { openConflicts, type EeServerRegistry } from '@truecourse/shared';
 import type { Db } from '@truecourse/db';
 import {
   JobStore,
-  NotificationStore,
-  ActiveJobExistsError,
   PendingBaselineStore,
   PendingGuardBaselineStore,
   GuardBackfillMarkerStore,
+  type OrphanedJob,
 } from '@truecourse/ee-data-store';
+import { createJobs, type Jobs } from '@truecourse/jobs';
 import { log } from '@truecourse/core/lib/logger';
 import { readGuardResult, readGuardLatest } from '@truecourse/core/lib/guard-store';
 import { emitRepoLifecycle } from '@truecourse/core/lib/repo-lifecycle';
 import { loadWorkspaceSpec } from '@truecourse/core/lib/spec-store';
 import { getWorkspaceDecisions, type CuratedCorpus } from '@truecourse/core/commands/spec-in-process';
-import type { Runner } from 'graphile-worker';
 import {
   selectGateStore,
   selectOperatorRepoEnumeration,
@@ -36,7 +33,8 @@ import {
   installationOctokit,
 } from '@truecourse/ee-github-app';
 import { EventHub } from './events.js';
-import { startWorker } from './worker.js';
+import { captureJobException, startEeWorker } from './worker.js';
+import type { EeErrorContext } from '../observability/sentry.js';
 import type { JobOutcomeStatus } from './harness.js';
 import {
   chainGuardOnboarding,
@@ -79,10 +77,6 @@ import {
   type GuardBaselineEnqueueRequest,
   type GuardBaselineJobPayload,
 } from './constants.js';
-
-function orgIdOf(req: Request): string | null {
-  return (req as Request & { user?: AuthUser }).user?.organizationId ?? null;
-}
 
 /** The job surface other modules enqueue onto: the shared store + the enqueue. */
 export interface JobsApi {
@@ -137,92 +131,6 @@ export interface JobsApi {
   backfillSettled: Promise<unknown>;
 }
 
-function createEventsRouter(hub: EventHub): Router {
-  const router = Router();
-  router.get('/', (req: Request, res: Response) => {
-    const org = orgIdOf(req);
-    if (!org) {
-      res.status(401).json({ error: 'no workspace' });
-      return;
-    }
-    res.set({
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no', // disable proxy (nginx) buffering of the stream
-    });
-    res.flushHeaders?.();
-    res.write(': connected\n\n');
-    const unsubscribe = hub.subscribe(org, res);
-    // Heartbeat keeps idle connections (and intermediary proxies) from closing.
-    const heartbeat = setInterval(() => {
-      try {
-        res.write(': ping\n\n');
-      } catch {
-        /* ignore */
-      }
-    }, 25_000);
-    req.on('close', () => {
-      clearInterval(heartbeat);
-      unsubscribe();
-    });
-  });
-  return router;
-}
-
-function createJobsRouter(jobStore: JobStore): Router {
-  const router = Router();
-  router.get('/', async (req: Request, res: Response) => {
-    const org = orgIdOf(req);
-    if (!org) return res.status(401).json({ error: 'no workspace' });
-    const active = req.query.active === '1' || req.query.active === 'true';
-    const type = typeof req.query.type === 'string' ? req.query.type : undefined;
-    const jobs = active ? await jobStore.listActive(org, type) : await jobStore.listForOrg(org);
-    res.json({ jobs });
-  });
-  router.get('/:id', async (req: Request, res: Response) => {
-    const org = orgIdOf(req);
-    if (!org) return res.status(401).json({ error: 'no workspace' });
-    const job = await jobStore.get(String(req.params.id), org);
-    if (!job) return res.status(404).json({ error: 'job not found' });
-    res.json(job);
-  });
-  return router;
-}
-
-const readSchema = z.union([
-  z.object({ all: z.literal(true) }),
-  z.object({ ids: z.array(z.string().min(1)).min(1) }),
-]);
-
-function createNotificationsRouter(notifications: NotificationStore): Router {
-  const router = Router();
-  router.get('/', async (req: Request, res: Response) => {
-    const org = orgIdOf(req);
-    if (!org) return res.status(401).json({ error: 'no workspace' });
-    const [list, unreadCount] = await Promise.all([
-      notifications.listForOrg(org),
-      notifications.unreadCount(org),
-    ]);
-    res.json({ notifications: list, unreadCount });
-  });
-  router.get('/unread-count', async (req: Request, res: Response) => {
-    const org = orgIdOf(req);
-    if (!org) return res.status(401).json({ error: 'no workspace' });
-    res.json({ unreadCount: await notifications.unreadCount(org) });
-  });
-  router.post('/read', async (req: Request, res: Response) => {
-    const org = orgIdOf(req);
-    if (!org) return res.status(401).json({ error: 'no workspace' });
-    const parsed = readSchema.safeParse(req.body ?? {});
-    if (!parsed.success) return res.status(400).json({ error: 'invalid', details: parsed.error.flatten() });
-    if ('all' in parsed.data) await notifications.markAllRead(org);
-    else await notifications.markRead(org, parsed.data.ids);
-    res.json({ unreadCount: await notifications.unreadCount(org) });
-  });
-  return router;
-}
-
 export interface RegisterJobsOptions {
   db: Db;
   connectionString: string;
@@ -233,47 +141,80 @@ export async function registerJobs(
   registry: EeServerRegistry,
   opts: RegisterJobsOptions,
 ): Promise<JobsApi> {
-  const jobStore = new JobStore(opts.db);
-  const notifications = new NotificationStore(opts.db);
   const pendingBaselines = new PendingBaselineStore(opts.db);
   const pendingGuardBaselines = new PendingGuardBaselineStore(opts.db);
   const guardBackfillMarkers = new GuardBackfillMarkerStore(opts.db);
-  const hub = new EventHub(opts.connectionString);
+
+  // A reaped `guard.gate` died before its crash-path catch could complete the
+  // PR's in-progress Check — settle each one as the error-styled failure now
+  // (best-effort; never blocks boot). Octokit clients are built from the app
+  // config per installation, the same way the worker's job bodies do it.
+  const settleReapedGates = async (reaped: OrphanedJob[]): Promise<void> => {
+    const cfg = loadGithubAppConfig();
+    if (!cfg) return;
+    const settled = await settleOrphanedGuardGates(
+      { octokitFor: (id) => installationOctokit(cfg, id) },
+      reaped,
+    );
+    if (settled > 0) log.info(`[ee-jobs] settled ${settled} stranded gate Check(s) as failures`);
+  };
+
+  const jobs: Jobs = createJobs<EeErrorContext>({
+    db: opts.db,
+    connectionString: opts.connectionString,
+    // EE's task list is assembled by `startEeWorker`, which owns the body deps
+    // (integration/knowledge stores, pipelines) the definitions close over.
+    tasks: [],
+    hub: new EventHub(opts.connectionString),
+    onReaped: settleReapedGates,
+    onException: captureJobException,
+    startWorker: ({ rt, connectionString, concurrency }) =>
+      startEeWorker({
+        rt,
+        connectionString,
+        concurrency,
+        db: opts.db,
+        masterSecret: opts.masterSecret,
+        onBaselineSettled,
+        onGuardGenerateSettled,
+        onGuardBaselineSettled,
+        onKnowledgeSyncSettled,
+      }),
+  });
+  const jobStore = jobs.jobStore;
 
   // Mount the routers first — pure wiring, no I/O — so the API surface is always
   // available even if the background services below fail to come up.
-  registry.registerRouter('/api/ee/events', createEventsRouter(hub));
-  registry.registerRouter('/api/ee/jobs', createJobsRouter(jobStore));
-  registry.registerRouter('/api/ee/notifications', createNotificationsRouter(notifications));
+  registry.registerRouter('/api/ee/events', jobs.routers.events);
+  registry.registerRouter('/api/ee/jobs', jobs.routers.jobs);
+  registry.registerRouter('/api/ee/notifications', jobs.routers.notifications);
 
-  // Start the background services (need a live Postgres). A failure here must NOT
-  // prevent the dashboard from booting — the HTTP server (auth, reads, capabilities)
-  // still comes up; jobs simply don't process until a restart succeeds. enqueueBaseline
-  // throws clearly if the worker never started.
-  let runner: Runner | null = null;
   // The fire-and-forget backfill's completion (best-effort). Already-resolved
   // unless/until the worker starts and kicks it off inside the try below.
   let backfillSettled: Promise<unknown> = Promise.resolve();
 
   const gateStore = selectGateStore(opts.db);
 
+  // The pending-buffer enqueues create their tracked row before they reach the
+  // queue, so they check the worker up front rather than leaving a queued row
+  // behind when there is nothing to run it.
+  const requireWorker = (): void => {
+    if (!jobs.workerStarted) throw new Error('the background job worker is not running');
+  };
+
   // Single-flight repo-baseline enqueue — shared by connect/push (returned below).
-  // Closes over the `runner` assigned just below.
   // Coalesces (rather than drops) a push that loses the single-flight race: the
   // dropped request is recorded as the repo's pending follow-up and replayed when
   // the running scan settles (see pending-baseline.ts). Idempotent for a
   // redelivered connect/push of the SAME commit — the replay skips a redundant
   // same-commit pending unless a re-baseline (force) was requested.
   const enqueueBaseline = (req: BaselineEnqueueRequest): Promise<string | null> => {
-    if (!runner) throw new Error('the background job worker is not running');
-    const r = runner;
+    requireWorker();
     return enqueueOrPendBaseline(
       {
         jobStore,
         pendingBaselines,
-        addJob: async (jobId, jreq, jobKey) => {
-          await r.addJob(REPO_BASELINE_TASK, { jobId, ...jreq }, { jobKey, maxAttempts: 1 });
-        },
+        addJob: (jobId, jreq, jobKey) => jobs.addJob(REPO_BASELINE_TASK, { jobId, ...jreq }, jobKey),
       },
       req,
     );
@@ -283,60 +224,24 @@ export async function registerJobs(
   // post-generate chain, and the deploy backfill all land here. Coalesces (rather
   // than drops) a refresh that loses the single-flight race: the dropped request is
   // recorded as the repo's pending follow-up and replayed when the running run
-  // settles (see pending-guard-baseline.ts). Closes over the `runner` below.
+  // settles (see pending-guard-baseline.ts).
   const enqueueGuardBaseline = (req: GuardBaselineEnqueueRequest): Promise<string | null> => {
-    if (!runner) throw new Error('the background job worker is not running');
-    const r = runner;
+    requireWorker();
     return enqueueOrPendGuardBaseline(
       {
         jobStore,
         pendingGuardBaselines,
-        addJob: async (jobId, jreq, jobKey) => {
-          await r.addJob(GUARD_BASELINE_TASK, { jobId, ...jreq }, { jobKey, maxAttempts: 1 });
-        },
+        addJob: (jobId, jreq, jobKey) =>
+          jobs.addJob(GUARD_BASELINE_TASK, { jobId, ...jreq }, jobKey),
       },
       req,
     );
   };
 
-  // Single-flight enqueue: one active job per key — a concurrent request is a
-  // no-op (null), so a redelivered webhook / double click / chain race never
-  // queues a duplicate. The `jobId` is stamped into the payload for the harness.
-  // The payload is also persisted on the row, so boot recovery can settle what a
-  // crashed run left dangling (e.g. a gate's stranded PR Check — see orphans.ts).
-  const singleFlightEnqueue = async (
-    task: string,
-    org: string,
-    key: string,
-    payload: Record<string, unknown>,
-  ): Promise<string | null> => {
-    if (!runner) throw new Error('the background job worker is not running');
-    let job;
-    try {
-      job = await jobStore.create({ org, type: task, key, payload });
-    } catch (err) {
-      if (err instanceof ActiveJobExistsError) return null;
-      throw err;
-    }
-    try {
-      await runner.addJob(task, { jobId: job.id, ...payload }, { jobKey: key, maxAttempts: 1 });
-    } catch (err) {
-      // No graphile job exists to run (or settle) the row we just created — a
-      // 'queued' row would hold the single-flight key until the next restart's
-      // boot recovery, turning every request for this key until then into a
-      // bogus "already running" null. Mark it terminal, then rethrow.
-      await jobStore
-        .markFailed(job.id, (err as Error).message)
-        .catch(() => undefined);
-      throw err;
-    }
-    return job.id;
-  };
-
   // Single-flight guard-generate enqueue — the baseline onboarding chain and the
   // dashboard's manual Generate both land here. Keyed per repo.
   const enqueueGuardGenerate = (req: GuardGenerateEnqueueRequest): Promise<string | null> =>
-    singleFlightEnqueue(REPO_GUARD_TASK, req.workspaceOrgId, guardJobKey(req.repoFullName), {
+    jobs.singleFlightEnqueue(REPO_GUARD_TASK, req.workspaceOrgId, guardJobKey(req.repoFullName), {
       ...req,
     });
 
@@ -344,7 +249,7 @@ export async function registerJobs(
   // Keyed per repo + head SHA: a redelivered webhook for the same head is a
   // no-op, while a new push (new head) queues a fresh gate.
   const enqueueGuardGate = (req: GuardGateEnqueueRequest): Promise<string | null> =>
-    singleFlightEnqueue(
+    jobs.singleFlightEnqueue(
       GUARD_GATE_TASK,
       req.workspaceOrgId,
       guardGateJobKey(req.repoFullName, req.headSha),
@@ -354,7 +259,7 @@ export async function registerJobs(
   // Single-flight guard spec-regen enqueue — the checkbox tick lands here. Keyed
   // per repo + head SHA: a duplicate tick for the same head is a no-op.
   const enqueueGuardSpecRegen = (req: GuardSpecRegenEnqueueRequest): Promise<string | null> =>
-    singleFlightEnqueue(
+    jobs.singleFlightEnqueue(
       GUARD_SPEC_REGEN_TASK,
       req.workspaceOrgId,
       guardSpecRegenJobKey(req.repoFullName, req.headSha),
@@ -472,36 +377,12 @@ export async function registerJobs(
     );
   };
 
+  // Start the background services (need a live Postgres). A failure here must NOT
+  // prevent the dashboard from booting — the HTTP server (auth, reads, capabilities)
+  // still comes up; jobs simply don't process until a restart succeeds. Every
+  // enqueue throws clearly if the worker never started.
   try {
-    // Boot recovery: the in-process worker means a restart abandoned any in-flight
-    // job. Reap them so the single-flight key frees and stale "Syncing…" clears.
-    const reaped = await jobStore.failOrphaned();
-    if (reaped.length > 0) {
-      log.info(`[ee-jobs] reaped ${reaped.length} orphaned job(s) from a prior run`);
-      // A reaped guard.gate died before its crash-path catch could complete the
-      // PR's in-progress Check — settle each one as the error-styled failure now
-      // (best-effort; never blocks boot). Octokit clients are built from the app
-      // config per installation, the same way the worker's job bodies do it.
-      const cfg = loadGithubAppConfig();
-      if (cfg) {
-        const settled = await settleOrphanedGuardGates(
-          { octokitFor: (id) => installationOctokit(cfg, id) },
-          reaped,
-        );
-        if (settled > 0) log.info(`[ee-jobs] settled ${settled} stranded gate Check(s) as failures`);
-      }
-    }
-    await hub.start();
-    runner = await startWorker({
-      db: opts.db,
-      connectionString: opts.connectionString,
-      masterSecret: opts.masterSecret,
-      jobStore,
-      onBaselineSettled,
-      onGuardGenerateSettled,
-      onGuardBaselineSettled,
-      onKnowledgeSyncSettled,
-    });
+    await jobs.start();
     // A crash could have left pending follow-up baselines with no running job to
     // replay them. Now that the reaped keys are free and the worker is up, drain
     // them (per-row best-effort — one bad row must not stop the rest).
@@ -540,27 +421,21 @@ export async function registerJobs(
 
   for (const sig of ['SIGTERM', 'SIGINT'] as const) {
     process.once(sig, () => {
-      void runner?.stop().catch(() => {});
-      void hub.stop().catch(() => {});
+      void jobs.stop().catch(() => {});
     });
   }
 
   return {
     jobStore,
-    enqueueSync: async (payload, jobKey) => {
-      if (!runner) throw new Error('the background job worker is not running');
-      await runner.addJob(KNOWLEDGE_SYNC_TASK, payload, { jobKey, maxAttempts: 1 });
-    },
-    enqueueEstimate: async (payload, jobKey) => {
-      if (!runner) throw new Error('the background job worker is not running');
-      await runner.addJob(KNOWLEDGE_ESTIMATE_TASK, payload, { jobKey, maxAttempts: 1 });
-    },
+    enqueueSync: (payload, jobKey) => jobs.addJob(KNOWLEDGE_SYNC_TASK, { ...payload }, jobKey),
+    enqueueEstimate: (payload, jobKey) =>
+      jobs.addJob(KNOWLEDGE_ESTIMATE_TASK, { ...payload }, jobKey),
     enqueueBaseline,
     enqueueGuardGenerate,
     enqueueGuardGate,
     enqueueGuardSpecRegen,
     enqueueGuardBaseline,
-    workerStarted: runner !== null,
+    workerStarted: jobs.workerStarted,
     backfillSettled,
   };
 }

@@ -11,8 +11,11 @@
  */
 
 import { createApiTransport, type ProviderConfig } from '@truecourse/llm-api';
+import { loadSdk } from '@truecourse/llm-claude-agent';
+import { resolveClaudeBinary } from '@truecourse/shared';
 import type { LlmTransport } from '@truecourse/shared/llm';
 import type { GlobalApiLlmConfig } from '../../config/global-config.js';
+import { checkClaudeAuth } from '../../lib/cli-binary.js';
 import { buildProviderConfig } from './install-transport.js';
 
 /** Timeout for the probe call — long enough for a cold provider, short enough to fail fast. */
@@ -44,4 +47,25 @@ export async function probeApiConfig(
   if (typeof text !== 'string' || text.trim() === '') {
     throw new Error('provider returned an empty response');
   }
+}
+
+/**
+ * The claude-code counterpart: prove the `claude` binary is installed and
+ * logged in (one tiny `claude -p` round-trip) and that the Agent SDK the
+ * session driver rides on can be loaded — it is an optional peer, so a missing
+ * install would otherwise fail every session identically, one run in. Throws
+ * with `claude`'s own words on a refused login.
+ */
+export async function probeClaudeCode(): Promise<void> {
+  const binary = resolveClaudeBinary();
+  const result = await checkClaudeAuth(binary);
+  if (!result.ok) {
+    if (result.reason === 'not-found') {
+      throw new Error(`The \`claude\` CLI was not found (looked for \`${binary}\`).`);
+    }
+    throw new Error(
+      result.output || `\`claude\` exited with code ${result.code ?? 'unknown'} during the login probe.`,
+    );
+  }
+  await loadSdk();
 }

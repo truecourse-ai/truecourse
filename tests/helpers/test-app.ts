@@ -1,15 +1,19 @@
 /**
  * Server-route test harness for the closed visibility model. A repository is
  * visible only when a link row ties it to the caller's workspace, so a bare
- * `createApp({ authVerifier: null, github: null })` sees nothing. Route tests
- * that are not ABOUT scoping use this instead: an auth verifier that stamps
- * one test org, and a permissive link store that reads every registered repo
- * as linked to it — the file-registry analog of the gh_repos-derived registry
- * the production server runs on.
+ * `createApp({ authVerifier: null, github: null, jobs: null })` sees nothing.
+ * Route tests that are not ABOUT scoping use this instead: an auth verifier that
+ * stamps one test org, a permissive link store that reads every registered repo
+ * as linked to it — the file-registry analog of the gh_repos-derived registry the
+ * production server runs on — and a job runner that records what a route enqueues
+ * instead of running it.
  */
 
 import { Router } from 'express';
 import type { AuthVerifier } from '@truecourse/shared';
+import type { EnqueueResult, JobsMount } from '../../apps/dashboard/server/src/jobs/index';
+import type { OnboardingJobRequest } from '../../apps/dashboard/server/src/jobs/tasks/onboarding';
+import type { GuardSetupJobRequest } from '../../apps/dashboard/server/src/jobs/tasks/repo-guard-setup';
 import { readRegistry, unregisterProject } from '@truecourse/core/config/registry';
 import { createApp, type CreateAppOptions } from '../../apps/dashboard/server/src/app';
 import type { GithubMount } from '../../apps/dashboard/server/src/github/index';
@@ -46,6 +50,39 @@ export function testGithubMount(orgId: string = TEST_ORG): GithubMount {
     },
   };
   return { webhook: Router(), connect: Router(), store: store as unknown as GithubMount['store'] };
+}
+
+/** A job runner that RECORDS enqueues instead of running anything — what a route
+ *  test needs from the queue, since the work itself has its own suites. Only the
+ *  enqueue surface is real; the cast is confined to this helper. */
+export interface StubJobs {
+  mount: JobsMount;
+  scans: OnboardingJobRequest[];
+  guardSetups: GuardSetupJobRequest[];
+  /** What the next enqueue answers — set it to `{ status: 'busy' }` for a 409. */
+  answer: EnqueueResult;
+}
+
+export function stubJobs(): StubJobs {
+  const stub: StubJobs = {
+    scans: [],
+    guardSetups: [],
+    answer: { status: 'queued', jobId: 'job_test' },
+    mount: null as unknown as JobsMount,
+  };
+  stub.mount = {
+    enqueueScan: async (request: OnboardingJobRequest) => {
+      stub.scans.push(request);
+      return stub.answer;
+    },
+    enqueueGuardSetup: async (request: GuardSetupJobRequest) => {
+      stub.guardSetups.push(request);
+      return stub.answer;
+    },
+    cancelRepoJobs: async () => 'stopped' as const,
+    routers: { events: Router(), jobs: Router(), notifications: Router() },
+  } as unknown as JobsMount;
+  return stub;
 }
 
 /** The provider a test workspace is configured with. */
@@ -90,6 +127,9 @@ export function createTestApp(overrides: Partial<CreateAppOptions> = {}) {
     serveStatic: false,
     authVerifier: testAuthVerifier(),
     github: testGithubMount(),
+    // The routes that start work enqueue onto a runner; a test that is not ABOUT
+    // the queue gets one that records the enqueue and runs nothing.
+    jobs: stubJobs().mount,
     ...overrides,
   });
 }

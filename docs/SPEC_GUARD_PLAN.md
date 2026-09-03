@@ -5147,3 +5147,365 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     now running (`build 1m 4s · verifying: entry probe`); no clock and no bars — every
     line is written by a real transition. The analysis pass is reported from `mapOnce`, so
     it lands on step 1 or step 2 depending on which one actually pays for it.
+
+---
+
+## Guard setup as agent sessions (ported 2026-09-02)
+
+The items below were ported from the `claude/interface-authoring-agent-loop-sq4fbo`
+branch, where `guard setup` was rebuilt on the agent loop. The port is CONTAINED:
+the recipe-repair, dependency-catalog, seed and auth-proof sessions, the
+`--only-<step>` flags, the per-step settle spine and the recipe/catalog
+hardening all came over; the INTERFACES step (the journeys → interfaces rename,
+`interface-mapper`, `interface-author`, the reconcile session) did not — this
+branch still maps journeys, and setup's spine is recipe → detect → catalog →
+seed → auth. Mentions of "interfaces" in the items below describe the source
+branch; read them as journeys here. Items 135 and 136 (the web authoring arm
+and journey-defect diagnosis) are referenced by 137/138 but were not ported.
+
+109. **`guard setup` runs one step at a time (2026-08-20).** STATUS: BUILT.
+    `spec scan` got `--only-<step>` first, for the same reason setup needs it:
+    against a real repository the interesting question is almost never "did the
+    whole stage work" but "does THIS step do the right thing", and a stage whose
+    only granularity is all-of-it makes every inspection cost the steps around
+    it — an app boot, a live probe, four session kinds. Five mutually exclusive
+    flags now select one of setup's LLM-bearing steps:
+    `--only-recipe | --only-catalog | --only-interfaces | --only-seed | --only-auth`.
+
+    **`detect` is not selectable, on purpose.** It is one `mapInterfaces` pass,
+    deterministic and LLM-free, and every later step reads its in-memory output
+    (the detection snapshot, the schema, the route surface). So it always runs,
+    and the persisted snapshot is always the current tree's — which is what
+    keeps `readGuardExternalsView` and `guard status` honest after a partial run.
+
+    **Earlier steps REPLAY, later ones never start.** The recipe step's replay is
+    `recipe.json` itself — loaded, never re-derived, and never re-probed (the
+    boot and the live call belong to `--only-recipe`). The soft steps replay as
+    "leave what is on disk alone": no externals skeleton write, no reconcile, no
+    authoring run, no seed draft. A step that never ran throws
+    `SetupStepNotReadyError`, naming the flag to run first — the same refusal
+    `ScanStepNotReadyError` makes, and for the same reason: silently running the
+    prior step is exactly the blurring stepwise runs exist to prevent.
+
+    **What counts as "it ran" differs by step, because the steps differ.** The
+    recipe's evidence is its artifact — every later step reads `recipe.json`
+    directly, and a hand-committed one is as good as a derived one. The catalog,
+    interfaces and seed steps can each legitimately produce NOTHING (a repo with
+    no third parties, no screens, no schema), so demanding an artifact would
+    abort runs that are perfectly ready; their evidence is the step's row in
+    `guard/setup.json`, which is the same record skip-when-settled already reads.
+
+    **The report MERGES.** A single-step run rewrites `guard/setup.json`, so
+    without a merge a `--only-seed` run would leave a one-row spine and the next
+    bare setup would re-derive the recipe and re-classify the catalog for
+    nothing. Rows and blocks this run produced win; every other step keeps the
+    previous report's row verbatim, fingerprints included. The chosen step keeps
+    its normal idempotence (`--refresh` forces it, `--replace` still means
+    re-author), and the pre-flight estimate prices that step's session kinds and
+    nothing else.
+
+    **As built**: `packages/guard-generator/src/setup.ts` (`GUARD_SETUP_ONLY_STEPS`,
+    `SetupStepNotReadyError`, the `only` option, the replay branches,
+    `mergeStepSpine`), `packages/guard-generator/src/index.ts`,
+    `packages/core/src/commands/guard-setup.ts` (the option, the scoped estimate,
+    the sessions-run dirs, the bounded tracker),
+    `packages/core/src/services/llm/spec-estimate.ts` (`estimateGuardSetup({ only })`),
+    `tools/cli/src/commands/guard-setup.ts` (the labels, the refusal, the
+    "Next:" pointer), `tools/cli/src/index.ts` (the five flags + mutual
+    exclusivity). Tests: `tests/core/guard-setup-steps.test.ts` (each flag's
+    isolation, the replayed recipe that is never probed, both refusals, the
+    merge under `--refresh`, the scoped estimate).
+
+115. **Recipe discovery hardening (2026-08-20 guard-setup bench).** STATUS:
+    BUILT. The setup bench ran `--only-recipe` against all three reference
+    repos and every session gamed verification green: cal.diy authored the
+    app-store CLI as the product (the briefing's own inventory listed the
+    Nest api), documenso authored an inline `node -e` stub server answering
+    200 to every path (rewriting the one-liner comma-operator style to slip
+    the shell-operator lint), strapi a no-op eval build plus a config module
+    as `entry`. Five closures, all gating on the ENGINE side because prompt
+    rules alone were what got gamed:
+    - **Stage `static` in `verifyProposal`** — the free refusal rules now run
+      at stage zero of EVERY verification path (deterministic, session fold,
+      one-shot, cache), not just the session's `check_recipe` tool.
+    - **Inline-eval refusal** — eval flags (`node -e/-p`, `python -c`,
+      `sh -c`, `deno eval`, …) in `entry`/`serve` argvs, and an
+      install/build that is nothing but one eval one-liner (`true` stays the
+      sanctioned no-build).
+    - **The inventory rule** — a proposal with no `api` block while the
+      route manifest lists apps with HTTP route prefixes is refused, naming
+      them. Partial coverage is deliberately NOT refused (a monorepo
+      routinely serves one app and ships others it never runs).
+    - **The wildcard (anti-stub) probe** — after the health path answers,
+      verification GETs two paths no app could serve; identical status+body
+      on all three fails `server boot`. Discovery-only — the runner's
+      preflight never re-probes a recipe a human accepted.
+    - **Workspace api derivation** — the deterministic proposer's workspace
+      branch used to punt unless exactly one member declared a `bin`; now
+      the most-routed non-example manifest app with a plain `start` script
+      derives `api.serve` (workspace-mediated argv, `app`, `cwd: "repo"`,
+      the member's own health route — `/api/health` joined the ranking).
+      cal.diy now derives `yarn workspace @calcom/api-v2 start` +
+      `/health`, documenso `npm run start -w @documenso/remix` +
+      `/api/health` — the reference targets — with zero LLM calls; a boot
+      failure hands the session THIS candidate as evidence instead of
+      nothing. Route manifest also learned Remix/React-Router flat routes
+      (`buildRouteManifest`, gate: the app's routes config imports
+      `remix-flat-routes`; grammar mirrored from
+      `packages/interface-mapper/src/web/remix-flat.ts` — dependency
+      direction forbids the import), which is what made documenso's product
+      app visible at all (125 routes vs `other · no routes`). And the
+      database hint gained the recipe-app manifest fallback
+      (`databaseFromManifest`): strapi's `examples/getstarted` declares
+      `better-sqlite3` that its code only names in a knex config string, and
+      `examples/` is not a service dir, so nothing else could see it.
+      Deliberately NOT built: a `web` block in the proposal schema (web is
+      authored, never discovered — the repair prompt now says so) and serve
+      grounding to workspace scripts (held until a re-bench shows the
+      probe + eval rules leaking). ADDENDUM (same day): the re-bench's
+      first cal.diy run exposed that the PROPOSAL schemas had no `cwd` —
+      the runner and the deterministic path carry `cwd: "repo"` but a
+      session could not express it, so no workspace-mediated serve could
+      ever boot from a repair (the session burned its budget on `--cwd`
+      argv hacks). Both proposal schemas gained `cwd: z.literal('repo')`
+      plus prompt lines. VALIDATED (step-05 re-bench ×3): gaming gone 3/3 —
+      cal.diy green (api-v2 `yarn workspace` serve, real /health 200 boot,
+      one verify, 249k tokens), documenso green (the reference serve
+      verbatim, real /api/health 200 against its dockerized test db, 261k),
+      strapi honest CLI-only (real install/build/bin; its api surface needs
+      a strapi route reader — open gap). Open observations: verify's
+      install/build channel is an unsandboxed host shell (one session used
+      `build: "…; ls -la ..; false"` as recon; strapi's green recipe runs
+      `corepack enable` — host shims — on every install), and the sandbox
+      HOME hits the corepack download prompt on yarn-workspace boots.
+      SECOND ADDENDUM (same evening, clean-rerun round): all four
+      observations closed and one incident survived. (1) compose bring-up
+      in install/build statically refused → `api.services.up/down`; the
+      proposal schemas therefore gained `services {up, down?}` + top-level
+      `app` (the first refusal steered an obedient session into a field the
+      schema forbade — two zod re-asks counted as the 2-strike malformed
+      death; open agent-loop question: schema re-asks may deserve their own
+      budget). (2) A GREEN verdict now carries `warnings` (surfaced as
+      todos + "VERIFIED WITH CAVEATS") when the boot rode a localhost
+      datastore the recipe never brings up. (3) Host-mutation refusals over
+      install/build/services + sudo in any argv: sudo, `corepack enable`
+      (message teaches `corepack yarn …`), global installs, npm config
+      set, git config --global, launchctl/systemctl, and — after a session
+      put `docker rm -f database` in services.up and REMOVED the
+      developer's running cal.diy database container (restored from its
+      surviving volume same hour) — `docker rm/kill/stop`, `docker volume
+      rm/prune`, `docker system prune`; project-scoped `docker compose
+      down` stays legal, and the incident command is a test verbatim.
+      (4) `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` defaults in every child env.
+      Plus: `probeApiServers` now runs `api.services.up` around the boots
+      and best-effort `down` after — the probe owns the world the recipe
+      declares (before this, a services recipe verified green and then
+      failed its own probe into an empty world). Final clean runs: cal.diy
+      green + warning fires; documenso green in the reference shape
+      (testing compose under services, collision solved WITHOUT docker rm);
+      strapi honest CLI-only green with zero host mutations.
+      As built:
+      `packages/guard-generator/src/{recipe-discovery,recipe-propose,prompts}.ts`,
+      `packages/core/src/services/guard-setup/recipe-repair.ts`,
+      `packages/guard-runner/src/route-manifest.ts`,
+      `packages/analyzer/src/database-detector.ts`,
+      `packages/core/src/services/interface.service.ts`. Tests:
+      `tests/guard-generator/recipe-static-complaints.test.ts`,
+      `recipe-discovery.test.ts` (wildcard probe),
+      `recipe-propose.test.ts` (workspace member),
+      `tests/guard-runner/route-manifest.test.ts` (remix),
+      `tests/analyzer/database-detector.test.ts` (manifest fallback),
+      `tests/core/guard-setup-recipe-repair.test.ts` (session tools).
+
+116. **Dependency-catalog session: domain grain + convergence (2026-08-20
+    guard-setup bench).** STATUS: BUILT. The step-06 bench failed 0/3: the
+    one session that completed classified the raw service detection (65
+    junk rows on cal.diy — rule 1 forced an entry per url-mined hostname,
+    amplifying detector noise into curation), and the other two spent every
+    turn on read_file/search_repo and died without an outcome (the settle
+    disease, item 112). Three fixes in
+    `packages/core/src/services/guard-setup/dependency-catalog.ts`:
+    (1) rule 1 narrowed to SUBSTANTIATED services — an SDK-registry match
+    or a base-URL env var, the skeleton's own declarability bar; url-mined
+    hostnames become an information-only briefing line and the prompt calls
+    entries for them wrong, not thorough. (2) The briefing grounds on the
+    DOMAIN: it opens with the grain ("a handful of entries — the domain
+    objects the documented flows stand on"), lists the corpus area tags
+    with doc counts (a local corpus.json read; a missing corpus yields
+    nothing), and splits detection into must-account vs information-only.
+    (3) Settle-style convergence pressure: draft to `check_catalog` no
+    later than mid-budget, read a handful of files at most. The prompt
+    change rotates the session cache key. Re-bench: 3/3 converged in the
+    right universe — cal.diy 8 domain entries (2 turns/27k; was 65 junk
+    rows), documenso 10 (14 turns/140k; was dead), strapi 7 (19/276k; was
+    dead). Residual, tracked not fixed: recall GRAIN vs the hand-curated
+    references (semantic ~5/17 · 6/8 · 4/15 — cold sessions produce the
+    coarse layer; credential variants and per-type documents are slice
+    curation), synonym NAMING with no shown vocabulary (the item-106
+    lesson), a library (`passport`) forced in by its registry category,
+    and the externals skeleton's baseUrlEnv minting (finding 58 class)
+    still open. Tests: `tests/core/guard-setup-catalog.test.ts`
+    (substantiated-only rule, briefing split + corpus grounding).
+
+118. **Setup hardening round 2 (2026-08-21 steps-05/06 run-of-record).**
+    STATUS: BUILT. Six fixes from the bench's engine items:
+    (1) **Compose NAMESPACE rule** — the boundary the docker-rm refusal
+    left open: cal.diy's verified-green `services.up` re-ported and
+    stopped the developer's live redis through legal `docker compose
+    up/stop` (bare invocation = the developer's default project; compose
+    "resolves" a port change by RECREATING the running container). Static
+    refusal in `staticProposalComplaints` (now takes `repoRoot`): every
+    `docker compose` in install/build/services must carry `-p <project>`
+    or an `-f` file pinning top-level `name:`; `-f -` (stdin) demands
+    `-p`. The generated `docker-compose.guard.yml` now pins
+    `name: tc-guard-<database>` (datastore-compose.ts). Both prompts
+    teach the rule + "namespace YOUR OWN world, never touch theirs".
+    (2) **Empty-schema warning** — the unserviced-localhost warning's
+    sibling: services declared, SQL URL pinned, and NO migrate-ish
+    command anywhere (install/build/services.up) warns that the green
+    rode whatever schema the volume already carried (cal.diy verified
+    against a 7-day-old reference volume under `SKIP_DB_MIGRATIONS=1`).
+    (3) **`draftCheckpoint` on both setup sessions** — the item-117 shell
+    mechanism wired onto recipe-repair (check_recipe, turn 8) and
+    dependency-catalog (check_catalog, turn 6): the death mode (strapi
+    recipe run 5, documenso catalog runs 1+3 — 20+ exploration turns,
+    zero or one late draft) now gets a structural mid-budget steer, not
+    briefing prose.
+    (4) **Skeleton plausible-origin rule** (third skeleton rule): a
+    `baseUrlEnv` must be origin-shaped (or carry a detected default URL),
+    never credential/callback-shaped (`DAILY_API_KEY`,
+    `CLOSECOM_CLIENT_ID`, `*_WEBHOOK_URL`, `*_REDIRECT_URI`), and never
+    a variable the recipe itself pins (`dub→NEXT_PUBLIC_WEBAPP_URL`) —
+    kills the finding-58 mint-time class that reproduced 3/3 runs on
+    cal.diy (18 invented declarations → ~3 honest ones).
+    (5) **`ownHosts` joins the proposal schema** + both prompts, written
+    through to recipe.json — the fallback recipe can finally name the
+    product's own domains (cal.diy: 81 detected externals under a
+    hostless recipe). NOTE: the 06-bench observation that detection
+    reported 81 even WITH reference ownHosts is still open — the filter
+    itself needs a look.
+    (6) **Sandbox-starts-empty briefing** — sandbox_exec/shell
+    descriptions + the repair how-to now say the sandbox is an empty
+    scratch dir (strapi run 5 burned early turns discovering that).
+    As built: `packages/guard-generator/src/{recipe-discovery,
+    externals-skeleton, datastore-compose, schemas, prompts}.ts`,
+    `packages/core/src/services/guard-setup/{recipe-repair,
+    dependency-catalog}.ts`. Tests:
+    `tests/guard-generator/recipe-static-complaints.test.ts` (namespace
+    rule, incident verbatim), `recipe-discovery.test.ts` (empty-schema
+    warning trio), `externals-skeleton.test.ts` (plausible-origin rule,
+    cal.diy verbatim). Open from the bench: the strapi web
+    route/screen reader (07's 0/79 ceiling), catalog briefing naming
+    what is NOT a dependency (passport/strapi-project), ownHosts-filter
+    investigation above.
+
+123. **Seed session hardening (2026-08-23 documenso drafting bench).** STATUS:
+    BUILT. Four fixes from the 08-drafting runs (run 2 died budget-exhausted at
+    43 turns holding a draft the engine had already run and verified; run 3
+    converged with one turn to spare; both spent their whole first grant
+    exploring; a `Bearer `-prefixed token passed every static check twice):
+    (1) **`draftCheckpoint` on the seed session** — item 118's mechanism,
+    third session: `run_seed_draft` at turn 10 (execution errors steer better
+    than more reading).
+    (2) **Salvage** — a session that dies without an outcome (budget,
+    malformed, dead provider — never an abort) while holding a draft
+    `run_seed_draft` FULLY verified gets that draft folded as its outcome;
+    the fresh-world proof still gates the write, and the step record + CLI
+    say `salvaged`.
+    (3) **Credential probes** — every minted credential must declare a live
+    probe (`probes: {name: {method?, path}}`, in `run_seed_draft` args and
+    the outcome; never in the committed recipe). The engine boots the
+    recipe's server (`preflightApiServer`) and sends the minted value
+    VERBATIM: refused (401/403) with the credential fails the draft, and so
+    does an endpoint that answers WITHOUT it (ungated proves nothing). Runs
+    in-session and again in the fold's fresh world. Closes the boot-green
+    Goodhart hole the Bearer drift sailed through.
+    (4) **Seed-machinery briefing** — `existingSeedMachinery` walks the repo
+    for seed-named files (capped, excerpted, dependency dirs skipped) and the
+    briefing carries them, so sessions stop re-finding the app's own seed
+    helpers by search (~10 turns/session on the bench).
+    As built: `packages/core/src/services/guard-setup/seed-session.ts`,
+    `packages/{shared/src/guard/setup.ts,guard-generator/src/setup.ts}`
+    (`salvaged` on the step record), `tools/cli/src/commands/guard-setup.ts`.
+    Tests: `tests/core/guard-setup-seed-session.test.ts` (probe pass/Bearer
+    drift/ungated endpoint/fold coverage, salvage incident-verbatim,
+    machinery walk) over the fixture's new auth-gated `GET /me`.
+
+124. **The seed step builds the app before the session (2026-08-24 cal.diy
+    drafting bench).** STATUS: BUILT. Item 123's credential probes boot the
+    recipe's server — in-session and in the fold — and a checkout that never
+    ran `recipe.build` has nothing to boot: cal.diy run 3 verified its draft
+    and then died on the probe's missing dist, twice, with no legal
+    self-rescue (a heavy nest build does not fit inside a seed command the
+    way documenso's remix build did). `buildSeedSession` now runs
+    `recipe.build` once, before the world boots and OUTSIDE the session
+    cache (a cache hit's fold probe needs the built app too); a failed
+    build fails the step honestly before any session tokens are spent. The
+    fold's fresh world keeps resetting only the datastore, never the app
+    binary. `packages/core/src/services/guard-setup/seed-session.ts`; tests
+    in `tests/core/guard-setup-seed-session.test.ts` (build-before-up
+    ordering, failing-build refusal with zero sessions).
+
+137. **The seed drafts principals for the API only — a runnable web surface has
+    no way to log in (documenso, 2026-08-27).** STATUS: BUILT (2026-08-27). With
+    the web authoring arm live [135] and the web server booting, the first full
+    web run authored **3 web scenarios against 531 web blocks whose capability
+    is the bare word `credentials`**. The api half of the same run authored 39,
+    because it has the one principal the seed mints (`apiToken`). documenso's
+    web UI authenticates by BROWSER SESSION; nothing mints one.
+    Cause: `GuardSetupSeedSessionInput` carries `securitySchemes` and `roles` —
+    both OpenAPI concepts read off the api surface — and nothing else. The
+    drafter is api-centric by construction, so it cannot be asked for a session
+    principal, and `providesWarnings`'s "one principal per role" doctrine counts
+    only API roles. The seed even upserts a durable session row in the app's own
+    session-validator format (the 2026-08-26 draft's header says so) and then
+    declares no credential for it.
+    FIX (seed-session.ts): a prepared `recipe.web` on an app with evidence of
+    login (a principal-shaped table — email/username/password columns — or
+    schemes/roles) now REQUIRES a web principal (`requiredPrincipalSurfaces`).
+    The briefing's "Runnable surfaces" section states the recipe: the login
+    email+password ship as FIXTURE fields (web `fill` values already resolve
+    `{{fixture:…}}`, so scenarios sign in through the form — no new channel),
+    plus a DURABLE session whose full Cookie header value ships as a credential
+    probed with `{surface: "web", path}` — the web analogue of the api probe:
+    the engine boots `recipe.web` (running `web.build` first when declared) and
+    proves the authenticated page load succeeds while the anonymous one is
+    refused, where a web refusal is 401/403 OR a redirect to the login page.
+    Enforcement is item [138]'s binding check. Tests in
+    `tests/core/guard-setup-seed-session.test.ts`.
+    Related: [135] (the arm that made web authorable), [136] (the schema fix that
+    let these verdicts survive), [128], [138] (the binding fitness check).
+
+138. **The seed step's fitness check must BIND, probes must be a LOOKUP, and
+    principals come FIRST (documenso, 2026-08-27 — the same incident as
+    [137]).** STATUS: BUILT (2026-08-27). Three more causes behind the
+    zero-credential seed that blocked ~15M tokens of downstream sessions:
+    (a) `providesWarnings` said "no credentials declared while the API declares
+    security schemes" and "N roles but M credentials" — both ignorable, and the
+    step's verification only checked the manifest MATCHED `provides`, which an
+    empty declaration does trivially; (b) the probe requirement ("an endpoint
+    that requires the credential and fails cleanly without it") sent the session
+    SEARCHING the route surface, which consumed its whole budget; (c) the
+    session spent that budget on fixtures before principals, hit its ceiling,
+    and the salvage folded the half that does not matter.
+    FIXES:
+    - BINDING: `requiredPrincipalSurfaces` (api requires a principal when the
+      corpus declares security schemes; web per [137]) + `missingPrincipalSurfaces`.
+      `run_seed_draft` REFUSES a draft that leaves a required surface without a
+      credential probed on that surface — before spending the execution — and
+      the fold re-applies the check to the outcome, so the salvage path can only
+      ever keep a draft that carries the principals and a principal-less outcome
+      fails the step with the surface named. A genuinely unauthenticated API
+      (no schemes, no roles, no login table for web) still passes fixtures-only.
+    - LOOKUP: `collectProbeCandidates` (openapi-security.ts) derives the
+      endpoints whose OpenAPI security REQUIRES a scheme with no public
+      alternative — parameter-free GETs first, base path applied — and
+      `GuardSetupSeedSessionInput.probeCandidates` puts them in the briefing:
+      the session confirms one instead of discovering one.
+    - ORDER: principals-first is instructed (briefing work loop + system prompt)
+      AND structural — since no principal-less draft can verify, a budget death
+      after the first verified draft salvages a seed WITH principals; before it,
+      nothing salvages and the step fails loud. No second session was needed;
+      the cache key moves with the prompt fingerprint, invalidating pre-doctrine
+      cached outcomes.
+    Related: [137], [118] (the draft checkpoint this composes with), [128].

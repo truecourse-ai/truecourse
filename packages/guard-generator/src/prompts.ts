@@ -789,7 +789,7 @@ export interface ExternalServiceHint {
  * request. `required: 'unknown'` is a real answer — the field is read, and nothing
  * in the source says whether it may be absent.
  */
-export interface JourneyContractHint {
+export interface InterfaceContractHint {
   method: string
   path: string
   bodyFields?: { name: string; required: boolean | 'unknown' }[]
@@ -877,7 +877,7 @@ export interface AuthorUserContext {
    * claim is reached. Empty/absent (no api journeys, a degraded mapping, cli) keeps
    * the prompt byte-identical. USER-prompt only.
    */
-  journeyContracts?: JourneyContractHint[]
+  journeyContracts?: InterfaceContractHint[]
   /**
    * api scenarios: the REST of the app's operations — everything the api catalog
    * offers that THIS flow's journeys do not walk. A flow's SETUP steps
@@ -886,7 +886,7 @@ export interface AuthorUserContext {
    * rendering and same verbatim-path rule as {@link journeyContracts}; empty/absent
    * keeps the prompt byte-identical. USER-prompt only.
    */
-  otherOperations?: JourneyContractHint[]
+  otherOperations?: InterfaceContractHint[]
   /** How many other operations the cap dropped, so the block can say so. */
   otherOperationsOverflow?: number
   /**
@@ -974,7 +974,7 @@ export interface AuthorUserContext {
  * requiredness the source does not state — never rendered as "optional", which
  * would be a claim the analysis did not make.
  */
-function contractSummary(hint: JourneyContractHint): string {
+function contractSummary(hint: InterfaceContractHint): string {
   const parts: string[] = []
   for (const [label, fields] of [
     ['body', hint.bodyFields],
@@ -1496,6 +1496,26 @@ Concretely:
              "defaultServer": "web" }
 - Propose entry for a command-line program, api for an HTTP server, or BOTH when
   the repository ships both. At least one of them is required.
+- Everything the recipe runs must be something THIS repository ships. Never an
+  inline-eval stand-in (\`node -e …\` as a server, an entry that merely loads a
+  module, a build that builds nothing) — the engine refuses those statically, and
+  a stand-in that passed would test nothing.
+- A server that needs a datastore declares the repo's OWN bring-up under
+  \`api.services\` (\`{"up": "docker compose -f <repo compose file> up -d --wait …",
+  "down": "docker compose -f … stop"}\`) — never inside \`build\` (statically
+  refused: the runner owns the services lifecycle, and a build's leftovers leak).
+  Namespace EVERY \`docker compose\` invocation: pass \`-p <dedicated-project>\`, or
+  point \`-f\` at a compose file that declares a top-level \`name:\` (a dedicated
+  test compose). A bare \`docker compose up/stop\` attaches to the repository's
+  DEFAULT compose project — the developer's own running stack, whose containers
+  it would recreate or stop — and is refused statically. And when the app pins a
+  SQL datastore, run the repo's schema/migration step inside \`api.services.up\`
+  after the bring-up — a compose that only starts an empty database boots a
+  server with no schema behind a green health probe.
+- ownHosts (optional, recommended) lists the product's OWN hostnames
+  ("acme.com", "api.acme.com") — domains the app's code calls that ARE the app,
+  not third parties. Without it, detection reports the app's own domains as
+  external services.
 
 Output exactly one JSON object with \`build\` plus \`entry\` and/or \`api\` (and
 \`install\` when dependencies must be fetched first). No prose.`
@@ -2423,7 +2443,7 @@ export interface MatchMilestoneLine {
  * a one-line summary per step. Never file paths, symbols, or source: the matcher
  * reads what a USER can reach, exactly like the journey fingerprint.
  */
-export interface JourneyDigest {
+export interface InterfaceDigest {
   id: string
   title: string
   /** The entry descriptor as the surface declares it (a command path, a route). */
@@ -2434,7 +2454,7 @@ export interface JourneyDigest {
 
 /** What the engine tells the matcher on its ONE corrective re-ask. */
 export interface MatchIssues {
-  /** Journey ids the plan named that are not in the catalog. */
+  /** Interface ids the plan named that are not in the catalog. */
   unknownJourneys: string[]
   /** Milestone numbers the plan never covered. */
   uncoveredMilestones: number[]
@@ -2450,7 +2470,7 @@ export interface MatchUserContext {
   /** The surface being matched (a driver-registry id, e.g. `cli`). */
   surface: string
   /** The surface's whole journey catalog, as digests. */
-  journeys: JourneyDigest[]
+  journeys: InterfaceDigest[]
   /** On a re-ask after engine validation, exactly what was wrong. */
   issues?: MatchIssues
   /** On a re-ask after invalid output, the prior output quoted back. */

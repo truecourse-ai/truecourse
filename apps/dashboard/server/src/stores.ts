@@ -17,6 +17,7 @@ import { log } from '@truecourse/core/lib/logger';
 import { setAnalysisStore } from '@truecourse/core/lib/analysis-store';
 import { setSpecStore } from '@truecourse/core/lib/spec-store';
 import { setGuardStore } from '@truecourse/core/lib/guard-store';
+import { setGuardOverlayStore } from '@truecourse/core/lib/guard-overlays';
 import { setInferredActionStore } from '@truecourse/core/lib/inferred-action-store';
 import { setRepoConfigStore } from '@truecourse/core/config/project-config';
 import { setUiStateStore } from '@truecourse/core/config/ui-state';
@@ -29,6 +30,7 @@ import {
   PgAnalysisStore,
   PgSpecStore,
   PgGuardStore,
+  PgGuardOverlayStore,
   PgInferredActionStore,
   PgRepoConfigStore,
   PgUiStateStore,
@@ -57,6 +59,9 @@ export function installDbStores(
   setSpecStore(new PgSpecStore(db));
   // Guard run store + scenario corpus + dismissedClaims decisions.
   setGuardStore(new PgGuardStore(db));
+  // The supplied-dependency overlays (registered API keys, base URLs, tokens):
+  // one encrypted row per repo, decrypted only into a run's ephemeral clone.
+  setGuardOverlayStore(new PgGuardOverlayStore(db, masterSecret));
   // The dismiss/promote overlay for inferred decisions.
   setInferredActionStore(new PgInferredActionStore(db));
   setRepoConfigStore(new PgRepoConfigStore(db));

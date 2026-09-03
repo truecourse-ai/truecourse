@@ -23,6 +23,9 @@ importers:
       '@truecourse/core':
         specifier: workspace:*
         version: link:packages/core
+      '@truecourse/data-store':
+        specifier: workspace:*
+        version: link:packages/data-store
       '@truecourse/db':
         specifier: workspace:*
         version: link:packages/db
@@ -50,6 +53,9 @@ importers:
       '@truecourse/guard-runner':
         specifier: workspace:*
         version: link:packages/guard-runner
+      '@truecourse/jobs':
+        specifier: workspace:*
+        version: link:packages/jobs
       '@truecourse/llm':
         specifier: workspace:*
         version: link:packages/llm
@@ -312,6 +318,9 @@ importers:
       '@truecourse/github-app':
         specifier: workspace:*
         version: link:../../../packages/github-app
+      '@truecourse/jobs':
+        specifier: workspace:*
+        version: link:../../../packages/jobs
       '@truecourse/shared':
         specifier: workspace:*
         version: link:../../../packages/shared
@@ -567,6 +576,9 @@ importers:
       '@truecourse/ee-storage':
         specifier: workspace:*
         version: link:../storage
+      '@truecourse/jobs':
+        specifier: workspace:*
+        version: link:../../../packages/jobs
       '@truecourse/llm':
         specifier: workspace:*
         version: link:../../../packages/llm
@@ -756,9 +768,9 @@ importers:
       '@truecourse/guard-runner':
         specifier: workspace:*
         version: link:../guard-runner
-      '@truecourse/journey-mapper':
+      '@truecourse/interface-mapper':
         specifier: workspace:*
-        version: link:../journey-mapper
+        version: link:../interface-mapper
       '@truecourse/llm':
         specifier: workspace:*
         version: link:../llm
@@ -961,7 +973,7 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
-  packages/journey-mapper:
+  packages/interface-mapper:
     dependencies:
       '@truecourse/guard-runner':
         specifier: workspace:*
@@ -973,6 +985,52 @@ importers:
       '@types/node':
         specifier: ^22.19.15
         version: 22.19.15
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  packages/jobs:
+    dependencies:
+      '@truecourse/core':
+        specifier: workspace:*
+        version: link:../core
+      '@truecourse/data-store':
+        specifier: workspace:*
+        version: link:../data-store
+      '@truecourse/db':
+        specifier: workspace:*
+        version: link:../db
+      '@truecourse/llm-api':
+        specifier: workspace:*
+        version: link:../llm-api
+      '@truecourse/shared':
+        specifier: workspace:*
+        version: link:../shared
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@electric-sql/pglite@0.2.17)(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(pg@8.21.0)
+      express:
+        specifier: ^4.21.0
+        version: 4.22.1
+      graphile-worker:
+        specifier: ^0.16.6
+        version: 0.16.6(typescript@5.9.3)
+      pg:
+        specifier: ^8.13.1
+        version: 8.21.0
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+    devDependencies:
+      '@types/express':
+        specifier: ^5.0.0
+        version: 5.0.6
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.15
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.0
       typescript:
         specifier: ^5.7.0
         version: 5.9.3

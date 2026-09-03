@@ -13,7 +13,7 @@ import {
   type AuthorUserContext,
   type ProbeTranscript,
 } from '@truecourse/guard-generator'
-import type { GuardBirthFinding, GuardFlow, Journey } from '@truecourse/shared'
+import type { GuardBirthFinding, GuardFlow, Interface } from '@truecourse/shared'
 import type { LlmTransport } from '@truecourse/shared/llm'
 import {
   loadScenarios,
@@ -51,8 +51,8 @@ import {
   flowPerClaim,
   matchAll,
   matchBy,
-  cliJourney,
-  journeysOf,
+  cliInterface,
+  interfacesOf,
   stampMilestones,
   PASSING_STEPS,
   FAILING_STEPS,
@@ -182,7 +182,7 @@ describe('generateGuards — realization gaps', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r), // the mapper found nothing
+      interfaces: interfacesOf(r), // the mapper found nothing
       extractRunner: versionCliBgUntestable,
       matchRunner: async () => {
         throw new Error('matching must never run against an empty catalog')
@@ -246,7 +246,7 @@ describe('generateGuards — realization gaps', () => {
 
   it('a surface with journeys but no driver yet is an awaiting-driver gap on the flow', async () => {
     const r = seed()
-    const webJourney: Journey = {
+    const webJourney: Interface = {
       id: 'web/board',
       type: 'web',
       title: 'Board',
@@ -257,7 +257,7 @@ describe('generateGuards — realization gaps', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, cliJourney(['relkit']), webJourney),
+      interfaces: interfacesOf(r, cliInterface(['relkit']), webJourney),
       extractRunner: versionCliBgUntestable,
     })
 
@@ -522,7 +522,7 @@ describe('generateGuards — change detection', () => {
     writeDoc(r, TWO_CLI_DOC, TWO_CLI_CONTENT)
 
     // Two flows, each matched to its OWN journey.
-    const twoJourneys = [cliJourney(['relkit', 'version']), cliJourney(['relkit', 'help'])]
+    const twoJourneys = [cliInterface(['relkit', 'version']), cliInterface(['relkit', 'help'])]
     const perFlow = async (ctx: Parameters<ReturnType<typeof matchAll>>[0]) => ({
       plan: ctx.milestones.map((m) => ({
         journeyId: ctx.journeys.find((j) => j.id.endsWith(ctx.flow.id))?.id ?? ctx.journeys[0].id,
@@ -532,7 +532,7 @@ describe('generateGuards — change detection', () => {
 
     await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, ...twoJourneys),
+      interfaces: interfacesOf(r, ...twoJourneys),
       extractRunner: extractBy({}),
       matchRunner: perFlow,
     })
@@ -541,7 +541,7 @@ describe('generateGuards — change detection', () => {
     let authored: string[] = []
     const res = await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, cliJourney(['relkit', 'version'], ['--json']), twoJourneys[1]),
+      interfaces: interfacesOf(r, cliInterface(['relkit', 'version'], ['--json']), twoJourneys[1]),
       extractRunner: extractBy({}),
       matchRunner: perFlow,
       generateRunner: authorBy({}, (ctx) => authored.push(ctx.flow.id)),

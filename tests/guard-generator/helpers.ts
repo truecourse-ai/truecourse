@@ -4,12 +4,12 @@ import os from 'node:os'
 import path from 'node:path'
 import { buildDocSectionIndex } from '@truecourse/guard-runner'
 import {
-  journeyFingerprint,
+  interfaceFingerprint,
   type ApiRequestContract,
   type DetectedExternalService,
   type OutboundRequest,
   type GuardScenario,
-  type Journey,
+  type Interface,
 } from '@truecourse/shared'
 import {
   generateGuards,
@@ -21,7 +21,7 @@ import {
   type GenerateGuardsOptions,
   type GenerateRunner,
   type GuardGenerateResult,
-  type JourneyProvider,
+  type InterfaceProvider,
   type MatchRunner,
   type RawGeneratedScenario,
   type SeedDraftDatabase,
@@ -31,6 +31,10 @@ import {
 /** The realistic fixture CLI (`relkit`) shared with the guard-runner engine tests. */
 export const FIXTURE_BIN = fileURLToPath(
   new URL('../fixtures/guard-fixture-cli/bin.mjs', import.meta.url),
+)
+/** The web fixture: a static server whose `/` renders and whose unknown paths 404. */
+export const FIXTURE_WEB_SERVER = fileURLToPath(
+  new URL('../fixtures/guard-fixture-web/server.mjs', import.meta.url),
 )
 
 export function makeTempRepo(): string {
@@ -106,11 +110,11 @@ export const PASSING_STEPS: RawGeneratedScenario['steps'] = [{ run: ['--version'
 export const FAILING_STEPS: RawGeneratedScenario['steps'] = [{ run: ['boom'], expect: { exit: 0 } }]
 
 // ---------------------------------------------------------------------------
-// Journeys (the code half)
+// Interfaces (the code half)
 // ---------------------------------------------------------------------------
 
-/** One cli journey over a command path — the shape the mapper derives. */
-export function cliJourney(command: string[], flags: string[] = []): Journey {
+/** One cli interface over a command path — the shape the mapper derives. */
+export function cliInterface(command: string[], flags: string[] = []): Interface {
   const shape = {
     type: 'cli' as const,
     entry: { command },
@@ -120,12 +124,12 @@ export function cliJourney(command: string[], flags: string[] = []): Journey {
     id: `cli/${command.join('-') || 'root'}`,
     title: command.join(' '),
     ...shape,
-    fingerprint: journeyFingerprint(shape),
+    fingerprint: interfaceFingerprint(shape),
   }
 }
 
-/** One api journey over an operation — the shape the api mapper derives. */
-export function apiJourney(method: string, apiPath: string): Journey {
+/** One api interface over an operation — the shape the api mapper derives. */
+export function apiInterface(method: string, apiPath: string): Interface {
   const shape = {
     type: 'api' as const,
     entry: { method, path: apiPath },
@@ -135,29 +139,33 @@ export function apiJourney(method: string, apiPath: string): Journey {
     id: `api/${method.toLowerCase()}${apiPath.replace(/\W+/g, '-')}`,
     title: `${method} ${apiPath}`,
     ...shape,
-    fingerprint: journeyFingerprint(shape),
+    fingerprint: interfaceFingerprint(shape),
   }
 }
 
 /**
- * Write the journey snapshot production's mapper writes (`guard/journeys.json`) —
+ * Write the interface snapshot production's mapper writes (`guard/interfaces.json`) —
  * the file the pre-flight estimate reads to know what the surfaces look like.
  */
-export function writeJourneySnapshot(repo: string, journeys: Journey[]): void {
-  const target = path.join(repo, '.truecourse', 'guard', 'journeys.json')
+export function writeInterfaceSnapshot(repo: string, interfaces: Interface[]): void {
+  const target = path.join(repo, '.truecourse', 'guard', 'interfaces.json')
   fs.mkdirSync(path.dirname(target), { recursive: true })
   fs.writeFileSync(
     target,
-    JSON.stringify({ version: 1, generatedAt: '2026-01-01T00:00:00Z', recipeFingerprint: '', journeys }, null, 2),
+    JSON.stringify(
+      { version: 2, generatedAt: '2026-01-01T00:00:00Z', recipeFingerprint: '', interfaces },
+      null,
+      2,
+    ),
   )
 }
 
-/** A journey provider over an explicit catalog, snapshotting it exactly as the
+/** An interface provider over an explicit catalog, snapshotting it exactly as the
  *  real (analyzer-backed) mapper does so the estimate sees the same surfaces. */
-export function journeysOf(repo: string, ...journeys: Journey[]): JourneyProvider {
+export function interfacesOf(repo: string, ...interfaces: Interface[]): InterfaceProvider {
   return async () => {
-    writeJourneySnapshot(repo, journeys)
-    return { journeys }
+    writeInterfaceSnapshot(repo, interfaces)
+    return { interfaces }
   }
 }
 
@@ -166,7 +174,7 @@ export function journeysOf(repo: string, ...journeys: Journey[]): JourneyProvide
  * both ride ONE provider in production because both come from one analysis pass.
  */
 export function withExternalServices(
-  provider: JourneyProvider,
+  provider: InterfaceProvider,
   ...services: {
     service: string
     category?: DetectedExternalService['category']
@@ -176,7 +184,7 @@ export function withExternalServices(
     baseUrlEnvs?: DetectedExternalService['baseUrlEnvs']
     source?: DetectedExternalService['source']
   }[]
-): JourneyProvider {
+): InterfaceProvider {
   return async () => ({
     ...(await provider()),
     externalServices: services.map((s) => ({ ...s, evidence: [{ filePath: 'src/x.ts', importSource: s.service }] })),
@@ -189,9 +197,9 @@ export function withExternalServices(
  * construction. One provider again: production derives all of it from one pass.
  */
 export function withCodeTruth(
-  provider: JourneyProvider,
+  provider: InterfaceProvider,
   grounding: { requestContracts?: ApiRequestContract[]; outboundRequests?: OutboundRequest[] },
-): JourneyProvider {
+): InterfaceProvider {
   return async () => ({ ...(await provider()), ...grounding })
 }
 
@@ -199,13 +207,13 @@ export function withCodeTruth(
  * The same catalog, plus the datastore + parsed schema the analyzer would have
  * found — one provider, because production derives both from one pass.
  */
-export function withDatabase(provider: JourneyProvider, database: SeedDraftDatabase | null): JourneyProvider {
+export function withDatabase(provider: InterfaceProvider, database: SeedDraftDatabase | null): InterfaceProvider {
   return async () => ({ ...(await provider()), database })
 }
 
 /** The default catalog: the fixture CLI's two commands. */
-export const DEFAULT_JOURNEYS = (repo: string): JourneyProvider =>
-  journeysOf(repo, cliJourney(['relkit']), cliJourney(['relkit', 'boom']))
+export const DEFAULT_INTERFACES = (repo: string): InterfaceProvider =>
+  interfacesOf(repo, cliInterface(['relkit']), cliInterface(['relkit', 'boom']))
 
 // ---------------------------------------------------------------------------
 // Extraction
@@ -430,18 +438,18 @@ export function stubAdjudicationRunners(): { fidelityRunner: FidelityRunner; tri
 }
 
 /**
- * The journey + synthesis + matching seams a test must inject when it drives the
+ * The interface + synthesis + matching seams a test must inject when it drives the
  * pipeline without a transport — the deterministic stand-ins {@link runGenerate}
  * applies, exposed for callers (the CLI driver tests) that build their own options.
  */
 export function flowStageRunners(repo: string): {
-  journeys: JourneyProvider
+  interfaces: InterfaceProvider
   flowsRunner: FlowsRunner
   flowsEpicRunner: FlowsEpicRunner
   matchRunner: MatchRunner
 } {
   return {
-    journeys: DEFAULT_JOURNEYS(repo),
+    interfaces: DEFAULT_INTERFACES(repo),
     flowsRunner: flowPerClaim(),
     flowsEpicRunner: noEpics,
     matchRunner: matchAll(),

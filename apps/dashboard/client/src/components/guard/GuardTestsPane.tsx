@@ -4,14 +4,14 @@
  *
  * A test row names its flow, so the pane loads that flow's detail to get the rich
  * per-test facts the inventory read does not carry (the failure, the evidence
- * pointer, the journey path, and the milestone chain the detail's ruling resolves
+ * pointer, the interface path, and the milestone chain the detail's ruling resolves
  * its claim from). A `?gtest=` deep link therefore resolves the same way whether
  * the user arrived from a flow, from a run, or from a bookmark.
  */
 
 import { useMemo } from 'react';
 import { FlaskConical, Loader2 } from 'lucide-react';
-import type { GuardJourneyRow } from '@truecourse/shared';
+import type { GuardInterfaceRow } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
 import type { GuardDecisionsState } from '@/hooks/useGuardDecisions';
 import { useGuardFlowDetail } from '@/hooks/useGuardFlowDetail';
@@ -123,7 +123,7 @@ export function GuardTestsPane({
   error,
   runId,
   lastRun = null,
-  journeys,
+  interfaces,
   flowGoals,
   decisions,
   tabs,
@@ -132,7 +132,7 @@ export function GuardTestsPane({
   reloadKey = 0,
   prRef,
   onOpenFlow,
-  onOpenJourney,
+  onOpenInterface,
   onOpenSpec,
 }: {
   repoId: string;
@@ -143,7 +143,7 @@ export function GuardTestsPane({
   runId: string | null;
   /** That run's envelope — the overview's one last-run line. */
   lastRun?: GuardLastRun | null;
-  journeys: GuardJourneyRow[] | null;
+  interfaces: GuardInterfaceRow[] | null;
   /** flowId → the flow's one-line goal, for the "what it checks" line. */
   flowGoals: ReadonlyMap<string, string>;
   /** The dismissals state behind the detail's "don't test this claim" ruling. */
@@ -155,7 +155,7 @@ export function GuardTestsPane({
   reloadKey?: number;
   prRef?: string;
   onOpenFlow: (flowId: string) => void;
-  onOpenJourney: (journeyId: string) => void;
+  onOpenInterface: (interfaceId: string) => void;
   onOpenSpec: (doc: string, section: string) => void;
 }) {
   const { activeId, openTabs, open, close, selectOverview } = tabs;
@@ -212,12 +212,12 @@ export function GuardTestsPane({
           test={active}
           row={row}
           runId={runId}
-          journeys={journeys}
+          interfaces={interfaces}
           {...(flowGoals.get(active.flowId) ? { flowGoal: flowGoals.get(active.flowId) } : {})}
           milestones={detail?.milestones ?? []}
           {...(decisions ? { decisions } : {})}
           onOpenFlow={onOpenFlow}
-          onOpenJourney={onOpenJourney}
+          onOpenInterface={onOpenInterface}
           onOpenSpec={onOpenSpec}
         />
       );

@@ -393,6 +393,17 @@ function extractExportName(node: SyntaxNode): string | null {
     }
   }
 
+  // `export default <expression>` — the VALUE form, which the grammar keeps in
+  // its own field. Only `export default function` / `class` reach the
+  // declaration branch above, so without this the most common way a React app
+  // exports a page (`export default HomePage;`) was reported as no export at
+  // all: 74 of cal.diy's 79 route modules and 11 of documenso's. The name is the
+  // identifier when the expression has one and `default` when it is anonymous —
+  // an anonymous default is still a default, and the fact callers ask for is
+  // whether the module exports one.
+  const value = node.childForFieldName('value')
+  if (value) return value.type === 'identifier' ? value.text : 'default'
+
   return null
 }
 
@@ -400,6 +411,19 @@ function extractExportName(node: SyntaxNode): string | null {
  * Check if export is default export
  */
 function isDefaultExport(node: SyntaxNode): boolean {
+  // `export { default } from './index'` and `export { Page as default }` — the
+  // clause makes this module's default without the `default` keyword ever being
+  // a child of the statement, so the keyword scan below never sees it. cal.com's
+  // `pages/router/embed.tsx` is the whole file: one re-export line, and a screen
+  // that vanishes from a derivation asking whether the module renders anything.
+  // Only the FIRST specifier is consulted, because that is the one
+  // `extractExportName` reports — the record stays about one export.
+  const clause = node.children.find((c) => c.type === 'export_clause')
+  const first = clause?.children.find((c) => c.type === 'export_specifier')
+  if (first) {
+    const exported = first.childForFieldName('alias') ?? first.childForFieldName('name')
+    if (exported?.text === 'default') return true
+  }
   for (const child of node.children) {
     if (child.type === 'default' || child.text === 'default') {
       return true

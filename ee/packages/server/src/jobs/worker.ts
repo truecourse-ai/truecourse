@@ -15,10 +15,9 @@
  * never a silent retry that would double-run and fight the single-flight key.
  */
 
-import { run, type Runner, type Task } from 'graphile-worker';
+import type { Runner } from 'graphile-worker';
 import type { Db } from '@truecourse/db';
 import { JobStore, NotificationStore, PgKnowledgeStore, WorkspaceSettingsStore } from '@truecourse/ee-data-store';
-import { runWithTrace, type TraceContext } from '@truecourse/ee-llm';
 import { log } from '@truecourse/core/lib/logger';
 import {
   runBaseline,
@@ -52,7 +51,7 @@ import {
 import { getGuardStore } from '@truecourse/core/lib/guard-store';
 import { getGuardExecutor } from '@truecourse/core/lib/guard-executor';
 import type { IntegrationPendingView, NotificationLevel } from '@truecourse/shared';
-import { upstreamStatusOf } from '../observability/sentry.js';
+import { captureEeException, upstreamStatusOf, type EeErrorContext } from '../observability/sentry.js';
 import { IntegrationStore } from '../integrations/store.js';
 import { CONNECTORS } from '../knowledge/connectors/registry.js';
 import { connectorConfig, type ConnectorKind } from '../knowledge/connectors/types.js';
@@ -70,15 +69,20 @@ import {
 } from '@truecourse/core/commands/spec-in-process';
 import { loadWorkspaceSpec } from '@truecourse/core/lib/spec-store';
 import { GUARD_GENERATE_STEPS } from '@truecourse/core/commands/guard-in-process';
-import { StepTracker, type AnalysisProgressPayload } from '@truecourse/core/progress';
-import { JobStepTracker } from './steps.js';
+import type { StepTracker } from '@truecourse/core/progress';
 import {
   executeJob,
+  publishEvent,
+  startWorker,
+  stepBridge,
   type JobDefinition,
   type JobNotification,
   type JobOutcomeStatus,
+  type JobPayload,
   type JobRuntime,
-} from './harness.js';
+  type JobStepTracker,
+  type JobTask,
+} from '@truecourse/jobs';
 import {
   KNOWLEDGE_SYNC_TASK,
   KNOWLEDGE_SYNC_TITLE,
@@ -112,29 +116,37 @@ import {
 import { guardGateLimiter } from './guard-gate-limiter.js';
 import type { GuardBaselineSettleOutcome } from './pending-guard-baseline.js';
 
-/**
- * Bridge an OSS in-process StepTracker onto one EE job step: each inner-phase
- * transition is forwarded as the EE step's inline detail, so the popup shows the
- * same numbered sub-phases the OSS popup does. `stepDefs` is the inner phase set
- * to mirror — CURATE_STEPS (spec scan) by default. Returns a StepTracker to hand
- * to the callee.
- */
-function stepBridge(
-  eeTracker: JobStepTracker,
-  stepKey: string,
-  stepDefs: ReadonlyArray<{ key: string; label: string }> = CURATE_STEPS,
-): StepTracker {
-  return new StepTracker((p: AnalysisProgressPayload) => {
-    const text = p.detail ? `${p.step} · ${p.detail}` : p.step;
-    void eeTracker.detail(stepKey, text);
-  }, [...stepDefs]);
+/** Every EE job attributes its failures with the Sentry context. */
+type EeJobDefinition<P extends JobPayload> = JobDefinition<P, EeErrorContext>;
+
+/** The collaborators an EE job body settles through: the tracked row, the durable
+ *  feed, the live push, and the Sentry capture the harness reports failures to. */
+export function eeJobRuntime(
+  db: Db,
+  jobStore: JobStore,
+  notifications: NotificationStore,
+): JobRuntime<EeErrorContext> {
+  return {
+    db,
+    jobStore,
+    notifications,
+    publish: (org, event) => publishEvent(db, org, event),
+    onException: captureJobException,
+  };
 }
 
-export interface StartWorkerDeps {
+/** How the harness reports a failed EE job. */
+export function captureJobException(err: unknown, ctx: EeErrorContext | undefined): void {
+  if (ctx) captureEeException(err, ctx);
+}
+
+export interface StartEeWorkerDeps {
+  /** The lifecycle collaborators every job body settles through. */
+  rt: JobRuntime<EeErrorContext>;
   db: Db;
   connectionString: string;
+  concurrency?: number;
   masterSecret: string;
-  jobStore: JobStore;
   /**
    * Called after a `repo.baseline` job goes terminal (success OR failure), once
    * its single-flight key is free — replays any coalesced follow-up push for the
@@ -177,21 +189,6 @@ export interface StartWorkerDeps {
     payload: GuardBaselineJobPayload,
     settled: GuardBaselineSettleOutcome,
   ) => Promise<void>;
-}
-
-function jobTrace(
-  org: string,
-  jobId: string,
-  repo: { repoFullName?: string | null; commitSha?: string | null } = {},
-): TraceContext {
-  return {
-    org,
-    traceId: jobId,
-    jobId,
-    repoFullName: repo.repoFullName ?? null,
-    commitSha: repo.commitSha ?? null,
-    parentId: null,
-  };
 }
 
 /**
@@ -318,7 +315,7 @@ interface JobBodyDeps {
 function knowledgeSyncJob(
   d: JobBodyDeps,
   onSettled?: (payload: SyncJobPayload, outcome: JobOutcomeStatus, result?: unknown) => Promise<void>,
-): JobDefinition<SyncJobPayload> {
+): EeJobDefinition<SyncJobPayload> {
   return {
     type: KNOWLEDGE_SYNC_TASK,
     title: KNOWLEDGE_SYNC_TITLE,
@@ -328,7 +325,7 @@ function knowledgeSyncJob(
     // hook ripples a baseline re-scan to the org's connected repos (knowledge-
     // chain.ts) — best-effort, never throws. `corpusChanged` rides the result.
     onSettled: onSettled ? (ctx, outcome, result) => onSettled(ctx.payload, outcome, result) : undefined,
-    sentry: (err, p) => ({
+    errorMeta: (err, p) => ({
       component: 'knowledge',
       orgId: p.org,
       connector: p.kind,
@@ -390,13 +387,13 @@ function knowledgeSyncJob(
  *  non-empty delta persists a pending record + toasts the work to process; an empty
  *  delta clears any pending record + toasts "up to date". The estimate rides the
  *  job's result; the Process button dispatches the union consolidation (`/sync`). */
-function knowledgeEstimateJob(d: JobBodyDeps): JobDefinition<EstimateJobPayload> {
+function knowledgeEstimateJob(d: JobBodyDeps): EeJobDefinition<EstimateJobPayload> {
   return {
     type: KNOWLEDGE_ESTIMATE_TASK,
     title: KNOWLEDGE_ESTIMATE_TITLE,
     steps: KNOWLEDGE_ESTIMATE_STEPS,
     org: (p) => p.org,
-    sentry: (err, p) => ({
+    errorMeta: (err, p) => ({
       component: 'knowledge',
       orgId: p.org,
       connector: p.kind,
@@ -444,7 +441,7 @@ function knowledgeEstimateJob(d: JobBodyDeps): JobDefinition<EstimateJobPayload>
 function repoBaselineJob(
   db: Db,
   onSettled?: (payload: BaselineJobPayload, outcome: JobOutcomeStatus) => Promise<void>,
-): JobDefinition<BaselineJobPayload> {
+): EeJobDefinition<BaselineJobPayload> {
   return {
     type: REPO_BASELINE_TASK,
     title: REPO_BASELINE_TITLE,
@@ -452,7 +449,7 @@ function repoBaselineJob(
     org: (p) => p.workspaceOrgId,
     traceMeta: (p) => ({ repoFullName: p.repoFullName, commitSha: p.commitSha }),
     onSettled: onSettled ? (ctx, outcome) => onSettled(ctx.payload, outcome) : undefined,
-    sentry: (_err, p) => ({
+    errorMeta: (_err, p) => ({
       component: 'github-gate',
       orgId: p.workspaceOrgId,
       repo: p.repoFullName,
@@ -475,7 +472,7 @@ function repoBaselineJob(
           auth,
           octokitFor: (id) => installationOctokit(cfg, id),
           onPhase: (phase) => ctx.phase(phase),
-          specTracker: stepBridge(ctx.tracker, 'spec'),
+          specTracker: stepBridge(ctx.tracker, 'spec', CURATE_STEPS),
         },
         req,
       );
@@ -524,7 +521,7 @@ export interface GuardGenerateJobDeps extends ConflictsEmailSeam {
   ) => Promise<void>;
 }
 
-export function guardGenerateJob(deps: GuardGenerateJobDeps): JobDefinition<GuardGenerateJobPayload> {
+export function guardGenerateJob(deps: GuardGenerateJobDeps): EeJobDefinition<GuardGenerateJobPayload> {
   const { pipeline, onSettled } = deps;
   return {
     type: REPO_GUARD_TASK,
@@ -536,7 +533,7 @@ export function guardGenerateJob(deps: GuardGenerateJobDeps): JobDefinition<Guar
     // RUN after a BLOCKED generate (it persisted an open-conflicts report, which
     // would otherwise satisfy hasGuardState and chain a run against no scenarios).
     onSettled: onSettled ? (ctx, outcome, result) => onSettled(ctx.payload, outcome, result) : undefined,
-    sentry: (_err, p) => ({
+    errorMeta: (_err, p) => ({
       component: 'github-gate',
       orgId: p.workspaceOrgId,
       repo: p.repoFullName,
@@ -621,14 +618,14 @@ export interface GuardGateJobDeps {
  * the verdict lives on the PR's Check, and a toast per push would be noise;
  * failures still notify (onError, unconditionally).
  */
-export function guardGateJob(deps: GuardGateJobDeps): JobDefinition<GuardGateJobPayload> {
+export function guardGateJob(deps: GuardGateJobDeps): EeJobDefinition<GuardGateJobPayload> {
   return {
     type: GUARD_GATE_TASK,
     title: GUARD_GATE_TITLE,
     steps: GUARD_GATE_STEPS,
     org: (p) => p.workspaceOrgId,
     traceMeta: (p) => ({ repoFullName: p.repoFullName, commitSha: p.headSha }),
-    sentry: (_err, p) => ({
+    errorMeta: (_err, p) => ({
       component: 'github-gate',
       orgId: p.workspaceOrgId,
       repo: p.repoFullName,
@@ -709,7 +706,7 @@ export interface GuardBaselineJobDeps {
  * coalesced follow-up refresh once the single-flight key frees, keyed on the run's
  * verdict status (see pending-guard-baseline.ts).
  */
-export function guardBaselineJob(deps: GuardBaselineJobDeps): JobDefinition<GuardBaselineJobPayload> {
+export function guardBaselineJob(deps: GuardBaselineJobDeps): EeJobDefinition<GuardBaselineJobPayload> {
   return {
     type: GUARD_BASELINE_TASK,
     title: GUARD_BASELINE_TITLE,
@@ -726,7 +723,7 @@ export function guardBaselineJob(deps: GuardBaselineJobDeps): JobDefinition<Guar
             status: (result as { status?: GuardBaselineResult['status'] } | undefined)?.status ?? null,
           })
       : undefined,
-    sentry: (_err, p) => ({
+    errorMeta: (_err, p) => ({
       component: 'github-gate',
       orgId: p.workspaceOrgId,
       repo: p.repoFullName,
@@ -803,7 +800,7 @@ export interface GuardSpecRegenJobDeps extends ConflictsEmailSeam {
  * handler) settles to done / nochange / error. A no-doc-universe head is a clean
  * no-op (nochange, no re-gate).
  */
-export function guardSpecRegenJob(deps: GuardSpecRegenJobDeps): JobDefinition<GuardSpecRegenJobPayload> {
+export function guardSpecRegenJob(deps: GuardSpecRegenJobDeps): EeJobDefinition<GuardSpecRegenJobPayload> {
   const regate =
     deps.regate ??
     (async (corpus: GuardGateCorpus, gateReq: GuardGateRunRequest, signal?: AbortSignal) => {
@@ -833,7 +830,7 @@ export function guardSpecRegenJob(deps: GuardSpecRegenJobDeps): JobDefinition<Gu
     steps: GUARD_SPEC_REGEN_STEPS,
     org: (p) => p.workspaceOrgId,
     traceMeta: (p) => ({ repoFullName: p.repoFullName, commitSha: p.headSha }),
-    sentry: (_err, p) => ({
+    errorMeta: (_err, p) => ({
       component: 'github-gate',
       orgId: p.workspaceOrgId,
       repo: p.repoFullName,
@@ -939,28 +936,6 @@ export function guardSpecRegenJob(deps: GuardSpecRegenJobDeps): JobDefinition<Gu
   };
 }
 
-/**
- * Wrap a job definition as a graphile task: resolve the payload → ambient trace
- * context (org / job / repo) the EE transport tags LLM traces with, then run the
- * shared lifecycle. A definition factory (vs a plain definition) is resolved
- * per-invocation. Graphile's per-job `helpers.abortSignal` (fires when the
- * worker shuts down) rides into the body as `ctx.signal` so long work is
- * cancellable.
- */
-function registerJob<P extends { jobId: string }>(
-  rt: JobRuntime,
-  defOrFactory: JobDefinition<P> | ((payload: P) => JobDefinition<P>),
-): Task {
-  return (rawPayload, helpers) => {
-    const payload = rawPayload as P;
-    const def = typeof defOrFactory === 'function' ? defOrFactory(payload) : defOrFactory;
-    const trace = jobTrace(def.org(payload), payload.jobId, def.traceMeta?.(payload));
-    return runWithTrace(trace, () =>
-      executeJob(rt, def, payload, { signal: helpers.abortSignal }),
-    );
-  };
-}
-
 /** Deps the exported `runGuardGenerate` test seam needs — the stores + the
  *  onboarding pipeline (faked in tests; `defaultGuardOnboardingPipeline` live).
  *  `signal` stands in for graphile's per-job `helpers.abortSignal`. */
@@ -981,7 +956,7 @@ export async function runGuardGenerate(
   payload: GuardGenerateJobPayload,
 ): Promise<void> {
   await executeJob(
-    { db: deps.db, jobStore: deps.jobStore, notifications: deps.notifications },
+    eeJobRuntime(deps.db, deps.jobStore, deps.notifications),
     guardGenerateJob({
       db: deps.db,
       pipeline: deps.pipeline,
@@ -1015,7 +990,7 @@ export async function runGuardGate(
   payload: GuardGateJobPayload,
 ): Promise<void> {
   await executeJob(
-    { db: deps.db, jobStore: deps.jobStore, notifications: deps.notifications },
+    eeJobRuntime(deps.db, deps.jobStore, deps.notifications),
     guardGateJob({ db: deps.db, pipeline: deps.pipeline, octokitFor: deps.octokitFor }),
     payload,
     { signal: deps.signal },
@@ -1047,7 +1022,7 @@ export async function runGuardBaseline(
   payload: GuardBaselineJobPayload,
 ): Promise<void> {
   await executeJob(
-    { db: deps.db, jobStore: deps.jobStore, notifications: deps.notifications },
+    eeJobRuntime(deps.db, deps.jobStore, deps.notifications),
     guardBaselineJob({ pipeline: deps.pipeline, onSettled: deps.onSettled }),
     payload,
     { signal: deps.signal },
@@ -1075,7 +1050,7 @@ export async function runGuardSpecRegen(
   payload: GuardSpecRegenJobPayload,
 ): Promise<void> {
   await executeJob(
-    { db: deps.db, jobStore: deps.jobStore, notifications: deps.notifications },
+    eeJobRuntime(deps.db, deps.jobStore, deps.notifications),
     guardSpecRegenJob({
       db: deps.db,
       headRegenPipeline: deps.headRegenPipeline,
@@ -1106,7 +1081,7 @@ export async function runKnowledgeEstimate(
   payload: EstimateJobPayload,
 ): Promise<void> {
   await executeJob(
-    { db: deps.db, jobStore: deps.jobStore, notifications: deps.notifications },
+    eeJobRuntime(deps.db, deps.jobStore, deps.notifications),
     knowledgeEstimateJob(deps),
     payload,
   );
@@ -1121,59 +1096,59 @@ export async function runKnowledgeSync(
   onSettled?: (payload: SyncJobPayload, outcome: JobOutcomeStatus) => Promise<void>,
 ): Promise<void> {
   await executeJob(
-    { db: deps.db, jobStore: deps.jobStore, notifications: deps.notifications },
+    eeJobRuntime(deps.db, deps.jobStore, deps.notifications),
     knowledgeSyncJob(deps, onSettled),
     payload,
   );
 }
 
-export async function startWorker(deps: StartWorkerDeps): Promise<Runner> {
-  const { db, jobStore } = deps;
-  const notifications = new NotificationStore(db);
-  const rt: JobRuntime = { db, jobStore, notifications };
+/**
+ * Start the worker with EE's task list. The runtime, connection and concurrency
+ * come from the runner that owns them; everything else here is the per-edition
+ * job set and the seams its bodies read.
+ */
+export async function startEeWorker(deps: StartEeWorkerDeps): Promise<Runner> {
+  const { db } = deps;
   const bodyDeps: JobBodyDeps = {
     db,
     integrations: new IntegrationStore(db, deps.masterSecret),
     knowledge: new PgKnowledgeStore(db),
   };
 
-  const runner = await run({
-    connectionString: deps.connectionString,
-    concurrency: 2,
-    // ee-server owns SIGTERM/SIGINT (sentry flush + runner.stop in registerJobs).
-    noHandleSignals: true,
-    taskList: {
-      [KNOWLEDGE_SYNC_TASK]: registerJob(rt, knowledgeSyncJob(bodyDeps, deps.onKnowledgeSyncSettled)),
-      [KNOWLEDGE_ESTIMATE_TASK]: registerJob(rt, knowledgeEstimateJob(bodyDeps)),
-      [REPO_BASELINE_TASK]: registerJob(rt, repoBaselineJob(db, deps.onBaselineSettled)),
-      [REPO_GUARD_TASK]: registerJob(
-        rt,
-        guardGenerateJob({
-          db,
-          pipeline: defaultGuardOnboardingPipeline,
-          onSettled: deps.onGuardGenerateSettled,
-        }),
-      ),
-      // Factory form: the job body reads the live guard store/executor seams per
-      // invocation (github-app / OSS setup may install them after the worker starts).
-      [GUARD_GATE_TASK]: registerJob(rt, () =>
-        guardGateJob({ db, pipeline: defaultGuardGatePipeline }),
-      ),
-      // Guard baseline refresh — factory form (live seams per invocation). onSettled
-      // replays the repo's coalesced follow-up refresh once the key frees.
-      [GUARD_BASELINE_TASK]: registerJob(rt, () =>
+  const tasks: JobTask<EeErrorContext>[] = [
+    knowledgeSyncJob(bodyDeps, deps.onKnowledgeSyncSettled),
+    knowledgeEstimateJob(bodyDeps),
+    repoBaselineJob(db, deps.onBaselineSettled),
+    guardGenerateJob({
+      db,
+      pipeline: defaultGuardOnboardingPipeline,
+      onSettled: deps.onGuardGenerateSettled,
+    }),
+    // Factory form: the job body reads the live guard store/executor seams per
+    // invocation (github-app / OSS setup may install them after the worker starts).
+    { type: GUARD_GATE_TASK, define: () => guardGateJob({ db, pipeline: defaultGuardGatePipeline }) },
+    // Guard baseline refresh — factory form (live seams per invocation). onSettled
+    // replays the repo's coalesced follow-up refresh once the key frees.
+    {
+      type: GUARD_BASELINE_TASK,
+      define: () =>
         guardBaselineJob({
           pipeline: defaultGuardBaselinePipeline,
           onSettled: deps.onGuardBaselineSettled,
         }),
-      ),
-      // The spec-change checkbox regen: re-scan the head, regenerate scenarios,
-      // and re-gate against the PR's own corpus (the default regate seam).
-      [GUARD_SPEC_REGEN_TASK]: registerJob(rt, () =>
-        guardSpecRegenJob({ db, headRegenPipeline: defaultGuardHeadRegenPipeline }),
-      ),
     },
+    // The spec-change checkbox regen: re-scan the head, regenerate scenarios,
+    // and re-gate against the PR's own corpus (the default regate seam).
+    {
+      type: GUARD_SPEC_REGEN_TASK,
+      define: () => guardSpecRegenJob({ db, headRegenPipeline: defaultGuardHeadRegenPipeline }),
+    },
+  ];
+
+  return startWorker({
+    rt: deps.rt,
+    connectionString: deps.connectionString,
+    concurrency: deps.concurrency,
+    tasks,
   });
-  log.info('[ee-jobs] worker runner started');
-  return runner;
 }

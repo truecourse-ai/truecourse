@@ -6,13 +6,13 @@
  *
  * Every refusal the start route can give has a remedy, and the toast is where
  * the remedy is named: no provider sends the user to Models, a failed provider
- * probe quotes the provider, and a repository already scanning simply says so.
+ * probe quotes the provider, and a repository already working simply says so.
  * Nothing here throws — a surface that offers the button never has to handle
  * the answer.
  *
- * A start request stays open for the whole run, so `pending` is not a progress
- * indicator: the run appears in Activity within seconds of the click and the
- * live stream takes over from there.
+ * The route only ENQUEUES, so `pending` covers the request and nothing more:
+ * the run appears in Activity within seconds of the click and the live stream
+ * takes over from there.
  */
 
 import { useCallback, useMemo, useRef, useState } from 'react';
@@ -65,7 +65,7 @@ export function useRunTrigger(repoId: string): RunStarter {
               toast.error(`Provider check failed: ${outcome.message}`);
               return;
             case 'busy':
-              toast.error('A scan is already running');
+              toast.error('A run is already in progress');
               return;
             default:
               toast.error('Could not start the run', { description: outcome.message });

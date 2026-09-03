@@ -377,7 +377,7 @@ function surfaceLines(
     const result = resultsByScenario.get(s.id);
     // A committed scenario passed birth by construction; a run outcome supersedes it.
     const state = result ? `${result.outcome} ${MARK[result.outcome]}` : "birth ✓";
-    const drift = result?.journeyDrifted ? " · journey drifted" : "";
+    const drift = result?.interfaceDrifted ? " · interface drifted" : "";
     return `${s.surface} → ${s.id} (${state}${drift})`;
   });
   for (const gap of entry?.gaps ?? []) lines.push(`${gap.surface} → ${gapChipLabel(gap)}`);
@@ -442,7 +442,11 @@ function journeyIds(repoRoot: string, entry: GuardManifestFlow | undefined): str
   const ids: string[] = [];
   for (const scenario of loadScenarios(repoRoot).scenarios) {
     if (!wanted.has(scenario.id)) continue;
-    for (const id of scenario.journey?.path ?? []) if (!ids.includes(id)) ids.push(id);
+    // Either spelling: a scenario committed before the interface rename carries
+    // its grounding ref as `journey`.
+    for (const id of (scenario.interface ?? scenario.journey)?.path ?? []) {
+      if (!ids.includes(id)) ids.push(id);
+    }
   }
   return ids;
 }

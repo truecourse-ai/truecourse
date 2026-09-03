@@ -51,6 +51,20 @@ export const ExternalsLocalFileSchema = z.record(
         )
         .optional(),
       env: z.record(z.string().min(1), z.string()).optional(),
+      /**
+       * The authorization token this machine reaches the service with. It lives HERE
+       * and nowhere else: a token is a secret, so the committed declaration must
+       * never carry one, and it is outside every fingerprint, so rotating it
+       * re-authors nothing.
+       */
+      token: z.string().optional(),
+      /**
+       * Extra request headers this machine reaches the service with (a tenant id, an
+       * account header, a second key). Local for the same reason `token` is: the
+       * declaration says WHICH services exist, this file says how one developer's
+       * account is addressed.
+       */
+      headers: z.record(z.string().min(1), z.string()).optional(),
     })
     .strict(),
 )
@@ -72,6 +86,15 @@ export interface MergedExternal {
   endpoints: MergedExternalEndpoint[]
   /** Declared env vars, in declaration order, with the local overlay applied. */
   env: MergedExternalEnv[]
+  /**
+   * The overlay's authorization token, when it carries one. Overlay-only by
+   * construction (the declaration cannot hold a secret), so there is nothing to
+   * merge — it is passed through so a surface can say an account is registered
+   * without ever reading the file itself.
+   */
+  token?: string
+  /** The overlay's extra request headers, name → value. Overlay-only, like `token`. */
+  headers: Record<string, string>
   /** Overlay keys under this service that the recipe never declared (ignored). */
   undeclaredLocalEnv: string[]
 }
@@ -215,6 +238,8 @@ export function mergeExternals(
         ...(source.valueFromEnv !== undefined ? { valueFromEnv: source.valueFromEnv } : {}),
         ...(overlay?.env?.[name] !== undefined ? { localValue: overlay.env[name] } : {}),
       })),
+      ...(overlay?.token !== undefined ? { token: overlay.token } : {}),
+      headers: { ...(overlay?.headers ?? {}) },
       undeclaredLocalEnv: [
         ...Object.keys(overlay?.env ?? {}).filter((name) => !declaredNames.has(name)),
         ...Object.keys(overlay?.endpoints ?? {}).filter((name) => !declaredEndpointNames.has(name)),

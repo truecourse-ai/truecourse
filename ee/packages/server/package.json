@@ -24,6 +24,7 @@
     "@truecourse/ee-github-app": "workspace:*",
     "@truecourse/ee-llm": "workspace:*",
     "@truecourse/ee-storage": "workspace:*",
+    "@truecourse/jobs": "workspace:*",
     "@truecourse/llm": "workspace:*",
     "@truecourse/shared": "workspace:*",
     "@workos-inc/node": "^7.0.0",

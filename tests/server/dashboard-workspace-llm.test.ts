@@ -9,6 +9,9 @@
  * machine-readable) and a provider that won't answer (502, with the failure on
  * the run record so Activity can show it).
  *
+ * The spec scan runs on the job queue, so its ROUTE only pre-flights the
+ * provider and enqueues (202); the pipeline half is driven directly here.
+ *
  * The engines are mocked — nothing here reaches a model.
  */
 
@@ -70,10 +73,11 @@ import { analyzeInProcess } from '@truecourse/core/commands/analyze-in-process';
 import { createLLMProvider } from '@truecourse/core/services/llm/provider';
 import { getFlowFromLatest, enrichFlowWithLLM } from '@truecourse/core/services/flow';
 import { createSessionRun, listSessionRuns } from '@truecourse/core/lib/sessions-store';
+import { runStoredSpecScan } from '../../apps/dashboard/server/src/services/spec-scan.service';
 import type { SessionDriver } from '@truecourse/agent-loop';
 import type { LlmTransport } from '@truecourse/shared/llm';
 import type { GlobalApiLlmConfig } from '@truecourse/core/config/global-config';
-import { createTestApp, TEST_ORG } from '../helpers/test-app';
+import { createTestApp, stubJobs, TEST_ORG, type StubJobs } from '../helpers/test-app';
 import {
   resetWorkspaceLlmBackend,
   resetWorkspaceLlmConfigStore,
@@ -105,6 +109,7 @@ function configStore(configs: Record<string, GlobalApiLlmConfig>): WorkspaceLlmC
 let app: Express;
 let fixture: TestFixture;
 let probe: ReturnType<typeof vi.fn>;
+let jobs: StubJobs;
 
 beforeEach(async () => {
   probe = vi.fn(async () => {});
@@ -124,7 +129,8 @@ beforeEach(async () => {
 
   fixture = await setupTestFixture();
   execFileSync('git', ['init'], { cwd: fixture.repoPath, stdio: 'ignore' });
-  app = createTestApp();
+  jobs = stubJobs();
+  app = createTestApp({ jobs: jobs.mount });
   // After createTestApp — it installs the permissive default this suite replaces.
   setWorkspaceLlmConfigStore(configStore({ [TEST_ORG]: WORKSPACE_CONFIG }));
   setWorkspaceLlmBackend({
@@ -145,7 +151,7 @@ const url = (suffix: string) => `/api/repos/${fixture.project.slug}/${suffix}`;
 const start = (suffix: string) => {
   switch (suffix) {
     case 'spec scan':
-      return request(app).get(url('spec/corpus/scan'));
+      return request(app).post(url('spec/corpus/scan'));
     case 'guard generate':
       return request(app).post(url('guard/generate')).send({ confirmed: true });
     case 'analyze':
@@ -172,7 +178,7 @@ describe('a workspace with no provider configured', () => {
     await start('spec scan').expect(409);
     await start('guard generate').expect(409);
     expect(probe).not.toHaveBeenCalled();
-    expect(vi.mocked(curateInProcess)).not.toHaveBeenCalled();
+    expect(jobs.scans).toEqual([]);
     expect(vi.mocked(guardGenerateInProcess)).not.toHaveBeenCalled();
     expect(listSessionRuns(fixture.repoPath, 'spec-scan')).toHaveLength(0);
   });
@@ -186,7 +192,7 @@ describe('a provider that will not answer', () => {
   it.each(ENTRIES)('answers %s with the probe failure, before any spend', async (entry) => {
     const res = await start(entry).expect(502);
     expect(res.body).toMatchObject({ error: 'llm-probe-failed', message: '401 invalid x-api-key' });
-    expect(vi.mocked(curateInProcess)).not.toHaveBeenCalled();
+    expect(jobs.scans).toEqual([]);
     expect(vi.mocked(guardGenerateInProcess)).not.toHaveBeenCalled();
     expect(vi.mocked(analyzeInProcess)).not.toHaveBeenCalled();
     expect(vi.mocked(enrichFlowWithLLM)).not.toHaveBeenCalled();
@@ -205,12 +211,29 @@ describe('a provider that will not answer', () => {
 });
 
 describe('a configured, answering provider', () => {
-  it('runs the spec scan on the driver built from the workspace config', async () => {
-    await start('spec scan').expect(200);
+  // The scan runs on the queue, so the route's job is the PRE-FLIGHT: prove the
+  // workspace's provider, then hand the repository to the runner.
+  it('proves the workspace provider, then queues the scan', async () => {
+    const res = await start('spec scan').expect(202);
 
     expect(probe).toHaveBeenCalledTimes(1);
     expect(probe.mock.calls[0][0]).toEqual(WORKSPACE_CONFIG);
-    expect(vi.mocked(curateInProcess).mock.calls[0][1]).toMatchObject({ driver });
+    expect(res.body).toEqual({ jobId: 'job_test' });
+    expect(jobs.scans).toEqual([
+      {
+        repoId: fixture.project.slug,
+        repoFullName: fixture.repoPath,
+        workspaceOrgId: TEST_ORG,
+        source: 'manual',
+      },
+    ]);
+  });
+
+  it('answers 409 when the repository is already working', async () => {
+    jobs.answer = { status: 'busy' };
+
+    const res = await start('spec scan').expect(409);
+    expect(res.body.error).toMatch(/already running/i);
   });
 
   it('runs guard generate on the transport built from the workspace config', async () => {
@@ -232,6 +255,9 @@ describe('a configured, answering provider', () => {
     expect(vi.mocked(enrichFlowWithLLM)).toHaveBeenCalledWith(fixture.repoPath, 'f1', transport);
   });
 
+  // The pipeline itself, not the route: whatever kills a scan lands ON the run
+  // record before it is rethrown, because Activity shows runs, not this
+  // process's log.
   it('records WHY a scan crashed on the run it created', async () => {
     vi.mocked(curateInProcess).mockImplementationOnce(async (_repoRoot, options) => {
       const run = createSessionRun(fixture.repoPath, { command: 'spec-scan', gitRef: 'main' });
@@ -240,12 +266,20 @@ describe('a configured, answering provider', () => {
       throw new Error('the clone went missing');
     });
 
-    await start('spec scan').expect(500);
+    await expect(runStoredSpecScan(fixture.repoPath, { driver })).rejects.toThrow(
+      'the clone went missing',
+    );
 
     expect(listSessionRuns(fixture.repoPath, 'spec-scan')[0]).toMatchObject({
       status: 'failed',
       error: { message: 'the clone went missing' },
     });
+  });
+
+  it('runs the spec scan on the driver built from the workspace config', async () => {
+    await runStoredSpecScan(fixture.repoPath, { driver, transportMode: 'api' });
+
+    expect(vi.mocked(curateInProcess).mock.calls[0][1]).toMatchObject({ driver });
   });
 
   it('leaves analyze alone when LLM rules are off — no provider is needed', async () => {
@@ -258,21 +292,48 @@ describe('a configured, answering provider', () => {
   });
 });
 
-describe('the manual scan’s estimate gate', () => {
-  it('asks for confirmation by default', async () => {
-    await start('spec scan').expect(200);
+describe("operator mode — the server's own Claude Code", () => {
+  const claudeDriver = { attribution: { provider: 'claude-code', model: 'opus' } } as unknown as SessionDriver;
+  const claudeTransport = (async () => '{}') as LlmTransport;
+  let claudeProbe: ReturnType<typeof vi.fn>;
 
-    const options = vi.mocked(curateInProcess).mock.calls[0][1];
-    expect(options?.onLlmEstimate).toBeTypeOf('function');
-    expect(options?.onEstimatePhase).toBeDefined();
+  beforeEach(() => {
+    vi.stubEnv('TRUECOURSE_LLM_TRANSPORT', 'claude-code');
+    claudeProbe = vi.fn(async () => {});
+    // No workspace has a provider — operator mode must never need one.
+    setWorkspaceLlmConfigStore(configStore({}));
+    setWorkspaceLlmBackend({
+      probe: probe as never,
+      claudeCode: { probe: claudeProbe as never, driver: () => claudeDriver, transport: () => claudeTransport },
+    });
   });
 
-  it('skips it for ?confirm=none — the caller has already said yes', async () => {
-    await request(app).get(`${url('spec/corpus/scan')}?confirm=none`).expect(200);
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
 
-    const options = vi.mocked(curateInProcess).mock.calls[0][1];
-    expect(options?.onLlmEstimate).toBeUndefined();
-    expect(options?.onEstimatePhase).toBeUndefined();
-    expect(options).toMatchObject({ driver });
+  it('queues the spec scan on the operator’s login, with no workspace provider', async () => {
+    await start('spec scan').expect(202);
+
+    expect(claudeProbe).toHaveBeenCalledTimes(1);
+    expect(probe).not.toHaveBeenCalled();
+    expect(jobs.scans).toHaveLength(1);
+  });
+
+  it('runs guard generate on `claude -p`, in claude-code mode so the tier aliases stay', async () => {
+    await start('guard generate').expect(200);
+
+    expect(vi.mocked(guardGenerateInProcess).mock.calls[0][1]).toMatchObject({
+      transport: claudeTransport,
+      transportMode: 'claude-code',
+    });
+  });
+
+  it('answers a logged-out `claude` with the probe failure, before any spend', async () => {
+    claudeProbe.mockRejectedValue(new Error('Not logged in · run claude login'));
+
+    const res = await start('spec scan').expect(502);
+    expect(res.body).toMatchObject({ error: 'llm-probe-failed', message: 'Not logged in · run claude login' });
+    expect(jobs.scans).toEqual([]);
   });
 });

@@ -164,6 +164,21 @@ export interface GuardStore {
   /** One scenario YAML's content by its repo-relative path, or `null`. */
   readScenarioFile(repoKey: string, relPath: string, commitSha?: string): Promise<string | null>;
 
+  // --- Setup bundle ---------------------------------------------------------
+  // What `guard setup` leaves behind (the settle spine, findings, recipe,
+  // dependency catalog, seed script) as `{ repoRelativePath: content }`. Keyed
+  // like the scenario corpus: saves per `RepoRef` (the hosted store rejects an
+  // empty commit), commit-optional reads fall back to the newest stored bundle.
+  // OSS needs neither side — the files ARE the working tree.
+  /** Snapshot setup's files for `ref` (file impl: no-op). */
+  saveGuardSetupBundle(ref: RepoRef, files: Record<string, string>): Promise<void>;
+  /** That commit's bundle, else the newest stored one; `null` when there is none
+   *  (always `null` for the file impl). */
+  loadGuardSetupBundle(
+    repoKey: string,
+    commitSha?: string,
+  ): Promise<Record<string, string> | null>;
+
   // --- Decisions ------------------------------------------------------------
   // `scope` (optional) selects a PR-scoped overlay in EE (the `_pr/<n>` sentinel);
   // omitted → the repo-scoped decisions file. The file store has no overlay
@@ -348,6 +363,15 @@ class FileGuardStore implements GuardStore {
     return fs.readFileSync(full, 'utf-8');
   }
 
+  async saveGuardSetupBundle(): Promise<void> {
+    // No-op: setup wrote these files into the working tree, which is the store.
+  }
+
+  async loadGuardSetupBundle(): Promise<Record<string, string> | null> {
+    // Nothing to materialize — the tree already holds whatever setup left.
+    return null;
+  }
+
   async readGuardDecisions(repoPath: string, scope?: string): Promise<GuardDecisions> {
     if (isPrScope(scope)) throw new Error(PR_DECISIONS_FILE_ERROR);
     return fileReadGuardDecisions(repoPath);
@@ -454,6 +478,15 @@ export const readScenarioFile = (
   relPath: string,
   commitSha?: string,
 ): Promise<string | null> => active.readScenarioFile(repoKey, relPath, commitSha);
+
+export const saveGuardSetupBundle = (
+  ref: RepoRef,
+  files: Record<string, string>,
+): Promise<void> => active.saveGuardSetupBundle(ref, files);
+export const loadGuardSetupBundle = (
+  repoKey: string,
+  commitSha?: string,
+): Promise<Record<string, string> | null> => active.loadGuardSetupBundle(repoKey, commitSha);
 
 export const readGuardDecisions = (repoPath: string, scope?: string): Promise<GuardDecisions> =>
   active.readGuardDecisions(repoPath, scope);

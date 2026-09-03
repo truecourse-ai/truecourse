@@ -52,6 +52,7 @@ describe('deriveGuardCompose', () => {
     expect(derived.plan.services).toEqual({
       up: 'docker compose -f docker-compose.guard.yml up -d --wait',
       down: 'docker compose -f docker-compose.guard.yml down',
+      reset: 'docker compose -f docker-compose.guard.yml down -v',
     })
     const db = services(derived.plan.content).postgres
     expect(db.image).toBe('postgres:16-alpine')
@@ -248,7 +249,11 @@ describe('proposeRecipe — when a datastore is generated', () => {
     if (!out.ok) return
     expect(out.compose).toBeUndefined()
     // The repo's own file, run the repo's own way — no `-f` override.
-    expect(out.recipe.api?.services).toEqual({ up: 'docker compose up -d --wait', down: 'docker compose down' })
+    expect(out.recipe.api?.services).toEqual({
+      up: 'docker compose up -d --wait',
+      down: 'docker compose down',
+      reset: 'docker compose down -v',
+    })
     expect(out.recipe.api?.env).toBeUndefined()
   })
 

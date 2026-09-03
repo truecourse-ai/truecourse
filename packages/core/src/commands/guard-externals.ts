@@ -19,13 +19,16 @@
  *      byte-stable — the recipe is parsed, patched, and re-serialized in its own
  *      2-space format, and a write that changes nothing touches no file.
  *
- * Working-tree only, by design: it writes files inside the repo. A hosted store
- * has no working tree, so the routes gate on `guardsMaterializeInPlace()`.
+ * Written against a working tree: it reads and writes files inside the repo. The
+ * externals routes themselves still gate on `guardsMaterializeInPlace()`; the
+ * dependencies surface, which composes this view, serves a hosted repo over a
+ * scratch tree of its stored state with an empty host env (`env` option).
  */
 
 import fs from 'node:fs';
 import {
   RecipeSchema,
+  ExternalsLocalFileSchema,
   loadExternalsLocal,
   mergeExternals,
   resolveExternal,
@@ -34,16 +37,30 @@ import {
   computeRecipeFingerprint,
   readGuardResult,
   readGuardSetup,
+  readGuardDecisions,
+  resolveDependencies,
+  loadDependencyCatalog,
+  loadDependenciesLocal,
+  dependenciesPath,
+  dependenciesLocalPath,
   ExternalsError,
   type ExternalRequirement,
   type ExternalState,
   type ExternalsLocalFile,
   type RecipeApiExternal,
+  type ResolvedDependency,
 } from '@truecourse/guard-runner';
 import {
   parseBlockedOnCapabilities,
+  isSecretHeaderName,
   MISSING_DATA_NOUN,
+  GuardDependenciesFileSchema,
+  GuardDependenciesLocalSchema,
   type BaseUrlEnv,
+  type GuardDependenciesFile,
+  type GuardDependenciesLocal,
+  type GuardDependencyEntry,
+  type GuardDependencyEnvVar,
   type GuardExternalSetupState,
   type GuardExternalSetupIndex,
   type DetectedExternalService,
@@ -55,6 +72,29 @@ import { atomicWriteText } from '../lib/atomic-write.js';
 // ---------------------------------------------------------------------------
 // The read view.
 // ---------------------------------------------------------------------------
+
+/**
+ * One registered request header, as every surface shows it. A header whose NAME
+ * reads as a credential ({@link isSecretHeaderName}) travels without its value —
+ * the same rule the env half follows, so no surface can echo a stored secret back
+ * even by accident.
+ */
+export interface GuardExternalHeaderView {
+  name: string
+  /** The stored value; absent when the name reads as a secret. */
+  value?: string
+  secret: boolean
+}
+
+/** The registered headers as view rows: name-sorted, secret values withheld. */
+function headerViews(headers: Record<string, string> | undefined): GuardExternalHeaderView[] {
+  return Object.entries(headers ?? {})
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([name, value]) => {
+      const secret = isSecretHeaderName(name);
+      return { name, secret, ...(secret ? {} : { value }) };
+    });
+}
 
 /** One service as every UI shows it: detection ∪ declaration ∪ resolution. */
 export interface GuardExternalServiceView {
@@ -93,8 +133,33 @@ export interface GuardExternalServiceView {
   endpoints: Record<string, string>;
   mode?: 'sandbox' | 'real';
   description?: string;
+  /**
+   * True when an authorization token is registered for this service on this
+   * machine. The token itself never travels — this is the whole of what a surface
+   * may know about it.
+   */
+  tokenSet: boolean;
+  /** The extra request headers registered locally; a secret-named one has no value. */
+  headers: GuardExternalHeaderView[];
   /** Per-requirement resolution + reasons; empty for an undeclared service. */
   requirements: ExternalRequirement[];
+  /**
+   * Present when this service is a SUPPLIED entry of the dependency catalog — the
+   * umbrella every class of user-registered dependency now lives under. It carries
+   * what the catalog knows and the recipe cannot: the rolled-up requirement an
+   * instance must satisfy, and which flow contributed each part of it, so a reader
+   * sees why every expectation exists (and a dismissed flow's expectation is gone).
+   */
+  catalog?: {
+    /** The catalog entry name (usually the service name). */
+    dependency: string;
+    /** The rolled-up requirement, one line. */
+    requirement: string;
+    /** The surviving per-flow needs behind that line. */
+    needs: { flowId: string; need: string }[];
+    /** The human sentence saying when this dependency applies; absent ⇒ always. */
+    when?: string;
+  };
   /** Flows the last generate settled `blocked-on` naming THIS service (0 if none). */
   blockedFlows: number;
   /**
@@ -116,8 +181,10 @@ export interface GuardExternalsView {
   recipeValid: boolean;
   /** Why the recipe (or the overlay) could not be read; null when both are fine. */
   invalidReason: string | null;
-  /** True when the recipe exists, parses, and carries an `api` block (writes need one). */
-  hasApiBlock: boolean;
+  /** Absolute path of the committed dependency catalog — shown whether or not it exists. */
+  catalogPath: string;
+  /** Absolute path of the gitignored instance overlay. */
+  catalogLocalPath: string;
   /**
    * True when detection has run — `guard setup` recorded a snapshot, or (for a repo
    * that predates setup) a `guard generate` report exists. False means "no detection
@@ -131,23 +198,42 @@ export interface GuardExternalsView {
   unknownLocalServices: string[];
 }
 
+export interface GuardExternalsReadOptions {
+  /**
+   * The host environment a declared variable may resolve from. Defaults to this
+   * process's; a hosted read passes an EMPTY one, so the server's own variables
+   * can never read as a registered account.
+   */
+  env?: NodeJS.ProcessEnv;
+}
+
 /**
  * The joined externals view for `repoRoot`. Every input is optional: no recipe, no
  * generate report, and no overlay all read as "nothing configured yet" rather than
  * an error — this is the page a user opens BEFORE any of them exist. Only a file
  * that exists and is broken produces an `invalidReason`.
  */
-export function readGuardExternalsView(repoRoot: string): GuardExternalsView {
+export function readGuardExternalsView(
+  repoRoot: string,
+  opts: GuardExternalsReadOptions = {},
+): GuardExternalsView {
   const recipeFile = recipePath(repoRoot);
   const localFile = externalsLocalPath(repoRoot);
+  // The dependency catalog is the UMBRELLA over user-registered dependencies, and
+  // external services are one class of them. It is read FIRST and unconditionally,
+  // because a catalog-declared service needs no `api` block to exist — which is the
+  // whole point of decoupling external services from the api driver.
+  const catalog = readCatalogServices(repoRoot);
   const base = {
     recipePath: recipeFile,
     localPath: localFile,
+    catalogPath: catalog.catalogPath,
+    catalogLocalPath: catalog.localPath,
     unknownLocalServices: [] as string[],
   };
 
   // DETECTION comes from `guard setup`: it is a deterministic
-  // `mapJourneys` pass setup pays for before the first generate, so the page is
+  // `mapInterfaces` pass setup pays for before the first generate, so the page is
   // populated from the start. A repo whose last setup predates this file — or that
   // only ever ran a generate — falls back to the generate report's own list, which
   // is where detection used to live. BLOCKED FLOWS stay generate's: only authoring
@@ -160,13 +246,18 @@ export function readGuardExternalsView(repoRoot: string): GuardExternalsView {
 
   const recipe = readRecipeForView(recipeFile);
   if ('reason' in recipe) {
+    // A broken recipe blanks the RECIPE half only: catalog-declared services stand
+    // on their own file and stay readable, which is what makes them independent.
+    const catalogNames = new Set(catalog.services.map((s) => s.service));
     return {
       ...base,
       recipeValid: false,
       invalidReason: recipe.reason,
-      hasApiBlock: false,
       detectionAvailable,
-      services: detectedOnlyViews(detected, blockedFlows, new Set()),
+      services: [
+        ...catalog.services.map((s) => withDetection(s, detected, blockedFlows)),
+        ...detectedOnlyViews(detected, blockedFlows, catalogNames),
+      ],
     };
   }
 
@@ -184,7 +275,7 @@ export function readGuardExternalsView(repoRoot: string): GuardExternalsView {
   const merged = mergeExternals(declared, local);
   const detectedByName = new Map(detected.map((d) => [d.service, d]));
   const services: GuardExternalServiceView[] = merged.map((m) => {
-    const resolved = resolveExternal(m, process.env);
+    const resolved = resolveExternal(m, opts.env ?? process.env);
     const hit = detectedByName.get(m.service);
     return {
       service: m.service,
@@ -202,6 +293,8 @@ export function readGuardExternalsView(repoRoot: string): GuardExternalsView {
       endpoints: Object.fromEntries(m.endpoints.map((e) => [e.envVar, e.url])),
       ...(resolved.mode ? { mode: resolved.mode } : {}),
       ...(resolved.description ? { description: resolved.description } : {}),
+      tokenSet: m.token !== undefined && m.token !== '',
+      headers: headerViews(m.headers),
       requirements: resolved.requirements,
       blockedFlows: blockedFlows.get(m.service) ?? 0,
       evidence: hit?.evidence.map((e) => ({ ...e })) ?? [],
@@ -209,17 +302,123 @@ export function readGuardExternalsView(repoRoot: string): GuardExternalsView {
     };
   });
   const declaredNames = new Set(services.map((s) => s.service));
+  // A service the recipe declares wins over its catalog twin: the recipe carries the
+  // proxy-shaping detail (endpoints, mode) the catalog has no field for. The catalog
+  // rows the recipe does NOT declare are the ones the api-block decoupling exists
+  // for, and they list exactly like a declared one.
+  const catalogOnly = catalog.services.filter((s) => !declaredNames.has(s.service));
+  const known = new Set([...declaredNames, ...catalogOnly.map((s) => s.service)]);
 
   return {
     ...base,
     recipeValid: recipe.recipe !== null,
     invalidReason: overlayReason,
-    hasApiBlock: recipe.recipe?.api !== undefined,
     detectionAvailable,
-    services: [...services, ...detectedOnlyViews(detected, blockedFlows, declaredNames)],
+    services: [
+      ...services,
+      ...catalogOnly.map((s) => withDetection(s, detected, blockedFlows)),
+      ...detectedOnlyViews(detected, blockedFlows, known),
+    ],
     unknownLocalServices: Object.keys(local)
-      .filter((name) => !declaredNames.has(name))
+      .filter((name) => !known.has(name))
       .sort(),
+  };
+}
+
+/**
+ * The catalog's SUPPLIED entries that name an external service, as view rows — ONE
+ * per named service, since an entry may stand for several (a provider-API credential
+ * entry stands for every provider it can reach the model through) and this surface
+ * is keyed by service identity.
+ *
+ * They need no `api` block and no recipe at all: the catalog declares WHAT the
+ * program depends on and the gitignored overlay holds the instance, which is the
+ * same committed/local split `api.externals` uses one class narrower. A broken
+ * catalog file degrades to no rows rather than blanking the page — the recipe half
+ * is still true.
+ */
+function readCatalogServices(repoRoot: string): {
+  services: GuardExternalServiceView[];
+  catalogPath: string;
+  localPath: string;
+} {
+  let resolved;
+  // The instance overlay, read for the TRANSPORT half a resolution has no field
+  // for: the token and the extra headers this machine reaches the service with.
+  let local: GuardDependenciesLocal = {};
+  try {
+    resolved = resolveDependencies(repoRoot, {
+      dismissedFlows: new Set(readGuardDecisions(repoRoot).dismissedFlows.map((f) => f.flowId)),
+    });
+    local = loadDependenciesLocal(repoRoot);
+  } catch {
+    return {
+      services: [],
+      catalogPath: dependenciesPath(repoRoot),
+      localPath: dependenciesLocalPath(repoRoot),
+    };
+  }
+  // One view per service identity: the first entry claiming a name owns it, so a
+  // catalog that names the same service twice cannot list it twice either.
+  const claimed = new Set<string>();
+  const named: { dependency: ResolvedDependency; service: string }[] = [];
+  for (const dependency of resolved.dependencies) {
+    if (dependency.state === null) continue;
+    for (const service of dependency.entry.services ?? []) {
+      if (claimed.has(service)) continue;
+      claimed.add(service);
+      named.push({ dependency, service });
+    }
+  }
+  const services = named.map(({ dependency: d, service }) => ({
+    service,
+    detected: false,
+    declared: true,
+    state: d.state as ExternalState,
+    baseUrlEnv: null,
+    baseUrlEnvSource: null,
+    baseUrlEnvs: [],
+    baseUrl: null,
+    endpoints: {},
+    tokenSet: (local[d.name]?.token ?? '') !== '',
+    headers: headerViews(local[d.name]?.headers),
+    ...(d.entry.summary ? { description: d.entry.summary } : {}),
+    // The catalog's requirements ARE the env vars the registration declares, so
+    // they render in the same rows a recipe-declared service's do.
+    requirements: d.requirements.map((r) => ({
+      kind: 'env' as const,
+      envVar: r.field,
+      resolved: r.resolved,
+      ...(r.reason ? { reason: r.reason } : {}),
+      secret: r.secret,
+    })),
+    blockedFlows: 0,
+    evidence: [],
+    undeclaredLocalEnv: [],
+    catalog: {
+      dependency: d.name,
+      requirement: d.requirement,
+      needs: d.needs.map((n) => ({ ...n })),
+      ...(d.entry.condition ? { when: d.entry.condition.sentence } : {}),
+    },
+  }));
+  return { services, catalogPath: resolved.catalogPath, localPath: resolved.localPath };
+}
+
+/** Fold detection's category/evidence onto a catalog row that names the same service. */
+function withDetection(
+  row: GuardExternalServiceView,
+  detected: readonly DetectedExternalService[],
+  blockedFlows: ReadonlyMap<string, number>,
+): GuardExternalServiceView {
+  const hit = detected.find((d) => d.service === row.service);
+  return {
+    ...row,
+    detected: hit !== undefined,
+    ...(hit?.category ? { category: hit.category } : {}),
+    ...(hit ? { detectedVia: hit.source ?? 'sdk' } : {}),
+    ...(hit ? { evidence: hit.evidence.map((e) => ({ ...e })) } : {}),
+    blockedFlows: blockedFlows.get(row.service) ?? 0,
   };
 }
 
@@ -337,6 +536,10 @@ function detectedOnlyViews(
       baseUrlEnvs: d.baseUrlEnvs?.map((e) => ({ ...e })) ?? [],
       baseUrl: null,
       endpoints: {},
+      // An undeclared service configures nothing, so there is nothing registered
+      // against it either — the form is how that changes.
+      tokenSet: false,
+      headers: [],
       requirements: [],
       blockedFlows: blockedFlows.get(d.service) ?? 0,
       evidence: d.evidence.map((e) => ({ ...e })),
@@ -427,6 +630,19 @@ export interface GuardExternalPatch {
   description?: string;
   /** Env vars the app needs for this service; a `null` entry drops one. */
   env?: Record<string, GuardExternalEnvPatch>;
+  /**
+   * The authorization token this machine reaches the service with; `null` (or
+   * blank) clears it. Always stored in the gitignored overlay — a token is a
+   * secret, and the caller does not get to choose otherwise.
+   */
+  token?: string | null;
+  /**
+   * Extra request headers this machine reaches the service with; a `null` entry
+   * drops one, and a header the caller does not name keeps what it had. Stored in
+   * the overlay beside the token: a tenant id or a second key is one developer's
+   * account detail, not a declaration teammates inherit.
+   */
+  headers?: Record<string, string | null>;
 }
 
 /**
@@ -471,9 +687,13 @@ export function writeGuardExternals(
   }
   const api = doc.api as Record<string, unknown> | undefined;
   if (!api || typeof api !== 'object') {
-    throw new GuardExternalsWriteError(
-      'recipe.json has no `api` block — external services configure the api driver, so the recipe needs one first.',
-    );
+    // No `api` block, and that is FINE: an external service is a dependency of the
+    // program under test, not a feature of the api driver, so it is declared in the
+    // dependency catalog and configured from the gitignored instance overlay. The
+    // recipe is not touched at all on this path — a cli-only repo has no api block
+    // to grow one, and requiring it was the coupling that made external services
+    // unconfigurable for every repo without an HTTP server.
+    return writeCatalogExternals(repoRoot, patch);
   }
 
   const externals = { ...((api.externals as Record<string, RecipeApiExternal>) ?? {}) };
@@ -506,8 +726,158 @@ export function writeGuardExternals(
     );
   }
 
+  // The overlay is validated for the same reason the recipe is: a write that would
+  // make a file unloadable (a header name that is not an HTTP token) must be
+  // refused HERE, never discovered by the next read as a broken-file banner.
+  assertValidOverlay(ExternalsLocalFileSchema.safeParse(local), 'externals.local.json');
+
   writeIfChanged(recipeFile, serializeLike(rawRecipe, doc));
   writeLocalIfChanged(externalsLocalPath(repoRoot), local);
+  return readGuardExternalsView(repoRoot);
+}
+
+/**
+ * The api-block-free write: an external service becomes a SUPPLIED entry of the
+ * dependency catalog, and its values go to the catalog's gitignored instance
+ * overlay. Same split, same reasons — the declaration is committed so the team
+ * shares it and it enters the recipe fingerprint; the base URL and the keys never
+ * reach git.
+ *
+ * The registration is `env`-shaped because that is what an external account IS on
+ * this path: the variables the program reads the origin and the credentials from.
+ * The base-URL variable is declared non-secret (an origin is not a secret and every
+ * surface shows it); every other variable is a secret by default, exactly as the
+ * recipe path treats them.
+ */
+function writeCatalogExternals(
+  repoRoot: string,
+  patch: GuardExternalsWrite,
+): GuardExternalsView {
+  const catalogFile = dependenciesPath(repoRoot);
+  let catalog: GuardDependenciesFile;
+  let local: GuardDependenciesLocal;
+  try {
+    catalog = { dependencies: [...loadDependencyCatalog(repoRoot).dependencies] };
+    local = { ...loadDependenciesLocal(repoRoot) };
+  } catch (e) {
+    throw new GuardExternalsWriteError(
+      `${e instanceof Error ? e.message : String(e)} — fix or delete the file before saving.`,
+    );
+  }
+
+  for (const [service, entry] of Object.entries(patch.externals)) {
+    const index = catalog.dependencies.findIndex((d) => d.services?.includes(service));
+    // An UMBRELLA entry — one class of starting state standing for several services —
+    // is not a declaration this writer owns: rewriting it into a single-service
+    // external would rename the entry and throw away the registration every other
+    // service it covers is registered through. It is edited where it lives.
+    const prior = index === -1 ? undefined : catalog.dependencies[index];
+    if (prior && (prior.services?.length ?? 0) > 1) {
+      throw new GuardExternalsWriteError(
+        `"${service}" is one of the services the "${prior.name}" dependency stands for — register it there, not as an external of its own.`,
+      );
+    }
+    // A MATCHED entry keeps its identity: its name (which scenarios' `needs` and the
+    // overlay's row key both reference) and every var it already declares. The patch
+    // only ever layers over it — replacing the entry wholesale would rename it,
+    // orphan its registered secrets, and drop declared vars the patch never named.
+    const entryName = prior?.name ?? service;
+    if (entry === null) {
+      if (index !== -1) catalog.dependencies.splice(index, 1);
+      delete local[entryName];
+      continue;
+    }
+    const priorVars: GuardDependencyEnvVar[] =
+      prior?.registration?.kind === 'env' ? prior.registration.vars : [];
+    const removed = new Set(
+      Object.entries(entry.env ?? {})
+        .filter(([, source]) => source === null)
+        .map(([name]) => name),
+    );
+    const vars: GuardDependencyEnvVar[] = priorVars.filter((v) => !removed.has(v.name));
+    if (!vars.some((v) => v.name === entry.baseUrlEnv)) {
+      vars.unshift({
+        name: entry.baseUrlEnv,
+        description: `the base URL the program reads ${service} from`,
+        secret: false,
+      });
+    }
+    const values: Record<string, string> = { ...(local[entryName]?.env ?? {}) };
+    if (entry.baseUrl !== undefined) values[entry.baseUrlEnv] = entry.baseUrl;
+    for (const [name, source] of Object.entries(entry.env ?? {})) {
+      if (source === null) {
+        delete values[name];
+        continue;
+      }
+      if (!vars.some((v) => v.name === name)) {
+        vars.push({ name, description: `the ${service} credential the program reads`, secret: true });
+      }
+      // `valueFromEnv` has no catalog analogue on purpose: the overlay IS the value
+      // store (it is gitignored), so a value is stored, not pointed at.
+      values[name] = 'value' in source ? source.value : (process.env[source.valueFromEnv] ?? '');
+    }
+    const declaration: GuardDependencyEntry = {
+      name: entryName,
+      class: 'supplied',
+      services: prior?.services ?? [service],
+      summary: entry.description ?? prior?.summary ?? `an account for the ${service} API this repo calls`,
+      // A path/config-dir registration stays what it is — the overlay row carries
+      // the transport values either way, and rewriting the shape would orphan the
+      // registered instance.
+      registration:
+        prior?.registration && prior.registration.kind !== 'env'
+          ? prior.registration
+          : { kind: 'env', vars },
+      needs: prior?.needs ?? [],
+      ...(prior?.condition ? { condition: prior.condition } : {}),
+    };
+    if (index === -1) catalog.dependencies.push(declaration);
+    else catalog.dependencies[index] = declaration;
+
+    // The transport half rides in the same overlay row, merged per field — the
+    // recipe path's rule, one file over.
+    const headers: Record<string, string> = { ...(local[entryName]?.headers ?? {}) };
+    for (const [name, value] of Object.entries(entry.headers ?? {})) {
+      if (value === null || value.trim() === '') delete headers[name];
+      else headers[name] = value;
+    }
+    const token =
+      entry.token === undefined
+        ? local[entryName]?.token
+        : entry.token === null || entry.token.trim() === ''
+          ? undefined
+          : entry.token;
+
+    const row = {
+      ...(Object.keys(values).length > 0 ? { env: values } : {}),
+      ...(token !== undefined ? { token } : {}),
+      ...(Object.keys(headers).length > 0 ? { headers } : {}),
+    };
+    if (Object.keys(row).length > 0) local[entryName] = row;
+    else delete local[entryName];
+  }
+
+  catalog.dependencies.sort((a, b) => a.name.localeCompare(b.name));
+  const validated = GuardDependenciesFileSchema.safeParse(catalog);
+  if (!validated.success) {
+    throw new GuardExternalsWriteError(
+      `the resulting dependencies.json would be invalid: ${validated.error.issues
+        .map((i) => `${i.path.join('.')} ${i.message}`)
+        .join('; ')}`,
+    );
+  }
+  assertValidOverlay(GuardDependenciesLocalSchema.safeParse(local), 'dependencies.local.json');
+  if (catalog.dependencies.length > 0) {
+    writeIfChanged(catalogFile, JSON.stringify(catalog, null, 2) + '\n');
+  } else if (fs.existsSync(catalogFile)) {
+    fs.rmSync(catalogFile);
+  }
+  const localFile = dependenciesLocalPath(repoRoot);
+  if (Object.keys(local).length > 0) {
+    writeIfChanged(localFile, JSON.stringify(sortedByKey(local), null, 2) + '\n');
+  } else if (fs.existsSync(localFile)) {
+    fs.rmSync(localFile);
+  }
   return readGuardExternalsView(repoRoot);
 }
 
@@ -574,6 +944,20 @@ function splitPatch(
     declaredEndpoints[name] = url.trim();
   }
 
+  // The transport half: overlay-only, and merged per FIELD like everything else
+  // here — a patch that says nothing about a header leaves it exactly as it was.
+  const localHeaders: Record<string, string> = { ...(priorLocal?.headers ?? {}) };
+  for (const [name, value] of Object.entries(entry.headers ?? {})) {
+    if (value === null || value.trim() === '') delete localHeaders[name];
+    else localHeaders[name] = value;
+  }
+  const token =
+    entry.token === undefined
+      ? priorLocal?.token
+      : entry.token === null || entry.token.trim() === ''
+        ? undefined
+        : entry.token;
+
   const toLocalBaseUrl = entry.baseUrl !== undefined && entry.baseUrlTarget === 'local';
   const declaration: RecipeApiExternal = {
     baseUrlEnv: entry.baseUrlEnv,
@@ -592,8 +976,23 @@ function splitPatch(
     // says nothing about them must leave them exactly as they were.
     ...(Object.keys(localEndpoints).length > 0 ? { endpoints: sortedByKey(localEndpoints) } : {}),
     ...(Object.keys(localEnv).length > 0 ? { env: sortedByKey(localEnv) } : {}),
+    ...(token !== undefined ? { token } : {}),
+    ...(Object.keys(localHeaders).length > 0 ? { headers: sortedByKey(localHeaders) } : {}),
   };
   return { declaration, secrets: Object.keys(secrets).length > 0 ? secrets : null };
+}
+
+/** Refuse a write whose result would not load back. `label` names the file. */
+function assertValidOverlay(
+  result: { success: true } | { success: false; error: { issues: { path: (string | number)[]; message: string }[] } },
+  label: string,
+): void {
+  if (result.success) return;
+  throw new GuardExternalsWriteError(
+    `the resulting ${label} would be invalid: ${result.error.issues
+      .map((i) => `${i.path.join('.')} ${i.message}`.trim())
+      .join('; ')}`,
+  );
 }
 
 /** Read the overlay for a write; a broken overlay is refused, never overwritten. */

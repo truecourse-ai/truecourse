@@ -11,6 +11,9 @@
  *
  * Any authenticated member of the workspace may read and write it — the config
  * is what makes the product work at all, so there is no separate admin gate.
+ *
+ * On an instance running on its operator's Claude Code the GET carries that
+ * as `operator` and the PATCH is refused: nothing saved here would be used.
  */
 
 import { Router, type Request, type Response } from 'express';
@@ -20,9 +23,14 @@ import type { LlmConfigUpdate } from '@truecourse/shared';
 import type { GlobalApiLlmConfig } from '@truecourse/core/config/global-config';
 import { log } from '@truecourse/core/lib/logger';
 import {
+  OPERATOR_PROVIDER,
+  operatorClaudeCode,
   probeWorkspaceLlmConfig,
   workspaceLlmConfigStore,
 } from '../services/workspace-llm.service.js';
+
+const OPERATOR_MESSAGE =
+  "This instance runs on the operator's Claude Code (TRUECOURSE_LLM_TRANSPORT=claude-code); the workspace provider is not used.";
 
 const configSchema = z.object({
   provider: z.enum(LLM_PROVIDER_KINDS),
@@ -77,6 +85,7 @@ router.get('/config', async (req: Request, res: Response) => {
     res.json({
       config: await workspaceLlmConfigStore().getView(orgId),
       providers: LLM_PROVIDER_KINDS,
+      ...(operatorClaudeCode() ? { operator: OPERATOR_PROVIDER } : {}),
     });
   } catch (err) {
     log.error(`[LLM] reading the config for ${orgId} failed: ${(err as Error).message}`);
@@ -88,6 +97,10 @@ router.patch('/config', async (req: Request, res: Response) => {
   const orgId = req.user?.organizationId;
   if (!orgId) {
     res.status(403).json({ error: 'This session has no workspace.' });
+    return;
+  }
+  if (operatorClaudeCode()) {
+    res.status(409).json({ error: OPERATOR_MESSAGE });
     return;
   }
   const parsed = configSchema.safeParse(req.body);

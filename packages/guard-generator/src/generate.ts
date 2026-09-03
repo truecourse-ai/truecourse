@@ -57,7 +57,10 @@ import {
   readGuardDecisions,
   readGuardAutoResolutions,
   writeGuardAutoResolutions,
-  readJourneyCatalog,
+  readAuthoredInterfaceCatalog,
+  readMergedInterfaceCatalog,
+  mergeInterfaceLists,
+  mergeRegistries,
   manifestPath,
   runBuild,
   runInstall,
@@ -123,7 +126,8 @@ import {
   type GuardScenarioDiagnosis,
   type GuardTestStatus,
   type GuardUnadjudicatedStage,
-  type Journey,
+  type Interface,
+  type InterfaceResource,
 } from '@truecourse/shared'
 import {
   planGuardWork,
@@ -147,7 +151,7 @@ import {
   FIDELITY_PROMPT_FINGERPRINT,
   type AuthorMilestone,
   type AuthorUserContext,
-  type JourneyContractHint,
+  type InterfaceContractHint,
   type OutboundRequestHint,
   type BirthRetryContext,
   type ExternalServiceHint,
@@ -199,10 +203,10 @@ import { flattenZodError, quoteInvalidOutput, scenarioCompositionDefect } from '
 import { mineExampleBlocks, exampleFidelityDefect, type DocExampleBlock } from './examples.js'
 import { discoverRecipe } from './recipe-discovery.js'
 import type { SeedDraftDatabase } from './seed-draft.js'
-import { routesFromJourneys } from './recipe-propose.js'
+import { routesFromInterfaces } from './recipe-propose.js'
 import { enrichBlockedOn } from './external-blocked.js'
 import {
-  buildJourneyContractHints,
+  buildInterfaceContractHints,
   buildOtherOperationHints,
   buildOutboundRequestHints,
   outboundOverflow,
@@ -462,11 +466,17 @@ export interface GuardGenerateModels {
  * degradation is defined, never inherited — an empty surface settles as an honest
  * `no-journey` gap instead of failing the spec half of the pipeline.
  */
-export type JourneyProvider = () => Promise<{
-  journeys: Journey[]
+export type InterfaceProvider = () => Promise<{
+  interfaces: Interface[]
+  /**
+   * The catalog's RESOURCE REGISTRY — the places the interfaces' `at`/`to`/`of`
+   * name. Omitted where the mapping established none; merged with the authored
+   * half's registry exactly as the interface lists are.
+   */
+  resources?: Record<string, InterfaceResource[]>
   /**
    * The repo's detected third-party dependencies. Derived from the SAME
-   * analysis pass as the journeys — a pure read of the analyzer's import registry —
+   * analysis pass as the interfaces — a pure read of the analyzer's import registry —
    * so it rides this seam rather than opening a second one that would re-analyze the
    * tree. Omitted (a provider that predates it, or the snapshot fallback) reads as
    * "not detected": every blocked-on reason keeps its generic noun.
@@ -532,8 +542,8 @@ export interface GenerateGuardsOptions {
    * tests lower it to observe escalation in fewer runs.
    */
   escalateAutoResolveAfter?: number
-  /** Journey mapping seam — see {@link JourneyProvider}. */
-  journeys?: JourneyProvider
+  /** Interface mapping seam — see {@link InterfaceProvider}. */
+  interfaces?: InterfaceProvider
   /**
    * The hard gate: refuse to run without a committed `recipe.json` instead of
    * deriving one. TRUE on every working-tree path (`truecourse guard setup` owns
@@ -564,7 +574,7 @@ export interface GenerateGuardsOptions {
    *  counter. Fires `(0, total)` as soon as the view plan is known (views are
    *  planned per doc upfront), then once per completed view. */
   onExtractViewProgress?: (done: number, total: number) => void
-  /** Journey mapping settled: how many journeys were derived, across all surfaces. */
+  /** Interface mapping settled: how many journeys were derived, across all surfaces. */
   onJourneys?: (journeys: number, surfaces: number) => void
   /** Flow synthesis progress, ticking per area as it settles. */
   onFlowProgress?: (done: number, total: number) => void
@@ -723,23 +733,23 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const recipeRunner =
     options.recipeRunner ??
     spawnRecipeRunner({ transport, model: options.models?.recipe, fallbackModel: options.models?.fallback })
-  // Journey mapping is memoized: the deterministic recipe proposer ranks its health
+  // Interface mapping is memoized: the deterministic recipe proposer ranks its health
   // path over the SAME route surface stage 4 walks, so a repo with no recipe maps
   // its journeys once, earlier — never twice.
-  let mappedJourneys: Promise<MappedSurface> | null = null
-  const journeysOnce = (): Promise<MappedSurface> => (mappedJourneys ??= mapJourneysSafely(repoRoot, options.journeys))
+  let mappedInterfaces: Promise<MappedSurface> | null = null
+  const interfacesOnce = (): Promise<MappedSurface> => (mappedInterfaces ??= mapInterfacesSafely(repoRoot, options.interfaces))
 
   const recipeResult = await discoverRecipe(repoRoot, recipeRunner, {
-    routes: async () => routesFromJourneys((await journeysOnce()).journeys),
+    routes: async () => routesFromInterfaces((await interfacesOnce()).interfaces),
     // The datastore half of the SAME memoized pass — read only when a boot
     // verification failed, so the failure can name the dependency it died on.
     database: async () => {
-      const db = (await journeysOnce()).database
+      const db = (await interfacesOnce()).database
       return db ? { type: db.type, driver: db.driver } : null
     },
     // The connection URLs the SAME pass harvested: with no compose file in the
     // repo, the proposer derives one from them.
-    datastores: async () => (await journeysOnce()).datastoreUrls,
+    datastores: async () => (await interfacesOnce()).datastoreUrls,
   })
   if (recipeResult.status === 'verify-failed') {
     // A failed proposal call already aborts the run loudly through this channel, so
@@ -1027,8 +1037,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     .map((d) => ({ doc: d.doc, anchor: d.anchor, title: d.title }))
 
   // 4. Journeys — deterministic, free, and independent of everything spec-side.
-  const mapped = await journeysOnce()
-  const catalog = mapped.journeys
+  const mapped = await interfacesOnce()
+  const catalog = mapped.interfaces
   // The repo's own third-party dependencies, from the same pass. They name
   // the third party in an api authoring prompt and in every blocked-on gap reason.
   const externalServices = mapped.externalServices
@@ -2175,7 +2185,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             const plan = taskByKey.get(candidate.ref)?.plan
             const journeyContracts =
               candidate.surface === 'api' && plan
-                ? buildJourneyContractHints(plan.journeys, requestContracts)
+                ? buildInterfaceContractHints(plan.journeys, requestContracts)
                 : []
             const triage = await runTriage(
               repoRoot,
@@ -2677,9 +2687,12 @@ function providedHint(account: ResolvedExternal): ExternalServiceHint {
   }
 }
 
-/** What ONE analysis pass of the working tree yields this run — see {@link JourneyProvider}. */
+/** What ONE analysis pass of the working tree yields this run — see {@link InterfaceProvider}. */
 interface MappedSurface {
-  journeys: Journey[]
+  interfaces: Interface[]
+  /** The catalog's resource registry, when the catalog carries one — see
+   *  {@link InterfaceProvider}. Rides both the provider and snapshot paths. */
+  resources?: Record<string, InterfaceResource[]>
   externalServices: DetectedExternalService[]
   /** Per-operation inbound request contracts — the per-journey authoring grounding. */
   requestContracts: ApiRequestContract[]
@@ -2692,17 +2705,36 @@ interface MappedSurface {
 }
 
 /**
- * The journey catalog for this run: the injected mapper, else the last mapping's
- * snapshot, else empty. A mapper that throws degrades to the snapshot for the same
+ * The interface catalog for this run: the injected mapper, else the last mapping's
+ * snapshot, else empty — and, on EITHER path, the hand-authored catalog merged
+ * over the top. A mapper that throws degrades to the snapshot for the same
  * reason it degrades to empty — the spec half of the pipeline must keep working on
  * a repo the mapper chokes on.
+ *
+ * The authored merge is on the SUCCESS path deliberately. Reaching for the on-disk
+ * catalog only when the mapper THREW meant a healthy mapping — which derives `cli`
+ * and `api` and no other surface — simply replaced every hand-authored web task,
+ * and the flows grounding on them settled as `no-interface` while the run stayed
+ * green: the one case that never happens was the only one protected.
+ *
+ * Exported for the test that pins that: the seam is one function, and what it
+ * merges is the whole difference between an authored surface reaching the
+ * generator and vanishing.
  */
-async function mapJourneysSafely(repoRoot: string, provider?: JourneyProvider): Promise<MappedSurface> {
+export async function mapInterfacesSafely(
+  repoRoot: string,
+  provider?: InterfaceProvider,
+): Promise<MappedSurface> {
+  // A present-but-broken authored file THROWS out of here rather than reading as
+  // empty (see `readAuthoredInterfaceCatalog`): losing the surface quietly is the
+  // failure this merge exists to prevent, so it is not a degradation offered here.
+  const authored = readAuthoredInterfaceCatalog(repoRoot)
   if (provider) {
     try {
       const mapped = await provider()
       return {
-        journeys: mapped.journeys,
+        interfaces: mergeInterfaceLists(mapped.interfaces, authored?.interfaces ?? []),
+        ...withResources(mergeRegistries(mapped.resources, authored?.resources)),
         externalServices: mapped.externalServices ?? [],
         database: mapped.database ?? null,
         datastoreUrls: mapped.datastoreUrls ?? [],
@@ -2713,17 +2745,26 @@ async function mapJourneysSafely(repoRoot: string, provider?: JourneyProvider): 
       /* fall through to the snapshot */
     }
   }
-  // The snapshot carries journeys only — external services are derived from the
-  // working tree, never persisted, so a degraded run reports none rather than a
-  // stale list.
+  // The snapshot carries interfaces (and their resource registry) only — external
+  // services are derived from the working tree, never persisted, so a degraded run
+  // reports none rather than a stale list.
+  const snapshot = readMergedInterfaceCatalog(repoRoot)
   return {
-    journeys: readJourneyCatalog(repoRoot)?.journeys ?? [],
+    interfaces: snapshot?.interfaces ?? [],
+    ...withResources(snapshot?.resources),
     externalServices: [],
     database: null,
     datastoreUrls: [],
     requestContracts: [],
     outboundRequests: [],
   }
+}
+
+/** A registry rides along only when there is one — an absent one is not empty. */
+function withResources(
+  resources: Record<string, InterfaceResource[]> | undefined,
+): { resources?: Record<string, InterfaceResource[]> } {
+  return resources && Object.keys(resources).length > 0 ? { resources } : {}
 }
 
 // ---------------------------------------------------------------------------
@@ -2928,7 +2969,7 @@ async function authorFlowScenario(opts: {
    * this flow does NOT walk as setup material (signing up before signing in). Empty
    * on a cli batch or a repo with no api surface.
    */
-  apiJourneys: Journey[]
+  apiJourneys: Interface[]
   /** The repo's outbound request construction, already capped. */
   outboundRequests: OutboundRequestHint[]
   outboundRequestsOverflow: number
@@ -3004,7 +3045,7 @@ async function authorFlowScenario(opts: {
   // Probes ground CLI commands against the built entry — api scenarios are authored
   // ungrounded (birth evidence supplies the real responses).
   const probes = surface === 'cli' ? await opts.ground(work.flow.milestones.map((m) => m.claimTitle)) : []
-  const journeyContracts = buildJourneyContractHints(plan.journeys, opts.requestContracts)
+  const journeyContracts = buildInterfaceContractHints(plan.journeys, opts.requestContracts)
   // The setup catalog is the BOUND server's own surface. An operation the
   // route manifest positively attributes to ANOTHER app is unreachable from this
   // scenario, and advertising it is exactly how cal.com's `/v2/...` paths ended up
@@ -3196,8 +3237,8 @@ function buildAuthorCtx(
   externalServices: ExternalServiceHint[],
   serverIndex: ServerRouteIndex,
   grounding: {
-    journeyContracts: JourneyContractHint[]
-    otherOperations: JourneyContractHint[]
+    journeyContracts: InterfaceContractHint[]
+    otherOperations: InterfaceContractHint[]
     otherOperationsOverflow: number
     outboundRequests: OutboundRequestHint[]
     outboundRequestsOverflow: number
@@ -3366,7 +3407,7 @@ function recipeCredentialCapabilities(
 }
 
 /** One journey's entry path (`''` when it has none) — the route-manifest lookup key. */
-function journeyEntryPath(journey: Journey): string {
+function journeyEntryPath(journey: Interface): string {
   const entry = journey.entry as { path?: string }
   return typeof entry?.path === 'string' ? entry.path : ''
 }

@@ -1,0 +1,39 @@
+{
+  "name": "@truecourse/jobs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@truecourse/core": "workspace:*",
+    "@truecourse/data-store": "workspace:*",
+    "@truecourse/db": "workspace:*",
+    "@truecourse/llm-api": "workspace:*",
+    "@truecourse/shared": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "graphile-worker": "^0.16.6",
+    "pg": "^8.13.1",
+    "zod": "^3.23.8"
+  },
+  "peerDependencies": {
+    "express": "^4.21.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.10",
+    "typescript": "^5.7.0"
+  }
+}

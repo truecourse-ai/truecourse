@@ -14,11 +14,11 @@ import {
   GuardScenarioSchema,
   GUARD_FORMAT_VERSION,
   isRunnableDriver,
-  journeyFingerprint,
+  interfaceFingerprint,
   type GuardDriverId,
   type GuardFlow,
   type GuardScenario,
-  type Journey,
+  type Interface,
 } from '@truecourse/shared'
 import { slugifyHeading, scenariosDir, loadScenarios } from '@truecourse/guard-runner'
 import type { RawGeneratedScenario } from './schemas.js'
@@ -60,7 +60,7 @@ export function areaOrDocSlug(section: SectionInput): string {
  */
 export function buildFlowScenario(opts: {
   flow: GuardFlow
-  journeys: readonly Journey[]
+  journeys: readonly Interface[]
   raw: RawGeneratedScenario
   id: string
   /**
@@ -92,7 +92,7 @@ export function buildFlowScenario(opts: {
     flow: { id: flow.id, fingerprint: flow.fingerprint },
     journey: {
       path: journeys.map((j) => j.id),
-      fingerprints: journeys.map((j) => j.fingerprint || journeyFingerprint(j)),
+      fingerprints: journeys.map((j) => j.fingerprint || interfaceFingerprint(j)),
     },
     binds: flow.bindings.map((b) => ({ doc: b.doc, section: b.anchor, fingerprint: b.fingerprint })),
     driver: raw.driver,

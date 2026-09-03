@@ -18,7 +18,7 @@
  */
 
 /** What just completed for the repo — the `spec:complete` socket kinds. */
-export type RepoLifecycleKind = 'scan' | 'guard-generate' | 'guard-run'
+export type RepoLifecycleKind = 'scan' | 'guard-setup' | 'guard-generate' | 'guard-run'
 
 export type RepoLifecycleEmitter = (repoKey: string, kind: RepoLifecycleKind) => Promise<void>
 

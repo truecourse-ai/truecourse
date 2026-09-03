@@ -34,6 +34,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -193,14 +194,26 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
 
   // The workspace's provider, read beside the registry. A refused or
   // unreachable read stays `unknown` — the needs-setup surfaces are a claim
-  // about the workspace, not about this read.
+  // about the workspace, not about this read. The read can outlive the shell
+  // (the settings page refetches it after a save; a test tears the tree down
+  // mid-flight), and its answer is dropped once the shell is gone.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
   const refreshLlmProvider = useCallback(async () => {
+    let next: LlmProviderState;
     try {
-      const { config } = await fetchLlmConfig();
-      setLlmProvider(config ? 'configured' : 'missing');
+      const { config, operator } = await fetchLlmConfig();
+      next = config || operator ? 'configured' : 'missing';
     } catch {
-      setLlmProvider('unknown');
+      next = 'unknown';
     }
+    if (mounted.current) setLlmProvider(next);
   }, []);
 
   useEffect(() => {

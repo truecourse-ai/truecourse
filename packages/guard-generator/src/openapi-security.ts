@@ -39,6 +39,8 @@ import {
   canonicalStringify,
   isOpenApiDoc,
   parseOpenApiSpec,
+  openApiServerBasePath,
+  HTTP_METHODS,
   type OpenApiDoc,
   type SecurityScheme,
 } from '@truecourse/shared/openapi'
@@ -173,6 +175,68 @@ export function validateCredentialSatisfies(
     )
   }
   return { errors, warnings: [] }
+}
+
+/**
+ * One spec-derived endpoint suitable as a live credential probe: its declared
+ * security REQUIRES a scheme with no public alternative, so the anonymous
+ * control request has a stated reason to be refused.
+ */
+export interface ProbeCandidate {
+  /** Uppercase HTTP method. */
+  method: string
+  /** Base-path-prefixed request path, as the live server serves it. */
+  path: string
+  /** Every scheme named across the operation's OR-groups, sorted. */
+  schemes: string[]
+}
+
+/** How many candidate probe endpoints the seed briefing carries. */
+const MAX_PROBE_CANDIDATES = 12
+
+/**
+ * The endpoints whose OpenAPI security makes them probe-shaped by construction
+ * — handed to the seed session so confirming a probe is a LOOKUP, not a search
+ * (the search is what exhausted a whole session budget on documenso, which then
+ * shipped a seed declaring zero credentials). Cheapest first: a parameter-free
+ * GET needs no fixture ids and no body to confirm.
+ */
+export function collectProbeCandidates(
+  docs: Iterable<SpecDocText>,
+  max = MAX_PROBE_CANDIDATES,
+): ProbeCandidate[] {
+  const byRequest = new Map<string, ProbeCandidate>()
+  for (const { doc, content } of docs) {
+    if (!isOpenApiDoc(doc, content)) continue
+    const parsed = parseOpenApiSpec(content)
+    if (!parsed?.paths) continue
+    const base = openApiServerBasePath(content)
+    for (const [routePath, item] of Object.entries(parsed.paths)) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+      for (const method of HTTP_METHODS) {
+        const operation = (item as Record<string, unknown>)[method]
+        if (!operation || typeof operation !== 'object' || Array.isArray(operation)) continue
+        const groups = effectiveOperationSecurity(parsed, operation)
+        // No groups = public; an empty AND-group is an alternative satisfied by
+        // NOTHING, so the anonymous request passes and the endpoint gates nothing.
+        if (groups.length === 0 || groups.some((g) => g.length === 0)) continue
+        const path = base && routePath !== '/' ? `${base}${routePath}` : base || routePath
+        const key = `${method} ${path}`
+        if (byRequest.has(key)) continue
+        byRequest.set(key, {
+          method: method.toUpperCase(),
+          path,
+          schemes: [...new Set(groups.flat())].sort(),
+        })
+      }
+    }
+  }
+  // GET before writes, parameter-free before templated; path order for stability.
+  const rank = (c: ProbeCandidate): number =>
+    (c.method === 'GET' ? 0 : 2) + (c.path.includes('{') ? 1 : 0)
+  return [...byRequest.values()]
+    .sort((a, b) => rank(a) - rank(b) || a.path.localeCompare(b.path) || a.method.localeCompare(b.method))
+    .slice(0, max)
 }
 
 /** The parsed operation object carried by an OpenAPI section's canonical fullText. */

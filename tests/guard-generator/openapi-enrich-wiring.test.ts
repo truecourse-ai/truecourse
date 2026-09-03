@@ -29,8 +29,8 @@ import {
   writeDoc,
   extractBy,
   runGenerate,
-  journeysOf,
-  apiJourney,
+  interfacesOf,
+  apiInterface,
 } from './helpers.js'
 
 const repos: string[] = []
@@ -218,7 +218,7 @@ describe('generateGuards — the api author prompt carries the matched request s
     const { byFlow, runner } = collectCtxs()
     await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, apiJourney('POST', '/todos')),
+      interfaces: interfacesOf(r, apiInterface('POST', '/todos')),
       extractRunner: extractBy({
         'create-a-todo': [{ claim: 'POST /todos requires a title', driver: 'api', reason: 'HTTP 400' }],
         'unrelated-behavior': { untestable: 'no endpoint' },
@@ -241,7 +241,7 @@ describe('generateGuards — the api author prompt carries the matched request s
     const { byFlow, runner } = collectCtxs()
     await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, apiJourney('POST', '/api/v1/todos')),
+      interfaces: interfacesOf(r, apiInterface('POST', '/api/v1/todos')),
       extractRunner: extractBy({
         'create-a-todo': [{ claim: 'POST /todos requires a title', driver: 'api', reason: 'HTTP 400' }],
         'unrelated-behavior': { untestable: 'no endpoint' },
@@ -262,7 +262,7 @@ describe('generateGuards — the api author prompt carries the matched request s
     const { byFlow, runner } = collectCtxs()
     await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, apiJourney('POST', '/todos')),
+      interfaces: interfacesOf(r, apiInterface('POST', '/todos')),
       extractRunner: extractBy({
         'create-a-todo': [{ claim: 'POST /todos requires a title', driver: 'api', reason: 'HTTP 400' }],
         'unrelated-behavior': { untestable: 'no endpoint' },

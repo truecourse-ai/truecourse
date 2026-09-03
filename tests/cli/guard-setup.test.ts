@@ -2,10 +2,16 @@
  * `truecourse guard setup` — the terminal surface.
  *
  * The engine and the adapter are covered elsewhere; what this file pins down is the
- * command's own contract: the one-line cost confirm and its `-y`, the non-TTY
- * refusal that never clobbers a hand-edited seed, and the closing report that names
- * every artifact it wrote (a compose file or a seed script appearing unexplained in
- * `git status` is the failure mode this block exists for).
+ * command's own contract: the one-line SESSION cost confirm and its `-y`, the
+ * non-TTY refusal that never clobbers a hand-edited seed, and the closing report
+ * that names every artifact it wrote (a compose file or a seed script appearing
+ * unexplained in `git status` is the failure mode that block exists for).
+ *
+ * Every case here injects the one-shot `recipeRunner` test seam, which is also what
+ * turns the AGENT SESSIONS off (`guardSetupInProcess` wires them only for a run with
+ * no injected runner) — so nothing reaches a provider, and the steps whose body IS a
+ * session report their unwired placeholder. The closing report's rendering of a run
+ * that DID draft is pinned directly on `printSetupReport` at the bottom.
  *
  * The prompts are scripted through the CLI's own `@clack/prompts` copy — pnpm keeps
  * it under `tools/cli/node_modules`, so the bare specifier does not resolve here and
@@ -20,7 +26,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { recipePath } from '@truecourse/guard-runner';
 import { setDefaultTransport } from '@truecourse/shared/llm';
-import type { SeedProposal } from '@truecourse/guard-generator';
 import { writeGlobalConfig } from '../../packages/core/src/config/global-config';
 
 const { out, confirms } = vi.hoisted(() => ({ out: [] as string[], confirms: [] as boolean[] }));
@@ -54,7 +59,7 @@ vi.mock('../../tools/cli/node_modules/@clack/prompts', () => {
   };
 });
 
-const { runGuardSetup } = await import('../../tools/cli/src/commands/guard-setup');
+const { runGuardSetup, printSetupReport } = await import('../../tools/cli/src/commands/guard-setup');
 
 const FIXTURE = fileURLToPath(new URL('../fixtures/seed-draft', import.meta.url));
 
@@ -132,27 +137,6 @@ function writeRecipe(r: string, over: Record<string, unknown> = {}): void {
   fs.writeFileSync(target, JSON.stringify(recipe, null, 2) + '\n');
 }
 
-const PROPOSAL: SeedProposal = {
-  scriptPath: 'scripts/guard-seed.mjs',
-  scriptContent: [
-    "import fs from 'node:fs'",
-    'const org = { id: 42, slug: "acme" }',
-    'fs.writeFileSync(process.env.SEED_STORE, JSON.stringify({ orgs: [org] }))',
-    'fs.writeFileSync(process.env.GUARD_SEED_OUT, JSON.stringify({',
-    '  fixtures: { org },',
-    '  credentials: { owner: { value: "Bearer owner-token" } },',
-    '}))',
-    '',
-  ].join('\n'),
-  seed: {
-    command: 'node scripts/guard-seed.mjs',
-    provides: {
-      fixtures: { org: ['id', 'slug'] },
-      credentials: { owner: { header: 'Authorization', description: 'org owner' } },
-    },
-  },
-};
-
 const neverCalled = async (): Promise<never> => {
   throw new Error('no model in tests');
 };
@@ -175,7 +159,7 @@ async function run(opts: Parameters<typeof runGuardSetup>[0]): Promise<number | 
 }
 
 describe('runGuardSetup', () => {
-  it('names every artifact it wrote — nothing appears in `git status` unexplained', async () => {
+  it('reports every step it ran, and where the record went', async () => {
     const r = fixtureRepo();
     writeRecipe(r);
 
@@ -184,19 +168,21 @@ describe('runGuardSetup', () => {
       yes: true,
       interactive: false,
       recipeRunner: neverCalled,
-      seedRunner: async () => PROPOSAL,
     });
 
     expect(text()).toMatch(/recipe\s+already present/);
     expect(text()).toMatch(/reached\s+default: GET \/health → 200/);
-    expect(text()).toMatch(/seed\s+wrote scripts\/guard-seed\.mjs/);
-    expect(text()).toMatch(/principals\s+owner/);
+    expect(text()).toMatch(/detected\s+0 external services/);
+    // The seed's body is a SESSION, and an injected one-shot runner turns the
+    // sessions off — so the step says so rather than pretending it ran.
+    expect(text()).toMatch(/seed\s+skipped: the seed session is not wired/);
+    expect(text()).toMatch(/report: \.truecourse\/guard\/setup\.json/);
     expect(text()).toMatch(/Review and commit/);
-    expect(fs.existsSync(path.join(r, 'scripts/guard-seed.mjs'))).toBe(true);
   }, 120_000);
 
-  // The estimate is ONE LINE, deliberately: setup is bounded at two calls, so the
-  // staged modal the big pipelines render would be more ceremony than the spend.
+  // The estimate is ONE LINE, deliberately: the staged modal the big pipelines
+  // render would be more ceremony than setup's spend. It is quoted in MODEL TURNS
+  // now — the unit a session budget is bounded in.
   it('confirms the cost in one line, and `-y` skips the prompt', async () => {
     const r = fixtureRepo();
     writeRecipe(r);
@@ -206,10 +192,10 @@ describe('runGuardSetup', () => {
       yes: true,
       interactive: false,
       recipeRunner: neverCalled,
-      seedRunner: async () => PROPOSAL,
     });
 
-    expect(text()).toMatch(/Setup makes up to \d+ LLM calls/);
+    expect(text()).toMatch(/Setup's agent sessions may spend up to \d+ model turns?/);
+    expect(text()).toMatch(/deterministic derivations and warm caches run first, for free/);
     expect(text()).not.toMatch(/confirm: Proceed with setup\?/);
   }, 120_000);
 
@@ -223,8 +209,7 @@ describe('runGuardSetup', () => {
       cwd: r,
       interactive: true,
       recipeRunner: neverCalled,
-      seedRunner: neverCalled,
-    });
+      });
 
     expect(text()).toMatch(/confirm: Proceed with setup\?/);
     expect(text()).toMatch(/Setup cancelled/);
@@ -253,8 +238,7 @@ describe('runGuardSetup', () => {
       refresh: true,
       interactive: false,
       recipeRunner: neverCalled,
-      seedRunner: neverCalled,
-    });
+      });
 
     expect(fs.readFileSync(path.join(r, 'scripts/guard-seed.mjs'), 'utf-8')).toBe('// mine\n');
   }, 120_000);
@@ -273,9 +257,8 @@ describe('runGuardSetup', () => {
       cwd: r,
       interactive: true,
       recipeRunner: neverCalled,
-      seedRunner: async () => PROPOSAL,
-      journeys: async () => ({
-        journeys: [],
+      interfaces: async () => ({
+        interfaces: [],
         externalServices: [
           { service: 'stripe', category: 'payment' as const, evidence: [], baseUrlEnv: 'STRIPE_BASE_URL' },
         ],
@@ -299,8 +282,7 @@ describe('runGuardSetup', () => {
       yes: true,
       interactive: false,
       recipeRunner: neverCalled,
-      seedRunner: neverCalled,
-    });
+      });
 
     expect(exited).toBe(1);
     expect(text()).toMatch(/not reachable/);
@@ -339,11 +321,11 @@ describe('runGuardSetup — API mode', () => {
       yes: true,
       interactive: false,
       recipeRunner: neverCalled,
-      seedRunner: async () => PROPOSAL,
-    });
+      });
 
     expect(text()).not.toMatch(/`claude` CLI/);
-    expect(text()).toMatch(/seed\s+wrote scripts\/guard-seed\.mjs/);
+    expect(text()).toMatch(/recipe\s+already present/);
+    expect(text()).toMatch(/Review and commit/);
   }, 120_000);
 
   // The pre-flight is the transport's, not Claude Code's: an unusable provider
@@ -381,10 +363,102 @@ describe('runGuardSetup — API mode', () => {
       interactive: false,
       llmTransport: 'api',
       recipeRunner: neverCalled,
-      seedRunner: async () => PROPOSAL,
-    });
+      });
 
     expect(text()).not.toMatch(/`claude` CLI/);
-    expect(text()).toMatch(/seed\s+wrote scripts\/guard-seed\.mjs/);
+    expect(text()).toMatch(/recipe\s+already present/);
+    expect(text()).toMatch(/Review and commit/);
   }, 120_000);
+});
+
+// ---------------------------------------------------------------------------
+// The closing report — rendered directly, because the artifacts a real run
+// writes come out of sessions the CLI has no test seam for.
+// ---------------------------------------------------------------------------
+
+describe('printSetupReport', () => {
+  it('names every artifact a drafting run wrote — nothing unexplained in `git status`', () => {
+    printSetupReport(
+      {
+        ranAt: '2026-08-19T00:00:00.000Z',
+        status: 'ok',
+        steps: [],
+        recipe: {
+          status: 'ok',
+          outcome: 'discovered',
+          source: 'llm',
+          wrotePath: '.truecourse/scenarios/recipe.json',
+          composePath: '.truecourse/scenarios/guard-datastore.yml',
+          probes: [{ server: 'default', path: '/health', status: 200, ok: true }],
+        },
+        seed: {
+          status: 'ok',
+          outcome: 'drafted',
+          scriptPath: '.truecourse/scenarios/guard-seed.mjs',
+          command: 'node .truecourse/scenarios/guard-seed.mjs',
+          fixtures: ['org'],
+          credentials: ['owner'],
+        },
+      },
+      '.truecourse/guard/setup.json',
+    );
+
+    expect(text()).toMatch(/recipe\s+wrote \.truecourse\/scenarios\/recipe\.json/);
+    expect(text()).toMatch(/datastore\s+wrote \.truecourse\/scenarios\/guard-datastore\.yml/);
+    expect(text()).toMatch(/reached\s+default: GET \/health → 200/);
+    expect(text()).toMatch(/seed\s+wrote \.truecourse\/scenarios\/guard-seed\.mjs/);
+    expect(text()).toMatch(/principals\s+owner/);
+    expect(text()).toMatch(/report: \.truecourse\/guard\/setup\.json/);
+  });
+
+  // `blocked` is the auth step's LOUD verdict by design — the 2026-08-24 bench
+  // caught the CLI swallowing it twice (the verdict lived only in setup.json).
+  it('renders the auth verdict from the steps spine, blocked loudest', () => {
+    printSetupReport(
+      {
+        ranAt: '2026-08-19T00:00:00.000Z',
+        status: 'ok',
+        steps: [
+          {
+            key: 'auth',
+            status: 'blocked',
+            inputFingerprint: 'b',
+            reason: 'aws: not registered — packages/providers/upload-aws-s3 imports it',
+          },
+        ],
+        recipe: { status: 'ok', outcome: 'exists' },
+      },
+      '.truecourse/guard/setup.json',
+    );
+
+    expect(text()).toMatch(/auth\s+blocked: aws: not registered/);
+  });
+
+  // The usage line is still the ONE-SHOT line: `usage.sessions` (and the step
+  // rows, and the diagnostics) are not rendered yet — the report surface is
+  // section 06's. Pinned so that change is a visible one.
+  it('renders the usage line of a run whose spend was agent sessions', () => {
+    printSetupReport(
+      {
+        ranAt: '2026-08-19T00:00:00.000Z',
+        status: 'ok',
+        steps: [
+          { key: 'catalog', status: 'ok', inputFingerprint: 'a', sessionRunId: 'run-1' },
+          { key: 'auth', status: 'blocked', inputFingerprint: 'b', reason: 'register `anthropic`' },
+        ],
+        recipe: { status: 'ok', outcome: 'exists' },
+        usage: {
+          calls: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          costUsd: 1.25,
+          sessions: { count: 2, turns: 21, tokens: 180_000, costUsd: 1.25 },
+        },
+      },
+      '.truecourse/guard/setup.json',
+    );
+
+    expect(text()).toMatch(/usage\s+0 calls · \$1\.25/);
+    expect(text()).not.toMatch(/21 turns/);
+  });
 });

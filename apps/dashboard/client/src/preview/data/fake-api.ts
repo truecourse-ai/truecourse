@@ -41,6 +41,8 @@ import {
   generateReport,
   scenarioInventory,
 } from './flow-fixtures';
+import { guardForRepo } from './index';
+import { REPOS } from './repos';
 import { interfacesView } from './interface-fixtures';
 import { artifactRaw } from './artifact-fixtures';
 import {
@@ -123,7 +125,7 @@ export function createPreviewSpecSource(repoId: string, versionId?: string | nul
       return { conflictResolutions: state?.conflictResolutions ?? [] };
     },
     async scan() {
-      return null;
+      // No on-demand scan over fixtures.
     },
   };
 }
@@ -401,7 +403,7 @@ export function createWorkspaceSpecSource(): SpecSource {
       return { conflictResolutions: state.conflictResolutions ?? [] };
     },
     async scan() {
-      return null;
+      // No on-demand scan over fixtures.
     },
   };
 }
@@ -419,6 +421,10 @@ function knowledgeLedger(params: URLSearchParams): { documents: unknown[]; total
 }
 
 const ROUTE = /^\/api\/repos\/([^/]+)\/(.+)$/;
+
+/** The repositories the fixtures describe. Every other id is a REAL, connected
+ *  repository, and its reads and writes go to the server untouched. */
+const FIXTURE_REPO_IDS = new Set(REPOS.map((r) => r.id));
 
 /**
  * Answer the reads and writes the reused components make; hand everything else
@@ -442,16 +448,29 @@ export function installPreviewFetch(): void {
     if (!match) return real(input, init);
     const repoId = decodeURIComponent(match[1]!);
     const rest = match[2]!;
+    // A connected repository is real all the way down: its corpus, its guard
+    // state and its runs are the server's, and no fixture stands in for any of
+    // it. Only the repositories the fixtures describe are answered here.
+    if (!FIXTURE_REPO_IDS.has(repoId)) return real(input, init);
     // The agent-sessions store is REAL for every repository: the shell follows
     // the real repos' runs through it, and a real repository's Activity tab is
     // the real view. There are no session fixtures to answer with, so these go
     // to the server — and a repository the server does not know simply 404s,
     // which is what the callers already expect.
     if (rest === 'sessions' || rest.startsWith('sessions/')) return real(input, init);
-    // So is starting a scan: a connected repository's Activity starts a real
-    // run through the server, and no fixture could stand in for the answer —
-    // it is where "this workspace has no provider" is found out.
-    if (rest === 'spec/corpus/scan') return real(input, init);
+    // So is starting a run: a connected repository's Activity starts a real one
+    // through the server, and no fixture could stand in for the answer — it is
+    // where "this workspace has no provider" is found out.
+    if (rest === 'spec/corpus/scan' || rest === 'guard/setup') return real(input, init);
+    // So is the INTERFACE CATALOG of a connected repository: it is derived from
+    // that repository's own tree, and no fixture could stand in for it. A
+    // repository with guard fixtures is one of the mock ones and keeps them.
+    if (
+      !guardForRepo(repoId) &&
+      (rest === 'guard/interfaces' || rest === 'guard/interface/raw' || rest === 'guard/map')
+    ) {
+      return real(input, init);
+    }
     const method = (init?.method ?? 'GET').toUpperCase();
     let body: Record<string, unknown> = {};
     if (typeof init?.body === 'string') {

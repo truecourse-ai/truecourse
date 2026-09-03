@@ -12,7 +12,7 @@
  *   3 steps            the structured step list, grouped by milestone; the failing
  *                      step carries its own expected/actual/output INLINE
  *   4 evidence         ONE transcript block
- *   5 journey          the code path it drives
+ *   5 interface        the code path it drives
  *   footer             labelled rows: Test · File · Flow · Spec
  *
  * The diff lives WHERE IT BROKE. A failure is a fact about one step, so it reads
@@ -44,11 +44,11 @@
  */
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { ArrowUpRight, ChevronDown, ChevronRight, Copy, Route } from 'lucide-react';
+import { ArrowUpRight, Braces, ChevronDown, ChevronRight, Copy } from 'lucide-react';
 import type {
   GuardDriverId,
   GuardFailureDetail,
-  GuardJourneyRow,
+  GuardInterfaceRow,
   GuardScenarioStepView,
   GuardScenarioStory as GuardScenarioStoryData,
   GuardTriage,
@@ -58,7 +58,7 @@ import * as api from '@/lib/api';
 import { formatGuardDuration } from '@/lib/guard-drifts';
 import type { GuardTestStatusView } from '@/lib/guard-flow-status';
 import { guardTestLabel } from '@/lib/guard-tests';
-import { GuardJourneyDiagram } from './GuardJourneyDiagram';
+import { GuardInterfaceDiagram } from './GuardInterfaceDiagram';
 import { GuardLongText } from './GuardLongText';
 import { GuardScenarioStory } from './GuardScenarioStory';
 import { GuardTriageChip } from './GuardTriageChip';
@@ -109,7 +109,7 @@ export interface GuardTestViewModel {
    * run) leaves the group headed by its number alone.
    */
   milestones?: readonly { order: number; claimTitle: string }[];
-  journeyDrifted?: boolean;
+  interfaceDrifted?: boolean;
   /**
    * True when the failing step was an UNMILESTONED setup step — a prerequisite the
    * spec never asserts. Renders beside the failure so a red test that never reached
@@ -120,7 +120,8 @@ export interface GuardTestViewModel {
   goal?: string;
   flow?: { id: string; title: string };
   binds: { doc: string; section: string; headingText?: string; fingerprint?: string };
-  journeyPath: readonly string[];
+  /** The catalog interfaces this test drives, in order (the wire calls it `journeyPath`). */
+  interfacePath: readonly string[];
   evidence: GuardEvidenceRef | null;
 }
 
@@ -288,19 +289,19 @@ function groupStepsByMilestone(steps: readonly GuardScenarioStepView[]): StepGro
 export function GuardTestView({
   repoId,
   test,
-  journeys,
+  interfaces,
   lead,
   action,
   headerAction,
   notes,
   onOpenFlow,
-  onOpenJourney,
+  onOpenInterface,
   onOpenSpec,
 }: {
   repoId: string;
   test: GuardTestViewModel;
-  /** The mapped catalog, for the journeys this test drives; null = unmapped. */
-  journeys: GuardJourneyRow[] | null;
+  /** The mapped catalog, for the interfaces this test drives; null = unmapped. */
+  interfaces: GuardInterfaceRow[] | null;
   /** Run-scoped chrome above the verdict (the run's flow-instance paint). */
   lead?: ReactNode;
   /** The one ruling this page offers (entity view only). */
@@ -310,7 +311,7 @@ export function GuardTestView({
   /** Extra verdict-card notes (stale/orphaned bindings, "no result yet"). */
   notes?: ReactNode;
   onOpenFlow?: (flowId: string) => void;
-  onOpenJourney?: (journeyId: string) => void;
+  onOpenInterface?: (interfaceId: string) => void;
   onOpenSpec: (doc: string, section: string) => void;
 }) {
   const [source, setSource] = useState<{
@@ -383,7 +384,7 @@ export function GuardTestView({
   // "failed (birth)" is the plan's own wording for a test committed red: it ran
   // once, at authoring time, and disagreed with the code.
   const verdictWord = failed ? (test.status.birth ? 'failed (birth)' : 'failed') : passed ? 'passed' : test.status.word.toLowerCase();
-  const byId = new Map((journeys ?? []).map((j) => [j.id, j]));
+  const byId = new Map((interfaces ?? []).map((i) => [i.id, i]));
   const claims = new Map((test.milestones ?? []).map((m) => [m.order, m.claimTitle]));
   const claimOf = (order: number) => claims.get(order);
   // WHICH step is the open one is a fact about the VIEWED RESULT, so the step list
@@ -514,15 +515,15 @@ export function GuardTestView({
               </HoverPopover>
             )}
 
-            {test.journeyDrifted && (
+            {test.interfaceDrifted && (
               <HoverPopover portal
                 align="start"
                 width="wide"
-                content="The live journey catalog no longer matches the fingerprints this test was grounded on — the code surface it was derived from moved. Never a pass/fail input; re-generate to re-ground it."
+                content="The live interface catalog no longer matches the fingerprints this test was grounded on — the code surface it was derived from moved. Never a pass/fail input; re-generate to re-ground it."
               >
                 <div className="mt-2 flex items-center gap-2 text-[12px] text-amber-600 dark:text-amber-400">
                   <span className="h-2 w-2 shrink-0 rounded-full bg-amber-500" />
-                  Journey drift — the mapped surface moved since this test was written
+                  Interface drift — the mapped surface moved since this test was written
                 </div>
               </HoverPopover>
             )}
@@ -603,33 +604,33 @@ export function GuardTestView({
           </div>
         )}
 
-        {/* 5. The journey it drives — context, not verdict, so it comes last. */}
+        {/* 5. The interface it drives — context, not verdict, so it comes last. */}
         <div>
-          <div className={LABEL}>Journey</div>
-          {test.journeyPath.length === 0 ? (
+          <div className={LABEL}>Interface</div>
+          {test.interfacePath.length === 0 ? (
             <p className="text-[12px] text-muted-foreground">
-              This test records no journey path (hand-written, or written before mapping).
+              This test records no interface path (hand-written, or written before mapping).
             </p>
           ) : (
             <div className="space-y-2">
-              {test.journeyPath.map((id) => {
-                const journey = byId.get(id);
+              {test.interfacePath.map((id) => {
+                const iface = byId.get(id);
                 return (
                   <div key={id}>
                     <button
                       type="button"
-                      onClick={() => onOpenJourney?.(id)}
-                      disabled={!onOpenJourney}
+                      onClick={() => onOpenInterface?.(id)}
+                      disabled={!onOpenInterface}
                       className="mb-1 inline-flex items-center gap-1 font-mono text-[11px] text-primary hover:underline disabled:no-underline"
                     >
-                      <Route className="h-3 w-3" />
+                      <Braces className="h-3 w-3" />
                       {id}
                     </button>
-                    {journey ? (
-                      <GuardJourneyDiagram journey={journey} label={journey.id} />
+                    {iface ? (
+                      <GuardInterfaceDiagram iface={iface} label={iface.id} />
                     ) : (
                       <p className="text-[12px] text-muted-foreground">
-                        Not in the current catalog — run Map on the Journeys tab to re-derive it.
+                        Not in the current catalog — run Map on the Interfaces tab to re-derive it.
                       </p>
                     )}
                   </div>

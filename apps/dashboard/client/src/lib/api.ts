@@ -1,6 +1,7 @@
 import type {
   BrowseDirResponse,
   CapabilitiesResponse,
+  GuardArtifactSource,
   GuardClaimIdentity,
   GuardDecisions,
   GuardDocCoverage,
@@ -8,7 +9,7 @@ import type {
   GuardFlowsView,
   GuardGenerateReport,
   GuardHistory,
-  GuardJourneysView,
+  GuardInterfacesView,
   GuardLatestResponse,
   GuardLatestWithRunFlows,
   GuardScenarioInventory,
@@ -868,11 +869,6 @@ export interface SpecCorpusResponse {
   corpusCommit?: string;
 }
 
-/** A scan that the user dismissed at the cost-estimate confirm — a no-op. */
-export interface SpecScanCancelled {
-  cancelled: true;
-}
-
 /**
  * OSS include/exclude ack: the persisted decision lists only. The corpus is
  * unchanged by an OSS decision (no re-curate), so no corpus is returned — the
@@ -920,13 +916,12 @@ export async function getSpecCorpus(
 }
 
 /**
- * Run a fresh corpus scan (curate), persist corpus.json, return it — or
- * `{ cancelled: true }` when the user dismisses the cost-estimate confirm.
+ * Enqueue a fresh corpus scan. It runs as a background job, so this resolves as
+ * soon as the job is QUEUED (202): progress arrives over `spec:progress` and the
+ * corpus is refetched when `spec:complete { kind: 'scan' }` lands.
  */
-export function getSpecCorpusScan(
-  repoId: string,
-): Promise<SpecCorpusResponse | SpecScanCancelled> {
-  return fetchApi<SpecCorpusResponse | SpecScanCancelled>(`/api/repos/${repoId}/spec/corpus/scan`);
+export function startSpecCorpusScan(repoId: string): Promise<{ jobId: string }> {
+  return fetchApi<{ jobId: string }>(`/api/repos/${repoId}/spec/corpus/scan`, { method: 'POST' });
 }
 
 /** A source doc's markdown (for the prose Spec tab). `commit` reads it at a PR head (EE). */
@@ -1120,18 +1115,43 @@ export async function getGuardFlow(repoId: string, flowId: string, ref?: string)
   }
 }
 
-/** The code-derived journey catalog + its reverse index onto the flows. Always 200. */
-export function getGuardJourneys(repoId: string, ref?: string): Promise<GuardJourneysView> {
-  return fetchApi<GuardJourneysView>(withRef(`/api/repos/${repoId}/guard/journeys`, ref));
+/** The code-derived interface catalog + its reverse index onto the flows. Always 200. */
+export function getGuardInterfaces(repoId: string, ref?: string): Promise<GuardInterfacesView> {
+  return fetchApi<GuardInterfacesView>(withRef(`/api/repos/${repoId}/guard/interfaces`, ref));
 }
 
 /**
- * Map the working tree's surfaces to journeys — deterministic, LLM-free, free.
+ * Map the working tree's surfaces to interfaces — deterministic, LLM-free, free.
  * The response IS the fresh catalog view, so the tab swaps state from it (no
  * refetch, no socket).
  */
-export function mapGuardJourneys(repoId: string): Promise<GuardJourneysView> {
-  return fetchApi<GuardJourneysView>(`/api/repos/${repoId}/guard/map`, { method: 'POST' });
+export function mapGuardInterfaces(repoId: string): Promise<GuardInterfacesView> {
+  return fetchApi<GuardInterfacesView>(`/api/repos/${repoId}/guard/map`, { method: 'POST' });
+}
+
+/** Which artifact-backed entity a raw read addresses — the route's own segment. */
+export type GuardArtifactKind = 'interface';
+
+/**
+ * The stored artifact behind one entity — its own pretty-printed slice of the
+ * JSON store file, for the detail's raw mode. `null` on 404 (no store yet, or no
+ * entry with that id). The interface catalog is working-tree-only, so a hosted
+ * repo reads as `null` too.
+ */
+export async function getGuardArtifactRaw(
+  repoId: string,
+  kind: GuardArtifactKind,
+  id: string,
+  ref?: string,
+): Promise<GuardArtifactSource | null> {
+  try {
+    return await fetchApi<GuardArtifactSource>(
+      withRef(`/api/repos/${repoId}/guard/${kind}/raw?id=${encodeURIComponent(id)}`, ref),
+    );
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
 }
 
 /**

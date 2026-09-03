@@ -26,8 +26,8 @@ import {
   writeDoc,
   extractBy,
   runGenerate,
-  journeysOf,
-  apiJourney,
+  interfacesOf,
+  apiInterface,
 } from './helpers.js'
 
 const repos: string[] = []
@@ -80,7 +80,7 @@ const JOURNEYS = ['sha256:journey']
 
 /** The journeys the secured operations are realized through. */
 const meJourneys = (r: string) =>
-  journeysOf(r, apiJourney('GET', '/me'), apiJourney('GET', '/admin'), apiJourney('GET', '/public'))
+  interfacesOf(r, apiInterface('GET', '/me'), apiInterface('GET', '/admin'), apiInterface('GET', '/public'))
 
 describe('planGuardWork — securityFingerprint stamping', () => {
   it('stamps a secured operation section; leaves the public operation empty', () => {
@@ -170,7 +170,7 @@ describe('generateGuards — the api author prompt carries the operation-auth ma
     const { ctxs, runner } = collectAuth()
     await runGenerate({
       repoRoot: r,
-      journeys: meJourneys(r),
+      interfaces: meJourneys(r),
       extractRunner: extractBy({
         'paths/get-getme': [{ claim: 'GET /me returns the caller', driver: 'api', reason: 'HTTP 200' }],
         'paths/get-getadmin': [{ claim: 'GET /admin returns admin data', driver: 'api', reason: 'HTTP 200' }],
@@ -197,7 +197,7 @@ describe('generateGuards — the api author prompt carries the operation-auth ma
     const { ctxs, runner } = collectAuth()
     await runGenerate({
       repoRoot: r,
-      journeys: meJourneys(r),
+      interfaces: meJourneys(r),
       extractRunner: extractBy({
         'paths/get-getme': [{ claim: 'GET /me returns the caller', driver: 'api', reason: 'HTTP 200' }],
         'paths/get-getadmin': { untestable: 'needs oauth' },
@@ -225,7 +225,7 @@ describe('generateGuards — `satisfies` validation', () => {
     })
     const res = await runGenerate({
       repoRoot: r,
-      journeys: meJourneys(r),
+      interfaces: meJourneys(r),
       extractRunner: async () => {
         throw new Error('extraction must not run — the recipe was rejected')
       },
@@ -244,7 +244,7 @@ describe('generateGuards — `satisfies` validation', () => {
     })
     const res = await runGenerate({
       repoRoot: r,
-      journeys: meJourneys(r),
+      interfaces: meJourneys(r),
       extractRunner: extractBy({
         'paths/get-getme': { untestable: 'nothing to author here' },
         'paths/get-getadmin': { untestable: 'nothing to author here' },
@@ -267,7 +267,7 @@ describe('generateGuards — `satisfies` validation', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r),
+      interfaces: interfacesOf(r),
       extractRunner: extractBy({ login: { untestable: 'prose only' } }),
       generateRunner: neverAuthors,
     })

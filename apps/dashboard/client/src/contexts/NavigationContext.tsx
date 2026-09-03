@@ -49,7 +49,9 @@ const TAB_SCOPED_PARAMS = [
   'gtest',
   'gflow',
   'gfind',
+  'ginterface',
   'gjourney',
+  'gplace',
   'gview',
   // Activity tab: the selected agent-sessions run + session.
   'run',
@@ -95,8 +97,12 @@ function tabFromParams(searchParams: URLSearchParams | null): LeftTab | null {
   if (searchParams?.get('gtest') || searchParams?.get('gscn')) return 'tests';
   // A Guard flow (`?gflow=`) or finding (`?gfind=`) deep-link implies the Flows tab.
   if (searchParams?.get('gflow') || searchParams?.get('gfind')) return 'guardflows';
-  // A journey deep-link (`?gjourney=<id>`) implies the Journeys tab.
-  if (searchParams?.get('gjourney')) return 'journeys';
+  // A place (`?gplace=<surface>:<id>`, the tab's own selection) or an interface
+  // deep-link (`?ginterface=<id>`) implies the Interfaces tab. The pre-rename
+  // `?gjourney=` spelling is still honoured so old bookmarks land.
+  if (searchParams?.get('gplace') || searchParams?.get('ginterface') || searchParams?.get('gjourney')) {
+    return 'interfaces';
+  }
   return null;
 }
 

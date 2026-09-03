@@ -104,8 +104,8 @@ export function failureDetailLines(
       "    ⊘ blocked precondition — a setup step failed before any specified behavior was reached",
     );
   }
-  if (s.journeyDrifted) {
-    lines.push("    ⟳ journey drifted — the code surface this was grounded on moved; re-generate to re-ground");
+  if (s.interfaceDrifted) {
+    lines.push("    ⟳ interface drifted — the code surface this was grounded on moved; re-generate to re-ground");
   }
   return lines;
 }

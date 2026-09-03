@@ -43,7 +43,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, Ban, Layers, PenLine, Route } from 'lucide-react';
+import { ArrowUpRight, Ban, Braces, Layers, PenLine } from 'lucide-react';
 import { guardFindingClass } from '@truecourse/shared';
 import type { GuardFlowDetail as GuardFlowDetailData, GuardFlowScenarioRow, GuardGenerateError } from '@truecourse/shared';
 import { HoverPopover } from '@/components/ui/hover-popover';
@@ -156,9 +156,9 @@ function SurfaceRow({
         <span className="text-[11px] font-medium text-muted-foreground">{guardTestLabel(row.surface)}</span>
         <span className="text-[11px] text-muted-foreground">·</span>
         <GuardFlowStatusChip status={view.plain} word={view.word} />
-        {row.journeyDrifted && (
+        {row.interfaceDrifted && (
           <HoverPopover portal width="narrow" content="The code surface this test was grounded on has moved since it was written. Never a pass/fail input.">
-            <span aria-label="journey drift" className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+            <span aria-label="interface drift" className="h-1.5 w-1.5 rounded-full bg-amber-500" />
           </HoverPopover>
         )}
         <span className="ml-auto inline-flex shrink-0 items-center gap-1 text-[11px] text-primary">
@@ -275,7 +275,7 @@ export function GuardFlowDetail({
   decisions,
   onOpenSpec,
   onOpenTest,
-  onOpenJourney,
+  onOpenInterface,
   onOpenExternals,
 }: {
   detail: GuardFlowDetailData;
@@ -284,7 +284,7 @@ export function GuardFlowDetail({
   onOpenSpec: (doc: string, section: string) => void;
   /** Open a test on the Tests tab — a test has exactly one home. */
   onOpenTest: (testId: string) => void;
-  onOpenJourney: (journeyId: string) => void;
+  onOpenInterface: (interfaceId: string) => void;
   /** Jump to the External APIs tab, on the named service's card. */
   onOpenExternals?: (service?: string) => void;
 }) {
@@ -386,19 +386,19 @@ export function GuardFlowDetail({
 
         {detail.journeyIds.length > 0 && (
           <div>
-            <div className={LABEL}>Journeys</div>
-            {/* One reference per line — the same row idiom the Journeys pane uses
-                for the flows that use a journey, so both sides of the link read
-                identically. */}
+            <div className={LABEL}>Interfaces</div>
+            {/* One reference per line — the same row idiom the Interfaces pane
+                uses for the flows that use an interface, so both sides of the
+                link read identically. */}
             <div className="flex flex-col items-start gap-1">
               {detail.journeyIds.map((id) => (
                 <button
                   key={id}
                   type="button"
-                  onClick={() => onOpenJourney(id)}
+                  onClick={() => onOpenInterface(id)}
                   className="inline-flex max-w-full items-center gap-1 rounded border border-border px-1.5 py-0.5 text-left font-mono text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground"
                 >
-                  <Route className="h-3 w-3 shrink-0" />
+                  <Braces className="h-3 w-3 shrink-0" />
                   <span className="truncate">{id}</span>
                 </button>
               ))}

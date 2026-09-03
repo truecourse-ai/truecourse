@@ -3,27 +3,37 @@
  * stage between `spec scan` and `guard generate`.
  *
  * The ENGINE is `@truecourse/guard-generator`'s `runGuardSetup` (recipe discovery +
- * the live endpoint probe, detection, the externals skeleton, the one seed). THIS
- * module is the adapter both the CLI and (later) the dashboard call: it owns
- * step 0 (is a provider configured — a CONFIG question, which the engine package
- * deliberately has no dependency on), model + transport resolution, the pre-flight
- * cost estimate, usage accounting, and persisting `guard/setup.json`.
+ * the live endpoint probe, detection, the catalog step with its externals skeleton,
+ * the one seed — the step spine with per-step fingerprints). THIS module is the
+ * adapter both the CLI and (later) the dashboard call: it owns step 0 (is a
+ * provider configured — a CONFIG question, which the engine package deliberately
+ * has no dependency on), model + transport resolution, the pre-flight cost
+ * estimate, usage accounting, persisting `guard/setup.json`, and the AGENT-SESSION
+ * seams: the recipe-repair, dependency-catalog, interfaces (reconcile + web-task
+ * authoring), seed and auth-proof sessions are built here (they need the
+ * configured session driver + the sessions store) and injected into the engine,
+ * which stays core-free.
  *
- * Working-tree only, by design: setup writes files inside the repo. A hosted store
- * has no working tree, which is exactly why hosted `guard generate` keeps deriving
- * its own recipe rather than depending on this stage.
+ * Working-tree only, by design: setup writes files inside the repo. A hosted
+ * caller runs it against a clone it materialized, and injects what a server owns
+ * that a checkout does not — the workspace's transport and session driver, and
+ * the repo identity its run record is keyed by.
  */
 
 import {
   runGuardSetup,
   spawnRecipeRunner,
-  spawnSeedRunner,
   GUARD_SETUP_STEPS,
+  type GuardSetupOnlyStep,
+  type GuardSetupAuthStep,
+  type GuardSetupCatalogSession,
+  type GuardSetupInterfaceProvider,
+  type GuardSetupInterfacesStep,
   type GuardSetupResult,
+  type GuardSetupSeedSession,
   type GuardSetupStepKey,
-  type JourneyProvider,
+  type RecipeRepairFn,
   type RecipeRunner,
-  type SeedRunner,
 } from '@truecourse/guard-generator';
 import { writeGuardSetup, readGuardSetup, guardSetupPath } from '@truecourse/guard-runner';
 import {
@@ -39,6 +49,7 @@ import {
   type LlmTransport,
 } from '@truecourse/shared/llm';
 import { resolveClaudeBinary } from '@truecourse/shared';
+import type { RunError, SessionDriver } from '@truecourse/agent-loop';
 import type { GuardSetupReport } from '@truecourse/shared';
 import {
   LlmApiConfigError,
@@ -51,12 +62,27 @@ import { effectiveLlmMode, type LlmTransportMode } from '../config/global-config
 import { resolveFallbackModel, resolveModel } from '../config/llm-models.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
 import { estimateGuardSetup } from '../services/llm/spec-estimate.js';
-import { mapJourneys } from '../services/journey.service.js';
+import { mapInterfaces } from '../services/interface.service.js';
+import { sessionRunDir, type SessionRunStartedInfo } from '../lib/sessions-store.js';
+import {
+  buildAuthProof,
+  buildCatalogSession,
+  buildInterfacesStep,
+  buildRecipeRepair,
+  buildSeedSession,
+  createGuardSetupSessionContext,
+} from '../services/guard-setup/index.js';
+import { runGuardInterfaceAuthoring } from './guard-interfaces.js';
 import type { LlmEstimate } from './analyze-core.js';
 import { EstimateDeclined } from './spec-in-process.js';
 import type { StepTracker } from '../progress.js';
 
-export { GUARD_SETUP_STEPS } from '@truecourse/guard-generator';
+export {
+  GUARD_SETUP_STEPS,
+  GUARD_SETUP_ONLY_STEPS,
+  SetupStepNotReadyError,
+  type GuardSetupOnlyStep,
+} from '@truecourse/guard-generator';
 export { EstimateDeclined } from './spec-in-process.js';
 export { readGuardSetup, guardSetupPath } from '@truecourse/guard-runner';
 
@@ -77,26 +103,90 @@ export interface GuardSetupInProcessOptions {
    */
   llm?: 'cli' | 'agent' | 'api';
   io?: string;
+  /**
+   * Run the ONE-SHOT calls on THIS transport instead of resolving one. The
+   * dashboard server passes the transport it built from the asking workspace's
+   * stored provider config — credentials travel with the run, never through a
+   * process-wide default — and step 0 is answered by its existence.
+   */
+  transport?: LlmTransport;
+  /**
+   * The mode an explicit `transport`/`driver` runs in, which decides the stage
+   * models and the run record's attribution. Unset, the saved selection (as a
+   * `--llm` flag may have overridden it) answers.
+   */
+  transportMode?: LlmTransportMode;
+  /**
+   * Run the SESSIONS on THIS driver instead of the configured one. Passing it
+   * means passing `transportMode` too — the driver states what it calls, not
+   * which mode selected it.
+   */
+  driver?: SessionDriver;
+  /**
+   * Where the run record and transcripts are keyed — the repo IDENTITY when
+   * `repoRoot` is an ephemeral clone deleted after the run. Defaults to
+   * `repoRoot`.
+   */
+  sessionsKey?: string;
+  /**
+   * Open the run record up front rather than on the first session, so a hosted
+   * run is watchable from the moment it starts — including one that fails
+   * before any session exists, or spends none at all.
+   */
+  eagerRun?: boolean;
   /** Re-derive the recipe and re-draft the seed even when both already exist. */
   refresh?: boolean;
+  /** Interfaces step: re-author places that already carry authored tasks. */
+  replace?: boolean;
   /**
-   * Pre-flight cost gate. Called with the (bounded, at-most-two-stage) estimate
-   * before any LLM work; return `false` to abort (throws {@link EstimateDeclined}).
+   * A sessions-store run record just came into being — setup's own (on its first
+   * session, or at once under `eagerRun`) and the nested interfaces step's alike,
+   * so the CLI can print a "watch live" deep link for each. A lazy run spending
+   * no session never fires it.
+   */
+  onRunStarted?: (info: SessionRunStartedInfo) => void;
+  /**
+   * Single-step mode (the CLI's `--only-<step>` flags): run only this step —
+   * prior steps replay from what they left on disk (a step nobody ran throws
+   * {@link SetupStepNotReadyError}), later steps never start, and the persisted
+   * `guard/setup.json` merges over the previous one. The estimate gate prices
+   * only the chosen step.
+   */
+  only?: GuardSetupOnlyStep;
+  /**
+   * Pre-flight cost gate. Called with the session-modeled estimate before any
+   * LLM work; return `false` to abort (throws {@link EstimateDeclined}).
    */
   onLlmEstimate?: (estimate: LlmEstimate) => Promise<boolean>;
   /** Asked only when a refresh would REPLACE an existing `api.seed`; see the engine. */
   confirmSeedReplace?: () => Promise<boolean>;
   signal?: AbortSignal;
-  // --- test seams (production spawns the transport) ---
+  // --- test seams (production spawns the transport / builds the sessions) ---
   recipeRunner?: RecipeRunner;
-  seedRunner?: SeedRunner;
-  journeys?: JourneyProvider;
+  interfaces?: GuardSetupInterfaceProvider;
+  /** Test seam for the recipe-repair session. */
+  repair?: RecipeRepairFn;
+  /** Test seam for the dependency-catalog session. */
+  catalogSession?: GuardSetupCatalogSession;
+  /** Test seam for the interfaces step (reconcile + authoring). */
+  authorInterfaces?: GuardSetupInterfacesStep;
+  /** Test seam for the seed session. */
+  seedSession?: GuardSetupSeedSession;
+  /** Test seam for the auth-proof step. */
+  verifyAuth?: GuardSetupAuthStep;
 }
 
 export interface GuardSetupInProcessResult {
   report: GuardSetupReport;
   /** Absolute path of the persisted `guard/setup.json`. */
   reportPath: string;
+  /**
+   * The sessions-store run dirs this run opened — `sessions/guard-setup/<runId>/`
+   * and, when the interfaces step authored, the `sessions/guard-interfaces/<runId>/`
+   * its own engine opened. Empty when nothing spent a session. Named for
+   * stepwise runs, whose point is reading the transcripts afterwards.
+   */
+  sessionsRunDirs: string[];
 }
 
 /**
@@ -151,7 +241,14 @@ export function assertLlmProviderConfigured(
  * converse is {@link effectiveLlmMode}: a `cli` flag moves model resolution off
  * the API config too, so the two never disagree.
  */
-function resolveTransport(options: { llm?: 'cli' | 'agent' | 'api'; io?: string }): ResolvedSetupTransport {
+function resolveTransport(options: {
+  llm?: 'cli' | 'agent' | 'api';
+  io?: string;
+  transport?: LlmTransport;
+}): ResolvedSetupTransport {
+  // A caller that built its own transport has already answered every question
+  // this function asks — including step 0's, since the object exists.
+  if (options.transport) return { transport: options.transport };
   if (options.llm === 'agent') {
     if (!options.io) {
       throw new Error('--llm agent requires --io <dir> (the request/response mailbox directory)');
@@ -179,13 +276,25 @@ interface ResolvedSetupTransport {
 /** The pre-flight estimate the CLI prompt renders — the SAME one the gate uses. */
 export async function estimateGuardSetupCost(
   repoRoot: string,
-  opts: { refresh?: boolean; mode?: LlmTransportMode } = {},
+  opts: {
+    refresh?: boolean;
+    replace?: boolean;
+    mode?: LlmTransportMode;
+    /** Single-step mode: price ONLY this step's sessions. */
+    only?: GuardSetupOnlyStep;
+  } = {},
 ): Promise<LlmEstimate> {
   return estimateGuardSetup(repoRoot, await getModelPrices(), opts);
 }
 
-/** The two LLM stages setup can spend on. */
-const SETUP_USAGE_STAGES = ['guard.recipe', 'guard.seed'] as const;
+/**
+ * The ONE-SHOT stage setup can still spend on: the legacy recipe fallback,
+ * which fires only on runs without a session driver (the `agent` mailbox
+ * transport, or an injected `recipeRunner` test seam). The sessions' spend is
+ * accounted separately — the loop's `BudgetSpent` has no input/output token
+ * split, so it rides `usage.sessions` instead of being forced into these fields.
+ */
+const SETUP_USAGE_STAGES = ['guard.recipe'] as const;
 
 export async function guardSetupInProcess(
   repoRoot: string,
@@ -208,12 +317,14 @@ export async function guardSetupInProcess(
   });
   // The transport this run actually uses decides the models — never the saved
   // selection a `--llm-transport` flag just overrode.
-  const mode = effectiveLlmMode(options.llm);
+  const mode = options.transportMode ?? effectiveLlmMode(options.llm);
 
   if (options.onLlmEstimate) {
     const estimate = await estimateGuardSetupCost(repoRoot, {
       mode,
       ...(options.refresh ? { refresh: true } : {}),
+      ...(options.replace ? { replace: true } : {}),
+      ...(options.only ? { only: options.only } : {}),
     });
     if ((estimate.stages?.length ?? 0) > 0) {
       const proceed = await options.onLlmEstimate(estimate);
@@ -226,6 +337,107 @@ export async function guardSetupInProcess(
   if (llmLog) setLlmCallSink(llmLog.sink);
   const startedAt = Date.now();
 
+  // THE SESSION SEAMS. Production wires the real agent
+  // sessions; a run with an injected one-shot recipe runner (the test seam)
+  // keeps the legacy path those tests drive, and the `agent` mailbox transport
+  // has no session driver at all. The context is LAZY by default — a run whose
+  // deterministic paths settle everything never creates a run record and never
+  // builds a driver — until a hosted caller asks for an eager one, which has a
+  // watcher from the first second and must be visible even when it spends nothing.
+  const sessionsAvailable = options.llm !== 'agent' && options.recipeRunner === undefined;
+  const sessionContextOptions = {
+    repoRoot,
+    ...(options.sessionsKey ? { sessionsKey: options.sessionsKey } : {}),
+    ...(options.tracker ? { tracker: options.tracker } : {}),
+    ...(options.eagerRun ? { eager: true } : {}),
+    ...(options.llm === 'cli' || options.llm === 'api' ? { transport: options.llm } : {}),
+    ...(options.onRunStarted ? { onRunStarted: options.onRunStarted } : {}),
+  };
+  const sessionContext = !sessionsAvailable
+    ? null
+    : options.driver
+      ? createGuardSetupSessionContext({
+          ...sessionContextOptions,
+          driver: options.driver,
+          transportMode: mode,
+        })
+      : createGuardSetupSessionContext(sessionContextOptions);
+  const transportFlag = options.llm === 'cli' || options.llm === 'api' ? options.llm : undefined;
+  // The interfaces step's authoring half runs under `guard interfaces author`'s
+  // OWN sessions-store run, so its transcripts live somewhere else than setup's;
+  // a stepwise run has to be told where.
+  let interfacesRunId: string | undefined;
+  const repair =
+    options.repair ??
+    (sessionContext
+      ? buildRecipeRepair(sessionContext, {
+          ...(options.signal ? { signal: options.signal } : {}),
+        })
+      : undefined);
+  const catalogSession =
+    options.catalogSession ??
+    (sessionContext
+      ? buildCatalogSession(sessionContext, {
+          ...(options.signal ? { signal: options.signal } : {}),
+        })
+      : undefined);
+  const authorInterfaces =
+    options.authorInterfaces ??
+    (sessionContext
+      ? buildInterfacesStep(sessionContext, {
+          // The authoring engine of `guard interfaces author`, verbatim — its
+          // own sessions-store run (`sessions/guard-interfaces/…`), its context
+          // pass, its findings ledger and closing reconciliation.
+          author: async (authorOpts) => {
+            const run = await runGuardInterfaceAuthoring({
+              repoRoot: authorOpts.repoRoot,
+              replace: authorOpts.replace,
+              ...(options.sessionsKey ? { sessionsKey: options.sessionsKey } : {}),
+              ...(options.driver ? { driver: options.driver, transportMode: mode } : {}),
+              ...(transportFlag ? { transport: transportFlag } : {}),
+              ...(options.signal ? { signal: options.signal } : {}),
+              ...(options.onRunStarted ? { onRunStarted: options.onRunStarted } : {}),
+              onStatus: (message) => tracker?.detail('interfaces', message),
+            });
+            interfacesRunId = run.runId;
+            return {
+              runId: run.runId,
+              authored: run.authored,
+              skipped: run.skipped,
+              places: run.places.map((place) => ({ status: place.status })),
+              diagnostics: run.diagnostics,
+              spent: run.spent,
+            };
+          },
+          ...(options.signal ? { signal: options.signal } : {}),
+        })
+      : undefined);
+  const seedSession =
+    options.seedSession ??
+    (sessionContext
+      ? buildSeedSession(sessionContext, {
+          ...(options.signal ? { signal: options.signal } : {}),
+        })
+      : undefined);
+  const verifyAuth =
+    options.verifyAuth ??
+    (sessionContext
+      ? buildAuthProof(sessionContext, {
+          ...(options.signal ? { signal: options.signal } : {}),
+        })
+      : undefined);
+
+  /** Where this run's transcripts landed — setup's own run, then the interfaces
+   *  step's, in the order they open. */
+  const sessionsRunDirs = (): string[] => {
+    const key = options.sessionsKey ?? repoRoot;
+    const setupRunId = sessionContext?.runId();
+    return [
+      ...(setupRunId ? [sessionRunDir(key, 'guard-setup', setupRunId)] : []),
+      ...(interfacesRunId ? [sessionRunDir(key, 'guard-interfaces', interfacesRunId)] : []),
+    ];
+  };
+
   const steps = GUARD_SETUP_STEPS.map((s) => s.key as GuardSetupStepKey);
   let current = 0;
   const advanceTo = (key: GuardSetupStepKey): void => {
@@ -234,6 +446,11 @@ export async function guardSetupInProcess(
     current = next;
     tracker?.start(key);
   };
+
+  // Why the run record closes `failed` — a report the engine refused is the run
+  // failing, whatever its sessions did. Hoisted because the `finally` that closes
+  // the record cannot see the report.
+  let closingFailure: RunError | null = null;
 
   try {
     const result: GuardSetupResult = await runGuardSetup({
@@ -245,26 +462,26 @@ export async function guardSetupInProcess(
           model: resolveModel('guard.recipe', undefined, repoRoot, mode),
           fallbackModel: resolveFallbackModel(repoRoot, mode) ?? undefined,
         }),
-      seedRunner:
-        options.seedRunner ??
-        spawnSeedRunner({
-          transport,
-          model: resolveModel('guard.seed', undefined, repoRoot, mode),
-          fallbackModel: resolveFallbackModel(repoRoot, mode) ?? undefined,
-        }),
-      journeys:
-        options.journeys ??
+      interfaces:
+        options.interfaces ??
         (async () => {
           // ONE working-tree analysis feeds every step, exactly as generate does it.
-          const mapped = await mapJourneys(repoRoot);
+          const mapped = await mapInterfaces(repoRoot);
           return {
-            journeys: mapped.catalog.journeys,
+            interfaces: mapped.catalog.interfaces,
             externalServices: mapped.externalServices,
             database: mapped.database,
             datastoreUrls: mapped.datastoreUrls,
           };
         }),
+      ...(repair ? { repair } : {}),
+      ...(catalogSession ? { catalogSession } : {}),
+      ...(authorInterfaces ? { authorInterfaces } : {}),
+      ...(seedSession ? { seedSession } : {}),
+      ...(verifyAuth ? { verifyAuth } : {}),
       ...(options.refresh ? { refresh: true } : {}),
+      ...(options.replace ? { replace: true } : {}),
+      ...(options.only ? { only: options.only } : {}),
       ...(options.confirmSeedReplace ? { confirmSeedReplace: options.confirmSeedReplace } : {}),
       ...(options.signal ? { signal: options.signal } : {}),
       onStep: (step) => advanceTo(step),
@@ -282,17 +499,26 @@ export async function guardSetupInProcess(
     // every later one stays PENDING, so the terminal never ticks work that never ran.
     if (result.report.status === 'failed') {
       tracker?.error(steps[current], firstLine(result.report.reason) ?? 'aborted');
+      closingFailure = { message: result.report.reason ?? 'guard setup failed', kind: 'setup' };
     } else {
-      for (let i = current; i < steps.length; i++) tracker?.done(steps[i]);
+      // A single-step run closes the checklist at the step it was asked for:
+      // everything past it never started, so nothing past it may tick.
+      const last = options.only ? steps.indexOf(options.only) + 1 : steps.length;
+      for (let i = current; i < last; i++) tracker?.done(steps[i]);
     }
 
-    const report: GuardSetupReport = { ...result.report, ...withUsage() };
+    const report: GuardSetupReport = {
+      ...result.report,
+      ...withUsage(sessionContext?.usageTotals() ?? null),
+    };
     const reportPath = writeGuardSetup(repoRoot, report);
-    return { report, reportPath };
+    return { report, reportPath, sessionsRunDirs: sessionsRunDirs() };
   } catch (e) {
     tracker?.error(steps[current], (e as Error).message);
     throw e;
   } finally {
+    // Close the sessions-store run, when any session actually ran under it.
+    sessionContext?.finish(options.signal?.aborted === true, closingFailure ?? undefined);
     if (llmLog) {
       setLlmCallSink(undefined);
       llmLog.finish(Date.now() - startedAt);
@@ -300,8 +526,16 @@ export async function guardSetupInProcess(
   }
 }
 
-/** Sum the run's usage over setup's two stages; omitted when no real call landed. */
-function withUsage(): Pick<GuardSetupReport, 'usage'> {
+/**
+ * The run's spend: the one-shot stage usage (the legacy recipe fallback) plus
+ * the agent-session totals the context accumulated. `costUsd` is the WHOLE
+ * run; the sessions' turn/token detail rides its own block because the loop's
+ * `BudgetSpent` has no input/output split to fold into the one-shot fields.
+ * Omitted entirely when nothing was spent.
+ */
+function withUsage(
+  sessions: { count: number; turns: number; tokens: number; costUsd: number } | null,
+): Pick<GuardSetupReport, 'usage'> {
   const usage = getStageUsage();
   let calls = 0;
   let inputTokens = 0;
@@ -315,7 +549,16 @@ function withUsage(): Pick<GuardSetupReport, 'usage'> {
     outputTokens += u.outputTokens;
     costUsd += u.costUsd;
   }
-  return calls > 0 ? { usage: { calls, inputTokens, outputTokens, costUsd } } : {};
+  if (calls === 0 && (sessions === null || sessions.count === 0)) return {};
+  return {
+    usage: {
+      calls,
+      inputTokens,
+      outputTokens,
+      costUsd: costUsd + (sessions?.costUsd ?? 0),
+      ...(sessions && sessions.count > 0 ? { sessions } : {}),
+    },
+  };
 }
 
 function firstLine(reason: string | undefined): string | undefined {

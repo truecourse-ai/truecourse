@@ -22,7 +22,7 @@ import type {
   GuardClaimIdentity,
   GuardFlowMilestoneView,
   GuardFlowScenarioRow,
-  GuardJourneyRow,
+  GuardInterfaceRow,
 } from '@truecourse/shared';
 import type { GuardDecisionsState } from '@/hooks/useGuardDecisions';
 import { HoverPopover } from '@/components/ui/hover-popover';
@@ -57,23 +57,23 @@ export function GuardTestDetail({
   test,
   row,
   runId,
-  journeys,
+  interfaces,
   flowGoal,
   milestones = [],
   decisions,
   onOpenFlow,
-  onOpenJourney,
+  onOpenInterface,
   onOpenSpec,
 }: {
   repoId: string;
   /** The inventory row — identity, title, surface, and the flow it belongs to. */
   test: GuardTestRow;
-  /** The flow-join row (result, failure, evidence, journey path); null while loading. */
+  /** The flow-join row (result, failure, evidence, interface path); null while loading. */
   row: GuardFlowScenarioRow | null;
   /** The run the outcome came from (evidence lives under it); null when never run. */
   runId: string | null;
-  /** The mapped catalog, for the journeys this test drives; null = unmapped. */
-  journeys: GuardJourneyRow[] | null;
+  /** The mapped catalog, for the interfaces this test drives; null = unmapped. */
+  interfaces: GuardInterfaceRow[] | null;
   /** The flow's one-line goal — what this test is ultimately checking. */
   flowGoal?: string;
   /** The flow's milestone chain — resolves the claim behind a failing result. */
@@ -81,7 +81,7 @@ export function GuardTestDetail({
   /** The dismissals state; omitted (guard reads off / PR scope unresolved) = no action. */
   decisions?: GuardDecisionsState;
   onOpenFlow: (flowId: string) => void;
-  onOpenJourney: (journeyId: string) => void;
+  onOpenInterface: (interfaceId: string) => void;
   onOpenSpec: (doc: string, section: string) => void;
 }) {
   const [ruling, setRuling] = useState(false);
@@ -136,7 +136,7 @@ export function GuardTestDetail({
     // The chain the step list is grouped under — each section headed by the claim
     // its steps realize.
     milestones,
-    ...(row?.journeyDrifted ? { journeyDrifted: true } : {}),
+    ...(row?.interfaceDrifted ? { interfaceDrifted: true } : {}),
     ...(row?.blockedPrecondition ? { blockedPrecondition: true } : {}),
     ...(flowGoal ? { goal: flowGoal } : {}),
     flow: { id: test.flowId, title: test.flowTitle },
@@ -145,7 +145,7 @@ export function GuardTestDetail({
       section: test.anchor,
       ...(test.headingText ? { headingText: test.headingText } : {}),
     },
-    journeyPath: row?.journeyPath ?? [],
+    interfacePath: row?.journeyPath ?? [],
     evidence,
   };
 
@@ -153,9 +153,9 @@ export function GuardTestDetail({
     <GuardTestView
       repoId={repoId}
       test={model}
-      journeys={journeys}
+      interfaces={interfaces}
       onOpenFlow={onOpenFlow}
-      onOpenJourney={onOpenJourney}
+      onOpenInterface={onOpenInterface}
       onOpenSpec={onOpenSpec}
       notes={
         row != null && !row.outcome && row.stage !== 'birth' ? (

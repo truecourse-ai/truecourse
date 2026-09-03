@@ -36,7 +36,7 @@ import {
   type GuardTriage,
 } from '@truecourse/shared'
 import { jsonSchemaHint, OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm'
-import type { JourneyContractHint, OutputCorrection } from './prompts.js'
+import type { InterfaceContractHint, OutputCorrection } from './prompts.js'
 import type { ProbeTranscript } from './ground.js'
 import { quoteInvalidOutput } from './validate.js'
 
@@ -137,7 +137,7 @@ export interface TriageUserContext {
   probes?: ProbeTranscript[]
   /** The plan's inbound request contracts — what each walked operation's handler
    *  actually reads off the request (api tests). */
-  journeyContracts?: JourneyContractHint[]
+  journeyContracts?: InterfaceContractHint[]
   /** On a re-ask after invalid output, the prior output quoted back. */
   correction?: OutputCorrection
 }
@@ -151,7 +151,7 @@ function indentBlock(text: string): string {
 }
 
 /** The same trailing request-fields clause the authoring prompt renders. */
-function contractLine(hint: JourneyContractHint): string {
+function contractLine(hint: InterfaceContractHint): string {
   const parts: string[] = []
   for (const [label, fields] of [
     ['body', hint.bodyFields],
@@ -264,7 +264,7 @@ export interface TriageFlowContext {
   sectionText: string
   milestones: TriageMilestone[]
   probes?: ProbeTranscript[]
-  journeyContracts?: JourneyContractHint[]
+  journeyContracts?: InterfaceContractHint[]
 }
 
 /**

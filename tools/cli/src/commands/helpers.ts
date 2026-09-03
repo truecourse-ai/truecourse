@@ -48,6 +48,63 @@ export function getServerUrl(): string {
   return `http://localhost:${port}`;
 }
 
+let dashboardUrlPromise: Promise<string> | null = null;
+
+/**
+ * Where the dashboard UI actually lives — NOT always the API server. The
+ * packaged server serves the SPA on its own port (getServerUrl); under
+ * `pnpm dev` the Vite client runs on :3000 beside the API on :3001, which
+ * serves no HTML at all. Resolved once per process: an explicit
+ * TRUECOURSE_DASHBOARD_URL wins, then whichever candidate answers `/` with
+ * HTML, else the server URL — the link must print even with nothing running,
+ * and the packaged default is the honest fallback.
+ */
+export function resolveDashboardUrl(): Promise<string> {
+  dashboardUrlPromise ??= (async () => {
+    const explicit = process.env.TRUECOURSE_DASHBOARD_URL;
+    if (explicit) return explicit.replace(/\/+$/, "");
+    const server = getServerUrl();
+    for (const candidate of [server, "http://localhost:3000"]) {
+      if (await servesHtml(candidate)) return candidate;
+    }
+    return server;
+  })();
+  return dashboardUrlPromise;
+}
+
+async function servesHtml(url: string): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 400);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    return res.ok && (res.headers.get("content-type") ?? "").includes("text/html");
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * The dashboard Activity deep link to one agent-sessions run
+ * (`?tab=activity&run=<runId>` — the runId is unique across commands, so the
+ * command never rides the URL). Omit `runId` for the tab itself.
+ * `dashboardUrl` comes from {@link resolveDashboardUrl}, resolved once at
+ * command start so the print-time callbacks stay synchronous.
+ */
+export function activityUrl(dashboardUrl: string, slug: string, runId?: string): string {
+  return `${dashboardUrl}/repos/${slug}?tab=activity${runId ? `&run=${runId}` : ""}`;
+}
+
+/**
+ * The "watch live" line an agentic command prints the moment its
+ * sessions-store run record exists. Printed unconditionally — if the dashboard
+ * is down, the same URL replays the persisted transcripts later.
+ */
+export function printWatchLive(dashboardUrl: string, slug: string, runId: string): void {
+  p.log.message(`Watch live: ${activityUrl(dashboardUrl, slug, runId)}`);
+}
+
 /**
  * Resolve the current directory's registered project from the local registry.
  * Registers the repo on first use. Exits if no `.truecourse/` is found.

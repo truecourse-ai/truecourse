@@ -27,8 +27,8 @@ import {
   flowOfAll,
   noEpics,
   runGenerate,
-  journeysOf,
-  apiJourney,
+  interfacesOf,
+  apiInterface,
   rawApi,
   FIXTURE_API_SERVER,
   FIXTURE_API_SERVER_V2,
@@ -115,7 +115,7 @@ describe('generateGuards — the route gate', () => {
     let authorCalls = 0
     const res = await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, apiJourney('GET', '/v2/bookings')),
+      interfaces: interfacesOf(r, apiInterface('GET', '/v2/bookings')),
       extractRunner: v2Extract,
       matchRunner: async (ctx) => {
         matchCalls++
@@ -147,7 +147,7 @@ describe('generateGuards — the route gate', () => {
 
     const opts = {
       repoRoot: r,
-      journeys: journeysOf(r, apiJourney('GET', '/v2/bookings')),
+      interfaces: interfacesOf(r, apiInterface('GET', '/v2/bookings')),
       extractRunner: v2Extract,
     }
     const first = await runGenerate(opts)
@@ -169,7 +169,7 @@ describe('generateGuards — the route gate', () => {
     let ctx: AuthorUserContext | undefined
     const res = await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, apiJourney('GET', '/v2/bookings'), apiJourney('GET', '/api/version')),
+      interfaces: interfacesOf(r, apiInterface('GET', '/v2/bookings'), apiInterface('GET', '/api/version')),
       extractRunner: v2Extract,
       generateRunner: authorBy(
         {
@@ -209,7 +209,7 @@ describe('generateGuards — the route gate', () => {
     let ctx: AuthorUserContext | undefined
     const res = await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, apiJourney('GET', '/api/version')),
+      interfaces: interfacesOf(r, apiInterface('GET', '/api/version')),
       extractRunner: webExtract,
       generateRunner: authorBy(
         {
@@ -241,7 +241,7 @@ describe('generateGuards — the route gate', () => {
     let authorCalls = 0
     const res = await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, apiJourney('GET', '/v2/bookings'), apiJourney('GET', '/api/version')),
+      interfaces: interfacesOf(r, apiInterface('GET', '/v2/bookings'), apiInterface('GET', '/api/version')),
       extractRunner: bothExtract,
       flowsRunner: flowOfAll('Book through the api, then read the web version'),
       flowsEpicRunner: noEpics,
@@ -277,7 +277,7 @@ describe('generateGuards — the route gate', () => {
     let ctx: AuthorUserContext | undefined
     await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, apiJourney('GET', '/v2/bookings')),
+      interfaces: interfacesOf(r, apiInterface('GET', '/v2/bookings')),
       extractRunner: v2Extract,
       generateRunner: authorBy(
         {
@@ -306,7 +306,7 @@ describe('generateGuards — the route gate', () => {
     let ctx: AuthorUserContext | undefined
     const res = await runGenerate({
       repoRoot: r,
-      journeys: journeysOf(r, apiJourney('GET', '/v2/bookings')),
+      interfaces: interfacesOf(r, apiInterface('GET', '/v2/bookings')),
       extractRunner: v2Extract,
       generateRunner: authorBy(
         {
