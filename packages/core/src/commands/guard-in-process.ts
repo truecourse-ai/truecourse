@@ -221,8 +221,8 @@ export interface GuardGenerateInProcessOptions {
    * provider and this run's authoring model are stamped.
    */
   attribution?: SessionLlm;
-  /** The run record just came into being — after the estimate and conflict
-   *  gates, before any LLM work. The CLI prints its "watch live" link from it. */
+  /** The run record just came into being — before the gates, so a generate the
+   *  gates stop is on record too. The CLI prints its "watch live" link from it. */
   onRunStarted?: (info: SessionRunStartedInfo) => void;
   /**
    * Stop the run. The generator has no abort seam of its own, so this is honored
@@ -331,39 +331,15 @@ export async function guardGenerateInProcess(
   // provider block is api mode whatever the local config file says; the
   // operator's Claude Code keeps the tier aliases).
   const mode = options.transport ? (options.transportMode ?? 'api') : effectiveLlmMode(options.llm);
-
-  // Hard-fail on unresolved spec conflicts BEFORE the estimate — never ask to
-  // spend, then fail. Extracting both sides of an open overlap births noise.
-  assertNoOpenConflicts(repoRoot);
-
-  // Pre-flight cost estimate + confirm, before any LLM call. No stages ⇒ nothing
-  // changed ⇒ skip the prompt and run the deterministic no-op. Decline → abort.
-  if (options.onLlmEstimate) {
-    const prices = await getModelPrices();
-    const estimate = await withEstimatePhase(options.onEstimatePhase, () =>
-      estimateGuardTokens(repoRoot, prices, { mode }),
-    );
-    if ((estimate.stages?.length ?? 0) > 0) {
-      const proceed = await options.onLlmEstimate(estimate);
-      if (!proceed) throw new EstimateDeclined('guard');
-    }
-  }
-
-  // The transport is resolved before the run record exists: an unusable saved
-  // provider config is a refusal, not a failed run.
-  const transport = resolveTransport(options);
   const models = resolveGuardModels(repoRoot, mode);
-
-  resetStageUsage();
-  const llmLog = createLlmCallLogger(repoRoot, 'guard-generate');
-  if (llmLog) setLlmCallSink(llmLog.sink);
-  const startedAt = Date.now();
 
   // The run record: `sessions/guard-generate/<runId>/`. Generate spends
   // one-shot calls rather than sessions, so the record carries no transcripts —
   // it carries the step checklist, what it ran on and how it ended, which is all
-  // a surface that never saw the process can read. Created after both gates, so
-  // a declined estimate or a blocked corpus leaves no run.
+  // a surface that never saw the process can read. Created FIRST: a generate
+  // that started and was stopped by a gate — a blocked corpus, a declined
+  // estimate, an unusable provider config — is still a generate that started,
+  // and Activity must say so and why.
   const run = createSessionRun(options.sessionsKey ?? repoRoot, {
     command: 'guard-generate',
     gitRef: await resolveCommitSha(repoRoot),
@@ -373,6 +349,44 @@ export async function guardGenerateInProcess(
   const untap = tracker?.tap((progress) => {
     if (progress.steps) run.setChecklist(progress.steps);
   });
+
+  let transport: LlmTransport | undefined;
+  try {
+    // Hard-fail on unresolved spec conflicts BEFORE the estimate — never ask to
+    // spend, then fail. Extracting both sides of an open overlap births noise.
+    assertNoOpenConflicts(repoRoot);
+
+    // Pre-flight cost estimate + confirm, before any LLM call. No stages ⇒ nothing
+    // changed ⇒ skip the prompt and run the deterministic no-op. Decline → abort.
+    if (options.onLlmEstimate) {
+      const prices = await getModelPrices();
+      const estimate = await withEstimatePhase(options.onEstimatePhase, () =>
+        estimateGuardTokens(repoRoot, prices, { mode }),
+      );
+      if ((estimate.stages?.length ?? 0) > 0) {
+        const proceed = await options.onLlmEstimate(estimate);
+        if (!proceed) throw new EstimateDeclined('guard');
+      }
+    }
+
+    transport = resolveTransport(options);
+  } catch (e) {
+    untap?.();
+    // A stop the user asked for is not a failure; a gate that refused is, and
+    // the record carries its reason under the gate's own kind.
+    if (e instanceof EstimateDeclined) run.finish('interrupted');
+    else if (e instanceof OpenConflictsError) {
+      run.finish('failed', { error: { message: firstLine(e.message) ?? e.message, kind: 'open-conflicts' } });
+    } else {
+      run.finish('failed', { error: { message: (e as Error).message, kind: 'llm-config' } });
+    }
+    throw e;
+  }
+
+  resetStageUsage();
+  const llmLog = createLlmCallLogger(repoRoot, 'guard-generate');
+  if (llmLog) setLlmCallSink(llmLog.sink);
+  const startedAt = Date.now();
 
   const throwIfAborted = (): void => {
     if (options.signal?.aborted) throw new GuardGenerateAborted();

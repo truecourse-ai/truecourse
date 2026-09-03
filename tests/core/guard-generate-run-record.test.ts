@@ -16,8 +16,10 @@ import path from 'node:path';
 import type { LlmTransport } from '@truecourse/shared/llm';
 import {
   guardGenerateInProcess,
+  EstimateDeclined,
   GuardGenerateAborted,
   GUARD_GENERATE_STEPS,
+  OpenConflictsError,
 } from '../../packages/core/src/commands/guard-in-process.js';
 import { listSessionRuns } from '../../packages/core/src/lib/sessions-store.js';
 import { resetSpecStore } from '../../packages/core/src/lib/spec-store.js';
@@ -85,6 +87,76 @@ describe('guard generate run record', () => {
     await expect(
       guardGenerateInProcess(repo, { transport, transportMode: 'api', signal: controller.signal, sessionsKey }),
     ).rejects.toBeInstanceOf(GuardGenerateAborted);
+    const [run] = listSessionRuns(sessionsKey, 'guard-generate');
+    expect(run).toMatchObject({ status: 'interrupted' });
+    expect(run.error).toBeUndefined();
+  });
+});
+
+describe('a generate the gates stop is on record too', () => {
+  it('records a blocked corpus as a failed run carrying the conflict reason', async () => {
+    fs.mkdirSync(path.join(repo, '.truecourse', 'specs'), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, '.truecourse', 'specs', 'corpus.json'),
+      JSON.stringify({
+        version: 3,
+        generatedAt: '2026-01-01T00:00:00Z',
+        docs: [
+          { ref: 'docs/v1.md', kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['users'] },
+          { ref: 'docs/v2.md', kind: 'prd', lastTouched: '2026-02-01T00:00:00Z', areaTags: ['users'] },
+        ],
+        areas: [
+          {
+            id: 'users',
+            product: 'users',
+            concern: 'users',
+            docRefs: ['docs/v1.md', 'docs/v2.md'],
+            overlaps: [{ docs: ['docs/v1.md', 'docs/v2.md'], note: 'two names for one thing', sections: [] }],
+          },
+        ],
+        relations: [],
+        skippedDocs: [],
+      }),
+    );
+
+    await expect(
+      guardGenerateInProcess(repo, { transport, transportMode: 'api', sessionsKey }),
+    ).rejects.toBeInstanceOf(OpenConflictsError);
+
+    const [run] = listSessionRuns(sessionsKey, 'guard-generate');
+    expect(run).toMatchObject({
+      status: 'failed',
+      error: { kind: 'open-conflicts', message: expect.stringContaining('1 open spec conflict') },
+    });
+  });
+
+  it('records a declined estimate as interrupted', async () => {
+    // A corpus with one changed section, so the estimate has something to
+    // price and the gate actually asks.
+    fs.mkdirSync(path.join(repo, '.truecourse', 'specs'), { recursive: true });
+    fs.mkdirSync(path.join(repo, 'docs'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'docs', 'cli.md'), '## version\n`app --version` prints the version.\n');
+    fs.writeFileSync(
+      path.join(repo, '.truecourse', 'specs', 'corpus.json'),
+      JSON.stringify({
+        version: 3,
+        generatedAt: '2026-01-01T00:00:00Z',
+        docs: [{ ref: 'docs/cli.md', kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['cli'] }],
+        areas: [{ id: 'cli', product: 'cli', concern: 'cli', docRefs: ['docs/cli.md'], overlaps: [] }],
+        relations: [],
+        skippedDocs: [],
+      }),
+    );
+
+    await expect(
+      guardGenerateInProcess(repo, {
+        transport,
+        transportMode: 'api',
+        sessionsKey,
+        onLlmEstimate: async () => false,
+      }),
+    ).rejects.toBeInstanceOf(EstimateDeclined);
+
     const [run] = listSessionRuns(sessionsKey, 'guard-generate');
     expect(run).toMatchObject({ status: 'interrupted' });
     expect(run.error).toBeUndefined();
