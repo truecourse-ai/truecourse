@@ -12,6 +12,8 @@
  *   GET /:id/guard/flows         the flow inventory + recipe card (the Flows tab)
  *   GET /:id/guard/flows/:flowId one flow: milestones, per-surface scenarios, gaps, findings
  *   GET /:id/guard/interfaces    the code-derived interface catalog + its reverse index
+ *   GET /:id/guard/dependencies  the dependency catalog joined with its registered instances
+ *   GET /:id/guard/dependency/raw one catalog entry in scenarios/dependencies.json by ?id=<name>
  *   GET /:id/guard/interface/raw one catalog entry's stored JSON, by ?id=
  *   GET /:id/guard/scenarios     the committed-scenario inventory + recipe card
  *   GET /:id/guard/scenario      a scenario's YAML source by ?id=
@@ -48,10 +50,14 @@ import {
   readGuardFlowsForView,
   readGuardInterfaces,
   readGuardInterfaceRaw,
+  readGuardDependencyRaw,
   readGuardRunFlows,
   guardExternalSetupIndexForView,
 } from '@truecourse/core/commands/guard-read';
 import { readGuardExternalsView } from '@truecourse/core/commands/guard-externals';
+import { readGuardDependenciesView } from '@truecourse/core/commands/guard-dependencies';
+import { withGuardReadTree } from '@truecourse/core/lib/guard-read-tree';
+import { hostedDependenciesView } from './guard-dependencies-hosted.js';
 import { readGuardSetup } from '@truecourse/core/commands/guard-setup';
 import { readBundleGuardSetup } from '@truecourse/core/services/guard-setup/bundle';
 import { guardsMaterializeInPlace, loadGuardSetupBundle } from '@truecourse/core/lib/guard-store';
@@ -270,6 +276,29 @@ router.get('/:id/guard/interface/raw', async (req: Request, res: Response, next:
   }
 });
 
+// The stored catalog entry behind ONE dependency row — the same raw reading the
+// interface route offers, keyed by the entry's name. A working tree reads the
+// committed file; a hosted repo reads it out of the setup bundle. The gitignored
+// instance overlay is never part of it.
+router.get('/:id/guard/dependency/raw', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    const id = String(req.query.id ?? '');
+    if (!id) {
+      res.status(400).json({ error: 'Missing ?id=<dependency name>.' });
+      return;
+    }
+    const source = await readGuardDependencyRaw(repo.path, id, refOf(req));
+    if (!source) {
+      res.status(404).json({ error: `No stored dependency: ${id}` });
+      return;
+    }
+    res.json(source);
+  } catch (e) {
+    next(e);
+  }
+});
+
 // The committed-scenario inventory + recipe card — always 200 (empty inventory /
 // null recipe until scenarios and a recipe exist), so the tab renders its own
 // empty states rather than erroring.
@@ -410,6 +439,30 @@ router.get('/:id/guard/setup', async (req: Request, res: Response, next: NextFun
       return;
     }
     res.json({ report });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET — the DEPENDENCIES view: every class of starting state the program needs
+// (the committed catalog) joined with the registered instances, the flows each
+// one blocks, and the external-service half where the row is one. A working tree
+// reads itself, host env included; a hosted repo composes the same view over a
+// scratch tree of its stored state — the setup bundle, the scenario set, the
+// generate report and the encrypted overlays — with an EMPTY host env, so the
+// server's own variables never read as a registered account.
+router.get('/:id/guard/dependencies', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    if (guardsMaterializeInPlace()) {
+      res.json(readGuardDependenciesView(repo.path));
+      return;
+    }
+    res.json(
+      await withGuardReadTree(repo.path, refOf(req), (tree) =>
+        hostedDependenciesView(tree, readGuardDependenciesView(tree, { env: {}, hostless: true })),
+      ),
+    );
   } catch (e) {
     next(e);
   }

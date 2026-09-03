@@ -12,10 +12,12 @@ import { useGuardDependencies } from '@/preview/vendor/hooks/useGuardDependencie
 import { useGuardView } from '@/preview/vendor/hooks/useGuardView';
 import type { Repo } from '@/preview/data/types';
 import { useGuardTabJump } from './tab-jump';
+import { useGuardRefresh } from './use-guard-refresh';
 
 export function DependencyPage({ repo, name }: { repo: Repo; name: string }) {
   useGuardTabJump();
-  const { view, loading, save, saving } = useGuardDependencies(repo.id, true);
+  const reloadKey = useGuardRefresh(repo, ['guard-setup']);
+  const { view, loading, save, saving } = useGuardDependencies(repo.id, true, reloadKey);
   const { openGuardFlow } = useGuardView();
   // A CTA elsewhere names a SERVICE; the entry it resolves to may be keyed by its
   // own name and cover several services.

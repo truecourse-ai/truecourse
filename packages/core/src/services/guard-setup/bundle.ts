@@ -96,6 +96,8 @@ export const GUARD_SETUP_AUTHORED_INTERFACES_FILE = relOf(
   BUNDLE_ROOT,
   guardAuthoredInterfacesPath(BUNDLE_ROOT),
 );
+/** The bundle key of the committed dependency catalog, for the same reason. */
+export const GUARD_SETUP_DEPENDENCIES_FILE = relOf(BUNDLE_ROOT, dependenciesPath(BUNDLE_ROOT));
 
 /**
  * The setup report a stored bundle carries, parsed — null when the bundle has

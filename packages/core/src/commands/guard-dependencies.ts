@@ -34,8 +34,12 @@
  * recipe secret, one file over. A form that showed nothing for a registered variable
  * would read exactly like an unregistered one, which is the confusion this closes.
  *
- * Working-tree only, by design: it reads and writes files inside the repo, so the
- * routes gate on `guardsMaterializeInPlace()` exactly as the externals ones do.
+ * Written against a working tree: it reads and writes files inside the repo. A
+ * hosted repository has none, so its routes compose the same view over a scratch
+ * tree of the stored state (`lib/guard-read-tree.ts`) with an EMPTY host env and
+ * `hostless` set — a path has nothing to point at there, and the dashboard edits
+ * no recipe — and keep what the writer left in the two overlay files as the
+ * repo's encrypted overlay row (`lib/guard-overlays.ts`).
  */
 
 import fs from 'node:fs';
@@ -220,9 +224,27 @@ export interface GuardDependenciesView {
   unknownLocalNames: string[];
 }
 
+export interface GuardDependenciesReadOptions {
+  /** The host environment declared variables may resolve from; defaults to this process's. */
+  env?: NodeJS.ProcessEnv;
+  /**
+   * The tree is a HOSTED scratch tree: there is no developer machine behind it, so
+   * a `path` / `config-dir` registration has nothing to point at. Such fields read
+   * as unresolved with that reason, and the write refuses them.
+   */
+  hostless?: boolean;
+}
+
+/** Why a host path cannot be registered for a hosted repository — the field's reason and the write's refusal. */
+const HOSTLESS_PATH_REASON =
+  'a path on a machine: register it where the scenarios run — the hosted product has no filesystem to point at';
+
 /** The joined dependencies view for `repoRoot`. Every input is optional. */
-export function readGuardDependenciesView(repoRoot: string): GuardDependenciesView {
-  const externals = readGuardExternalsView(repoRoot);
+export function readGuardDependenciesView(
+  repoRoot: string,
+  opts: GuardDependenciesReadOptions = {},
+): GuardDependenciesView {
+  const externals = readGuardExternalsView(repoRoot, { env: opts.env });
   const flowTitles = readFlowTitles(repoRoot);
   const blocked = blockedIndex(repoRoot, flowTitles);
 
@@ -256,7 +278,7 @@ export function readGuardDependenciesView(repoRoot: string): GuardDependenciesVi
       .map((name) => services.get(name))
       .filter((s): s is GuardExternalServiceView => s !== undefined);
     for (const service of covered) claimedServices.add(service.service);
-    rows.push(catalogRow(dependency, overlay[dependency.name], covered, flowTitles, blocked));
+    rows.push(catalogRow(dependency, overlay[dependency.name], covered, flowTitles, blocked, opts));
   }
 
   for (const service of externals.services) {
@@ -289,10 +311,12 @@ function catalogRow(
   covered: readonly GuardExternalServiceView[],
   flowTitles: ReadonlyMap<string, string>,
   blocked: ReadonlyMap<string, GuardDependencyBlockedFlow[]>,
+  opts: GuardDependenciesReadOptions,
 ): GuardDependencyRowView {
   const entry = dependency.entry;
   const descriptions = envDescriptions(entry.registration);
   const keys = [dependency.name, ...covered.map((s) => s.service)];
+  const hostlessPath = opts.hostless === true && entry.registration?.kind !== 'env';
   return {
     name: dependency.name,
     class: entry.class,
@@ -310,7 +334,7 @@ function catalogRow(
     fields: dependency.requirements.map((r) => ({
       field: r.field,
       resolved: r.resolved,
-      ...(r.reason ? { reason: r.reason } : {}),
+      ...(hostlessPath ? { reason: HOSTLESS_PATH_REASON } : r.reason ? { reason: r.reason } : {}),
       secret: r.secret,
       ...(descriptions.has(r.field) ? { description: descriptions.get(r.field)! } : {}),
       ...registeredValue(r, dependency, overlay),
@@ -595,11 +619,16 @@ export function writeGuardDependency(
   repoRoot: string,
   name: string,
   patch: GuardDependencyPatch,
+  opts: GuardDependenciesReadOptions = {},
 ): GuardDependenciesView {
-  const view = readGuardDependenciesView(repoRoot);
+  const view = readGuardDependenciesView(repoRoot, opts);
   const row = view.dependencies.find((d) => d.name === name);
   if (!row) {
     throw new GuardDependencyWriteError(`No dependency named "${name}" in this repository.`);
+  }
+  if (opts.hostless) {
+    const refusal = hostlessRefusal(row, patch);
+    if (refusal) throw new GuardDependencyWriteError(refusal);
   }
 
   if (!row.registration) {
@@ -608,7 +637,7 @@ export function writeGuardDependency(
         `"${name}" is ${row.class}, so there is no instance to register — the scenario creates it, or the runner seeds it.`,
       );
     }
-    return writeServiceDependency(repoRoot, row, patch);
+    return writeServiceDependency(repoRoot, row, patch, opts);
   }
 
   const local: GuardDependenciesLocal = readLocalForWrite(repoRoot);
@@ -657,9 +686,44 @@ export function writeGuardDependency(
       patch.headers !== undefined) &&
     row.service?.declaredInRecipe
   ) {
-    writeServiceFields(repoRoot, row, patch);
+    writeServiceFields(repoRoot, row, patch, opts);
   }
-  return readGuardDependenciesView(repoRoot);
+  return readGuardDependenciesView(repoRoot, opts);
+}
+
+/**
+ * What a HOSTED registration cannot do, in one sentence — or null. There is no
+ * developer machine behind the tree, so a path has nothing to point at; and the
+ * recipe is not edited from the dashboard, so a write may only fill in what the
+ * committed declaration already names: an origin and the variables it declares,
+ * never a new variable, a new base-URL variable or an account mode.
+ */
+function hostlessRefusal(row: GuardDependencyRowView, patch: GuardDependencyPatch): string | null {
+  if (patch.path !== undefined || (row.registration && row.registration.kind !== 'env')) {
+    return `"${row.name}" is registered through ${HOSTLESS_PATH_REASON}.`;
+  }
+  const service = row.service;
+  if (!service?.declaredInRecipe) return null;
+  if (patch.baseUrlEnv !== undefined && patch.baseUrlEnv.trim() !== (service.baseUrlEnv ?? '')) {
+    return `"${row.name}" reads its base URL from ${service.baseUrlEnv ?? 'an undeclared variable'}; changing that is a recipe edit, which the dashboard does not make.`;
+  }
+  if (patch.mode !== undefined && patch.mode !== service.mode) {
+    return `"${row.name}"'s account mode is declared in the recipe, which the dashboard does not edit.`;
+  }
+  // A catalog registration validates its own variables below; a service-only
+  // row's fields ARE the recipe's declared variables, so a name outside them
+  // would have to be declared first.
+  if (row.registration) return null;
+  const declared = new Set([
+    ...(service.baseUrlEnv ? [service.baseUrlEnv] : []),
+    ...Object.keys(service.endpoints),
+    ...row.fields.map((f) => f.field),
+  ]);
+  const undeclared = Object.keys(patch.env ?? {}).filter((name) => !declared.has(name));
+  if (undeclared.length > 0) {
+    return `"${row.name}" does not declare ${undeclared.join(', ')}; a new variable is a recipe edit, which the dashboard does not make.`;
+  }
+  return null;
 }
 
 /** The api-shaped write: a service declaration plus its secrets, split by the externals writer. */
@@ -667,20 +731,22 @@ function writeServiceDependency(
   repoRoot: string,
   row: GuardDependencyRowView,
   patch: GuardDependencyPatch,
+  opts: GuardDependenciesReadOptions,
 ): GuardDependenciesView {
   if (patch.path !== undefined) {
     throw new GuardDependencyWriteError(
       `"${row.name}" is an external service: it is registered through its base URL and variables, not a path.`,
     );
   }
-  writeServiceFields(repoRoot, row, patch);
-  return readGuardDependenciesView(repoRoot);
+  writeServiceFields(repoRoot, row, patch, opts);
+  return readGuardDependenciesView(repoRoot, opts);
 }
 
 function writeServiceFields(
   repoRoot: string,
   row: GuardDependencyRowView,
   patch: GuardDependencyPatch,
+  opts: GuardDependenciesReadOptions,
 ): void {
   const service = row.service!;
   const baseUrlEnv = (patch.baseUrlEnv ?? service.baseUrlEnv ?? '').trim();
@@ -700,6 +766,9 @@ function writeServiceFields(
         [service.service]: {
           baseUrlEnv,
           ...(patch.baseUrl !== undefined ? { baseUrl: patch.baseUrl.trim() } : {}),
+          // A hosted origin is an instance, never a declaration: it goes to the
+          // overlay, where the local value wins over the recipe's per field.
+          ...(patch.baseUrl !== undefined && opts.hostless ? { baseUrlTarget: 'local' as const } : {}),
           ...(patch.mode ? { mode: patch.mode } : {}),
           ...(Object.keys(env).length > 0 ? { env } : {}),
           ...(patch.token !== undefined ? { token: patch.token } : {}),

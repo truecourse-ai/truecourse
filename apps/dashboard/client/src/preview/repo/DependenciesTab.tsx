@@ -15,6 +15,7 @@ import { GUARD_DEPENDENCY_STATE, guardDependencyMatches, guardDependencyType } f
 import type { GuardDependencyRow, GuardDependencyState } from '@/preview/vendor/types/guard-dependencies';
 import type { Repo } from '@/preview/data/types';
 import { useGuardTabJump } from './tab-jump';
+import { useGuardRefresh } from './use-guard-refresh';
 
 const CLASS_LABEL: Record<GuardDependencyRow['class'], string> = {
   'step-creatable': 'step-creatable',
@@ -33,7 +34,8 @@ export function DependenciesTab({ repo }: { repo: Repo }) {
     if (jumpTo) navigate(`/preview/repos/${repo.id}/dependencies/${encodeURIComponent(jumpTo)}`, { replace: true });
   }, [jumpTo, navigate, repo.id]);
 
-  const { view, loading } = useGuardDependencies(repo.id, true);
+  const reloadKey = useGuardRefresh(repo, ['guard-setup', 'guard-externals']);
+  const { view, loading, error } = useGuardDependencies(repo.id, true, reloadKey);
   const [query, setQuery] = useState('');
   const [classFilter, setClassFilter] = useState<string[]>([]);
   const [stateFilter, setStateFilter] = useState<string[]>([]);
@@ -150,7 +152,7 @@ export function DependenciesTab({ repo }: { repo: Repo }) {
             {rows.length === 0 && (
               <tr>
                 <td colSpan={5} className="px-6 py-8 text-center text-muted-foreground">
-                  {loading ? 'Loading dependencies.' : 'No dependency matches.'}
+                  {loading ? 'Loading dependencies.' : error ? error : 'No dependency matches.'}
                 </td>
               </tr>
             )}

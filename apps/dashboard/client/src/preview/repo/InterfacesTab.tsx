@@ -8,13 +8,30 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import type { GuardInterfaceRow } from '@/preview/vendor/shared';
+import type { GuardInterfaceRow, GuardInterfacesView } from '@/preview/vendor/shared';
 import { guardDriver } from '@/preview/vendor/shared';
 import { CHIP_CLASS, PageHeader } from '@/preview/ui/bits';
 import { FilterBar } from '@/preview/ui/filter-bar';
 import { useGuardInterfaces } from '@/preview/vendor/hooks/useGuardInterfaces';
 import type { Repo } from '@/preview/data/types';
 import { useGuardTabJump } from './tab-jump';
+import { useGuardRefresh } from './use-guard-refresh';
+
+/**
+ * Why the catalog is empty, in the catalog's own words: nothing mapped yet, or
+ * mapped and every surface came out empty — named per surface with the ladder
+ * that read it (`tree`, `probes`), so a reader knows what setup looked at.
+ */
+function emptyCatalogReason(view: GuardInterfacesView | null): string {
+  if (!view || view.unavailable === 'no-working-tree') return 'No interface catalog is stored for this repository yet.';
+  if (!view.mapped) return 'No interfaces mapped yet. Setup derives the catalog.';
+  const read = view.surfaces
+    .filter((s) => s.source)
+    .map((s) => `${s.label.toLowerCase()} by ${String(s.source)}`);
+  return read.length > 0
+    ? `Setup read ${read.join(', ')} and derived no interfaces.`
+    : 'Setup derived no interfaces.';
+}
 
 export function InterfacesTab({ repo }: { repo: Repo }) {
   useGuardTabJump();
@@ -27,7 +44,8 @@ export function InterfacesTab({ repo }: { repo: Repo }) {
     if (jumpTo) navigate(`/preview/repos/${repo.id}/interfaces/${encodeURIComponent(jumpTo)}`, { replace: true });
   }, [jumpTo, navigate, repo.id]);
 
-  const interfaces = useGuardInterfaces(repo.id, true);
+  const reloadKey = useGuardRefresh(repo, ['guard-setup']);
+  const interfaces = useGuardInterfaces(repo.id, true, reloadKey);
   const [query, setQuery] = useState('');
   const [surfaceFilter, setSurfaceFilter] = useState<string[]>([]);
   const [originFilter, setOriginFilter] = useState<string[]>([]);
@@ -133,7 +151,13 @@ export function InterfacesTab({ repo }: { repo: Repo }) {
             {rows.length === 0 && (
               <tr>
                 <td colSpan={5} className="px-6 py-8 text-center text-muted-foreground">
-                  {interfaces.loading ? 'Loading interfaces.' : 'No interface matches.'}
+                  {interfaces.loading
+                    ? 'Loading interfaces.'
+                    : interfaces.error
+                      ? interfaces.error
+                      : all.length === 0
+                        ? emptyCatalogReason(interfaces.view)
+                        : 'No interface matches.'}
                 </td>
               </tr>
             )}

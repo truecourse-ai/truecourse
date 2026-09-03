@@ -19,8 +19,10 @@
  *      byte-stable — the recipe is parsed, patched, and re-serialized in its own
  *      2-space format, and a write that changes nothing touches no file.
  *
- * Working-tree only, by design: it writes files inside the repo. A hosted store
- * has no working tree, so the routes gate on `guardsMaterializeInPlace()`.
+ * Written against a working tree: it reads and writes files inside the repo. The
+ * externals routes themselves still gate on `guardsMaterializeInPlace()`; the
+ * dependencies surface, which composes this view, serves a hosted repo over a
+ * scratch tree of its stored state with an empty host env (`env` option).
  */
 
 import fs from 'node:fs';
@@ -196,13 +198,25 @@ export interface GuardExternalsView {
   unknownLocalServices: string[];
 }
 
+export interface GuardExternalsReadOptions {
+  /**
+   * The host environment a declared variable may resolve from. Defaults to this
+   * process's; a hosted read passes an EMPTY one, so the server's own variables
+   * can never read as a registered account.
+   */
+  env?: NodeJS.ProcessEnv;
+}
+
 /**
  * The joined externals view for `repoRoot`. Every input is optional: no recipe, no
  * generate report, and no overlay all read as "nothing configured yet" rather than
  * an error — this is the page a user opens BEFORE any of them exist. Only a file
  * that exists and is broken produces an `invalidReason`.
  */
-export function readGuardExternalsView(repoRoot: string): GuardExternalsView {
+export function readGuardExternalsView(
+  repoRoot: string,
+  opts: GuardExternalsReadOptions = {},
+): GuardExternalsView {
   const recipeFile = recipePath(repoRoot);
   const localFile = externalsLocalPath(repoRoot);
   // The dependency catalog is the UMBRELLA over user-registered dependencies, and
@@ -261,7 +275,7 @@ export function readGuardExternalsView(repoRoot: string): GuardExternalsView {
   const merged = mergeExternals(declared, local);
   const detectedByName = new Map(detected.map((d) => [d.service, d]));
   const services: GuardExternalServiceView[] = merged.map((m) => {
-    const resolved = resolveExternal(m, process.env);
+    const resolved = resolveExternal(m, opts.env ?? process.env);
     const hit = detectedByName.get(m.service);
     return {
       service: m.service,

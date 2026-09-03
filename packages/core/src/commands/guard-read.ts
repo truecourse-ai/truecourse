@@ -20,6 +20,7 @@ import {
   guardLatestPath,
   guardResultPath,
   manifestPath,
+  dependenciesPath,
   guardAuthoredInterfacesPath,
   guardInterfacesPath,
   mergeInterfaceCatalogs,
@@ -34,6 +35,7 @@ import {
 import { flowsPath } from '@truecourse/guard-generator'
 import {
   GUARD_SETUP_AUTHORED_INTERFACES_FILE,
+  GUARD_SETUP_DEPENDENCIES_FILE,
   GUARD_SETUP_INTERFACES_FILE,
 } from '../services/guard-setup/bundle.js'
 import { corpusFilePath } from '@truecourse/spec-consolidator'
@@ -1597,8 +1599,9 @@ function interfaceSurfaces(
 function artifactSlice(
   raw: string | null,
   file: string,
-  key: 'interfaces',
+  key: 'interfaces' | 'dependencies',
   id: string,
+  idField: 'id' | 'name' = 'id',
 ): GuardArtifactSource | null {
   if (raw == null) return null
   let parsed: unknown
@@ -1609,9 +1612,28 @@ function artifactSlice(
   }
   const entries = (parsed as Record<string, unknown> | null)?.[key]
   if (!Array.isArray(entries)) return null
-  const entry = entries.find((e) => (e as Record<string, unknown> | null)?.id === id)
+  const entry = entries.find((e) => (e as Record<string, unknown> | null)?.[idField] === id)
   if (entry === undefined) return null
   return { id, file, content: JSON.stringify(entry, null, 2) }
+}
+
+/**
+ * One catalog entry, sliced out of the committed `scenarios/dependencies.json`
+ * by its name — the raw half of the Dependencies detail. A working tree reads
+ * the file; a hosted repo reads it out of the setup bundle (`ref` pins a
+ * commit, else the newest). The gitignored instance overlay is never part of
+ * this reading: the catalog declares, the overlay holds the values.
+ */
+export async function readGuardDependencyRaw(
+  repoKey: string,
+  name: string,
+  ref?: string,
+): Promise<GuardArtifactSource | null> {
+  const rel = path.relative(repoKey, dependenciesPath(repoKey)).split(path.sep).join('/')
+  const raw = guardsMaterializeInPlace()
+    ? readFileTextOr(dependenciesPath(repoKey))
+    : ((await loadGuardSetupBundle(repoKey, ref))?.[GUARD_SETUP_DEPENDENCIES_FILE] ?? null)
+  return artifactSlice(raw, rel, 'dependencies', name, 'name')
 }
 
 /**

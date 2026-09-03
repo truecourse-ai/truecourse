@@ -42,6 +42,7 @@ import {
   scenarioInventory,
 } from './flow-fixtures';
 import { guardForRepo } from './index';
+import { REPOS } from './repos';
 import { interfacesView } from './interface-fixtures';
 import { artifactRaw } from './artifact-fixtures';
 import {
@@ -421,6 +422,10 @@ function knowledgeLedger(params: URLSearchParams): { documents: unknown[]; total
 
 const ROUTE = /^\/api\/repos\/([^/]+)\/(.+)$/;
 
+/** The repositories the fixtures describe. Every other id is a REAL, connected
+ *  repository, and its reads and writes go to the server untouched. */
+const FIXTURE_REPO_IDS = new Set(REPOS.map((r) => r.id));
+
 /**
  * Answer the reads and writes the reused components make; hand everything else
  * on. Installed ONCE when the preview chunk loads (only a preview address loads
@@ -443,6 +448,10 @@ export function installPreviewFetch(): void {
     if (!match) return real(input, init);
     const repoId = decodeURIComponent(match[1]!);
     const rest = match[2]!;
+    // A connected repository is real all the way down: its corpus, its guard
+    // state and its runs are the server's, and no fixture stands in for any of
+    // it. Only the repositories the fixtures describe are answered here.
+    if (!FIXTURE_REPO_IDS.has(repoId)) return real(input, init);
     // The agent-sessions store is REAL for every repository: the shell follows
     // the real repos' runs through it, and a real repository's Activity tab is
     // the real view. There are no session fixtures to answer with, so these go

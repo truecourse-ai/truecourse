@@ -215,8 +215,8 @@ export function GuardInterfacesPane({
     return (
       <EmptyState
         icon={Braces}
-        title="No working tree to map"
-        body="Hosted repos map their surfaces during the server-side generate."
+        title="No interface catalog stored yet"
+        body="A connected repository maps its surfaces during guard setup."
       />
     );
   }

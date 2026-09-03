@@ -26,6 +26,9 @@
  *                              unit: the next generate drops it with
  *                              its tests. Same file, `dismissedFlows`.
  *   POST /:id/guard/flows/undismiss  reverse a flow dismissal.
+ *   PUT  /:id/guard/dependencies  register ONE dependency's instance: the values
+ *                              go to the gitignored scenarios/dependencies.local.json
+ *                              (a hosted repo: its encrypted overlay row)
  *   PUT  /:id/guard/externals  declare/clear external API accounts:
  *                              declarations to the committed recipe.json, secret
  *                              values to the gitignored externals.local.json.
@@ -67,7 +70,15 @@ import {
   GuardExternalsWriteError,
   type GuardExternalsWrite,
 } from '@truecourse/core/commands/guard-externals';
+import {
+  writeGuardDependency,
+  GuardDependencyWriteError,
+  type GuardDependencyPatch,
+} from '@truecourse/core/commands/guard-dependencies';
+import { readGuardOverlaysFromTree, writeGuardOverlays } from '@truecourse/core/lib/guard-overlays';
+import { withGuardReadTree } from '@truecourse/core/lib/guard-read-tree';
 import { GUARD_SETUP_ONLY_STEPS } from '@truecourse/core/commands/guard-setup';
+import { hostedDependenciesView } from './guard-dependencies-hosted.js';
 import { estimateStepPhase } from '@truecourse/core/progress';
 import { runFailureMessage } from '@truecourse/guard-runner';
 import { dismissedClaimKey, type GuardDecisions } from '@truecourse/shared';
@@ -549,6 +560,57 @@ router.put('/:id/guard/externals', async (req: Request, res: Response, next: Nex
     // declaration that would not load) — a plain 422 with the engine's wording,
     // never a 500.
     if (e instanceof GuardExternalsWriteError) {
+      res.status(422).json({ error: e.message });
+      return;
+    }
+    next(e);
+  }
+});
+
+// PUT — register ONE dependency's instance. Body: `{ name, env?, path?, baseUrlEnv?,
+// baseUrl?, mode?, token?, headers? }`. The caller names a dependency, never a file,
+// so the write is confined to the store's own path by construction. Only variables
+// the committed registration DECLARES are accepted (422 otherwise), and nothing
+// stored is ever echoed back: the response is the fresh view, which masks every
+// secret.
+//
+// A working tree writes its gitignored overlays in place. A hosted repo runs the
+// same writer over a scratch tree of its stored state and keeps what the writer
+// left in the two overlay files as its encrypted overlay row — a path (nothing on
+// the server to point at) and a recipe edit (a new variable, a base-URL variable,
+// an account mode) are refused there, since the dashboard edits no recipe.
+//
+// Not a job: an instant write like dismiss/undismiss, so it takes no guard lock —
+// but registering an instance changes what the next generate can author, so it
+// emits the same completion event the externals write does and the client's
+// guard views refetch.
+router.put('/:id/guard/dependencies', async (req: Request, res: Response, next: NextFunction) => {
+  const repoId = req.params.id as string;
+  try {
+    const repo = await resolveProjectForRequest(repoId);
+    const body = (req.body ?? {}) as { name?: unknown } & GuardDependencyPatch;
+    if (typeof body.name !== 'string' || body.name.trim() === '') {
+      res.status(400).json({ error: 'dependency write requires { name, … }.' });
+      return;
+    }
+    const { name, ...patch } = body;
+    const view = guardsMaterializeInPlace()
+      ? writeGuardDependency(repo.path, name, patch as GuardDependencyPatch)
+      : await withGuardReadTree(repo.path, undefined, async (tree) => {
+          const written = writeGuardDependency(tree, name, patch as GuardDependencyPatch, {
+            env: {},
+            hostless: true,
+          });
+          await writeGuardOverlays(repo.path, readGuardOverlaysFromTree(tree));
+          return hostedDependenciesView(tree, written);
+        });
+    emitSpecComplete(repoId, 'guard-externals');
+    res.json(view);
+  } catch (e) {
+    // A refused registration is the user's problem to fix (an undeclared variable,
+    // a class with nothing to register, a broken overlay) — a plain 422 with the
+    // engine's wording, never a 500.
+    if (e instanceof GuardDependencyWriteError || e instanceof GuardExternalsWriteError) {
       res.status(422).json({ error: e.message });
       return;
     }

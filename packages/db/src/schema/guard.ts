@@ -124,3 +124,19 @@ export const guardScenarioSets = pgTable(
   },
   (t) => [primaryKey({ columns: [t.repoKey, t.commitSha] })],
 );
+
+/**
+ * The supplied-dependency OVERLAYS of a hosted repo — what a working tree keeps
+ * in the gitignored `scenarios/dependencies.local.json` and
+ * `scenarios/externals.local.json`: the registered instances (API keys, base
+ * URLs, tokens, headers). One row per repo, both overlays as ONE JSON blob
+ * encrypted under the deployment's master secret, decrypted only to materialize
+ * into a run's ephemeral clone. Deliberately not content-addressed: a secret must
+ * never sit in the shared `content` pool.
+ */
+export const guardDependencyOverlays = pgTable('guard_dependency_overlays', {
+  repoKey: text('repo_key').primaryKey(),
+  /** `encryptSecret(JSON.stringify({ dependencies, externals }))`. */
+  overlaysEnc: text('overlays_enc').notNull(),
+  updatedAt: ts('updated_at').notNull(),
+});

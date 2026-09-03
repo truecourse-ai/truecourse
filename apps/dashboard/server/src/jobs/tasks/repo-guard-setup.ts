@@ -15,6 +15,7 @@
 
 import { resolveCommitSha } from '@truecourse/core/lib/repo-ref';
 import { emitRepoLifecycle } from '@truecourse/core/lib/repo-lifecycle';
+import { materializeGuardOverlays } from '@truecourse/core/lib/guard-overlays';
 import {
   loadGuardSetupBundle,
   saveGuardSetupBundle,
@@ -83,6 +84,10 @@ export function createRepoGuardSetupTask(
         // forward is the last setup that ran, whatever commit it ran on.
         const stored = await loadGuardSetupBundle(repoFullName);
         if (stored) materializeGuardSetupBundle(tree.dir, stored);
+        // The registered instances go in beside it, as the two gitignored files
+        // the engine reads them from. The bundle collected below never carries
+        // them: a secret enters only through the dashboard, never out of a clone.
+        await materializeGuardOverlays(repoFullName, tree.dir);
 
         const { report } = await runSetup(tree.dir, {
           driver: llm.driver(),

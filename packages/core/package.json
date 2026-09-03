@@ -132,6 +132,14 @@
       "types": "./dist/lib/guard-store.d.ts",
       "import": "./dist/lib/guard-store.js"
     },
+    "./lib/guard-overlays": {
+      "types": "./dist/lib/guard-overlays.d.ts",
+      "import": "./dist/lib/guard-overlays.js"
+    },
+    "./lib/guard-read-tree": {
+      "types": "./dist/lib/guard-read-tree.d.ts",
+      "import": "./dist/lib/guard-read-tree.js"
+    },
     "./lib/guard-executor": {
       "types": "./dist/lib/guard-executor.d.ts",
       "import": "./dist/lib/guard-executor.js"

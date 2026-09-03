@@ -25,12 +25,13 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import type { Runner } from 'graphile-worker';
 import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
-import { JobStore, NotificationStore, PgGuardStore, PgSpecStore } from '@truecourse/data-store';
+import { JobStore, NotificationStore, PgGuardStore, PgGuardOverlayStore, PgSpecStore } from '@truecourse/data-store';
 import { registerJob, type JobTask, type StartWorker } from '@truecourse/jobs';
 import type { JobView } from '@truecourse/shared';
 // The dist entries the server itself imports — a source-path import here would
 // install these seams on a parallel copy of the module.
 import { setGuardStore, loadGuardSetupBundle } from '@truecourse/core/lib/guard-store';
+import { setGuardOverlayStore, writeGuardOverlays } from '@truecourse/core/lib/guard-overlays';
 import { setSpecStore, saveSpec } from '@truecourse/core/lib/spec-store';
 import {
   listSessionRuns,
@@ -135,6 +136,7 @@ beforeEach(async () => {
   db = drizzle(client, { schema }) as unknown as Db;
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
   setGuardStore(new PgGuardStore(db));
+  setGuardOverlayStore(new PgGuardOverlayStore(db, 'master-secret-at-least-32-chars-long!!'));
   setSpecStore(new PgSpecStore(db));
   running = [];
   enqueued = [];
@@ -280,6 +282,8 @@ describe('the guard setup job', () => {
   let clone: string;
   /** Every setup run's session seams — stubbed; their own suites cover them. */
   const catalogCalls: string[] = [];
+  /** Whether the clone held the dependencies overlay when the engine looked. */
+  const overlaysSeen: boolean[] = [];
 
   /** A fresh clone of the fixture at a stable path, as a run really gets one. */
   function installWorkTree(): void {
@@ -320,6 +324,7 @@ describe('the guard setup job', () => {
 
   beforeEach(async () => {
     catalogCalls.length = 0;
+    overlaysSeen.length = 0;
     installWorkTree();
     // The scan's output, as the store holds it: setup reads the curated doc
     // universe, and the job materializes it into the clone.
@@ -342,6 +347,11 @@ describe('the guard setup job', () => {
           guardSetupInProcess(repoRoot, {
             ...options,
             interfaces: async () => {
+              // What the clone carried when the engine looked: the registered
+              // instances are materialized as the runner's two overlay files.
+              overlaysSeen.push(
+                fs.existsSync(path.join(repoRoot, '.truecourse', 'scenarios', 'dependencies.local.json')),
+              );
               // The real mapping snapshots the derived catalog; the bundle
               // collects that file, so the stub writes it too.
               const snapshot = path.join(repoRoot, '.truecourse', 'guard', 'interfaces.json');
@@ -413,6 +423,25 @@ describe('the guard setup job', () => {
       'seed',
       'auth',
     ]);
+  }, 60_000);
+
+  it('materializes the registered instances into the clone, and never collects them back', async () => {
+    await writeGuardOverlays(REPO, {
+      dependencies: { anthropic: { env: { ANTHROPIC_API_KEY: 'sk-test-not-real' } } },
+      externals: {},
+    });
+    await jobs.enqueueGuardSetup(request);
+    await Promise.all(running);
+
+    const [setup] = await jobsOfType('repo.guard-setup');
+    expect(setup).toMatchObject({ status: 'succeeded' });
+    expect(overlaysSeen).toEqual([true]);
+    // A secret enters through the dashboard only: the bundle a clone leaves
+    // behind carries neither overlay file.
+    const bundle = (await loadGuardSetupBundle(REPO)) ?? {};
+    expect(Object.keys(bundle)).not.toContain('.truecourse/scenarios/dependencies.local.json');
+    expect(Object.keys(bundle)).not.toContain('.truecourse/scenarios/externals.local.json');
+    expect(JSON.stringify(bundle)).not.toContain('sk-test-not-real');
   }, 60_000);
 
   it('replays the settled steps on a second run, from the stored bundle', async () => {

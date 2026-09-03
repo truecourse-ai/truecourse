@@ -759,6 +759,11 @@ lives in `packages/jobs` and `packages/data-store`, and `ee/` re-exports it.
 Onboarding is the first base consumer: connecting a repository enqueues
 `repo.scan`, which chains `repo.guard-setup` on success. Chains, coalescing and
 backfill stay in `ee/`; the client jobs context, popup and bell have not moved.
+Supplied dependency values are row-backed (2026-09-03): a connected repository's
+Interfaces and Dependencies tabs read its stored setup bundle, a registration
+lands as one encrypted row per repository and is injected into every hosted
+clone, and a host path or a recipe edit is refused from the dashboard (§4.3,
+§9 amendment to §7).
 
 - The database package and migrations, the data-store package (minus the
   analyze stores), the content pool, the jobs runner (queue, harness,
