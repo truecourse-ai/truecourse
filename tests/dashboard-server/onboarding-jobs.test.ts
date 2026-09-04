@@ -537,6 +537,44 @@ describe('the guard setup job', () => {
     expect(setup).toMatchObject({ status: 'succeeded', result: { status: 'failed' } });
     expect(await jobsOfType('repo.guard-generate')).toEqual([]);
   });
+
+  it('a refresh consents to replacing the seed — the engine asks, and a hosted refresh is the answer', async () => {
+    await jobs.stop();
+    const seen: { refresh?: boolean; only?: string; consent?: boolean }[] = [];
+    jobs = createServerJobs({
+      db,
+      connectionString: 'postgres://unused',
+      hub,
+      startWorker: fakeWorker(['repo.guard-setup']),
+      guardSetup: {
+        startLlm: async () => testLlm,
+        runSetup: async (_repoRoot, options) => {
+          seen.push({
+            refresh: options.refresh,
+            only: options.only,
+            consent: await options.confirmSeedReplace?.(),
+          });
+          return {
+            report: { ranAt: '2026-01-01T00:00:00Z', status: 'failed', reason: 'no recipe', steps: [] },
+            reportPath: '',
+            sessionsRunDirs: [],
+          } as never;
+        },
+      },
+    });
+    await jobs.start();
+
+    await jobs.enqueueGuardSetup({ ...request, only: 'seed', refresh: true });
+    await Promise.all(running);
+    // Without the flag the engine's own default (no consent) stands.
+    await jobs.enqueueGuardSetup(request);
+    await Promise.all(running);
+
+    expect(seen).toEqual([
+      { refresh: true, only: 'seed', consent: true },
+      { refresh: undefined, only: undefined, consent: undefined },
+    ]);
+  });
 });
 
 // ---------------------------------------------------------------------------
