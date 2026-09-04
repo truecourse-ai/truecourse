@@ -13,21 +13,51 @@
  * datastore — so sharing the booted world changes no state semantics; it only
  * removes the races (and the ~20s boot each sandbox paid).
  *
+ * OWNERSHIP. The handle owns the world's whole lifecycle — boot, teardown AND
+ * restore. An execution that merely shares the world (a `runGuard` handed the
+ * handle) never resets it: the documenso 2026-09-03 run lost every session
+ * after its first mutator because the runner's own mutator tail ran the
+ * recipe's `services.reset` (`down -v`) under a world a hundred sibling
+ * executions were still using, and nothing re-booted it. The owner restores
+ * once, through {@link reset}, after every sharing execution is done.
+ *
  * MECHANISM: a single-flight memo, deliberately free of world knowledge — the
- * boot/teardown logic stays in `run.ts`, which passes it in as thunks, so the
- * two can never drift. The FIRST `ensure` runs the boot thunk and registers the
- * matching teardown; concurrent and later callers await the same boot. A boot
- * that failed (threw, or resolved to the caller's failure shape via
- * `retryable`) clears the memo so the NEXT execution re-attempts — mirroring
- * the old per-run behavior where every round tried its own `up` — while the
- * teardown registration survives, so `shutdown()` still sweeps a half-created
- * world. `shutdown()` is idempotent, best-effort, and runs the teardown only
- * if a boot ever started.
+ * boot/teardown/reset logic stays in `run.ts`, which passes it in as thunks, so
+ * the two can never drift. The FIRST `ensure` runs the boot thunk and registers
+ * the lifecycle; concurrent and later callers await the same boot. A boot that
+ * failed (threw, or resolved to the caller's failure shape via `retryable`)
+ * clears the memo so the NEXT execution re-attempts — mirroring the old
+ * per-run behavior where every round tried its own `up` — while the lifecycle
+ * registration survives, so `shutdown()` still sweeps a half-created world.
+ * {@link invalidate} clears the memo on purpose (the owner's repair path after
+ * the world was lost under it); `shutdown()` is idempotent, best-effort, and
+ * runs the teardown only if a boot ever started.
  *
  * The handle is IN-PROCESS (same class as `signal`/`visualJudge` on the
  * executor seam): a hosted/EE executor simply ignores it and keeps booting its
  * own per-run worlds — remote runs never shared a host to race on.
  */
+
+/** The world's lifecycle thunks, registered by whichever `ensure` boots it. */
+export interface GuardWorldLifecycle {
+  /** Stop what `services.up` brought up (`services.down`). Best-effort. */
+  down: () => Promise<void>
+  /**
+   * Restore the world to its pristine, un-seeded state (`services.reset`, a
+   * `down -v` class command). Absent when the recipe declares none — a world
+   * nobody can restore. Resolves whether the command succeeded.
+   */
+  reset?: () => Promise<boolean>
+}
+
+/** What {@link GuardSharedWorld.reset} did. */
+export type GuardWorldResetOutcome =
+  /** The registered reset ran and succeeded; the memo is cleared. */
+  | 'reset'
+  /** The registered reset ran and failed; the world stays as it was. */
+  | 'reset-failed'
+  /** Nothing to run: no lifecycle registered yet, or the recipe declares no reset. */
+  | 'no-reset'
 
 /**
  * The single-flight world memo. `ensure` is generic PER CALL rather than per
@@ -38,14 +68,29 @@
 export interface GuardSharedWorld {
   /**
    * Return the prepared world, booting it via `boot` if this is the first (or
-   * a retry after a failed) call. `down` is registered ONCE, by whichever call
-   * actually boots, and runs only at {@link shutdown}. `retryable` marks a
+   * a retry after a failed, or an invalidated) call. The lifecycle is
+   * registered ONCE, by whichever call actually boots: `down` runs only at
+   * {@link shutdown}, `reset` only at {@link reset}. `retryable` marks a
    * RESOLVED boot value as a failure the next caller should re-attempt
    * (run.ts resolves failures into run-result shapes rather than throwing).
    */
-  ensure<T>(boot: () => Promise<T>, down: () => Promise<void>, retryable?: (value: T) => boolean): Promise<T>
+  ensure<T>(boot: () => Promise<T>, lifecycle: GuardWorldLifecycle, retryable?: (value: T) => boolean): Promise<T>
   /** True once a boot has been attempted — `shutdown` will have work to do. */
   booted(): boolean
+  /**
+   * Forget the memoized world so the NEXT `ensure` boots again — the owner's
+   * move after the world was lost under it (a container that died, a port
+   * another process took). A boot in flight still settles for its callers;
+   * the lifecycle registration is kept.
+   */
+  invalidate(): void
+  /**
+   * Restore the world through the registered `reset`, then forget the memo (a
+   * reset world is gone; the next `ensure` boots afresh). Awaits a boot in
+   * flight first so the reset never lands under it. The OWNER's call — once,
+   * after every sharing execution settled — never a sharing execution's.
+   */
+  reset(): Promise<GuardWorldResetOutcome>
   /** Run the registered teardown once, best-effort. Safe to call repeatedly,
    *  and a no-op when nothing ever booted. */
   shutdown(): Promise<void>
@@ -53,22 +98,22 @@ export interface GuardSharedWorld {
 
 export function createGuardSharedWorld(): GuardSharedWorld {
   let inFlight: Promise<unknown> | null = null
-  let down: (() => Promise<void>) | null = null
+  let lifecycle: GuardWorldLifecycle | null = null
   let torndown = false
 
   return {
-    ensure<T>(boot: () => Promise<T>, registerDown: () => Promise<void>, retryable?: (value: T) => boolean) {
+    ensure<T>(boot: () => Promise<T>, register: GuardWorldLifecycle, retryable?: (value: T) => boolean) {
       if (inFlight === null) {
-        down ??= registerDown
+        lifecycle ??= register
         const attempt = boot().then(
           (value) => {
             // A resolved failure (run.ts's non-ok shapes) must not memoize as
             // the world — the next execution re-attempts, like today.
-            if (retryable?.(value)) inFlight = null
+            if (retryable?.(value) && inFlight === attempt) inFlight = null
             return value
           },
           (e) => {
-            inFlight = null
+            if (inFlight === attempt) inFlight = null
             throw e
           },
         )
@@ -78,15 +123,26 @@ export function createGuardSharedWorld(): GuardSharedWorld {
       return inFlight as Promise<T>
     },
     booted() {
-      return down !== null
+      return lifecycle !== null
+    },
+    invalidate() {
+      inFlight = null
+    },
+    async reset() {
+      if (!lifecycle?.reset) return 'no-reset'
+      await inFlight?.catch(() => undefined)
+      const ok = await lifecycle.reset().catch(() => false)
+      if (!ok) return 'reset-failed'
+      inFlight = null
+      return 'reset'
     },
     async shutdown() {
-      if (torndown || down === null) return
+      if (torndown || lifecycle === null) return
       torndown = true
       // Let an in-flight boot settle first so the teardown never races it —
       // the exact overlap this module exists to remove.
       await inFlight?.catch(() => undefined)
-      await down().catch(() => undefined)
+      await lifecycle.down().catch(() => undefined)
     },
   }
 }

@@ -71,7 +71,6 @@ import {
   readMergedInterfaceCatalog,
   manifestPath,
   runBuild,
-  DEFAULT_BUILD_TIMEOUT_MS,
   runInstall,
   resolveEntry,
   resolveApiServers,
@@ -96,6 +95,7 @@ import {
   type BuildResult,
   type EntryPreflightResult,
   createGuardSharedWorld,
+  isWorldBootFailure,
 } from '@truecourse/guard-runner'
 import {
   DEFAULT_AUTO_RESOLVE_ESCALATE_AFTER,
@@ -230,7 +230,7 @@ import {
   buildResourceHints,
   outboundOverflow,
 } from './grounding.js'
-import { birthValidate, type BirthCandidate, type BirthOutcome, type BirthRound } from './birth.js'
+import { BIRTH_NOT_RUN_EXPECTED, birthValidate, type BirthCandidate, type BirthOutcome, type BirthRound } from './birth.js'
 import {
   buildServerRouteIndex,
   bindFlowServer,
@@ -2412,8 +2412,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       }
 
       /** One fresh-sandbox execution with the refusal + anomaly latches
-       *  applied — every worker run and every confirmation goes through here. */
-      const executeOnce = async (
+       *  applied — every worker run and every confirmation goes through here
+       *  (through {@link executeOnce}, which adds the world-health latch). */
+      const executeAgainstWorld = async (
         candidate: BirthCandidate,
         task: AuthorTask,
       ): Promise<{ report: FlowWorkerToolReport } | { result: GuardScenarioResult }> => {
@@ -2451,6 +2452,96 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         if (outcome.result.unservedRoute) unservedByRef.set(taskKey(task), outcome)
         if (outcome.result.outcome === 'error') lastExecutionErrorByRef.set(taskKey(task), outcome)
         return { result: outcome.result }
+      }
+
+      // THE WORLD-HEALTH LATCH. A server that cannot boot AFTER the world has
+      // proven itself (executions booted against it) is news about the RUN,
+      // not about the scenario that happened to observe it — a container that
+      // exited, a port another process took, a reset run under the pool. Left
+      // to the workers, that one fact costs a session per flow, each retiring
+      // its flow against a dead world (documenso 2026-09-03: ~110 sessions
+      // after one loss). So the FIRST observer pauses the pool, hands the
+      // shared world back for one re-boot (`invalidate` → the next execution's
+      // `ensure` resets a dirty world, runs `services.up` and the seed again)
+      // and re-executes; a boot that fails again latches a run-level
+      // `world-lost` refusal every later execution short-circuits on. Bounded
+      // by a small repair budget so a flapping world cannot loop. A scenario
+      // carrying its own boot overrides (`setup`, a lifecycle `boot` step)
+      // never triggers it: a crash under ITS env is its own finding.
+      let worldBoots = 0
+      let worldRepairs = 0
+      let worldRepair: Promise<boolean> | null = null
+      const carriesBootOverrides = (scenario: GuardScenario): boolean =>
+        scenario.setup !== undefined || scenario.steps.some((step) => 'boot' in step)
+      const latchWorldLost = (candidate: BirthCandidate, failure: GuardScenarioResult): void => {
+        if (runRefusal) return
+        runRefusal = {
+          status: 'world-lost',
+          message: worldLostMessage(failure, worldBoots, worldRepairs),
+          flowIds: [candidate.flow.id],
+        }
+        errors.push(runRefusalError(runRefusal))
+      }
+      /** A result that says the world was not there: the server's own boot
+       *  failure, or the runner declining the whole round because its world
+       *  boot (services, seed) failed — birth's synthetic "not run" result. */
+      const worldWasLost = (run: { report: FlowWorkerToolReport } | { result: GuardScenarioResult }): boolean =>
+        'result' in run &&
+        (isWorldBootFailure(run.result) || run.result.failure?.expected === BIRTH_NOT_RUN_EXPECTED)
+      const executeOnce = async (
+        candidate: BirthCandidate,
+        task: AuthorTask,
+      ): Promise<{ report: FlowWorkerToolReport } | { result: GuardScenarioResult }> => {
+        // Nothing executes against a world under repair: the verdict decides
+        // whether this execution runs against a repaired world or short-circuits.
+        if (worldRepair) await worldRepair
+        const run = await executeAgainstWorld(candidate, task)
+        if (!('result' in run)) return run
+        if (!isWorldBootFailure(run.result)) {
+          worldBoots += 1
+          return run
+        }
+        // A boot failure before the world ever proved itself is the existing
+        // story (the preflight, the worker's own diagnosis); one under a
+        // scenario's own overrides is that scenario's finding.
+        if (worldBoots === 0 || carriesBootOverrides(candidate.scenario)) return run
+        if (worldRepair) {
+          // A sibling is repairing: this result was taken against the dead
+          // world, so it is re-taken once the verdict is in (a lost verdict
+          // makes the re-take return the refusal).
+          await worldRepair
+          return executeOnce(candidate, task)
+        }
+        let settle!: (ok: boolean) => void
+        worldRepair = new Promise<boolean>((resolve) => {
+          settle = resolve
+        })
+        try {
+          worldRepairs += 1
+          if (worldRepairs > WORLD_REPAIR_BUDGET) {
+            latchWorldLost(candidate, run.result)
+            settle(false)
+            return executeAgainstWorld(candidate, task)
+          }
+          sharedWorld.invalidate()
+          const retry = await executeAgainstWorld(candidate, task)
+          if (worldWasLost(retry)) {
+            if ('result' in retry) latchWorldLost(candidate, retry.result)
+            settle(false)
+            return executeAgainstWorld(candidate, task)
+          }
+          if (!('result' in retry)) {
+            // The re-boot itself was refused (its seed, its services) — the
+            // execution latched that refusal; nothing repaired.
+            settle(false)
+            return retry
+          }
+          worldBoots += 1
+          settle(true)
+          return retry
+        } finally {
+          worldRepair = null
+        }
       }
 
       /** Whether a run outcome reproduces the declared red predictions
@@ -3255,11 +3346,16 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   await sharedWorld.shutdown()
 
   // The mutator wave ran against that world: restore it so its damage (a changed
-  // password, a deleted account) reaches no later run. A recipe with no `reset`
-  // leaves the marker standing — the honest record that the world is dirty.
-  if (mutatorPhasePlanned && recipe.api?.services?.reset) {
-    const reset = await runBuild(repoRoot, recipe.api.services.reset, recipe.env, DEFAULT_BUILD_TIMEOUT_MS)
-    if (reset.ok) fs.rmSync(guardWorldDirtyMarkerPath(repoRoot), { force: true })
+  // password, a deleted account) reaches no later run — through the world's own
+  // handle, the ONE owner of its lifecycle (the runner never resets a world it
+  // shares). A recipe with no `reset` leaves the marker standing — the honest
+  // record that the world is dirty; a wave that never booted the world has
+  // nothing to restore and nothing to record.
+  if (mutatorPhasePlanned) {
+    const restored = sharedWorld.booted() ? await sharedWorld.reset() : 'no-reset'
+    if (restored === 'reset' || !sharedWorld.booted()) {
+      fs.rmSync(guardWorldDirtyMarkerPath(repoRoot), { force: true })
+    }
   }
 
   // 8. Persist — INDEPENDENTLY, per scenario, whatever its confirmation run said.
@@ -4168,10 +4264,36 @@ function renderCondensedResult(result: GuardScenarioResult): string {
 /** The refusal message a worker tool returns once the runner declined the run —
  *  a WORLD defect, stated as one; no scenario the worker authors can get past it. */
 function workerRefusalMessage(refusal: GuardRunRefusal): string {
+  if (refusal.status === 'world-lost') {
+    return (
+      `the prepared world was LOST mid-run and could not be repaired: ${refusal.message}\n` +
+      'This is a run-level fact (recorded once) — nothing you author can run this generate. ' +
+      'Stop executing and end the session with the outcome that best states what you learned before the loss; the flow stays unsettled and the next generate re-attempts it.'
+    )
+  }
   return (
     `the runner REFUSED the run before any scenario executed: ${refusal.message}\n` +
     'This is a configuration/world defect (recorded once, run-level) — nothing you author can run this generate. ' +
     'Stop executing and end the session with the outcome that best states your findings; the flow stays unsettled until the configuration is fixed.'
+  )
+}
+
+/** How many times one generate re-boots a world it lost before giving up on it. */
+const WORLD_REPAIR_BUDGET = 2
+
+/** The `world-lost` refusal's reason: what was observed, what was tried, what to do. */
+function worldLostMessage(failure: GuardScenarioResult, boots: number, repairs: number): string {
+  const observed = oneLine(failure.failure?.actual ?? 'the server did not boot')
+  const tried =
+    repairs > WORLD_REPAIR_BUDGET
+      ? `the run's repair budget (${WORLD_REPAIR_BUDGET} re-boots) was already spent`
+      : `a re-boot of the world (reset when dirty, services.up, seed) still could not bring it up`
+  return (
+    `The prepared world (the recipe's services + seed) was lost mid-run: after ${boots} execution(s) had booted ` +
+    `against it, the server could not boot any more (${observed}), and ${tried}. Every later execution was ` +
+    'skipped instead of retiring its flow against a dead world, so the affected flows stay unsettled. Find what took ' +
+    'the world down — a container that exited, a port another process took, a reset run under the pool — and ' +
+    're-run `truecourse guard generate`.'
   )
 }
 
@@ -4312,16 +4434,22 @@ function buildAuthorCtx(
  *  The seed's FIXTURE catalog rides here too: it is how a web scenario learns a
  *  login principal exists at all — without it every auth-gated flow blocks on
  *  the word "credentials" while the seeded user sits in the database (documenso
- *  2026-08-28: 114 of 119 web flows). */
+ *  2026-08-28: 114 of 119 web flows). The world's CREDENTIALS ride beside it:
+ *  what a `credential` step installs so the browser starts signed in. */
 function webPreparationCtx(
   recipe: Recipe,
-): Pick<AuthorUserContext, 'recipeServe' | 'recipeHealthPath' | 'recipeEntry' | 'fixtures'> {
+): Pick<AuthorUserContext, 'recipeServe' | 'recipeHealthPath' | 'recipeEntry' | 'fixtures' | 'credentials'> {
   const web = resolveWebSurface(recipe)
   const fixtures = recipeFixtureCatalog(recipe)
+  // Every credential, unscoped: the server allowlist scopes api REQUESTS, and
+  // the browser drives the recipe's one web surface — what a `credential` step
+  // installs is whichever principal the flow needs.
+  const credentials = recipeCredentialCapabilities(recipe)
   return {
     ...(web ? { recipeServe: [...web.serve], recipeHealthPath: web.healthPath } : {}),
     ...(recipe.entry ? { recipeEntry: recipe.entry } : {}),
     ...(fixtures.length > 0 ? { fixtures } : {}),
+    ...(credentials.length > 0 ? { credentials } : {}),
   }
 }
 

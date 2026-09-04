@@ -11,7 +11,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { runGuard, guardWorldDirtyMarkerPath } from '@truecourse/guard-runner'
+import { createGuardSharedWorld, runGuard, guardWorldDirtyMarkerPath } from '@truecourse/guard-runner'
 import { makeTempRepo, rmrf, writeApiRecipe, writeScenario, apiScenario, specBinds } from './helpers.js'
 
 const repos: string[] = []
@@ -93,6 +93,35 @@ describe('runGuard — the world-mutator tail', () => {
     expect(fs.existsSync(guardWorldDirtyMarkerPath(r))).toBe(true)
     expect(worldLog(r)).toEqual(['up', 'down'])
   }, 60_000)
+
+  it('under a SHARED world the tail leaves the restore to the owner — siblings after it still find the world up', async () => {
+    const r = repo()
+    writeApiRecipe(r, { services: logServices(r, true) })
+    writeScenario(r, 'api/shared.yaml', sharedScenario())
+    writeScenario(r, 'api/mutator.yaml', mutatorScenario())
+
+    const world = createGuardSharedWorld()
+    const first = await runGuard({ repoRoot: r, skipBuild: true, sharedWorld: world })
+    expect(first.status).toBe('ok')
+    if (first.status !== 'ok') return
+    // The mutator ran, and NO reset ran under the shared world: the run reports
+    // the world dirty and keeps the marker for the owner.
+    expect(worldLog(r)).toEqual(['up'])
+    expect(first.latest.run.worldLeftDirty).toBe(true)
+    expect(fs.existsSync(guardWorldDirtyMarkerPath(r))).toBe(true)
+
+    // A sibling execution after the tail runs against the SAME, still-booted world.
+    const second = await runGuard({ repoRoot: r, skipBuild: true, sharedWorld: world })
+    expect(second.status).toBe('ok')
+    if (second.status !== 'ok') return
+    expect(second.latest.scenarios.every((s) => s.outcome === 'pass')).toBe(true)
+    expect(worldLog(r)).toEqual(['up'])
+
+    // The owner restores — once, through the handle, with the recipe's own command.
+    await world.shutdown()
+    expect(await world.reset()).toBe('reset')
+    expect(worldLog(r)).toEqual(['up', 'down', 'reset'])
+  }, 90_000)
 
   it('a surviving marker makes the next world boot reset before `up`', async () => {
     const r = repo()

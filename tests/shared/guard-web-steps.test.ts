@@ -23,6 +23,7 @@ import {
   describeWebLocator,
   firstInvalidMatchPattern,
   isWebClickStep,
+  isWebCredentialStep,
   isWebExpectStep,
   isWebFillStep,
   isWebHistoryStep,
@@ -60,6 +61,23 @@ describe('web step schema', () => {
       isWebExpectStep(check),
     ]).toEqual([true, true, true, true])
     expect(isWebStep(navigate as GuardSandboxStep)).toBe(true)
+  })
+
+  it('`credential` names a world credential the browser starts as — the name, never a value', () => {
+    const step = GuardWebStepSchema.parse({ driver: 'web', credential: 'webSession', milestone: 1 })
+    expect(isWebCredentialStep(step)).toBe(true)
+    expect(isWebExpectStep(step)).toBe(false)
+    expect(describeWebCommand(step)).toBe('sign in as webSession')
+    // A value has no place in a scenario: the step is strict.
+    expect(() => GuardWebStepSchema.parse({ driver: 'web', credential: 'webSession', value: 'sid=1' })).toThrow()
+    expect(() => GuardWebStepSchema.parse({ driver: 'web', credential: '' })).toThrow()
+    // It may carry an expectation, like every other verb.
+    const checked = GuardWebStepSchema.parse({
+      driver: 'web',
+      credential: 'apiToken',
+      expect: { text: { contains: 'Signed in' } },
+    })
+    expect(describeWebExpect(checked.expect)).toBe('page text contains “Signed in”')
   })
 
   it('the step-level driver is required — an undeclared web verb is not a step', () => {

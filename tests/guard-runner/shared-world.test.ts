@@ -38,8 +38,8 @@ describe('createGuardSharedWorld — the single-flight memo', () => {
       return { ok: true as const }
     }
     const down = async () => {}
-    const [a, b] = await Promise.all([world.ensure(boot, down), world.ensure(boot, down)])
-    const c = await world.ensure(boot, down)
+    const [a, b] = await Promise.all([world.ensure(boot, { down }), world.ensure(boot, { down })])
+    const c = await world.ensure(boot, { down })
     expect(boots).toBe(1)
     expect(a).toBe(b)
     expect(b).toBe(c)
@@ -50,9 +50,9 @@ describe('createGuardSharedWorld — the single-flight memo', () => {
     let boots = 0
     const boot = async () => ({ ok: boots++ > 0 })
     const down = async () => {}
-    const first = await world.ensure(boot, down, (v) => !v.ok)
+    const first = await world.ensure(boot, { down }, (v) => !v.ok)
     expect(first.ok).toBe(false)
-    const second = await world.ensure(boot, down, (v) => !v.ok)
+    const second = await world.ensure(boot, { down }, (v) => !v.ok)
     expect(second.ok).toBe(true)
     expect(boots).toBe(2)
   })
@@ -65,8 +65,10 @@ describe('createGuardSharedWorld — the single-flight memo', () => {
         async () => {
           throw new Error('compose died')
         },
-        async () => {
-          downs++
+        {
+          down: async () => {
+            downs++
+          },
         },
       ),
     ).rejects.toThrow('compose died')
@@ -88,8 +90,10 @@ describe('createGuardSharedWorld — the single-flight memo', () => {
         order.push('boot-settled')
         return {}
       },
-      async () => {
-        order.push('down')
+      {
+        down: async () => {
+          order.push('down')
+        },
       },
     )
     // Shutdown while the boot is in flight — it must wait, never race it
@@ -97,6 +101,58 @@ describe('createGuardSharedWorld — the single-flight memo', () => {
     await Promise.all([world.shutdown(), bootP])
     await world.shutdown() // idempotent
     expect(order).toEqual(['boot-settled', 'down'])
+  })
+})
+
+describe('createGuardSharedWorld — the owner\'s lifecycle: invalidate and reset', () => {
+  it('invalidate forgets the world so the next ensure boots again; the lifecycle registration survives', async () => {
+    const world = createGuardSharedWorld()
+    let boots = 0
+    let downs = 0
+    const boot = async () => ({ n: ++boots })
+    const lifecycle = { down: async () => void downs++ }
+    expect((await world.ensure(boot, lifecycle)).n).toBe(1)
+    expect((await world.ensure(boot, lifecycle)).n).toBe(1)
+    world.invalidate()
+    expect((await world.ensure(boot, lifecycle)).n).toBe(2)
+    await world.shutdown()
+    expect(downs).toBe(1)
+  })
+
+  it('reset runs the registered restore ONCE the boot has settled, then forgets the world', async () => {
+    const world = createGuardSharedWorld()
+    const order: string[] = []
+    let boots = 0
+    const boot = async () => {
+      await wait(20)
+      order.push(`boot-${++boots}`)
+      return {}
+    }
+    const lifecycle = {
+      down: async () => void order.push('down'),
+      reset: async () => {
+        order.push('reset')
+        return true
+      },
+    }
+    const bootP = world.ensure(boot, lifecycle)
+    const [outcome] = await Promise.all([world.reset(), bootP])
+    expect(outcome).toBe('reset')
+    expect(order).toEqual(['boot-1', 'reset'])
+    // The world is gone: the next ensure boots afresh.
+    await world.ensure(boot, lifecycle)
+    expect(order).toEqual(['boot-1', 'reset', 'boot-2'])
+  })
+
+  it('reset reports a failed restore, and a world with no restore command', async () => {
+    const failing = createGuardSharedWorld()
+    await failing.ensure(async () => ({}), { down: async () => {}, reset: async () => false })
+    expect(await failing.reset()).toBe('reset-failed')
+
+    const bare = createGuardSharedWorld()
+    expect(await bare.reset()).toBe('no-reset') // nothing registered yet
+    await bare.ensure(async () => ({}), { down: async () => {} })
+    expect(await bare.reset()).toBe('no-reset') // the recipe declares none
   })
 })
 

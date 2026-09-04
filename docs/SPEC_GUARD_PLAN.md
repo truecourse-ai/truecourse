@@ -7811,6 +7811,96 @@ ports → Opus; shared-branch git surgery → inline by the coordinating session
     [137]/[147] (the seed step's web principals arm only when web is
     runnable — this is what makes them arm hands-off).
 
+149. **The shared world has ONE owner, and a lost world is a run-level fact
+    (documenso 2026-09-03: ~110 sessions retired against a dead world).**
+    STATUS: BUILT (2026-09-04). The hosted generate lost every session after
+    its first mutator: the runner's own mutator tail ran the recipe's
+    `services.reset` (`down -v`) inside `runGuard` even under generate's
+    SHARED world, the single-flight memo had no way to forget the world, and
+    every later execution booted its server against a Postgres that was gone.
+    The bench run of 2026-08-31 lost its tail the same way (misread then as
+    "transient unhealthy boots"). Two general rules, both engine-side:
+    - OWNERSHIP (`shared-world.ts`): the handle owns boot, teardown AND
+      restore. `ensure` registers a lifecycle (`down`, and `reset` when the
+      recipe declares one); `reset()` is the OWNER's call (generate, after
+      every sharing execution settled) and `invalidate()` forgets the memo so
+      the next `ensure` boots afresh. `runGuard` under a shared world writes
+      the dirty marker and leaves the restore to the owner
+      (`worldLeftDirty`); an owned run restores after its own tail as before.
+      Generate's end-of-run restore goes through the handle, so no compose
+      command lives in the generator any more.
+    - THE WORLD-HEALTH LATCH (`generate.ts`, around `executeOnce`): a boot
+      failure (`isWorldBootFailure` in `world-health.ts`: the api server's
+      `the api server to start`, the sandbox's `the web surface did not come
+      up`) AFTER the world proved itself pauses the pool, hands the world back
+      for ONE re-boot (`invalidate` → the next execution's `ensure` resets a
+      dirty world, runs `services.up` and the seed) and re-executes; a boot
+      that fails again latches a run-level `world-lost` refusal every later
+      execution short-circuits on (the affected flows stay unsettled). Bounded
+      by a repair budget of 2; a scenario with its own boot overrides (`setup`,
+      a lifecycle `boot` step) never triggers it.
+    Tests: `tests/guard-runner/shared-world.test.ts` (invalidate/reset),
+    `tests/guard-runner/run-world-mutators.test.ts` (the shared-world tail),
+    `tests/guard-runner/world-health.test.ts`,
+    `tests/guard-generator/generate-world-health.test.ts`.
+    Related: [125] (the shared world), [143]/[145] (the tail and the gate).
+
+150. **The browser starts as a seeded principal: the web `credential` step.**
+    STATUS: BUILT (2026-09-04). The seed mints a session, but only the api
+    driver could present it; every web scenario signed in through the login
+    form, and documenso's DB-backed login limit (50 per 15 min, shared by
+    every sandbox's server) tripped two minutes into the pool — 52 of 95 web
+    sessions never got past the sign-in page. General rule: a scenario never
+    redoes setup work the seed already did. `{ driver: web, credential:
+    <name> }` installs one of the world's credentials (recipe-declared or
+    seed-minted, the same set an api step references as `{{cred:…}}`) into
+    the browser: a `Cookie` credential becomes the surface's cookies, any
+    other header rides every request (`web/credential.ts`). The runner hands
+    sandbox scenarios the world's credentials with their headers
+    (`RunScenarioContext.credentials`); the step records the NAME only. The
+    web author prompt gains a CREDENTIALS AVAILABLE block and the doctrine
+    "open every signed-in flow with a `credential` step; the login form is for
+    flows ABOUT signing in" (web fingerprint → `bc362be57f0801e8`; cli/api
+    untouched). Tests: `tests/shared/guard-web-steps.test.ts`,
+    `tests/guard-runner/web-driver.test.ts` (cookie, header, anonymous,
+    unknown), `tests/guard-generator/prompts.test.ts`.
+    Related: [137]/[138] (the seed's principals), [140] (the fixture block
+    this supersedes as the default sign-in channel).
+
+151. **An api principal is required by EVIDENCE, not by doc format.** STATUS:
+    BUILT (2026-09-04). The seed's "Runnable surfaces" armed the api principal
+    on one signal — an OpenAPI security scheme — so a repository whose API
+    docs are markdown (documenso) never required one, and a fresh hosted seed
+    (2026-09-03) minted a web session and nothing else: 108 api milestones
+    then blocked on "credentials". `seed-evidence.ts` (`apiAuthEvidence`)
+    reads every deterministic signal the setup already holds — a declared
+    scheme, a credential header (`Authorization`, `X-API-Key`, …) on a mapped
+    operation's contract, a token-shaped table in the schema (`ApiToken`,
+    `access_tokens`, …), corpus docs describing a bearer/api-key header — and
+    any of them makes `api` a required surface: the briefing states the
+    evidence, `run_seed_draft` and the fold refuse a draft without a probed api
+    credential, and the AUTHENTICATION block of the grounding becomes a
+    mandate. When the spec declares no security, the candidate probes come
+    from the mapped operations (`probeCandidatesFromInterfaces`, parameter-free
+    GETs first) so confirming one stays a lookup. Doctrine: mint the token the
+    way the app issues it; a web cookie is not an api principal.
+    Tests: `tests/guard-generator/seed-evidence.test.ts`,
+    `tests/core/guard-setup-seed-session.test.ts`.
+    Related: [137]/[138] (the principal mandate), [150] (the web half).
+
+152. **The seed is told which resources the routes reference.** STATUS: BUILT
+    (2026-09-04). The same documenso seed minted one user; 259 milestones
+    blocked on missing-data (an envelope, a template, a team) that no test
+    could act on. `requiredResources` folds every path-template parameter and
+    id/handle-shaped request field of the mapped operations to the resource it
+    names (`{envelopeId}` → envelope, `/documents/{id}` → document, `orgUrl` →
+    org), most-referenced first, and the briefing's "Resources the route
+    surface references — seed ONE of each" section asks for one instance of
+    each, owned by the seeded principal, with its id and handles published as
+    fixture fields. Advisory, not a refusal: `check_provides` warns when no
+    fixture names a listed resource, and the doctrine asks for a finding when
+    no service path can create one. Related: [138] (fixture doctrine), [151].
+
 ## The hosted product (ported 2026-09-03)
 
 Everything above describes the engine as the file-mode CLI runs it. This branch

@@ -21,6 +21,7 @@
 import type { ResolvedWebSurface } from '../recipe.js'
 import { startWebSurface, type WebSurfaceHandle } from '../web/surface.js'
 import type { StepRunContext } from './types.js'
+import { WEB_SURFACE_DOWN_PREFIX } from '../world-health.js'
 
 /** What a driver needs from the run to bring the surface up: the world it serves. */
 export type SurfaceOpenContext = Pick<StepRunContext, 'repoRoot' | 'sandbox' | 'signal'>
@@ -67,7 +68,7 @@ export function sandboxSurface(surface: ResolvedWebSurface | null): SandboxSurfa
         sandboxEnv: ctx.sandbox.env,
         ...(ctx.signal ? { signal: ctx.signal } : {}),
       })
-      if (!started.ok) return { ok: false, reason: `the web surface did not come up: ${started.reason}` }
+      if (!started.ok) return { ok: false, reason: `${WEB_SURFACE_DOWN_PREFIX}${started.reason}` }
       server = started.server
       return { ok: true, server }
     },

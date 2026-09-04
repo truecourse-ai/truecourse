@@ -188,7 +188,7 @@ export async function birthValidate(
     return {
       outcomes: candidates.map((candidate) => ({
         candidate,
-        result: syntheticResult(candidate, 'the scenario to run', message),
+        result: syntheticResult(candidate, BIRTH_NOT_RUN_EXPECTED, message),
       })),
     }
   }
@@ -204,6 +204,9 @@ export async function birthValidate(
     ...(res.stepStats ? { stepStats: res.stepStats } : {}),
   }
 }
+
+/** The `failure.expected` of a synthetic result: the round did not run at all. */
+export const BIRTH_NOT_RUN_EXPECTED = 'the scenario to run'
 
 /** The `error` result for a candidate that never reached the runner. */
 function syntheticResult(

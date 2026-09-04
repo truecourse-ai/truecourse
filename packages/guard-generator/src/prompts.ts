@@ -756,8 +756,13 @@ collide.
 otherwise bare: no network egress beyond the surface under test, no ambient
 credentials, no external systems. What IS provided is the SEED: when the user prompt
 lists FIXTURES, that data — principals included — already exists in the served app's
-database, and a SIGNED-IN world is reached by navigating the login page and filling
-the seeded login fields, never by blocking. Every scenario of a run executes against
+database, and a SIGNED-IN world is reached WITHOUT the login screen: a \`credential\`
+step names one of the CREDENTIALS the user prompt lists (a seeded session cookie, a
+token) and the runner installs it into the browser before the first navigation. Fill
+the login form only when the flow is ABOUT signing in, or when no credential is
+listed and a fixture carries login fields — every form login spends the app's login
+rate limit, which a run of many scenarios trips. Never block on "credentials" while
+either channel exists. Every scenario of a run executes against
 ONE shared world: create what you need through the app's own screens and endpoints
 under identities you mint (embed \${unique}), and never mutate state you did not
 create — a scenario that would change a seeded principal's password or email, revoke
@@ -1286,6 +1291,33 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       'DATA: omit `scenario` and return `"blockedOn": ["missing-data", "<the entity>"]`.',
     )
   }
+  // The world's credentials for the WEB batch: what a `credential` step can
+  // install into the browser so the scenario starts signed in. The login form
+  // is the fallback, not the default — every form login spends the app's login
+  // rate limit, and a pool of browser scenarios trips it (documenso 2026-09-03:
+  // 52 of 95 web sessions never got past the sign-in page).
+  const webCredentials = ctx.driver === 'web' && ctx.credentials && ctx.credentials.length > 0
+  if (webCredentials) {
+    lines.push(
+      '',
+      'CREDENTIALS AVAILABLE — the prepared world holds these principals; their values',
+      'are secret and never shown to you. A `credential` step installs one into the',
+      'browser — a Cookie credential becomes the surface\'s cookies, any other header',
+      'rides every request the page makes — so the scenario starts SIGNED IN without',
+      'visiting the login screen:',
+    )
+    for (const c of ctx.credentials!) {
+      const role = c.description ? ` (${c.description})` : ''
+      lines.push(
+        `- ${c.name}${role} → header \`${c.header}\`; author \`{ "driver": "web", "credential": "${c.name}" }\` as the first step`,
+      )
+    }
+    lines.push(
+      'Open every signed-in flow with a `credential` step. Use the login form only when',
+      'the flow is ABOUT signing in (then the seeded login fixture is what you fill), or',
+      'when the claim needs a principal none of these credentials is.',
+    )
+  }
   // The same catalog for the WEB batch, in the browser's terms: the seed's login
   // principal is how a web scenario reaches a signed-in world at all. Without this
   // block every auth-gated web flow blocks on the bare word "credentials" while the
@@ -1304,12 +1336,22 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       lines.push(`- ${f.name}: fields ${f.fields.map((x) => `\`${x}\``).join(', ')}`)
     }
     lines.push(
-      'A SIGNED-IN world is reached through these: when a fixture carries login fields',
-      '(an email/username and a password), navigate to the login page and `fill` them —',
-      'that IS this surface\'s credential. Block on `"credentials"` only when NO listed',
-      'fixture can sign the needed principal in; a flow that needs seeded data not',
-      'listed above (and that no screen can create) is blocked on `"missing-data"`',
-      'plus the entity.',
+      ...(webCredentials
+        ? [
+            'A SIGNED-IN world is reached with a `credential` step (see CREDENTIALS',
+            'AVAILABLE); a fixture that carries login fields (an email/username and a',
+            'password) is for a flow ABOUT signing in — navigate to the login page and',
+            '`fill` them there. Block on `"credentials"` only when neither a listed',
+            'credential nor a listed fixture can be the needed principal; a flow that',
+          ]
+        : [
+            'A SIGNED-IN world is reached through these: when a fixture carries login fields',
+            '(an email/username and a password), navigate to the login page and `fill` them —',
+            'that IS this surface\'s credential. Block on `"credentials"` only when NO listed',
+            'fixture can sign the needed principal in; a flow that',
+          ]),
+      'needs seeded data not listed above (and that no screen can create) is blocked',
+      'on `"missing-data"` plus the entity.',
     )
   }
   // Detected third parties: what this repo actually integrates
@@ -2112,6 +2154,13 @@ export interface SeedDraftInput {
    */
   securitySchemes?: { name: string; summary: string }[]
   /**
+   * Why the api surface authenticates when no scheme is declared — the wider
+   * deterministic evidence (a credential header on a mapped operation, a token
+   * table, docs describing a bearer header). Renders the AUTHENTICATION block as
+   * a mandate rather than a question.
+   */
+  apiAuthEvidence?: { kind: string; detail: string }[]
+  /**
    * The roles the app distinguishes — one principal is minted per entry. Derived
    * deterministically from the schema (a role-shaped column and its enumerated
    * values) and, where the specs name them, from the spec language. Empty ⇒ one
@@ -2200,6 +2249,15 @@ export function buildSeedUserPrompt(input: SeedDraftInput): string {
       'exactly one of these keys (any other name is dropped by the engine):',
     )
     for (const s of input.securitySchemes) lines.push(`  ${s.name}: ${s.summary}`)
+  } else if (input.apiAuthEvidence && input.apiAuthEvidence.length > 0) {
+    lines.push(
+      '',
+      'AUTHENTICATION: the specification declares no OpenAPI security scheme, but the',
+      'api surface AUTHENTICATES — the evidence:',
+      ...input.apiAuthEvidence.map((e) => `  - ${e.detail}`),
+      'Mint the api principal the way the app issues it (read its verifier for the',
+      'header and its prefix), and omit "satisfies" — there is no scheme to name.',
+    )
   } else {
     lines.push(
       '',

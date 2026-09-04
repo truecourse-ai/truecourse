@@ -16,7 +16,13 @@
 
 import path from 'node:path'
 import type { GuardSandboxStep, GuardWebStep } from '@truecourse/shared'
-import { describeWebCommand, describeWebExpect, isWebStep, isWebUploadStep } from '@truecourse/shared'
+import {
+  describeWebCommand,
+  describeWebExpect,
+  isWebCredentialStep,
+  isWebStep,
+  isWebUploadStep,
+} from '@truecourse/shared'
 import { stepExcerpt, type EvidenceStep } from '../evidence.js'
 import {
   DEFAULT_WEB_STEP_TIMEOUT_MS,
@@ -25,13 +31,15 @@ import {
   type WebStepResult,
 } from '../web/executor.js'
 import { openWebSession, type WebSession } from '../web/session.js'
+import { installWebCredential } from '../web/credential.js'
 import { resolveWebStep } from '../web/tokens.js'
 import { materializeWebFile, type WebFilePayload } from '../web/upload.js'
 import type { SandboxSurface } from './surface.js'
 import type { StepDriver, StepOutcome, StepRunContext } from './types.js'
+import { STEP_TO_RUN_EXPECTED } from '../world-health.js'
 
 /** The `failure.expected` an infrastructure failure of a web step carries. */
-const STEP_TO_RUN = 'the step to run'
+const STEP_TO_RUN = STEP_TO_RUN_EXPECTED
 
 /**
  * The infra message a web step earns when the repo declares no web surface. An
@@ -56,6 +64,9 @@ export interface WebStepDriverOptions {
 /** The driver for every step a browser takes. */
 export function webStepDriver(opts: WebStepDriverOptions): StepDriver {
   let session: WebSession | null = null
+  // The extra headers `credential` steps installed so far — accumulated, because
+  // Playwright's setter replaces the whole set.
+  let extraHeaders: Record<string, string> = {}
 
   return {
     id: 'web',
@@ -66,6 +77,7 @@ export function webStepDriver(opts: WebStepDriverOptions): StepDriver {
       // after every driver has let go of it.
       await session?.close()
       session = null
+      extraHeaders = {}
     },
 
     async execute(step, ctx) {
@@ -79,6 +91,20 @@ export function webStepDriver(opts: WebStepDriverOptions): StepDriver {
       const failedToOpen = (message: string): StepOutcome => failedToTake(message)
 
       if (!opts.served.declared) return failedToOpen(NO_WEB_SURFACE_INFRA)
+
+      // A credential the world does not hold is the author's mistake, said before
+      // a surface and a browser are paid for.
+      const credential = isWebCredentialStep(resolved) ? ctx.credentials?.get(resolved.credential) : undefined
+      if (isWebCredentialStep(resolved) && !credential) {
+        const known = [...(ctx.credentials?.keys() ?? [])].sort()
+        return failedToTake(
+          `credential "${resolved.credential}" is not one this world provides — ` +
+            (known.length > 0
+              ? `the recipe declares / the seed mints: ${known.join(', ')}`
+              : 'the recipe declares none and the seed minted none'),
+          '(no credential was installed)',
+        )
+      }
 
       // The uploaded file is materialized BEFORE the browser is asked for anything:
       // a declaration that cannot become bytes — a path that escapes the sandbox, a
@@ -101,6 +127,17 @@ export function webStepDriver(opts: WebStepDriverOptions): StepDriver {
         session = opened.session
       }
       if (ctx.signal?.aborted) return { status: 'aborted' }
+
+      if (isWebCredentialStep(resolved) && credential) {
+        const installed = await installWebCredential(
+          session.page,
+          session.baseUrl,
+          resolved.credential,
+          credential,
+          extraHeaders,
+        )
+        if (!installed.ok) return failedToTake(installed.reason, '(the credential was not installed)')
+      }
 
       // Only the lines THIS step produced ride in its record; the ones before it
       // already rode in an earlier step's.

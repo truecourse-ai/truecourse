@@ -50,7 +50,15 @@ export type {
 export { defaultGuardExecutor } from './guard-executor.js'
 export type { GuardExecutor, GuardExecInput, GuardExecReport } from './guard-executor.js'
 export { createGuardSharedWorld } from './shared-world.js'
-export type { GuardSharedWorld } from './shared-world.js'
+export type { GuardSharedWorld, GuardWorldLifecycle, GuardWorldResetOutcome } from './shared-world.js'
+export { parseCookieHeader, installWebCredential } from './web/credential.js'
+export type { WorldCredential } from './web/credential.js'
+export {
+  isWorldBootFailure,
+  API_SERVER_BOOT_EXPECTED,
+  STEP_TO_RUN_EXPECTED,
+  WEB_SURFACE_DOWN_PREFIX,
+} from './world-health.js'
 
 export { loadScenarios, walkScenarioRelFiles } from './scenario-loader.js'
 export type { LoadedScenarios, ScenarioLoadError } from './scenario-loader.js'

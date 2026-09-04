@@ -23,6 +23,7 @@ import type { Sandbox } from '../sandbox.js'
 import type { EvidenceStep } from '../evidence.js'
 import type { ExpectMismatch } from '../expect.js'
 import type { StepObservation } from '../step-stats.js'
+import type { WorldCredential } from '../web/credential.js'
 
 /**
  * WHAT HAPPENED to one step, in the only four shapes a verdict is made of. Every
@@ -95,6 +96,12 @@ export interface StepRunContext {
   publishCaptures(values: Record<string, string>): void
   /** The run's default per-step budget; a step's own `timeoutMs` wins over it. */
   stepTimeoutMs: number
+  /**
+   * The prepared world's credentials — declared by the recipe or minted by the
+   * seed — by name, for the drivers that can present one (a web `credential`
+   * step). Absent when the run prepared none.
+   */
+  credentials?: ReadonlyMap<string, WorldCredential>
   /** Run-level cancellation. */
   signal?: AbortSignal
   /** Per-invocation observation the runner folds into the no-op anomaly stats. */

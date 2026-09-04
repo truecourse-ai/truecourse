@@ -1305,7 +1305,38 @@ describe('GENERATE_WEB_SYSTEM_PROMPT — the third authoring arm', () => {
     // is reached by filling the seeded login fixture, never by blocking on
     // "credentials") replaced the bare "no credentials" line.
     // …and again with the blast-radius cut (`world` + shared-world doctrine).
-    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('5ae8cec6f69fdc62')
+    // …and once more when the `credential` step became the sign-in channel
+    // (the login form is for flows ABOUT signing in).
+    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('bc362be57f0801e8')
+  })
+
+  it('a web batch advertises the world credentials as the sign-in channel, and the fixture block defers to it', () => {
+    const withCredentials = buildAuthorUserPrompt(
+      authorCtx({
+        driver: 'web',
+        recipeServe: ['node', 'web.js'],
+        recipeHealthPath: '/health',
+        credentials: [{ name: 'webSession', header: 'Cookie', description: 'the seeded session' }],
+        fixtures: [{ name: 'webUser', fields: ['email', 'password'] }],
+      }),
+    )
+    expect(withCredentials).toContain('CREDENTIALS AVAILABLE — the prepared world holds these principals')
+    expect(withCredentials).toContain('- webSession (the seeded session) → header `Cookie`')
+    expect(withCredentials).toContain('{ "driver": "web", "credential": "webSession" }')
+    expect(withCredentials).toContain('reached with a `credential` step')
+    expect(withCredentials).not.toContain("that IS this surface's credential")
+    // Without credentials the fixture block keeps the login-form doctrine, and
+    // no credentials block renders at all.
+    const fixturesOnly = buildAuthorUserPrompt(
+      authorCtx({
+        driver: 'web',
+        recipeServe: ['node', 'web.js'],
+        recipeHealthPath: '/health',
+        fixtures: [{ name: 'webUser', fields: ['email', 'password'] }],
+      }),
+    )
+    expect(fixturesOnly).not.toContain('CREDENTIALS AVAILABLE')
+    expect(fixturesOnly).toContain("that IS this surface's credential")
   })
 
   it('a web batch advertises the seed fixture catalog as the sign-in channel', () => {

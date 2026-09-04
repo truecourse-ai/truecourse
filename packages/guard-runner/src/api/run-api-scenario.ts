@@ -44,6 +44,7 @@ import { normalize, type NormalizerContext } from '../normalizers.js'
 import { applyUniqueEnv, applyUniqueSetup } from '../unique.js'
 import { SANDBOX_SETUP_EXPECTED, CAPABILITY_SETUP_EXPECTED } from '../run-scenario.js'
 import { STEP_OUTPUT_LIMIT } from '../evidence.js'
+import { API_SERVER_BOOT_EXPECTED } from '../world-health.js'
 import type { ApiStepObservation } from '../step-stats.js'
 import {
   spawnApiProcess,
@@ -457,7 +458,7 @@ export async function runApiScenario(
           ...(attempts > 1 ? { bootAttempts: attempts } : {}),
           failure: {
             step: 1,
-            expected: 'the api server to start',
+            expected: API_SERVER_BOOT_EXPECTED,
             // The message names the retry so a persisted error shows the boot was tried twice.
             actual: attempts > 1 ? `${boot.reason} (boot failed on both of ${attempts} attempts)` : boot.reason,
             ...(boot.stdout ? { stdout: redact(boot.stdout.slice(-STEP_OUTPUT_LIMIT)) } : {}),
@@ -575,7 +576,7 @@ export async function runApiScenario(
               retired.stderr += boot.stderr
               // A child that could not be SPAWNED is infrastructure: there is no
               // process whose readiness could have been judged.
-              if (boot.spawnFailed) return errorAt(stepIndex, stepMilestone, 'the api server to start', boot.reason)
+              if (boot.spawnFailed) return errorAt(stepIndex, stepMilestone, API_SERVER_BOOT_EXPECTED, boot.reason)
               return fail('the server to boot and become healthy', boot.reason)
             }
             server = boot.server
@@ -596,7 +597,7 @@ export async function runApiScenario(
             await retireServer()
             if (ctx.signal?.aborted) return abortedResult(base, stepIndex, start)
             if (spawned.spawnError()) {
-              return errorAt(stepIndex, stepMilestone, 'the api server to start', `api server failed to spawn: ${spawned.spawnError()}`)
+              return errorAt(stepIndex, stepMilestone, API_SERVER_BOOT_EXPECTED, `api server failed to spawn: ${spawned.spawnError()}`)
             }
             if (!exit.exited) {
               return fail(

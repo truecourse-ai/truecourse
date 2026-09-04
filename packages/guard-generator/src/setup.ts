@@ -101,6 +101,13 @@ import {
   validateCredentialSatisfies,
   type ProbeCandidate,
 } from './openapi-security.js'
+import {
+  apiAuthEvidence,
+  probeCandidatesFromInterfaces,
+  requiredResources,
+  type ApiAuthEvidence,
+  type RequiredResource,
+} from './seed-evidence.js'
 import type { InterfaceProvider } from './generate.js'
 import type { RecipeRunner } from './runners.js'
 
@@ -326,6 +333,17 @@ export interface GuardSetupSeedSessionInput {
    * then shipped a seed declaring zero credentials).
    */
   probeCandidates: ProbeCandidate[]
+  /**
+   * Why the api surface is judged to authenticate — every deterministic signal
+   * (`apiAuthEvidence`), not the OpenAPI scheme alone. Any entry makes `api` a
+   * runnable surface the seed must mint a probed principal for.
+   */
+  apiAuthEvidence?: ApiAuthEvidence[]
+  /**
+   * The resources the route surface references by id or handle, most-referenced
+   * first (`requiredResources`) — the rows a test must already have.
+   */
+  requiredResources?: RequiredResource[]
   roles: { name: string; source: string }[]
   specExcerpts: { doc: string; text: string }[]
   /** The repo's ecosystem — decides the drafted script's language/extension. */
@@ -803,13 +821,25 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       steps.push({ key: 'seed', status: 'skipped', reason: 'unchanged', inputFingerprint: seedFpPre })
       opts.onStepDone?.('seed', 'unchanged')
     } else {
+      const schemes = collectSecuritySchemes(openApiDocs)
+      const specProbes = collectProbeCandidates(openApiDocs)
       const seedRun = await runSeedStep({
         opts,
         recipe: current,
         database,
         routes: routesFromInterfaces(mapped.interfaces),
-        schemes: collectSecuritySchemes(openApiDocs),
-        probeCandidates: collectProbeCandidates(openApiDocs),
+        schemes,
+        // Spec-derived probes first (their security is stated); the mapped
+        // operations fill in when the spec declares none, so a corpus with
+        // markdown API docs still gets a lookup rather than a search.
+        probeCandidates: specProbes.length > 0 ? specProbes : probeCandidatesFromInterfaces(mapped.interfaces),
+        apiAuthEvidence: apiAuthEvidence({
+          interfaces: mapped.interfaces,
+          database,
+          docs: corpusDocTexts(repoRoot),
+          securitySchemes: schemes,
+        }),
+        requiredResources: requiredResources(mapped.interfaces),
         fingerprint: seedFpPre,
         onPhase: (running, done) => phases.enter({ running, done }),
       })
@@ -1229,6 +1259,8 @@ async function runSeedStep(args: {
   routes: readonly ApiRouteRef[]
   schemes: { name: string; summary: string }[]
   probeCandidates: ProbeCandidate[]
+  apiAuthEvidence: ApiAuthEvidence[]
+  requiredResources: RequiredResource[]
   /** The step's PRE-RUN fingerprint — the seed session's cache key. */
   fingerprint: string
   onPhase: (running: string, done: string) => void
@@ -1302,6 +1334,8 @@ async function runSeedStep(args: {
     routes: routes.map((r) => ({ method: r.method, path: r.path })),
     securitySchemes: schemes,
     probeCandidates: args.probeCandidates,
+    apiAuthEvidence: args.apiAuthEvidence,
+    requiredResources: args.requiredResources,
     roles: detectRoleColumns(database),
     specExcerpts: readSpecExcerpts(opts.repoRoot),
     ecosystem: detectEcosystems(opts.repoRoot)[0] ?? 'js',
@@ -1357,6 +1391,20 @@ function declaredNames(seed: {
  * the schema stays the authority on what is creatable, and this only has to tell the
  * model that "org owner" and "member" are words this product uses.
  */
+/** Every kept corpus doc's FULL text — the evidence scan reads whole documents,
+ *  where the briefing's excerpts stop after the first screen. */
+export function corpusDocTexts(repoRoot: string): { doc: string; text: string }[] {
+  const out: { doc: string; text: string }[] = []
+  for (const ref of readCorpusAreaTags(repoRoot).keys()) {
+    try {
+      out.push({ doc: ref, text: fs.readFileSync(path.resolve(repoRoot, ref), 'utf-8') })
+    } catch {
+      continue
+    }
+  }
+  return out
+}
+
 export function readSpecExcerpts(repoRoot: string): { doc: string; text: string }[] {
   const out: { doc: string; text: string }[] = []
   for (const ref of readCorpusAreaTags(repoRoot).keys()) {

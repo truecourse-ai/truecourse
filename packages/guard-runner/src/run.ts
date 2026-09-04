@@ -56,6 +56,7 @@ import {
 } from './externals.js'
 import { loadScenarios, type ScenarioLoadError } from './scenario-loader.js'
 import type { GuardSharedWorld } from './shared-world.js'
+import type { WorldCredential } from './web/credential.js'
 import {
   DependencyCatalogError,
   dependencyBlockFor,
@@ -920,8 +921,25 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
           await runBuild(repoRoot, api.services.down, loaded.recipe.env, DEFAULT_BUILD_TIMEOUT_MS)
         }
       }
+      // The restore thunk rides with the teardown so the shared world's OWNER can
+      // run the recipe's reset without knowing the command — the same bytes the
+      // owned path runs after its own mutator tail below.
+      const resetWorld = async (): Promise<boolean> => {
+        if (!api.services?.reset) return false
+        const reset = await runBuild(
+          repoRoot,
+          api.services.reset,
+          loaded.recipe.env,
+          opts.buildTimeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS,
+        )
+        return reset.ok
+      }
       const world = opts.sharedWorld
-        ? await opts.sharedWorld.ensure(bootWorld, downWorld, (v) => !v.ok)
+        ? await opts.sharedWorld.ensure(
+            bootWorld,
+            { down: downWorld, ...(api.services?.reset ? { reset: resetWorld } : {}) },
+            (v) => !v.ok,
+          )
         : await bootWorld()
       if (!world.ok) return world.stop
       // Own-world runs tear down in the finally below; a shared world is torn
@@ -1140,12 +1158,27 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       }
 
     const credentialAllowlist = new Map<string, string[]>()
+    // The header each credential rides in — what a web `credential` step needs
+    // to put it in the browser (an api step names the header itself).
+    const credentialHeaders = new Map<string, string>()
     for (const [name, cred] of Object.entries(api?.credentials ?? {})) {
       credentialAllowlist.set(name, credentialServers(cred, resolvedServers))
+      credentialHeaders.set(name, cred.header)
     }
     for (const [name, cred] of Object.entries(api?.seed?.provides.credentials ?? {})) {
       credentialAllowlist.set(name, credentialServers(cred, resolvedServers))
+      credentialHeaders.set(name, cred.header)
     }
+    /** The world's credentials with their headers, for the sandbox path (web
+     *  `credential` steps). Every credential: the server allowlist scopes api
+     *  requests, and the browser drives the recipe's one web surface. */
+    const worldCredentials = (): ReadonlyMap<string, WorldCredential> =>
+      new Map(
+        [...(apiCredentials ?? [])].flatMap(([name, value]) => {
+          const header = credentialHeaders.get(name)
+          return header ? [[name, { header, value }] as const] : []
+        }),
+      )
     const credentialViewCache = new Map<
       string,
       { credentials: Map<string, string>; foreign: Map<string, readonly string[]> }
@@ -1214,6 +1247,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               ...(apiFixtures ? { fixtures: apiFixtures } : {}),
               ...(api?.seed ? { seedDeclared: true } : {}),
               ...(webSurface ? { web: webSurface } : {}),
+              ...(apiCredentials && apiCredentials.size > 0 ? { credentials: worldCredentials() } : {}),
               stepTimeoutMs,
               capturePassEvidence,
               signal: cancel.signal,
@@ -1298,7 +1332,14 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       fs.writeFileSync(guardWorldDirtyMarkerPath(repoRoot), `${runId}\n`)
       tailResults = await mapWithConcurrency(tailRunnable, 1, runOne)
       if (!cancel.signal.aborted) {
-        if (api?.services?.reset) {
+        if (opts.sharedWorld) {
+          // A SHARED world is the owner's to restore — once, after every
+          // sharing execution settled (`GuardSharedWorld.reset`), never from
+          // inside one of them: a reset here ran `down -v` under a hundred
+          // sibling executions (documenso 2026-09-03) and nothing re-booted.
+          // The marker stays as the honest record until the owner restores.
+          worldLeftDirty = true
+        } else if (api?.services?.reset) {
           const reset = await runBuild(
             repoRoot,
             api.services.reset,

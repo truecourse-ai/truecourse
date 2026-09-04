@@ -12,7 +12,7 @@
  *   - the LOCATOR is closed to the handles a USER perceives ({@link GuardWebLocatorSchema});
  *   - the step declares its own DRIVER ({@link webDriver});
  *   - the address is asserted ORIGIN-STRIPPED ({@link GuardWebExpectSchema});
- *   - the verb set is CLOSED at six ({@link GuardWebStepSchema});
+ *   - the verb set is CLOSED at seven ({@link GuardWebStepSchema});
  *   - a step may CAPTURE what the page shows ({@link GuardWebCaptureSchema}), into
  *     the same scenario-wide namespace a cli or api step captures into.
  */
@@ -744,9 +744,37 @@ export const GuardWebExpectStepSchema = z
   .strict()
 
 /**
+ * THE PRINCIPAL VERB: `credential` installs one of the world's credentials — a
+ * secret the recipe declares or the seed minted, the same `{{cred:<name>}}` set
+ * an api step puts in a header — into the browser, so the scenario starts SIGNED
+ * IN. A `Cookie` credential becomes the surface's cookies; any other header
+ * rides every request the page makes. The value is never authored and never
+ * shown: the step names the credential, the runner holds the secret.
+ *
+ * Why a verb and not a scenario-level default: whether the browser is signed in
+ * is a FACT ABOUT THE SCENARIO — a flow about the anonymous experience must not
+ * inherit a session — so it is declared where every other fact about a step is.
+ * Why not the login form: the seed already minted the session, and every form
+ * login re-spends the app's login rate limit (documenso 2026-09-03: 52 of 95
+ * browser sessions never got past the sign-in page once the limit tripped).
+ */
+export const GuardWebCredentialStepSchema = z
+  .object({
+    driver: webDriver,
+    /** The credential's NAME as the recipe/seed declares it — never its value. */
+    credential: z.string().min(1),
+    expect: GuardWebExpectSchema.optional(),
+    capture,
+    timeoutMs,
+    note,
+    milestone,
+  })
+  .strict()
+
+/**
  * ONE web step — one action, or one assertion, taken by a real browser against the
- * web surface the sandbox serves. The verbs are closed at six: navigate, click,
- * fill, upload, history, expect. There is deliberately no hover, no scroll, no
+ * web surface the sandbox serves. The verbs are closed at seven: navigate, click,
+ * fill, upload, history, credential, expect. There is deliberately no hover, no scroll, no
  * keyboard: each would be a promise about how the page is OPERATED rather than what
  * it PROMISES, and the vocabulary grows only when a real claim cannot be stated
  * without it — which is exactly what `history` was (2026-08-11: "Back and Forward
@@ -755,15 +783,6 @@ export const GuardWebExpectStepSchema = z
  * promise is "you can put a file into it", and no combination of click and fill
  * states it — a file chooser is not a text field).
  */
-export const GuardWebStepSchema = z.union([
-  GuardWebNavigateStepSchema,
-  GuardWebClickStepSchema,
-  GuardWebFillStepSchema,
-  GuardWebUploadStepSchema,
-  GuardWebHistoryStepSchema,
-  GuardWebExpectStepSchema,
-])
-
 export type GuardWebRole = (typeof GUARD_WEB_ROLES)[number]
 export type GuardWebLocator = z.infer<typeof GuardWebLocatorSchema>
 export type GuardWebCapture = z.infer<typeof GuardWebCaptureSchema>
@@ -778,8 +797,30 @@ export type GuardWebClickStep = z.infer<typeof GuardWebClickStepSchema>
 export type GuardWebFillStep = z.infer<typeof GuardWebFillStepSchema>
 export type GuardWebUploadStep = z.infer<typeof GuardWebUploadStepSchema>
 export type GuardWebHistoryStep = z.infer<typeof GuardWebHistoryStepSchema>
+export type GuardWebCredentialStep = z.infer<typeof GuardWebCredentialStepSchema>
 export type GuardWebExpectStep = z.infer<typeof GuardWebExpectStepSchema>
-export type GuardWebStep = z.infer<typeof GuardWebStepSchema>
+/** The union is spelled out from its members (not inferred from the schema)
+ *  because the schema below is annotated with it: seven strict members exceed
+ *  what tsc will serialize into a declaration (TS7056), and the explicit alias
+ *  keeps every schema built on the union emittable. */
+export type GuardWebStep =
+  | GuardWebNavigateStep
+  | GuardWebClickStep
+  | GuardWebFillStep
+  | GuardWebUploadStep
+  | GuardWebHistoryStep
+  | GuardWebCredentialStep
+  | GuardWebExpectStep
+
+export const GuardWebStepSchema: z.ZodType<GuardWebStep, z.ZodTypeDef, unknown> = z.union([
+  GuardWebNavigateStepSchema,
+  GuardWebClickStepSchema,
+  GuardWebFillStepSchema,
+  GuardWebUploadStepSchema,
+  GuardWebHistoryStepSchema,
+  GuardWebCredentialStepSchema,
+  GuardWebExpectStepSchema,
+])
 
 /**
  * True when the step is driven by the browser rather than by the sandbox shell.
@@ -815,6 +856,10 @@ export function isWebHistoryStep(step: GuardWebStep): step is GuardWebHistorySte
   return 'history' in step
 }
 
+export function isWebCredentialStep(step: GuardWebStep): step is GuardWebCredentialStep {
+  return 'credential' in step
+}
+
 /**
  * True when the web step only asserts (it takes no action on the page).
  *
@@ -829,7 +874,8 @@ export function isWebExpectStep(step: GuardWebStep): step is GuardWebExpectStep 
     !isWebClickStep(step) &&
     !isWebFillStep(step) &&
     !isWebUploadStep(step) &&
-    !isWebHistoryStep(step)
+    !isWebHistoryStep(step) &&
+    !isWebCredentialStep(step)
   )
 }
 
@@ -976,5 +1022,7 @@ export function describeWebCommand(step: GuardWebStep): string {
     return `upload “${webFileName(step.file)}” to ${describeWebLocator(step.upload)}`
   }
   if (isWebHistoryStep(step)) return `go ${step.history}`
+  // The NAME only — the value is a secret the runner holds.
+  if (isWebCredentialStep(step)) return `sign in as ${step.credential}`
   return 'check the page'
 }

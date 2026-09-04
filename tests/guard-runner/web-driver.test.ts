@@ -28,6 +28,7 @@ import {
   scenarioUnique,
   WEB_VIDEO_FILE,
   type ResolvedWebSurface,
+  type WorldCredential,
 } from '@truecourse/guard-runner'
 import {
   FIXTURE_BIN,
@@ -87,8 +88,14 @@ function webSurfaceOf(repo: string): ResolvedWebSurface | null {
   return resolveWebSurface(loaded.recipe)
 }
 
-/** Run one scenario in its own sandbox, with the fixture recipe's web surface. */
-async function run(repo: string, steps: GuardSandboxStep[], id = 'web.flow.cli.1') {
+/** Run one scenario in its own sandbox, with the fixture recipe's web surface —
+ *  and, when given, the prepared world's credentials a `credential` step installs. */
+async function run(
+  repo: string,
+  steps: GuardSandboxStep[],
+  id = 'web.flow.cli.1',
+  credentials?: ReadonlyMap<string, WorldCredential>,
+) {
   const s: GuardSandboxScenario = scenario({ id, steps, binds: specBinds('a/b') })
   const surface = webSurfaceOf(repo)
   return await runScenario(s, {
@@ -99,6 +106,7 @@ async function run(repo: string, steps: GuardSandboxStep[], id = 'web.flow.cli.1
     stepTimeoutMs: 20_000,
     capturePassEvidence: true,
     ...(surface ? { web: surface } : {}),
+    ...(credentials ? { credentials } : {}),
   })
 }
 
@@ -1089,6 +1097,85 @@ describe('the web driver', () => {
       expect(result.outcome).toBe('fail')
       expect(result.failure?.expected).toContain('equals 3 − 1')
       expect(result.failure?.actual).toContain('3')
+    },
+    TEST_TIMEOUT_MS,
+  )
+
+  // THE PRINCIPAL CHANNEL: a `credential` step puts a world credential into the
+  // browser, so a scenario starts signed in without a login screen. The fixture's
+  // /whoami page echoes what the browser presented.
+  it(
+    'a Cookie credential becomes the surface\'s cookies — the page sees a signed-in browser',
+    async () => {
+      const world = new Map<string, WorldCredential>([
+        ['webSession', { header: 'Cookie', value: 'sid=abc123; theme=dark' }],
+      ])
+      const result = await run(
+        repo,
+        [
+          { driver: 'web', credential: 'webSession' },
+          {
+            driver: 'web',
+            navigate: '/whoami',
+            expect: { text: { contains: 'cookie: sid=abc123; theme=dark' } },
+            milestone: 1,
+          },
+        ],
+        'web.credential-cookie.cli.1',
+        world,
+      )
+      expect(result.outcome).toBe('pass')
+      const text = transcript(repo, 'web.credential-cookie.cli.1')
+      // The step's own record reads as the credential's NAME; the value it
+      // installed is not in it (the /whoami page echoing it back is the app's).
+      const stepOne = text.slice(text.indexOf('── step 1'), text.indexOf('── step 2'))
+      expect(stepOne).toContain('sign in as webSession')
+      expect(stepOne).not.toContain('abc123')
+    },
+    TEST_TIMEOUT_MS,
+  )
+
+  it(
+    'any other header rides every request the page makes',
+    async () => {
+      const world = new Map<string, WorldCredential>([
+        ['apiToken', { header: 'Authorization', value: 'Bearer tok-42' }],
+      ])
+      const result = await run(
+        repo,
+        [
+          { driver: 'web', credential: 'apiToken' },
+          { driver: 'web', navigate: '/whoami', expect: { text: { contains: 'authorization: Bearer tok-42' } } },
+        ],
+        'web.credential-header.cli.1',
+        world,
+      )
+      expect(result.outcome).toBe('pass')
+    },
+    TEST_TIMEOUT_MS,
+  )
+
+  it(
+    'without the step the browser is anonymous, and a credential the world lacks is an error naming what it holds',
+    async () => {
+      const world = new Map<string, WorldCredential>([['webSession', { header: 'Cookie', value: 'sid=1' }]])
+      const anonymous = await run(
+        repo,
+        [{ driver: 'web', navigate: '/whoami', expect: { text: { contains: 'cookie: none' } } }],
+        'web.credential-anon.cli.1',
+        world,
+      )
+      expect(anonymous.outcome).toBe('pass')
+
+      const unknown = await run(
+        repo,
+        [{ driver: 'web', credential: 'adminSession' }, { driver: 'web', navigate: '/whoami' }],
+        'web.credential-unknown.cli.1',
+        world,
+      )
+      expect(unknown.outcome).toBe('error')
+      expect(unknown.failure?.actual).toContain('credential "adminSession" is not one this world provides')
+      expect(unknown.failure?.actual).toContain('webSession')
     },
     TEST_TIMEOUT_MS,
   )

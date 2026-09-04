@@ -54,6 +54,7 @@ import {
   type ScenarioDrivers,
 } from './drivers/index.js'
 import type { ResolvedWebSurface } from './recipe.js'
+import type { WorldCredential } from './web/credential.js'
 import { evidenceScenarioDir } from './store.js'
 
 // Evidence records the exact determinism pins the sandbox applied — one source,
@@ -116,6 +117,13 @@ export interface RunScenarioContext {
    * missing `web` block, because a browser with nothing to point at is not a test.
    */
   web?: ResolvedWebSurface
+  /**
+   * The prepared world's CREDENTIALS by name — the recipe's declared ones and
+   * what the seed minted, each a header + secret — for a web `credential` step
+   * to install into the browser. The same set an api scenario references as
+   * `{{cred:<name>}}`; the value never enters a scenario or its evidence.
+   */
+  credentials?: ReadonlyMap<string, WorldCredential>
   /**
    * Run-level cancellation (external abort or the overall run wall-clock). An
    * in-flight step child is SIGKILLed and the scenario settles as an `error`
@@ -375,6 +383,7 @@ export async function runScenario(
         for (const [name, value] of Object.entries(values)) captured.set(name, value)
       },
       stepTimeoutMs: ctx.stepTimeoutMs,
+      ...(ctx.credentials ? { credentials: ctx.credentials } : {}),
       ...(cancellable && ctx.signal ? { signal: ctx.signal } : {}),
       ...(ctx.onStep ? { onStep: ctx.onStep } : {}),
     })
