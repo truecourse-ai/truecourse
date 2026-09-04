@@ -392,8 +392,11 @@ switch (command) {
     process.stdout.write('relkit serve: starting\n')
     if (process.env.RELKIT_SERVE_QUIET !== '1') {
       setTimeout(() => {
-        process.stdout.write('relkit serve: listening on http://127.0.0.1:4321\n')
-        process.stdout.write('Press Ctrl-C to stop\n')
+        // ONE write: the runner kills the group the moment the marker is read, so
+        // a second write racing that kill would be lost under load. A single
+        // small write is atomic on the pipe, and the step's output then always
+        // holds both lines — which is what the transcript tests assert on.
+        process.stdout.write('relkit serve: listening on http://127.0.0.1:4321\nPress Ctrl-C to stop\n')
       }, Number(process.env.RELKIT_SERVE_MS ?? 80))
     }
     setInterval(() => {}, 1000)

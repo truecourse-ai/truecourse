@@ -1260,13 +1260,14 @@ cd truecourse
 pnpm install
 pnpm build              # Build all packages — required before the first `pnpm test` (tests resolve workspace packages from their dist/)
 dotnet build -c Release tools/csharp-roslyn-host   # One-time, needs the .NET 8 SDK — see note below
+pnpm --filter @truecourse/guard-runner exec playwright-core install chromium   # One-time: the browser the guard web-driver tests run
 pnpm dev                # Start dashboard at http://localhost:3000 (server on :3001, Vite on :3000)
 pnpm test               # Run tests
 ```
 
 `pnpm dev` expects a `.truecourse/` folder at the repo root — created automatically on the first `truecourse analyze` against the repo (or simply `mkdir -p .truecourse`).
 
-The full test suite requires the C# Roslyn host to be built (same requirement as [analyzing C#](#prerequisites)): the C# e2e test fails without it, and the Roslyn semantic-rule tests silently skip. CI builds it before running tests (`.github/workflows/test.yml`); do the same locally, once per checkout/worktree.
+The full test suite requires the C# Roslyn host to be built (same requirement as [analyzing C#](#prerequisites)): the C# e2e test fails without it, and the Roslyn semantic-rule tests silently skip. It also needs Playwright's Chromium (`playwright-core install chromium` above): the guard web-driver suites fail rather than skip without it. CI installs both before running tests (`.github/actions/setup`); do the same locally, once per checkout/worktree.
 
 ## Community
 
