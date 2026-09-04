@@ -145,7 +145,7 @@ export function GuardTestDetail({
       section: test.anchor,
       ...(test.headingText ? { headingText: test.headingText } : {}),
     },
-    interfacePath: row?.journeyPath ?? [],
+    interfacePath: row?.interfacePath ?? [],
     evidence,
   };
 
@@ -165,7 +165,7 @@ export function GuardTestDetail({
           </p>
         ) : null
       }
-      action={
+      rulings={
         action ? (
           dismissal ? (
             <div className="mt-3 text-[11px] text-muted-foreground">

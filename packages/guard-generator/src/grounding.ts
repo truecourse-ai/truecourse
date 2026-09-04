@@ -1,6 +1,7 @@
 /**
- * CODE-TRUTH GROUNDING for scenario authoring — the pure joins that turn
- * two analysis products into the two per-repo prompt blocks.
+ * CODE-TRUTH GROUNDING for scenario authoring — the pure reads that turn the
+ * interface catalog and the outbound-request product into the per-repo prompt
+ * blocks.
  *
  * Both exist because of the same measured failure class: a scenario that is right
  * about the CLAIM and wrong about the APP dies before the claim is ever exercised.
@@ -14,11 +15,11 @@
  */
 
 import type {
-  ApiRequestContract,
   DetectedExternalService,
   Interface,
+  InterfaceResource,
   OutboundRequest,
-  RequestField,
+  InterfaceRequestField,
 } from '@truecourse/shared'
 import type { InterfaceContractHint, OutboundRequestHint } from './prompts.js'
 
@@ -35,30 +36,40 @@ export const MAX_OTHER_OPERATIONS = 30
 
 /**
  * The flow's own operations, in the order matching walks them: exact method + path
- * (verbatim, so a request never has to be invented) plus the contract when the
- * repo's routes declare one. Non-api interfaces and duplicates are dropped.
+ * (verbatim, so a request never has to be invented) plus what the handler reads off
+ * the request. Non-api interfaces and duplicates are dropped.
+ *
+ * The request half is read off THE INTERFACE'S OWN CONTRACT (plan item 102). It used
+ * to arrive as a second argument — a separate `ApiRequestContract[]` product joined
+ * here by method+path, which meant the two halves could only agree if two
+ * derivations composed their paths identically, and meant a run reading the
+ * SNAPSHOT catalog (no live mapping) had the operations but never their fields.
+ * With the contract living on the operation, both problems are structural
+ * non-problems: there is nothing to join, and the snapshot carries what the
+ * mapping wrote.
  */
 export function buildInterfaceContractHints(
   interfaces: readonly Interface[],
-  contracts: readonly ApiRequestContract[],
 ): InterfaceContractHint[] {
-  const byOperation = new Map<string, ApiRequestContract>()
-  for (const contract of contracts) byOperation.set(`${contract.method} ${contract.path}`, contract)
-
   const seen = new Set<string>()
   const hints: InterfaceContractHint[] = []
   for (const iface of interfaces) {
     const entry = iface.entry as { method?: string; path?: string }
     if (iface.type !== 'api' || !entry?.method || !entry?.path) continue
+    // An RPC-derived operation is real and invocable, but its request grammar is
+    // the procedure's input schema encoded into `?input=` — a shape no hint here
+    // describes and no scenario is authored against this round (item 12). It
+    // stays in the catalog for the web join; it does not ground a scenario.
+    if (iface.procedure) continue
     const key = `${entry.method.toUpperCase()} ${entry.path}`
     if (seen.has(key)) continue
     seen.add(key)
-    const contract = byOperation.get(key)
+    const request = iface.contract?.surface === 'api' ? iface.contract.operation.request : undefined
     hints.push({
       method: entry.method.toUpperCase(),
       path: entry.path,
-      ...(contract?.bodyFields ? { bodyFields: contract.bodyFields.map(copyField) } : {}),
-      ...(contract?.queryFields ? { queryFields: contract.queryFields.map(copyField) } : {}),
+      ...(request?.body ? { bodyFields: request.body.map(copyField) } : {}),
+      ...(request?.query ? { queryFields: request.query.map(copyField) } : {}),
     })
   }
   return hints
@@ -74,17 +85,46 @@ export function buildInterfaceContractHints(
  */
 export function buildOtherOperationHints(
   catalogInterfaces: readonly Interface[],
-  contracts: readonly ApiRequestContract[],
   own: readonly InterfaceContractHint[],
 ): { operations: InterfaceContractHint[]; overflow: number } {
   const walked = new Set(own.map((o) => `${o.method} ${o.path}`))
-  const rest = buildInterfaceContractHints(catalogInterfaces, contracts).filter(
+  const rest = buildInterfaceContractHints(catalogInterfaces).filter(
     (hint) => !walked.has(`${hint.method} ${hint.path}`),
   )
   return {
     operations: rest.slice(0, MAX_OTHER_OPERATIONS),
     overflow: Math.max(0, rest.length - MAX_OTHER_OPERATIONS),
   }
+}
+
+/**
+ * The PLACES a plan's interfaces act on: the resources their location contract
+ * names (`at`, `to`), resolved in each interface's own area registry, plus the
+ * resources those sit on (the `of` chain) — a task acting on a panel asserts
+ * against the screen around it too. First-reached order, deduped; an interface
+ * with no location contract (cli, api, an unmigrated web catalog) contributes
+ * nothing, so a plan with none renders the exact prompt it did before.
+ */
+export function buildResourceHints(
+  interfaces: readonly Interface[],
+  resources: Record<string, InterfaceResource[]> | undefined,
+): InterfaceResource[] {
+  if (!resources) return []
+  const hints: InterfaceResource[] = []
+  const seen = new Set<string>()
+  const add = (area: string, id: string | undefined): void => {
+    if (!id || seen.has(id)) return
+    const resource = (resources[area] ?? []).find((r) => r.id === id)
+    if (!resource) return
+    seen.add(id)
+    hints.push(resource)
+    add(area, resource.of)
+  }
+  for (const iface of interfaces) {
+    add(iface.type, iface.at)
+    add(iface.type, iface.to)
+  }
+  return hints
 }
 
 /**
@@ -155,6 +195,6 @@ function hostOf(url: string | undefined): string | undefined {
   }
 }
 
-function copyField(field: RequestField): RequestField {
+function copyField(field: InterfaceRequestField): { name: string; required: boolean | 'unknown' } {
   return { name: field.name, required: field.required }
 }

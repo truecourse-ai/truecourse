@@ -64,3 +64,20 @@ runs:
     - name: Build C# Roslyn host
       run: dotnet build -c Release tools/csharp-roslyn-host
       shell: bash
+
+    # The guard web driver runs a real Chromium through `playwright-core`, and
+    # the browser suites (web-driver, web-upload, visual-judge, the mixed
+    # request/web steps, generate's web arm) FAIL rather than skip without one —
+    # a silently skipped browser suite is a hole in the guarantee. The download
+    # is cached by playwright-core version; `--with-deps` still installs the
+    # runner's apt libraries on every run, since those live outside the cache.
+    - uses: actions/cache@v4
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+        restore-keys: |
+          playwright-${{ runner.os }}-
+
+    - name: Install Chromium for the guard web driver
+      run: pnpm --filter @truecourse/guard-runner exec playwright-core install --with-deps chromium
+      shell: bash

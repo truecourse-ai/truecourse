@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { RecipeProposalSchema } from '@truecourse/guard-generator'
+import { dump as yamlDump } from 'js-yaml'
+import {
+  RecipeProposalSchema,
+  RawGeneratedScenarioSchema,
+  RawGeneratedWebScenarioSchema,
+  rawScenarioSchemaFor,
+  parseRawScenarioYaml,
+} from '@truecourse/guard-generator'
 
 describe('RecipeProposalSchema', () => {
   it('accepts an optional install command', () => {
@@ -100,5 +107,77 @@ describe('RecipeProposalSchema', () => {
       expect(parsed.success).toBe(false)
       if (!parsed.success) expect(parsed.error.issues[0].message).toMatch(/not a shell no-op/)
     }
+  })
+})
+
+describe('RawGeneratedWebScenarioSchema — the web arm admits one world', () => {
+  const nav = { driver: 'web', navigate: '/', expect: { visible: { role: 'heading', name: 'Board' } } }
+  const run = { run: ['add', 'x'], expect: { exit: 0 } }
+  const request = { request: { method: 'GET', path: '/api/notes' }, expect: { status: 200 } }
+  const parse = (steps: unknown[]) => RawGeneratedWebScenarioSchema.safeParse({ title: 't', steps })
+
+  it('accepts a web-only draft', () => {
+    expect(parse([nav]).success).toBe(true)
+  })
+
+  it('accepts a mixed draft — cli seed, web steps, api verification', () => {
+    expect(parse([run, nav, request]).success).toBe(true)
+  })
+
+  it('rejects a draft with no web step, saying which surface it belongs on', () => {
+    const parsed = parse([run, request])
+    expect(parsed.success).toBe(false)
+    if (!parsed.success) {
+      expect(parsed.error.issues[0].message).toContain('at least one `driver: web` step')
+    }
+  })
+
+  it('rejects the reference-corpus cli verbs — authored cli vocabulary is `run` only', () => {
+    expect(parse([nav, { git: ['init'] }]).success).toBe(false)
+    expect(parse([nav, { write: { 'a.txt': 'x' } }]).success).toBe(false)
+  })
+
+  it('rejects the api lifecycle verbs — the sandbox owns the served surface', () => {
+    expect(parse([nav, { boot: {} }]).success).toBe(false)
+    expect(parse([nav, { signal: { name: 'SIGTERM', expect: { exitCode: 0 } } }]).success).toBe(false)
+    expect(parse([nav, { logs: { stream: 'stdout', match: 'x' } }]).success).toBe(false)
+  })
+
+  it('rejects a locator carrying two handles at once', () => {
+    expect(parse([{ driver: 'web', click: { role: 'button', name: 'Save', text: 'Save' } }]).success).toBe(false)
+  })
+
+  it('keeps a pure-cli draft resolving through the union unchanged', () => {
+    const parsed = RawGeneratedScenarioSchema.safeParse({ title: 't', steps: [run] })
+    expect(parsed.success).toBe(true)
+  })
+})
+
+describe('rawScenarioSchemaFor — drafts parse against the surface the engine asked for', () => {
+  it('maps each runnable surface to its own arm and falls back to the union', () => {
+    expect(rawScenarioSchemaFor('web')).toBe(RawGeneratedWebScenarioSchema)
+    expect(rawScenarioSchemaFor('tui')).toBe(RawGeneratedScenarioSchema)
+  })
+
+  it('reports the real field path on a web defect, never `(root): Invalid input`', () => {
+    const text = yamlDump({
+      title: 't',
+      steps: [{ driver: 'web', click: { role: 'buton', name: 'Save' } }],
+    })
+    const parsed = parseRawScenarioYaml(text, 'web')
+    expect('error' in parsed && parsed.error).toContain('steps.0.click.role')
+    expect('error' in parsed && parsed.error).not.toContain('(root)')
+  })
+
+  it('still refuses engine-owned fields before any schema runs', () => {
+    const parsed = parseRawScenarioYaml(yamlDump({ id: 'x', title: 't', steps: [] }), 'web')
+    expect('error' in parsed && parsed.error).toContain('engine-owned')
+  })
+
+  it('a surface-less call keeps resolving through the whole union', () => {
+    const parsed = parseRawScenarioYaml(
+      yamlDump({ title: 't', steps: [{ run: ['--version'], expect: { exit: 0 } }] }),
+    )
+    expect('raw' in parsed).toBe(true)
   })
 })

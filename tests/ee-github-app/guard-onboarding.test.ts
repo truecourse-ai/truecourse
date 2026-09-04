@@ -35,13 +35,8 @@ import {
   OpenConflictsError,
 } from '@truecourse/core/commands/guard-in-process';
 import { writeGuardResult as writeCloneGuardResult } from '@truecourse/guard-runner';
-import {
-  generateGuards,
-  type GuardGenerateResult,
-  type ExtractRunner,
-  type GenerateRunner,
-} from '@truecourse/guard-generator';
-import { flowStageRunners, stampMilestones, stubAdjudicationRunners } from '../guard-generator/helpers.js';
+import { generateGuards, type GuardGenerateResult } from '@truecourse/guard-generator';
+import { flowStageSeams, extractSessionBy, submitWorkerSessions, raw } from '../guard-generator/helpers.js';
 import type { GithubAuth } from '../../packages/github-app/src/github';
 import {
   materializeStoredCorpus,
@@ -114,8 +109,8 @@ function makeGuardResult(over: Partial<GuardGenerateResult> = {}): GuardGenerate
 function fakeGenerateWriting(result: GuardGenerateResult) {
   return vi.fn(async (dir: string) => {
     writeFile(dir, '.truecourse/scenarios/recipe.json', JSON.stringify({ guard: 1, entry: ['node', 'cli.js'] }));
-    writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ version: 2, flows: [] }));
-    writeFile(dir, '.truecourse/scenarios/cli/s1.yaml', 'guard: 2\nid: s1\n');
+    writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ flows: [] }));
+    writeFile(dir, '.truecourse/scenarios/cli/s1.yaml', 'id: s1\n');
     writeCloneGuardResult(
       dir,
       buildGuardReport(result, '2026-07-09T12:00:00.000Z', {
@@ -247,8 +242,8 @@ describe('guard onboarding pipeline', () => {
     });
     const generate = vi.fn(async (dir: string) => {
       writeFile(dir, '.truecourse/scenarios/recipe.json', JSON.stringify({ guard: 1, entry: ['node', 'cli.js'] }));
-      writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ version: 2, flows: [] }));
-      writeFile(dir, '.truecourse/scenarios/cli/s1.yaml', 'guard: 2\nid: s1\n');
+      writeFile(dir, '.truecourse/scenarios/manifest.json', JSON.stringify({ flows: [] }));
+      writeFile(dir, '.truecourse/scenarios/cli/s1.yaml', 'id: s1\n');
       // The birth run wrote its transcript into the checkout (removed after run).
       writeFile(dir, `${evidencePath}/transcript.txt`, 'birth transcript');
       writeFile(dir, `${evidencePath}/diff.txt`, 'expected exit 0, got 1');
@@ -298,7 +293,6 @@ describe('guard onboarding pipeline', () => {
         dir,
         '.truecourse/scenarios/manifest.json',
         JSON.stringify({
-          version: 2,
           flows: [
             {
               flowId: 'f1',
@@ -307,7 +301,7 @@ describe('guard onboarding pipeline', () => {
               scenarios: [
                 {
                   id: 'drift1',
-                  surface: 'cli',
+                  drivers: ['cli'],
                   status: 'failing',
                   diagnosis: {
                     doc: 'README.md',
@@ -327,7 +321,7 @@ describe('guard onboarding pipeline', () => {
           ],
         }),
       );
-      writeFile(dir, '.truecourse/scenarios/cli/s1.yaml', 'guard: 2\nid: s1\n');
+      writeFile(dir, '.truecourse/scenarios/cli/s1.yaml', 'id: s1\n');
       writeFile(dir, `${driftPath}/transcript.txt`, 'committed red test transcript');
       writeFile(dir, `${defectPath}/transcript.txt`, 'withheld defect transcript');
       // The report names ONLY the withheld defect — the committed test's row was
@@ -575,34 +569,21 @@ describe('guard onboarding pipeline', () => {
   const FIXTURE_BIN = fileURLToPath(new URL('../fixtures/guard-fixture-cli/bin.mjs', import.meta.url));
   const DOC_BODY = '## version\n`--version` prints the version and exits 0.\n';
 
-  const extractVersion: ExtractRunner = async ({ outline }) => ({
-    claims: [
-      {
-        claim: '`--version` prints the version and exits 0',
-        driver: 'cli',
-        sectionAnchor: outline[0].anchor,
-        reason: 'exit code observable',
-      },
-    ],
-    untestable: [],
-  });
-  const authorVersion: GenerateRunner = async (ctx) => ({
-    scenario: stampMilestones(
-      { title: 'version works', driver: 'cli' as const, steps: [{ run: ['--version'], expect: { exit: 0 } }] },
-      ctx.milestones.length,
-    ),
-  });
-
-  /** The real generate wired with a fixed recipe proposal — no LLM, everything else real. */
+  /** The real generate wired with a fixed recipe proposal — no LLM, everything
+   *  else real. Guard generate's LLM stages are agent SESSIONS (plan 04), so the
+   *  four required seams answer with what a session would have produced. */
   function realGenerateProposing(proposal: { install?: string; build: string; entry: string[] }) {
     return async (dir: string) => ({
       guard: await generateGuards({
         repoRoot: dir,
-        ...flowStageRunners(dir),
-        ...stubAdjudicationRunners(),
+        ...flowStageSeams(dir),
+        extractSession: extractSessionBy({
+          version: [{ claim: '`--version` prints the version and exits 0' }],
+        }),
+        flowWorkerSession: submitWorkerSessions(() =>
+          raw('version works', [{ run: ['--version'], expect: { exit: 0 } }]),
+        ),
         recipeRunner: async () => proposal,
-        extractRunner: extractVersion,
-        generateRunner: authorVersion,
       }),
     });
   }

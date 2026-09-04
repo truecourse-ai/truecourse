@@ -10,7 +10,7 @@
  * instead of collapsing every integration into one opaque bucket.
  *
  * Granularity is REPO-level, not flow-level, and the wording says so ("detected"):
- * a journey carries no source-file identity (see `InterfaceSchema` — an entry is a
+ * an interface carries no source-file identity (see `InterfaceSchema` — an entry is a
  * command or an operation, never a file), so there is nothing to intersect a
  * service's evidence files against. Claiming per-flow precision we cannot compute
  * would be a lie; naming the repo's actual dependencies is not.

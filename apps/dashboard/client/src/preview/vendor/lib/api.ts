@@ -1107,8 +1107,13 @@ export async function getGuardLatest(repoId: string, ref?: string): Promise<Guar
 
 /** The append-only run-summary history (empty `{ runs: [] }` until a run exists).
  *  With `pr` (EE), the PR's own run timeline, one run per pushed head. */
-export function getGuardHistory(repoId: string, pr?: number): Promise<GuardHistory> {
-  const qs = pr !== undefined ? `?pr=${pr}` : '';
+export function getGuardHistory(
+  repoId: string,
+  pr?: number,
+  opts: { all?: boolean } = {},
+): Promise<GuardHistory> {
+  // `all`: every stored run of the repository, pull-request heads included.
+  const qs = pr !== undefined ? `?pr=${pr}` : opts.all ? '?all=1' : '';
   return fetchApi<GuardHistory>(`/api/repos/${repoId}/guard/history${qs}`);
 }
 

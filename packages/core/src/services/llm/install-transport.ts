@@ -3,9 +3,10 @@
  *
  * One injection point for the whole product: in `api` mode a direct-API
  * transport (`@truecourse/llm-api`) becomes the process-wide default, so all ~20
- * leaf runners reach the provider instead of spawning `claude`. In `claude-code`
- * mode nothing is installed and behavior is exactly what it has always been —
- * each runner falls back to its own `cliTransport()`.
+ * leaf runners reach the provider over its API. In `claude-code` mode the Agent
+ * SDK one-shot transport (`@truecourse/llm-claude-agent`) is the default — the
+ * same protocol the session driver runs, on the user's own `claude` login — so
+ * no leaf runner spawns `claude -p` unless a run asks for that explicitly.
  *
  * Safe to call per pipeline entry: the config file's mtime is cached, so repeat
  * calls are one `stat`. A transport installed by someone else (the enterprise
@@ -14,6 +15,8 @@
  */
 
 import { createApiTransport, type ProviderConfig } from '@truecourse/llm-api';
+import { createClaudeAgentTransport } from '@truecourse/llm-claude-agent';
+import { resolveClaudeBinary } from '@truecourse/shared';
 import {
   getDefaultTransport,
   setDefaultTransport,
@@ -201,6 +204,26 @@ export function createConfiguredApiTransport(): LlmTransport {
   return createApiTransportFor(readApiLlmConfig());
 }
 
+/** The one claude-code transport of this process — identity is how a caller
+ *  tells "this spawns `claude`" from a transport that never does. */
+let claudeCode: LlmTransport | undefined;
+
+/**
+ * The claude-code one-shot transport: the Agent SDK on the `claude` login of
+ * whoever runs this process, resolving the binary per call. The CLI reaches it
+ * through {@link installConfiguredLlmTransport}; the dashboard server reaches it
+ * directly when the operator runs the instance on their own Claude Code.
+ */
+export function createClaudeCodeTransport(): LlmTransport {
+  claudeCode ??= createClaudeAgentTransport({ pathToClaudeCodeExecutable: resolveClaudeBinary() });
+  return claudeCode;
+}
+
+/** Whether `transport` is the claude-code one — the run will spawn `claude`. */
+export function isClaudeCodeTransport(transport: LlmTransport | undefined): boolean {
+  return transport !== undefined && transport === claudeCode;
+}
+
 /** The transport this module installed, so it never clears anyone else's. */
 let installed: LlmTransport | undefined;
 /** Config identity (path + mtime + env override) the current install came from. */
@@ -212,23 +235,20 @@ function configKey(): string {
 
 /**
  * Install the configured transport if the config changed since the last call.
- * `api` → the direct-API transport becomes the process default; anything else →
- * no default transport (today's Claude Code behavior).
+ * `api` → the direct-API transport becomes the process default; `claude-code` →
+ * the Agent SDK one-shot transport does. A transport someone else installed
+ * (the enterprise edition, at boot) is never replaced.
  */
 export function installConfiguredLlmTransport(): void {
   const key = configKey();
   if (key === installedFrom) return;
+  const current = getDefaultTransport();
+  if (current !== undefined && current !== installed) return;
 
-  if (getConfiguredLlmMode() !== 'api') {
-    // Drop only OUR transport — an enterprise-installed one stays.
-    if (installed && getDefaultTransport() === installed) setDefaultTransport(undefined);
-    installed = undefined;
-    installedFrom = key;
-    return;
-  }
   // Only a successful build marks the config as handled, so a caller that
   // retries after fixing an invalid config sees the error again, not a no-op.
-  const transport = createConfiguredApiTransport();
+  const transport =
+    getConfiguredLlmMode() === 'api' ? createConfiguredApiTransport() : createClaudeCodeTransport();
   installed = transport;
   setDefaultTransport(transport);
   installedFrom = key;
@@ -236,7 +256,9 @@ export function installConfiguredLlmTransport(): void {
 
 /** Forget the cached config identity + installed transport (tests). */
 export function resetConfiguredLlmTransport(): void {
+  if (installed && getDefaultTransport() === installed) setDefaultTransport(undefined);
   installed = undefined;
   installedFrom = null;
   priceTable = null;
+  claudeCode = undefined;
 }

@@ -9,10 +9,13 @@
 
 export {
   generateGuards,
-  authorCacheKey,
-  retryCacheKey,
-  GENERATE_CACHE_NAME,
-  FIDELITY_CACHE_NAME,
+  looksWorldMutating,
+  workerCacheKey,
+  // Single-step mode (the CLI's `--only-<step>` flags): the pipeline's session
+  // steps in order. `@truecourse/core` enforces the cache-only replay of the
+  // prior ones against these.
+  GENERATE_SESSION_STEPS,
+  type GenerateStep,
   type GenerateGuardsOptions,
   type GuardGenerateResult,
   type GuardGenerateModels,
@@ -20,8 +23,17 @@ export {
   type GuardBirthFinding,
   type GuardGenerateError,
   type GuardExtractionFailure,
-  type AuthorFailure,
   type InterfaceProvider,
+  // The flow-worker session seam (plan 04 steps 17 + 18) — implemented by
+  // `@truecourse/core`, injected by the command adapter.
+  type FlowWorkerSessionSeam,
+  type FlowWorkerSessionResult,
+  type FlowWorkerTask,
+  type FlowWorkerToolReport,
+  type FlowWorkerCacheMaterial,
+  type WorkerFidelityInput,
+  type WorkerFidelityVerdict,
+  type WorkerFidelityJudge,
 } from './generate.js'
 
 export {
@@ -84,34 +96,52 @@ export {
 } from './suppression.js'
 
 export {
-  extractDocClaims,
-  docExtractionCached,
-  countExtractViews,
-  countUncachedExtractViews,
-  EXTRACT_CACHE_NAME,
+  snapExtraction,
+  isSystemicSessionLoss,
   type DocClaims,
   type ExtractResult,
+  type ExtractedClaimWithNeeds,
+  type ExtractSessionSeam,
+  type PriorExtraction,
+  type ReuseExtractionSeam,
+  type GuardSessionSummary,
 } from './extract.js'
 
 export {
+  mergeExtractedClaims,
+  persistExtractedClaims,
+  type ExtractedDocOutcome,
+} from './claims-persist.js'
+
+export {
   synthesizeFlows,
-  planFlowSynthesis,
   buildFlowAreas,
+  flowAreaKey,
+  FLOW_AREA_CLAIM_CEILING,
   flowAreaIdForDoc,
-  flowAreaCacheKey,
-  flowEpicCacheKey,
+  flowAreaClaimsMaterial,
+  flowAreaOutlinesMaterial,
+  flowEpicDigestsMaterial,
   flowSectionKey,
   flowsPath,
   readFlowsFile,
-  FLOWS_CACHE_NAME,
+  checkFlowSet,
+  checkEpicSet,
+  isFlowSetClean,
+  isFlowSynthesisWipeout,
   type SynthesizeFlowsOptions,
   type FlowSynthesisResult,
-  type FlowSynthesisPlan,
-  type FlowAreaPlan,
   type FlowSynthesisArea,
   type FlowAreaDocInput,
   type FlowClaimInput,
   type FlowDocInput,
+  type FlowSetCheckContext,
+  type FlowSetCheckReport,
+  type FlowsAreaSessionSeam,
+  type FlowsAreaSessionResult,
+  type FlowsEpicSessionSeam,
+  type FlowsEpicSessionResult,
+  type FlowsSessionGrounding,
   type SubsumedFlow,
   type UnsettledArea,
 } from './flows.js'
@@ -210,6 +240,7 @@ export {
   readSpecExcerpts,
   collectSecuritySchemes,
   ecosystemFingerprint,
+  interfacesFingerprint,
   computeSeedStepFingerprint,
   authFingerprint,
   settledFingerprints,
@@ -227,7 +258,6 @@ export {
   type GuardSetupInterfacesStep,
   type GuardSetupInterfacesStepInput,
   type GuardSetupInterfacesStepResult,
-  interfacesFingerprint,
   type GuardSetupSeedSession,
   type GuardSetupSeedSessionInput,
   type GuardSetupSeedSessionResult,
@@ -255,34 +285,27 @@ export {
   type BirthRound,
 } from './birth.js'
 
-// Failing-test triage — the post-birth judgment stage.
-export {
-  runTriage,
-  triageCacheKey,
-  buildTriageUserPrompt,
-  TRIAGE_CACHE_NAME,
-  TRIAGE_SYSTEM_PROMPT,
-  TRIAGE_PROMPT_FINGERPRINT,
-  type TriageUserContext,
-  type TriageFlowContext,
-  type TriageMilestone,
-} from './triage.js'
+// Scenario yaml round-trip helpers the worker session path reads through.
+export { serializeScenarioYaml, parseRawScenarioYaml, parseScenarioYaml } from './serialize.js'
+
+// The failing-test TRIAGE stage is RETIRED (plan 04 step 20): a committed
+// red's adjudication is the flow worker's own confirmed `expectedReds`
+// prediction. The orphaned `.cache/guard/triage` files remain on disk
+// (derived, deletable); `GuardTriageSchema` lives on in `@truecourse/shared`
+// because committed manifests still carry historical triage verdicts read-side.
 
 export {
-  EXTRACT_SYSTEM_PROMPT,
   GENERATE_SYSTEM_PROMPT,
   GENERATE_API_SYSTEM_PROMPT,
   GENERATE_API_PROMPT_FINGERPRINT,
+  GENERATE_WEB_SYSTEM_PROMPT,
+  GENERATE_WEB_PROMPT_FINGERPRINT,
   RECIPE_SYSTEM_PROMPT,
   SEED_SYSTEM_PROMPT,
   SEED_PROMPT_FINGERPRINT,
   buildSeedUserPrompt,
   FIDELITY_SYSTEM_PROMPT,
   FIDELITY_PROMPT_FINGERPRINT,
-  FLOWS_SYSTEM_PROMPT,
-  FLOWS_PROMPT_FINGERPRINT,
-  FLOWS_EPIC_SYSTEM_PROMPT,
-  FLOWS_EPIC_PROMPT_FINGERPRINT,
   MATCH_SYSTEM_PROMPT,
   MATCH_PROMPT_FINGERPRINT,
   GENERATE_PROMPT_FINGERPRINT,
@@ -290,8 +313,6 @@ export {
   buildAuthorUserPrompt,
   buildFidelityUserPrompt,
   buildRecipeUserPrompt,
-  buildFlowsUserPrompt,
-  buildFlowsEpicUserPrompt,
   type AuthorUserContext,
   type InterfaceContractHint,
   type OutboundRequestHint,
@@ -302,17 +323,17 @@ export {
   type MatchUserContext,
   type MatchMilestoneLine,
   type InterfaceDigest,
-  type FlowsUserContext,
-  type FlowsEpicUserContext,
-  type FlowClaimLine,
-  type FlowDocOutline,
   type FlowDigest,
   type OutlineEntry,
   type SeedDraftInput,
-  type RecipeAppInventoryEntry,
   type SeedBlockedClaim,
   type SeedRetryContext,
   type SeedSchemaTable,
+  type RecipeAppInventoryEntry,
+  CLAIM_DIFF_SYSTEM_PROMPT,
+  CLAIM_DIFF_PROMPT_FINGERPRINT,
+  buildClaimDiffUserPrompt,
+  type ClaimDiffSectionInput,
 } from './prompts.js'
 
 // Example mining (D3) — the doc's own examples run verbatim.
@@ -327,23 +348,26 @@ export {
 } from './examples.js'
 
 export {
-  spawnExtractRunner,
-  spawnGenerateRunner,
   spawnRecipeRunner,
-  spawnFidelityRunner,
-  spawnTriageRunner,
-  spawnFlowsRunner,
-  spawnFlowsEpicRunner,
   spawnMatchRunner,
-  type ExtractRunner,
-  type GenerateRunner,
+  spawnWorldClassifyRunner,
+  spawnClaimDiffRunner,
   type RecipeRunner,
-  type FidelityRunner,
-  type TriageRunner,
-  type FlowsRunner,
-  type FlowsEpicRunner,
   type MatchRunner,
+  type WorldClassifyRunner,
+  type ClaimDiffRunner,
 } from './runners.js'
+
+export {
+  reuseCosmeticExtractions,
+  rememberDocTexts,
+  claimDiffCacheKey,
+  docContentHash,
+  CLAIM_DIFF_CACHE_NAME,
+  DOC_TEXT_CACHE_NAME,
+  EMPTY_CLAIM_DIFF_GATE,
+  type ClaimDiffGateResult,
+} from './claim-diff.js'
 
 export {
   TestabilityVerdictSchema,
@@ -356,10 +380,14 @@ export {
   UntestableNoteSchema,
   DocExtractionSchema,
   RawGeneratedScenarioSchema,
+  RawGeneratedCliScenarioSchema,
+  RawGeneratedWebScenarioSchema,
+  rawScenarioSchemaFor,
   AuthoredFlowScenarioSchema,
   RealizationMatchSchema,
   FidelityReviewSchema,
   FlowSynthesisSchema,
+  FlowSetSchema,
   EpicSynthesisSchema,
   SynthesizedFlowSchema,
   SynthesizedMilestoneSchema,
@@ -374,16 +402,22 @@ export {
   type ExtractedClaim,
   type UntestableNote,
   type DocExtraction,
+  type RawGeneratedApiScenario,
+  type RawGeneratedCliScenario,
+  type RawGeneratedWebScenario,
   type RawGeneratedScenario,
   type AuthoredFlowScenario,
   type RealizationMatch,
   type RealizationStep,
   type FidelityReview,
   type FlowSynthesis,
+  type FlowSet,
   type EpicSynthesis,
   type SynthesizedFlow,
   type SynthesizedMilestone,
   type SynthesizedEpicFlow,
+  ClaimDiffSchema,
+  type ClaimDiff,
 } from './schemas.js'
 
 // The app↔server join — which recipe server serves a flow's paths, and
@@ -411,3 +445,5 @@ export {
   cliCompositionDefect,
   apiCompositionDefect,
 } from './validate.js'
+export { apiAuthEvidence, probeCandidatesFromInterfaces, requiredResources } from './seed-evidence.js'
+export type { ApiAuthEvidence, RequiredResource } from './seed-evidence.js'

@@ -14,7 +14,7 @@
  * RUN level and produces no scenario verdicts at all (see {@link BirthRound}).
  */
 
-import { runFailureMessage, type GuardExecutor, type GuardRunStepStats, type Recipe } from '@truecourse/guard-runner'
+import { runFailureMessage, type GuardExecutor, type GuardRunStepStats, type GuardSharedWorld, type Recipe } from '@truecourse/guard-runner'
 import type {
   GuardDriverId,
   GuardFlow,
@@ -118,6 +118,12 @@ export interface BirthOptions {
    */
   executor: GuardExecutor
   /**
+   * The run-level shared world, threaded verbatim into every executor input so
+   * all rounds of one generate consume ONE booted world (see guard-runner's
+   * shared-world.ts). Absent on callers that own their world.
+   */
+  sharedWorld?: GuardSharedWorld
+  /**
    * The recipe to build + run against (REQUIRED). The generate flow already has the
    * discovered/loaded recipe, so it's passed IN rather than re-read from disk.
    */
@@ -151,6 +157,7 @@ export async function birthValidate(
 
   const res = await opts.executor({
     checkoutDir: repoRoot,
+    ...(opts.sharedWorld ? { sharedWorld: opts.sharedWorld } : {}),
     recipe: opts.recipe,
     scenarios: candidates.map((c) => c.scenario),
     persist: false,
@@ -181,7 +188,7 @@ export async function birthValidate(
     return {
       outcomes: candidates.map((candidate) => ({
         candidate,
-        result: syntheticResult(candidate, 'the scenario to run', message),
+        result: syntheticResult(candidate, BIRTH_NOT_RUN_EXPECTED, message),
       })),
     }
   }
@@ -197,6 +204,9 @@ export async function birthValidate(
     ...(res.stepStats ? { stepStats: res.stepStats } : {}),
   }
 }
+
+/** The `failure.expected` of a synthetic result: the round did not run at all. */
+export const BIRTH_NOT_RUN_EXPECTED = 'the scenario to run'
 
 /** The `error` result for a candidate that never reached the runner. */
 function syntheticResult(

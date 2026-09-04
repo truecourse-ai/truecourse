@@ -107,7 +107,10 @@ export function CorpusPage({ repo, kind, itemId }: { repo: Repo; kind: 'doc' | '
   const versions = useCoverageVersion(repo.id);
   const versionId = versions.version?.id ?? null;
   const versionQuery = versions.version && versions.version.parentId ? `?version=${encodeURIComponent(versions.version.id)}` : '';
-  const source = useMemo(() => corpusSourceFor(repo, versionId), [repo, versionId]);
+  // Keyed on the fields the factory reads, not the repo object: the shell rebuilds a
+  // running repo's row on every progress tick, and a new source would refetch and
+  // re-scroll every open document.
+  const source = useMemo(() => corpusSourceFor(repo.id, repo.real, versionId), [repo.id, repo.real, versionId]);
   return (
     <SpecSourceProvider source={source}>
       <CorpusItemBody repo={repo} itemId={itemId} kind={kind} versionQuery={versionQuery} />

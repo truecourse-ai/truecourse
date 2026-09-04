@@ -7,7 +7,7 @@
  * never fine-tune to the current case).
  *
  * A driver is `runnable` when its scenarios can be authored AND executed today
- * (the `cli` and `api` drivers). A non-runnable driver is RECORDED for coverage honesty — its
+ * (the `cli`, `api` and `web` drivers). A non-runnable driver is RECORDED for coverage honesty — its
  * sections are classified and surface as "awaiting-driver" gaps — but no scenario
  * is authored or run until the driver ships. `waitingLabel` is the UI copy for
  * that awaiting state ("Needs web driver").
@@ -39,7 +39,8 @@ export interface GuardDriverDef {
   /**
    * The recipe block that PREPARES this driver — the key `guard generate` checks
    * before it authors anything for the surface, and the noun a blocked-on gap
-   * names. Keeping it HERE is what makes the registry's promise true: a driver
+   * names. A runnable driver names one; a driver still awaiting its runner does
+   * not. Keeping it HERE is what makes the registry's promise true: a driver
    * lands by adding one row, not by finding every `driver === 'cli'` branch.
    */
   recipeKey?: 'entry' | 'api' | 'web'
@@ -48,8 +49,8 @@ export interface GuardDriverDef {
 }
 
 /**
- * The drivers, in canonical order. `cli` and `api` are runnable today; the
- * rest are recorded for coverage honesty. ADD A ROW to introduce a driver — every
+ * The drivers, in canonical order. `cli`, `api` and `web` are runnable today; the rest
+ * are recorded for coverage honesty. ADD A ROW to introduce a driver — every
  * derived array, schema, status, and label below picks it up automatically.
  *
  * A registry row also names an INTERFACE TYPE — the surface an interface is mapped
@@ -65,7 +66,10 @@ export interface GuardDriverDef {
 export const GUARD_DRIVERS = [
   { id: 'cli', label: 'CLI', runnable: true, recipeKey: 'entry' },
   { id: 'api', label: 'API', runnable: true, recipeKey: 'api' },
-  { id: 'web', label: 'Web', runnable: false, recipeKey: 'web', waitingLabel: 'Needs web driver' },
+  // Flipped runnable only once the flow worker grew its web arm (prompt + raw
+  // schema + surface-keyed parse): flipping earlier, with the runner long since
+  // shipped, handed web tasks CLI tooling — 121 doomed sessions on documenso.
+  { id: 'web', label: 'Web', runnable: true, recipeKey: 'web' },
   { id: 'tui', label: 'TUI', runnable: false, waitingLabel: 'Needs TUI driver' },
   { id: 'library', label: 'Library', runnable: false, waitingLabel: 'Needs library driver' },
   { id: 'desktop', label: 'Desktop', runnable: false, waitingLabel: 'Needs desktop driver' },
@@ -85,12 +89,12 @@ export type GuardAwaitingDriverId = Extract<(typeof GUARD_DRIVERS)[number], { ru
 /** All driver ids as a non-empty tuple — the source for `z.enum` (which needs one). */
 export const guardDriverIds = GUARD_DRIVERS.map((d) => d.id) as [GuardDriverId, ...GuardDriverId[]]
 
-/** Ids of drivers that can be authored + run today (`['cli', 'api']`). */
+/** Ids of drivers that can be authored + run today (`['cli', 'api', 'web']`). */
 export const runnableDriverIds: readonly GuardDriverId[] = GUARD_DRIVERS.filter((d) => d.runnable).map(
   (d) => d.id,
 )
 
-/** Ids of drivers recorded-only until they ship (`['web', 'tui', 'library', 'desktop', 'mobile']`). */
+/** Ids of drivers recorded-only until they ship (`['tui', 'library', 'desktop', 'mobile']`). */
 export const awaitingDriverIds: readonly GuardAwaitingDriverId[] = GUARD_DRIVERS.filter(
   (d) => !d.runnable,
 ).map((d) => d.id as GuardAwaitingDriverId)

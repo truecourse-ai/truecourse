@@ -19,6 +19,7 @@
  */
 
 import { z } from 'zod'
+import { claimIdentityKey } from './claims.js'
 
 /**
  * One dismissed claim. Identity is `anchor` + `title` (the extracted claim's
@@ -87,7 +88,12 @@ export const EMPTY_GUARD_DECISIONS: GuardDecisions = {
   dismissedFlows: [],
 }
 
-/** The stable identity key a dismissal / claim matches on: doc + anchor + title. */
+/**
+ * The stable identity key a dismissal / claim matches on: doc + anchor + title.
+ * Delegates to {@link claimIdentityKey} — the claims store keys its claims with
+ * the same function, so a dismissal and the claim it dismisses can never disagree
+ * about what makes them the same object.
+ */
 export function dismissedClaimKey(doc: string, anchor: string, title: string): string {
-  return `${doc}\0${anchor}\0${title}`
+  return claimIdentityKey(doc, anchor, title)
 }

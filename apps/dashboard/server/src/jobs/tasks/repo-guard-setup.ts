@@ -102,7 +102,9 @@ export function createRepoGuardSetupTask(
           tracker: mirrorTracker(ctx, GUARD_SETUP_STEPS),
           ...(ctx.signal ? { signal: ctx.signal } : {}),
           ...(only ? { only } : {}),
-          ...(refresh ? { refresh: true } : {}),
+          // A hosted refresh IS the consent to replace the seed: the script lives
+          // in the bundle, never in a hand-edited tree, and the request said so.
+          ...(refresh ? { refresh: true, confirmSeedReplace: async () => true } : {}),
         });
 
         const files = collectGuardSetupBundle(tree.dir);

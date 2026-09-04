@@ -1,8 +1,9 @@
 /**
  * `installConfiguredLlmTransport()` — the single point where the saved LLM
- * selection becomes a process-wide transport: mode selection, the env override,
- * mtime-cached re-install, api-block validation, and the promise that a
- * transport installed by someone else (the enterprise edition) is never cleared.
+ * selection becomes a process-wide transport: mode selection (the direct-API
+ * transport in api mode, the Agent SDK one-shot in claude-code mode), the env
+ * override, mtime-cached re-install, api-block validation, and the promise that
+ * a transport installed by someone else (the enterprise edition) is never cleared.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
@@ -17,6 +18,7 @@ import {
   createConfiguredApiTransport,
   getConfiguredLlmMode,
   installConfiguredLlmTransport,
+  isClaudeCodeTransport,
   resetConfiguredLlmTransport,
   resolveApiKey,
 } from '../../packages/core/src/services/llm/install-transport.js';
@@ -54,16 +56,16 @@ afterEach(() => {
 });
 
 describe('installConfiguredLlmTransport — mode selection', () => {
-  it('installs nothing when no selection is saved', () => {
+  it('installs the claude-code transport when no selection is saved', () => {
     installConfiguredLlmTransport();
-    expect(getDefaultTransport()).toBeUndefined();
+    expect(isClaudeCodeTransport(getDefaultTransport())).toBe(true);
     expect(getConfiguredLlmMode()).toBe('claude-code');
   });
 
-  it('installs nothing in claude-code mode, even with credentials saved', () => {
+  it('installs the claude-code transport in claude-code mode, even with credentials saved', () => {
     writeGlobalConfig({ llm: { transport: 'claude-code', api: apiConfig().llm!.api } });
     installConfiguredLlmTransport();
-    expect(getDefaultTransport()).toBeUndefined();
+    expect(isClaudeCodeTransport(getDefaultTransport())).toBe(true);
   });
 
   it('never clears a transport installed by someone else', () => {
@@ -77,6 +79,7 @@ describe('installConfiguredLlmTransport — mode selection', () => {
     writeGlobalConfig(apiConfig());
     installConfiguredLlmTransport();
     expect(typeof getDefaultTransport()).toBe('function');
+    expect(isClaudeCodeTransport(getDefaultTransport())).toBe(false);
   });
 
   it('honors the TRUECOURSE_LLM_TRANSPORT override in both directions', () => {
@@ -84,16 +87,17 @@ describe('installConfiguredLlmTransport — mode selection', () => {
     process.env.TRUECOURSE_LLM_TRANSPORT = 'api';
     installConfiguredLlmTransport();
     expect(getDefaultTransport()).toBeDefined();
+    expect(isClaudeCodeTransport(getDefaultTransport())).toBe(false);
 
     resetConfiguredLlmTransport();
     setDefaultTransport(undefined);
     writeGlobalConfig(apiConfig());
     process.env.TRUECOURSE_LLM_TRANSPORT = 'claude-code';
     installConfiguredLlmTransport();
-    expect(getDefaultTransport()).toBeUndefined();
+    expect(isClaudeCodeTransport(getDefaultTransport())).toBe(true);
   });
 
-  it('removes its own transport when the saved selection flips back', () => {
+  it('replaces its own transport when the saved selection flips back', () => {
     writeGlobalConfig(apiConfig());
     installConfiguredLlmTransport();
     const installed = getDefaultTransport();
@@ -101,7 +105,8 @@ describe('installConfiguredLlmTransport — mode selection', () => {
 
     writeGlobalConfig({ llm: { transport: 'claude-code', api: apiConfig().llm!.api } });
     installConfiguredLlmTransport();
-    expect(getDefaultTransport()).toBeUndefined();
+    expect(getDefaultTransport()).not.toBe(installed);
+    expect(isClaudeCodeTransport(getDefaultTransport())).toBe(true);
   });
 });
 
@@ -126,7 +131,7 @@ describe('installConfiguredLlmTransport — mtime caching', () => {
 
     process.env.TRUECOURSE_LLM_TRANSPORT = 'claude-code';
     installConfiguredLlmTransport();
-    expect(getDefaultTransport()).toBeUndefined();
+    expect(isClaudeCodeTransport(getDefaultTransport())).toBe(true);
   });
 });
 

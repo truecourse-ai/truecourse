@@ -15,8 +15,13 @@
  * the guard surfaces can say WHY there are no scenarios, and the job settles
  * as a warning rather than a failure — the remedy is a resolution, not a retry.
  * A cancelled generate leaves the store exactly as it found it.
+ *
+ * A generate that produced a scenario set chains into the BASELINE RUN — the
+ * last link of onboarding — so every connected repository ends up with a run
+ * on record, not just a set of scenarios.
  */
 
+import { log } from '@truecourse/core/lib/logger';
 import { resolveCommitSha } from '@truecourse/core/lib/repo-ref';
 import { emitRepoLifecycle } from '@truecourse/core/lib/repo-lifecycle';
 import { loadGuardSetupBundle, writeGuardResult } from '@truecourse/core/lib/guard-store';
@@ -60,12 +65,14 @@ export interface GuardGenerateJobResult {
 
 /** The engines the body drives — production wires the real ones. */
 export interface RepoGuardGenerateTaskDeps {
+  /** Enqueue the baseline run a generate with scenarios chains into. */
+  chainGuardRun(request: OnboardingJobRequest): Promise<void>;
   startLlm?: (orgId: string) => Promise<WorkspaceLlm>;
   runGenerate?: typeof guardGenerateInProcess;
 }
 
 export function createRepoGuardGenerateTask(
-  deps: RepoGuardGenerateTaskDeps = {},
+  deps: RepoGuardGenerateTaskDeps,
 ): JobDefinition<GuardGenerateJobPayload> {
   const startLlm = deps.startLlm ?? startWorkspaceLlm;
   const runGenerate = deps.runGenerate ?? guardGenerateInProcess;
@@ -199,11 +206,28 @@ export function createRepoGuardGenerateTask(
       data: { repoFullName: payload.repoFullName },
     }),
 
-    async onSettled(ctx) {
+    async onSettled(ctx, outcome, result) {
       // Clears the in-page progress popup and refreshes the guard surfaces,
-      // however the generate ended. Nothing chains after it yet: the baseline
-      // run is the next link.
+      // however the generate ended.
       await emitRepoLifecycle(ctx.payload.repoFullName, 'guard-generate');
+      // Only a generate that left a scenario set has anything to run: a blocked
+      // corpus ends the chain here (its notification already says why), and so
+      // does a failure or a cancel. An unchanged set still runs — the code under
+      // it may have moved, and the baseline run is what says so.
+      if (outcome !== 'succeeded') return;
+      if ((result as { status?: string } | undefined)?.status !== 'ok') return;
+      try {
+        // A fresh request, not this job's payload: the chained job gets its own
+        // row id from the enqueue, never generate's.
+        const { repoId, repoFullName, workspaceOrgId } = ctx.payload;
+        await deps.chainGuardRun({ repoId, repoFullName, workspaceOrgId, source: 'chain' });
+      } catch (err) {
+        // A chain that cannot be enqueued is not this generate's failure: the
+        // scenarios are stored, and the run can be started by hand.
+        log.warn(
+          `[jobs] could not chain the baseline run for ${ctx.payload.repoFullName}: ${(err as Error).message}`,
+        );
+      }
     },
   };
 }

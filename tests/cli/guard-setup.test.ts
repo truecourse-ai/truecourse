@@ -257,7 +257,7 @@ describe('runGuardSetup', () => {
       cwd: r,
       interactive: true,
       recipeRunner: neverCalled,
-      interfaces: async () => ({
+        interfaces: async () => ({
         interfaces: [],
         externalServices: [
           { service: 'stripe', category: 'payment' as const, evidence: [], baseUrlEnv: 'STRIPE_BASE_URL' },

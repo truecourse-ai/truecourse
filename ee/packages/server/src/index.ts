@@ -19,7 +19,6 @@ import { setRepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
 import { setGuardGatePendingLookup, setGuardGateHeadsLookup } from '@truecourse/core/lib/guard-gate-pending';
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { setGuardPrRegenEnqueue } from '@truecourse/core/lib/guard-pr-regen-enqueue';
-import { setSpecConflictsResolvedHook } from '@truecourse/core/lib/spec-conflicts-resolved-hook';
 import { setSpecInheritanceHook } from '@truecourse/core/lib/spec-inheritance-hook';
 import { setKnowledgeLedgerReader, setKnowledgeDocBodyReader } from '@truecourse/core/lib/knowledge-ledger-reader';
 import { createSpecInheritanceHook, createKnowledgeLedgerReader, createKnowledgeDocBodyReader } from './knowledge/inheritance.js';
@@ -33,7 +32,6 @@ import {
   createGuardRouter,
   createGuardGenerateEnqueue,
   createGuardPrRegenEnqueue,
-  createSpecConflictsResolvedBaselineScan,
 } from './guard/index.js';
 import { registerAdmin } from './admin/index.js';
 import { installEeStores, sweepStaleTempDirs } from './storage.js';
@@ -175,14 +173,6 @@ const plugin: EePlugin = {
         octokitFor: (id) => installationOctokit(githubAppConfig, id),
         enqueueGuardSpecRegen: jobs.enqueueGuardSpecRegen,
       }),
-    );
-
-    // The same conflict-clearing decision also re-scans the repo baseline so the
-    // store corpus re-curates (force — the commit hasn't moved) and the conflict-
-    // free scan chains scenario generation. Install the core seam the spec routes
-    // call, resolving the repo the same way as the Generate seam above.
-    setSpecConflictsResolvedHook(
-      createSpecConflictsResolvedBaselineScan({ store: gateStore, enqueueBaseline: jobs.enqueueBaseline }),
     );
 
     // Repo Knowledge inheritance: a connected repo folds its workspace's Knowledge

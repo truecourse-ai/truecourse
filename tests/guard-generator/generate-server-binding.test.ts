@@ -15,17 +15,18 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import yaml from 'js-yaml'
-import type { AuthorUserContext, MatchRunner } from '@truecourse/guard-generator'
+import { GuardScenarioSchema, guardScenarioDrivers } from '@truecourse/shared'
+import type { MatchRunner } from '@truecourse/guard-generator'
 import {
   makeTempRepo,
   rmrf,
   writeApiRecipe,
   writeDoc,
   writeCorpus,
-  extractBy,
-  authorBy,
-  flowOfAll,
-  noEpics,
+  extractSessionBy,
+  submitWorkerSessions,
+  flowOfAllSession,
+  noEpicSessions,
   runGenerate,
   interfacesOf,
   apiInterface,
@@ -81,13 +82,13 @@ const BOTH_DOC = [
   'GET /api/version returns 200 with the version.',
 ].join('\n')
 
-const v2Extract = extractBy({
+const v2Extract = extractSessionBy({
   bookings: [{ driver: 'api', claim: 'GET /v2/bookings returns 200', reason: 'HTTP status + body' }],
 })
-const webExtract = extractBy({
+const webExtract = extractSessionBy({
   version: [{ driver: 'api', claim: 'GET /api/version returns 200', reason: 'HTTP status + body' }],
 })
-const bothExtract = extractBy({
+const bothExtract = extractSessionBy({
   bookings: [{ driver: 'api', claim: 'GET /v2/bookings returns 200', reason: 'HTTP status + body' }],
   version: [{ driver: 'api', claim: 'GET /api/version returns 200', reason: 'HTTP status + body' }],
 })
@@ -98,9 +99,9 @@ const TWO_SERVERS = {
   'api-v2': { serve: ['node', FIXTURE_API_SERVER_V2], healthPath: '/v2/health', app: 'apps/api/v2' },
 }
 
-/** A matcher that walks milestone N through journey N — the multi-app plan. */
-const matchEachJourney: MatchRunner = async ({ milestones, journeys }) => ({
-  plan: milestones.map((m, i) => ({ journeyId: journeys[Math.min(i, journeys.length - 1)].id, milestone: m.order })),
+/** A matcher that walks milestone N through interface N — the multi-app plan. */
+const matchEachInterface: MatchRunner = async ({ milestones, interfaces }) => ({
+  plan: milestones.map((m, i) => ({ interfaceId: interfaces[Math.min(i, interfaces.length - 1)].id, milestone: m.order })),
 })
 
 describe('generateGuards — the route gate', () => {
@@ -116,13 +117,13 @@ describe('generateGuards — the route gate', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, apiInterface('GET', '/v2/bookings')),
-      extractRunner: v2Extract,
+      extractSession: v2Extract,
       matchRunner: async (ctx) => {
         matchCalls++
-        return { plan: ctx.milestones.map((m) => ({ journeyId: ctx.journeys[0].id, milestone: m.order })) }
+        return { plan: ctx.milestones.map((m) => ({ interfaceId: ctx.interfaces[0].id, milestone: m.order })) }
       },
-      generateRunner: authorBy({}, () => {
-        authorCalls++
+      flowWorkerSession: submitWorkerSessions(() => undefined, {
+        onBriefing: () => authorCalls++,
       }),
     })
 
@@ -148,7 +149,7 @@ describe('generateGuards — the route gate', () => {
     const opts = {
       repoRoot: r,
       interfaces: interfacesOf(r, apiInterface('GET', '/v2/bookings')),
-      extractRunner: v2Extract,
+      extractSession: v2Extract,
     }
     const first = await runGenerate(opts)
     expect(first.coverageGaps.some((g) => g.reason.includes('missing-server'))).toBe(true)
@@ -166,38 +167,35 @@ describe('generateGuards — the route gate', () => {
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, V2_DOC)
 
-    let ctx: AuthorUserContext | undefined
+    let briefing = ''
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, apiInterface('GET', '/v2/bookings'), apiInterface('GET', '/api/version')),
-      extractRunner: v2Extract,
-      generateRunner: authorBy(
-        {
-          bookings: rawApi('GET /v2/ping answers 200', [
+      extractSession: v2Extract,
+      flowWorkerSession: submitWorkerSessions(
+        () =>
+          rawApi('GET /v2/ping answers 200', [
             { request: { method: 'GET', path: '/v2/ping' }, expect: { status: 200 } },
           ]),
-        },
-        (c) => {
-          ctx = c
-        },
+        { onBriefing: (_t, text) => (briefing = text) },
       ),
     })
 
     expect(res.errors).toEqual([])
     expect(res.written).toHaveLength(1)
     const committed = yaml.load(fs.readFileSync(path.join(r, res.written[0].file), 'utf-8')) as {
-      driver: string
       server?: string
     }
     // The engine owns the field: the model never authored it, and it is stamped
     // because the flow bound a server OTHER than the recipe's default.
-    expect(committed.driver).toBe('api')
+    expect(guardScenarioDrivers(GuardScenarioSchema.parse(committed))).toEqual(['api'])
     expect(committed.server).toBe('api-v2')
-    // The prompt described THAT service — and only its own operations: the web
+    // The briefing described THAT service — and only its own operations: the web
     // app's `/api/version` is another service's, so the setup catalog drops it.
-    expect(ctx?.server).toEqual({ name: 'api-v2', app: 'apps/api/v2' })
-    expect(ctx?.recipeHealthPath).toBe('/v2/health')
-    expect((ctx?.otherOperations ?? []).map((o) => o.path)).not.toContain('/api/version')
+    expect(briefing).toContain('api-v2')
+    expect(briefing).toContain('apps/api/v2')
+    expect(briefing).toContain('/v2/health')
+    expect(briefing).not.toContain('/api/version')
   }, 60_000)
 
   it('binds a known route of an opaque app to its declared server and stamps the YAML', async () => {
@@ -206,20 +204,20 @@ describe('generateGuards — the route gate', () => {
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, WEB_DOC)
 
-    let ctx: AuthorUserContext | undefined
+    let briefing = ''
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, apiInterface('GET', '/api/version')),
-      extractRunner: webExtract,
-      generateRunner: authorBy(
-        {
-          version: rawApi('GET /api/version answers 200', [
+      extractSession: webExtract,
+      // The fixture web server 404s that path, so the worker DECLARES the red —
+      // the scenario still commits, which is what the `server` stamp is about.
+      flowWorkerSession: submitWorkerSessions(
+        () => ({
+          red: rawApi('GET /api/version answers 200', [
             { request: { method: 'GET', path: '/api/version' }, expect: { status: 200 } },
           ]),
-        },
-        (c) => {
-          ctx = c
-        },
+        }),
+        { onBriefing: (_t, text) => (briefing = text) },
       ),
     })
 
@@ -229,7 +227,7 @@ describe('generateGuards — the route gate', () => {
       server?: string
     }
     expect(committed.server).toBe('web')
-    expect(ctx?.server).toEqual({ name: 'web', app: 'apps/web' })
+    expect(briefing).toContain('apps/web')
   }, 60_000)
 
   it('blocks a flow that spans two declared servers — a scenario runs against one', async () => {
@@ -242,12 +240,12 @@ describe('generateGuards — the route gate', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, apiInterface('GET', '/v2/bookings'), apiInterface('GET', '/api/version')),
-      extractRunner: bothExtract,
-      flowsRunner: flowOfAll('Book through the api, then read the web version'),
-      flowsEpicRunner: noEpics,
-      matchRunner: matchEachJourney,
-      generateRunner: authorBy({}, () => {
-        authorCalls++
+      extractSession: bothExtract,
+      flowsAreaSession: flowOfAllSession('Book through the api, then read the web version'),
+      flowsEpicSession: noEpicSessions,
+      matchRunner: matchEachInterface,
+      flowWorkerSession: submitWorkerSessions(() => undefined, {
+        onBriefing: () => authorCalls++,
       }),
     })
 
@@ -274,25 +272,24 @@ describe('generateGuards — the route gate', () => {
     writeCorpus(r, [{ ref: DOC }])
     writeDoc(r, DOC, V2_DOC)
 
-    let ctx: AuthorUserContext | undefined
+    let briefing = ''
     await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, apiInterface('GET', '/v2/bookings')),
-      extractRunner: v2Extract,
-      generateRunner: authorBy(
-        {
-          bookings: rawApi('GET /v2/ping answers 200', [
+      extractSession: v2Extract,
+      flowWorkerSession: submitWorkerSessions(
+        () =>
+          rawApi('GET /v2/ping answers 200', [
             { request: { method: 'GET', path: '/v2/ping' }, expect: { status: 200 } },
           ]),
-        },
-        (c) => {
-          ctx = c
-        },
+        { onBriefing: (_t, text) => (briefing = text) },
       ),
     })
 
     // A web session cookie is not an api-v2 credential; one with no allowlist is.
-    expect((ctx?.credentials ?? []).map((c) => c.name)).toEqual(['api-key', 'shared'])
+    expect(briefing).toContain('api-key')
+    expect(briefing).toContain('shared')
+    expect(briefing).not.toContain('web-session')
   }, 60_000)
 
   it('authors exactly as before in a repo the route manifest knows nothing about', async () => {
@@ -303,20 +300,14 @@ describe('generateGuards — the route gate', () => {
     // block, so the flow authors exactly as it did before the gate existed.
     writeDoc(r, DOC, V2_DOC)
 
-    let ctx: AuthorUserContext | undefined
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, apiInterface('GET', '/v2/bookings')),
-      extractRunner: v2Extract,
-      generateRunner: authorBy(
-        {
-          bookings: rawApi('GET /todos answers 200', [
-            { request: { method: 'GET', path: '/todos' }, expect: { status: 200 } },
-          ]),
-        },
-        (c) => {
-          ctx = c
-        },
+      extractSession: v2Extract,
+      flowWorkerSession: submitWorkerSessions(() =>
+        rawApi('GET /todos answers 200', [
+          { request: { method: 'GET', path: '/todos' }, expect: { status: 200 } },
+        ]),
       ),
     })
 
@@ -324,6 +315,5 @@ describe('generateGuards — the route gate', () => {
     expect(res.written).toHaveLength(1)
     const committed = yaml.load(fs.readFileSync(path.join(r, res.written[0].file), 'utf-8')) as { server?: string }
     expect(committed.server).toBeUndefined()
-    expect(ctx?.server).toBeUndefined()
   }, 60_000)
 })

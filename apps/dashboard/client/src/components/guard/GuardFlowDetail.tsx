@@ -307,7 +307,7 @@ export function GuardFlowDetail({
   const rows: GuardFlowScenarioRow[] =
     detail.surfaces.length > 0
       ? detail.surfaces
-      : [{ status: 'unguarded', birthPassed: false, hasEvidence: false, journeyPath: [] }];
+      : [{ status: 'unguarded', birthPassed: false, hasEvidence: false, interfacePath: [] }];
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -384,14 +384,14 @@ export function GuardFlowDetail({
           </div>
         </div>
 
-        {detail.journeyIds.length > 0 && (
+        {detail.interfaceIds.length > 0 && (
           <div>
             <div className={LABEL}>Interfaces</div>
             {/* One reference per line — the same row idiom the Interfaces pane
                 uses for the flows that use an interface, so both sides of the
                 link read identically. */}
             <div className="flex flex-col items-start gap-1">
-              {detail.journeyIds.map((id) => (
+              {detail.interfaceIds.map((id) => (
                 <button
                   key={id}
                   type="button"

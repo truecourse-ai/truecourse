@@ -34,6 +34,10 @@
  *   PUT  /:id/guard/externals  declare/clear external API accounts:
  *                              declarations to the committed recipe.json, secret
  *                              values to the gitignored externals.local.json.
+ *   PUT  /:id/guard/dependencies  register ONE dependency's instance: the values
+ *                              go to the gitignored scenarios/dependencies.local.json
+ *                              (a recipe-declared service's base URL / mode still
+ *                              go to recipe.json, where the team shares them).
  *
  * Concurrency: one guard job per repo at a time. Generate and setup are queued
  * jobs, so the queue's single-flight key (plus the store-wide look at the repo's
@@ -47,8 +51,6 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
 import {
   estimateGuard,
-  guardRunInProcess,
-  GUARD_RUN_STEPS,
   OpenConflictsError,
 } from '@truecourse/core/commands/guard-in-process';
 import { getCorpus, getDecisions } from '@truecourse/core/commands/spec-in-process';
@@ -84,9 +86,7 @@ import { estimateStepPhase } from '@truecourse/core/progress';
 import { runFailureMessage } from '@truecourse/guard-runner';
 import { dismissedClaimKey, openConflicts, type GuardDecisions } from '@truecourse/shared';
 import {
-  createSocketSpecTracker,
   emitSpecComplete,
-  emitSpecProgress,
 } from '../socket/handlers.js';
 import { parsePr } from './route-params.js';
 import { requireJobs } from '../jobs/current.js';
@@ -295,42 +295,26 @@ router.post('/:id/guard/setup', async (req: Request, res: Response, next: NextFu
 });
 
 // POST — run the committed scenarios. Deterministic and LLM-free, so there is no
-// estimate gate. `ok` emits the completion lifecycle event; a hard problem
-// (no recipe / no scenarios / invalid recipe / build failure) returns its status +
-// message for the client to surface (build failures also leave the sticky error in
-// the progress popup, since the driver marked the build step failed).
+// estimate gate and no provider check, but it builds and boots the program, so
+// it is a QUEUED JOB rather than work inside the request: the route enqueues and
+// answers 202 with the job id. The run streams over the repo's socket room and
+// completes with `spec:complete` (`kind: guard-run`).
 router.post('/:id/guard/run', async (req: Request, res: Response, next: NextFunction) => {
-  const repoId = req.params.id as string;
-  let held = false;
   try {
-    const repo = await resolveProjectForRequest(repoId);
-    if (guardJobs.has(repoId)) {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    const outcome = await requireJobs().enqueueGuardRun({
+      repoId: req.params.id as string,
+      repoFullName: repo.path,
+      workspaceOrgId: orgOf(req),
+      source: 'manual',
+    });
+    if (outcome.status === 'busy') {
       res.status(409).json({ error: 'A guard job is already running for this repo.' });
       return;
     }
-    guardJobs.add(repoId);
-    held = true;
-
-    const tracker = createSocketSpecTracker(repoId, GUARD_RUN_STEPS.map((s) => ({ ...s })));
-    const result = await guardRunInProcess(repo.path, { tracker });
-
-    if (result.status === 'ok') {
-      emitSpecComplete(repoId, 'guard-run');
-      res.json({ status: 'ok', summary: result.latest.summary });
-      return;
-    }
-    // Non-ok: a build failure or a dead-entry pre-flight already put the popup into
-    // its sticky error state (the driver called tracker.error). The other statuses
-    // never started the popup, so clear any lifecycle state and toast the message.
-    if (result.status !== 'build-failed' && result.status !== 'entry-preflight-failed') {
-      emitSpecComplete(repoId, 'guard-run');
-    }
-    res.json({ status: result.status, message: runFailureMessage(result) });
+    res.status(202).json({ jobId: outcome.jobId });
   } catch (e) {
-    emitSpecProgress(repoId, { step: 'error', percent: 100, detail: (e as Error).message });
     next(e);
-  } finally {
-    if (held) guardJobs.delete(repoId);
   }
 });
 

@@ -7,7 +7,7 @@
  * moves the recipe fingerprint, which re-authors sections that were already good.
  * Setup makes all of it knowable and fixable before the first extraction call.
  *
- * The steps, in order, and what each may do to the run:
+ * The steps, in order (the §7.6 taxonomy), and what each may do to the run:
  *   0    an LLM provider must be configured        — the CALLER's check (config lives
  *                                                    above this package); the adapter
  *                                                    fails before calling in.
@@ -101,6 +101,13 @@ import {
   validateCredentialSatisfies,
   type ProbeCandidate,
 } from './openapi-security.js'
+import {
+  apiAuthEvidence,
+  probeCandidatesFromInterfaces,
+  requiredResources,
+  type ApiAuthEvidence,
+  type RequiredResource,
+} from './seed-evidence.js'
 import type { InterfaceProvider } from './generate.js'
 import type { RecipeRunner } from './runners.js'
 
@@ -187,34 +194,34 @@ export interface GuardSetupOptions {
    * depend on `@truecourse/core`, so the command layer adapts it onto its tracker.
    */
   onStepDetail?: (step: GuardSetupStepKey, detail: string) => void
-  // --- the session seams ---
+  // --- the session seams (plan 03) ---
   /**
-   * The recipe-repair session, passed through to `discoverRecipe`.
+   * The recipe-repair session (step 9), passed through to `discoverRecipe`.
    * Absent ⇒ the legacy one-shot `recipeRunner` fallback runs instead.
    */
   repair?: RecipeRepairFn
   /**
-   * The dependency-catalog session. Runs inside the catalog step,
+   * The dependency-catalog session (step 10). Runs inside the catalog step,
    * AFTER the deterministic externals skeleton; its fold (in the seam's own
    * implementation) merges into `scenarios/dependencies.json` + the local
    * overlay. Absent ⇒ the catalog step is its deterministic half alone.
    */
   catalogSession?: GuardSetupCatalogSession
   /**
-   * The interfaces step body: the cli reconcile session over the mapping's
-   * diagnostics, then the web-task authoring run. Absent ⇒ the step reports a
-   * `skipped` placeholder row.
+   * The interfaces step body (plan 03 steps 11 + 12): the cli reconcile
+   * session over the mapping's diagnostics, then the web-task authoring run.
+   * Absent ⇒ the step reports a `skipped` placeholder row.
    */
   authorInterfaces?: GuardSetupInterfacesStep
   /**
-   * The seed authoring session. Replaces the one-shot
+   * The seed authoring session (plan 03 step 13). Replaces the one-shot
    * `draftSeed`; absent ⇒ the seed step reports a `skipped` placeholder row
    * (the gate and the replace-confirmation still run first, here).
    */
   seedSession?: GuardSetupSeedSession
   /**
-   * The auth-proof session over the catalog's supplied entries. Absent ⇒ the
-   * step reports a `skipped` placeholder row. Its result may
+   * The auth-proof session over the catalog's supplied entries (plan 03 step
+   * 14). Absent ⇒ the step reports a `skipped` placeholder row. Its result may
    * be `blocked` — the one step allowed to end that way without failing setup.
    */
   verifyAuth?: GuardSetupAuthStep
@@ -224,7 +231,7 @@ export interface GuardSetupOptions {
 }
 
 /** Stable step taxonomy, shared by the CLI tracker and the dashboard —
- *  the spine: recipe → detect → catalog → interfaces → seed → auth
+ *  the §7.6 spine: recipe → detect → catalog → interfaces → seed → auth
  *  (the old externals step folded INTO catalog). */
 export const GUARD_SETUP_STEPS = [
   { key: 'recipe', label: 'Deriving the recipe' },
@@ -242,7 +249,7 @@ export type GuardSetupStepKey = (typeof GUARD_SETUP_STEPS)[number]['key']
 // which owns the sessions), injected by the command adapter.
 // ---------------------------------------------------------------------------
 
-/** What the dependency-catalog session is briefed on. */
+/** What the dependency-catalog session is briefed on (plan 03 step 10). */
 export interface GuardSetupCatalogSessionInput {
   repoRoot: string
   /** The verified recipe as it stands AFTER the externals skeleton write. */
@@ -268,15 +275,16 @@ export type GuardSetupCatalogSession = (
 /**
  * The provider the setup engine maps the tree with — generate's
  * {@link InterfaceProvider} shape plus the mapping's run DIAGNOSTICS (the cli
- * union's tree-vs-probe disputes). Structural and optional, so every existing
- * provider (which simply omits the field) still fits, and the field never
- * enters the snapshot — it is run reporting the interfaces step consumes.
+ * union's tree-vs-probe disputes, plan 03 step 12). Structural and optional,
+ * so every existing provider (which simply omits the field) still fits, and
+ * the field never enters the snapshot — it is run reporting the interfaces
+ * step consumes.
  */
 export type GuardSetupInterfaceProvider = () => Promise<
   Awaited<ReturnType<InterfaceProvider>> & { diagnostics?: MapperDiagnostic[] }
 >
 
-/** The interfaces step's seam: reconcile the disputes, then author. */
+/** The interfaces step's seam (plan 03 steps 11 + 12): reconcile, then author. */
 export interface GuardSetupInterfacesStepInput {
   repoRoot: string
   fingerprint: string
@@ -308,7 +316,7 @@ export type GuardSetupInterfacesStep = (
   input: GuardSetupInterfacesStepInput,
 ) => Promise<GuardSetupInterfacesStepResult>
 
-/** What the seed authoring session is briefed on — today's
+/** What the seed authoring session is briefed on (plan 03 step 13) — today's
  *  draftSeed inputs, gathered by the engine so the session module stays free
  *  of the corpus readers. */
 export interface GuardSetupSeedSessionInput {
@@ -325,6 +333,17 @@ export interface GuardSetupSeedSessionInput {
    * then shipped a seed declaring zero credentials).
    */
   probeCandidates: ProbeCandidate[]
+  /**
+   * Why the api surface is judged to authenticate — every deterministic signal
+   * (`apiAuthEvidence`), not the OpenAPI scheme alone. Any entry makes `api` a
+   * runnable surface the seed must mint a probed principal for.
+   */
+  apiAuthEvidence?: ApiAuthEvidence[]
+  /**
+   * The resources the route surface references by id or handle, most-referenced
+   * first (`requiredResources`) — the rows a test must already have.
+   */
+  requiredResources?: RequiredResource[]
   roles: { name: string; source: string }[]
   specExcerpts: { doc: string; text: string }[]
   /** The repo's ecosystem — decides the drafted script's language/extension. */
@@ -355,7 +374,7 @@ export type GuardSetupSeedSession = (
   input: GuardSetupSeedSessionInput,
 ) => Promise<GuardSetupSeedSessionResult>
 
-/** The auth-proof step's seam. */
+/** The auth-proof step's seam (plan 03 step 14). */
 export interface GuardSetupAuthStepInput {
   repoRoot: string
   recipe: Recipe
@@ -380,7 +399,7 @@ export interface GuardSetupResult {
  * recipe gate come back as `status: 'failed'` with a reason, and every soft step
  * records its own outcome without demoting the run.
  *
- * SKIP-WHEN-SETTLED: every taxonomy step records an input
+ * SKIP-WHEN-SETTLED (plan 03 step 8): every taxonomy step records an input
  * fingerprint in the report's `steps` spine, computed over the tree AS THE STEP
  * LEFT IT (a step that writes — the skeleton, the seed — would otherwise never
  * match itself again). On a re-run, a step whose prior row settled (`ok`, or an
@@ -751,8 +770,8 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         ...(result.reason ? { reason: result.reason } : {}),
         inputFingerprint: interfacesFingerprint(repoRoot),
         ...(result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}),
-        // The step row is where run reporting lands — diagnostics are never
-        // stored in the catalog itself.
+        // The step row is where run reporting lands (diagnostics are NEVER
+        // stored in the catalog, and 01-D left the CLI/dashboard silent on them).
         ...(result.diagnostics && result.diagnostics.length > 0 ? { diagnostics: result.diagnostics } : {}),
         ...(result.resolutions && result.resolutions.length > 0 ? { resolutions: result.resolutions } : {}),
         ...(result.changes && result.changes.length > 0 ? { changes: result.changes } : {}),
@@ -802,13 +821,25 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       steps.push({ key: 'seed', status: 'skipped', reason: 'unchanged', inputFingerprint: seedFpPre })
       opts.onStepDone?.('seed', 'unchanged')
     } else {
+      const schemes = collectSecuritySchemes(openApiDocs)
+      const specProbes = collectProbeCandidates(openApiDocs)
       const seedRun = await runSeedStep({
         opts,
         recipe: current,
         database,
         routes: routesFromInterfaces(mapped.interfaces),
-        schemes: collectSecuritySchemes(openApiDocs),
-        probeCandidates: collectProbeCandidates(openApiDocs),
+        schemes,
+        // Spec-derived probes first (their security is stated); the mapped
+        // operations fill in when the spec declares none, so a corpus with
+        // markdown API docs still gets a lookup rather than a search.
+        probeCandidates: specProbes.length > 0 ? specProbes : probeCandidatesFromInterfaces(mapped.interfaces),
+        apiAuthEvidence: apiAuthEvidence({
+          interfaces: mapped.interfaces,
+          database,
+          docs: corpusDocTexts(repoRoot),
+          securitySchemes: schemes,
+        }),
+        requiredResources: requiredResources(mapped.interfaces),
         fingerprint: seedFpPre,
         onPhase: (running, done) => phases.enter({ running, done }),
       })
@@ -826,7 +857,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     }
   }
 
-  // ---- Step 6: auth — the supplied-state proof. ----------------------------
+  // ---- Step 6: auth. Framework row only until plan step 14 wires it. -------
   // The ONE step that may end `blocked` (a supplied credential waiting on a user
   // registration) without demoting the run.
   if (enter('auth')) {
@@ -849,10 +880,10 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         key: 'auth',
         status: 'skipped',
         reason:
-          'auth verification is not wired into this run — inject the `verifyAuth` seam (production does)',
+          'auth verification is not wired into setup yet — supplied auth entries are checked at run time (plan step 14 wires the proof session here)',
         inputFingerprint: authFp,
       })
-      opts.onStepDone?.('auth', 'not wired into this run')
+      opts.onStepDone?.('auth', 'not wired into setup yet')
     }
   }
 
@@ -886,7 +917,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
 }
 
 // ---------------------------------------------------------------------------
-// Skip-when-settled: the step fingerprints
+// Skip-when-settled: the step fingerprints (plan 03 step 8)
 // ---------------------------------------------------------------------------
 
 /**
@@ -1123,7 +1154,7 @@ function restoreAuthoredBlocks(repoRoot: string, blocks: AuthoredBlocks): Recipe
 }
 
 // ---------------------------------------------------------------------------
-// The catalog step's externals skeleton write
+// Step 3 — the externals skeleton write
 // ---------------------------------------------------------------------------
 
 /**
@@ -1218,7 +1249,7 @@ function unprovidedServices(repoRoot: string, recipe: Recipe): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// The seed step
+// Step 4 — the one seed
 // ---------------------------------------------------------------------------
 
 async function runSeedStep(args: {
@@ -1228,6 +1259,8 @@ async function runSeedStep(args: {
   routes: readonly ApiRouteRef[]
   schemes: { name: string; summary: string }[]
   probeCandidates: ProbeCandidate[]
+  apiAuthEvidence: ApiAuthEvidence[]
+  requiredResources: RequiredResource[]
   /** The step's PRE-RUN fingerprint — the seed session's cache key. */
   fingerprint: string
   onPhase: (running: string, done: string) => void
@@ -1280,7 +1313,7 @@ async function runSeedStep(args: {
   // Narrowed by the gate; restated for the type checker.
   if (!database) return { step: { status: 'skipped', reason: 'gate' } }
 
-  // THE SEED SESSION — the one-shot `draftSeed` retired into
+  // THE SEED SESSION (plan 03 step 13) — the one-shot `draftSeed` retired into
   // an agent session that PROVES its draft by execution. The seam owns the
   // whole lifecycle (services up, the session, the fold's fresh-world gate);
   // this step gathers the briefing inputs, which are exactly the old draft's.
@@ -1301,6 +1334,8 @@ async function runSeedStep(args: {
     routes: routes.map((r) => ({ method: r.method, path: r.path })),
     securitySchemes: schemes,
     probeCandidates: args.probeCandidates,
+    apiAuthEvidence: args.apiAuthEvidence,
+    requiredResources: args.requiredResources,
     roles: detectRoleColumns(database),
     specExcerpts: readSpecExcerpts(opts.repoRoot),
     ecosystem: detectEcosystems(opts.repoRoot)[0] ?? 'js',
@@ -1356,6 +1391,20 @@ function declaredNames(seed: {
  * the schema stays the authority on what is creatable, and this only has to tell the
  * model that "org owner" and "member" are words this product uses.
  */
+/** Every kept corpus doc's FULL text — the evidence scan reads whole documents,
+ *  where the briefing's excerpts stop after the first screen. */
+export function corpusDocTexts(repoRoot: string): { doc: string; text: string }[] {
+  const out: { doc: string; text: string }[] = []
+  for (const ref of readCorpusAreaTags(repoRoot).keys()) {
+    try {
+      out.push({ doc: ref, text: fs.readFileSync(path.resolve(repoRoot, ref), 'utf-8') })
+    } catch {
+      continue
+    }
+  }
+  return out
+}
+
 export function readSpecExcerpts(repoRoot: string): { doc: string; text: string }[] {
   const out: { doc: string; text: string }[] = []
   for (const ref of readCorpusAreaTags(repoRoot).keys()) {

@@ -953,6 +953,9 @@ importers:
 
   packages/guard-runner:
     dependencies:
+      '@lydell/node-pty':
+        specifier: ^1.2.0-beta.14
+        version: 1.2.0-beta.15
       '@truecourse/shared':
         specifier: workspace:*
         version: link:../shared
@@ -969,6 +972,9 @@ importers:
       '@types/node':
         specifier: ^22.19.15
         version: 22.19.15
+      playwright-core:
+        specifier: 1.62.1
+        version: 1.62.1
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -2462,6 +2468,39 @@ packages:
 
   '@lezer/yaml@1.0.4':
     resolution: {integrity: sha512-2lrrHqxalACEbxIbsjhqGpSW8kWpUKuY6RHgnSAFZa6qK62wvnPxA8hGOwOoDbwHcOFs5M4o27mjGu+P7TvBmw==}
+
+  '@lydell/node-pty-darwin-arm64@1.2.0-beta.15':
+    resolution: {integrity: sha512-6TSBbzdcLiNTHl1mTuzflqXrkmcC36USVGvERoDgvHk2ItEDaMaFZuAJ1CqPmwYj0DyhCS16TVS8OGK9xZnjyQ==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@lydell/node-pty-darwin-x64@1.2.0-beta.15':
+    resolution: {integrity: sha512-yDT2oqPqYMBScyuk1U9Rg5VKcrbMOD9o9jWYYamDADA3NSbUISroPChrqYRQ74Y7BQtNH4gqYAiWOZRi5uQZ0Q==}
+    cpu: [x64]
+    os: [darwin]
+
+  '@lydell/node-pty-linux-arm64@1.2.0-beta.15':
+    resolution: {integrity: sha512-wkbNF7dYAmtJv+o2+iztVlNwnUB4B0uX0wh/UD+mwMcmE2gNMnW9GChXO7fEE5XJokD0vB5idiHpGegaN+G/sg==}
+    cpu: [arm64]
+    os: [linux]
+
+  '@lydell/node-pty-linux-x64@1.2.0-beta.15':
+    resolution: {integrity: sha512-+U/5AVvHT6W+8OCYcnJgN0Qgc0ycO3TfD6aaFJHK+WHij797f8gsi5dV1HEO9l6YQmWCD+VL5gaLDhx3mxHwCA==}
+    cpu: [x64]
+    os: [linux]
+
+  '@lydell/node-pty-win32-arm64@1.2.0-beta.15':
+    resolution: {integrity: sha512-pyAk91w7wnnKrD4mrHXtIXRfmzSWV5bEzvRhurXcMCtCc2TJ424ciUskIgWMhAPP6y3KyUnqElj+U6kY3iOt0A==}
+    cpu: [arm64]
+    os: [win32]
+
+  '@lydell/node-pty-win32-x64@1.2.0-beta.15':
+    resolution: {integrity: sha512-2f8twEmDVxZ7drchAXjtevpmSPhFok0avAnzXro4t5gmz0xsPNKkoZvymwtuIS3xo7PzQqZOPQ/YzwEMb7oIzQ==}
+    cpu: [x64]
+    os: [win32]
+
+  '@lydell/node-pty@1.2.0-beta.15':
+    resolution: {integrity: sha512-Br8wBxzbxFwdWgk9uQ+rdzE0xfoxOK4QuGH54swhRwc5IxP6H9Y1/bcyazRGvNUs6XkB5qNVkezuKSRxUwZe7A==}
 
   '@marijn/find-cluster-break@1.0.2':
     resolution: {integrity: sha512-l0h88YhZFyKdXIFNfSWpyjStDjGHwZ/U7iobcK1cQQD8sejsONdQtTVU+1wVN1PBw40PiiHB1vA5S7VTfQiP9g==}
@@ -5404,6 +5443,11 @@ packages:
   pkg-types@2.3.1:
     resolution: {integrity: sha512-y+ichcgc2LrADuhLNAx8DFjVfgz91pRxfZdI3UDhxHvcVEZsenLO+7XaU5vOp0u/7V/wZ+plyuQxtrDlZJ+yeg==}
 
+  playwright-core@1.62.1:
+    resolution: {integrity: sha512-wPYSwEBJY9GHraISXqyqtx0na0LpO3XEX7jNDhntbex7tzUS7kLnZsOlFruFJB4Hi/rhDMjXGqHewDZ68nYZVw==}
+    engines: {node: '>=20'}
+    hasBin: true
+
   postcss-selector-parser@7.1.1:
     resolution: {integrity: sha512-orRsuYpJVw8LdAwqqLykBj9ecS5/cRHlI5+nvTo8LcCKmzDmqVORXtOIYEEQuL9D4BxtA1lm5isAqzQZCoQ6Eg==}
     engines: {node: '>=4'}
@@ -7863,6 +7907,33 @@ snapshots:
       '@lezer/common': 1.5.1
       '@lezer/highlight': 1.2.3
       '@lezer/lr': 1.4.8
+
+  '@lydell/node-pty-darwin-arm64@1.2.0-beta.15':
+    optional: true
+
+  '@lydell/node-pty-darwin-x64@1.2.0-beta.15':
+    optional: true
+
+  '@lydell/node-pty-linux-arm64@1.2.0-beta.15':
+    optional: true
+
+  '@lydell/node-pty-linux-x64@1.2.0-beta.15':
+    optional: true
+
+  '@lydell/node-pty-win32-arm64@1.2.0-beta.15':
+    optional: true
+
+  '@lydell/node-pty-win32-x64@1.2.0-beta.15':
+    optional: true
+
+  '@lydell/node-pty@1.2.0-beta.15':
+    optionalDependencies:
+      '@lydell/node-pty-darwin-arm64': 1.2.0-beta.15
+      '@lydell/node-pty-darwin-x64': 1.2.0-beta.15
+      '@lydell/node-pty-linux-arm64': 1.2.0-beta.15
+      '@lydell/node-pty-linux-x64': 1.2.0-beta.15
+      '@lydell/node-pty-win32-arm64': 1.2.0-beta.15
+      '@lydell/node-pty-win32-x64': 1.2.0-beta.15
 
   '@marijn/find-cluster-break@1.0.2': {}
 
@@ -11145,6 +11216,8 @@ snapshots:
       confbox: 0.2.4
       exsolve: 1.1.0
       pathe: 2.0.3
+
+  playwright-core@1.62.1: {}
 
   postcss-selector-parser@7.1.1:
     dependencies:

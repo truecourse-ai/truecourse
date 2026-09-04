@@ -775,9 +775,10 @@ describe('guardSetupInProcess — hosted injection', () => {
     return dir;
   }
 
-  const checklistOf = (run: { display?: { blocks: { kind: string }[] } }): { key: string; status: string }[] => {
+  type ChecklistRow = { key: string; status: string; sessionKinds?: string[] };
+  const checklistOf = (run: { display?: { blocks: { kind: string }[] } }): ChecklistRow[] => {
     const block = run.display?.blocks.find((b) => b.kind === 'checklist');
-    return (block as { items: { key: string; status: string }[] } | undefined)?.items ?? [];
+    return (block as { items: ChecklistRow[] } | undefined)?.items ?? [];
   };
 
   it('runs the sessions on the injected driver, under the caller\'s sessions key', async () => {
@@ -853,5 +854,15 @@ describe('guardSetupInProcess — hosted injection', () => {
     ]);
     expect(checklistOf(run)[0].status).toBe('error');
     expect(checklistOf(run)[1].status).toBe('pending');
+    // Each step claims the session kinds that do its work, so a surface reading
+    // run.json files every session under its step instead of after the list.
+    expect(checklistOf(run).map((i) => [i.key, i.sessionKinds])).toEqual([
+      ['recipe', ['guard-setup.recipe-repair']],
+      ['detect', []],
+      ['catalog', ['guard-setup.dependency-catalog']],
+      ['interfaces', ['guard-setup.reconcile-interfaces']],
+      ['seed', ['guard-setup.seed']],
+      ['auth', ['guard-setup.auth-proof']],
+    ]);
   }, 60_000);
 });

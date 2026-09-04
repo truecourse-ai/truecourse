@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   agentTransport,
+  buildCliStdinPayload,
+  cliInputFormatArgs,
   cliTransport,
   resolveTimeoutScale,
   resolveStallTimeoutMs,
@@ -564,5 +566,97 @@ describe('cliTransport — prompt travels over stdin, never argv', () => {
       delete process.env.TC_ARGV_OUT;
       delete process.env.TC_STDIN_OUT;
     }
+  });
+});
+
+describe('cliTransport — image attachments', () => {
+  const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUg==';
+
+  it('a text-only request writes the raw prompt and asks for no input format', () => {
+    const payload = buildCliStdinPayload({ system: 's', user: 'just words' });
+    expect(payload).toBe('just words');
+    expect(cliInputFormatArgs({ system: 's', user: 'just words' })).toEqual([]);
+    expect(cliInputFormatArgs({ system: 's', user: 'u', images: [] })).toEqual([]);
+  });
+
+  it('an image request writes ONE newline-terminated user envelope, text block first', () => {
+    const req = {
+      system: 's',
+      user: 'is the banner visible?',
+      images: [{ mediaType: 'image/png' as const, data: PNG_B64 }],
+    };
+    expect(cliInputFormatArgs(req)).toEqual(['--input-format', 'stream-json']);
+    const payload = buildCliStdinPayload(req);
+    expect(payload.endsWith('\n')).toBe(true);
+    expect(payload.trimEnd().includes('\n')).toBe(false); // exactly one NDJSON line
+    expect(JSON.parse(payload)).toEqual({
+      type: 'user',
+      session_id: '',
+      parent_tool_use_id: null,
+      message: {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'is the banner visible?' },
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG_B64 } },
+        ],
+      },
+    });
+  });
+
+  it('every image becomes its own block, after the single text block', () => {
+    const payload = buildCliStdinPayload({
+      system: 's',
+      user: 'u',
+      images: [
+        { mediaType: 'image/png', data: 'AAA' },
+        { mediaType: 'image/jpeg', data: 'BBB' },
+      ],
+    });
+    const content = JSON.parse(payload).message.content;
+    expect(content.map((c: { type: string }) => c.type)).toEqual(['text', 'image', 'image']);
+    expect(content[2].source.media_type).toBe('image/jpeg');
+  });
+
+  it('the spawned call carries --input-format and the envelope on stdin', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-argvout-'));
+    const argvOut = path.join(dir, 'argv.json');
+    const stdinOut = path.join(dir, 'stdin.txt');
+    process.env.TC_ARGV_OUT = argvOut;
+    process.env.TC_STDIN_OUT = stdinOut;
+    try {
+      const transport = cliTransport({ bin: fakeArgvStdinBin() });
+      const out = await transport({
+        id: 't', stage: 'guard.visualJudge', system: 'sys', user: 'look',
+        images: [{ mediaType: 'image/png', data: PNG_B64 }],
+        responseFormat: 'json', timeoutMs: 10_000,
+      });
+      expect(out).toBe('ok');
+      const argv: string[] = JSON.parse(fs.readFileSync(argvOut, 'utf8'));
+      expect(argv.join(' ')).toContain('--input-format stream-json');
+      // Every other flag the text path passes is untouched.
+      expect(argv).toContain('--include-partial-messages');
+      expect(argv).toContain('--tools');
+      const stdin = JSON.parse(fs.readFileSync(stdinOut, 'utf8'));
+      expect(stdin.message.content[1].source.data).toBe(PNG_B64);
+    } finally {
+      delete process.env.TC_ARGV_OUT;
+      delete process.env.TC_STDIN_OUT;
+    }
+  });
+
+  it('the agent mailbox passes images through to the answerer', async () => {
+    const io = tmpIo();
+    const transport = agentTransport(io, { pollMs: 10 });
+    const pending = transport({
+      id: 'img-1', stage: 'guard.visualJudge', system: 's', user: 'u',
+      images: [{ mediaType: 'image/png', data: PNG_B64 }],
+      timeoutMs: 5_000,
+    });
+    const reqPath = path.join(io, 'requests', 'img-1.json');
+    for (let i = 0; i < 100 && !fs.existsSync(reqPath); i++) await sleep(10);
+    const written = JSON.parse(fs.readFileSync(reqPath, 'utf8'));
+    expect(written.images).toEqual([{ mediaType: 'image/png', data: PNG_B64 }]);
+    fs.writeFileSync(path.join(io, 'responses', 'img-1.json'), JSON.stringify({ text: 'ok' }));
+    expect(await pending).toBe('ok');
   });
 });

@@ -41,6 +41,12 @@ import {
   type GuardGenerateJobRequest,
   type RepoGuardGenerateTaskDeps,
 } from './tasks/repo-guard-generate.js';
+import {
+  createRepoGuardRunTask,
+  REPO_GUARD_RUN_TASK,
+  type GuardRunJobRequest,
+  type RepoGuardRunTaskDeps,
+} from './tasks/repo-guard-run.js';
 import type { OnboardingJobRequest } from './tasks/onboarding.js';
 
 /** What an enqueue did: it queued a job, or the repo is already working. */
@@ -51,6 +57,7 @@ export interface JobsMount extends Jobs {
   enqueueScan(request: OnboardingJobRequest): Promise<EnqueueResult>;
   enqueueGuardSetup(request: GuardSetupJobRequest): Promise<EnqueueResult>;
   enqueueGuardGenerate(request: GuardGenerateJobRequest): Promise<EnqueueResult>;
+  enqueueGuardRun(request: GuardRunJobRequest): Promise<EnqueueResult>;
   /**
    * Stop everything this repository has in flight, for a disconnect. `not-here`
    * means one of its jobs is running on another replica, which is not ours to
@@ -65,7 +72,8 @@ export interface CreateServerJobsOptions {
   /** Task-body seams (tests substitute the engines each job drives). */
   scan?: Omit<RepoScanTaskDeps, 'chainGuardSetup'>;
   guardSetup?: Omit<RepoGuardSetupTaskDeps, 'chainGuardGenerate'>;
-  guardGenerate?: RepoGuardGenerateTaskDeps;
+  guardGenerate?: Omit<RepoGuardGenerateTaskDeps, 'chainGuardRun'>;
+  guardRun?: RepoGuardRunTaskDeps;
   /** How the worker runner is started. Substituted in tests. */
   startWorker?: StartWorker<Record<string, unknown>>;
   /** The live backplane. Defaults to the queue's Postgres LISTEN/NOTIFY hub. */
@@ -73,9 +81,9 @@ export interface CreateServerJobsOptions {
 }
 
 export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
-  // The scan chains into setup and setup into generate, and every enqueue lives
-  // on the mount the runner is part of — so the task list closes over a runner
-  // that exists a line later.
+  // The scan chains into setup, setup into generate and generate into the
+  // baseline run, and every enqueue lives on the mount the runner is part of —
+  // so the task list closes over a runner that exists a line later.
   let jobs!: Jobs;
 
   const enqueue = async (
@@ -103,6 +111,9 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
   const enqueueGuardGenerate = (request: GuardGenerateJobRequest): Promise<EnqueueResult> =>
     enqueue(REPO_GUARD_GENERATE_TASK, 'guard-generate', request, { ...request });
 
+  const enqueueGuardRun = (request: GuardRunJobRequest): Promise<EnqueueResult> =>
+    enqueue(REPO_GUARD_RUN_TASK, 'guard-run', request, { ...request });
+
   const tasks: readonly JobTask[] = [
     createRepoScanTask({
       ...opts.scan,
@@ -122,7 +133,16 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
         }
       },
     }),
-    createRepoGuardGenerateTask(opts.guardGenerate),
+    createRepoGuardGenerateTask({
+      ...opts.guardGenerate,
+      chainGuardRun: async (request) => {
+        const outcome = await enqueueGuardRun(request);
+        if (outcome.status === 'busy') {
+          log.info(`[jobs] the baseline run for ${request.repoFullName} is already in flight`);
+        }
+      },
+    }),
+    createRepoGuardRunTask(opts.guardRun),
   ];
 
   jobs = createJobs({
@@ -137,7 +157,12 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
     repoFullName: string,
     orgId: string,
   ): Promise<'stopped' | 'not-here'> => {
-    for (const task of [REPO_SCAN_TASK, REPO_GUARD_SETUP_TASK, REPO_GUARD_GENERATE_TASK]) {
+    for (const task of [
+      REPO_SCAN_TASK,
+      REPO_GUARD_SETUP_TASK,
+      REPO_GUARD_GENERATE_TASK,
+      REPO_GUARD_RUN_TASK,
+    ]) {
       const active = await jobs.jobStore.getActiveByKey(orgId, jobKey(task, repoFullName));
       if (!active) continue;
       if ((await jobs.cancel(active.id)) === 'not-here') return 'not-here';
@@ -149,12 +174,14 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
     enqueueScan,
     enqueueGuardSetup,
     enqueueGuardGenerate,
+    enqueueGuardRun,
     cancelRepoJobs,
   });
 }
 
-/** The session-run commands the onboarding jobs run — what `repoIsWorking` reads. */
-type RepoCommand = 'spec-scan' | 'guard-setup' | 'guard-generate';
+/** The session-run commands the onboarding jobs run — what `repoIsWorking` reads.
+ *  A run spends no sessions, so `guard-run` never has a record to find. */
+type RepoCommand = 'spec-scan' | 'guard-setup' | 'guard-generate' | 'guard-run';
 
 /** One active job per (workspace, repo, task) — the queue's single-flight key. */
 const jobKey = (task: string, repoFullName: string): string => `${task}:${repoFullName}`;
@@ -165,6 +192,7 @@ const jobKey = (task: string, repoFullName: string): string => `${task}:${repoFu
  * it (it sweeps dead-pid runs as it reads, so `running` means a live process).
  */
 function repoIsWorking(repoFullName: string, command: RepoCommand): boolean {
+  if (command === 'guard-run') return false;
   try {
     return listSessionRuns(repoFullName, command).some((run) => run.status === 'running');
   } catch {

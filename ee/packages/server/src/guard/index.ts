@@ -22,7 +22,6 @@ import {
 import type {
   GuardGenerateEnqueueRequest,
   GuardSpecRegenEnqueueRequest,
-  BaselineEnqueueRequest,
 } from '../jobs/constants.js';
 
 function orgIdOf(req: Request): string | null {
@@ -174,44 +173,5 @@ export function createGuardPrRegenEnqueue(
     await deps.enqueueGuardSpecRegen(
       buildGuardSpecRegenRequest({ repoFullName: repoKey, link, prNumber, pr, commentId: null }),
     );
-  };
-}
-
-export interface SpecBaselineScanDeps {
-  /** The gate store — resolves the connected repo link + its baseline commit. */
-  store: Pick<GateStore, 'getRepo' | 'getBaseline'>;
-  /** Single-flight repo-baseline enqueue (null = already running). */
-  enqueueBaseline(req: BaselineEnqueueRequest): Promise<string | null>;
-}
-
-/**
- * Build the `repoKey → baseline-scan enqueue` seam the dashboard installs via
- * `setSpecConflictsResolvedHook`. A repo-scope spec decision that clears the last
- * open conflict fires this so the hosted repo re-scans its baseline and the
- * conflict-free scan chains scenario generation. `force` is set because the commit
- * hasn't moved (a decision, not a push): the corpus must re-curate anyway.
- *
- * Resolution mirrors {@link createGuardGenerateEnqueue} (installation / default
- * branch / baseline commit / workspace org, all from the stored gate records).
- * Best-effort — silently no-ops when the repo isn't connected or has no baseline
- * yet; the single-flight key makes a redundant scan (one already running) a
- * harmless null.
- */
-export function createSpecConflictsResolvedBaselineScan(
-  deps: SpecBaselineScanDeps,
-): (repoKey: string) => Promise<void> {
-  return async (repoKey: string): Promise<void> => {
-    const link = await deps.store.getRepo(repoKey);
-    if (!link?.workspaceOrgId) return;
-    const baseline = await deps.store.getBaseline(repoKey);
-    if (!baseline) return;
-    await deps.enqueueBaseline({
-      repoFullName: repoKey,
-      installationId: link.installationId,
-      defaultBranch: link.defaultBranch,
-      commitSha: baseline.commitSha,
-      workspaceOrgId: link.workspaceOrgId,
-      force: true,
-    });
   };
 }

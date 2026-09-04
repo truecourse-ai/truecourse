@@ -1,4 +1,5 @@
 import type {
+  GuardEvidenceVisual,
   BrowseDirResponse,
   CapabilitiesResponse,
   GuardArtifactSource,
@@ -1081,8 +1082,13 @@ export async function getGuardLatest(repoId: string, ref?: string): Promise<Guar
 
 /** The append-only run-summary history (empty `{ runs: [] }` until a run exists).
  *  With `pr` (EE), the PR's own run timeline — one run per pushed head. */
-export function getGuardHistory(repoId: string, pr?: number): Promise<GuardHistory> {
-  const qs = pr !== undefined ? `?pr=${pr}` : '';
+export function getGuardHistory(
+  repoId: string,
+  pr?: number,
+  opts: { all?: boolean } = {},
+): Promise<GuardHistory> {
+  // `all`: every stored run of the repository, pull-request heads included.
+  const qs = pr !== undefined ? `?pr=${pr}` : opts.all ? '?all=1' : '';
   return fetchApi<GuardHistory>(`/api/repos/${repoId}/guard/history${qs}`);
 }
 
@@ -1207,10 +1213,21 @@ export function getGuardScenarios(repoId: string, ref?: string): Promise<GuardSc
 }
 
 /** A scenario's raw YAML source; null on 404 (unknown id). `ref` scopes to a PR head (EE). */
-export async function getGuardScenarioSource(repoId: string, id: string, ref?: string): Promise<GuardScenarioSource | null> {
+export async function getGuardScenarioSource(
+  repoId: string,
+  id: string,
+  ref?: string,
+  /** Where the test ran, when known: the steps then carry what each one actually did there. */
+  evidence?: { runId?: string; evidencePath?: string },
+): Promise<GuardScenarioSource | null> {
+  const where = evidence?.runId
+    ? `&runId=${encodeURIComponent(evidence.runId)}`
+    : evidence?.evidencePath
+      ? `&evidencePath=${encodeURIComponent(evidence.evidencePath)}`
+      : '';
   try {
     return await fetchApi<GuardScenarioSource>(
-      withRef(`/api/repos/${repoId}/guard/scenario?id=${encodeURIComponent(id)}`, ref),
+      withRef(`/api/repos/${repoId}/guard/scenario?id=${encodeURIComponent(id)}${where}`, ref),
     );
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return null;
@@ -1236,6 +1253,49 @@ export async function getGuardEvidence(
   });
   if (!res.ok) throw new ApiError(res.status, await res.text().catch(() => 'Evidence not found.'));
   return res.text();
+}
+
+/**
+ * WHERE a scenario's evidence bundle is, as the visual reads address it: the run it
+ * ran in, or the directory a birth finding stored. The same pair the transcript
+ * reads already split across two functions — one bundle, so one handle.
+ */
+export type GuardEvidenceWhere = { runId: string; scenarioId: string } | { evidencePath: string };
+
+function evidenceWhereParams(where: GuardEvidenceWhere): URLSearchParams {
+  return new URLSearchParams(
+    'runId' in where ? { runId: where.runId, scenarioId: where.scenarioId } : { evidencePath: where.evidencePath },
+  );
+}
+
+/**
+ * The VISUAL evidence of one scenario — the per-step screenshots and the session
+ * video a browser run left, in reading order. Always 200; a run that recorded none
+ * (every cli/api run, and every run written before the web driver existed) answers
+ * with an empty list.
+ */
+export async function getGuardEvidenceVisuals(
+  repoId: string,
+  where: GuardEvidenceWhere,
+): Promise<GuardEvidenceVisual[]> {
+  const body = await fetchApi<{ visuals?: GuardEvidenceVisual[] }>(
+    `/api/repos/${repoId}/guard/evidence/visuals?${evidenceWhereParams(where).toString()}`,
+  );
+  return body.visuals ?? [];
+}
+
+/**
+ * The URL one visual's BYTES are served from — an `<img>`/`<video>` source, not a
+ * fetch: the browser loads it itself, with the media type the route sets.
+ */
+export function guardEvidenceVisualUrl(
+  repoId: string,
+  where: GuardEvidenceWhere,
+  file: string,
+): string {
+  const params = evidenceWhereParams(where);
+  params.set('file', file);
+  return `${BASE_URL}/api/repos/${repoId}/guard/evidence/visual?${params.toString()}`;
 }
 
 /**
@@ -1338,16 +1398,14 @@ export function triggerGuardGenerate(repoId: string): Promise<{ jobId: string }>
   return fetchApi<{ jobId: string }>(`/api/repos/${repoId}/guard/generate`, { method: 'POST' });
 }
 
-export interface GuardRunTriggerResult {
-  status: string;
-  summary?: { total: number; pass: number; fail: number; stale: number; orphaned: number; error: number };
-  /** Present on a non-ok status (no recipe / no scenarios / build failure). */
-  message?: string;
-}
-
-/** Trigger `guard run` — deterministic, LLM-free, no estimate. */
-export function triggerGuardRun(repoId: string): Promise<GuardRunTriggerResult> {
-  return fetchApi<GuardRunTriggerResult>(`/api/repos/${repoId}/guard/run`, { method: 'POST' });
+/**
+ * Trigger `guard run` — deterministic, LLM-free, no estimate. The route
+ * ENQUEUES: a 202 means the run is on the queue, and the result lands over the
+ * socket (`spec:complete`, `kind: guard-run`). 409 when the repo is already
+ * working.
+ */
+export function triggerGuardRun(repoId: string): Promise<{ jobId: string }> {
+  return fetchApi<{ jobId: string }>(`/api/repos/${repoId}/guard/run`, { method: 'POST' });
 }
 
 // The optional `scope` on every spec decision mutation is the EE PR view

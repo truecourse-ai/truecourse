@@ -363,11 +363,13 @@ describe('GuardDriftsView — passed group', () => {
     // The duration lives HERE only: a row says which test and how it stands, and
     // nothing more.
     expect(await screen.findByText('Verdict')).toBeInTheDocument();
-    expect(screen.getByText('passed')).toBeInTheDocument();
-    expect(screen.getByText('4ms')).toBeInTheDocument();
+    const band = screen.getByRole('region', { name: 'Test verdict' });
+    expect(within(band).getByText('Passed')).toBeInTheDocument();
+    expect(within(band).getByText('4ms')).toBeInTheDocument();
     // A pass from a run that captured no transcript (no evidencePath) shows none —
-    // no evidence block, no toggle, no placeholder noise.
+    // no Transcript record to open, no toggle, no placeholder noise.
     expect(screen.queryByText('View evidence')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Transcript/ })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('evidence transcript')).not.toBeInTheDocument();
     // Steps render structurally (the file's own text is a footer link), and the
     // binding sits in the footer where the reader can jump into the spec. The
@@ -383,7 +385,7 @@ describe('GuardDriftsView — passed group', () => {
     expect(screen.queryByText('Expected')).not.toBeInTheDocument();
   });
 
-  it('opens a passing scenario WITH evidence — renders its transcript open on mount (evidence for passes too)', async () => {
+  it('opens a passing scenario WITH evidence — its transcript is there to open (evidence for passes too)', async () => {
     const user = userEvent.setup();
     // A pass whose run captured a transcript carries an evidencePath.
     const withPassEvidence: GuardLatest = {
@@ -405,9 +407,10 @@ describe('GuardDriftsView — passed group', () => {
     await user.click(await screen.findByText('passing claim'));
     // Still the positive one-line verdict…
     expect(await screen.findByText('Verdict')).toBeInTheDocument();
-    // …plus its own transcript, fetched on mount and shown open like a failure's
-    // (no toggle) — a green guard's proof of what executed.
+    // …plus its own transcript, fetched on mount and read by opening the record
+    // it lives in — a green guard's proof of what executed.
     expect(screen.queryByText('View evidence')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /^Transcript/ }));
     expect(await screen.findByText('EVIDENCE-TRANSCRIPT-XYZ')).toBeInTheDocument();
     expect(screen.getByLabelText('evidence transcript')).toBeInTheDocument();
     // No failure detail, though — a pass has no expected/actual.
@@ -422,18 +425,21 @@ describe('GuardDriftsView — detail', () => {
     const user = userEvent.setup();
     renderView();
     await user.click(await screen.findByText('login rate limits'));
-    expect(await screen.findByText('exit code 1')).toBeInTheDocument();
-    expect(screen.getByText('exit code 0')).toBeInTheDocument();
+    // The diff reads inside the failing step's record, which starts open.
+    expect(await screen.findByLabelText('expected value')).toHaveTextContent('exit code 1');
+    expect(screen.getByLabelText('actual value')).toHaveTextContent('exit code 0');
     // The binding doc + section are shown in the detail.
     expect(screen.getByText('§ authentication/login/rate-limiting')).toBeInTheDocument();
   });
 
-  it('renders the evidence transcript expanded on mount', async () => {
+  it('renders the evidence transcript in the record it lives in, loaded on mount', async () => {
     const user = userEvent.setup();
     renderView();
     await user.click(await screen.findByText('login rate limits'));
-    // No View/Hide evidence toggle — the transcript loads on mount, shown expanded.
+    // No View/Hide evidence toggle — the transcript loads on mount and the
+    // Transcript record shows what was already fetched.
     expect(screen.queryByText('View evidence')).not.toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: /^Transcript/ }));
     expect(await screen.findByText('EVIDENCE-TRANSCRIPT-XYZ')).toBeInTheDocument();
   });
 
@@ -441,7 +447,7 @@ describe('GuardDriftsView — detail', () => {
     const user = userEvent.setup();
     renderView();
     await user.click(await screen.findByText('login rate limits'));
-    await screen.findByText('exit code 1');
+    await screen.findByLabelText('expected value');
     // The detail pane renders no own X (its old "Close scenario" affordance)…
     expect(screen.queryByLabelText('Close scenario')).not.toBeInTheDocument();
     // …only the tab strip's per-tab close (Close s-fail) remains.
@@ -463,7 +469,7 @@ describe('GuardDriftsView — detail', () => {
     stubFetch({ latest: withOutput });
     renderView();
     await user.click(await screen.findByText('login rate limits'));
-    expect(await screen.findByText('exit code 1')).toBeInTheDocument();
+    expect(await screen.findByLabelText('expected value')).toHaveTextContent('exit code 1');
     expect(screen.getByLabelText('step output')).toHaveTextContent('drift-stdout-line');
     expect(screen.getByLabelText('step error output')).toHaveTextContent('usage: login --token <t>');
     // The retired section and its stream sub-headings render nowhere.
@@ -476,7 +482,7 @@ describe('GuardDriftsView — detail', () => {
     const user = userEvent.setup();
     renderView(); // default s-fail failure has no stdout/stderr
     await user.click(await screen.findByText('login rate limits'));
-    await screen.findByText('exit code 1');
+    await screen.findByLabelText('expected value');
     expect(screen.queryByText('Program output')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('step output')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('step error output')).not.toBeInTheDocument();
@@ -649,20 +655,24 @@ describe('GuardDriftsView — bug 1: evidence state resets across selections', (
     stubPerScenarioEvidence();
     renderView();
 
-    // Open the failed scenario — its evidence loads on mount, shown expanded.
+    // Open the failed scenario — its evidence loads on mount, read in its record.
     await user.click(await screen.findByText('login rate limits'));
+    await user.click(await screen.findByRole('button', { name: /^Transcript/ }));
     expect(await screen.findByText('EVIDENCE-FOR-s-fail')).toBeInTheDocument();
 
-    // Single-click the passing scenario (preview replaces the tab): a pass has NO
-    // evidence section and the failed transcript must be gone (fresh keyed instance).
+    // Single-click the passing scenario (preview replaces the tab): a pass with no
+    // evidence has NO transcript record at all, and the failed transcript must be
+    // gone (fresh keyed instance).
     await user.click(screen.getByText('passing claim'));
     expect(await screen.findByText('Verdict')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Transcript/ })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('evidence transcript')).not.toBeInTheDocument();
     expect(screen.queryByText('EVIDENCE-FOR-s-fail')).not.toBeInTheDocument();
 
     // Select ANOTHER failing scenario: only its OWN transcript loads on mount, and
     // the stale s-fail transcript never bleeds through (the mounted-ref race guard).
     await user.click(screen.getByText('infra broke'));
+    await user.click(await screen.findByRole('button', { name: /^Transcript/ }));
     expect(await screen.findByText('EVIDENCE-FOR-s-error')).toBeInTheDocument();
     expect(screen.queryByText('EVIDENCE-FOR-s-fail')).not.toBeInTheDocument();
   });
@@ -677,7 +687,7 @@ describe('GuardDriftsView — bug 2: preview / pin tab model', () => {
     await user.click(await screen.findByText('login rate limits'));
     expect(tabLabel('s-fail')).toHaveClass('italic');
     expect(gdrift()).toBe('s-fail');
-    expect(await screen.findByText('exit code 1')).toBeInTheDocument();
+    expect(await screen.findByLabelText('expected value')).toHaveTextContent('exit code 1');
 
     // A second single-click takes the transient slot — one tab only.
     await user.click(screen.getByText('infra broke'));
@@ -710,7 +720,7 @@ describe('GuardDriftsView — bug 2: preview / pin tab model', () => {
 
   it('a ?gdrift deep link opens the scenario as a pinned tab', async () => {
     renderView('/repos/r?section=guard&tab=guarddrifts&gdrift=s-fail');
-    expect(await screen.findByText('exit code 1')).toBeInTheDocument();
+    expect(await screen.findByLabelText('expected value')).toHaveTextContent('exit code 1');
     expect(tabLabel('s-fail')).toHaveClass('font-medium');
   });
 });
@@ -838,12 +848,12 @@ describe('GuardDriftsView — run-switch tab re-resolution', () => {
     renderView();
     // Pin s-fail — it FAILED in the latest run (expected/actual shown).
     await user.dblClick(await screen.findByText('login rate limits'));
-    expect(await screen.findByText('exit code 1')).toBeInTheDocument();
+    expect(await screen.findByLabelText('expected value')).toHaveTextContent('exit code 1');
 
     // Load the older run: same tab, but s-fail PASSED there → last-result, no failure.
     await user.click(screen.getByText(/2026-07-06T00-00-00Z/));
-    expect(await screen.findByText('passed')).toBeInTheDocument();
-    expect(screen.queryByText('exit code 1')).not.toBeInTheDocument();
+    expect(await screen.findByText('Passed')).toBeInTheDocument();
+    expect(screen.queryByLabelText('expected value')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Close s-fail')).toBeInTheDocument();
   });
 

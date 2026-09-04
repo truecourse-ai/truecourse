@@ -7,43 +7,60 @@
  * for a setup error that escaped before any step ran, which has nothing to transcribe.
  */
 
-import type { GuardCliScenario, GuardExpect, GuardScenarioResult, OutputExcerpts } from '@truecourse/shared'
-import { blockedPreconditionAnnotation } from '@truecourse/shared'
+import type {
+  GuardSandboxScenario,
+  GuardExpect,
+  GuardFileExpect,
+  GuardScenarioResult,
+} from '@truecourse/shared'
+import {
+  blockedPreconditionAnnotation,
+  guardExecutionSteps,
+  milestoneClaims,
+  milestoneOrder,
+  visualAnnotation,
+  type GuardVisualJudgment,
+} from '@truecourse/shared'
+import type { GuardVisualJudge } from './visual-judge.js'
 import { createSandbox, SandboxError, DETERMINISM_PINS } from './sandbox.js'
-import { overlayStepEnv } from './child-env.js'
 import { applyCapabilities, CapabilityError } from './capabilities/index.js'
+import {
+  applySandbox,
+  applySandboxEnv,
+  applySandboxExpect,
+  applySandboxSetup,
+  mapExpectStrings,
+} from './sandbox-token.js'
+import { applyCaptured, applyCapturedEnv, CapturedValueError } from './captured.js'
+import { resolveFixtureText, UnknownFixtureError } from './api/vars.js'
+import {
+  applySupplied,
+  applySuppliedEnv,
+  applySuppliedExpect,
+  DependencyCatalogError,
+  type SuppliedInstance,
+} from './dependencies.js'
 import { startHttpStubs, applyHttpStubOrigins, type HttpStubsHandle } from './capabilities/http.js'
 import { startExternalProxies } from './capabilities/external-proxy.js'
-import { executeStep, type StepCapture } from './executor.js'
 import type { StepObservation } from './step-stats.js'
 import { normalize, type NormalizerContext } from './normalizers.js'
 import { applyUnique, applyUniqueEnv, applyUniqueSetup } from './unique.js'
-import { evaluateExpect } from './expect.js'
 import { writeEvidence, type EvidenceStep } from './evidence.js'
+import type { ExpectMismatch } from './expect.js'
+import {
+  buildStepDrivers,
+  driverFor,
+  SANDBOX_SETUP_EXPECTED,
+  type ScenarioDrivers,
+} from './drivers/index.js'
+import type { ResolvedWebSurface } from './recipe.js'
+import type { WorldCredential } from './web/credential.js'
+import { evidenceScenarioDir } from './store.js'
 
 // Evidence records the exact determinism pins the sandbox applied — one source,
 // so what evidence claims can never drift from what the child actually saw.
 const ENV_PINS = DETERMINISM_PINS
 
-/**
- * Per-stream cap on the RAW output excerpts attached to a mismatch `failure`.
- * Mirrors the probe-transcript convention (`PROBE_OUTPUT_LIMIT` in the guard
- * generator's `ground.ts`) so the retry/finding evidence stays a manageable size.
- */
-export const FAILURE_OUTPUT_LIMIT = 1200
-
-/**
- * The RAW (un-normalized) stdout/stderr excerpts to ride next to a mismatch — each
- * head-truncated to {@link FAILURE_OUTPUT_LIMIT}, each stream omitted when it was
- * empty (no empty-string noise). Spread onto the `failure` at the mismatch site so
- * the birth-retry and the finding see the usage error the program actually printed.
- */
-function outputExcerpts(capture: StepCapture): OutputExcerpts {
-  const out: OutputExcerpts = {}
-  if (capture.stdout) out.stdout = capture.stdout.slice(0, FAILURE_OUTPUT_LIMIT)
-  if (capture.stderr) out.stderr = capture.stderr.slice(0, FAILURE_OUTPUT_LIMIT)
-  return out
-}
 
 export interface RunScenarioContext {
   repoRoot: string
@@ -57,7 +74,56 @@ export interface RunScenarioContext {
    */
   unique: string
   recipeEnv?: Record<string, string>
+  /** The recipe's `expose` map — programs put on the sandbox PATH under their name. */
+  expose?: Record<string, string | string[]>
+  /**
+   * The PROVIDED supplied instances this scenario binds, copied into its sandbox
+   * before anything runs. Only ever non-empty when every binding resolved: a
+   * scenario with an unprovided one settles `blocked` in the run planner and never
+   * reaches here.
+   */
+  supplied?: readonly SuppliedInstance[]
   stepTimeoutMs: number
+  /**
+   * The SEED's fixture manifest, when the run seeded one — what `{{fixture:…}}`
+   * resolves against in every authored string this scenario carries.
+   *
+   * Fixtures are not secrets (the seed manifest says so): they are the ids, handles
+   * and canonical documents a prepared world published, and a sandbox scenario needs
+   * them for exactly the reason an api one does — the same seeded PDF the API accepts
+   * is the one the UI must accept, and inlining it per scenario would put N copies of
+   * one unreviewable blob in the corpus. Absent ⇒ the seed did not run for this
+   * selection, and a scenario that references a fixture settles an `error` saying so
+   * rather than uploading the literal text `{{fixture:doc.base64}}`.
+   */
+  fixtures?: ReadonlyMap<string, Record<string, unknown>>
+  /**
+   * The recipe declares an `api.seed`. Only used to tell the two fixture failures
+   * apart: a fixture that does not exist is the author's mistake, and a seed that
+   * never ran for this selection is the RUN's — and sending an author to fix a
+   * manifest that is perfectly correct is the worse of the two messages.
+   *
+   * Since item 98 the run prepares the seeded world for ANY selection that needs one
+   * — a scenario referencing a fixture included — so `runGuard` no longer reaches
+   * this message. It stays because this context is a public API: a caller that
+   * assembles one without fixtures still gets the honest half of the answer rather
+   * than "no such fixture".
+   */
+  seedDeclared?: boolean
+  /**
+   * The recipe's WEB SURFACE, when it declares one — how the served app starts and
+   * how its readiness is observed. Present ⇒ a web step may open the browser
+   * against it; absent ⇒ a scenario carrying web steps settles `error` naming the
+   * missing `web` block, because a browser with nothing to point at is not a test.
+   */
+  web?: ResolvedWebSurface
+  /**
+   * The prepared world's CREDENTIALS by name — the recipe's declared ones and
+   * what the seed minted, each a header + secret — for a web `credential` step
+   * to install into the browser. The same set an api scenario references as
+   * `{{cred:<name>}}`; the value never enters a scenario or its evidence.
+   */
+  credentials?: ReadonlyMap<string, WorldCredential>
   /**
    * Run-level cancellation (external abort or the overall run wall-clock). An
    * in-flight step child is SIGKILLed and the scenario settles as an `error`
@@ -79,37 +145,27 @@ export interface RunScenarioContext {
    * not spawn is not reported.
    */
   onStep?: (observation: StepObservation) => void
-}
-
-/** The observation the runner aggregates — raw emptiness + timing, no output kept. */
-function observeStep(capture: StepCapture): StepObservation {
-  return {
-    exitCode: capture.exitCode,
-    stdoutEmpty: capture.stdout.length === 0,
-    stderrEmpty: capture.stderr.length === 0,
-    durationMs: capture.durationMs,
-  }
+  /**
+   * OPTIONAL visual judge (see {@link GuardVisualJudge}) — asked to look at the
+   * screenshot of a step that has already FAILED, and only then. Absent (every
+   * test, birth validation, any caller without a transport) ⇒ nothing changes.
+   */
+  visualJudge?: GuardVisualJudge
 }
 
 /**
- * The two fixed `failure.expected` sentinels a scenario run emits when its declared
- * SETUP could not materialize BEFORE any step ran — a bad `setup.files` path (a
- * sandbox escape) or a `setup` capability that failed (e.g. `setup.git` naming an
- * unseeded file). Both are generation defects the model can fix from the `actual`
- * message, not infrastructure, so the guard generator routes them through the one
- * evidence-retry. Named constants (not inline literals) so the produce sites below
- * and the {@link isSetupDefectResult} consume site can never drift.
+ * The `failure.expected` sentinel a scenario emits when a declared SETUP CAPABILITY
+ * could not materialize before any step ran (`setup.git` naming an unseeded file).
+ * A generation defect the model can fix from the `actual` message, not
+ * infrastructure, so the guard generator routes it through the one evidence-retry.
+ * Its sibling — a `setup.files` path escaping the sandbox — is the cli driver's
+ * {@link SANDBOX_SETUP_EXPECTED}, re-exported below so both read from one source.
  */
-export const SANDBOX_SETUP_EXPECTED = 'sandbox setup to succeed'
 export const CAPABILITY_SETUP_EXPECTED = 'setup capabilities to materialize'
 
-/**
- * The infra reason for a step whose output outlived it (`orphanedStdio`) — the
- * command returned but something it started still holds the pipes, so what the
- * step printed is only what had arrived when the run gave up waiting.
- */
-export const ORPHANED_STDIO_INFRA =
-  'the step left a background process still holding its output (a spawned daemon?)'
+// The sentinels a caller matches on, re-exported from where they are produced.
+export { SANDBOX_SETUP_EXPECTED, ORPHANED_STDIO_INFRA } from './drivers/cli-driver.js'
+export { NO_WEB_SURFACE_INFRA } from './drivers/web-driver.js'
 
 /**
  * True when an `error` outcome is a setup-declaration defect (a bad `setup.files`
@@ -125,38 +181,26 @@ export function isSetupDefectResult(result: GuardScenarioResult): boolean {
 
 /**
  * Interpolate `${unique}` in a cli EXPECTATION — its matcher values AND its
- * `files` KEYS (the asserted paths) — the same surface the cli request side has
- * (the cli driver carries no `${var}` captures or fixtures), so a scenario can
- * assert on a resource it named with `${unique}` and the failure/evidence shows
- * the resolved token. The `files` key is a path the step created from an argv that
- * WAS interpolated; leaving the key verbatim would look for a literal `${unique}`
- * filename and report every such assertion as missing.
+ * `files` KEYS (the asserted paths), through the one traversal every token pass
+ * shares — so a scenario can assert on a resource it named with `${unique}` and the
+ * failure/evidence shows the resolved token. The `files` key is a path the step
+ * created from an argv that WAS interpolated; leaving the key verbatim would look
+ * for a literal `${unique}` filename and report every such assertion as missing.
  */
-function applyUniqueExpect(expect: GuardExpect, unique: string): GuardExpect {
-  const u = (s: string): string => applyUnique(s, unique)
-  const stream = <M extends { equals?: string; contains?: string; matches?: string }>(m: M): M => ({
-    ...m,
-    ...(m.equals !== undefined ? { equals: u(m.equals) } : {}),
-    ...(m.contains !== undefined ? { contains: u(m.contains) } : {}),
-    ...(m.matches !== undefined ? { matches: u(m.matches) } : {}),
-  })
-  const file = <M extends { equals?: string; contains?: string }>(m: M): M => ({
-    ...m,
-    ...(m.equals !== undefined ? { equals: u(m.equals) } : {}),
-    ...(m.contains !== undefined ? { contains: u(m.contains) } : {}),
-  })
-  return {
-    ...expect,
-    ...(expect.stdout ? { stdout: stream(expect.stdout) } : {}),
-    ...(expect.stderr ? { stderr: stream(expect.stderr) } : {}),
-    ...(expect.files
-      ? { files: Object.fromEntries(Object.entries(expect.files).map(([k, v]) => [u(k), file(v)])) }
-      : {}),
-  }
+function applyUniqueExpect<E extends GuardExpect | GuardFileExpect>(expect: E, unique: string): E {
+  return mapExpectStrings(expect, (text) => applyUnique(text, unique))
+}
+
+/** {@link applyCaptured} across a cli expectation — matcher values and `files` keys. */
+function applyCapturedExpect<E extends GuardExpect | GuardFileExpect>(
+  expect: E,
+  values: ReadonlyMap<string, string>,
+): E {
+  return mapExpectStrings(expect, (text) => applyCaptured(text, values))
 }
 
 export async function runScenario(
-  scenario: GuardCliScenario,
+  scenario: GuardSandboxScenario,
   ctx: RunScenarioContext,
 ): Promise<GuardScenarioResult> {
   const start = Date.now()
@@ -209,6 +253,9 @@ export async function runScenario(
       recipeEnv: ctx.recipeEnv,
       scenarioEnv: setup?.env,
       setupFiles: setup?.files,
+      repoRoot: ctx.repoRoot,
+      ...(ctx.expose ? { expose: ctx.expose } : {}),
+      ...(ctx.supplied ? { supplied: ctx.supplied } : {}),
     })
   } catch (e) {
     // Setup failure (e.g. a path escape) — infra error before any step ran.
@@ -225,13 +272,41 @@ export async function runScenario(
   const normCtx: NormalizerContext = { sandboxRoot: sandbox.root, repoRoot: ctx.repoRoot }
   const normText = (t: string): string => normalize(t, scenario.normalize, normCtx)
   const records: EvidenceStep[] = []
+  /** The step currently executing — what a `${captured:…}` miss is attributed to. */
+  let stepInFlight = 1
+
+  // The FULL execution sequence: `steps`, then `teardown`, one continuous
+  // numbering. On a green run the boundary is invisible — a teardown step is an
+  // ordinary, verdict-affecting step. It matters on every other exit.
+  const mainCount = scenario.steps.length
+  const allSteps = guardExecutionSteps(scenario)
+  /**
+   * The best-effort teardown pass, assigned once the step machinery exists (it
+   * closes over the drivers and token resolvers). Hoisted so the outermost catch —
+   * which sits outside that machinery's scope — can still restore the host.
+   */
+  let finishTeardown = async (_reached: number): Promise<boolean> => true
+
+  /** Where a driver's non-text artifacts land (a screenshot, a session video). */
+  const evidenceDir = evidenceScenarioDir(ctx.repoRoot, ctx.runId, scenario.id)
+
+  // THE DRIVERS this scenario runs with — built once, closed once. Each owns the
+  // steps it declares and whatever it has to open to take them; the world they SHARE
+  // (the served surface) comes up at the first step that needs it and not before,
+  // because the surface serves the sandbox that the cli steps ahead of it populate.
+  const world: ScenarioDrivers = buildStepDrivers({
+    resolvedEntry: ctx.resolvedEntry,
+    ...(setup?.git?.identity ? { gitIdentity: setup.git.identity } : {}),
+    surface: ctx.web ?? null,
+  })
+  const drivers = world.drivers
 
   try {
     // Materialize declared setup capabilities (git, …) after files seeding. A
     // provider failure is infrastructure — an `error` outcome naming the
     // capability, never a `fail`, mirroring how a build failure surfaces.
     try {
-      applyCapabilities(setup, { cwd: sandbox.cwd, env: sandbox.env })
+      applyCapabilities(applySandboxSetup(setup, sandbox.cwd), { cwd: sandbox.cwd, env: sandbox.env })
     } catch (e) {
       const message = e instanceof CapabilityError ? e.message : e instanceof Error ? e.message : String(e)
       return {
@@ -242,133 +317,256 @@ export async function runScenario(
       }
     }
 
-    for (let i = 0; i < scenario.steps.length; i++) {
-      const step = scenario.steps[i]
+    // `${unique}`, `${supplied:…}`, `${sandbox}`, `${captured:…}` — the four tokens
+    // a scenario-authored string may carry, resolved with the same surgical
+    // substring replacement (never a parser) that `unique.ts` documents. The
+    // recipe-owned `resolvedEntry` is never touched.
+    //
+    // `${captured:…}` resolves LAST, and deliberately: its value is the only one
+    // that came from the PROGRAM rather than from the scenario, so substituting it
+    // after the others means it is inserted and never re-scanned — a command that
+    // prints `${sandbox}` cannot make the next step's argv expand it.
+    /** What each step captured, in scenario order — read live by `tok` below. */
+    const captured = new Map<string, string>()
+    /**
+     * The seed's fixtures, always ACTIVE on this surface: an empty map still makes
+     * `{{fixture:…}}` a reference that must resolve, so a scenario written against a
+     * world this selection did not prepare says so instead of handing the literal
+     * token to a child process.
+     */
+    const fixtures = ctx.fixtures ?? new Map<string, Record<string, unknown>>()
+    /**
+     * `{{fixture:…}}` FIRST, on the raw template, and the four `${…}` tokens only on
+     * the literal text between the references — the api driver's bounded-injection
+     * order (`api/vars.ts`), which is what keeps a seeded value from being re-scanned
+     * and a captured one from ever expanding into a fixture read.
+     */
+    const tok = (text: string): string =>
+      resolveFixtureText(text, fixtures, (segment) =>
+        applyCaptured(
+          applySandbox(applySupplied(applyUnique(segment, ctx.unique), sandbox.supplied), sandbox.cwd),
+          captured,
+        ),
+      )
+    const resolveExpect = <E extends GuardExpect | GuardFileExpect>(expect: E): E =>
+      applyCapturedExpect(
+        applySandboxExpect(
+          applySuppliedExpect(applyUniqueExpect(expect, ctx.unique), sandbox.supplied),
+          sandbox.cwd,
+        ),
+        captured,
+      )
+    /** The same four passes across an env overlay's VALUES (the names are literal). */
+    const resolveEnv = (env: Record<string, string>): Record<string, string> =>
+      applyCapturedEnv(
+        applySandboxEnv(applySuppliedEnv(applyUniqueEnv(env, ctx.unique), sandbox.supplied), sandbox.cwd),
+        captured,
+      )
+
+    /**
+     * The context ONE step executes under. `cancellable: false` is the best-effort
+     * teardown discipline: a cancelled run still restores the host, so its teardown
+     * steps run without the run signal (each still bounded by the step budget).
+     */
+    const stepContext = (stepIndex: number, cancellable: boolean) => ({
+      stepIndex,
+      sandbox,
+      repoRoot: ctx.repoRoot,
+      runId: ctx.runId,
+      scenarioId: scenario.id,
+      evidenceDir,
+      tok,
+      resolveExpect,
+      resolveEnv,
+      normText,
+      publishCaptures: (values: Record<string, string>) => {
+        for (const [name, value] of Object.entries(values)) captured.set(name, value)
+      },
+      stepTimeoutMs: ctx.stepTimeoutMs,
+      ...(ctx.credentials ? { credentials: ctx.credentials } : {}),
+      ...(cancellable && ctx.signal ? { signal: ctx.signal } : {}),
+      ...(ctx.onStep ? { onStep: ctx.onStep } : {}),
+    })
+
+    /**
+     * Execute every teardown step not yet reached, BEST-EFFORT — called on every
+     * non-green exit (a failure, an infrastructure error, a cancellation) so host
+     * state the scenario mutated outside its sandbox is restored on exactly the
+     * runs that used to leak it. `reached` is the 1-based index of the last step
+     * attempted; teardown resumes after it, never before the teardown boundary.
+     * The scenario has ALREADY settled, so nothing here can move the verdict: a
+     * step that misses or cannot run is recorded (`teardownMiss` on its evidence
+     * record) and the loop continues — the next step may still restore what it
+     * owns. Returns false when anything missed, which the result surfaces as the
+     * `teardownIncomplete` annotation.
+     */
+    finishTeardown = async (reached: number): Promise<boolean> => {
+      let complete = true
+      for (let j = Math.max(reached, mainCount); j < allSteps.length; j++) {
+        const step = allSteps[j]
+        const stepIndex = j + 1
+        stubs?.markStep(stepIndex)
+        try {
+          const outcome = await driverFor(step, drivers).execute(step, stepContext(stepIndex, false))
+          if (outcome.status === 'aborted') {
+            complete = false
+            continue
+          }
+          for (const r of outcome.records) r.teardown = true
+          const miss =
+            outcome.status === 'fail'
+              ? { expected: outcome.mismatch.expected, actual: outcome.mismatch.actual }
+              : outcome.status === 'error'
+                ? { expected: outcome.expected, actual: outcome.message }
+                : null
+          if (miss) {
+            complete = false
+            const last = outcome.records[outcome.records.length - 1]
+            if (last) last.teardownMiss = miss
+          }
+          records.push(...outcome.records)
+        } catch (e) {
+          // A `${captured:…}` whose value the interrupted run never produced, or
+          // any other reason the step could not be taken. Recorded, not thrown:
+          // an exception here would mask the scenario's own, already-settled result.
+          complete = false
+          const message = e instanceof Error ? e.message : String(e)
+          records.push({
+            index: stepIndex,
+            teardown: true,
+            argv: [],
+            repeat: 1,
+            iterationsRun: 0,
+            exitCode: null,
+            timedOut: false,
+            spawnError: message,
+            rawStdout: '',
+            rawStderr: '',
+            normStdout: '',
+            normStderr: '',
+            durationMs: 0,
+            teardownMiss: { expected: 'the teardown step to be taken', actual: message },
+          })
+        }
+      }
+      return complete
+    }
+
+    for (let i = 0; i < allSteps.length; i++) {
+      const step = allSteps[i]
       const stepIndex = i + 1
+      stepInFlight = stepIndex
+      const stepMilestone = milestoneOrder(step.milestone)
       // Attribute any stub violation raised while this step runs to THIS step.
       stubs?.markStep(stepIndex)
-      // Substitute `${unique}` in the scenario-authored argv + stdin + env overlay
-      // (the recipe-owned `resolvedEntry` is left verbatim). The cli driver has no
-      // other `${var}` mechanism, so this is a surgical token replacement, not a
-      // parser. Evidence records the RESOLVED overlay — what the child actually saw.
-      const argv = [...ctx.resolvedEntry, ...step.run.map((a) => applyUnique(a, ctx.unique))]
-      const stdin = step.stdin === undefined ? undefined : applyUnique(step.stdin, ctx.unique)
-      const stepEnvOverlay = step.env ? applyUniqueEnv(step.env, ctx.unique) : undefined
-      const repeat = step.repeat ?? 1
-      // This step's env: the scenario sandbox env with the step's own overlay on
-      // top, scoped to these child spawns only — the next step sees `sandbox.env`
-      // again. `resolvedEntry` was pinned to an absolute interpreter at run start,
-      // so a step PATH edit reaches CHILD lookups but never the entrypoint.
-      const stepEnv = overlayStepEnv(sandbox.env, stepEnvOverlay)
-      const invocation = {
-        argv,
-        stdin,
-        ...(stepEnvOverlay ? { env: stepEnvOverlay } : {}),
-        repeat,
+
+      if (ctx.signal?.aborted) {
+        // Cancellation still restores the host: the steps already taken may have
+        // installed exactly what teardown removes. Nothing run yet ⇒ nothing to undo.
+        if (i > 0) await finishTeardown(i)
+        return abortedResult(base, stepIndex, start)
       }
 
-      let lastCapture: StepCapture | null = null
-      for (let iteration = 1; iteration <= repeat; iteration++) {
-        if (ctx.signal?.aborted) return abortedResult(base, stepIndex, start)
-        const capture = await executeStep({
-          argv,
-          cwd: sandbox.cwd,
-          env: stepEnv,
-          stdin,
-          timeoutMs: ctx.stepTimeoutMs,
-          signal: ctx.signal,
-        })
-        lastCapture = capture
-        // Aggregate every step that actually spawned (a spawn failure never ran).
-        if (!capture.spawnError) ctx.onStep?.(observeStep(capture))
-        // A capture ended by cancellation is not a verdict — settle without evidence.
-        if (ctx.signal?.aborted) return abortedResult(base, stepIndex, start)
+      // THE DISPATCH, and the only thing this loop knows about surfaces: the step
+      // says how it acts, the registry says who takes it. What comes back is the
+      // shared outcome vocabulary, so everything below is about the SCENARIO —
+      // evidence, milestone attribution, the verdict — and nothing below branches
+      // on what kind of step it was.
+      const outcome = await driverFor(step, drivers).execute(step, stepContext(stepIndex, true))
+      if (ctx.signal?.aborted || outcome.status === 'aborted') {
+        await finishTeardown(stepIndex)
+        return abortedResult(base, stepIndex, start)
+      }
+      if (stepIndex > mainCount) for (const r of outcome.records) r.teardown = true
+      records.push(...outcome.records)
+      if (outcome.status === 'ok') continue
 
-        // Infrastructure problem — never a scenario fail.
-        if (capture.spawnError || capture.timedOut || capture.orphanedStdio) {
-          // `timedOut` and `orphanedStdio` are mutually exclusive by construction
-          // (see StepCapture): the command either overran the budget or finished
-          // and left its stdio held. One reason each, never both.
-          const infra = capture.spawnError
-            ? `failed to spawn: ${capture.spawnError}`
-            : capture.timedOut
-              ? `step timed out after ${ctx.stepTimeoutMs}ms`
-              : ORPHANED_STDIO_INFRA
-          records.push(toRecord({ index: stepIndex, ...invocation, iterationsRun: iteration }, capture, normText))
-          const evidencePath = writeEvidence({
-            repoRoot: ctx.repoRoot,
-            runId: ctx.runId,
-            scenarioId: scenario.id,
-            title: scenario.title,
-            ...evidenceRefs,
-            outcome: 'error',
-            steps: records,
-            failingStep: stepIndex,
-            infraMessage: infra,
-            sandboxCwd: sandbox.cwd,
-            envPins: ENV_PINS,
-          })
-          return {
-            ...base,
-            outcome: 'error',
-            durationMs: Date.now() - start,
-            ...(step.milestone ? { failedMilestone: step.milestone } : {}),
-            failure: { step: stepIndex, expected: 'the step to run', actual: infra },
-            evidencePath,
-          }
-        }
+      // THE VISUAL JUDGE. It runs HERE and nowhere else: the deterministic verdict
+      // is already settled (the expectation's own poll loop has run out), the step
+      // has left a picture of the page it settled against, and nothing below can
+      // change `outcome.status`. One call per failing scenario — the loop returns
+      // on the first failing step, so there is never a second.
+      const failed = outcome.status === 'fail' ? outcome : null
+      const claim = stepClaim(step)
+      const judgment =
+        failed?.visual && ctx.visualJudge && !ctx.signal?.aborted
+          ? await judgeVisually(
+              ctx.visualJudge,
+              {
+                screenshotPath: failed.visual.screenshotPath,
+                ...(claim !== undefined ? { claim } : {}),
+                expectation: failed.visual.expectation,
+                expected: failed.mismatch.expected,
+                actual: failed.mismatch.actual,
+                stepIndex,
+                scenarioId: scenario.id,
+              },
+              ctx.signal,
+            )
+          : null
 
-        const normStdout = normText(capture.stdout)
-        const normStderr = normText(capture.stderr)
-        const mismatch = evaluateExpect({
-          expect: applyUniqueExpect(step.expect, ctx.unique),
-          exitCode: capture.exitCode,
-          stdout: normStdout,
-          stderr: normStderr,
-          sandboxCwd: sandbox.cwd,
-          normalizeText: normText,
-        })
+      // The teardown steps not yet reached run NOW, best-effort, before the
+      // evidence is written — their records belong in the same bundle, and the
+      // host must be restored on exactly the runs that used to leak it.
+      const teardownComplete = await finishTeardown(stepIndex)
 
-        if (mismatch) {
-          records.push(toRecord({ index: stepIndex, ...invocation, iterationsRun: iteration }, capture, normText))
-          const evidencePath = writeEvidence({
-            repoRoot: ctx.repoRoot,
-            runId: ctx.runId,
-            scenarioId: scenario.id,
-            title: scenario.title,
-            ...evidenceRefs,
-            outcome: 'fail',
-            steps: records,
-            failingStep: stepIndex,
-            mismatch,
-            sandboxCwd: sandbox.cwd,
-            envPins: ENV_PINS,
-          })
-          return {
-            ...base,
-            outcome: 'fail',
-            durationMs: Date.now() - start,
-            // The flow milestone that broke — absent when the step is plumbing.
-            ...(step.milestone ? { failedMilestone: step.milestone } : {}),
-            // Plumbing that broke in a MILESTONED scenario is a blocked precondition
-            // (a setup step asserting nothing about the spec), not doc-vs-code drift.
-            // An annotation only — the outcome stays `fail`.
-            ...blockedPreconditionAnnotation(scenario.steps, stepIndex),
-            failure: {
-              step: stepIndex,
-              expected: mismatch.expected,
-              actual: mismatch.actual,
-              // The RAW child output that produced this mismatch (NOT the normalized
-              // text matched against) — head-truncated, empty streams omitted.
-              ...outputExcerpts(capture),
-            },
-            evidencePath,
-          }
+      // A step that could not be taken BEFORE it produced any record has nothing to
+      // transcribe (a `cwd` that escapes the sandbox is the case): it settles like a
+      // setup escape, with no bundle, exactly as it always has.
+      const writable = outcome.records.length > 0 || records.length > 0
+      const evidencePath =
+        !writable && outcome.status === 'error' && outcome.expected === SANDBOX_SETUP_EXPECTED
+          ? undefined
+          : writeEvidence({
+              repoRoot: ctx.repoRoot,
+              runId: ctx.runId,
+              scenarioId: scenario.id,
+              title: scenario.title,
+              ...evidenceRefs,
+              outcome: outcome.status,
+              steps: records,
+              failingStep: stepIndex,
+              ...(outcome.status === 'fail'
+                ? { mismatch: outcome.mismatch, ...(judgment ? { visual: judgment } : {}) }
+                : { infraMessage: outcome.message }),
+              sandboxCwd: sandbox.cwd,
+              envPins: ENV_PINS,
+            })
+
+      if (outcome.status === 'error') {
+        return {
+          ...base,
+          outcome: 'error',
+          durationMs: Date.now() - start,
+          ...(stepMilestone ? { failedMilestone: stepMilestone } : {}),
+          ...(teardownComplete ? {} : { teardownIncomplete: true }),
+          failure: { step: stepIndex, expected: outcome.expected, actual: outcome.message },
+          ...(evidencePath ? { evidencePath } : {}),
         }
       }
-
-      if (lastCapture) {
-        records.push(toRecord({ index: stepIndex, ...invocation, iterationsRun: repeat }, lastCapture, normText))
+      return {
+        ...base,
+        outcome: 'fail',
+        durationMs: Date.now() - start,
+        // The flow milestone that broke — absent when the step is plumbing.
+        ...(stepMilestone ? { failedMilestone: stepMilestone } : {}),
+        ...(teardownComplete ? {} : { teardownIncomplete: true }),
+        // Plumbing that broke in a MILESTONED scenario is a blocked precondition (a
+        // setup step asserting nothing about the spec), not doc-vs-code drift. An
+        // annotation only — the outcome stays `fail`.
+        ...blockedPreconditionAnnotation(allSteps, stepIndex),
+        failure: {
+          step: stepIndex,
+          expected: outcome.mismatch.expected,
+          actual: outcome.mismatch.actual,
+          // The RAW output that produced this mismatch (NOT the normalized text
+          // matched against) — head-truncated, empty streams omitted.
+          ...(outcome.excerpts ?? {}),
+          // The judge's compact annotation — advisory, and absent whenever no
+          // verdict was reached. The full rationale stayed in the transcript.
+          ...(judgment ? { visual: visualAnnotation(judgment) } : {}),
+        },
+        ...(evidencePath ? { evidencePath } : {}),
       }
     }
 
@@ -380,7 +578,7 @@ export async function runScenario(
     // credentials, so there is nothing to redact out of the recorded excerpts.
     const violation = stubs?.settle() ?? null
     if (violation) {
-      const violationStep = violation.step ?? scenario.steps.length
+      const violationStep = violation.step ?? allSteps.length
       const evidencePath = writeEvidence({
         repoRoot: ctx.repoRoot,
         runId: ctx.runId,
@@ -399,13 +597,13 @@ export async function runScenario(
         sandboxCwd: sandbox.cwd,
         envPins: ENV_PINS,
       })
-      const milestone = scenario.steps[violationStep - 1]?.milestone
+      const milestone = milestoneOrder(allSteps[violationStep - 1]?.milestone)
       return {
         ...base,
         outcome: 'fail',
         durationMs: Date.now() - start,
         ...(milestone ? { failedMilestone: milestone } : {}),
-        ...blockedPreconditionAnnotation(scenario.steps, violationStep),
+        ...blockedPreconditionAnnotation(allSteps, violationStep),
         failure: { step: violationStep, expected: violation.expected, actual: violation.actual },
         evidencePath,
       }
@@ -428,9 +626,153 @@ export async function runScenario(
         })
       : undefined
     return { ...base, outcome: 'pass', durationMs: Date.now() - start, ...(evidencePath ? { evidencePath } : {}) }
+  } catch (e) {
+    // A `{{fixture:…}}` that resolves against nothing. An `error`, not a `fail` —
+    // the scenario never got to observe the app — and it says WHICH of the two
+    // mistakes it is: a fixture the seed does not publish (the author's), or a seed
+    // that did not run for this selection (the run's, and no edit to the scenario
+    // would fix it). The api driver settles the same throw the same way.
+    if (e instanceof UnknownFixtureError) {
+      const reference = `{{fixture:${e.fixture}}}`
+      return {
+        ...base,
+        outcome: 'error',
+        durationMs: Date.now() - start,
+        failure: {
+          step: stepInFlight,
+          expected: `fixture "${e.fixture}" to be provided by the recipe's api.seed`,
+          actual:
+            ctx.fixtures === undefined && ctx.seedDeclared
+              ? `${reference} — the seed did not run for this selection, so no fixture values exist; ` +
+                'the recipe declares an `api.seed` this run never executed, so the gap is the RUN’s and no edit to the scenario closes it'
+              : e.message,
+        },
+      }
+    }
+    // A `${captured:…}` with nothing behind it. The loader's cross-check rejects
+    // every committed scenario that could get here, so this is a freshly authored
+    // one in birth validation: an author-fixable defect, reported as a `fail`
+    // naming the reference (the api driver's `UnknownVariableError` rule), never a
+    // literal token handed to a child process.
+    //
+    // A `${supplied:…}` naming a field its registration does not declare throws the
+    // same way mid-step (the name-level gate ran, the field-level miss can only
+    // surface at resolution). It settles THIS scenario as an `error` naming the
+    // reference — one scenario's defect must never reject the whole run.
+    if (!(e instanceof CapturedValueError) && !(e instanceof DependencyCatalogError)) throw e
+    // The thrower is skipped (re-resolving it would throw identically); the
+    // teardown steps after it still run, best-effort, before evidence is written.
+    const teardownComplete = await finishTeardown(stepInFlight)
+    if (e instanceof DependencyCatalogError) {
+      const evidencePath =
+        records.length > 0
+          ? writeEvidence({
+              repoRoot: ctx.repoRoot,
+              runId: ctx.runId,
+              scenarioId: scenario.id,
+              title: scenario.title,
+              ...evidenceRefs,
+              outcome: 'error',
+              steps: records,
+              failingStep: stepInFlight,
+              infraMessage: e.message,
+              sandboxCwd: sandbox.cwd,
+              envPins: ENV_PINS,
+            })
+          : undefined
+      return {
+        ...base,
+        outcome: 'error',
+        durationMs: Date.now() - start,
+        ...(teardownComplete ? {} : { teardownIncomplete: true }),
+        failure: {
+          step: stepInFlight,
+          expected: 'every `${supplied:…}` reference to name a declared registration field',
+          actual: e.message,
+        },
+        ...(evidencePath ? { evidencePath } : {}),
+      }
+    }
+    const mismatch: ExpectMismatch = {
+      subject: 'capture',
+      expected: `\${captured:${e.variable}} to be captured by an earlier step`,
+      actual: e.message,
+      detail: [e.message],
+    }
+    const evidencePath = writeEvidence({
+      repoRoot: ctx.repoRoot,
+      runId: ctx.runId,
+      scenarioId: scenario.id,
+      title: scenario.title,
+      ...evidenceRefs,
+      outcome: 'fail',
+      steps: records,
+      failingStep: stepInFlight,
+      mismatch,
+      sandboxCwd: sandbox.cwd,
+      envPins: ENV_PINS,
+    })
+    return {
+      ...base,
+      outcome: 'fail',
+      durationMs: Date.now() - start,
+      ...(teardownComplete ? {} : { teardownIncomplete: true }),
+      ...blockedPreconditionAnnotation(allSteps, stepInFlight),
+      failure: { step: stepInFlight, expected: mismatch.expected, actual: mismatch.actual },
+      evidencePath,
+    }
   } finally {
+    // Every driver's world goes down BEFORE the sandbox directory it acted in: the
+    // served surface runs with the sandbox as its cwd, and killing it first is what
+    // keeps a scenario from leaving a server holding a deleted directory.
+    await world.close()
     await stubs?.stop()
     sandbox.cleanup()
+  }
+}
+
+
+/**
+ * The step's HUMAN-level claim, for the judge: the authoring note if it has one
+ * (it says why this assertion is the falsifiable form of the claim), else the
+ * claim identities of the milestone it realizes. Undefined when it carries
+ * neither, which is honest — a plumbing step is about nothing in particular.
+ */
+function stepClaim(step: GuardSandboxScenario['steps'][number]): string | undefined {
+  const note = step.note?.trim()
+  if (note) return note
+  const claims = milestoneClaims(step.milestone)
+  return claims.length > 0 ? claims.join(' · ') : undefined
+}
+
+/**
+ * Ask the judge, and never let it matter that it failed. A judge is an optional
+ * annotator over an ALREADY-DECIDED verdict: a thrown call (no transport, a dead
+ * network, a timeout) must leave the run bit-identical to one that had no judge.
+ * The run's cancel signal settles it to `null` IMMEDIATELY — an advisory
+ * annotation must never keep a cancelled run waiting on a vision call.
+ */
+async function judgeVisually(
+  judge: GuardVisualJudge,
+  input: Parameters<GuardVisualJudge>[0],
+  signal?: AbortSignal,
+): Promise<GuardVisualJudgment | null> {
+  try {
+    const call = judge(input)
+    if (!signal) return await call
+    return await Promise.race([
+      call,
+      new Promise<null>((resolve) => {
+        const onAbort = (): void => resolve(null)
+        if (signal.aborted) return onAbort()
+        signal.addEventListener('abort', onAbort, { once: true })
+        // The judge settling first unhooks the listener; its own catch below still
+        // owns every failure path.
+        void call.finally(() => signal.removeEventListener('abort', onAbort)).catch(() => {})
+      }),
+    ])
+  } catch {
+    return null
   }
 }
 
@@ -448,20 +790,4 @@ function abortedResult(
   }
 }
 
-function toRecord(
-  invocation: Pick<EvidenceStep, 'index' | 'argv' | 'stdin' | 'env' | 'repeat' | 'iterationsRun'>,
-  capture: StepCapture,
-  normText: (t: string) => string,
-): EvidenceStep {
-  return {
-    ...invocation,
-    exitCode: capture.exitCode,
-    timedOut: capture.timedOut,
-    spawnError: capture.spawnError,
-    rawStdout: capture.stdout,
-    rawStderr: capture.stderr,
-    normStdout: normText(capture.stdout),
-    normStderr: normText(capture.stderr),
-    durationMs: capture.durationMs,
-  }
-}
+

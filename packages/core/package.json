@@ -52,6 +52,10 @@
       "types": "./dist/commands/guard-dependencies.d.ts",
       "import": "./dist/commands/guard-dependencies.js"
     },
+    "./commands/guard-adjudicate": {
+      "types": "./dist/commands/guard-adjudicate.d.ts",
+      "import": "./dist/commands/guard-adjudicate.js"
+    },
     "./commands/guard-externals": {
       "types": "./dist/commands/guard-externals.d.ts",
       "import": "./dist/commands/guard-externals.js"
@@ -159,10 +163,6 @@
     "./lib/repo-lifecycle": {
       "types": "./dist/lib/repo-lifecycle.d.ts",
       "import": "./dist/lib/repo-lifecycle.js"
-    },
-    "./lib/spec-conflicts-resolved-hook": {
-      "types": "./dist/lib/spec-conflicts-resolved-hook.d.ts",
-      "import": "./dist/lib/spec-conflicts-resolved-hook.js"
     },
     "./lib/spec-inheritance-hook": {
       "types": "./dist/lib/spec-inheritance-hook.d.ts",
@@ -287,6 +287,10 @@
     "./services/llm/probe": {
       "types": "./dist/services/llm/probe.d.ts",
       "import": "./dist/services/llm/probe.js"
+    },
+    "./services/llm/guard-visual-judge": {
+      "types": "./dist/services/llm/guard-visual-judge.d.ts",
+      "import": "./dist/services/llm/guard-visual-judge.js"
     },
     "./services/telemetry": {
       "types": "./dist/services/telemetry.service.d.ts",

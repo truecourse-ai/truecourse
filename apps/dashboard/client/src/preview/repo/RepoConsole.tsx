@@ -193,6 +193,26 @@ export default function RepoConsole() {
             ) : (
               <DependenciesTab repo={repo} />
             )
+          ) : active === 'tests' && repo.real ? (
+            // REAL, not mock: the tests of a connected repository are the flows
+            // its generate stored, read over `/api/repos/<id>/guard/flows` and
+            // re-read when a generate or a run lands — the same two views the
+            // fixture repositories get, the table and one test as its own page.
+            flowId ? (
+              <TestPage repo={repo} flowId={decodeURIComponent(flowId)} />
+            ) : (
+              <TestsTab repo={repo} />
+            )
+          ) : active === 'runs' && repo.real ? (
+            // REAL, not mock: every run the server stored for a connected
+            // repository — the baseline runs and the pull-request head runs the
+            // gate wrote — over `/api/repos/<id>/guard/history?all=1`, and one
+            // run's snapshot with its evidence as its own page.
+            runId ? (
+              <RunPage repo={repo} runId={decodeURIComponent(runId)} />
+            ) : (
+              <RunsTab repo={repo} />
+            )
           ) : active === 'corpus' && repo.real ? (
             // REAL, not mock: the corpus of a connected repository is what its
             // scan stored on the server, read over `/api/repos/<id>/spec/*`,

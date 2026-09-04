@@ -1,17 +1,20 @@
 /**
- * The three guard-generator prompts — whole-document claim extraction, batched
- * scenario authoring, and recipe discovery — plus their content fingerprints
+ * The guard-generator prompt doctrine — scenario authoring (reused verbatim as
+ * the flow-worker session prompts' base), fidelity review (the worker's child
+ * reviewer's base), realization matching, recipe discovery, and the seed
+ * doctrine guard-setup's session reuses — plus their content fingerprints
  * (folded into the cache keys so a prompt edit re-runs the affected stage).
+ * The retired one-shot extract/flows prompts are gone (plan 04 step 20); the
+ * session prompts that replaced them live in `@truecourse/core`.
  *
  * Every output shape a prompt asks for is the JSON Schema rendered from the SAME
  * Zod definition the engine validates the reply with — never hand-written prose
  * that could drift from the engine. `GENERATE_SYSTEM_PROMPT` embeds
  * `RawGeneratedScenarioSchema` (the behavioral fields the model authors — engine-
  * owned fields like `id`/`binds`/`guard` are not in the model's vocabulary at
- * all); `EXTRACT_SYSTEM_PROMPT` the per-document `DocExtractionSchema`;
- * `RECIPE_SYSTEM_PROMPT` the proposal (`RecipeProposalSchema`). Hand-written
- * prose that can drift from the schema is exactly what burned the contract
- * prompts; here the schema IS the documentation.
+ * all); `RECIPE_SYSTEM_PROMPT` the proposal (`RecipeProposalSchema`).
+ * Hand-written prose that can drift from the schema is exactly what burned the
+ * contract prompts; here the schema IS the documentation.
  *
  * The prompts are written to be reliable on the smallest supported model: closed
  * enumerations, one canonical schema, a single JSON object/array out, and an
@@ -19,18 +22,25 @@
  */
 
 import { createHash } from 'node:crypto'
-import type { InvalidMatchPattern, OutputExcerpts } from '@truecourse/shared'
+import type { InterfaceResource, InvalidMatchPattern, OutputExcerpts } from '@truecourse/shared'
+import {
+  describeWebLocator,
+  GuardStreamMatcherSchema,
+  GuardWebCapturesSchema,
+  GuardWebExpectSchema,
+  GuardWebFileSchema,
+  GuardWebLocatorSchema,
+  GuardWebStateSchema,
+  type GuardDriverId,
+} from '@truecourse/shared'
 import { jsonSchemaHint, OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm'
 import {
-  CLAIM_DRIVERS,
-  DocExtractionSchema,
   RecipeProposalSchema,
   SeedProposalSchema,
   RawGeneratedCliScenarioSchema,
   RawGeneratedApiScenarioSchema,
+  RawGeneratedWebScenarioObjectSchema,
   FidelityReviewSchema,
-  FlowSynthesisSchema,
-  EpicSynthesisSchema,
   RealizationMatchSchema,
 } from './schemas.js'
 import type { ProbeTranscript } from './ground.js'
@@ -42,16 +52,23 @@ import type { MinedExampleBlock } from './examples.js'
  *  per runnable driver: each authoring prompt embeds its own. */
 const SCENARIO_JSON_SCHEMA = jsonSchemaHint(RawGeneratedCliScenarioSchema.strip())
 const API_SCENARIO_JSON_SCHEMA = jsonSchemaHint(RawGeneratedApiScenarioSchema.strip())
+/** The web arm's hint NAMES its deeply-shared sub-schemas: the locator union (with
+ *  its 80-role enum) recurs in every verb, expectation and capture, and inlined it
+ *  renders at ~119K characters — named under `definitions`, ~18K. */
+const WEB_SCENARIO_JSON_SCHEMA = jsonSchemaHint(RawGeneratedWebScenarioObjectSchema.strip(), {
+  webLocator: GuardWebLocatorSchema,
+  webState: GuardWebStateSchema,
+  webExpect: GuardWebExpectSchema,
+  webCaptures: GuardWebCapturesSchema,
+  webFile: GuardWebFileSchema,
+  matcher: GuardStreamMatcherSchema,
+})
 /** The extraction + recipe-proposal JSON Schemas, from the runner's Zod source. */
-const EXTRACTION_JSON_SCHEMA = jsonSchemaHint(DocExtractionSchema)
 const RECIPE_JSON_SCHEMA = jsonSchemaHint(RecipeProposalSchema)
 /** The seed-draft JSON Schema, from the engine's own Zod source. */
 const SEED_JSON_SCHEMA = jsonSchemaHint(SeedProposalSchema)
 /** The fidelity-review verdict JSON Schema, from the runner's Zod source. */
 const FIDELITY_JSON_SCHEMA = jsonSchemaHint(FidelityReviewSchema)
-/** The flow-synthesis JSON Schemas (per-area composition + the epic pass). */
-const FLOWS_JSON_SCHEMA = jsonSchemaHint(FlowSynthesisSchema)
-const FLOWS_EPIC_JSON_SCHEMA = jsonSchemaHint(EpicSynthesisSchema)
 /** The realization-matching verdict JSON Schema, from the runner's Zod source. */
 const MATCH_JSON_SCHEMA = jsonSchemaHint(RealizationMatchSchema)
 
@@ -72,176 +89,16 @@ export interface OutlineEntry {
   level: number
 }
 
-/** Render the document outline as a compact, one-anchor-per-line list. The anchor
- *  already carries the heading path, so no extra heading text is needed. */
-function renderOutline(outline: OutlineEntry[]): string {
-  return outline.map((e) => e.anchor).join('\n')
-}
-
 // ---------------------------------------------------------------------------
-// Claim extraction
+// Retired one-shot stages
 // ---------------------------------------------------------------------------
 
-export const EXTRACT_SYSTEM_PROMPT = `\
-You read ONE specification document and extract the CLAIMS in it that an executable
-test could verify — each a single, externally-observable behavior the document
-guarantees. You return JSON only: the claims, plus a note for every section that
-states no testable behavior. No prose outside the JSON.
-
-${OUTPUT_ONLY_GUARDRAIL}
-
-# What a claim is
-A claim is ONE concrete, observable behavior a program guarantees: an exit code,
-text written to stdout/stderr, a file created or changed, an HTTP response, a
-datastore change, a rendered UI element. Write each claim as a single declarative
-sentence, in the document's own terms.
-
-# Be selective — extract behaviors, not sentences
-Return the SMALLEST set of claims that captures what a section actually guarantees.
-This is the most important rule after faithfulness:
-- A well-covered section yields a HANDFUL of claims (roughly 1–8), not dozens. If
-  you are emitting more than ~8 claims for one section, you are almost certainly
-  over-splitting — consolidate.
-- ONE claim per distinct behavior, not one per sentence, per listed flag, or per
-  example. A command documented with several options is usually ONE claim about
-  its primary observable outcome; give a flag its own claim only when the section
-  states a SEPARATE, distinct observable behavior for it.
-- Do not extract a claim for every item merely because a section lists it (a
-  command map, an options table, an enumeration). Extract the behaviors the
-  section explicitly specifies an outcome for.
-- Skip trivial, obvious, or restated behaviors. Prefer fewer, higher-value claims;
-  when unsure whether something is a distinct testable behavior, leave it out.
-
-# Drivers — which kind of test could assert the claim
-- cli — a command-line program's behavior when invoked with arguments (and
-  optional stdin): its exit code, what it writes to stdout/stderr, or the files it
-  creates or changes.
-- api — an HTTP/RPC service's response, or the datastore state a request leaves —
-  AND the behavior of the service PROCESS itself: that it starts (or refuses to
-  start, with an exit code and a message) under a given configuration, that it
-  applies migrations at boot, what it writes to stdout/stderr while serving, that it
-  shuts down on SIGTERM/SIGINT, and that its state survives a restart. A claim about
-  the SERVER's own lifecycle is an \`api\` claim, not a \`cli\` one; \`cli\` is for a
-  COMMAND a user runs to completion (a package script, a tool invocation), which is a
-  different program from the service.
-  cli and api are the drivers tests are authored for today; still extract
-  web/tui/library claims so the coverage picture stays honest.
-- web — a browser UI (navigation, clicks, visible content).
-- tui — an interactive terminal UI (keystrokes, on-screen contents).
-- library — the package's programmatic API, consumed by IMPORTING it from user
-  code: \`import\`/\`require\` of the package or its subpaths, calling its exported
-  functions/classes/hooks, registering it from a program. The deciding line is the
-  documented consumption form, not the feature: the SAME capability is \`cli\` when
-  the docs invoke a command and \`library\` when they tell the user to write code
-  that imports the package.
-
-# Faithfulness — the prime directive
-Extract ONLY what the text states. Never infer a behavior the words do not state.
-A claim that overreaches the prose is worse than a missing one. When a section is
-background, rationale, definitions, naming, design history, a pure cross-
-reference, or needs a capability no driver has, record an untestable note instead
-of forcing a weak claim.
-
-# Sandbox limits — commands that need an LLM provider are not cli-testable
-Guard runs each command in a sealed sandbox with NO credentials and NO network. A
-command whose documented behavior requires an authenticated LLM provider or an
-external AI CLI (it calls out to a model to do its work — an infer / generate /
-AI-backed command) therefore CANNOT run there: its real behavior is unreachable, and a
-cli claim for it would only be authored to die in the sandbox for lack of provider
-auth. Do NOT extract such a command's behavior as a cli claim — classify it blocked-on
-the llm-provider capability instead: record an untestable note for the section whose
-reason states it needs an authenticated LLM provider (llm-provider). Judge this by the
-DOCUMENTED behavior, never a fixed command list — any provider-auth-dependent command.
-
-# Sections and anchors
-The OUTLINE below lists every section with its exact ANCHOR. Each claim MUST carry
-the anchor of the section whose own text states it, copied VERBATIM from the
-outline — never invent, abbreviate, translate, or reformat an anchor. Bind a claim
-to the NARROWEST section that states it (a claim stated in a subsection belongs to
-that subsection, not its parent).
-
-# Untestable notes — honesty about gaps
-For every section whose own text states NO externally-observable behavior any
-driver could assert, add ONE untestable note: its anchor and a one-sentence
-reason. A section that yields at least one claim needs no note. Do not note a
-section that is only a container for subsections.
-
-# Output schema (CANONICAL)
-This JSON Schema is generated from the engine's Zod definition; your reply must
-validate against it exactly. Output EXACTLY ONE JSON object, no prose, no fences:
-${EXTRACTION_JSON_SCHEMA}
-Concretely:
-  { "claims": [
-      { "claim": "<one declarative sentence>",
-        "driver": "cli" | "api" | "web" | "tui" | "library",
-        "sectionAnchor": "<an anchor copied verbatim from the outline>",
-        "reason": "<the observable behavior a test would assert>" } ],
-    "untestable": [
-      { "sectionAnchor": "<an anchor copied verbatim>",
-        "reason": "<why no driver can assert anything here>" } ] }`
-
-export const EXTRACT_PROMPT_FINGERPRINT = fingerprint(EXTRACT_SYSTEM_PROMPT)
-
-export interface ExtractUserContext {
-  /** Repo-relative doc path. */
-  doc: string
-  /** The full document outline (every section) — the closed anchor set. */
-  outline: OutlineEntry[]
-  /** The text of this view (the whole doc, or one chunk when the doc is large). */
-  viewText: string
-  /** 1-based view position + count, present only when the doc was chunked. */
-  view?: { index: number; total: number }
-  /**
-   * Verbatim sentences a conflict resolution judged STALE — the losing
-   * side of a "the other doc is right" verdict. No claim asserting what they say
-   * may be extracted. Rides the per-view INPUT (not the system prompt), so only
-   * views containing a suppressed sentence change their cache key.
-   */
-  suppressed?: string[]
-  /** On a re-ask after invalid output, the prior output quoted back. */
-  correction?: OutputCorrection
-}
-
-export function buildExtractUserPrompt(ctx: ExtractUserContext): string {
-  const lines = [
-    `Document: ${ctx.doc}`,
-    '',
-    'OUTLINE — copy one of these anchors verbatim into every claim/note (this is the',
-    'complete section list; it stays the same across parts of a chunked document):',
-    renderOutline(ctx.outline),
-    '',
-    ctx.view
-      ? `DOCUMENT TEXT (part ${ctx.view.index} of ${ctx.view.total} — extract only from this part; the outline above is complete):`
-      : 'DOCUMENT TEXT:',
-    '"""',
-    ctx.viewText,
-    '"""',
-  ]
-  if (ctx.suppressed && ctx.suppressed.length > 0) {
-    lines.push(
-      '',
-      'RESOLVED — STALE, DO NOT EXTRACT. A conflict resolution judged the following',
-      'sentence(s) in this document stale (another document is authoritative here).',
-      'Extract NO claim that asserts what any of them says — treat them as if absent:',
-    )
-    for (const q of ctx.suppressed) lines.push(`- "${q}"`)
-  }
-  if (ctx.correction) {
-    lines.push(
-      '',
-      'CORRECTION — your previous response was NOT valid. You returned:',
-      ctx.correction.invalidOutput,
-      'Return exactly ONE JSON object with "claims" and "untestable" arrays matching',
-      `the schema above, and NOTHING else. Every "driver" is one of ${CLAIM_DRIVERS.join('|')};`,
-      'every "sectionAnchor" is an anchor copied verbatim from the outline.',
-    )
-  }
-  return lines.join('\n')
-}
-
-// ---------------------------------------------------------------------------
-// Scenario authoring
-// ---------------------------------------------------------------------------
+// The one-shot EXTRACT / FLOWS / FLOWS_EPIC prompts were RETIRED (plan 04
+// step 20): extraction and flow synthesis run as agent sessions whose prompts
+// live in `@truecourse/core` (`services/guard-generate/{extract,flows}.ts`).
+// Their frozen fingerprints survive as literal salt inside
+// `flowGenerationInputsHash` (see `section-plan.ts`) so committed flow hashes
+// did not move when the prompts left.
 
 export const GENERATE_SYSTEM_PROMPT = `\
 You author ONE guard SCENARIO — a declarative, executable test that walks a spec
@@ -373,9 +230,9 @@ NAME the blocker with the right noun — the classes are triaged differently:
 
 # The scenario schema (CANONICAL)
 This JSON Schema is generated from the engine's Zod definition — match it exactly.
-It contains ONLY the fields you author (\`driver\` is always "cli"); the engine
-assigns the scenario's id, its flow/journey references, and its section bindings
-itself, so do not emit any field that is not in the schema.
+It contains ONLY the fields you author; the engine assigns the scenario's id, its
+flow/interface references, and its section bindings itself, so do not emit any
+field that is not in the schema.
 ${SCENARIO_JSON_SCHEMA}
 
 # The title states the PROMISE, never the expected output
@@ -401,9 +258,10 @@ or, when the flow needs world-state the sandbox cannot provide:
 Exactly one of the two. No prose, no fences — only the JSON object.`
 
 /**
- * PIN 2026-08-01 (Wave 5): rolled once for this wave's authored-vocabulary rules —
- * the doc's own examples run verbatim, and a two-sided promise gets a two-sided test
- * (the accepted input AND the rejected one). The author cache re-keys once.
+ * PIN 2026-08-12 (the scenario-level `driver` field's REMOVAL): the authored schema
+ * no longer carries it — the driver belongs to the STEP — so the rendered schema and
+ * the sentence that explained the field both shrank. A deletion: nothing new is
+ * authorable, and the author cache re-keys once.
  */
 export const GENERATE_PROMPT_FINGERPRINT = fingerprint(GENERATE_SYSTEM_PROMPT)
 
@@ -625,6 +483,29 @@ The noun makes it countable across flows; the entity names what a seed would hav
 create. Data the flow can create for itself through the API's own endpoints is NOT
 this — author those steps.
 
+# One shared world — declare your blast radius
+Every scenario of a run executes against ONE application world, side by side. So:
+CREATE what you need through the app's own endpoints under identities you mint
+(embed \${unique}), and never mutate state you did not create. The seeded fixtures
+and credentials are SHARED — log in with them, read them, build on them, but a
+scenario that would change a seeded principal's password or email, revoke its
+sessions or tokens, delete its account, or flip global/instance configuration must
+either (a) first create ITS OWN principal/record through the API and mutate that,
+or — when the claim is genuinely about shared/global state no scenario can own —
+(b) declare \`"world": "mutates"\` at the scenario's top level. A declared mutator
+runs LAST, serialized, against a world the runner restores afterwards; an
+UNDECLARED mutation poisons every scenario that runs after it (one delete-account
+scenario once cost a run 452 sign-in failures). The engine ENFORCES the
+declaration: \`run_scenario\` and \`submit_scenario\` refuse to execute a mutates
+draft outside that final wave (the refusal tells you what to do — usually the
+engine re-runs your flow there), and refuse it entirely when the recipe declares
+no \`api.services.reset\`, because a mutation nobody can repair must never run —
+then end the session blocked, naming the missing reset as the capability. When
+the listed FIXTURES include a SACRIFICIAL principal (one whose name or notes mark
+it disposable, e.g. \`sacrificialUser\`), prefer a third way: burn THAT principal
+for credential mutations instead of declaring a shared mutation — the seed
+restores it on the next boot.
+
 # Ground every request in the app's own surface, never in a guess
 The user prompt states, from the app's OWN source, which operations exist, what each
 one reads off the request, and how the app builds the requests it sends UPSTREAM.
@@ -662,9 +543,9 @@ proves nothing about the doc and reports as a false failure.
 
 # The scenario schema (CANONICAL)
 This JSON Schema is generated from the engine's Zod definition — match it exactly.
-It contains ONLY the fields you author (\`driver\` is always "api"); the engine
-assigns the scenario's id, its flow/journey references, and its section bindings
-itself, so do not emit any field that is not in the schema.
+It contains ONLY the fields you author; the engine assigns the scenario's id, its
+flow/interface references, and its section bindings itself, so do not emit any
+field that is not in the schema.
 ${API_SCENARIO_JSON_SCHEMA}
 
 # The title states the PROMISE, never the expected output
@@ -692,11 +573,249 @@ or, when the flow needs world-state the sandbox cannot provide:
 Exactly one of the two. No prose, no fences — only the JSON object.`
 
 /**
- * PIN 2026-08-01 (Wave 5): rolled once for this wave's authored-vocabulary rules —
- * the doc's own examples run verbatim, and a two-sided promise gets a two-sided test
- * (the accepted input AND the rejected one). The author cache re-keys once.
+ * PIN 2026-08-12: rolled with the cli prompt, by the scenario-level `driver` field's
+ * REMOVAL — the authored schema no longer carries it, so the rendered schema and the
+ * sentence that explained it both shrank. A deletion.
  */
 export const GENERATE_API_PROMPT_FINGERPRINT = fingerprint(GENERATE_API_SYSTEM_PROMPT)
+
+// ---------------------------------------------------------------------------
+// Scenario authoring — web driver
+// ---------------------------------------------------------------------------
+
+export const GENERATE_WEB_SYSTEM_PROMPT = `\
+You author ONE guard SCENARIO — a declarative, executable test that walks a spec
+FLOW through an application's WEB SURFACE, in a real browser. A flow is a
+user-goal path: an ordered list of MILESTONES, each one a spec claim. You are
+given the flow, each milestone's claim and the section text it came from, a
+REALIZATION PLAN naming the screens and tasks that serve each milestone, and how
+the surface is built and served. You return ONE scenario whose steps walk the
+path in order. No prose, only JSON.
+
+# No tools, no repository access
+You have NO tools and NO repository access. Tool-call JSON or \`<tool_use>\` markup is
+invalid output — your response can ONLY be the JSON object described below. You never
+need to inspect code: author steps from what the CLAIMS and their sections state and
+what the PLACES listed in the user prompt really render, and when a scenario fails
+birth validation the retry supplies the failing step's observed page state — use it
+to fix LOCATORS, ADDRESSES, and SETUP, never to decide WHAT to assert (see the next
+rule).
+
+# Assertions come from the claim, never the observed page
+Every ASSERTION must state what the milestone's CLAIM — read against its section's
+text — says: the exact text it quotes, the address it names, the state it promises,
+adapting only placeholders to the concrete values your scenario creates. If the page
+demonstrably behaves DIFFERENTLY from the claim, you MUST STILL assert the CLAIM'S
+version. The scenario then fails birth — and that is the CORRECT, desired outcome:
+the doc-vs-code disagreement surfaces as a finding. Never weaken, generalize, or
+swap a claimed assertion for a softer, effect-only check (asserting "some text
+changed" where the claim quotes a message) to make a scenario pass — a green test
+that proves less than the claim is the worst outcome.
+
+# Faithfulness — the prime directive
+Assert only what each claim, read against its section's text, states. A scenario
+must never claim more than the prose does.
+
+# The doc's own examples run VERBATIM
+Some milestone sections contain a WORKED EXAMPLE: a fenced block whose surrounding
+prose promises an outcome for it. The user prompt repeats each such block byte-exact
+between DOC EXAMPLE markers. When the example is what the scenario RUNS or FEEDS the
+app — a file it imports, a value it fills in — copy the bytes BETWEEN the markers
+EXACTLY (into \`setup.files\` content, a \`fill\` value, an upload's \`text\`), never a
+paraphrase and never a reformat; a deliberately-broken example must stay broken. When
+the prose also quotes the example's OUTCOME, the assertion states that outcome exactly
+as quoted. A block nothing runs (a pure illustration) constrains nothing.
+
+# The path is the point: one scenario, every milestone
+The flow's milestones are ORDERED, and the state one leaves behind is what the next
+acts on: create a thing, see it listed, open it, change it. Author ONE scenario that
+walks them in order in a single sandbox world.
+- Every milestone MUST be realized by at least one step, and each such step carries
+  \`milestone: <that milestone's number>\`. A step that only prepares the world (a
+  login, a seeding action nothing asserts) carries NO \`milestone\`.
+- A milestone may take several steps (act, then observe): annotate each of them
+  with that milestone's number.
+- Never renumber, merge, split, skip, or invent a milestone — the numbers are given.
+- When a milestone needs world-state the milestones before it do not produce, declare
+  it in \`setup\` or seed it with a plumbing step — never drop the milestone.
+
+# Two-sided promises get two-sided tests
+Some claims state BOTH halves of a behavior: what DOES happen and what does NOT —
+the input a form ACCEPTS and the one it REJECTS, the item a filter SHOWS and the one
+it HIDES. BOTH halves are that milestone's contract. A scenario exercising only the
+positive half is HALF a test: it would STILL PASS if the logic broke so the excluded
+case wrongly succeeded too. When a milestone's claim names what must NOT happen,
+realize that milestone with steps for BOTH halves — each carrying its number — and
+assert the exclusion OBSERVABLY (the item absent from the page's text, the
+documented error message shown, the control disabled). A scenario that drops the
+exclusion half is weak and will be flagged.
+
+# The verb vocabulary — six verbs, closed
+A web step is one of: \`navigate\` (go to a surface-relative path), \`click\`
+(activate an element), \`fill\` (type a \`value\` into an input; empty clears it),
+\`upload\` (hand a \`file\` to the control a user would operate), \`history\` (the
+browser's own \`back\`/\`forward\` — the claim "Back returns you" is about the
+BROWSER, never re-navigation), and \`expect\` (assert on the page without acting).
+There is deliberately no hover, no scroll, no keyboard — and no sleep verb, ever:
+every expectation WAITS on observable state, bounded by \`timeoutMs\`, so "the page
+catches up" is expressed by asserting what it must show, never by waiting a
+duration.
+
+# Every web step declares \`driver: web\`
+Every web step carries \`"driver": "web"\` — all six verbs, not only the ambiguous
+one. If it says \`web\`, the browser does it; a step without the tag is a cli or api
+step. (The rule exists because a step whose only verb is \`expect\` would otherwise
+be ambiguous against every other step's \`expect\` block.)
+
+# THE LOCATOR POLICY — address elements the way a user finds them
+Every element a step touches is addressed by a LOCATOR, and the locator family is
+closed to the handles a USER perceives:
+- The PRIMARY handle is role + accessible name: \`{ "role": "button", "name": "Save" }\`.
+  The role is a real ARIA role; the name is the element's label, text, or aria-label.
+- The five alternates, for elements a role+name does not reach: \`placeholder\` (the
+  prompt inside an empty input), \`label\` (the visible label of a form control),
+  \`text\` (the element's own visible words), \`title\` (the tooltip), \`alt\` (an
+  image's alt text). Each member is exclusive — one handle per locator.
+- NO CSS selectors, NO XPath, NO test ids: those address the IMPLEMENTATION, and a
+  scenario that addresses the implementation stops being a user-replayable probe of
+  the promise.
+- The match is case-insensitive substring by default; \`"exact": true\` demands the
+  whole string (use it when one name is a prefix of another).
+- A locator is STRICT: it must resolve to exactly ONE element. Two matches is a
+  genuine ambiguity and fails loudly. \`"pick": "first"\` is the one authored
+  exception, for a page that legitimately shows many controls reading the same (a
+  grid of slot buttons) where ANY serves the flow.
+- An element no user-perceivable handle reaches is NOT guessed at: the milestone
+  that needs it makes the flow blocked — name the unlocatable element in
+  \`blockedOn\`.
+The realization plan writes targets as \`<role> "<name>"\`. Translate them directly:
+\`click: button "Add Repository"\` becomes
+\`{ "driver": "web", "click": { "role": "button", "name": "Add Repository" } }\`, and
+\`fill: textbox "Repository path"\` becomes
+\`{ "driver": "web", "fill": { "role": "textbox", "name": "Repository path" }, "value": "…" }\`.
+
+# Addresses are SURFACE-RELATIVE
+A \`navigate\` path starts with \`/\` and never carries an origin — the sandbox
+allocates the port, so \`navigate: "/analyses/42"\`, never a host. \`expect.url\`
+matches \`pathname + search\` with the origin stripped: \`/notes?title=x\` is what a
+scenario writes and what a failure quotes.
+
+# What an expectation may assert
+A web \`expect\` waits on, then asserts, one or more of:
+- \`text\` — the page's visible text (or, with \`within\`, one element's), using the
+  same equals | contains | matches vocabulary every stream matcher has;
+- \`url\` — the address, origin-stripped (above);
+- \`visible\` — an element (or a list of them) that must be present and visible: the
+  plainest form of "the page arrived";
+- \`state\` — an ARIA state of one element: checked | pressed | selected | expanded |
+  disabled. These are the states with NO text — the active tab, the switch's
+  position — and the state assertion is the only honest form of such a claim. A
+  control that exposes no such state fails the assertion by saying so, and that
+  failure is a real finding: the control is unobservable to a screen reader too.
+- \`attribute\` / \`class\` — what the page keeps OUTSIDE its text, on the document
+  element by default: a theme (\`class\` has \`dark\`), a locale, a \`data-\` fact.
+  \`class\` matches a TOKEN, the way \`classList.contains\` does.
+
+# Mixing vocabularies — one sandbox, one world
+Your scenario runs in ONE sandbox world shared by three vocabularies, and two other
+step kinds may appear beside the web steps:
+- a cli step — \`run\` is argv APPENDED to the program entrypoint the user prompt
+  names — may SEED the world the browser then sees (create the record a screen must
+  list);
+- an api \`request\` step may VERIFY through the server what the UI just wrote (and
+  \`capture\` ids from responses).
+Both are ordinary steps and may carry a \`milestone\`. Two prohibitions: a milestone
+about a SCREEN must be realized by a web step — a \`request\` alone proves the API,
+not the page — and the api lifecycle verbs (\`boot\`, \`signal\`, \`logs\`) do not
+exist here: the sandbox owns the served surface's lifecycle. Values cross the
+boundary through ONE capture namespace: a cli/api capture is read back as \`\${name}\`
+and a web capture as \`\${captured:<name>}\`, in any authored string of any step.
+
+# How a scenario runs
+The web surface is built once (its build command, when it declares one) and served
+FRESH for each scenario in an empty sandbox working directory on a runner-chosen
+port, health-polled before the first browser step. The browser, the cli entrypoint
+and the served app all share that one sandbox cwd — one world. Seed inputs
+declaratively with \`setup.files\` (path → content) and \`setup.env\` (extra env for
+the served process); \`setup.git\` declares a git repo the sandbox starts with. There
+is no shell escape.
+
+# Web captures — carry what the page shows
+A web step may take a value OFF the page for later steps:
+\`"capture": { "<name>": { "from": <locator>, "get": "text" | "value" | "count" |
+{ "state": … } | { "attribute": … } } }\` — \`text\` is the default; add
+\`"number": "<regex with ONE capturing group>"\` to slice a figure out of a sentence
+("seats left: 3"). Later steps read it as \`\${captured:<name>}\`. A capture whose
+element or pattern finds nothing FAILS its step — capture only what the page really
+shows. Whenever the scenario CREATES a resource with a client-chosen identifier,
+embed the run-unique \`\${unique}\` token in it so parallel and repeated runs never
+collide.
+
+# World-state capabilities
+\`setup\` declares the WORLD a test needs — never code, never shell. The sandbox is
+otherwise bare: no network egress beyond the surface under test, no ambient
+credentials, no external systems. What IS provided is the SEED: when the user prompt
+lists FIXTURES, that data — principals included — already exists in the served app's
+database, and a SIGNED-IN world is reached WITHOUT the login screen: a \`credential\`
+step names one of the CREDENTIALS the user prompt lists (a seeded session cookie, a
+token) and the runner installs it into the browser before the first navigation. Fill
+the login form only when the flow is ABOUT signing in, or when no credential is
+listed and a fixture carries login fields — every form login spends the app's login
+rate limit, which a run of many scenarios trips. Never block on "credentials" while
+either channel exists. Every scenario of a run executes against
+ONE shared world: create what you need through the app's own screens and endpoints
+under identities you mint (embed \${unique}), and never mutate state you did not
+create — a scenario that would change a seeded principal's password or email, revoke
+its sessions, delete its account, or flip global configuration must first create ITS
+OWN principal and mutate that (a fixture named as SACRIFICIAL, e.g.
+\`sacrificialUser\`, is the one seeded principal credential mutations MAY burn — the
+seed restores it), or (when the claim is genuinely about shared state no scenario
+can own) declare \`"world": "mutates"\` at the scenario's top level so the runner
+schedules it last against a world it restores afterwards — the engine enforces
+this: a mutates draft is refused outside that final wave (the refusal says what to
+do), and refused entirely when the recipe declares no \`api.services.reset\` (end
+the session blocked, naming the missing reset). When the flow needs
+world-state neither
+\`setup\`, the seed, nor the app's own UI can produce — an authenticated session no
+seeded or supplied credential opens, a screen the recipe's web block does not serve,
+a third-party service, pre-existing DATA no screen can create — author NOTHING: omit
+\`scenario\` AND name the missing capability in \`blockedOn\`. An honest blocked flow
+is right; a scenario that fakes the missing world is wrong. NAME the blocker with
+the right noun: \`"credentials"\` for a missing secret or login NO listed fixture
+provides, the SERVICE ITSELF for a third party (\`"stripe"\`), the unlocatable
+element when no user-perceivable handle reaches it, and \`"missing-data"\` plus a
+second entry naming the entity when pre-existing data is what is missing.
+
+# The scenario schema (CANONICAL)
+This JSON Schema is generated from the engine's Zod definition — match it exactly.
+It contains ONLY the fields you author; the engine assigns the scenario's id, its
+flow/interface references, and its section bindings itself, so do not emit any
+field that is not in the schema.
+${WEB_SCENARIO_JSON_SCHEMA}
+
+# The title states the PROMISE, never the expected output
+\`title\` is what the DOCUMENT promises, in the words a reader of the doc would use
+— "Creating a note shows it on the board", not "the page contains \`Note created\`"
+and not "the url is /notes". The assertions are already in the steps; a title that
+repeats a literal expected value tells a reviewer nothing about what the test is
+FOR, and reads as an implementation detail the moment the wording changes.
+
+# Determinism
+No timing assumptions, no retries, no assertions on values the app generates
+non-deterministically (timestamps, ids) unless you \`capture\` them first or list the
+matching \`normalize\` entry (timestamps | abs-paths | versions | durations). Prefer
+\`contains\` on the meaningful phrase over \`equals\` on a whole page's text, and
+prefer asserting a DELTA against a captured value over an absolute number that only
+tests the state the world happened to be in.
+
+# Output — ONE object, carrying one scenario
+Return EXACTLY ONE JSON object:
+  { "scenario": { … the scenario, its steps carrying \`milestone\` … } }
+or, when the flow needs world-state the sandbox cannot provide:
+  { "blockedOn": ["<capability, e.g. credentials|missing-data|<service>|<the unlocatable element>"] }
+Exactly one of the two. No prose, no fences — only the JSON object.`
+
+export const GENERATE_WEB_PROMPT_FINGERPRINT = fingerprint(GENERATE_WEB_SYSTEM_PROMPT)
 
 /**
  * A birth-validation failure attached to a flow scenario on a retry so the model
@@ -741,7 +860,7 @@ export interface AuthorMilestone {
   /**
    * The realization the matcher picked, already translated through the driver
    * adapter (`invoke` → cli `run`, `request` → api `request`) — one line per
-   * journey step. Empty when no journey was matched to this milestone.
+   * interface step. Empty when no interface was matched to this milestone.
    */
   realization: string[]
   /**
@@ -822,19 +941,20 @@ export interface AuthorUserContext {
   flow: { id: string; title: string; goal: string }
   /** The flow's path, in order — the assertion source and the milestone numbers. */
   milestones: AuthorMilestone[]
-  /** The journey ids the realization plan walks, in order (provenance for the model). */
-  journeyPath: string[]
+  /** The interface ids the realization plan walks, in order (provenance for the model). */
+  interfacePath: string[]
   /** Canonical area ids the flow's docs cover, from the corpus (may be empty). */
   areaTags: string[]
   /** The surface this scenario runs on — selects the system prompt + the
    *  preparation framing below. */
-  driver: 'cli' | 'api'
-  /** cli batches: the recipe entrypoint argv, so the model knows what `run` is
-   *  appended to. Absent on api batches. */
+  driver: GuardDriverId
+  /** cli and web batches: the recipe entrypoint argv, so the model knows what
+   *  `run` is appended to. Absent on api batches, and on web batches whose
+   *  recipe declares no entry. */
   recipeEntry?: string[]
-  /** api batches: the recipe's serve argv (the runner boots it per scenario). */
+  /** api and web batches: the surface's serve argv (the runner boots it per scenario). */
   recipeServe?: string[]
-  /** api batches: the health endpoint the runner polls before any step runs. */
+  /** api and web batches: the health endpoint the runner polls before any step runs. */
   recipeHealthPath?: string
   /**
    * api batches: the recipe server this scenario is BOUND to — its name,
@@ -855,10 +975,12 @@ export interface AuthorUserContext {
    */
   credentials?: { name: string; header: string; description?: string }[]
   /**
-   * api batches: the seed stage's fixture CATALOG — each fixture's name + the field
-   * names it exposes (never runtime values). Advertises the `{{fixture:<name>.<field>}}`
-   * placeholders available; present only when the recipe declares a seed stage, so a
-   * seed-less repo's prompt stays byte-identical. Ignored on cli batches.
+   * api and web batches: the seed stage's fixture CATALOG — each fixture's name +
+   * the field names it exposes (never runtime values). Advertises the
+   * `{{fixture:<name>.<field>}}` placeholders available; on web it is also how a
+   * scenario learns a seeded LOGIN principal exists (the fill-the-login-form
+   * channel). Present only when the recipe declares a seed stage, so a seed-less
+   * repo's prompt stays byte-identical. Ignored on cli batches.
    */
   fixtures?: { name: string; fields: string[] }[]
   /**
@@ -874,16 +996,26 @@ export interface AuthorUserContext {
    * exact path + the request fields the handler reads, requiredness included when
    * the source states it. Grounds three measured failures: invented
    * paths, bodies missing a required field, and a setup step that 400s before the
-   * claim is reached. Empty/absent (no api journeys, a degraded mapping, cli) keeps
+   * claim is reached. Empty/absent (no api interfaces, a degraded mapping, cli) keeps
    * the prompt byte-identical. USER-prompt only.
    */
-  journeyContracts?: InterfaceContractHint[]
+  interfaceContracts?: InterfaceContractHint[]
+  /**
+   * The PLACES this flow's interfaces act on — the resource-registry entries
+   * their location contract (`at`/`to`) names, `of`-ancestors included, with
+   * their READABLES: what each place visibly shows, as facts in the web
+   * driver's own assertion vocabulary. Grounds web assertions in what the page
+   * really renders instead of doc prose. Empty/absent (no location contract —
+   * every cli/api plan, and web catalogs from before resources) keeps the
+   * prompt byte-identical. USER-prompt only.
+   */
+  resources?: InterfaceResource[]
   /**
    * api scenarios: the REST of the app's operations — everything the api catalog
-   * offers that THIS flow's journeys do not walk. A flow's SETUP steps
+   * offers that THIS flow's interfaces do not walk. A flow's SETUP steps
    * routinely need one (signing up before signing in), and with only the flow's own
    * operations listed the model invented the rest and got a 404 on step 1. Same
-   * rendering and same verbatim-path rule as {@link journeyContracts}; empty/absent
+   * rendering and same verbatim-path rule as {@link interfaceContracts}; empty/absent
    * keeps the prompt byte-identical. USER-prompt only.
    */
   otherOperations?: InterfaceContractHint[]
@@ -941,6 +1073,18 @@ export interface AuthorUserContext {
    */
   priorFlag?: { title: string; mismatch: string }
   /**
+   * Incremental authoring — the flow's COMMITTED scenarios, to be edited rather
+   * than re-sampled, plus what moved since they were authored: the bound
+   * sections whose text changed (their new text is already in the briefing) and
+   * the interfaces whose code surface changed. Never set beside `priorFlag`: a
+   * rejected prior is authored away from, not edited.
+   */
+  priorScenarios?: readonly { id: string; yaml: string }[]
+  movedInputs?: {
+    sections: readonly { doc: string; anchor: string; heading: string }[]
+    interfaces: readonly string[]
+  }
+  /**
    * On a re-ask after the engine rejected the scenario: the milestones no step
    * realized, the `milestone` values that match none of the flow's, and an
    * `expect` regex that does not compile. Exactly what was wrong — never a bare
@@ -974,6 +1118,71 @@ export interface AuthorUserContext {
  * requiredness the source does not state — never rendered as "optional", which
  * would be a claim the analysis did not make.
  */
+/**
+ * One resource of the PLACES block: the place's identity line, then one line per
+ * readable, each in the web driver's own words ({@link describeWebLocator} — the
+ * same rendering a step list and a failure use, so the model reads the vocabulary
+ * it must write). A `when` renders as a trailing condition; a readable kind the
+ * place doesn't carry renders nothing.
+ *
+ * A readable that carries an `id` renders it. The id is the NAME of one fact on
+ * this place, and naming it is what lets the capture note below point at a
+ * specific readable ("take the count off `violations-rows`") instead of at prose;
+ * a readable without one renders exactly as it always did.
+ */
+function resourceLines(place: InterfaceResource): string[] {
+  const cond = (when?: string) => (when ? `  [${when}]` : '')
+  const named = (id?: string) => (id ? ` \`${id}\`` : '')
+  const lines = [
+    `- ${place.title} (${place.kind} \`${place.id}\`${place.of ? `, ${nesting(place.kind)} \`${place.of}\`` : ''})${
+      place.description ? `: ${place.description}` : ''
+    }`,
+  ]
+  const r = place.readables
+  // A cli command group and an api noun carry NO readables — those are DOM
+  // facts (plan item 102) — so such a place renders its identity line and stops,
+  // exactly as an unfleshed web place does.
+  if (!r) return lines
+  for (const m of r.markers ?? []) {
+    lines.push(
+      `    shows${named(m.id)} “${m.marker}”${m.within ? ` within ${describeWebLocator(m.within)}` : ''}${cond(m.when)}`,
+    )
+  }
+  for (const e of r.elements ?? []) {
+    lines.push(`    renders${named(e.id)} ${describeWebLocator(e.element)}${cond(e.when)}`)
+  }
+  for (const c of r.controls ?? []) {
+    lines.push(
+      `    control${named(c.id)} ${describeWebLocator(c.control)} exposes ${c.states.join(', ')}${cond(c.when)}`,
+    )
+  }
+  for (const row of r.rows ?? []) {
+    const enums = row.slots
+      .filter((s) => s.kind === 'enum')
+      .map((s) => `${s.name} ∈ ${(s.values ?? []).join(' | ')}`)
+      .join('; ')
+    lines.push(
+      `    rows${named(row.id)}: one ${row.item} per item${row.within ? ` within ${describeWebLocator(row.within)}` : ''}, text \`${row.template}\`${
+        enums ? ` (${enums})` : ''
+      }${cond(row.when)}`,
+    )
+  }
+  return lines
+}
+
+/**
+ * How a place sits on the one it is `of`, in that surface's own words: a dialog
+ * opens OVER a screen, a panel sits ON one, a command lives IN its group and a
+ * REST noun UNDER the noun that encloses it. The three web kinds keep the words
+ * they had, so a web PLACES block renders byte-identically.
+ */
+function nesting(kind: InterfaceResource['kind']): string {
+  if (kind === 'dialog') return 'over'
+  if (kind === 'command-group') return 'in'
+  if (kind === 'rest-noun') return 'under'
+  return 'on'
+}
+
 function contractSummary(hint: InterfaceContractHint): string {
   const parts: string[] = []
   for (const [label, fields] of [
@@ -999,26 +1208,43 @@ function indentBlock(text: string): string {
     .join('\n')
 }
 
+/** The preparation framing that heads the author prompt, per driver. The cli and
+ *  api arms' lines are byte-identical to what they always were — only web adds a
+ *  shape of its own. */
+function preparationLines(ctx: AuthorUserContext): string[] {
+  if (ctx.driver === 'api') {
+    return [
+      // Name the bound service FIRST when the repo has more than one —
+      // every line under it describes that server and nothing else.
+      ...(ctx.server
+        ? [
+            `Service: "${ctx.server.name}"${ctx.server.app ? ` — the workspace app ${ctx.server.app}` : ''}${ctx.server.description ? ` (${ctx.server.description})` : ''}.`,
+            'This repository runs several HTTP services; your scenario runs against THIS one only.',
+          ]
+        : []),
+      `Service serve command: ${JSON.stringify(ctx.recipeServe)}  (the runner boots it fresh per scenario and injects PORT)`,
+      `Health endpoint: GET ${ctx.recipeHealthPath ?? '/'}  (polled until 2xx before any step runs)`,
+      `Build command: ${ctx.recipeBuild}`,
+    ]
+  }
+  if (ctx.driver === 'web') {
+    return [
+      `Web surface serve command: ${JSON.stringify(ctx.recipeServe)}  (the runner boots it fresh per scenario and injects PORT)`,
+      `Health endpoint: GET ${ctx.recipeHealthPath ?? '/'}  (polled until 2xx before the first browser step)`,
+      ...(ctx.recipeEntry
+        ? [`Program entrypoint: ${JSON.stringify(ctx.recipeEntry)}  (a cli step's \`run\` argv is appended to this)`]
+        : []),
+      `Build command: ${ctx.recipeBuild}`,
+    ]
+  }
+  return [
+    `Program entrypoint: ${JSON.stringify(ctx.recipeEntry)}  (your step \`run\` argv is appended to this)`,
+    `Build command: ${ctx.recipeBuild}`,
+  ]
+}
+
 export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
-  const lines: string[] =
-    ctx.driver === 'api'
-      ? [
-          // Name the bound service FIRST when the repo has more than one —
-          // every line under it describes that server and nothing else.
-          ...(ctx.server
-            ? [
-                `Service: "${ctx.server.name}"${ctx.server.app ? ` — the workspace app ${ctx.server.app}` : ''}${ctx.server.description ? ` (${ctx.server.description})` : ''}.`,
-                'This repository runs several HTTP services; your scenario runs against THIS one only.',
-              ]
-            : []),
-          `Service serve command: ${JSON.stringify(ctx.recipeServe)}  (the runner boots it fresh per scenario and injects PORT)`,
-          `Health endpoint: GET ${ctx.recipeHealthPath ?? '/'}  (polled until 2xx before any step runs)`,
-          `Build command: ${ctx.recipeBuild}`,
-        ]
-      : [
-          `Program entrypoint: ${JSON.stringify(ctx.recipeEntry)}  (your step \`run\` argv is appended to this)`,
-          `Build command: ${ctx.recipeBuild}`,
-        ]
+  const lines: string[] = preparationLines(ctx)
   // Declared api credentials (Phase 1): advertise the available `{{cred:<name>}}`
   // placeholders and the header each is injected as — never the secret value.
   // Gated so a credential-less repo's prompt is byte-identical to before.
@@ -1063,6 +1289,69 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       'known user) is authorable through these fixtures. A flow that needs data NOT listed',
       'above — and that the API cannot create through its own endpoints — is blocked on',
       'DATA: omit `scenario` and return `"blockedOn": ["missing-data", "<the entity>"]`.',
+    )
+  }
+  // The world's credentials for the WEB batch: what a `credential` step can
+  // install into the browser so the scenario starts signed in. The login form
+  // is the fallback, not the default — every form login spends the app's login
+  // rate limit, and a pool of browser scenarios trips it (documenso 2026-09-03:
+  // 52 of 95 web sessions never got past the sign-in page).
+  const webCredentials = ctx.driver === 'web' && ctx.credentials && ctx.credentials.length > 0
+  if (webCredentials) {
+    lines.push(
+      '',
+      'CREDENTIALS AVAILABLE — the prepared world holds these principals; their values',
+      'are secret and never shown to you. A `credential` step installs one into the',
+      'browser — a Cookie credential becomes the surface\'s cookies, any other header',
+      'rides every request the page makes — so the scenario starts SIGNED IN without',
+      'visiting the login screen:',
+    )
+    for (const c of ctx.credentials!) {
+      const role = c.description ? ` (${c.description})` : ''
+      lines.push(
+        `- ${c.name}${role} → header \`${c.header}\`; author \`{ "driver": "web", "credential": "${c.name}" }\` as the first step`,
+      )
+    }
+    lines.push(
+      'Open every signed-in flow with a `credential` step. Use the login form only when',
+      'the flow is ABOUT signing in (then the seeded login fixture is what you fill), or',
+      'when the claim needs a principal none of these credentials is.',
+    )
+  }
+  // The same catalog for the WEB batch, in the browser's terms: the seed's login
+  // principal is how a web scenario reaches a signed-in world at all. Without this
+  // block every auth-gated web flow blocks on the bare word "credentials" while the
+  // seeded user sits in the served app's database — the briefing, not the world,
+  // is what was missing (documenso 2026-08-28: 114 of 119 web flows).
+  if (ctx.driver === 'web' && ctx.fixtures && ctx.fixtures.length > 0) {
+    lines.push(
+      '',
+      'FIXTURES AVAILABLE — the seed created this data (rows AND principals) in the',
+      "served app's database before your scenario runs; the values are chosen at run",
+      'time and never shown to you. Reference a field with `{{fixture:<name>.<field>}}`',
+      'in any authored string of any step — a `navigate` path, a `fill` value, a',
+      'locator, an expected text:',
+    )
+    for (const f of ctx.fixtures) {
+      lines.push(`- ${f.name}: fields ${f.fields.map((x) => `\`${x}\``).join(', ')}`)
+    }
+    lines.push(
+      ...(webCredentials
+        ? [
+            'A SIGNED-IN world is reached with a `credential` step (see CREDENTIALS',
+            'AVAILABLE); a fixture that carries login fields (an email/username and a',
+            'password) is for a flow ABOUT signing in — navigate to the login page and',
+            '`fill` them there. Block on `"credentials"` only when neither a listed',
+            'credential nor a listed fixture can be the needed principal; a flow that',
+          ]
+        : [
+            'A SIGNED-IN world is reached through these: when a fixture carries login fields',
+            '(an email/username and a password), navigate to the login page and `fill` them —',
+            'that IS this surface\'s credential. Block on `"credentials"` only when NO listed',
+            'fixture can sign the needed principal in; a flow that',
+          ]),
+      'needs seeded data not listed above (and that no screen can create) is blocked',
+      'on `"missing-data"` plus the entity.',
     )
   }
   // Detected third parties: what this repo actually integrates
@@ -1183,16 +1472,50 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
     `goal: ${ctx.flow.goal}`,
     `milestones: ${ctx.milestones.length}`,
   )
-  if (ctx.journeyPath.length > 0) {
+  if (ctx.interfacePath.length > 0) {
     lines.push(
-      `realized through: ${ctx.journeyPath.join(' → ')}  (the surfaces matching chose; the`,
+      `realized through: ${ctx.interfacePath.join(' → ')}  (the surfaces matching chose; the`,
       'per-milestone lines below say which serves which)',
+    )
+  }
+  // The PLACES block — what each screen/dialog/panel the flow acts on visibly
+  // shows, from the interface catalog's resource registry. Gated on non-empty,
+  // so every plan without a location contract renders byte-identical.
+  if (ctx.resources && ctx.resources.length > 0) {
+    lines.push(
+      '',
+      "PLACES THIS FLOW ACTS ON — from the app's own interface catalog. Each place",
+      'lists what it VISIBLY shows, as assertable facts in the web-step vocabulary.',
+      'Ground your web expectations in THESE — a marker is text the page really',
+      'renders, a control lists the ARIA states it genuinely exposes (assert no',
+      'state on a control not listed here), and a rows shape says what varies in a',
+      'repeated item so you never assert a rendered value as if it were stable.',
+    )
+    for (const place of ctx.resources) lines.push(...resourceLines(place))
+    // The capture note. Placed HERE and not in the system prompt on purpose: what
+    // makes a capture safe is being grounded in a listed readable, so the vocabulary
+    // is taught next to the facts it may point at.
+    lines.push(
+      '',
+      'CAPTURE — a web step may take a value OFF one of these readables and use it in a',
+      'later step, which is the only way to state a claim about a CHANGE. Write it on the',
+      'step as `capture: { <name>: { from: <locator>, get: … } }`, where `from` is a',
+      'locator listed above and `get` is one of: `text` (the default), `value` (an',
+      "input's current value), `count` (how many elements match — several matches are",
+      'the answer here, not an ambiguity), `{ state: <aria state> }`, or',
+      '`{ attribute: <name> }`. Add `number: "<regex with ONE group>"` to slice the',
+      'number out of a sentence the page writes it in ("seats left: 3").',
+      'Later steps read it as `${captured:<name>}` in any authored string, and assert a',
+      'DELTA with `compare: { equals: "${captured:<name>}", offset: -1 }` — "one fewer',
+      'than there were". Prefer that to asserting an absolute number, which only tests',
+      'the state the world happened to be in. A capture whose element or pattern finds',
+      'nothing FAILS its step, so capture only what these places really show.',
     )
   }
   // The flow's own operations as the repo's ROUTE REGISTRATIONS declare
   // them — the exact paths, and what each handler reads off the request. api-only and
   // gated on non-empty, so a cli batch or a degraded mapping is byte-identical.
-  if (ctx.driver === 'api' && ctx.journeyContracts && ctx.journeyContracts.length > 0) {
+  if (ctx.driver === 'api' && ctx.interfaceContracts && ctx.interfaceContracts.length > 0) {
     lines.push(
       '',
       "OPERATIONS THIS FLOW WALKS — read out of the app's own route registrations. Use",
@@ -1201,7 +1524,7 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       'carrying each field marked `required` — a missing one is a 400 before any',
       'assertion of yours runs:',
     )
-    for (const j of ctx.journeyContracts) {
+    for (const j of ctx.interfaceContracts) {
       lines.push(`- ${j.method} ${j.path}${contractSummary(j)}`)
     }
     // The rest of the surface. A flow's SETUP steps live here — the
@@ -1330,6 +1653,41 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       )
     }
   }
+  if (ctx.priorScenarios && ctx.priorScenarios.length > 0) {
+    const moved = ctx.movedInputs ?? { sections: [], interfaces: [] }
+    lines.push(
+      '',
+      'PRIOR SCENARIOS — this flow already has COMMITTED scenarios. EDIT them; do not',
+      'start over. What moved since they were authored:',
+    )
+    if (moved.sections.length > 0) {
+      lines.push('  sections whose text changed (their CURRENT text is above):')
+      for (const s of moved.sections) lines.push(`    - ${s.doc} #${s.anchor} — "${s.heading}"`)
+    }
+    if (moved.interfaces.length > 0) {
+      lines.push('  interfaces whose code surface changed:')
+      for (const id of moved.interfaces) lines.push(`    - ${id}`)
+    }
+    if (moved.sections.length === 0 && moved.interfaces.length === 0) {
+      lines.push('  (the inputs moved in a way the engine could not attribute — re-verify every step)')
+    }
+    lines.push(
+      'Rules:',
+      '  1. Keep every step that still holds BYTE-FOR-BYTE. Re-submitting a scenario',
+      '     unchanged (with its `replaces` id) is the correct answer when nothing moved',
+      '     under it.',
+      '  2. Change only the steps the moved sections/interfaces invalidate. Never weaken',
+      '     an assertion or drop a milestone to make a step pass.',
+      '  3. `submit_scenario` with `replaces: <id>` keeps that id and its place in the',
+      '     corpus. Omit `replaces` ONLY for an obligation the current text states that',
+      '     no kept scenario asserts — a genuinely new scenario.',
+      '  4. `drop_scenario` ONLY when the obligation a prior scenario asserted is GONE',
+      '     from the current text; the reason must name that obligation. Never drop a',
+      '     scenario you merely chose to rewrite — replace it.',
+      '  5. Every scenario you submit must still realize every milestone.',
+    )
+    for (const p of ctx.priorScenarios) lines.push('', `--- prior scenario ${p.id}`, p.yaml)
+  }
   if (ctx.priorFlag) {
     lines.push(
       '',
@@ -1417,7 +1775,7 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       'CORRECTION — your previous response was NOT valid. You returned:',
       ctx.correction.invalidOutput,
       'Return exactly ONE JSON object: { "scenario": { … } } with the scenario matching',
-      `the schema (title, driver "${ctx.driver}", non-empty steps, optional setup/normalize,`,
+      'the schema (title, non-empty steps, optional setup/normalize,',
       '`milestone` on the steps that realize one) — or { "blockedOn": ["<capability>"] }',
       'when the flow needs world-state the sandbox cannot provide. No prose — only the',
       'JSON object.',
@@ -1478,11 +1836,30 @@ Concretely:
     api.serve argument and every api.env value at start time (e.g.
     "serve": ["uvicorn","app.main:app","--port","\${PORT}"], or
     "env": { "ASPNETCORE_URLS": "http://127.0.0.1:\${PORT}" }).
+- web (browser apps) is how to START the browser surface. When the repository
+  ships a browser app (a next/remix/react-router app — the workspace list names
+  each app's framework), declare it: web.serve (for a fullstack app usually the
+  SAME argv as api.serve — one process serves the endpoints and the screens),
+  web.healthPath naming a page that RENDERS for an anonymous visitor (a login or
+  sign-in page beats "/", which often redirects), web.env for whatever the app
+  needs to address itself (\${PORT} substituted, e.g.
+  "APP_URL": "http://127.0.0.1:\${PORT}"), "cwd": "repo" for a
+  workspace-mediated serve, and — in a monorepo — web.app naming the served
+  workspace app's directory. A proposal with no web block for a repo that ships
+  a browser app is refused statically.
+- api.services (when the server needs a datastore) declares the repo's OWN
+  bring-up and teardown. A compose-managed up REQUIRES reset — the full wipe,
+  volumes included ("docker compose -f <same file> down -v"); without it the
+  runner cannot restore the world after a world-mutating test and the proposal
+  is refused statically.
 - When the repository is a workspace/monorepo that ships MORE THAN ONE HTTP service
   (a web app and a separate API service), declare them ALL under api.servers, one
   named entry per service, plus api.defaultServer. Each entry carries its own serve,
   healthPath, and app — the repo-relative directory of the workspace package it
-  serves ("apps/api/v2"). The workspace apps listed in the user message are the
+  serves ("apps/api/v2") — plus \`"cwd": "repo"\` whenever the serve argv is
+  workspace-mediated ("yarn workspace …", "npm run -w …"): the default boot
+  directory is a throwaway sandbox, where such an argv cannot find the workspace
+  root. The workspace apps listed in the user message are the
   inventory to draw from. Declaring only one of several services means every
   documented endpoint of the others is untestable, and every test written against
   them asks the wrong server and fails for the wrong reason. Use api.serve for a
@@ -1777,6 +2154,13 @@ export interface SeedDraftInput {
    */
   securitySchemes?: { name: string; summary: string }[]
   /**
+   * Why the api surface authenticates when no scheme is declared — the wider
+   * deterministic evidence (a credential header on a mapped operation, a token
+   * table, docs describing a bearer header). Renders the AUTHENTICATION block as
+   * a mandate rather than a question.
+   */
+  apiAuthEvidence?: { kind: string; detail: string }[]
+  /**
    * The roles the app distinguishes — one principal is minted per entry. Derived
    * deterministically from the schema (a role-shaped column and its enumerated
    * values) and, where the specs name them, from the spec language. Empty ⇒ one
@@ -1865,6 +2249,15 @@ export function buildSeedUserPrompt(input: SeedDraftInput): string {
       'exactly one of these keys (any other name is dropped by the engine):',
     )
     for (const s of input.securitySchemes) lines.push(`  ${s.name}: ${s.summary}`)
+  } else if (input.apiAuthEvidence && input.apiAuthEvidence.length > 0) {
+    lines.push(
+      '',
+      'AUTHENTICATION: the specification declares no OpenAPI security scheme, but the',
+      'api surface AUTHENTICATES — the evidence:',
+      ...input.apiAuthEvidence.map((e) => `  - ${e.detail}`),
+      'Mint the api principal the way the app issues it (read its verifier for the',
+      'header and its prefix), and omit "satisfies" — there is no scheme to name.',
+    )
   } else {
     lines.push(
       '',
@@ -2083,227 +2476,6 @@ export function buildFidelityUserPrompt(ctx: FidelityUserContext): string {
 // Flow synthesis — per-area composition
 // ---------------------------------------------------------------------------
 
-export const FLOWS_SYSTEM_PROMPT = `\
-You compose FLOWS out of a specification area's already-extracted CLAIMS. A flow is
-one user-goal path: a title, a goal, and an ordered list of MILESTONES, where every
-milestone IS one of the claims you were given. You return JSON only.
-
-${OUTPUT_ONLY_GUARDRAIL}
-
-# Your input, and the only thing you may do with it
-You are given the claims of ONE area — each with the document and the section anchor
-it was extracted from — plus each document's heading outline. You ORDER and GROUP
-those claims into paths. That is the entire job.
-- Never invent, reword, translate, shorten, merge, or split a claim. Each milestone
-  COPIES one given claim's \`doc\`, \`anchor\`, and claim text VERBATIM, character for
-  character. A milestone the engine cannot match back to a given claim is discarded.
-- You have NO code, NO commands, NO test framework, and NO repository. A flow states
-  WHAT the product should do for a user, never HOW a test would drive it. Do not
-  name a command, endpoint, URL, selector, file, or function that does not already
-  appear in the text you were given.
-
-# What makes a good flow
-A flow is what a USER is trying to achieve, in the order they would do it.
-- COMPOSE when claims chain into one goal. "Create a task → the list shows it →
-  complete it → the completed filter shows it" is ONE flow with four milestones, not
-  four flows. The state one milestone leaves behind is what the next one acts on.
-- A ONE-MILESTONE flow is correct and expected when a claim stands alone (an error
-  case, a validation rule, a single flag's behavior). Never pad a flow with unrelated
-  claims to make it look bigger — a padded path tests nothing coherently.
-- At most ~8 milestones. A longer chain is two flows.
-- No near-duplicates: having emitted "create → list → complete", do NOT also emit
-  "create → list" or "create → complete". Emit the longest path you believe in, once.
-- \`title\`: the user goal in the document's own words ("Create and complete a task").
-  \`goal\`: one sentence stating what the user gets when the whole path works.
-- Group by GOAL, not by document or section: claims from different documents of the
-  area belong in one flow when the user experiences them as one path.
-
-# Coverage honesty — the rule you are graded on
-Every claim marked \`account: required\` MUST appear either as a milestone of at least
-one flow, or in \`noFlowClaims\` with a one-sentence reason. Never silently drop one.
-A claim MAY appear in more than one flow when it genuinely belongs to both.
-Claims marked \`account: optional\` sit on surfaces with no test runner today: use one
-as a milestone when it truly belongs to the path, but you never have to account for it.
-Reasons that are legitimate for \`noFlowClaims\`: the claim is an edge/error condition
-no user path reaches, it restates another claim, or it describes a static property
-rather than something a user does. "It didn't fit" is not a reason.
-
-# Output schema (CANONICAL)
-This JSON Schema is generated from the engine's Zod definition; your reply must
-validate against it exactly. Output EXACTLY ONE JSON object, no prose, no fences:
-${FLOWS_JSON_SCHEMA}
-Concretely:
-  { "flows": [
-      { "title": "<the user goal, short>",
-        "goal": "<one sentence: what the user gets when the path works>",
-        "milestones": [
-          { "order": 1,
-            "doc": "<copied verbatim from the claim>",
-            "anchor": "<copied verbatim from the claim>",
-            "claimTitle": "<the claim text, copied verbatim>",
-            "note": "<optional: why this step sits here>" } ] } ],
-    "noFlowClaims": [
-      { "doc": "<copied verbatim>", "anchor": "<copied verbatim>",
-        "claimTitle": "<the claim text, copied verbatim>",
-        "reason": "<one sentence: why no flow uses this claim>" } ] }`
-
-export const FLOWS_PROMPT_FINGERPRINT = fingerprint(FLOWS_SYSTEM_PROMPT)
-
-/** One claim as flow synthesis sees it: its identity triple, the surface hint
- *  extraction assigned, and whether coverage accounting requires it. */
-export interface FlowClaimLine {
-  doc: string
-  anchor: string
-  /** The claim's text — copied verbatim into a milestone's `claimTitle`. */
-  claim: string
-  /** The surface hint from extraction (`cli`, `api`, `web`, …). */
-  driver: string
-  /** True when the claim must land in a flow or in `noFlowClaims` (runnable surfaces). */
-  required: boolean
-}
-
-/** One document's outline as flow synthesis sees it — sections only, no text. */
-export interface FlowDocOutline {
-  doc: string
-  outline: OutlineEntry[]
-  /** Sections extraction judged untestable — context on where the gaps are. */
-  untestable?: { anchor: string; reason: string }[]
-}
-
-/** What the engine tells the model on its ONE corrective re-ask: the milestone /
- *  no-flow references it could not match, and the claims it left unaccounted. */
-export interface FlowSynthesisIssues {
-  unknownReferences: string[]
-  uncoveredClaims: string[]
-}
-
-export interface FlowsUserContext {
-  /** Canonical area id the claims belong to. */
-  areaId: string
-  /** The area's claims — the closed vocabulary milestones are drawn from. */
-  claims: FlowClaimLine[]
-  /** Heading outlines of the area's documents (orientation, never section text). */
-  docs: FlowDocOutline[]
-  /** On a re-ask after invalid output, the prior output quoted back. */
-  correction?: OutputCorrection
-  /** On a re-ask after engine validation, exactly what was wrong. */
-  issues?: FlowSynthesisIssues
-}
-
-export function buildFlowsUserPrompt(ctx: FlowsUserContext): string {
-  const lines: string[] = [`Area: ${ctx.areaId}`]
-  if (ctx.docs.length > 0) {
-    lines.push(
-      '',
-      "DOCUMENT OUTLINES (orientation — where this area's claims come from):",
-    )
-    for (const d of ctx.docs) {
-      lines.push(`${d.doc}`)
-      for (const e of d.outline) lines.push(`  ${e.anchor} — ${e.headingText}`)
-      for (const u of d.untestable ?? []) lines.push(`  (no testable behavior: ${u.anchor} — ${u.reason})`)
-    }
-  }
-  lines.push(
-    '',
-    'CLAIMS IN THIS AREA — the closed set your milestones are drawn from. Copy `doc`,',
-    '`anchor`, and the claim text VERBATIM into every milestone you emit:',
-  )
-  for (const c of ctx.claims) {
-    lines.push(
-      '',
-      `--- claim`,
-      `doc: ${c.doc}`,
-      `anchor: ${c.anchor}`,
-      `claim: ${c.claim}`,
-      `surface: ${c.driver}   account: ${c.required ? 'required' : 'optional'}`,
-    )
-  }
-  if (ctx.issues) {
-    if (ctx.issues.unknownReferences.length > 0) {
-      lines.push(
-        '',
-        'CORRECTION — these references matched NO claim above. A milestone (or a',
-        'noFlowClaims entry) must copy one claim\'s doc, anchor, and text verbatim:',
-      )
-      for (const r of ctx.issues.unknownReferences) lines.push(`- ${r}`)
-    }
-    if (ctx.issues.uncoveredClaims.length > 0) {
-      lines.push(
-        '',
-        'CORRECTION — these claims are marked `account: required` but your answer put',
-        'them in no flow and gave no reason. Put each one in a flow, or list it in',
-        '"noFlowClaims" with a one-sentence reason:',
-      )
-      for (const c of ctx.issues.uncoveredClaims) lines.push(`- ${c}`)
-    }
-    lines.push(
-      'Return the COMPLETE answer again (all flows, not only the corrections), as one',
-      'JSON object matching the schema.',
-    )
-  }
-  if (ctx.correction) {
-    lines.push(
-      '',
-      'CORRECTION — your previous response was NOT valid. You returned:',
-      ctx.correction.invalidOutput,
-      'Return exactly ONE JSON object with "flows" and/or "noFlowClaims" arrays matching',
-      'the schema above, and NOTHING else. Every milestone carries "doc", "anchor", and',
-      '"claimTitle" copied verbatim from a claim listed above.',
-    )
-  }
-  return lines.join('\n')
-}
-
-// ---------------------------------------------------------------------------
-// Flow synthesis — cross-area epic pass
-// ---------------------------------------------------------------------------
-
-export const FLOWS_EPIC_SYSTEM_PROMPT = `\
-You are given the FLOWS a product's specification areas produced — each a user-goal
-path, summarized as its title, its goal, and its milestones. Your one job: decide
-whether any of them chain into an EPIC — a single journey a real user performs
-end-to-end ACROSS areas ("sign up → create a first project → invite a teammate").
-You return JSON only.
-
-${OUTPUT_ONLY_GUARDRAIL}
-
-# The default answer is none
-Most products have zero or one epic. An epic is justified only when a user genuinely
-walks the whole chain in one sitting and each link depends on the previous one's
-state. Two flows that merely belong to the same product are NOT an epic. When in
-doubt, return { "epics": [] } — a wrong epic costs real test runs, a missing one costs
-nothing (the individual flows already cover their claims).
-
-# Rules for an epic you do emit
-- \`composedOf\`: the refs (\`F1\`, \`F2\`, …) of the flows it chains — at least TWO, from
-  DIFFERENT areas. Copy the refs exactly as listed below.
-- \`milestones\`: the path, in the order the user walks it. EVERY milestone must be a
-  milestone of one of the flows in \`composedOf\`, copied VERBATIM (\`doc\`, \`anchor\`,
-  \`claimTitle\`). You may drop a composed flow's milestones that the journey doesn't
-  need, but you may never introduce one from elsewhere or write new text.
-- Keep the chain to at most ~12 milestones, in a single coherent order.
-- \`title\`: the journey in user terms. \`goal\`: one sentence for what the user achieves.
-- Never emit an epic that is just one flow restated, and never emit two epics with the
-  same chain.
-
-# Output schema (CANONICAL)
-This JSON Schema is generated from the engine's Zod definition; your reply must
-validate against it exactly. Output EXACTLY ONE JSON object, no prose, no fences:
-${FLOWS_EPIC_JSON_SCHEMA}
-Concretely:
-  { "epics": [
-      { "title": "<the cross-area journey>",
-        "goal": "<one sentence>",
-        "composedOf": ["F1", "F4"],
-        "milestones": [
-          { "order": 1, "doc": "<copied verbatim>", "anchor": "<copied verbatim>",
-            "claimTitle": "<copied verbatim>" } ] } ] }
-or, when nothing chains:
-  { "epics": [] }`
-
-export const FLOWS_EPIC_PROMPT_FINGERPRINT = fingerprint(FLOWS_EPIC_SYSTEM_PROMPT)
-
-/** One flow as the epic pass sees it — its digest, never its documents. */
 export interface FlowDigest {
   /** Stable ref (`F1`, `F2`, …) the epic's `composedOf` copies. */
   ref: string
@@ -2314,76 +2486,130 @@ export interface FlowDigest {
 }
 
 /** The epic pass's engine feedback for its ONE corrective re-ask. */
-export interface EpicSynthesisIssues {
-  unknownReferences: string[]
+/** What the world classifier is shown per flow — identity + the words that give
+ *  its blast radius away. */
+export interface WorldClassifyFlowInput {
+  id: string
+  title: string
+  /** The flow's milestone claim titles, in order. */
+  milestones: string[]
 }
 
-export interface FlowsEpicUserContext {
-  digests: FlowDigest[]
-  correction?: OutputCorrection
-  issues?: EpicSynthesisIssues
-}
+export const WORLD_CLASSIFY_SYSTEM_PROMPT = `You classify test flows by BLAST RADIUS against one shared application world.
 
-export function buildFlowsEpicUserPrompt(ctx: FlowsEpicUserContext): string {
-  const lines: string[] = [
-    'FLOWS (digests only — no document text). Chain these by ref, or return no epics:',
-  ]
-  for (const d of ctx.digests) {
-    lines.push('', `--- ${d.ref}  (area: ${d.areaId})`, `title: ${d.title}`, `goal: ${d.goal}`, 'milestones:')
-    d.milestones.forEach((m, i) => lines.push(`  ${i + 1}. ${m.doc}#${m.anchor} — ${m.claimTitle}`))
-  }
-  if (ctx.issues && ctx.issues.unknownReferences.length > 0) {
-    lines.push(
-      '',
-      'CORRECTION — these references matched no flow ref / no milestone of the flows the',
-      'epic composes. Every "composedOf" entry is a ref listed above, and every milestone',
-      "is copied verbatim from one of that epic's composed flows:",
-    )
-    for (const r of ctx.issues.unknownReferences) lines.push(`- ${r}`)
-    lines.push('Return the COMPLETE answer again as one JSON object matching the schema.')
-  }
-  if (ctx.correction) {
-    lines.push(
-      '',
-      'CORRECTION — your previous response was NOT valid. You returned:',
-      ctx.correction.invalidOutput,
-      'Return exactly ONE JSON object with an "epics" array (use [] when nothing chains),',
-      'and NOTHING else.',
-    )
+A flow MUTATES the shared world when exercising it changes or destroys state other
+tests depend on: changing or resetting a password, revoking or invalidating
+sessions or tokens, deleting or deactivating an account, changing an email or
+username, flipping global/instance configuration, disabling a feature or sign-in
+method at runtime. Creating NEW things (users, documents, records) is NOT mutation
+— additive flows are the default. SELF-SCOPED LIFECYCLE IS ADDITIVE TOO: a flow
+that creates a record and then updates, sends, or deletes THAT SAME record
+("create a draft, edit it, delete it", "create a template and duplicate it")
+touches nothing any sibling depends on — tests mint their own records, so classify
+\`mutates\` ONLY for state the flow cannot have created itself: the seeded
+principal's credentials/sessions/tokens, the seeded fixtures, instance or global
+configuration, another account's records. When a flow both creates its own record
+AND touches such shared state, it mutates. Judge by what the flow would DO, not by
+the words alone: "reset password" mutates; "shows the reset-password page" does
+not; "delete the draft you created" does not. Over-classifying serializes half the
+run for nothing — a documenso board once ran 41 of 52 flows single-file because
+every create-then-delete lifecycle was read as destruction.
+
+Return EXACTLY ONE JSON object: { "mutators": ["<flow id>", …] } — the ids of the
+listed flows that mutate, empty array when none do. No prose, no fences.`
+
+/** Folded into the classify CACHE key: a doctrine change must re-classify —
+ *  the cached verdicts are the doctrine's output, and a key on the flow set
+ *  alone would pin an old doctrine's scheduling forever. */
+export const WORLD_CLASSIFY_PROMPT_FINGERPRINT = fingerprint(WORLD_CLASSIFY_SYSTEM_PROMPT)
+
+export function buildWorldClassifyUserPrompt(flows: readonly WorldClassifyFlowInput[]): string {
+  const lines = ['FLOWS (classify each; return only the world-mutating ids):', '']
+  for (const f of flows) {
+    lines.push(`- id: ${f.id}`, `  title: ${f.title}`)
+    for (const m of f.milestones) lines.push(`  * ${m}`)
   }
   return lines.join('\n')
 }
 
 // ---------------------------------------------------------------------------
-// Realization matching — one flow against one surface's journey catalog
+// Claim-diff gate — did an edited section change any obligation?
 // ---------------------------------------------------------------------------
+
+/** One edited section as the claim-diff gate sees it: the section's OWN text
+ *  before and after the edit (subsections are judged on their own), plus the
+ *  claims the last extraction pinned to this section. */
+export interface ClaimDiffSectionInput {
+  doc: string
+  anchor: string
+  headingText: string
+  /** The section's own text before the edit (no subsections). */
+  oldText: string
+  /** The section's own text now. */
+  newText: string
+  /** Claims the prior extraction pinned to this section; empty when it found
+   *  nothing testable here. */
+  priorClaims: readonly { claim: string; reason: string }[]
+  /** The prior extraction's untestable note for the section, when it had one. */
+  priorUntestable?: string
+}
+
+export const CLAIM_DIFF_SYSTEM_PROMPT = `You judge whether an edit to ONE section of a specification changed what a test would verify.
+
+You are given the section's own text BEFORE and AFTER the edit (its subsections are judged separately), and the CLAIMS a previous reading extracted from the old text — each a single externally-observable behavior the document guaranteed, with the observable a test would assert. Compare the two texts.
+
+Answer "cosmetic" when the edit changes no externally-observable guarantee: rewording, typo fixes, reformatting, reordering, punctuation, added or removed examples that illustrate what was already guaranteed, added prose with nothing a test could assert. Text the edit did not touch is, by definition, cosmetic — judge the DIFFERENCE, not the section as a whole.
+
+Answer "changed" when the difference alters, adds, removes, or weakens an observable behavior: a value, a condition, an actor, an ordering, an outcome, a default, an error, a limit. A prior claim that no longer holds as stated is "changed"; a new sentence that states a behavior a test could assert is "changed".
+
+When unsure whether the difference is observable, answer "changed" — a needless re-author costs time; a missed obligation costs correctness.
+
+Return EXACTLY ONE JSON object: { "verdict": "cosmetic" | "changed", "reason": "<one sentence naming the difference that decided it>" }. No prose, no fences.`
+
+/** Folded into the gate's cache key: a doctrine change must re-judge. */
+export const CLAIM_DIFF_PROMPT_FINGERPRINT = fingerprint(CLAIM_DIFF_SYSTEM_PROMPT)
+
+export function buildClaimDiffUserPrompt(input: ClaimDiffSectionInput): string {
+  const lines = [`SECTION ${input.doc} #${input.anchor} — "${input.headingText}"`, '']
+  if (input.priorClaims.length > 0) {
+    lines.push('PRIOR CLAIMS (extracted from the text before the edit):')
+    for (const c of input.priorClaims) lines.push(`- ${c.claim}`, `  observable: ${c.reason}`)
+  } else {
+    lines.push(
+      `PRIOR CLAIMS: none — the section was judged untestable${input.priorUntestable ? ` (${input.priorUntestable})` : ''}.`,
+    )
+  }
+  lines.push('', 'TEXT BEFORE THE EDIT:', '<<<BEFORE', input.oldText, 'BEFORE>>>')
+  lines.push('', 'TEXT AFTER THE EDIT:', '<<<AFTER', input.newText, 'AFTER>>>')
+  return lines.join('\n')
+}
 
 export const MATCH_SYSTEM_PROMPT = `\
 You decide HOW a spec FLOW could be walked on ONE of an application's surfaces. You
 are given the flow — a user goal and an ordered list of MILESTONES — and that
-surface's JOURNEY CATALOG: every entry point the surface actually offers, with the
+surface's INTERFACE CATALOG: every entry point the surface actually offers, with the
 steps each one performs. Your one job: return the ordered plan that walks the
-milestones through those journeys, or say plainly that the surface cannot do it. You
+milestones through those interfaces, or say plainly that the surface cannot do it. You
 return JSON only.
 
 ${OUTPUT_ONLY_GUARDRAIL}
 
 # What you are matching
 - A MILESTONE is something the product should do for a user, stated by the spec.
-- A JOURNEY is something the code actually offers: a command a user can run, an
+- A INTERFACE is something the code actually offers: a command a user can run, an
   endpoint they can call, a screen they can reach. It is derived from the code, so
   the catalog is the complete list of what this surface can do.
-- A PLAN pairs them: for each milestone, the journey (or journeys) a test would use
+- A PLAN pairs them: for each milestone, the interface (or interfaces) a test would use
   to reach it, in the order a user would walk them.
 
 # The rules
-- Use ONLY journeys from the catalog below, addressed by their \`id\` copied VERBATIM.
+- Use ONLY interfaces from the catalog below, addressed by their \`id\` copied VERBATIM.
   An id that is not in the catalog invalidates your whole answer.
 - Every milestone must appear in the plan at least once. A milestone may take two
-  journeys (do it, then observe it); a journey may serve two milestones.
+  interfaces (do it, then observe it); an interface may serve two milestones.
 - Keep the plan in milestone order — it is a path, and each step acts on the state
   the previous one left.
-- Match on BEHAVIOR, not on wording. A journey whose entry is \`tasks add\` realizes
+- Match on BEHAVIOR, not on wording. An interface whose entry is \`tasks add\` realizes
   "creating a task returns its id" even though neither text quotes the other.
 
 # The api surface also owns the SERVER PROCESS
@@ -2391,27 +2617,27 @@ The api surface does not only send requests: a test on it starts the service (wi
 any environment it likes), signals it, reads what it writes to stdout/stderr, and
 restarts it. So a milestone about STARTUP, CONFIGURATION defaults, a failed start,
 boot-time migrations, request LOGGING, graceful SHUTDOWN, or state SURVIVING a
-restart is realizable on \`api\` even though no journey in the catalog names it —
-journeys are entry points, not the process's whole life. Plan such a milestone
-against the journey the test observes it THROUGH (the endpoint whose data must
+restart is realizable on \`api\` even though no interface in the catalog names it —
+interfaces are entry points, not the process's whole life. Plan such a milestone
+against the interface the test observes it THROUGH (the endpoint whose data must
 survive the restart, the endpoint whose request produces the log line, or the
-service's health/entry journey when it is the boot itself under test) and say so in
+service's health/entry interface when it is the boot itself under test) and say so in
 the \`note\`. Only a milestone about a DIFFERENT program — a package script, a build
 or test command the docs tell a user to run — is outside this surface.
 
 # A route the app does NOT have is still the api surface's behavior
 A milestone about how the service answers a request it does not serve — an unknown
 path, an unsupported method on a real path, the shape of a 404 or 405 — IS realizable
-on the api surface even though no journey names it: the catalog lists the routes that
+on the api surface even though no interface names it: the catalog lists the routes that
 EXIST, and the claim is precisely about what happens off that list. Plan it against
-the journey it sits nearest (the operation whose path or family the claim names) and
+the interface it sits nearest (the operation whose path or family the claim names) and
 say so in the \`note\`. Do not call it unrealizable.
 
 # When the surface cannot do it — say so, and say why
-If any milestone has NO journey that could plausibly serve it, do NOT stretch an
-unrelated journey to cover it and do NOT return a partial plan. Return
+If any milestone has NO interface that could plausibly serve it, do NOT stretch an
+unrelated interface to cover it and do NOT return a partial plan. Return
 \`unrealizable\` with ONE sentence naming the milestone(s) nothing serves and what is
-missing (e.g. "no journey creates a project — the catalog only reads them"). That
+missing (e.g. "no interface creates a project — the catalog only reads them"). That
 verdict is a first-class, useful answer: it is how a spec promise with no code
 surface behind it becomes visible. A wrong plan, by contrast, produces a test that
 checks the wrong thing.
@@ -2421,7 +2647,7 @@ This JSON Schema is generated from the engine's Zod definition; your reply must
 validate against it exactly. Output EXACTLY ONE JSON object, no prose, no fences:
 ${MATCH_JSON_SCHEMA}
 Concretely:
-  { "plan": [ { "journeyId": "<copied verbatim from the catalog>",
+  { "plan": [ { "interfaceId": "<copied verbatim from the catalog>",
                 "milestone": <the milestone's number>,
                 "note": "<optional: how it serves that milestone>" } ] }
 or:
@@ -2439,9 +2665,9 @@ export interface MatchMilestoneLine {
 }
 
 /**
- * One journey as the matcher sees it: the DIGEST — id, title, entry descriptor, and
+ * One interface as the matcher sees it: the DIGEST — id, title, entry descriptor, and
  * a one-line summary per step. Never file paths, symbols, or source: the matcher
- * reads what a USER can reach, exactly like the journey fingerprint.
+ * reads what a USER can reach, exactly like the interface fingerprint.
  */
 export interface InterfaceDigest {
   id: string
@@ -2455,7 +2681,7 @@ export interface InterfaceDigest {
 /** What the engine tells the matcher on its ONE corrective re-ask. */
 export interface MatchIssues {
   /** Interface ids the plan named that are not in the catalog. */
-  unknownJourneys: string[]
+  unknownInterfaces: string[]
   /** Milestone numbers the plan never covered. */
   uncoveredMilestones: number[]
   /** `milestone` values that match no milestone of this flow. */
@@ -2469,8 +2695,8 @@ export interface MatchUserContext {
   milestones: MatchMilestoneLine[]
   /** The surface being matched (a driver-registry id, e.g. `cli`). */
   surface: string
-  /** The surface's whole journey catalog, as digests. */
-  journeys: InterfaceDigest[]
+  /** The surface's whole interface catalog, as digests. */
+  interfaces: InterfaceDigest[]
   /** On a re-ask after engine validation, exactly what was wrong. */
   issues?: MatchIssues
   /** On a re-ask after invalid output, the prior output quoted back. */
@@ -2491,10 +2717,10 @@ export function buildMatchUserPrompt(ctx: MatchUserContext): string {
   }
   lines.push(
     '',
-    `JOURNEY CATALOG for ${ctx.surface} — everything this surface offers. Copy an \`id\``,
+    `INTERFACE CATALOG for ${ctx.surface} — everything this surface offers. Copy an \`id\``,
     'verbatim into every plan entry:',
   )
-  for (const j of ctx.journeys) {
+  for (const j of ctx.interfaces) {
     lines.push('', `--- id: ${j.id}`, `title: ${j.title}`, `entry: ${j.entry}`)
     if (j.steps.length > 0) {
       lines.push('steps:')
@@ -2502,13 +2728,13 @@ export function buildMatchUserPrompt(ctx: MatchUserContext): string {
     }
   }
   if (ctx.issues) {
-    if (ctx.issues.unknownJourneys.length > 0) {
+    if (ctx.issues.unknownInterfaces.length > 0) {
       lines.push(
         '',
-        'CORRECTION — these journey ids are NOT in the catalog above. Every `journeyId`',
+        'CORRECTION — these interface ids are NOT in the catalog above. Every `interfaceId`',
         'is copied verbatim from a catalog entry:',
       )
-      for (const id of ctx.issues.unknownJourneys) lines.push(`- ${id}`)
+      for (const id of ctx.issues.unknownInterfaces) lines.push(`- ${id}`)
     }
     if (ctx.issues.unknownMilestones.length > 0) {
       lines.push(
@@ -2521,8 +2747,8 @@ export function buildMatchUserPrompt(ctx: MatchUserContext): string {
     if (ctx.issues.uncoveredMilestones.length > 0) {
       lines.push(
         '',
-        'CORRECTION — your plan covered no journey for these milestones. Either give each',
-        'one a journey from the catalog, or answer `unrealizable` naming what is missing:',
+        'CORRECTION — your plan covered no interface for these milestones. Either give each',
+        'one an interface from the catalog, or answer `unrealizable` naming what is missing:',
         `  ${ctx.issues.uncoveredMilestones.join(', ')}`,
       )
     }
@@ -2533,8 +2759,8 @@ export function buildMatchUserPrompt(ctx: MatchUserContext): string {
       '',
       'CORRECTION — your previous response was NOT valid. You returned:',
       ctx.correction.invalidOutput,
-      'Return exactly ONE JSON object: { "plan": [ { "journeyId", "milestone" }, … ] }',
-      'with journey ids copied verbatim from the catalog, or { "unrealizable": "<one',
+      'Return exactly ONE JSON object: { "plan": [ { "interfaceId", "milestone" }, … ] }',
+      'with interface ids copied verbatim from the catalog, or { "unrealizable": "<one',
       'sentence>" }. Nothing else.',
     )
   }

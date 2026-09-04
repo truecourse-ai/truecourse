@@ -373,6 +373,17 @@ ${title === null ? '' : `<p>title: ${escapeHtml(title)}</p>\n`}<p id="notes">${n
   )
 }
 
+/** What the browser PRESENTED: the request's Cookie and Authorization headers,
+ *  so a `credential` step's effect is observable as page text. */
+function whoamiPage(req) {
+  return page(
+    'Who am I',
+    `<h1>Who am I</h1>
+<p id="cookie">cookie: ${escapeHtml(req.headers.cookie ?? 'none')}</p>
+<p id="authorization">authorization: ${escapeHtml(req.headers.authorization ?? 'none')}</p>`,
+  )
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`)
   if (url.pathname === '/health') {
@@ -400,7 +411,9 @@ const server = http.createServer(async (req, res) => {
               ? CAPTURE
               : url.pathname === '/upload'
                 ? UPLOAD
-                : null
+                : url.pathname === '/whoami'
+                  ? whoamiPage(req)
+                  : null
   if (html === null) {
     res.writeHead(404, { 'content-type': 'text/html' })
     res.end(page('Not found', '<h1>Not found</h1>'))

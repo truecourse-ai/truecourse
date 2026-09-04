@@ -9,8 +9,12 @@
  */
 
 import { z } from 'zod'
+import { GuardScenarioAdjudicationSchema } from './adjudication.js'
 import { OutputExcerptsSchema } from './excerpts.js'
-import { GUARD_FORMAT_VERSION, GuardBindsSchema } from './scenario.js'
+import { GuardVisualAnnotationSchema } from './visual.js'
+import { GuardDependencyNeedSchema } from './dependencies.js'
+import { GuardBindsSchema } from './scenario.js'
+import { hasMilestone, type GuardStepMilestone } from './step-parts.js'
 
 /**
  * Per-scenario run outcome. `pass` | `fail` | `error` come from executing the
@@ -18,8 +22,22 @@ import { GUARD_FORMAT_VERSION, GuardBindsSchema } from './scenario.js'
  * written) and `orphaned` (the bound section no longer exists) come from the
  * binding check the runner performs against the live section index before it
  * executes anything — a stale/orphaned scenario is never run.
+ *
+ * `blocked` is the sixth and likewise NON-EXECUTED state: the scenario binds a
+ * SUPPLIED dependency (§7.2's dependency catalog) for which no instance is
+ * registered on this machine. Nothing about the repo is in dispute, so it must
+ * never read as `fail` — the run makes no network call, spawns no child, and
+ * settles with the dependency and its rolled-up requirement named, which is the
+ * one action that clears it (see {@link GuardScenarioResultSchema.blockedOn}).
  */
-export const GuardOutcomeSchema = z.enum(['pass', 'fail', 'stale', 'orphaned', 'error'])
+export const GuardOutcomeSchema = z.enum([
+  'pass',
+  'fail',
+  'stale',
+  'orphaned',
+  'error',
+  'blocked',
+])
 export type GuardOutcome = z.infer<typeof GuardOutcomeSchema>
 
 /**
@@ -35,14 +53,37 @@ export type GuardOutcome = z.infer<typeof GuardOutcomeSchema>
 export const GuardResultStageSchema = z.enum(['birth', 'run'])
 export type GuardResultStage = z.infer<typeof GuardResultStageSchema>
 
-/** A committed test's last known status — the manifest's inventory field, and what
- *  a read falls back to when the current run has no outcome for the scenario. */
-export const GuardTestStatusSchema = z.enum(['passing', 'failing'])
+/**
+ * A committed test's last known status — the manifest's inventory field, and what
+ * a read falls back to when the current run has no outcome for the scenario.
+ *
+ * `never-run` is the third, honest state: the test was COMMITTED WITHOUT AN
+ * EXECUTION. `guard generate` never writes it (it executes every scenario it
+ * authors, so its tests are `passing` or `failing`), but a hand-authored corpus
+ * has no birth execution behind it, and calling that green would be a green
+ * nothing ever earned. It paints as "never run", never as passing.
+ */
+export const GuardTestStatusSchema = z.enum(['passing', 'failing', 'never-run'])
 export type GuardTestStatus = z.infer<typeof GuardTestStatusSchema>
 
+/** Drop the retired `scenarioFormat` marker (pre-2026-08-13 writers stamp it)
+ *  before the strict body sees it, so mixed-version stores keep loading. */
+function dropLegacyScenarioFormat(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+  if (!('scenarioFormat' in value)) return value
+  const { scenarioFormat: _legacy, ...rest } = value as Record<string, unknown>
+  return rest
+}
+
+/** Where a run executed. */
+export const GuardRunOriginSchema = z.enum(['hosted', 'local'])
+export type GuardRunOrigin = z.infer<typeof GuardRunOriginSchema>
+
 /** Run envelope — provenance for the whole run. */
-export const GuardRunEnvelopeSchema = z
-  .object({
+export const GuardRunEnvelopeSchema = z.preprocess(
+  dropLegacyScenarioFormat,
+  z
+    .object({
     runId: z.string(),
     ranAt: z.string(),
     branch: z.string().nullable(),
@@ -56,12 +97,26 @@ export const GuardRunEnvelopeSchema = z
      * decides a later delivery when the corpus the gate would run still matches
      * (a force spec-regen run executes the PR's OWN regenerated corpus, whose
      * ids don't align with the committed set). Optional so CLI runs and
-     * pre-change snapshots keep parsing. NO format-version bump.
+     * pre-change snapshots keep parsing.
      */
-    corpusFingerprint: z.string().optional(),
-    scenarioFormat: z.literal(GUARD_FORMAT_VERSION),
-  })
-  .strict()
+      corpusFingerprint: z.string().optional(),
+      /**
+       * True when this run executed `world: mutates` scenarios and the recipe
+       * declares no `api.services.reset` to restore the world afterwards — the
+       * shared state the tail mutated is still live, and the next run inherits
+       * it. The honest warning, on the record a reader actually opens.
+       */
+      worldLeftDirty: z.boolean().optional(),
+      /** The pull request this run gated; absent on a default-branch run. */
+      pullRequest: z.number().int().positive().optional(),
+      /**
+       * Where the run executed: the hosted runner, or a developer's machine
+       * through the CLI. Absent reads as `hosted`.
+       */
+      origin: GuardRunOriginSchema.optional(),
+    })
+    .strict(),
+)
 export type GuardRunEnvelope = z.infer<typeof GuardRunEnvelopeSchema>
 
 export const GuardSummarySchema = z
@@ -72,6 +127,12 @@ export const GuardSummarySchema = z
     stale: z.number().int().nonnegative(),
     orphaned: z.number().int().nonnegative(),
     error: z.number().int().nonnegative(),
+    /**
+     * Scenarios held back on an unregistered supplied dependency. Defaulted rather
+     * than required so every snapshot written before the dependency catalog existed
+     * still parses (it had none by construction).
+     */
+    blocked: z.number().int().nonnegative().default(0),
   })
   .strict()
 export type GuardSummary = z.infer<typeof GuardSummarySchema>
@@ -88,12 +149,42 @@ export const GuardFailureDetailSchema = z
      * attached on EVERY expect-mismatch so the retry/finding sees the usage error
      * the program actually printed. Optional so pre-change snapshots keep parsing,
      * and infra failures (spawn/timeout — no real capture) simply carry neither.
-     * NO format-version bump.
+     *.
      */
     ...OutputExcerptsSchema.shape,
+    /**
+     * The VISUAL JUDGE's annotation, present only on a failing WEB step whose
+     * screenshot a vision model was asked to read (see {@link
+     * GuardVisualAnnotationSchema}). Advisory: it never moved this outcome — the
+     * deterministic expectation in `expected`/`actual` did. Kept to a verdict plus
+     * a capped one-liner because LATEST is inline-compact; the full rationale is
+     * in the evidence transcript. Optional so pre-change snapshots keep parsing.
+     *.
+     */
+    visual: GuardVisualAnnotationSchema.optional(),
   })
   .strict()
 export type GuardFailureDetail = z.infer<typeof GuardFailureDetailSchema>
+
+/**
+ * The unregistered supplied dependency that held a scenario back, with the
+ * requirement an instance must satisfy — rolled up from the flows that contributed
+ * it, each need attributed to its flow so a reader sees WHY every expectation is
+ * there and a dismissed flow's expectation visibly disappears.
+ */
+export const GuardBlockedDependencySchema = z
+  .object({
+    /** Catalog entry name (`analysis-target`). */
+    dependency: z.string().min(1),
+    /** The rolled-up requirement, one line. */
+    requirement: z.string().min(1),
+    /** The surviving per-flow needs behind that line. */
+    needs: z.array(GuardDependencyNeedSchema).default([]),
+    /** Where an instance is registered — the one action that clears this. */
+    registerIn: z.string().min(1),
+  })
+  .strict()
+export type GuardBlockedDependency = z.infer<typeof GuardBlockedDependencySchema>
 
 export const GuardScenarioResultSchema = z
   .object({
@@ -110,9 +201,24 @@ export const GuardScenarioResultSchema = z
     /**
      * The stage that produced `outcome` (see {@link GuardResultStageSchema}).
      * Optional so every pre-existing snapshot parses; absent reads as `run`
-     * through {@link guardResultStage}. NO format-version bump.
+     * through {@link guardResultStage}.
      */
     stage: GuardResultStageSchema.optional(),
+    /**
+     * WHICH RUN produced this row — the merged board's carrier of per-scenario run
+     * identity. A board (`LATEST.json`) is assembled from whatever mix of full and
+     * scoped runs happened, so the `run` envelope names only the run that touched it
+     * LAST; a row carried over from an earlier run records that run's id and
+     * timestamp here, and its `evidencePath` points into that run's evidence dir.
+     *
+     * Written ONLY on a carried row: a row the envelope's own run produced leaves
+     * both absent, which reads as the envelope through {@link guardResultRunId} /
+     * {@link guardResultRanAt}. Every result written before boards merged is
+     * therefore already correct (its run IS the envelope's). Optional, additive —
+     *.
+     */
+    runId: z.string().optional(),
+    ranAt: z.string().optional(),
     durationMs: z.number().nonnegative(),
     /** Present on `fail` / `error`. */
     failure: GuardFailureDetailSchema.optional(),
@@ -128,7 +234,7 @@ export const GuardScenarioResultSchema = z
      * only when a transient first boot failed and was retried once (see the api-boot
      * resilience item). Omitted for the common single-boot case and for cli scenarios,
      * so a retry is never silent yet the field adds no noise to normal results.
-     * Optional so pre-change snapshots keep parsing. NO format-version bump.
+     * Optional so pre-change snapshots keep parsing.
      */
     bootAttempts: z.number().int().positive().optional(),
     /**
@@ -191,6 +297,35 @@ export const GuardScenarioResultSchema = z
      * one recipe edit instead of a scenario that re-authors forever.
      */
     unservedRoute: z.boolean().optional(),
+    /**
+     * Why a `blocked` scenario never ran: the supplied dependency it binds that has
+     * no registered instance, and that dependency's requirement rolled up from the
+     * flows that contributed it. Present on `blocked` and only there — it is the
+     * actionable half of the outcome, so a surface renders it instead of a step
+     * failure (nothing executed, so there is no failing step to point at).
+     */
+    blockedOn: GuardBlockedDependencySchema.optional(),
+    /**
+     * The ADJUDICATION VERDICT this failure carries (`truecourse guard
+     * adjudicate`, plan 05 step 23) — written AFTER the run by the adjudication
+     * fold, never by the runner. The board merge carries it with an untouched
+     * row and DROPS it from a re-run one (a new actual needs a new verdict —
+     * see `mergeGuardBoard`). Present only on `fail` / `error` rows that were
+     * adjudicated; optional so every pre-existing snapshot parses.
+     */
+    adjudication: GuardScenarioAdjudicationSchema.optional(),
+    /**
+     * Teardown-incomplete ANNOTATION (always `true` when present): after this
+     * scenario settled, one of its BEST-EFFORT teardown steps (run because an
+     * earlier step had already failed or errored) did not meet its expectation or
+     * could not run — host state the scenario promised to restore may remain (a
+     * user-level service still installed, a supervisor entry left behind). Never an
+     * outcome and never a pass/fail input: the settled verdict stands, and the
+     * evidence transcript carries each teardown step's own record. Absent on every
+     * green run (there a teardown step is an ordinary, verdict-affecting step) and
+     * whenever every best-effort teardown step succeeded.
+     */
+    teardownIncomplete: z.boolean().optional(),
   })
   .strict()
 export type GuardScenarioResult = z.infer<typeof GuardScenarioResultSchema>
@@ -203,12 +338,12 @@ export type GuardScenarioResult = z.infer<typeof GuardScenarioResultSchema>
  * other step of the scenario does.
  */
 export function blockedPreconditionAnnotation(
-  steps: readonly { milestone?: number }[],
+  steps: readonly { milestone?: GuardStepMilestone }[],
   failingStep: number,
 ): { blockedPrecondition?: true } {
   const step = steps[failingStep - 1]
-  if (!step || step.milestone) return {}
-  return steps.some((s) => s.milestone) ? { blockedPrecondition: true } : {}
+  if (!step || hasMilestone(step.milestone)) return {}
+  return steps.some((s) => hasMilestone(s.milestone)) ? { blockedPrecondition: true } : {}
 }
 
 /** Per-section rollup — the unit the coverage UI highlights. */
@@ -241,6 +376,9 @@ export const GuardHistoryEntrySchema = z
     branch: z.string().nullable(),
     commit: z.string().nullable(),
     summary: GuardSummarySchema,
+    /** The envelope's provenance, carried so a run list needs no snapshot read. */
+    pullRequest: z.number().int().positive().optional(),
+    origin: GuardRunOriginSchema.optional(),
   })
   .strict()
 export type GuardHistoryEntry = z.infer<typeof GuardHistoryEntrySchema>
@@ -249,6 +387,20 @@ export const GuardHistorySchema = z
   .object({ runs: z.array(GuardHistoryEntrySchema) })
   .strict()
 export type GuardHistory = z.infer<typeof GuardHistorySchema>
+
+/** A run snapshot's history row: the envelope's identity and provenance plus its summary. */
+export function guardHistoryEntryOf(latest: GuardLatest): GuardHistoryEntry {
+  const { runId, ranAt, branch, commit, pullRequest, origin } = latest.run
+  return {
+    runId,
+    ranAt,
+    branch,
+    commit,
+    summary: latest.summary,
+    ...(pullRequest !== undefined ? { pullRequest } : {}),
+    ...(origin !== undefined ? { origin } : {}),
+  }
+}
 
 /**
  * Section status precedence — the worst scenario outcome wins. A section is green
@@ -259,6 +411,10 @@ const OUTCOME_PRECEDENCE: readonly GuardOutcome[] = [
   'error',
   'stale',
   'orphaned',
+  // Blocked outranks pass for the same reason stale does: a section whose other
+  // scenario never ran is not proven, and hiding that behind a green sibling would
+  // report coverage nobody earned.
+  'blocked',
   'pass',
 ]
 
@@ -266,6 +422,28 @@ const OUTCOME_PRECEDENCE: readonly GuardOutcome[] = [
  *  written before birth results existed was one). */
 export function guardResultStage(result: { stage?: GuardResultStage }): GuardResultStage {
   return result.stage ?? 'run'
+}
+
+/**
+ * The run that produced a recorded result: the row's own `runId` when it was carried
+ * into the board from an earlier run, else the envelope's — which is what every row
+ * the envelope's run produced (and every result written before boards merged) leaves
+ * absent. Address a row's evidence through THIS, never through the envelope alone.
+ */
+export function guardResultRunId(
+  result: { runId?: string },
+  envelope: { runId: string },
+): string {
+  return result.runId ?? envelope.runId
+}
+
+/** When a recorded result last ran — the row's own timestamp, else the envelope's.
+ *  Same rule as {@link guardResultRunId}. */
+export function guardResultRanAt(
+  result: { ranAt?: string },
+  envelope: { ranAt: string },
+): string {
+  return result.ranAt ?? envelope.ranAt
 }
 
 export function worstOutcome(outcomes: readonly GuardOutcome[]): GuardOutcome {

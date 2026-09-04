@@ -309,6 +309,8 @@ describe('guard-gate pipeline — diff semantics end-to-end', () => {
     // Head run persisted keyed by headSha, NOT as the baseline (decision 5).
     const persisted = await guardStore.readGuardRunForCommit(REPO, HEAD_SHA);
     expect(persisted?.scenarios[0]?.outcome).toBe('fail');
+    // The stored record names the pull request it gated and where it ran.
+    expect(persisted?.run).toMatchObject({ pullRequest: 7, origin: 'hosted' });
     expect((await guardStore.readGuardLatest(REPO))?.run.commit).toBe(BASE_SHA);
   });
 

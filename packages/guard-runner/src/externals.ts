@@ -22,6 +22,7 @@
 
 import fs from 'node:fs'
 import { z } from 'zod'
+import { HeaderNameSchema } from '@truecourse/shared'
 import { RecipeError, type RecipeApiExternal } from './recipe.js'
 import { externalsLocalPath } from './store.js'
 
@@ -64,7 +65,7 @@ export const ExternalsLocalFileSchema = z.record(
        * declaration says WHICH services exist, this file says how one developer's
        * account is addressed.
        */
-      headers: z.record(z.string().min(1), z.string()).optional(),
+      headers: z.record(HeaderNameSchema, z.string()).optional(),
     })
     .strict(),
 )
@@ -295,7 +296,7 @@ export function resolveExternal(
           kind: 'base-url',
           envVar: merged.baseUrlEnv,
           resolved: false,
-          reason: 'no base URL provided — add one to api.externals or externals.local.json',
+          reason: 'no base URL provided',
           secret: false,
         },
   )
@@ -386,7 +387,7 @@ function resolveEnvItem(
   return {
     requirement: {
       resolved: false,
-      reason: `no value — set it under "${item.name}" in .truecourse/scenarios/externals.local.json (or declare valueFromEnv)`,
+      reason: `no value registered for ${item.name}`,
     },
   }
 }

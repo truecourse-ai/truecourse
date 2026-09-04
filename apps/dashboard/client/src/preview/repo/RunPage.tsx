@@ -1,10 +1,12 @@
 /**
  * One run, as its own page (`/runs/:runId`): the breadcrumb back to Runs, the
  * run's facts on one line, then its results (the list, the tab strip, the
- * opened result's detail), the real run components over fake data.
+ * opened result's detail), the real run components over the run the address
+ * names — the server's snapshot for a connected repository, a fixture's for a
+ * mock one.
  */
 
-import { useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronRight, FlaskConical, Loader2 } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -12,7 +14,6 @@ import { CHIP_CLASS } from '@/preview/ui/bits';
 import { CollapsibleAside } from '@/preview/ui/collapsible-aside';
 import { GuardDriftDetail } from '@/preview/vendor/components/guard/GuardDriftDetail';
 import { GuardDriftList } from '@/preview/vendor/components/guard/GuardDriftList';
-import { useGuardRuns } from '@/preview/vendor/hooks/useGuardRuns';
 import { useGuardTabs } from '@/preview/vendor/hooks/useGuardTabs';
 import { useGuardView } from '@/preview/vendor/hooks/useGuardView';
 import { formatGuardDuration, formatGuardTime, guardRunRef, orderGuardDrifts } from '@/preview/vendor/lib/guard-drifts';
@@ -20,15 +21,12 @@ import { guardStatusMeta } from '@/preview/vendor/lib/guard-status';
 import { coverageVersionById } from '@/preview/data/corpus';
 import type { Repo } from '@/preview/data/types';
 import { useGuardTabJump } from './tab-jump';
+import { useGuardRun } from './use-guard-run';
 
 export function RunPage({ repo, runId }: { repo: Repo; runId: string }) {
   useGuardTabJump();
   const { openSpecSection, openGuardFlow } = useGuardView();
-  const { run, selectedRunId, selectRun, loading } = useGuardRuns(repo.id, true);
-  useEffect(() => {
-    if (selectedRunId !== runId) selectRun(runId);
-  }, [runId, selectedRunId, selectRun]);
-  const shown = run && run.run.runId === runId ? run : null;
+  const { run: shown, loading, error } = useGuardRun(repo.id, runId);
 
   const { activeId, open } = useGuardTabs('result', repo.id);
   const drifts = useMemo(() => orderGuardDrifts(shown?.scenarios), [shown]);
@@ -80,6 +78,8 @@ export function RunPage({ repo, runId }: { repo: Repo; runId: string }) {
         <div className="flex flex-1 items-center justify-center">
           {loading ? (
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          ) : error ? (
+            <EmptyState icon={FlaskConical} title="The run could not be read" body={error} />
           ) : (
             <EmptyState icon={FlaskConical} title="No such run" body="Nothing is recorded under that id." />
           )}

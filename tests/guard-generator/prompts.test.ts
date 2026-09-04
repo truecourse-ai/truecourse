@@ -1,18 +1,15 @@
 import { describe, it, expect } from 'vitest'
 import { createHash } from 'node:crypto'
 import {
-  EXTRACT_SYSTEM_PROMPT,
   GENERATE_SYSTEM_PROMPT,
   GENERATE_API_SYSTEM_PROMPT,
   GENERATE_PROMPT_FINGERPRINT,
   GENERATE_API_PROMPT_FINGERPRINT,
+  GENERATE_WEB_SYSTEM_PROMPT,
+  GENERATE_WEB_PROMPT_FINGERPRINT,
   RECIPE_SYSTEM_PROMPT,
   FIDELITY_SYSTEM_PROMPT,
   FIDELITY_PROMPT_FINGERPRINT,
-  FLOWS_SYSTEM_PROMPT,
-  FLOWS_PROMPT_FINGERPRINT,
-  FLOWS_EPIC_SYSTEM_PROMPT,
-  FLOWS_EPIC_PROMPT_FINGERPRINT,
   MATCH_SYSTEM_PROMPT,
   MATCH_PROMPT_FINGERPRINT,
   flowGenerationInputsHash,
@@ -20,16 +17,13 @@ import {
   buildFidelityUserPrompt,
   buildMatchUserPrompt,
   buildRecipeUserPrompt,
-  buildFlowsUserPrompt,
-  buildFlowsEpicUserPrompt,
+  RawGeneratedCliScenarioSchema,
   type AuthorMilestone,
   type AuthorUserContext,
   type FidelityUserContext,
   type MatchUserContext,
-  type FlowsUserContext,
-  type FlowsEpicUserContext,
 } from '@truecourse/guard-generator'
-import { OUTPUT_ONLY_GUARDRAIL } from '@truecourse/shared/llm'
+import { OUTPUT_ONLY_GUARDRAIL, jsonSchemaHint } from '@truecourse/shared/llm'
 
 /** The same content fingerprint the engine folds into the cache keys. */
 const fingerprint = (text: string): string =>
@@ -54,7 +48,7 @@ function milestone(overrides: Partial<AuthorMilestone> = {}): AuthorMilestone {
     doc: 'docs/cli.md',
     sectionHeading: 'done',
     sectionText: '`done <id>` prints `Completed t<N> ✓`.',
-    realization: ['run: ["done"]   (journey cli:done)'],
+    realization: ['run: ["done"]   (interface cli:done)'],
     ...overrides,
   }
 }
@@ -63,7 +57,7 @@ function authorCtx(overrides: Partial<AuthorUserContext> = {}): AuthorUserContex
   return {
     flow: FLOW,
     milestones: [milestone()],
-    journeyPath: ['cli:done'],
+    interfacePath: ['cli:done'],
     areaTags: [],
     driver: 'cli',
     recipeEntry: ['node', 'cli.js'],
@@ -78,14 +72,14 @@ function apiAuthorCtx(overrides: Partial<AuthorUserContext> = {}): AuthorUserCon
     recipeEntry: undefined,
     recipeServe: ['node', 'server.js'],
     recipeHealthPath: '/health',
-    journeyPath: ['api:create-user'],
+    interfacePath: ['api:create-user'],
     milestones: [
       milestone({
         claim: 'POST /users creates a user',
         doc: 'docs/api.md',
         sectionHeading: 'users',
         sectionText: 'POST /users creates a user and returns 201.',
-        realization: ['request: POST /users   (journey api:create-user)'],
+        realization: ['request: POST /users   (interface api:create-user)'],
       }),
     ],
     ...overrides,
@@ -117,7 +111,7 @@ function matchCtx(overrides: Partial<MatchUserContext> = {}): MatchUserContext {
       { order: 2, claim: '`done <id>` prints `Completed t<N> ✓`', note: 'observe the completion' },
     ],
     surface: 'cli',
-    journeys: [
+    interfaces: [
       {
         id: 'cli:tasks-add',
         title: 'Add a task',
@@ -167,57 +161,17 @@ describe('guard-generator prompts', () => {
     expect(GENERATE_SYSTEM_PROMPT).toContain('REAL BEHAVIOR')
   })
 
-  it('EXTRACT and RECIPE carry the shared output-only guardrail', () => {
-    expect(EXTRACT_SYSTEM_PROMPT).toContain(OUTPUT_ONLY_GUARDRAIL)
+  it('RECIPE carries the shared output-only guardrail', () => {
     expect(RECIPE_SYSTEM_PROMPT).toContain(OUTPUT_ONLY_GUARDRAIL)
   })
 
-  it('GENERATE keeps its own richer no-tools block, not the shared constant', () => {
-    // GENERATE was hardened by an earlier pass with a fuller block; leave it as is.
-    expect(GENERATE_SYSTEM_PROMPT).not.toContain(OUTPUT_ONLY_GUARDRAIL)
-    expect(GENERATE_SYSTEM_PROMPT).toContain('# No tools, no repository access')
-  })
-
-  it('EXTRACT_PROMPT_FINGERPRINT is pinned — moves only with an intended re-extract', () => {
-    // Pinned literal: the prompt renders the driver registry's ids, so the
-    // desktop + mobile journey-type rows moved this from 40e35f8ec26c72cb (the api
-    // driver becoming authorable). It must not move again silently.
-    // Rolled once: the `api` driver row now covers the SERVER PROCESS
-    // (startup under a configuration, a failed start, boot migrations, request
-    // logging, shutdown, restart persistence), because those claims were landing on
-    // `cli` and dying as "blocked on a recipe `entry`" on repos that have no CLI at
-    // all. A re-extract of every doc is the cost, and it is the point.
-    expect(fingerprint(EXTRACT_SYSTEM_PROMPT)).toBe('87fe2fdd9881b428')
-  })
-
-  it('EXTRACT_SYSTEM_PROMPT routes SERVER-PROCESS claims to api, not cli', () => {
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('the behavior of the service PROCESS itself')
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('shuts down on SIGTERM/SIGINT')
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('state survives a restart')
-    // …and the line that keeps a package script on cli.
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('`cli` is for a\n  COMMAND a user runs to completion')
-  })
-
-  // LLM-dependent commands classify as blocked-on, never authored.
-  it('EXTRACT_SYSTEM_PROMPT classifies LLM-provider-dependent commands as blocked-on', () => {
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('commands that need an LLM provider are not cli-testable')
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('authenticated LLM provider')
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('external AI CLI')
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('llm-provider')
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('Do NOT extract such a command')
-    // General, not a fixed command list.
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('any provider-auth-dependent command')
-  })
-
-  // Programmatic import-by-name API claims classify as library (recorded, not authored).
-  it('EXTRACT_SYSTEM_PROMPT classifies programmatic-API claims as library, by consumption form', () => {
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('- library — ')
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('IMPORTING it from user')
-    // The deciding line is how the docs consume it, not which feature it is.
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('documented consumption form')
-    // api became authorable; only web/tui/library stay recorded-only.
-    expect(EXTRACT_SYSTEM_PROMPT).toContain('web/tui/library claims')
-  })
+  // The EXTRACT one-shot prompt (and its fingerprint) is RETIRED — plan 04
+  // step 15 replaced it with the `guard-generate.extract` SESSION, whose prompt
+  // lives in `@truecourse/core`. Its classification rules (server-process ⇒ api,
+  // llm-provider ⇒ untestable, library by consumption form) are re-pinned
+  // against the session prompt in
+  // `tests/core/guard-generate-extract-session.test.ts`; the session prompt is
+  // fingerprinted by its own cache key, so there is no literal to pin here.
 
   // Assertions come from the claim/doc, never the transcript (AUTHORING).
   it('GENERATE_SYSTEM_PROMPT rules assertions come from the claim, not the transcript', () => {
@@ -383,12 +337,12 @@ describe('guard-generator prompts', () => {
             claim: '`add <title>` creates a task',
             sectionHeading: 'add',
             sectionText: '`add <title>` creates a task and prints its id.',
-            realization: ['run: ["add"]   (journey cli:add)'],
+            realization: ['run: ["add"]   (interface cli:add)'],
           }),
           milestone({
             order: 2,
             note: 'observe the completion the previous step enabled',
-            realization: ['run: ["done"]   (journey cli:done)', 'run: ["list"]   (journey cli:list)'],
+            realization: ['run: ["done"]   (interface cli:done)', 'run: ["list"]   (interface cli:list)'],
           }),
         ],
       }),
@@ -404,8 +358,8 @@ describe('guard-generator prompts', () => {
     expect(p).toContain('--- milestone 2')
     expect(p).toContain('note: observe the completion the previous step enabled')
     expect(p).toContain('realize with:')
-    expect(p).toContain('  run: ["done"]   (journey cli:done)')
-    expect(p).toContain('  run: ["list"]   (journey cli:list)')
+    expect(p).toContain('  run: ["done"]   (interface cli:done)')
+    expect(p).toContain('  run: ["list"]   (interface cli:list)')
     // In path order.
     expect(p.indexOf('--- milestone 1')).toBeLessThan(p.indexOf('--- milestone 2'))
   })
@@ -439,7 +393,7 @@ describe('guard-generator prompts', () => {
   })
 
   it('buildAuthorUserPrompt omits the realization lines for an unmatched milestone', () => {
-    const p = buildAuthorUserPrompt(authorCtx({ milestones: [milestone({ realization: [] })], journeyPath: [] }))
+    const p = buildAuthorUserPrompt(authorCtx({ milestones: [milestone({ realization: [] })], interfacePath: [] }))
     expect(p).toContain('--- milestone 1')
     expect(p).not.toContain('realize with:')
     expect(p).not.toContain('realized through:')
@@ -471,7 +425,7 @@ describe('guard-generator prompts', () => {
     expect(p).toContain('CORRECTION — your previous response was NOT valid.')
     expect(p).toContain('not json')
     expect(p).toContain('Return exactly ONE JSON object: { "scenario": { … } }')
-    expect(p).toContain('driver "cli"')
+    expect(p).toContain('the schema (title, non-empty steps, optional setup/normalize,')
     expect(p).toContain('{ "blockedOn": ["<capability>"] }')
   })
 
@@ -645,10 +599,10 @@ describe('guard-generator prompts', () => {
     // joined GuardSetupSchema, which BOTH drivers embed, so the cli scenario schema
     // moved with it. The capability itself is api-only (external accounts configure
     // the api server), and the cli system prompt says nothing new about it.
-    // Rolled again for the scenario story: the TITLE rule — a title
+    // Rolled again for the TITLE rule — a title
     // states the doc's promise, never the literal expected output. What the model
     // writes into an authored field is its own vocabulary, so it belongs here and
-    // rolls the fingerprint; the story surfaces read that title beside the flow's
+    // rolls the fingerprint; the test surfaces read that title beside the flow's
     // promise, and a title that quoted an exit code read as an implementation note.
     // Rolled again 2026-08-01 (the doc's own examples run
     // VERBATIM): a static AUTHORING rule — a DOC EXAMPLE the scenario runs is
@@ -660,8 +614,78 @@ describe('guard-generator prompts', () => {
     // AND a negative half is realized with steps for BOTH, the exclusion
     // asserted observably — the pre-squash defect family (one-sided flag tests
     // that stayed green when exclusion logic broke), re-expressed in flow terms.
-    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('833bbf6dd06af484')
-    expect(GENERATE_PROMPT_FINGERPRINT).toBe('833bbf6dd06af484')
+    // Rolled 2026-08-06 by the scenario format's v3 growth: the prompt renders the
+    // AUTHORED step schema, which gained the combined-output matcher, per-step
+    // `cwd`/`tty`/`note`, the milestone LIST, and git identity/root in setup. No
+    // prose changed — the vocabulary the model may write did. Every cli flow
+    // re-authors once, which the format bump forces anyway.
+    // Rolled 2026-08-07 twice over, both in the AUTHORED step schema: `timeoutMs`
+    // joined it (a step that legitimately outlives the default — a real LLM
+    // analysis — declares its own ceiling instead of failing as drift), and the
+    // authored argv narrowed back to plain strings (the omittable supplied-pair is
+    // runner-only vocabulary a model can never fill correctly — see
+    // AuthoredCliStepSchema).
+    // Rolled 2026-08-09 by PROMPT-KEYED terminal answers: a tty step's `stdin` may
+    // now be a list of `{marker, answer}` — each answer naming the question it
+    // replies to — so the AUTHORED step schema moved. (A hand-written coaching
+    // section that briefly accompanied it was reverted 2026-08-10: how to USE the
+    // vocabulary is the Generate owner's prose to write; the schema renders
+    // itself.)
+    // Rolled 2026-08-09 by CAPTURE: a step may name a piece of its own output
+    // (`capture`: a pattern whose one group is the value), later steps read it as
+    // `${captured:…}` in their argv, env, written content and expectations, and a
+    // matcher may carry a numeric `compare` (equals / atMost / atLeast) against it
+    // — so "the real bill lands at or below the estimate" is a verdict. The
+    // AUTHORED step schema moved and nothing else did: the vocabulary renders
+    // itself, and how to USE it is the Generate owner's prose to write.
+    // NOT rolled 2026-08-09 by the PATCH step, deliberately: the fifth cli step kind
+    // (set/remove a key path in a JSON document) joined the RUNNER's step union and
+    // not this prompt's, exactly as `git`, `write` and `delete` did before it. The
+    // authored cli vocabulary is the `run` step alone — see AuthoredCliStepSchema —
+    // so nothing the model may write changed, and re-authoring every cli flow over a
+    // vocabulary they cannot use would be a bill with no verdict behind it.
+    // RE-PINNED 2026-08-10 for the INTERFACE rename and nothing else: the word
+    // "journey" retired in favour of "interface" across stores, schemas and copy,
+    // and this prompt renders that vocabulary, so its text moved without a single
+    // rule moving with it. A rename, not vocabulary growth.
+    // RE-PINNED 2026-08-12 by the scenario-level `driver` field's REMOVAL: the
+    // authored schema no longer carries it (the driver is the step's), so the
+    // rendered schema and the sentence that explained the field both shrank. A
+    // deletion, not vocabulary growth — nothing new is authorable.
+    // ROLLED 2026-08-14 by the DELTA half of the comparison: `compare.offset`
+    // shifts the comparand, so "the count after is one less than the count before"
+    // is authorable for the first time. Vocabulary growth in the shared matcher, so
+    // both drivers' prompts move together — and re-authoring is the point: a claim
+    // about a CHANGE could previously only be written as an absolute number, which
+    // tests the fixture rather than the promise.
+    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('0fb6f80b67e16d03')
+    // Moved once with the blast-radius cut: the canonical schema gained `world`.
+    expect(GENERATE_PROMPT_FINGERPRINT).toBe('0fb6f80b67e16d03')
+  })
+
+  it('the authored cli step vocabulary is the `run` step — a runner-only kind never leaks in', () => {
+    // The prompt's canonical scenario schema IS this Zod schema rendered, so a step
+    // kind added to the RUNNER's union must not appear here: it would roll the
+    // fingerprint (this test's neighbour) and re-author the whole cli corpus over a
+    // vocabulary generation does not use. Widening it is a decision, not a side effect.
+    const schema = jsonSchemaHint(RawGeneratedCliScenarioSchema.strip())
+    const steps = JSON.parse(schema).properties.steps
+    expect(Object.keys(steps.items.properties).sort()).toEqual([
+      'capture',
+      'cwd',
+      'env',
+      'expect',
+      'milestone',
+      'note',
+      'repeat',
+      'run',
+      'stdin',
+      'timeoutMs',
+      'tty',
+    ])
+    for (const runnerOnly of ['patch', 'write', 'delete']) {
+      expect(steps.items.properties).not.toHaveProperty(runnerOnly)
+    }
   })
 
   // The enumerated `missing-data` noun — an AUTHORING rule (which
@@ -676,7 +700,7 @@ describe('guard-generator prompts', () => {
     }
   })
 
-  // The story surfaces render the title beside the flow's promise, so
+  // The test surfaces render the title beside the flow's promise, so
   // a title that quotes the literal expected output says nothing a reviewer needs.
   it('both authoring prompts forbid a title that restates the expected output', () => {
     for (const prompt of [GENERATE_SYSTEM_PROMPT, GENERATE_API_SYSTEM_PROMPT]) {
@@ -696,7 +720,7 @@ describe('guard-generator prompts', () => {
     const inputs = {
       flowFingerprint: 'sha256:flow',
       sectionKeys: ['sha256:section'],
-      journeyFingerprints: ['sha256:journey'],
+      interfaceFingerprints: ['sha256:interface'],
       recipeFingerprint: 'sha256:recipe',
     }
     const hash = flowGenerationInputsHash(inputs)
@@ -775,7 +799,7 @@ describe('guard-generator prompts', () => {
   it('MATCH_SYSTEM_PROMPT makes a process milestone realizable on api', () => {
     expect(MATCH_SYSTEM_PROMPT).toContain('# The api surface also owns the SERVER PROCESS')
     expect(MATCH_SYSTEM_PROMPT).toContain('state SURVIVING a\nrestart')
-    expect(MATCH_SYSTEM_PROMPT).toContain('the journey the test observes it THROUGH')
+    expect(MATCH_SYSTEM_PROMPT).toContain('the interface the test observes it THROUGH')
     expect(MATCH_SYSTEM_PROMPT).toContain('a package script, a build')
   })
 
@@ -842,7 +866,7 @@ describe('guard-generator prompts', () => {
     // improvisations (`/v2/x` → `/api/v2/x`, a lookalike endpoint) — and names the
     // `missing-server` refusal to return instead. Every api section re-authors once,
     // which is exactly how the scenarios that asked the wrong server convert.
-    // Rolled again for the scenario story: the same TITLE rule as the
+    // Rolled again for the TITLE rule — the same rule as the
     // cli prompt, in api words — the promise, never "response status is 201".
     // Rolled again 2026-08-01 (the doc's own examples run
     // VERBATIM), in api words: a documented request a step sends carries the DOC
@@ -857,8 +881,28 @@ describe('guard-generator prompts', () => {
     // rule now states the boundary the runner enforces — the window OPENS where the
     // previous step BEGAN, so a line the service flushes after that step's response
     // still counts. Every api flow re-authors once.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('58e07b12d07e4324')
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('58e07b12d07e4324')
+    // Rolled 2026-08-06 with its cli sibling: the rendered `setup` schema gained
+    // the git identity/root fields of scenario format v3.
+    // Rolled 2026-08-09 with its cli sibling, by the SHARED half of CAPTURE: every
+    // text and json matcher gained the numeric `compare` (equals / atMost /
+    // atLeast) that makes a captured value assertable. This driver already
+    // captured (`capture` / `captureHeaders`); only the assertion side grew, and
+    // the rendered schema is the whole of what changed.
+    // RE-PINNED 2026-08-10 for the INTERFACE rename and nothing else: the word
+    // "journey" retired in favour of "interface" across stores, schemas and copy,
+    // and this prompt renders that vocabulary, so its text moved without a single
+    // rule moving with it. A rename, not vocabulary growth.
+    // RE-PINNED 2026-08-12 with its cli sibling, by the scenario-level `driver`
+    // field's REMOVAL: the authored schema no longer carries it, so the rendered
+    // schema and the sentence that explained it both shrank. A deletion.
+    // ROLLED 2026-08-14 with its cli sibling, by `compare.offset` — the DELTA half
+    // of the comparison. Every text and json matcher's `compare` can now shift its
+    // comparand, which is what makes "one fewer seat than before" a verdict instead
+    // of an absolute number that only tests the fixture.
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('c023641899c98f89')
+    // Moved once with the blast-radius cut: `world` in the schema + the
+    // shared-world/self-mint doctrine block.
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('c023641899c98f89')
   })
 
   it('the api authoring prompt teaches the cookie jar and captureHeaders', () => {
@@ -1103,8 +1147,8 @@ describe('guard-generator prompts', () => {
     expect(MATCH_SYSTEM_PROMPT).toContain(OUTPUT_ONLY_GUARDRAIL)
   })
 
-  it('MATCH_SYSTEM_PROMPT forbids inventing journey ids — the catalog is the closed set', () => {
-    expect(MATCH_SYSTEM_PROMPT).toContain('Use ONLY journeys from the catalog below')
+  it('MATCH_SYSTEM_PROMPT forbids inventing interface ids — the catalog is the closed set', () => {
+    expect(MATCH_SYSTEM_PROMPT).toContain('Use ONLY interfaces from the catalog below')
     expect(MATCH_SYSTEM_PROMPT).toContain('copied VERBATIM')
     expect(MATCH_SYSTEM_PROMPT).toContain('An id that is not in the catalog invalidates your whole answer')
     // Every milestone is covered, in path order, matched on behavior not wording.
@@ -1138,9 +1182,13 @@ describe('guard-generator prompts', () => {
     // `unrealizable` re-matches into a plan.
     // Rolled again for the lifecycle half: the api surface owns the server
     // PROCESS, so a startup/shutdown/logging/restart milestone is planned against the
-    // journey it is observed through instead of settling `unrealizable`.
-    expect(MATCH_PROMPT_FINGERPRINT).toBe('df2d1a56fb52b946')
-    expect(fingerprint(MATCH_SYSTEM_PROMPT)).toBe('df2d1a56fb52b946')
+    // interface it is observed through instead of settling `unrealizable`.
+    // RE-PINNED 2026-08-10 for the INTERFACE rename and nothing else: the word
+    // "journey" retired in favour of "interface" across stores, schemas and copy,
+    // and this prompt renders that vocabulary, so its text moved without a single
+    // rule moving with it. A rename, not vocabulary growth.
+    expect(MATCH_PROMPT_FINGERPRINT).toBe('3ef011ad233400d1')
+    expect(fingerprint(MATCH_SYSTEM_PROMPT)).toBe('3ef011ad233400d1')
   })
 
   it('buildMatchUserPrompt renders the milestones and the catalog digest (ids, entries, steps)', () => {
@@ -1151,8 +1199,8 @@ describe('guard-generator prompts', () => {
     expect(p).toContain('  1. `add <title>` creates a task')
     // Synthesis' note rides next to the claim.
     expect(p).toContain('  (observe the completion)')
-    expect(p).toContain('JOURNEY CATALOG for cli')
-    // Each journey: its id, title, entry descriptor, and one line per step.
+    expect(p).toContain('INTERFACE CATALOG for cli')
+    // Each interface: its id, title, entry descriptor, and one line per step.
     expect(p).toContain('--- id: cli:tasks-add')
     expect(p).toContain('title: Add a task')
     expect(p).toContain('entry: tasks add')
@@ -1164,34 +1212,34 @@ describe('guard-generator prompts', () => {
     expect(p).not.toContain('CORRECTION —')
   })
 
-  it('buildMatchUserPrompt renders a journey with no steps as id/title/entry only', () => {
+  it('buildMatchUserPrompt renders an interface with no steps as id/title/entry only', () => {
     const p = buildMatchUserPrompt(
-      matchCtx({ journeys: [{ id: 'cli:version', title: 'Print the version', entry: 'version', steps: [] }] }),
+      matchCtx({ interfaces: [{ id: 'cli:version', title: 'Print the version', entry: 'version', steps: [] }] }),
     )
     expect(p).toContain('--- id: cli:version')
     expect(p).toContain('entry: version')
     expect(p).not.toContain('steps:')
   })
 
-  it('buildMatchUserPrompt quotes back the unknown journeys and the milestone gaps', () => {
+  it('buildMatchUserPrompt quotes back the unknown interfaces and the milestone gaps', () => {
     const p = buildMatchUserPrompt(
       matchCtx({
         issues: {
-          unknownJourneys: ['cli:tasks-archive'],
+          unknownInterfaces: ['cli:tasks-archive'],
           uncoveredMilestones: [2],
           unknownMilestones: [9],
         },
       }),
     )
     // The exact invented id, quoted back.
-    expect(p).toContain('CORRECTION — these journey ids are NOT in the catalog above.')
+    expect(p).toContain('CORRECTION — these interface ids are NOT in the catalog above.')
     expect(p).toContain('- cli:tasks-archive')
     // The exact out-of-range milestone, plus the closed number set.
     expect(p).toContain('CORRECTION — these `milestone` values match no milestone of this flow.')
     expect(p).toContain('the numbers listed above (1..2):')
     expect(p).toContain('  9')
     // The uncovered milestone, and the honest way out.
-    expect(p).toContain('CORRECTION — your plan covered no journey for these milestones.')
+    expect(p).toContain('CORRECTION — your plan covered no interface for these milestones.')
     expect(p).toContain('answer `unrealizable` naming what is missing')
     expect(p).toContain('  2')
     expect(p).toContain('Return the COMPLETE answer again as one JSON object matching the schema.')
@@ -1201,106 +1249,136 @@ describe('guard-generator prompts', () => {
     const p = buildMatchUserPrompt(matchCtx({ correction: { invalidOutput: 'here is my plan: …' } }))
     expect(p).toContain('CORRECTION — your previous response was NOT valid. You returned:')
     expect(p).toContain('here is my plan: …')
-    expect(p).toContain('{ "plan": [ { "journeyId", "milestone" }, … ] }')
+    expect(p).toContain('{ "plan": [ { "interfaceId", "milestone" }, … ] }')
     expect(p).toContain('or { "unrealizable": "<one')
   })
 
-  // --- flow synthesis (guard.flows) -----------------------------------------
+  // The flow-synthesis one-shot prompts (FLOWS / FLOWS_EPIC, their fingerprints
+  // and `buildFlowsUserPrompt` / `buildFlowsEpicUserPrompt`) are RETIRED — plan
+  // 04 step 16 replaced them with the `guard-generate.flows` SESSIONS, whose
+  // prompts and briefings live in `@truecourse/core` and are pinned in
+  // `tests/core/guard-generate-flows-session.test.ts`. One rule genuinely
+  // CHANGED with the move and is pinned there in its new form: synthesis is no
+  // longer blind to the code — the briefing carries interface digests and the
+  // dependency catalog as GROUNDING, while the binding rule (a milestone COPIES
+  // a given claim) survives whole.
+})
 
-  it('FLOWS_SYSTEM_PROMPT closes the action space with the shared no-tools guardrail', () => {
-    expect(FLOWS_SYSTEM_PROMPT).toContain(OUTPUT_ONLY_GUARDRAIL)
-    expect(FLOWS_EPIC_SYSTEM_PROMPT).toContain(OUTPUT_ONLY_GUARDRAIL)
+describe('GENERATE_WEB_SYSTEM_PROMPT — the third authoring arm', () => {
+  it('teaches the locator policy in the interface catalog’s own vocabulary', () => {
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('# THE LOCATOR POLICY')
+    // Role + accessible name primary, the five alternates, and the exclusions.
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('role + accessible name')
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('NO CSS selectors, NO XPath, NO test ids')
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('"pick": "first"')
+    // The translation rule — realization lines become locators, one worked example.
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('click: button "Add Repository"')
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('"click": { "role": "button", "name": "Add Repository" }')
   })
 
-  it('FLOWS_SYSTEM_PROMPT keeps synthesis spec-only — the independence invariant', () => {
-    // Milestones are copies of extracted claims, never new assertions.
-    expect(FLOWS_SYSTEM_PROMPT).toContain('COPIES one given claim')
-    expect(FLOWS_SYSTEM_PROMPT).toContain('Never invent, reword, translate, shorten, merge, or split a claim')
-    // No code, no probes, no recipe ever reach this stage.
-    expect(FLOWS_SYSTEM_PROMPT).toContain('You have NO code, NO commands, NO test framework, and NO repository')
-    expect(FLOWS_SYSTEM_PROMPT).not.toContain('transcript')
-    expect(FLOWS_SYSTEM_PROMPT).not.toContain('recipe')
-    expect(FLOWS_SYSTEM_PROMPT).not.toContain('journey')
+  it('closes the verb set at six, tags every step, and bans the sleep', () => {
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('# The verb vocabulary — six verbs, closed')
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('Every web step declares `driver: web`')
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('no sleep verb, ever')
+    // Addresses are surface-relative; url matches origin-stripped.
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('# Addresses are SURFACE-RELATIVE')
   })
 
-  it('FLOWS_SYSTEM_PROMPT states the coverage honesty rule and the granularity spectrum', () => {
-    expect(FLOWS_SYSTEM_PROMPT).toContain('# Coverage honesty')
-    expect(FLOWS_SYSTEM_PROMPT).toContain('account: required')
-    expect(FLOWS_SYSTEM_PROMPT).toContain('noFlowClaims')
-    // Atomic flows are legitimate; near-duplicates are not.
-    expect(FLOWS_SYSTEM_PROMPT).toContain('A ONE-MILESTONE flow is correct and expected')
-    expect(FLOWS_SYSTEM_PROMPT).toContain('No near-duplicates')
+  it('admits the one-world mix and bans the api lifecycle verbs', () => {
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('# Mixing vocabularies — one sandbox, one world')
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('the api lifecycle verbs (`boot`, `signal`, `logs`) do not')
+    // A milestone about a screen is realized by a web step, never a request alone.
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('a milestone\nabout a SCREEN must be realized by a web step')
   })
 
-  it('FLOWS_PROMPT_FINGERPRINT is pinned — moves only with an intended re-synthesis', () => {
-    expect(FLOWS_PROMPT_FINGERPRINT).toBe('654d47c7386fcd58')
-    expect(FLOWS_EPIC_PROMPT_FINGERPRINT).toBe('e49a339b46f07d79')
+  it('embeds its canonical schema NAMED, not inlined — the 119K regression guard', () => {
+    // Inlined, the locator union’s 80-role enum recurs ~30× and the prompt lands
+    // near 131K chars; named under `definitions` the whole prompt stays bounded.
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('"definitions"')
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('#/definitions/webLocator')
+    expect(GENERATE_WEB_SYSTEM_PROMPT.length).toBeLessThan(40_000)
   })
 
-  it('FLOWS_EPIC_SYSTEM_PROMPT defaults to no epics and only chains listed flows', () => {
-    expect(FLOWS_EPIC_SYSTEM_PROMPT).toContain('The default answer is none')
-    expect(FLOWS_EPIC_SYSTEM_PROMPT).toContain('DIFFERENT areas')
-    expect(FLOWS_EPIC_SYSTEM_PROMPT).toContain('{ "epics": [] }')
+  it('GENERATE_WEB_PROMPT_FINGERPRINT is pinned — and the cli/api pins did not move with the arm', () => {
+    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe(fingerprint(GENERATE_WEB_SYSTEM_PROMPT))
+    // Moved once deliberately: the seeded-principal doctrine (a signed-in world
+    // is reached by filling the seeded login fixture, never by blocking on
+    // "credentials") replaced the bare "no credentials" line.
+    // …and again with the blast-radius cut (`world` + shared-world doctrine).
+    // …and once more when the `credential` step became the sign-in channel
+    // (the login form is for flows ABOUT signing in).
+    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('bc362be57f0801e8')
   })
 
-  it('buildFlowsUserPrompt carries the claims, the outlines, and the accounting marks', () => {
-    const ctx: FlowsUserContext = {
-      areaId: 'tasks',
-      claims: [
-        { doc: 'docs/tasks.md', anchor: 'tasks/creating-tasks', claim: '`add <title>` creates a task', driver: 'cli', required: true },
-        { doc: 'docs/tasks.md', anchor: 'tasks/board', claim: 'the board shows one card per task', driver: 'web', required: false },
-      ],
-      docs: [
-        {
-          doc: 'docs/tasks.md',
-          outline: [{ anchor: 'tasks/creating-tasks', headingText: 'Creating tasks', level: 2 }],
-          untestable: [{ anchor: 'tasks/rationale', reason: 'design history' }],
-        },
-      ],
-    }
-    const p = buildFlowsUserPrompt(ctx)
-    expect(p).toContain('Area: tasks')
-    expect(p).toContain('DOCUMENT OUTLINES')
-    expect(p).toContain('tasks/creating-tasks — Creating tasks')
-    expect(p).toContain('no testable behavior: tasks/rationale')
-    expect(p).toContain('claim: `add <title>` creates a task')
-    expect(p).toContain('surface: cli   account: required')
-    expect(p).toContain('surface: web   account: optional')
-    expect(p).not.toContain('CORRECTION')
+  it('a web batch advertises the world credentials as the sign-in channel, and the fixture block defers to it', () => {
+    const withCredentials = buildAuthorUserPrompt(
+      authorCtx({
+        driver: 'web',
+        recipeServe: ['node', 'web.js'],
+        recipeHealthPath: '/health',
+        credentials: [{ name: 'webSession', header: 'Cookie', description: 'the seeded session' }],
+        fixtures: [{ name: 'webUser', fields: ['email', 'password'] }],
+      }),
+    )
+    expect(withCredentials).toContain('CREDENTIALS AVAILABLE — the prepared world holds these principals')
+    expect(withCredentials).toContain('- webSession (the seeded session) → header `Cookie`')
+    expect(withCredentials).toContain('{ "driver": "web", "credential": "webSession" }')
+    expect(withCredentials).toContain('reached with a `credential` step')
+    expect(withCredentials).not.toContain("that IS this surface's credential")
+    // Without credentials the fixture block keeps the login-form doctrine, and
+    // no credentials block renders at all.
+    const fixturesOnly = buildAuthorUserPrompt(
+      authorCtx({
+        driver: 'web',
+        recipeServe: ['node', 'web.js'],
+        recipeHealthPath: '/health',
+        fixtures: [{ name: 'webUser', fields: ['email', 'password'] }],
+      }),
+    )
+    expect(fixturesOnly).not.toContain('CREDENTIALS AVAILABLE')
+    expect(fixturesOnly).toContain("that IS this surface's credential")
   })
 
-  it('buildFlowsUserPrompt quotes back unknown references and unaccounted claims', () => {
-    const p = buildFlowsUserPrompt({
-      areaId: 'tasks',
-      claims: [],
-      docs: [],
-      issues: {
-        unknownReferences: ['docs/tasks.md#tasks/creating-tasks — "`archive` hides a task"'],
-        uncoveredClaims: ['docs/tasks.md#tasks/listing-tasks — "`list` prints open tasks"'],
-      },
-    })
-    expect(p).toContain('matched NO claim above')
-    expect(p).toContain('`archive` hides a task')
-    expect(p).toContain('account: required` but your answer put')
-    expect(p).toContain('`list` prints open tasks')
-    expect(p).toContain('Return the COMPLETE answer again')
+  it('a web batch advertises the seed fixture catalog as the sign-in channel', () => {
+    const p = buildAuthorUserPrompt(
+      authorCtx({
+        driver: 'web',
+        recipeServe: ['node', 'web.js'],
+        recipeHealthPath: '/health',
+        fixtures: [{ name: 'webUser', fields: ['email', 'password'] }],
+      }),
+    )
+    expect(p).toContain('FIXTURES AVAILABLE')
+    expect(p).toContain('- webUser: fields `email`, `password`')
+    expect(p).toContain('{{fixture:<name>.<field>}}')
+    expect(p).toMatch(/SIGNED-IN world/)
+    // The block is seed-gated: without a catalog the web prompt renders as before.
+    const bare = buildAuthorUserPrompt(
+      authorCtx({ driver: 'web', recipeServe: ['node', 'web.js'], recipeHealthPath: '/health' }),
+    )
+    expect(bare).not.toContain('FIXTURES AVAILABLE')
   })
 
-  it('buildFlowsEpicUserPrompt renders digests only — refs, titles, milestones', () => {
-    const ctx: FlowsEpicUserContext = {
-      digests: [
-        {
-          ref: 'F1',
-          areaId: 'tasks',
-          title: 'Create and complete a task',
-          goal: 'A user finishes a task.',
-          milestones: [{ doc: 'docs/tasks.md', anchor: 'tasks/creating-tasks', claimTitle: '`add <title>` creates a task' }],
-        },
-      ],
-    }
-    const p = buildFlowsEpicUserPrompt(ctx)
-    expect(p).toContain('--- F1  (area: tasks)')
-    expect(p).toContain('title: Create and complete a task')
-    expect(p).toContain('1. docs/tasks.md#tasks/creating-tasks — `add <title>` creates a task')
+  it('buildAuthorUserPrompt opens a web batch on the web preparation framing', () => {
+    const p = buildAuthorUserPrompt(
+      authorCtx({
+        driver: 'web',
+        recipeEntry: ['node', 'cli.js'],
+        recipeServe: ['node', 'web.js'],
+        recipeHealthPath: '/health',
+      }),
+    )
+    expect(p).toContain('Web surface serve command: ["node","web.js"]')
+    expect(p).toContain('Health endpoint: GET /health  (polled until 2xx before the first browser step)')
+    // The entrypoint rides along for the seeding `run` steps — framed as theirs.
+    expect(p).toContain("(a cli step's `run` argv is appended to this)")
+    expect(p).toContain('Build command: true')
+  })
+
+  it('a web batch without a cli entry omits the entrypoint line', () => {
+    const p = buildAuthorUserPrompt(
+      authorCtx({ driver: 'web', recipeEntry: undefined, recipeServe: ['node', 'web.js'] }),
+    )
+    expect(p).not.toContain('Program entrypoint')
   })
 })

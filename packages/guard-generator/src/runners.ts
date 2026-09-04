@@ -1,17 +1,23 @@
 /**
- * The injectable LLM runners for the guard-generator stages. Production spawns the
- * model through the shared `LlmTransport` seam (cli by default, agent mailbox in
- * EE, or the direct-API transport); tests inject stubs. Each runner is output-only:
- * it returns the model's raw parsed JSON (`unknown`) and never writes files or runs
- * commands.
+ * The injectable LLM runners for the guard-generator stages that are still
+ * ONE-SHOTS: recipe discovery (deliberately kept — see plan section 03) and
+ * realization matching. Everything else (extraction, flow synthesis, the
+ * flow-worker author/adjudicate loop and its fidelity child) runs as agent
+ * sessions injected through the session seams (plan 04); their runners were
+ * retired by step 20.
+ *
+ * Production spawns the model through the shared `LlmTransport` seam (cli by
+ * default, agent mailbox in EE, or the direct-API transport); tests inject
+ * stubs. Each runner is output-only: it returns the model's raw parsed JSON
+ * (`unknown`) and never writes files or runs commands.
  *
  * Every request carries its stage's response schema, rendered from the SAME Zod
  * definition the engine validates the reply with (and the same one the prompt
  * embeds as its canonical output contract — one source, never two wordings). The
  * API transport submits it as provider-side STRUCTURED OUTPUT; the cli and agent
- * backends treat it as informational. Two stages carry a schema strict output
- * cannot express (a typed record); each says so with `enforceSchema: false` and a
- * comment naming the construct, never a silent degrade — the gate in
+ * backends treat it as informational. The recipe stage carries a schema strict
+ * output cannot express (a typed record); it says so with `enforceSchema: false`
+ * and a comment naming the construct, never a silent degrade — the gate in
  * `tests/llm-api/stage-schemas.test.ts` pins the list.
  *
  * Enforcement never replaces the engine's own validation: the cli transport
@@ -20,214 +26,40 @@
  * records a fail-soft failure.
  */
 
+import { cliTransport, extractJsonValue, jsonSchemaHint, type LlmTransport } from '@truecourse/shared/llm'
+import { ClaimDiffSchema, RealizationMatchSchema, RecipeProposalSchema, WorldClassifySchema } from './schemas.js'
 import {
-  cliTransport,
-  extractJsonValue,
-  jsonSchemaHint,
-  type LlmTransport,
-} from '@truecourse/shared/llm'
-import { GuardTriageSchema } from '@truecourse/shared'
-import {
-  AuthoredApiResponseSchema,
-  AuthoredCliResponseSchema,
-  DocExtractionSchema,
-  EpicSynthesisSchema,
-  FidelityReviewSchema,
-  FlowSynthesisSchema,
-  RealizationMatchSchema,
-  RecipeProposalSchema,
-} from './schemas.js'
-import {
-  EXTRACT_SYSTEM_PROMPT,
-  buildExtractUserPrompt,
-  GENERATE_SYSTEM_PROMPT,
-  GENERATE_API_SYSTEM_PROMPT,
-  buildAuthorUserPrompt,
   RECIPE_SYSTEM_PROMPT,
   buildRecipeUserPrompt,
-  FIDELITY_SYSTEM_PROMPT,
-  buildFidelityUserPrompt,
-  FLOWS_SYSTEM_PROMPT,
-  buildFlowsUserPrompt,
-  FLOWS_EPIC_SYSTEM_PROMPT,
-  buildFlowsEpicUserPrompt,
   MATCH_SYSTEM_PROMPT,
   buildMatchUserPrompt,
-  type ExtractUserContext,
-  type AuthorUserContext,
+  WORLD_CLASSIFY_SYSTEM_PROMPT,
+  buildWorldClassifyUserPrompt,
+  CLAIM_DIFF_SYSTEM_PROMPT,
+  buildClaimDiffUserPrompt,
   type RecipeDiscoveryInput,
-  type FidelityUserContext,
-  type FlowsUserContext,
-  type FlowsEpicUserContext,
   type MatchUserContext,
+  type WorldClassifyFlowInput,
+  type ClaimDiffSectionInput,
 } from './prompts.js'
-import { TRIAGE_SYSTEM_PROMPT, buildTriageUserPrompt, type TriageRunner } from './triage.js'
 
 /** The response schema each stage sends on its request — one per reply contract,
  *  rendered once at module load from the engine's own Zod source. */
-const EXTRACT_RESPONSE_SCHEMA = jsonSchemaHint(DocExtractionSchema)
-const AUTHOR_CLI_RESPONSE_SCHEMA = jsonSchemaHint(AuthoredCliResponseSchema)
-const AUTHOR_API_RESPONSE_SCHEMA = jsonSchemaHint(AuthoredApiResponseSchema)
-const TRIAGE_RESPONSE_SCHEMA = jsonSchemaHint(GuardTriageSchema)
-const FIDELITY_RESPONSE_SCHEMA = jsonSchemaHint(FidelityReviewSchema)
-const FLOWS_RESPONSE_SCHEMA = jsonSchemaHint(FlowSynthesisSchema)
-const FLOWS_EPIC_RESPONSE_SCHEMA = jsonSchemaHint(EpicSynthesisSchema)
 const MATCH_RESPONSE_SCHEMA = jsonSchemaHint(RealizationMatchSchema)
 const RECIPE_RESPONSE_SCHEMA = jsonSchemaHint(RecipeProposalSchema)
+const WORLD_CLASSIFY_RESPONSE_SCHEMA = jsonSchemaHint(WorldClassifySchema)
+const CLAIM_DIFF_RESPONSE_SCHEMA = jsonSchemaHint(ClaimDiffSchema)
 
-export type ExtractRunner = (input: ExtractUserContext) => Promise<unknown>
-export type GenerateRunner = (input: AuthorUserContext) => Promise<unknown>
 export type RecipeRunner = (input: RecipeDiscoveryInput) => Promise<unknown>
-export type FidelityRunner = (input: FidelityUserContext) => Promise<unknown>
-export type FlowsRunner = (input: FlowsUserContext) => Promise<unknown>
-export type FlowsEpicRunner = (input: FlowsEpicUserContext) => Promise<unknown>
 export type MatchRunner = (input: MatchUserContext) => Promise<unknown>
+export type WorldClassifyRunner = (flows: readonly WorldClassifyFlowInput[]) => Promise<unknown>
+export type ClaimDiffRunner = (section: ClaimDiffSectionInput) => Promise<unknown>
 
 interface SpawnOptions {
   transport?: LlmTransport
   model?: string
   fallbackModel?: string
   timeoutMs?: number
-}
-
-export function spawnExtractRunner(opts: SpawnOptions = {}): ExtractRunner {
-  const transport = opts.transport ?? cliTransport()
-  const timeoutMs = opts.timeoutMs ?? 600_000
-  return async (ctx) => {
-    const suffix = `${ctx.view ? `:v${ctx.view.index}` : ''}${ctx.correction ? ':correction' : ''}`
-    const raw = await transport({
-      id: `guard.extract:${ctx.doc}${suffix}`,
-      stage: 'guard.extract',
-      model: opts.model,
-      fallbackModel: opts.fallbackModel,
-      system: EXTRACT_SYSTEM_PROMPT,
-      user: buildExtractUserPrompt(ctx),
-      responseFormat: 'json',
-      schema: EXTRACT_RESPONSE_SCHEMA,
-      timeoutMs,
-    })
-    return JSON.parse(extractJsonValue(raw))
-  }
-}
-
-export function spawnGenerateRunner(opts: SpawnOptions & { retryModel?: string } = {}): GenerateRunner {
-  const transport = opts.transport ?? cliTransport()
-  // 15 min, the widest ceiling of any stage — authoring (and its retry, which
-  // runs through this same runner) has a heavy reasoning tail on borderline
-  // claims: a measured batch spent 407s in pre-first-token silence before
-  // finishing at 435s, so a 10-min ceiling killed live work, not hangs. The
-  // stall timer stays the hang guard; this is only the backstop for silence.
-  const timeoutMs = opts.timeoutMs ?? 900_000
-  return async (ctx) => {
-    const isRetry = ctx.retry !== undefined
-    // Retries log under their own stage so their spend is attributed to the birth
-    // phase (which drives the retry), not the already-completed authoring line.
-    const stage = isRetry ? 'guard.retry' : 'guard.generate'
-    const suffix = `${ctx.issues ? ':issues' : ''}${ctx.correction ? ':correction' : ''}`
-    const raw = await transport({
-      id: `${stage}:${ctx.flow.id}:${ctx.driver}${suffix}`,
-      stage,
-      model: isRetry ? (opts.retryModel ?? opts.model) : opts.model,
-      fallbackModel: opts.fallbackModel,
-      // One authoring runner, one system prompt PER DRIVER — a batch never mixes.
-      system: ctx.driver === 'api' ? GENERATE_API_SYSTEM_PROMPT : GENERATE_SYSTEM_PROMPT,
-      user: buildAuthorUserPrompt(ctx),
-      responseFormat: 'json',
-      // The reply's schema follows the prompt's driver, so the two never disagree.
-      schema: ctx.driver === 'api' ? AUTHOR_API_RESPONSE_SCHEMA : AUTHOR_CLI_RESPONSE_SCHEMA,
-      // A scenario's `setup.files` / `setup.env` are records (name → value) and its
-      // http stubs another — strict structured output has no equivalent, so the
-      // schema rides as a prompt hint and the engine's Zod validates the reply. The
-      // root is an object, so the JSON mode this opt-out selects can still return it.
-      enforceSchema: false,
-      timeoutMs,
-    })
-    return JSON.parse(extractJsonValue(raw))
-  }
-}
-
-/** Failing-test triage — one top-tier judgment call per birth failure.
- *  The runner type lives in `triage.ts`; re-exported so callers import runners only. */
-export type { TriageRunner } from './triage.js'
-
-export function spawnTriageRunner(opts: SpawnOptions = {}): TriageRunner {
-  const transport = opts.transport ?? cliTransport()
-  const timeoutMs = opts.timeoutMs ?? 300_000
-  return async (ctx) => {
-    const raw = await transport({
-      id: `guard.triage:${ctx.flow.id}:${ctx.surface}${ctx.correction ? ':correction' : ''}`,
-      stage: 'guard.triage',
-      model: opts.model,
-      fallbackModel: opts.fallbackModel,
-      system: TRIAGE_SYSTEM_PROMPT,
-      user: buildTriageUserPrompt(ctx),
-      responseFormat: 'json',
-      schema: TRIAGE_RESPONSE_SCHEMA,
-      timeoutMs,
-    })
-    return JSON.parse(extractJsonValue(raw))
-  }
-}
-
-export function spawnFidelityRunner(opts: SpawnOptions = {}): FidelityRunner {
-  const transport = opts.transport ?? cliTransport()
-  const timeoutMs = opts.timeoutMs ?? 120_000
-  return async (ctx) => {
-    const raw = await transport({
-      id: `guard.fidelity:${ctx.flow.id}${ctx.correction ? ':correction' : ''}`,
-      stage: 'guard.fidelity',
-      model: opts.model,
-      fallbackModel: opts.fallbackModel,
-      system: FIDELITY_SYSTEM_PROMPT,
-      user: buildFidelityUserPrompt(ctx),
-      responseFormat: 'json',
-      schema: FIDELITY_RESPONSE_SCHEMA,
-      timeoutMs,
-    })
-    return JSON.parse(extractJsonValue(raw))
-  }
-}
-
-/** Per-area flow synthesis — composition over one area's extracted claims. */
-export function spawnFlowsRunner(opts: SpawnOptions = {}): FlowsRunner {
-  const transport = opts.transport ?? cliTransport()
-  const timeoutMs = opts.timeoutMs ?? 600_000
-  return async (ctx) => {
-    const suffix = `${ctx.issues ? ':issues' : ''}${ctx.correction ? ':correction' : ''}`
-    const raw = await transport({
-      id: `guard.flows:${ctx.areaId}${suffix}`,
-      stage: 'guard.flows',
-      model: opts.model,
-      fallbackModel: opts.fallbackModel,
-      system: FLOWS_SYSTEM_PROMPT,
-      user: buildFlowsUserPrompt(ctx),
-      responseFormat: 'json',
-      schema: FLOWS_RESPONSE_SCHEMA,
-      timeoutMs,
-    })
-    return JSON.parse(extractJsonValue(raw))
-  }
-}
-
-/** The cross-area epic pass — one call over the synthesized flows' digests. */
-export function spawnFlowsEpicRunner(opts: SpawnOptions = {}): FlowsEpicRunner {
-  const transport = opts.transport ?? cliTransport()
-  const timeoutMs = opts.timeoutMs ?? 600_000
-  return async (ctx) => {
-    const suffix = `${ctx.issues ? ':issues' : ''}${ctx.correction ? ':correction' : ''}`
-    const raw = await transport({
-      id: `guard.flows:epic${suffix}`,
-      stage: 'guard.flows',
-      model: opts.model,
-      fallbackModel: opts.fallbackModel,
-      system: FLOWS_EPIC_SYSTEM_PROMPT,
-      user: buildFlowsEpicUserPrompt(ctx),
-      responseFormat: 'json',
-      schema: FLOWS_EPIC_RESPONSE_SCHEMA,
-      timeoutMs,
-    })
-    return JSON.parse(extractJsonValue(raw))
-  }
 }
 
 /** Realization matching — one call per (flow, surface with a non-empty catalog). */
@@ -251,9 +83,52 @@ export function spawnMatchRunner(opts: SpawnOptions = {}): MatchRunner {
   }
 }
 
-// The one-shot seed runner (`spawnSeedRunner`) is GONE: the seed is authored by
-// the `guard-setup.seed` agent session in `@truecourse/core`, which reuses this
-// package's SEED_SYSTEM_PROMPT doctrine and `buildSeedUserPrompt` grounding.
+/** World classification — ONE batched call per generate over the changed flows,
+ *  deciding which workers the pool schedules into the mutator tail. */
+export function spawnWorldClassifyRunner(opts: SpawnOptions = {}): WorldClassifyRunner {
+  const transport = opts.transport ?? cliTransport()
+  const timeoutMs = opts.timeoutMs ?? 300_000
+  return async (flows) => {
+    const raw = await transport({
+      id: 'guard.world-classify',
+      stage: 'guard.world-classify',
+      model: opts.model,
+      fallbackModel: opts.fallbackModel,
+      system: WORLD_CLASSIFY_SYSTEM_PROMPT,
+      user: buildWorldClassifyUserPrompt(flows),
+      responseFormat: 'json',
+      schema: WORLD_CLASSIFY_RESPONSE_SCHEMA,
+      timeoutMs,
+    })
+    return JSON.parse(extractJsonValue(raw))
+  }
+}
+
+/** Claim-diff gate — one call per EDITED section whose doc has a prior
+ *  extraction, deciding whether the edit changed any obligation. */
+export function spawnClaimDiffRunner(opts: SpawnOptions = {}): ClaimDiffRunner {
+  const transport = opts.transport ?? cliTransport()
+  const timeoutMs = opts.timeoutMs ?? 120_000
+  return async (section) => {
+    const raw = await transport({
+      id: 'guard.claimDiff',
+      stage: 'guard.claimDiff',
+      model: opts.model,
+      fallbackModel: opts.fallbackModel,
+      system: CLAIM_DIFF_SYSTEM_PROMPT,
+      user: buildClaimDiffUserPrompt(section),
+      responseFormat: 'json',
+      schema: CLAIM_DIFF_RESPONSE_SCHEMA,
+      timeoutMs,
+    })
+    return JSON.parse(extractJsonValue(raw))
+  }
+}
+
+// The one-shot seed runner (`spawnSeedRunner`) is GONE (plan 03 retirement):
+// the seed is authored by the `guard-setup.seed` agent session in
+// `@truecourse/core`, which reuses this package's SEED_SYSTEM_PROMPT doctrine
+// and `buildSeedUserPrompt` grounding directly.
 
 export function spawnRecipeRunner(opts: SpawnOptions = {}): RecipeRunner {
   const transport = opts.transport ?? cliTransport()

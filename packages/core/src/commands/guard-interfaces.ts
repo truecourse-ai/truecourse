@@ -45,6 +45,7 @@ import { resolveCommitSha } from '../lib/repo-ref.js';
 import {
   createConfiguredApiTransport,
   installConfiguredLlmTransport,
+  createClaudeCodeTransport,
 } from '../services/llm/install-transport.js';
 import { createConfiguredSessionDriver } from '../services/llm/session-driver.js';
 import { deriveWebAuthoringContext } from '../services/web-context.service.js';
@@ -319,7 +320,7 @@ function oneShotTransport(flag?: LlmTransportFlag): LlmTransport {
   if (flag === 'api') return createConfiguredApiTransport();
   if (flag === 'cli') return cliTransport();
   installConfiguredLlmTransport();
-  return getDefaultTransport() ?? cliTransport();
+  return getDefaultTransport() ?? createClaudeCodeTransport();
 }
 
 /** Every session reached an outcome ⇒ completed; none did ⇒ failed. */

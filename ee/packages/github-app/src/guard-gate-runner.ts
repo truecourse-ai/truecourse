@@ -756,7 +756,12 @@ export function createGuardGatePipeline(seams: GuardGatePipelineSeams = {}): Gua
         if (report.status === 'ok' && corpus) {
           const stamped: GuardLatest = {
             ...report.latest,
-            run: { ...report.latest.run, corpusFingerprint: guardCorpusFingerprint(corpus.scenarios) },
+            run: {
+              ...report.latest.run,
+              corpusFingerprint: guardCorpusFingerprint(corpus.scenarios),
+              pullRequest: payload.prNumber,
+              origin: 'hosted',
+            },
           };
           await deps.guardStore.writeGuardRun(repoKey, stamped);
           await persistFailureEvidence(deps.guardStore, repoKey, tmp, stamped);

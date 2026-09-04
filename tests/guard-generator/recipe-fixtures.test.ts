@@ -55,7 +55,7 @@ const neverCalled: RecipeRunner = async () => {
   throw new Error('the model proposer was called — the deterministic path should have decided')
 }
 
-/** The api surface the journey mapper would hand discovery: a health route and a
+/** The api surface the interface mapper would hand discovery: a health route and a
  *  business route, so `/healthz` is RANKED rather than assumed. */
 const ROUTES: ApiRouteRef[] = [
   { method: 'GET', path: '/healthz' },

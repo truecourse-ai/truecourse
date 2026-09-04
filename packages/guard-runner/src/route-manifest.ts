@@ -75,7 +75,7 @@ export interface RouteManifest {
 export interface BuildRouteManifestOptions {
   /**
    * Extra (path, absolute file) pairs from an analyzer pass, attributed to apps by
-   * file path — `journey.service.ts` can feed `FileAnalysis.routeRegistrations`.
+   * file path — `interface.service.ts` can feed `FileAnalysis.routeRegistrations`.
    * A pair whose file lands under no discovered app is dropped (never invented).
    */
   extraRoutes?: readonly { path: string; file: string }[]

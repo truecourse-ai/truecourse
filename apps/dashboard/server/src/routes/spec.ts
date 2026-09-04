@@ -11,6 +11,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
+import { openConflicts } from '@truecourse/shared';
 import {
   corpusFilePath,
   decisionsPath,
@@ -32,7 +33,6 @@ import { listContractFiles } from '@truecourse/core/lib/contract-store';
 import { readRepoDoc } from '@truecourse/core/lib/repo-doc-reader';
 import { getBackgroundTaskRunner } from '@truecourse/core/lib/background-tasks';
 import { getGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
-import { getSpecConflictsResolvedHook } from '@truecourse/core/lib/spec-conflicts-resolved-hook';
 import {
   getKnowledgeLedgerReader,
   getKnowledgeDocBodyReader,
@@ -46,7 +46,6 @@ import {
   getCorpus,
   getDecisions,
   recuratePrCorpus,
-  recurateStoredCorpus,
   removeConflictResolution,
   removeManualExclude,
   removeManualInclude,
@@ -375,59 +374,33 @@ router.get(
   },
 );
 
-// A repo-scope decision cleared the last conflict, so an earlier guard generate
-// that ended BLOCKED on those conflicts can finally author its scenarios. Enqueue a
-// hosted guard generate through the core seam (EE installs it; OSS/tests leave it
-// unset → no-op). Best-effort: a failed enqueue never fails the decision save.
-async function enqueueGuardGenerateRefresh(repoKey: string): Promise<void> {
+// A repo-scope decision that clears the last open conflict unblocks a guard
+// generate that stopped on those conflicts: when the repo's current generate
+// report is `open-conflicts`, enqueue a hosted guard generate through the core
+// seam (the DB-mode server installs it; file mode and tests leave it unset →
+// no-op). A decision is NOT a corpus change: the open set derives from the stored
+// corpus plus the decisions through the same derivation the gate and the client
+// use, so nothing is re-curated and no scan runs. It fires off ANY decision that
+// clears the last conflict — a verdict/dismissal OR an exclude — since either can
+// be the one that resolves it. Best-effort: a failed enqueue never fails the
+// decision save.
+//
+// The guard-store read is gated on an empty open set so the hot path (conflicts
+// still remain) never touches it. The report is the REPO-level view read (the
+// baseline commit's row) — never the store's newest row, which a PR head's
+// regenerated `ok` report would shadow, silently skipping the unblock generate.
+async function regenIfConflictsResolved(repoKey: string, decisions: DecisionsFile): Promise<void> {
+  const corpus = await getCorpus(repoKey);
+  if (!corpus || corpus.docs.length === 0) return;
+  if (openConflicts(corpus, decisions).length > 0) return;
+  const report = await readGuardResultForView(repoKey);
+  if (report?.status !== 'open-conflicts') return;
   const enqueue = getGuardGenerateEnqueue();
   if (!enqueue) return;
   try {
     await enqueue(repoKey);
   } catch {
     /* best-effort — the decision is already saved */
-  }
-}
-
-// The same conflict-clearing decision also makes the hosted repo re-scan its
-// baseline (force — the commit hasn't moved) so the store corpus re-curates and the
-// conflict-free scan chains scenario generation. Dispatch through the core seam (EE
-// installs it; OSS/tests leave it unset → OSS re-scans via its own manual Scan step).
-// Best-effort: a failed enqueue never fails the decision save.
-async function enqueueBaselineScanRefresh(repoKey: string): Promise<void> {
-  const hook = getSpecConflictsResolvedHook();
-  if (!hook) return;
-  try {
-    await hook(repoKey);
-  } catch {
-    /* best-effort — the decision is already saved */
-  }
-}
-
-// EE only. After a decision edit, re-curate the stored corpus and — only if it is
-// now conflict-free — drive the hosted repo's self-generation. It re-scans the
-// baseline (enqueueBaselineScanRefresh) so the store corpus re-curates and the
-// conflict-free scan chains generation, AND — if the repo's current generate report
-// is `open-conflicts` (a generate that stopped before authoring any scenarios) —
-// enqueues a hosted guard generate so scenarios are authored even when the scan's
-// onboarding chain sees an existing (blocked) report. It triggers off ANY decision
-// that clears the last conflict — a verdict/dismissal OR an exclude — since either
-// can be the one that resolves it; while conflicts remain it's just the cheap
-// re-curate. OSS has no stored corpus, so this is a no-op there.
-//
-// The guard-store read is gated on `openConflicts === 0` so the hot path (conflicts
-// still remain) never touches it. The report is the REPO-level view read (the
-// baseline commit's row) — never the store's newest row, which a PR head's
-// regenerated `ok` report would shadow, silently skipping the unblock generate.
-async function recurateAndRegenIfResolved(repoKey: string): Promise<void> {
-  if (specsMaterializeInPlace()) return;
-  const result = await recurateStoredCorpus(repoKey);
-  if (result && result.openConflicts === 0 && result.corpus.docs.length > 0) {
-    await enqueueBaselineScanRefresh(repoKey);
-    const report = await readGuardResultForView(repoKey);
-    if (report?.status === 'open-conflicts') {
-      await enqueueGuardGenerateRefresh(repoKey);
-    }
   }
 }
 
@@ -480,27 +453,21 @@ async function mutateSpecDecisionPr(
 
 // A doc include/exclude mutation, edition-aware.
 //
-// OSS persists the decision to decisions.json and returns WITHOUT re-curating: the
-// corpus is unchanged by this call, so a single later Scan materializes any batch of
-// queued decisions (a full re-curate per click re-ran the set-level LLM stages every
-// time). The client moves the row optimistically and the Rescan dot lights via
+// The decision is persisted and acked WITHOUT re-curating: the corpus is unchanged
+// by this call, so a single later Scan materializes any batch of queued decisions
+// (a full re-curate per click re-ran the set-level LLM stages every time). The
+// client moves the row optimistically and the Rescan dot lights via
 // `decisionsPending`. No git gate: a decision write needs no working tree.
 //
-// EE has no local tree, so it re-curates the stored corpus over the repo-doc seam in
-// the same request (see recurateAndRegenIfResolved) and returns it — no clone, no
-// separate job.
+// DB mode additionally checks whether this decision cleared the repo's last open
+// conflict and unblocks a stalled guard generate (see regenIfConflictsResolved).
 async function mutateSpecDecision(
   repoPath: string,
   res: Response,
   mutate: () => Promise<DecisionsFile>,
 ): Promise<void> {
-  if (!specsMaterializeInPlace()) {
-    await mutate();
-    await recurateAndRegenIfResolved(repoPath);
-    res.json(await corpusPayload(repoPath));
-    return;
-  }
   const decisions = await mutate();
+  if (!specsMaterializeInPlace()) await regenIfConflictsResolved(repoPath, decisions);
   res.json({
     manualIncludes: decisions.manualIncludes ?? [],
     manualExcludes: decisions.manualExcludes ?? [],
@@ -617,9 +584,9 @@ router.delete(
 // A verdict resolves ONE flagged disagreement without re-curating: the corpus is
 // unchanged (the overlap stays flagged), and the shared resolved-derivation reads
 // the verdict live, so a single later Scan applies any batch (mirrors the OSS
-// include/exclude ack). OSS returns the persisted `conflictResolutions` (no
-// corpus); EE repo scope re-curates and returns the full corpus (its decisions
-// flow); a PR-scoped edit writes the PR overlay + re-curates the PR head.
+// include/exclude ack). Repo scope returns the persisted `conflictResolutions`
+// (no corpus) in both editions; a PR-scoped edit writes the PR overlay +
+// re-curates the PR head.
 // ---------------------------------------------------------------------------
 
 const CONFLICT_VERDICTS = ['a', 'b', 'dismissed'] as const;
@@ -629,16 +596,10 @@ async function mutateConflictResolution(
   res: Response,
   mutate: () => Promise<DecisionsFile>,
 ): Promise<void> {
-  if (!specsMaterializeInPlace()) {
-    // EE repo scope: re-curate is how EE decisions flow; return the full corpus
-    // (folding the recorded verdict), same as an include/exclude edit.
-    await mutate();
-    await recurateAndRegenIfResolved(repoPath);
-    res.json(await corpusPayload(repoPath));
-    return;
-  }
-  // OSS: instant decision-write, NO re-curate — ack the persisted verdicts.
+  // Instant decision-write, NO re-curate — ack the persisted verdicts. DB mode
+  // also unblocks a stalled guard generate when this was the last open conflict.
   const decisions = await mutate();
+  if (!specsMaterializeInPlace()) await regenIfConflictsResolved(repoPath, decisions);
   res.json({ conflictResolutions: decisions.conflictResolutions ?? [] });
 }
 
@@ -746,13 +707,15 @@ router.get(
       // latest stored sets are always in sync. Report existence from the stores;
       // nothing is stale.
       if (!specsMaterializeInPlace()) {
-        const [corpus, contractFiles] = await Promise.all([
-          loadLatestSpec<unknown>(repo.path, 'corpus'),
+        const [corpus, decisions, contractFiles] = await Promise.all([
+          getCorpus(repo.path),
+          getDecisions(repo.path),
           listContractFiles(repo.path, 'contracts'),
         ]);
         res.json({
-          // EE re-curates on every decision, so decisions never outrun the corpus.
-          decisionsPending: false,
+          // An include/exclude the stored corpus has not absorbed yet — a Scan
+          // would materialize it. Verdicts derive live and never pend.
+          decisionsPending: corpus !== null && hasUnabsorbedDecisions(corpus, decisions),
           // EE has no live tree — docs can't drift out from under the stored corpus.
           docsChanged: false,
           hasCorpus: corpus !== null,
@@ -790,6 +753,17 @@ function mtimeIfExists(file: string): number | null {
 // decisions. Compared against the corpus's own `generatedAt` (the curate
 // timestamp) rather than corpus.json's mtime, which lies on the committable
 // LATEST-convention file. Tolerant — any missing/unreadable file → false.
+// DB mode has no mtimes: a decision pends when the stored corpus still keeps an
+// excluded doc or still skips an included one.
+function hasUnabsorbedDecisions(corpus: CuratedCorpus, decisions: DecisionsFile): boolean {
+  const kept = new Set(corpus.docs.map((d) => d.ref));
+  const skipped = new Set(corpus.skippedDocs.map((d) => d.ref));
+  return (
+    (decisions.manualExcludes ?? []).some((ref) => kept.has(ref)) ||
+    (decisions.manualIncludes ?? []).some((ref) => skipped.has(ref))
+  );
+}
+
 function hasPendingDecisions(repoPath: string): boolean {
   const decisionsMtime = mtimeIfExists(decisionsPath(repoPath));
   if (decisionsMtime === null) return false;

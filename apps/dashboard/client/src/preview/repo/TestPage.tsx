@@ -1,8 +1,9 @@
 /**
  * One test, as its own page (`/tests/:flowId`): the breadcrumb back to Tests,
- * then the vendored test workspace for a flow (`GuardFlowsPane`
- * over fake data), pinned to this one flow. A scenario or finding the workspace
- * opens rides the same URL tabs it always did.
+ * then the vendored test workspace for a flow (`GuardFlowsPane`), pinned to
+ * this one flow. A scenario or finding the workspace opens rides the same URL
+ * tabs it always did. A connected repository's reads are the server's, re-read
+ * when a generate or a run lands; a fixture repository's are its fixtures.
  */
 
 import { useMemo } from 'react';
@@ -20,15 +21,17 @@ import type { GuardTabsState } from '@/preview/vendor/hooks/useGuardTabs';
 import { guardTestBinds } from '@/preview/vendor/lib/guard-tests';
 import type { Repo } from '@/preview/data/types';
 import { useGuardTabJump } from './tab-jump';
+import { useGuardRefresh } from './use-guard-refresh';
 
 export function TestPage({ repo, flowId }: { repo: Repo; flowId: string }) {
   useGuardTabJump();
   const navigate = useNavigate();
-  const flows = useGuardFlows(repo.id, true);
-  const interfaces = useGuardInterfaces(repo.id, true);
-  const claims = useGuardClaims(repo.id, true);
-  const tests = useGuardScenarios(repo.id, true);
-  const decisions = useGuardDecisions(repo.id, true);
+  const reloadKey = useGuardRefresh(repo, ['guard-generate', 'guard-run']);
+  const flows = useGuardFlows(repo.id, true, reloadKey);
+  const interfaces = useGuardInterfaces(repo.id, true, reloadKey);
+  const claims = useGuardClaims(repo.id, true, reloadKey);
+  const tests = useGuardScenarios(repo.id, true, reloadKey);
+  const decisions = useGuardDecisions(repo.id, true, reloadKey);
   const urlTabs = useGuardFlowTabs(repo.id);
   const { openSpecSection, openGuardInterface, openGuardExternals } = useGuardView();
 
@@ -84,6 +87,7 @@ export function TestPage({ repo, flowId }: { repo: Repo; flowId: string }) {
           interfaces={interfaces.view?.interfaces ?? null}
           claimTitles={claimTitles}
           binds={binds}
+          reloadKey={reloadKey}
           decisions={decisions}
           onOpenSpec={openSpecSection}
           onOpenInterface={openGuardInterface}

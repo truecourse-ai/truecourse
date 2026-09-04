@@ -1,6 +1,6 @@
 /**
  * Onboarding as a chain of background jobs: `repo.scan` → `repo.guard-setup`
- * → `repo.guard-generate`.
+ * → `repo.guard-generate` → `repo.guard-run`.
  *
  * What is pinned here is the chain's semantics and the setup job's brackets.
  * The scan enqueues its successor ONLY when it succeeded — a failed or
@@ -11,8 +11,11 @@
  * generate job brackets its engine the same way — the stored spec, the repo's
  * guard decisions, the baseline scenario set and setup's bundle go into the
  * clone; the scenario tree, the baseline report and the birth evidence come
- * out — and stores nothing from a run that authored nothing. And a disconnect
- * mid-run cancels quietly: no error, no notification, clone gone.
+ * out — and stores nothing from a run that authored nothing. The run job closes
+ * the chain: the baseline set and setup's bundle go into the clone, the run
+ * snapshot and every scenario's evidence bundle — screenshots as bytes — come
+ * out as the repo's baseline run. And a disconnect mid-run cancels quietly: no
+ * error, no notification, clone gone.
  *
  * The queue itself is real (PGlite + the real harness); only graphile is faked,
  * so a job body runs inline the moment it is enqueued. The LLM never is: the
@@ -40,9 +43,12 @@ import {
   loadGuardSetupBundle,
   loadScenarios,
   readGuardBaselineCommit,
+  readGuardLatest,
   readGuardResult,
   saveGuardSetupBundle,
+  saveScenarios,
   writeGuardDecisions,
+  writeGuardResult,
 } from '@truecourse/core/lib/guard-store';
 import { setGuardOverlayStore, writeGuardOverlays } from '@truecourse/core/lib/guard-overlays';
 import { setSpecStore, saveSpec } from '@truecourse/core/lib/spec-store';
@@ -60,11 +66,12 @@ import {
   scenariosDir,
   writeGuardResult as writeCloneGuardResult,
 } from '@truecourse/guard-runner';
-import { GUARD_FORMAT_VERSION, type GuardGenerateReport } from '@truecourse/shared';
+import { GUARD_FORMAT_VERSION, type GuardGenerateReport, type GuardLatest } from '@truecourse/shared';
 import type { LlmTransport } from '@truecourse/shared/llm';
 import { createServerJobs, type JobsMount } from '../../apps/dashboard/server/src/jobs/index';
 import type { RepoScanTaskDeps } from '../../apps/dashboard/server/src/jobs/tasks/repo-scan';
 import type { RepoGuardGenerateTaskDeps } from '../../apps/dashboard/server/src/jobs/tasks/repo-guard-generate';
+import type { RepoGuardRunTaskDeps } from '../../apps/dashboard/server/src/jobs/tasks/repo-guard-run';
 import { setWorkTreeProvider } from '../../apps/dashboard/server/src/services/work-tree.service';
 import {
   removeRepoRunState,
@@ -530,6 +537,44 @@ describe('the guard setup job', () => {
     expect(setup).toMatchObject({ status: 'succeeded', result: { status: 'failed' } });
     expect(await jobsOfType('repo.guard-generate')).toEqual([]);
   });
+
+  it('a refresh consents to replacing the seed — the engine asks, and a hosted refresh is the answer', async () => {
+    await jobs.stop();
+    const seen: { refresh?: boolean; only?: string; consent?: boolean }[] = [];
+    jobs = createServerJobs({
+      db,
+      connectionString: 'postgres://unused',
+      hub,
+      startWorker: fakeWorker(['repo.guard-setup']),
+      guardSetup: {
+        startLlm: async () => testLlm,
+        runSetup: async (_repoRoot, options) => {
+          seen.push({
+            refresh: options.refresh,
+            only: options.only,
+            consent: await options.confirmSeedReplace?.(),
+          });
+          return {
+            report: { ranAt: '2026-01-01T00:00:00Z', status: 'failed', reason: 'no recipe', steps: [] },
+            reportPath: '',
+            sessionsRunDirs: [],
+          } as never;
+        },
+      },
+    });
+    await jobs.start();
+
+    await jobs.enqueueGuardSetup({ ...request, only: 'seed', refresh: true });
+    await Promise.all(running);
+    // Without the flag the engine's own default (no consent) stands.
+    await jobs.enqueueGuardSetup(request);
+    await Promise.all(running);
+
+    expect(seen).toEqual([
+      { refresh: true, only: 'seed', consent: true },
+      { refresh: undefined, only: undefined, consent: undefined },
+    ]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -663,11 +708,13 @@ describe('the guard generate job', () => {
       relations: [],
       skippedDocs: [],
     });
+    // Only the generate runs here: the run it chains into is observed as an
+    // enqueue, never executed (its clone would race the assertions below).
     jobs = createServerJobs({
       db,
       connectionString: 'postgres://unused',
       hub,
-      startWorker: fakeWorker(),
+      startWorker: fakeWorker(['repo.guard-generate']),
       guardGenerate: {
         startLlm: async () => testLlm,
         runGenerate: (repoRoot, options) => generateImpl(repoRoot, options),
@@ -726,6 +773,30 @@ describe('the guard generate job', () => {
     expect(notes.map((n) => [n.level, n.title])).toEqual([['warning', 'Scenarios generated — findings to review']]);
     expect(fs.existsSync(clone)).toBe(false);
   }, 60_000);
+
+  it('chains the baseline run once the scenario set is stored', async () => {
+    await saveSetupBundle();
+
+    await jobs.enqueueGuardGenerate(request);
+    await Promise.all(running);
+
+    expect(enqueued).toEqual(['repo.guard-generate', 'repo.guard-run']);
+    expect(enqueuedPayloads[1]).toMatchObject({ repoFullName: REPO, workspaceOrgId: ORG, source: 'chain' });
+  });
+
+  it('chains nothing when the corpus was blocked, and says why', async () => {
+    await saveSetupBundle();
+    generateImpl = async () => {
+      throw new OpenConflictsError([
+        { area: 'orgs', a: 'docs/v1.md', b: 'docs/v2.md', note: 'two names for one thing' },
+      ] as never);
+    };
+
+    await jobs.enqueueGuardGenerate(request);
+    await Promise.all(running);
+
+    expect(enqueued).toEqual(['repo.guard-generate']);
+  });
 
   it('replays the baseline set and report into the next run’s clone', async () => {
     await saveSetupBundle();
@@ -800,6 +871,199 @@ describe('the guard generate job', () => {
     expect(await readGuardBaselineCommit(REPO)).toBeNull();
     expect(await new NotificationStore(db).listForOrg(ORG)).toEqual([]);
     expect(disposed).toEqual([clone]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The run job
+// ---------------------------------------------------------------------------
+
+describe('the guard run job', () => {
+  let clone: string;
+  type RunEngine = NonNullable<RepoGuardRunTaskDeps['runGuard']>;
+  let runImpl: RunEngine;
+  /** What the runner found in its clone — the materialization, seen from inside. */
+  let seen: { recipe: boolean; scenario: boolean }[];
+
+  const RECIPE = { build: 'true', api: { serve: ['node', 'server.mjs'], healthPath: '/health' } };
+  const GEN_COMMIT = 'gen-commit';
+  const RUN_ID = '2026-03-03T00-00-00Z_run1';
+  /** The bytes a browser run leaves: not text, and not valid UTF-8 either. */
+  const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff, 0xfe]);
+
+  const okReport = (): GuardGenerateReport => ({
+    generatedAt: '2026-02-02T00:00:00Z',
+    status: 'ok',
+    noChanges: false,
+    written: [
+      {
+        id: 'a1',
+        title: 'create an org',
+        doc: 'docs/orgs.md',
+        anchor: 'create',
+        file: '.truecourse/scenarios/orgs/a1.yaml',
+        status: 'passing',
+      },
+    ],
+    birthFindings: [],
+    sectionsTotal: 1,
+    sectionsChanged: 1,
+    skippedUnchanged: 0,
+    coverageGaps: [],
+    errors: [],
+    extractionFailures: [],
+    orphaned: [],
+  });
+
+  /** The snapshot a run leaves: one scenario, failed, with an evidence bundle. */
+  const latestOf = (evidencePath: string): GuardLatest => ({
+    run: { runId: RUN_ID, ranAt: '2026-03-03T00:00:00Z', branch: 'main', commit: null, recipeFingerprint: 'sha256:r' },
+    summary: { total: 1, pass: 0, fail: 1, stale: 0, orphaned: 0, error: 0, blocked: 0 },
+    scenarios: [
+      {
+        id: 'a1',
+        title: 'create an org',
+        binds: { doc: 'docs/orgs.md', section: 'create', fingerprint: 'sha256:x' },
+        outcome: 'fail',
+        durationMs: 12,
+        failure: { step: 1, expected: 'exit 0', actual: 'exit 1' },
+        evidencePath,
+      },
+    ],
+    sections: [],
+  });
+
+  /** A runner that records what it saw, leaves an evidence bundle, and reports one red. */
+  const failingRun: RunEngine = async (repoRoot) => {
+    seen.push({
+      recipe: fs.existsSync(recipePath(repoRoot)),
+      scenario: fs.existsSync(path.join(scenariosDir(repoRoot), 'orgs', 'a1.yaml')),
+    });
+    const evidencePath = `.truecourse/guard/evidence/${RUN_ID}/a1`;
+    fs.mkdirSync(path.join(repoRoot, evidencePath), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, evidencePath, 'transcript.txt'), 'step 1 failed');
+    fs.writeFileSync(path.join(repoRoot, evidencePath, 'step-1.png'), PNG);
+    return { status: 'ok', latest: latestOf(evidencePath), loadErrors: [] } as unknown as Awaited<
+      ReturnType<RunEngine>
+    >;
+  };
+
+  function installWorkTree(): void {
+    clone = path.join(makeTmpDir('tc-onboarding-run-clone-'), 'widgets');
+    setWorkTreeProvider(async () => {
+      fs.rmSync(clone, { recursive: true, force: true });
+      fs.cpSync(FIXTURE, clone, { recursive: true });
+      git(clone, 'init', '--initial-branch=main');
+      git(clone, 'config', 'user.name', 'Test');
+      git(clone, 'config', 'user.email', 'test@example.com');
+      git(clone, 'add', '-A');
+      git(clone, 'commit', '-m', 'one');
+      return {
+        dir: clone,
+        dispose: () => {
+          disposed.push(clone);
+          fs.rmSync(clone, { recursive: true, force: true });
+        },
+      };
+    });
+  }
+
+  /** What generate left: a stored scenario set and its baseline report. */
+  async function storeGeneratedSet(): Promise<void> {
+    const dir = makeTmpDir('tc-onboarding-run-set-');
+    const orgs = path.join(scenariosDir(dir), 'orgs');
+    fs.mkdirSync(orgs, { recursive: true });
+    fs.writeFileSync(
+      path.join(orgs, 'a1.yaml'),
+      ['id: a1', 'title: create an org', 'binds:', '  - doc: docs/orgs.md', '    section: create', '    fingerprint: "sha256:x"', 'steps:', '  - run: ["--help"]', '    expect:', '      exit: 0', ''].join('\n'),
+    );
+    fs.writeFileSync(manifestPath(dir), JSON.stringify({ version: GUARD_FORMAT_VERSION, flows: [] }, null, 2) + '\n');
+    const ref = { repoKey: REPO, commitSha: GEN_COMMIT };
+    await saveScenarios(ref, scenariosDir(dir));
+    await writeGuardResult(ref, okReport(), { baseline: true });
+  }
+
+  const saveSetupBundle = (): Promise<void> =>
+    saveGuardSetupBundle(
+      { repoKey: REPO, commitSha: 'setup-commit' },
+      { '.truecourse/scenarios/recipe.json': JSON.stringify(RECIPE, null, 2) + '\n' },
+    );
+
+  beforeEach(async () => {
+    seen = [];
+    runImpl = failingRun;
+    installWorkTree();
+    jobs = createServerJobs({
+      db,
+      connectionString: 'postgres://unused',
+      hub,
+      startWorker: fakeWorker(),
+      guardRun: {
+        startLlm: async () => testLlm,
+        runGuard: (repoRoot, options) => runImpl(repoRoot, options),
+      },
+    });
+    await jobs.start();
+  });
+
+  it('refuses a repository with no generated scenarios, and stores nothing', async () => {
+    await saveSetupBundle();
+    await jobs.enqueueGuardRun(request);
+    await Promise.all(running);
+
+    const [job] = await jobsOfType('repo.guard-run');
+    expect(job).toMatchObject({ status: 'failed', error: expect.stringMatching(/guard generate/) });
+    expect(seen).toEqual([]);
+    expect(await readGuardLatest(REPO)).toBeNull();
+    expect(disposed).toEqual([clone]);
+  });
+
+  it('runs the stored set over setup’s recipe, then saves the baseline run and its evidence', async () => {
+    await storeGeneratedSet();
+    await saveSetupBundle();
+
+    await jobs.enqueueGuardRun(request);
+    await Promise.all(running);
+
+    const [job] = await jobsOfType('repo.guard-run');
+    expect(job?.error).toBeNull();
+    expect(job).toMatchObject({
+      status: 'succeeded',
+      result: { runId: RUN_ID, summary: { total: 1, fail: 1 } },
+    });
+    // The runner found both halves in its clone: the stored set and setup's recipe.
+    expect(seen).toEqual([{ recipe: true, scenario: true }]);
+
+    // The durable half: the run is the repo's baseline, and the bundle came with it.
+    const latest = await readGuardLatest(REPO);
+    expect(latest?.run.runId).toBe(RUN_ID);
+    // The stored record says where it ran.
+    expect(latest?.run.origin).toBe('hosted');
+    expect(latest?.scenarios.map((s) => s.outcome)).toEqual(['fail']);
+    const store = new PgGuardStore(db);
+    const dir = `.truecourse/guard/evidence/${RUN_ID}/a1`;
+    expect(await store.readGuardEvidenceAt(REPO, dir, 'transcript.txt')).toBe('step 1 failed');
+    expect(await store.listGuardEvidenceAt(REPO, dir)).toEqual(['step-1.png', 'transcript.txt']);
+    // The screenshot survived byte-exact — it never went through a text decode.
+    expect(await store.readGuardEvidenceBytesAt(REPO, dir, 'step-1.png')).toEqual(PNG);
+
+    const notes = await new NotificationStore(db).listForOrg(ORG);
+    expect(notes.map((n) => [n.level, n.title])).toEqual([['warning', 'Scenarios ran — failures to review']]);
+    expect(fs.existsSync(clone)).toBe(false);
+  }, 60_000);
+
+  it('a run that could not start fails with the runner’s reason and stores nothing', async () => {
+    await storeGeneratedSet();
+    await saveSetupBundle();
+    runImpl = async () =>
+      ({ status: 'build-failed', build: { command: 'pnpm build', exitCode: 1, timedOut: false, stdout: '', stderr: 'boom' } }) as never;
+
+    await jobs.enqueueGuardRun(request);
+    await Promise.all(running);
+
+    const [job] = await jobsOfType('repo.guard-run');
+    expect(job).toMatchObject({ status: 'failed', error: expect.stringMatching(/pnpm build/) });
+    expect(await readGuardLatest(REPO)).toBeNull();
   });
 });
 

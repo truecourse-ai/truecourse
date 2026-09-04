@@ -5,12 +5,17 @@
  * version / duration / absolute path (one line touching all four normalizers), a
  * stdin filter, an append-on-each-run command (for `repeat`), write/read commands
  * over an argv-named path, an outbound `fetch` against a base URL read from the
- * environment (the `setup.http` stub target), a background release watcher, and
- * failure / hang commands (for the error paths).
+ * environment (the `setup.http` stub target), a background release watcher, an
+ * interactive publish that only asks on a terminal, a channel menu that reads
+ * KEYS rather than lines, a two-question release wizard behind a working phase
+ * that holds the terminal, a cwd reporter, a both-streams warning, a console-mode
+ * server that never returns (`serve`, for the run-until-marker step), and failure /
+ * hang commands (for the error paths).
  */
 
 import fs from 'node:fs'
 import path from 'node:path'
+import readline from 'node:readline'
 import { execFileSync, spawn } from 'node:child_process'
 
 const VERSION = '2.4.1'
@@ -163,6 +168,178 @@ switch (command) {
     break
   }
 
+  case 'publish': {
+    // The interactive path a release CLI ships: a destructive action asks for a
+    // confirmation, and only asks when there is a terminal to ask on. With piped
+    // stdin there is no way to answer, so it refuses instead of guessing — which
+    // is exactly why a scenario needs a real pty to reach the question at all.
+    if (!process.stdin.isTTY) {
+      process.stderr.write('error: publish needs a terminal to confirm on (use --yes in scripts)\n')
+      process.exit(2)
+    }
+    process.stdout.write(`Publish relkit v${VERSION}? [y/N] `)
+    const answer = await new Promise((resolve) => {
+      process.stdin.setEncoding('utf-8')
+      process.stdin.once('data', (chunk) => {
+        // Let go of the terminal, or the flowing stdin keeps the process alive
+        // after the answer — the pause every interactive CLI does here.
+        process.stdin.pause()
+        resolve(String(chunk).trim().toLowerCase())
+      })
+    })
+    if (answer !== 'y' && answer !== 'yes') {
+      process.stdout.write('\nPublish cancelled\n')
+      process.exit(1)
+    }
+    fs.writeFileSync(path.resolve(cwd, 'published.txt'), `${VERSION}\n`)
+    process.stdout.write(`\nPublished relkit v${VERSION}\n`)
+    break
+  }
+
+  case 'channel': {
+    // The other interactive shape a release CLI ships: a menu. Unlike `publish` it
+    // reads KEYS, so it puts the terminal in raw mode, and — like every select
+    // prompt (clack, inquirer, prompts) — it submits on RETURN, the key Enter
+    // sends on a terminal (`\r`). A newline is the different `enter` key and picks
+    // nothing, so an answer that arrives as a LINE never chooses a channel.
+    if (!process.stdin.isTTY) {
+      process.stderr.write('error: channel needs a terminal to pick on (use --set <name> in scripts)\n')
+      process.exit(2)
+    }
+    const options = ['stable', 'beta', 'canary']
+    let cursor = 0
+    if (args.includes('--check')) {
+      // Print, then go away and work, and only THEN take over the terminal — the
+      // shape that makes an answer typed at the first pause useless.
+      process.stdout.write('Checking the registry for published channels...\n')
+      await new Promise((r) => setTimeout(r, Number(process.env.RELKIT_CHANNEL_CHECK_MS ?? 400)))
+    }
+    readline.emitKeypressEvents(process.stdin)
+    process.stdin.setRawMode(true)
+    const render = () => {
+      const menu = options.map((o, i) => `${i === cursor ? '>' : ' '} ${o}\n`).join('')
+      process.stdout.write(`Release channel for relkit v${VERSION}:\n${menu}`)
+    }
+    render()
+    const picked = await new Promise((resolve) => {
+      const onKeypress = (_char, key) => {
+        if (!key) return
+        if (key.ctrl && key.name === 'c') process.exit(130)
+        else if (key.name === 'down') {
+          cursor = (cursor + 1) % options.length
+          render()
+        } else if (key.name === 'up') {
+          cursor = (cursor - 1 + options.length) % options.length
+          render()
+        } else if (key.name === 'return') {
+          process.stdin.off('keypress', onKeypress)
+          resolve(options[cursor])
+        }
+      }
+      process.stdin.on('keypress', onKeypress)
+    })
+    process.stdin.setRawMode(false)
+    process.stdin.pause()
+    fs.writeFileSync(path.resolve(cwd, 'channel.txt'), `${picked}\n`)
+    process.stdout.write(`Release channel set to ${picked}\n`)
+    break
+  }
+
+  case 'ship': {
+    // The shape a real CLI has when it must check something before it can ask
+    // anything: a PREFLIGHT that takes a while (a login probe, a registry call),
+    // then the questions. Two things about it are what make scripted answers hard,
+    // and both are what every spinner-driven CLI actually does:
+    //   - the preflight HOLDS THE TERMINAL while it works, consuming keystrokes so
+    //     a stray key cannot garble the spinner (`block()` in @clack/core does
+    //     exactly this) — so a key typed before the question is not an answer to
+    //     it, it is swallowed;
+    //   - it prints in bursts with pauses between them, so "the child went quiet"
+    //     is true long before any question exists.
+    // The count of swallowed keystrokes is printed, so a test can say WHERE an
+    // answer went rather than only that the step hung.
+    if (!process.stdin.isTTY) {
+      process.stderr.write('error: ship needs a terminal to ask on (use --dry-run in scripts)\n')
+      process.exit(2)
+    }
+    const frames = Number(process.env.RELKIT_SHIP_FRAMES ?? 4)
+    const frameMs = Number(process.env.RELKIT_SHIP_FRAME_MS ?? 200)
+    process.stdin.setRawMode(true)
+    let swallowed = 0
+    const swallow = (chunk) => {
+      swallowed += String(chunk).length
+    }
+    process.stdin.on('data', swallow)
+    for (let i = 1; i <= frames; i++) {
+      process.stdout.write(`\u001b[1G\u001b[2K\u001b[2m◐ verifying the signing key (${i}/${frames})\u001b[22m`)
+      await new Promise((r) => setTimeout(r, frameMs))
+    }
+    process.stdin.off('data', swallow)
+    process.stdout.write(`\u001b[1G\u001b[2Kpreflight swallowed ${swallowed} keystroke(s)\n`)
+
+    // Question one: a menu, submitted by RETURN like every select prompt.
+    const options = ['stable', 'beta', 'canary']
+    let cursor = 0
+    readline.emitKeypressEvents(process.stdin)
+    const render = () => {
+      const menu = options.map((o, i) => `${i === cursor ? '>' : ' '} ${o}\n`).join('')
+      process.stdout.write(`Release channel for relkit v${VERSION}:\n${menu}`)
+    }
+    render()
+    const picked = await new Promise((resolve) => {
+      const onKeypress = (_char, key) => {
+        if (!key) return
+        if (key.ctrl && key.name === 'c') process.exit(130)
+        else if (key.name === 'down') {
+          cursor = (cursor + 1) % options.length
+          render()
+        } else if (key.name === 'up') {
+          cursor = (cursor - 1 + options.length) % options.length
+          render()
+        } else if (key.name === 'return') {
+          process.stdin.off('keypress', onKeypress)
+          resolve(options[cursor])
+        }
+      }
+      process.stdin.on('keypress', onKeypress)
+    })
+
+    // Question two: a confirm, submitted by the printable key itself — and worded
+    // with the version emphasized, so a marker only spans it once the terminal's
+    // own decoration is out of the way.
+    process.stdout.write(`Publish \u001b[1mrelkit v${VERSION}\u001b[22m? [y/N] `)
+    const answer = await new Promise((resolve) => {
+      const onKeypress = (char, key) => {
+        if (key?.ctrl && key.name === 'c') process.exit(130)
+        process.stdin.off('keypress', onKeypress)
+        resolve(String(char ?? '').toLowerCase())
+      }
+      process.stdin.on('keypress', onKeypress)
+    })
+    process.stdin.setRawMode(false)
+    process.stdin.pause()
+    if (answer !== 'y') {
+      process.stdout.write('\nPublish cancelled\n')
+      process.exit(1)
+    }
+    fs.writeFileSync(path.resolve(cwd, 'shipped.txt'), `${picked} ${VERSION}\n`)
+    process.stdout.write(`\nShipped relkit v${VERSION} to ${picked}\n`)
+    break
+  }
+
+  case 'where':
+    // Report the directory the process was started in — how a scenario proves a
+    // per-step `cwd` reached the child rather than the sandbox root.
+    process.stdout.write(`cwd=${cwd}\n`)
+    break
+
+  case 'warn':
+    // One message on EACH stream: the shape an assertion that cannot pin a stream
+    // (`expect.output`) is written against.
+    process.stdout.write('scanned 3 files\n')
+    process.stderr.write('warning: skipped bulk.js (over the per-file budget)\n')
+    break
+
   case 'run-child': {
     // Spawn a child binary resolved via PATH and echo its stdout — proves a
     // scenario's setup.env.PATH override reaches CHILD processes (stub injection)
@@ -199,6 +376,30 @@ switch (command) {
     const watcher = spawn(process.execPath, ['-e', `setTimeout(() => {}, ${ms})`], { stdio: 'inherit' })
     watcher.unref()
     process.stdout.write(`watching in the background (pid ${watcher.pid})\n`)
+    break
+  }
+
+  case 'serve': {
+    // The HELD TERMINAL: a console-mode server that prints a banner, then its
+    // ready marker, and then never returns — the shape of `truecourse dashboard`.
+    // A step can only reach it by declaring the line it waits for (`until`).
+    //   RELKIT_SERVE_MS      how long the "boot" takes before the marker (default 80)
+    //   RELKIT_SERVE_QUIET   never print the marker at all (the marker-never-comes case)
+    //   TC_SERVE_PIDFILE     write this pid there, so a test can prove it was reaped
+    if (process.env.TC_SERVE_PIDFILE) {
+      fs.writeFileSync(process.env.TC_SERVE_PIDFILE, String(process.pid))
+    }
+    process.stdout.write('relkit serve: starting\n')
+    if (process.env.RELKIT_SERVE_QUIET !== '1') {
+      setTimeout(() => {
+        // ONE write: the runner kills the group the moment the marker is read, so
+        // a second write racing that kill would be lost under load. A single
+        // small write is atomic on the pipe, and the step's output then always
+        // holds both lines — which is what the transcript tests assert on.
+        process.stdout.write('relkit serve: listening on http://127.0.0.1:4321\nPress Ctrl-C to stop\n')
+      }, Number(process.env.RELKIT_SERVE_MS ?? 80))
+    }
+    setInterval(() => {}, 1000)
     break
   }
 

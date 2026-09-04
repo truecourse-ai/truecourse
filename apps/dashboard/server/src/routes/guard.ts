@@ -5,7 +5,7 @@
  *
  *   GET /:id/guard/status        composed status summary (coverage / last run / last generate)
  *   GET /:id/guard/latest        the last run's per-scenario results (+ failure/evidence + runFlows)
- *   GET /:id/guard/history       append-only run-summary history
+ *   GET /:id/guard/history       the baseline run trend (?all=1: every stored run, PR heads included)
  *   GET /:id/guard/runs/:runId   one past run snapshot (+ runFlows)
  *   GET /:id/guard/report        the last `guard generate` report
  *   GET /:id/guard/coverage      per-section coverage join for ?doc=<path> (over the live doc)
@@ -16,9 +16,16 @@
  *   GET /:id/guard/dependency/raw one catalog entry in scenarios/dependencies.json by ?id=<name>
  *   GET /:id/guard/interface/raw one catalog entry's stored JSON, by ?id=
  *   GET /:id/guard/scenarios     the committed-scenario inventory + recipe card
- *   GET /:id/guard/scenario      a scenario's YAML source by ?id=
+ *   GET /:id/guard/scenario      a scenario's YAML source + step list by ?id= (+ per-step
+ *                                actuals when ?runId= / ?evidencePath= names where it ran)
+ *   GET /:id/guard/interface/raw   one interface's entry in guard/interfaces.json by ?id=
+ *   GET /:id/guard/flow/raw      one flow's entry in scenarios/flows.json by ?id=
+ *   GET /:id/guard/claim/raw     one claim's entry in scenarios/claims.json by ?id=
+ *   GET /:id/guard/recipe/raw    scenarios/recipe.json itself, inline secrets masked
  *   GET /:id/guard/evidence      one evidence file for ?runId=&scenarioId=[&file=transcript.txt]
  *   GET /:id/guard/finding-evidence  one evidence file for a finding by ?path=<evidenceDir>[&file=]
+ *   GET /:id/guard/evidence/visuals  a scenario's screenshots + session video (names only)
+ *   GET /:id/guard/evidence/visual   one of those files, as image/png or video/webm
  *   GET /:id/guard/decisions     the committable guard decisions (dismissed claims)
  *   GET /:id/guard/staleness     the two amber-dot signals (generate / run)
  *   GET /:id/guard/externals     detected + declared external API accounts
@@ -29,18 +36,26 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import path from 'node:path';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
 import { readRepoDoc } from '@truecourse/core/lib/repo-doc-reader';
-import { composeGuardStatus } from '@truecourse/shared';
+import { composeGuardStatus, GUARD_VISUAL_CONTENT_TYPE } from '@truecourse/shared';
 import {
   readManifestForView,
   readGuardRunForView,
+  readGuardSectionTotals,
   readGuardHistory,
   readGuardResultForView,
   readGuardReport,
   readGuardRun,
   readGuardHistoryForPr,
   readGuardScenarioSource,
+  readGuardInterfaceRaw,
+  readGuardFlowRaw,
+  readGuardClaimRaw,
+  readGuardDependencyRaw,
+  readGuardRecipeRaw,
   readGuardEvidence,
   readGuardEvidenceAt,
+  listGuardEvidenceVisuals,
+  readGuardEvidenceVisual,
   getGuardDecisions,
   computeGuardStaleness,
   composeDocCoverage,
@@ -49,10 +64,11 @@ import {
   readGuardFlowDetail,
   readGuardFlowsForView,
   readGuardInterfaces,
-  readGuardInterfaceRaw,
-  readGuardDependencyRaw,
+  readGuardClaims,
+  readGuardClaimsForView,
   readGuardRunFlows,
   guardExternalSetupIndexForView,
+  type GuardEvidenceLocator,
 } from '@truecourse/core/commands/guard-read';
 import { readGuardExternalsView } from '@truecourse/core/commands/guard-externals';
 import { readGuardDependenciesView } from '@truecourse/core/commands/guard-dependencies';
@@ -80,6 +96,7 @@ router.get('/:id/guard/status', async (req: Request, res: Response, next: NextFu
         await readManifestForView(repo.path, ref),
         await readGuardRunForView(repo.path, ref),
         await readGuardResultForView(repo.path, ref),
+        await readGuardSectionTotals(repo.path, ref),
       ),
     );
   } catch (e) {
@@ -125,9 +142,15 @@ router.get('/:id/guard/history', async (req: Request, res: Response, next: NextF
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
     // `?pr=` (EE): the PR's own run timeline — one run per pushed head, via the
-    // gate-heads seam — never the repo baseline history under a PR view.
+    // gate-heads seam — never the repo baseline history under a PR view. `?all=1`:
+    // every run the store holds, baseline and pull-request heads alike, each
+    // naming its pull request — the Runs list of a connected repository.
     const pr = prOf(req);
-    res.json(pr !== undefined ? await readGuardHistoryForPr(repo.path, pr) : await readGuardHistory(repo.path));
+    res.json(
+      pr !== undefined
+        ? await readGuardHistoryForPr(repo.path, pr)
+        : await readGuardHistory(repo.path, { all: req.query.all === '1' }),
+    );
   } catch (e) {
     next(e);
   }
@@ -194,6 +217,9 @@ router.get('/:id/guard/coverage', async (req: Request, res: Response, next: Next
         // The flow corpus gives each section's flows their title and milestone
         // positions; absent, they degrade to manifest-derived rows.
         flows: await readGuardFlowsForView(repo.path, commit),
+        // Resolves each gapped claim to its store id, so a gap row in the section
+        // detail can link to the claim it is about.
+        claims: await readGuardClaimsForView(repo.path, commit),
         // Which third parties the user could PROVIDE right now — the join
         // that promotes a providable `blocked-on` section to `needs-setup`. Null on
         // a hosted store (no working tree, no externals page to send anyone to).
@@ -247,53 +273,69 @@ router.get('/:id/guard/interfaces', async (req: Request, res: Response, next: Ne
   }
 });
 
-/**
- * The stored artifact behind ONE catalog entry — the raw half of the two readings
- * the Interfaces detail offers (the page, and the file it came from). The entry's
- * own slice of the interfaces store, pretty-printed by the driver; 404 when the
- * store, or that id in it, is absent — which is also how a hosted repo reads,
- * since both halves of the catalog live in the working tree.
- *
- * The id selects INSIDE an already-read file and never reaches a path, so the
- * store seam's own confinement is the whole path story.
- */
-router.get('/:id/guard/interface/raw', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
-    const id = String(req.query.id ?? '');
-    if (!id) {
-      res.status(400).json({ error: 'Missing ?id=<interface id>.' });
-      return;
+// THE RAW ARTIFACT behind one entity — the second reading every artifact-backed
+// surface offers (View + the stored file). Each answers the entity's own slice of
+// its JSON store, pretty-printed by the driver; 404 when the store, or that entry
+// in it, does not exist — which is also how a hosted repo reads, since the stores
+// live in the working tree. The id selects INSIDE an already-read file and never
+// reaches a path, so the store seam's own confinement is the whole path story.
+//
+// The scenario detail has no route here: its artifact is the whole YAML file,
+// which `/guard/scenario` already returns as `content`.
+const rawArtifactRoute = (
+  read: (repoPath: string, id: string, ref?: string) => Promise<unknown | null>,
+  what: string,
+  /**
+   * A SINGLETON artifact — one per repo, addressed by nothing (the recipe). No
+   * `?id=` is required and the read receives an empty one: demanding an id for a
+   * resource there is only one of would be a lie about it.
+   */
+  singleton = false,
+) =>
+  async function handle(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const repo = await resolveProjectForRequest(req.params.id as string);
+      const id = String(req.query.id ?? '');
+      if (!id && !singleton) {
+        res.status(400).json({ error: `Missing ?id=<${what} id>.` });
+        return;
+      }
+      const source = await read(repo.path, id, refOf(req));
+      if (!source) {
+        res.status(404).json({ error: `No stored ${what}: ${id}` });
+        return;
+      }
+      res.json(source);
+    } catch (e) {
+      next(e);
     }
-    const source = await readGuardInterfaceRaw(repo.path, id);
-    if (!source) {
-      res.status(404).json({ error: `No stored interface: ${id}` });
-      return;
-    }
-    res.json(source);
-  } catch (e) {
-    next(e);
-  }
-});
+  };
 
-// The stored catalog entry behind ONE dependency row — the same raw reading the
-// interface route offers, keyed by the entry's name. A working tree reads the
-// committed file; a hosted repo reads it out of the setup bundle. The gitignored
-// instance overlay is never part of it.
-router.get('/:id/guard/dependency/raw', async (req: Request, res: Response, next: NextFunction) => {
+router.get(
+  '/:id/guard/interface/raw',
+  rawArtifactRoute((repoPath, id) => readGuardInterfaceRaw(repoPath, id), 'interface'),
+);
+router.get('/:id/guard/flow/raw', rawArtifactRoute(readGuardFlowRaw, 'flow'));
+router.get('/:id/guard/claim/raw', rawArtifactRoute(readGuardClaimRaw, 'claim'));
+// One dependency-catalog entry, addressed by its NAME (a catalog entry has no id).
+// The gitignored instance overlay has no raw route and never will: it holds the
+// registered values, and a stored secret is never handed back.
+router.get('/:id/guard/dependency/raw', rawArtifactRoute(readGuardDependencyRaw, 'dependency'));
+// The repo's ONE recipe — no id, and every inline secret masked by the driver
+// (the same mask `truecourse guard recipe` prints).
+router.get(
+  '/:id/guard/recipe/raw',
+  rawArtifactRoute((repoPath, _id, ref) => readGuardRecipeRaw(repoPath, ref), 'recipe', true),
+);
+
+// The claims payload — the extracted claim corpus with the trace from claim to
+// the flows that carry it and the scenario steps that prove it. Always 200: no
+// claims store yet reads as `extracted: false` with empty lists, which is the
+// client's own empty state.
+router.get('/:id/guard/claims', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
-    const id = String(req.query.id ?? '');
-    if (!id) {
-      res.status(400).json({ error: 'Missing ?id=<dependency name>.' });
-      return;
-    }
-    const source = await readGuardDependencyRaw(repo.path, id, refOf(req));
-    if (!source) {
-      res.status(404).json({ error: `No stored dependency: ${id}` });
-      return;
-    }
-    res.json(source);
+    res.json(await readGuardClaims(repo.path, refOf(req)));
   } catch (e) {
     next(e);
   }
@@ -319,7 +361,17 @@ router.get('/:id/guard/scenario', async (req: Request, res: Response, next: Next
       res.status(400).json({ error: 'Missing ?id=<scenario id>.' });
       return;
     }
-    const source = await readGuardScenarioSource(repo.path, id, refOf(req));
+    // WHERE this test ran, when the caller knows: the steps then carry what each one
+    // actually did there, next to what it asserts. Without it the answer is the
+    // authored file alone — which is all that is true of a test that never ran.
+    const runId = req.query.runId ? String(req.query.runId) : '';
+    const evidencePath = req.query.evidencePath ? String(req.query.evidencePath) : '';
+    const actualsFrom = runId
+      ? { runId }
+      : evidencePath
+        ? { evidenceDir: evidencePath }
+        : undefined;
+    const source = await readGuardScenarioSource(repo.path, id, refOf(req), actualsFrom);
     if (!source) {
       res.status(404).json({ error: `Scenario not found: ${id}` });
       return;
@@ -348,6 +400,88 @@ router.get('/:id/guard/evidence', async (req: Request, res: Response, next: Next
       return;
     }
     res.type('text/plain').send(content);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * WHERE a scenario's evidence bundle is, off the query — a run (`?runId=`) or the
+ * evidence directory a birth finding stored (`?evidencePath=`). The same two
+ * addressing modes `/guard/scenario` takes for its per-step actuals, because it is
+ * the same bundle; `null` when the query names neither.
+ */
+function evidenceLocatorOf(req: Request): GuardEvidenceLocator | null {
+  const runId = String(req.query.runId ?? '');
+  if (runId) return { runId };
+  const evidencePath = String(req.query.evidencePath ?? '');
+  return evidencePath ? { evidenceDir: evidencePath } : null;
+}
+
+// The VISUAL evidence of one scenario — the per-step screenshots and the session
+// video a browser run leaves in the bundle, as names + kinds + step indexes (the
+// bytes come from the sibling route below). Always 200: a cli/api run has none, and
+// an empty list is the honest answer for it.
+router.get('/:id/guard/evidence/visuals', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    const scenarioId = String(req.query.scenarioId ?? '');
+    const from = evidenceLocatorOf(req);
+    if (!from || ('runId' in from && !scenarioId)) {
+      res.status(400).json({ error: 'Missing ?runId=&scenarioId= or ?evidencePath=.' });
+      return;
+    }
+    res.json({ visuals: await listGuardEvidenceVisuals(repo.path, scenarioId, from) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ONE of those files, as bytes. Served with the media type its KIND dictates —
+// never sniffed, and never a file that is not a visual (a transcript is text and is
+// read through `/guard/evidence`). Path-safe by the same driver confinement the text
+// reads use: an unsafe file name, or a locator resolving outside the evidence root,
+// reads as a miss.
+//
+// RANGE-AWARE, because the video's scrubber lives or dies on it: a media element
+// only offers seeking when the server answers byte ranges — Chromium classifies a
+// plain-200 resource as a stream and pins `video.seekable` to zero even when the
+// file's own metadata is complete. The bytes are already in memory, so a range is
+// a subarray, not a second read; screenshots get partial reads for free.
+router.get('/:id/guard/evidence/visual', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    const scenarioId = String(req.query.scenarioId ?? '');
+    const file = String(req.query.file ?? '');
+    const from = evidenceLocatorOf(req);
+    if (!from || !file || ('runId' in from && !scenarioId)) {
+      res.status(400).json({ error: 'Missing ?file= and ?runId=&scenarioId= or ?evidencePath=.' });
+      return;
+    }
+    const found = await readGuardEvidenceVisual(repo.path, scenarioId, from, file);
+    if (!found) {
+      res.status(404).json({ error: 'Evidence not found.' });
+      return;
+    }
+    const bytes = found.bytes;
+    res.type(GUARD_VISUAL_CONTENT_TYPE[found.visual.kind]);
+    res.setHeader('Accept-Ranges', 'bytes');
+    const ranges = req.range(bytes.length);
+    if (ranges === -1) {
+      // Unsatisfiable — the 416 that names the real size, so the client can re-ask.
+      res.status(416).setHeader('Content-Range', `bytes */${bytes.length}`);
+      res.end();
+      return;
+    }
+    if (Array.isArray(ranges) && ranges.type === 'bytes' && ranges.length === 1) {
+      const { start, end } = ranges[0]!;
+      res.status(206).setHeader('Content-Range', `bytes ${start}-${end}/${bytes.length}`);
+      res.send(bytes.subarray(start, end + 1));
+      return;
+    }
+    // No Range header — or one this route does not slice by (malformed, a unit
+    // other than bytes, a multipart ask): the whole file is always a valid answer.
+    res.send(bytes);
   } catch (e) {
     next(e);
   }

@@ -1179,6 +1179,22 @@ describe('the seed session definition', () => {
     ]);
   });
 
+  it('warns when no fixture names a route-surface resource', () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    const input = seedInput(r, {
+      requiredResources: [
+        { resource: 'envelope', references: 3, params: ['envelopeId'], example: 'GET /envelope/{envelopeId}' },
+        { resource: 'team', references: 1, params: ['teamId'], example: 'GET /team/{teamId}' },
+      ],
+    });
+    const warnings = providesWarnings({ fixtures: { webUser: ['email', 'teamId'] } }, input);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('no fixture names these route-surface resources: envelope');
+    expect(warnings[0]).not.toContain('team');
+    expect(providesWarnings({ fixtures: { envelope: ['id'], team: ['id'] } }, input)).toEqual([]);
+  });
+
   it('warns about the credential shapes that become silent 401s', () => {
     const warnings = providesWarnings(
       {
@@ -1281,6 +1297,24 @@ describe('requiredPrincipalSurfaces — which surfaces demand a probed principal
     expect(requiredPrincipalSurfaces(seedInput(r))).toEqual([]);
   });
 
+  it('requires an api principal on any deterministic evidence — a token table, a credential header, docs — with no scheme declared', () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    const evidence = [
+      { kind: 'token-table' as const, detail: 'the schema holds API credential table(s): ApiToken' },
+      { kind: 'doc' as const, detail: '2 corpus doc(s) describe an API token/bearer header, e.g. docs/api/auth.md' },
+    ];
+    const required = requiredPrincipalSurfaces(seedInput(r, { apiAuthEvidence: evidence }));
+    expect(required).toHaveLength(1);
+    expect(required[0]).toMatchObject({ surface: 'api' });
+    expect(required[0].why).toContain('ApiToken');
+    expect(required[0].why).toContain('docs/api/auth.md');
+    // …and a probed api credential satisfies it exactly as a scheme-declared one would.
+    const provides = { fixtures: {}, credentials: { apiToken: { header: 'Authorization' } } };
+    expect(missingPrincipalSurfaces(provides, { apiToken: { path: '/api/v1/me' } }, required)).toEqual([]);
+    expect(missingPrincipalSurfaces(provides, undefined, required)).toHaveLength(1);
+  });
+
   it('missingPrincipalSurfaces is satisfied only by a web probe carrying its login proof', () => {
     const required = [{ surface: 'web' as const, why: 'the schema holds login principals (User)' }];
     const provides = {
@@ -1351,6 +1385,31 @@ describe('seedSessionBriefing — runnable surfaces and probe candidates', () =>
     expect(briefing).toMatch(/Candidate probe endpoints/);
     expect(briefing).toContain('- GET /api/v1/me (requires: apiKey)');
     expect(briefing).toMatch(/CONFIRM one/);
+  });
+
+  it('briefs the api mandate from evidence, the mapped-operation probes, and the resources the routes reference', () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    const briefing = seedSessionBriefing(
+      worldFor(r, {
+        apiAuthEvidence: [{ kind: 'token-table', detail: 'the schema holds API credential table(s): ApiToken' }],
+        probeCandidates: [{ method: 'GET', path: '/api/v1/documents', schemes: [] }],
+        requiredResources: [
+          { resource: 'envelope', references: 12, params: ['envelopeId'], example: 'GET /api/v2/envelope/{envelopeId}' },
+          { resource: 'team', references: 2, params: ['teamId', 'teamUrl'], example: 'GET /t/{teamUrl}' },
+        ],
+      }),
+    );
+    expect(briefing).toMatch(/- \*\*api\*\* — the schema holds API credential table\(s\): ApiToken/);
+    expect(briefing).toMatch(/refuses an anonymous call/);
+    expect(briefing).toContain('- GET /api/v1/documents');
+    expect(briefing).toMatch(/spec declares no security scheme, so these are the cheapest mapped operations/);
+    expect(briefing).toMatch(/## Resources the route surface references — seed ONE of each/);
+    expect(briefing).toContain('- envelope — referenced by 12 operation(s) as `envelopeId`; e.g. GET /api/v2/envelope/{envelopeId}');
+    expect(briefing).toContain('- team — referenced by 2 operation(s) as `teamId`, `teamUrl`');
+    // The grounding's AUTHENTICATION block is a mandate, not a question.
+    expect(briefing).toMatch(/api surface AUTHENTICATES — the evidence:/);
+    expect(briefing).not.toMatch(/decide whether a principal is needed at all/);
   });
 
   it('states the fixtures-only allowance when nothing authenticates', () => {

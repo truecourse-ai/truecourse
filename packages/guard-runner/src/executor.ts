@@ -15,7 +15,10 @@
  */
 
 import { spawn } from 'node:child_process'
+import { isPromptKeyedStdin, type GuardTtyAnswer } from '@truecourse/shared'
 import { armChildKill } from './child-kill.js'
+import { markerWatch, type MarkerWatch } from './marker.js'
+import { executeTtyStep } from './pty.js'
 
 export const DEFAULT_STEP_TIMEOUT_MS = 30_000
 
@@ -54,6 +57,27 @@ export interface StepCapture {
    * whatever had arrived by then, and that process group has been SIGKILLed.
    */
   orphanedStdio?: boolean
+  /**
+   * The marker of a PROMPT-KEYED answer whose question never appeared (see
+   * `pty.ts`). The first such marker only — the answers are a sequence, so the one
+   * that was still waiting is the one the run got stuck on. Present on a capture
+   * that otherwise reads clean: the command ran and exited, it simply never asked.
+   */
+  unaskedPrompt?: string
+  /**
+   * The step declared `until` and the marker APPEARED: the runner stopped the child
+   * there, and this capture is the output up to that moment. `exitCode` is null and
+   * `signal` is ours, so nothing downstream may read either as the command's own
+   * outcome — this field is what says why.
+   */
+  endedAtMarker?: string
+  /**
+   * The step declared `until` and the marker NEVER appeared — the command ended (or
+   * the budget did) without ever printing the line the step waits for. A finding
+   * about what the command wrote, exactly like {@link unaskedPrompt}, and reported
+   * as the step failing rather than as an infrastructure timeout.
+   */
+  unseenMarker?: string
   durationMs: number
 }
 
@@ -61,16 +85,52 @@ export interface ExecuteStepOptions {
   argv: string[]
   cwd: string
   env: NodeJS.ProcessEnv
-  stdin?: string
+  /**
+   * Scripted input: the bytes to pipe (or type), or the PROMPT-KEYED answers a
+   * terminal step delivers question by question. The keyed form needs `tty` —
+   * there is no question on a pipe — which the scenario schema already requires.
+   */
+  stdin?: string | readonly GuardTtyAnswer[]
+  /**
+   * The step's HELD-COMMAND marker: run until this text appears in what the child
+   * writes, then stop it and settle on the output so far. The one way to reach a
+   * command that never returns — see `GuardStepUntilSchema`. Absent for every
+   * ordinary step, which still settles only on the child's own end.
+   */
+  until?: string
   timeoutMs?: number
+  /**
+   * Run the command on a pseudo-terminal instead of pipes — see `pty.ts`. The
+   * capture then carries the terminal's single output channel as `stdout`, with
+   * `stderr` empty.
+   */
+  tty?: boolean
   /** Run-level cancellation: SIGKILLs the child, same path as the step timer. */
   signal?: AbortSignal
 }
 
 export function executeStep(opts: ExecuteStepOptions): Promise<StepCapture> {
+  if (opts.tty) return executeTtyStep(opts)
   const timeoutMs = opts.timeoutMs ?? DEFAULT_STEP_TIMEOUT_MS
   const [command, ...args] = opts.argv
   const start = Date.now()
+
+  // Prompt-keyed answers reply to questions, and a pipe is never asked one. The
+  // scenario schema rejects this pairing, so reaching it means a caller built the
+  // options by hand: refuse rather than pipe something that was never bytes.
+  if (isPromptKeyedStdin(opts.stdin)) {
+    return Promise.resolve({
+      exitCode: null,
+      signal: null,
+      stdout: '',
+      stderr: '',
+      timedOut: false,
+      spawnError: 'prompt-keyed answers are typed at a terminal — this step declares no `tty: true`',
+      durationMs: 0,
+    })
+  }
+  /** The bytes to pipe — narrowed by the refusal above, so never the keyed form. */
+  const pipedStdin = opts.stdin
 
   // Already-cancelled callers never spawn anything (same rule as runBuild).
   if (opts.signal?.aborted) {
@@ -128,6 +188,28 @@ export function executeStep(opts: ExecuteStepOptions): Promise<StepCapture> {
       groupOutlivesChild: true,
     })
 
+    // --- The HELD command's ready line (`until`) -------------------------
+    //
+    // A command that never returns is ended by what it PRINTS: the moment the
+    // marker appears the group is killed and the step settles on the output so
+    // far. The kill is OURS, so `timedOut` stays false and `endedAtMarker` is what
+    // explains the missing exit code downstream. Each stream gets its OWN watch:
+    // one shared buffer would let an interleaved chunk from the other stream split
+    // the marker forever (or let it falsely match across the stream seam) — the
+    // reason the pty path's prompt watch is its own instance too.
+    const heldOut = opts.until !== undefined ? markerWatch() : null
+    const heldErr = opts.until !== undefined ? markerWatch() : null
+    let endedAtMarker: string | undefined
+    const watchForMarker = (held: MarkerWatch | null, chunk: string): void => {
+      if (!held || opts.until === undefined || endedAtMarker !== undefined) return
+      held.feed(chunk)
+      if (!held.seen(opts.until)) return
+      endedAtMarker = opts.until
+      heldOut?.done()
+      heldErr?.done()
+      kill.now()
+    }
+
     const finish = (capture: StepCapture): void => {
       if (settled) return
       settled = true
@@ -164,21 +246,34 @@ export function executeStep(opts: ExecuteStepOptions): Promise<StepCapture> {
       finish({
         // An orphan's step reports the command's OWN outcome; the SIGKILL that
         // freed the pipes is ours, not the step's, and must not surface as one.
-        exitCode: orphaned ? orphaned.code : code,
+        // The same holds for a held command we stopped at its marker: it has no
+        // exit status of its own, and `endedAtMarker` is what says so.
+        exitCode: endedAtMarker !== undefined ? null : orphaned ? orphaned.code : code,
         signal: orphaned ? orphaned.signal : signal,
         stdout,
         stderr,
         timedOut: kill.timedOut && orphaned === undefined,
         ...(orphaned ? { orphanedStdio: true } : {}),
+        ...(endedAtMarker !== undefined ? { endedAtMarker } : {}),
+        // The ready line the step waits for never came — a fact about what the
+        // command printed, not about the machine (see StepCapture.unseenMarker).
+        ...(opts.until !== undefined && endedAtMarker === undefined ? { unseenMarker: opts.until } : {}),
         durationMs: Date.now() - start,
       })
     }
 
     child.stdout.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString('utf-8')
+      const text = chunk.toString('utf-8')
+      stdout += text
+      watchForMarker(heldOut, text)
     })
     child.stderr.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString('utf-8')
+      const text = chunk.toString('utf-8')
+      stderr += text
+      // The ready line is looked for on BOTH channels: which stream a program
+      // announces itself on is not something a scenario should have to know, and
+      // `expect.output` already refuses to make that guess.
+      watchForMarker(heldErr, text)
     })
 
     child.on('error', (err) => {
@@ -210,7 +305,7 @@ export function executeStep(opts: ExecuteStepOptions): Promise<StepCapture> {
       backstop.unref()
     })
 
-    if (opts.stdin !== undefined) child.stdin.write(opts.stdin)
+    if (pipedStdin !== undefined) child.stdin.write(pipedStdin)
     child.stdin.end()
   })
 }

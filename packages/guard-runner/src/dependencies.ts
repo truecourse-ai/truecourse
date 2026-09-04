@@ -1,17 +1,19 @@
 /**
  * THE DEPENDENCY CATALOG, run side — the declaration (`scenarios/dependencies.json`)
  * joined with the local instance overlay (`scenarios/dependencies.local.json`), and
- * the materialization of a registered instance into a sandbox.
+ * the materialization of a registered instance into a scenario's sandbox.
  *
  * The shapes and the committed-vs-local rationale live in
  * `@truecourse/shared` (`guard/dependencies.ts`). This module is the engine half,
  * and it answers exactly two questions:
  *
- *   1. Is a SUPPLIED dependency provided on this machine? `guard setup`'s auth
- *      proof runs the program against every provided one and reports the rest as
- *      a registration the user still owes.
+ *   1. Is a SUPPLIED dependency provided on this machine? The runner gates on it:
+ *      a scenario binding an unprovided one settles `blocked` naming the dependency
+ *      and its rolled-up requirement, before any sandbox, any child process, and
+ *      any network call — and therefore a literal `${supplied:…}` token can never
+ *      reach an argv, an env value, or a seeded file.
  *   2. Where does the instance live INSIDE the sandbox? Never in place: a path is
- *      copied under the sandbox cwd, a config dir is copied into the sandbox HOME.
+ *      copied under the scenario cwd, a config dir is copied into the sandbox HOME.
  *      Copy-in, never a symlink or a passthrough, so a run can never mutate the
  *      user's real project, corpus, or login state.
  *
@@ -33,9 +35,12 @@ import {
   type GuardDependenciesLocal,
   type GuardDependencyEntry,
   type GuardDependencyNeed,
+  type GuardExpect,
+  type GuardFileExpect,
   type GuardScenario,
 } from '@truecourse/shared'
 import { RecipeError, secretBullets } from './recipe.js'
+import { mapExpectStrings } from './sandbox-token.js'
 import { dependenciesLocalPath, dependenciesPath } from './store.js'
 
 /** A catalog or overlay file that exists but cannot be trusted. */
@@ -453,7 +458,7 @@ export function dependencyBlockFor(
 // Materialization
 // ---------------------------------------------------------------------------
 
-/** Directory (under the sandbox cwd) a `path`-shaped instance is copied into. */
+/** Directory (under the scenario cwd) a `path`-shaped instance is copied into. */
 export const SUPPLIED_DIR = '.tc-supplied'
 
 /** A name a child process can actually carry as an environment variable. */
@@ -471,8 +476,9 @@ export interface SuppliedInstance {
   env?: Record<string, string>
   /**
    * The variables the registration DECLARES OPTIONAL that this machine left blank
-   * (env shape). Not a fault and not a value — a registration field with nothing
-   * behind it.
+   * (env shape). Not a fault and not a value: it is the one case where a
+   * `${supplied:…}` token legitimately has nothing behind it, and the argv pair
+   * naming it drops out instead of failing. See {@link SuppliedOmissions}.
    */
   optionalUnset?: string[]
 }
@@ -516,8 +522,7 @@ export function suppliedInstancesFor(
   return out
 }
 
-/** What each supplied instance resolved to inside the sandbox, per dependency:
- *  `{ path }` for a copied-in tree, the registered variables for an env shape. */
+/** What `${supplied:<name>.<field>}` resolves to, per dependency. */
 export type SuppliedValues = Record<string, Record<string, string>>
 
 /**
@@ -541,12 +546,12 @@ export function omitsOptionalPair(value: string, omissions: SuppliedOmissions): 
   return suppliedTokenRefs(value).some((ref) => omissions.has(`${ref.name}.${ref.field}`))
 }
 
-
 /**
- * Copy every provided instance into the sandbox and return both the values the
- * instances resolved to and the env the child must carry.
+ * Copy every provided instance into the sandbox and return both the values
+ * `${supplied:…}` resolves to and the env the child must carry.
  *
- * COPY-IN, never a reference: `path` lands under the sandbox cwd, `config-dir`
+ * COPY-IN, never a reference: `path` lands under the scenario cwd (so a step's
+ * `cwd` can point at it and the sandbox containment rule still holds), `config-dir`
  * lands inside the sandbox HOME at its declared destination. Either way the run
  * works on a copy, so it cannot mutate the user's real project or login state — the
  * property that makes binding a real instance safe in the first place.
@@ -564,8 +569,10 @@ export function materializeSupplied(
       for (const field of instance.optionalUnset ?? []) omissions.add(`${instance.name}.${field}`)
       // A registered NAME that is a legal environment identifier is also exported to
       // the child — that is what makes an external-account registration work without
-      // the program being told anything (it reads `ANTHROPIC_API_KEY` itself). A name
-      // that is not one (`api-key`) is a registration FIELD, not a variable.
+      // the scenario doing anything (the program reads `ANTHROPIC_API_KEY` itself).
+      // A name that is not one (`api-key`) is a registration FIELD, reachable only
+      // through `${supplied:…}`, so the scenario places it where the program reads
+      // it. Nothing the scenario did not ask for ever lands in its env.
       for (const [name, value] of Object.entries(instance.env ?? {})) {
         if (ENV_IDENTIFIER.test(name)) env[name] = value
       }
@@ -604,13 +611,13 @@ function resolveInHome(home: string, homePath: string, name: string): string {
  *
  * A plain `cpSync({dereference: false})` would reproduce the host's symlinks
  * verbatim, and one that points OUTSIDE the instance (an absolute link, a `..`
- * traversal) would keep pointing at the host from inside the sandbox — a write
- * aimed through it would then mutate the developer's real filesystem, defeating
- * the copy-in guarantee. So: a relative link that resolves INSIDE the instance is
- * kept as a link (it resolves inside the copy the same way — the pnpm
- * `node_modules` layout survives untouched); every other link is MATERIALIZED —
- * its target's content is copied in its place — and a dangling one is skipped.
- * Nothing in the copy references the host.
+ * traversal) would keep pointing at the host from inside the sandbox — a
+ * `write:`/`patch:` step aimed through it would then mutate the developer's real
+ * filesystem, defeating the copy-in guarantee. So: a relative link that resolves
+ * INSIDE the instance is kept as a link (it resolves inside the copy the same
+ * way — the pnpm `node_modules` layout survives untouched); every other link is
+ * MATERIALIZED — its target's content is copied in its place — and a dangling one
+ * is skipped. Nothing in the copy references the host.
  */
 function copySelfContained(src: string, dest: string, root: string): void {
   const stat = fs.lstatSync(src)
@@ -647,6 +654,14 @@ function copySelfContained(src: string, dest: string, root: string): void {
 // The `${supplied:…}` token
 // ---------------------------------------------------------------------------
 
+/** {@link applySupplied} across a cli expectation — matcher values and `files` keys. */
+export function applySuppliedExpect<E extends GuardExpect | GuardFileExpect>(
+  expect: E,
+  values: SuppliedValues,
+): E {
+  return mapExpectStrings(expect, (text) => applySupplied(text, values))
+}
+
 /** {@link applySupplied} across an env overlay's VALUES (the names are literal). */
 export function applySuppliedEnv(
   env: Record<string, string>,
@@ -659,8 +674,8 @@ export function applySuppliedEnv(
 
 /**
  * Resolve every `${supplied:<name>.<field>}` in a scenario-authored string. Same
- * surgical-replacement rule as `${unique}`: a literal substring swap, never a
- * parser, and never applied to the recipe-owned entrypoint.
+ * surgical-replacement rule as `${sandbox}` and `${unique}`: a literal substring
+ * swap, never a parser, and never applied to the recipe-owned entrypoint.
  *
  * An unknown name/field THROWS rather than passing the literal token through: by
  * the time this runs the scenario's bindings are all provided, so the only way to

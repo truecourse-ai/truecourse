@@ -121,8 +121,6 @@ describe('Guard map action', () => {
 
     const second = await request(app).post(url('map')).expect(409);
     expect(second.body.error).toMatch(/already running/i);
-    // Generate and run share the same one-job-per-repo slot.
-    await request(app).post(url('run')).expect(409);
 
     release();
     expect((await firstDone).status).toBe(200);

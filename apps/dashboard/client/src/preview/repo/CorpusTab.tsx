@@ -307,14 +307,17 @@ function CorpusBody({ repo, versions }: { repo: Repo; versions: ReturnType<typeo
 
 /** The corpus source a repository reads: the server's for a connected one, the
  *  fixtures' (at the picked version) for a fixture one. */
-export function corpusSourceFor(repo: Repo, versionId: string | null): SpecSource {
-  return repo.real ? createRepoSpecSource(repo.id) : createPreviewSpecSource(repo.id, versionId);
+export function corpusSourceFor(repoId: string, real: boolean | undefined, versionId: string | null): SpecSource {
+  return real ? createRepoSpecSource(repoId) : createPreviewSpecSource(repoId, versionId);
 }
 
 export function CorpusTab({ repo }: { repo: Repo }) {
   const versions = useCoverageVersion(repo.id);
   const versionId = versions.version?.id ?? null;
-  const source = useMemo(() => corpusSourceFor(repo, versionId), [repo, versionId]);
+  // Keyed on the fields the factory reads, not the repo object: the shell rebuilds a
+  // running repo's row on every progress tick, and a new source would refetch and
+  // re-scroll every open document.
+  const source = useMemo(() => corpusSourceFor(repo.id, repo.real, versionId), [repo.id, repo.real, versionId]);
   return (
     <SpecSourceProvider source={source}>
       <CorpusBody repo={repo} versions={versions} />

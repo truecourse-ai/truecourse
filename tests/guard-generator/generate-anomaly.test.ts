@@ -2,7 +2,6 @@ import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { GenerateRunner } from '@truecourse/guard-generator'
 import { readManifest, loadScenarios } from '@truecourse/guard-runner'
 import {
   makeTempRepo,
@@ -13,15 +12,14 @@ import {
   writeCorpus,
   raw,
   rawApi,
-  extractBy,
-  authorBy,
+  extractSessionBy,
   runGenerate,
   interfacesOf,
   cliInterface,
   apiInterface,
-  flowOfAll,
-  faithfulReviewer,
-  stampMilestones,
+  flowOfAllSession,
+  submitWorkerSessions,
+  PASSING_STEPS,
 } from './helpers.js'
 
 const FIXTURE_API_INERT = fileURLToPath(new URL('../fixtures/guard-fixture-api/server-inert.mjs', import.meta.url))
@@ -70,22 +68,18 @@ describe('generateGuards — no-op recipe anomaly abort (cli)', () => {
     writeCorpus(r, [{ ref: DOC, areaTags: ['tools/relkit'] }])
     writeDoc(r, DOC, manySections(22))
 
-    let authorCalls = 0
-    let retryCalls = 0
-    const gen: GenerateRunner = async (ctx) => {
-      authorCalls++
-      if (ctx.retry) retryCalls++
-      // A real command the silent entry ignores: exit 0, no output, instant.
-      return { scenario: stampMilestones(raw(ctx.flow.title, [{ run: ['do'], expect: { exit: 0 } }]), ctx.milestones.length) }
-    }
+    let submits = 0
     let fidelityCalls = 0
 
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, cliInterface(['silent'])),
-      extractRunner: extractBy({}),
-      generateRunner: gen,
-      fidelityRunner: faithfulReviewer(() => fidelityCalls++),
+      extractSession: extractSessionBy({}),
+      // A real command the silent entry ignores: exit 0, no output, instant.
+      flowWorkerSession: submitWorkerSessions((task) => raw(task.flowId, [{ run: ['do'], expect: { exit: 0 } }]), {
+        onSubmit: () => submits++,
+        judge: async () => (fidelityCalls++, { kind: 'faithful' }),
+      }),
       // A generous threshold so node's ~40ms startup does not disqualify the no-op
       // steps — the test targets the ABORT orchestration, not sub-10ms real timing.
       noOpThresholdMs: 100_000,
@@ -95,7 +89,10 @@ describe('generateGuards — no-op recipe anomaly abort (cli)', () => {
     expect(res.status).toBe('recipe-failed')
     expect(res.reason).toContain('silent.mjs')
     expect(res.reason).toContain('do-nothing')
-    expect(res.reason).toMatch(/22 of 22/)
+    // The worker path executes ONE scenario per tool call, so the gate trips at
+    // the minimum sample (20) instead of after a 22-candidate batch: the abort
+    // is the same, it just costs two fewer sandboxes.
+    expect(res.reason).toMatch(/20 of 20/)
 
     // Nothing written, no findings, no partial persistence — the abort happens
     // before the persist stage, so rollback is by construction.
@@ -104,10 +101,17 @@ describe('generateGuards — no-op recipe anomaly abort (cli)', () => {
     expect(loadScenarios(r).scenarios).toEqual([])
     expect(readManifest(r)).toBeNull()
 
-    // Round-1 authoring ran once per flow; NO retry, and fidelity never fired.
-    expect(authorCalls).toBe(22)
-    expect(retryCalls).toBe(0)
-    expect(fidelityCalls).toBe(0)
+    // Every flow reached a worker; once the latch trips, later executions
+    // short-circuit.
+    expect(submits).toBe(22)
+    // The abort reason states exactly what the abort guarantees — that NOTHING
+    // was written — and no longer claims a spend it cannot control.
+    expect(res.reason).toContain('aborted before writing anything')
+    expect(res.reason).toContain('no scenario file, manifest, ledger or finding was touched')
+    // What it costs: the gate needs 20 executed steps to fire, and each of the
+    // greens before it is a real confirmation, so its fidelity child runs. One
+    // fewer than the sample, because the run that TRIPS the latch never settles.
+    expect(fidelityCalls).toBe(19)
   })
 
   it('does NOT abort when the entry produces output (a healthy CLI at scale)', async () => {
@@ -121,9 +125,10 @@ describe('generateGuards — no-op recipe anomaly abort (cli)', () => {
     let fidelityCalls = 0
     const res = await runGenerate({
       repoRoot: r,
-      extractRunner: extractBy({}),
-      generateRunner: authorBy({}),
-      fidelityRunner: faithfulReviewer(() => fidelityCalls++),
+      extractSession: extractSessionBy({}),
+      flowWorkerSession: submitWorkerSessions((task) => raw(task.flowId, PASSING_STEPS), {
+        judge: async () => (fidelityCalls++, { kind: 'faithful' }),
+      }),
       noOpThresholdMs: 100_000,
     })
 
@@ -151,7 +156,7 @@ describe('generateGuards — dead-stub anomaly abort (api)', () => {
     writeCorpus(r, [{ ref: API_DOC }])
     writeDoc(r, API_DOC, API_DOC_CONTENT)
 
-    // One flow over both claims; the authored journey asserts the stub's uniform
+    // One flow over both claims; the authored interface asserts the stub's uniform
     // 404 on both routes, so WITHOUT the gate all 20 steps would PASS and a green
     // corpus proving nothing would be committed.
     const steps = [
@@ -159,18 +164,18 @@ describe('generateGuards — dead-stub anomaly abort (api)', () => {
       ...Array.from({ length: 10 }, () => ({ request: { method: 'POST', path: '/beta', json: {} }, expect: { status: 404 }, milestone: 2 })),
     ]
     let fidelityCalls = 0
-    const gen: GenerateRunner = async () => ({ scenario: rawApi('alpha then beta', steps) })
 
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, apiInterface('GET', '/alpha'), apiInterface('POST', '/beta')),
-      extractRunner: extractBy({
+      extractSession: extractSessionBy({
         alpha: [{ driver: 'api', claim: 'GET /alpha answers the alpha resource', reason: 'HTTP status' }],
         beta: [{ driver: 'api', claim: 'POST /beta records a beta event', reason: 'HTTP status' }],
       }),
-      flowsRunner: flowOfAll('alpha then beta'),
-      generateRunner: gen,
-      fidelityRunner: faithfulReviewer(() => fidelityCalls++),
+      flowsAreaSession: flowOfAllSession('alpha then beta'),
+      flowWorkerSession: submitWorkerSessions(() => rawApi('alpha then beta', steps), {
+        judge: async () => (fidelityCalls++, { kind: 'faithful' }),
+      }),
     })
 
     expect(res.status).toBe('recipe-failed')

@@ -766,7 +766,14 @@ Supplied dependency values are row-backed (2026-09-03): a connected repository's
 Interfaces and Dependencies tabs read its stored setup bundle, a registration
 lands as one encrypted row per repository and is injected into every hosted
 clone, and a host path or a recipe edit is refused from the dashboard (§4.3,
-§9 amendment to §7).
+§9 amendment to §7). The Tests and Runs tabs of a connected repository read its
+stored state too (2026-09-03): Tests lists the flows generate stored and opens
+one as its own page; Runs lists every stored run — the baseline runs and the
+pull-request head runs the gate wrote — each naming its pull request and where
+it ran (the run record's `origin`, §6.3, stamped `hosted` today), and opens one
+run's snapshot with its evidence. Both re-read themselves when a generate or a
+run of the repository lands. A run does not yet name a coverage version: the
+Coverage column waits for row-backed versions.
 
 - The database package and migrations, the data-store package (minus the
   analyze stores), the content pool, the jobs runner (queue, harness,

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   GuardFlowSchema,
+  GuardFlowWorkerOutcomeSchema,
   GuardFlowsFileSchema,
   GuardFlowMilestoneSchema,
   GuardManifestSchema,
@@ -194,7 +195,6 @@ describe('resolveFlowIdentity', () => {
 
 describe('guard manifest v2 (flow-keyed)', () => {
   const manifest = {
-    version: 2 as const,
     flows: [
       {
         flowId: 'task-lifecycle',
@@ -204,39 +204,50 @@ describe('guard manifest v2 (flow-keyed)', () => {
           { doc: DOC, anchor: 'tasks/listing-tasks', fingerprint: 'sha256:l' },
         ],
         scenarios: [
-          { id: 'task-lifecycle.cli.1', surface: 'cli' as const, status: 'passing' as const },
-          { id: 'task-lifecycle.api.1', surface: 'api' as const, status: 'passing' as const },
+          { id: 'task-lifecycle.cli.1', drivers: ['cli'] as const, status: 'passing' as const },
+          { id: 'task-lifecycle.api.1', drivers: ['api'] as const, status: 'passing' as const },
         ],
-        journeys: [
-          { surface: 'cli' as const, journeyIds: ['cli/tasks-add', 'cli/tasks-list'] },
-          { surface: 'web' as const, journeyIds: ['web/board'] },
+        interfaces: [
+          { surface: 'cli' as const, interfaceIds: ['cli/tasks-add', 'cli/tasks-list'] },
+          { surface: 'web' as const, interfaceIds: ['web/board'] },
         ],
         generationInputsHash: 'sha256:gen',
         gaps: [
           { surface: 'web' as const, kind: 'awaiting-driver' as const, reason: 'no web driver', driver: 'web' as const },
         ],
+        retiredScenarios: [],
       },
     ],
   }
 
-  it('round-trips through JSON — including the per-surface planned journeys', () => {
+  it('round-trips through JSON — including the per-surface planned interfaces', () => {
     const parsed = GuardManifestSchema.parse(JSON.parse(JSON.stringify(manifest)))
     expect(parsed).toEqual(manifest)
     // The web plan survives even though NO web scenario exists — that record is the
     // only trace a matched-but-unauthored surface leaves.
-    expect(parsed.flows[0].journeys.find((j) => j.surface === 'web')?.journeyIds).toEqual(['web/board'])
+    expect(parsed.flows[0].interfaces.find((j) => j.surface === 'web')?.interfaceIds).toEqual(['web/board'])
   })
 
-  it('defaults the generation-inputs hash to null, and gaps/journeys to []', () => {
+  it('folds a LEGACY per-scenario `surface` into the drivers list', () => {
+    // Rows were written that way until the scenario-level driver was retired; the
+    // manifest is committed, so they keep loading — as the one-driver list `surface`
+    // always meant, and never written back.
+    const legacy = JSON.parse(JSON.stringify(manifest))
+    legacy.flows[0].scenarios = [{ id: 'task-lifecycle.cli.1', surface: 'cli', status: 'passing' }]
+    const parsed = GuardManifestSchema.parse(legacy)
+    expect(parsed.flows[0].scenarios[0].drivers).toEqual(['cli'])
+    expect('surface' in parsed.flows[0].scenarios[0]).toBe(false)
+  })
+
+  it('defaults the generation-inputs hash to null, and gaps/interfaces to []', () => {
     const parsed = GuardManifestSchema.parse({
-      version: 2,
       flows: [{ flowId: 'f', flowFingerprint: 'sha256:x', bindings: [], scenarios: [] }],
     })
     expect(parsed.flows[0].generationInputsHash).toBeNull()
     expect(parsed.flows[0].gaps).toEqual([])
-    // A manifest written before the field still parses — the journeys read then
+    // A manifest written before the field still parses — the interfaces read then
     // falls back to the committed scenarios' own refs.
-    expect(parsed.flows[0].journeys).toEqual([])
+    expect(parsed.flows[0].interfaces).toEqual([])
   })
 
   it('rejects a v1 manifest (clean cut)', () => {
@@ -249,7 +260,7 @@ describe('guard manifest v2 (flow-keyed)', () => {
   })
 
   it('an awaiting-driver gap carries its driver; other kinds carry none', () => {
-    const base = { version: 2, flows: [{ ...manifest.flows[0] }] }
+    const base = { flows: [{ ...manifest.flows[0] }] }
     const withBadGap = {
       ...base,
       flows: [{ ...manifest.flows[0], gaps: [{ surface: 'cli', kind: 'awaiting-driver', reason: 'r' }] }],
@@ -277,10 +288,9 @@ describe('guard manifest v2 (flow-keyed)', () => {
 
   it('unions the flows binding one section, and nulls a disagreeing inputs hash', () => {
     const twoFlows = {
-      version: 2 as const,
       flows: [
         { ...manifest.flows[0], flowId: 'one', generationInputsHash: 'sha256:a' },
-        { ...manifest.flows[0], flowId: 'two', generationInputsHash: 'sha256:b', scenarios: [{ id: 'two.cli.1', surface: 'cli' as const }] },
+        { ...manifest.flows[0], flowId: 'two', generationInputsHash: 'sha256:b', scenarios: [{ id: 'two.cli.1', drivers: ['cli'] as const, status: 'passing' as const }] },
       ],
     }
     const [first] = guardManifestSections(twoFlows)
@@ -311,5 +321,86 @@ describe('guard decisions — dismissedFlows', () => {
     expect(() =>
       GuardDecisionsSchema.parse({ version: 1, dismissedFlows: [{ flowId: 'f', dismissedAt: 'now' }] }),
     ).toThrow()
+  })
+})
+
+describe('GuardFlowWorkerOutcomeSchema payload pairing', () => {
+  it('blocked MAY carry lastEvidence — the run evidence behind the block (documenso 13-worker incident)', () => {
+    // Incident-verbatim (run 5, session 99f01d47…): the worker ended blocked
+    // after real runs and attached what it had proven. Refusing the evidence
+    // cost a whole re-ask turn for information worth keeping.
+    const withEvidence = GuardFlowWorkerOutcomeSchema.safeParse({
+      kind: 'blocked',
+      perMilestone: [
+        { order: 1, capability: 'missing-data: a legacy document id usable through POST /api/v2/template/use' },
+      ],
+      lastEvidence: 'GET /api/v2/document/1 → 404 with both credentials; the seeded world has no legacy document',
+    })
+    expect(withEvidence.success).toBe(true)
+  })
+
+  it('blocked MAY carry attempts — workers volunteer their probe count on an honest block (documenso 13-worker run 6)', () => {
+    // Incident-verbatim (run 6, session 0d3c76a5…): the worker made 16 real
+    // API attempts, diagnosed missing-data, attached lastEvidence as designed —
+    // and died malformed on `attempts`. Three honest blocked verdicts became
+    // hard session failures the same way; the field is honest metadata.
+    const res = GuardFlowWorkerOutcomeSchema.safeParse({
+      kind: 'blocked',
+      perMilestone: [{ order: 1, capability: 'missing-data: a pending envelope/document owned by the owner API token' }],
+      attempts: 16,
+      lastEvidence:
+        'cancelling sourceTemplate.id returned 404 Document not found; a fresh draft cancel returned 400 "Only pending documents can be cancelled"',
+    })
+    expect(res.success).toBe(true)
+  })
+
+  it('journey-defect MAY carry attempts and lastEvidence — a defect is DIAGNOSED, not guessed (documenso web run, 2026-08-26)', () => {
+    // Incident-verbatim: the first run with the web authoring arm produced 83
+    // journey-defects that all died malformed on exactly these two fields —
+    // "kind \"journey-defect\" must not carry `attempts`". The allowance was
+    // scoped blocked-only when item 128 landed, on the assumption that a defect
+    // is stated rather than probed. It is not: a worker reaches `journey-defect`
+    // by TRYING the interface and watching it fail, so it volunteers the probe
+    // count and the last evidence for the same reason a blocked one does — and
+    // refusing them threw away 83 real diagnoses.
+    const res = GuardFlowWorkerOutcomeSchema.safeParse({
+      kind: 'journey-defect',
+      report: {
+        interfaceId: 'web/upload-document-to-current-folder',
+        detail: 'the supplied web serve command exited before /signin became healthy',
+      },
+      attempts: 3,
+      lastEvidence: 'npm run start -w @documenso/remix exited 1; /signin never answered within 60s',
+    })
+    expect(res.success).toBe(true)
+  })
+
+  it('settled still refuses attempts — the allowance is for the kinds that PROBE', () => {
+    const res = GuardFlowWorkerOutcomeSchema.safeParse({
+      kind: 'settled',
+      scenarioYamlSha: 'a'.repeat(64),
+      expectedReds: [],
+      attempts: 2,
+    })
+    expect(res.success).toBe(false)
+    if (!res.success) expect(res.error.issues.map((i) => i.path[0])).toEqual(['attempts'])
+  })
+
+  it('settled must not carry lastEvidence — the allowance is blocked-only', () => {
+    const res = GuardFlowWorkerOutcomeSchema.safeParse({
+      kind: 'settled',
+      scenarioYamlSha: 'a'.repeat(64),
+      expectedReds: [],
+      lastEvidence: 'stray',
+    })
+    expect(res.success).toBe(false)
+  })
+
+  it('retired keeps requiring both attempts and lastEvidence', () => {
+    expect(GuardFlowWorkerOutcomeSchema.safeParse({ kind: 'retired', attempts: 2 }).success).toBe(false)
+    expect(
+      GuardFlowWorkerOutcomeSchema.safeParse({ kind: 'retired', attempts: 2, lastEvidence: 'no faithful scenario' })
+        .success,
+    ).toBe(true)
   })
 })

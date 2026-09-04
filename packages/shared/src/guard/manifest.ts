@@ -2,9 +2,9 @@
  * `scenarios/manifest.json` — the binding record for the committed scenarios, the
  * guard analogue of `contracts/manifest.json`. It is keyed by FLOW (v2): each
  * entry names the flow, the milestone composition it was generated against, the
- * sections it binds, the scenarios that realize it per surface, the
- * generation-inputs hash that makes an unchanged flow a no-op, and the per-surface
- * gaps that explain a missing scenario.
+ * sections it binds, the scenarios that realize it (each with the drivers its steps
+ * exercise), the generation-inputs hash that makes an unchanged flow a no-op, and
+ * the per-surface gaps that explain a missing scenario.
  *
  * Per-SECTION coverage derives at read time from the flows' bindings — see
  * {@link guardManifestSections}.
@@ -15,7 +15,6 @@
  */
 
 import { z } from 'zod'
-import { GUARD_FORMAT_VERSION } from './scenario.js'
 import { GuardDriverIdSchema, type GuardDriverId } from './drivers.js'
 import { GuardFlowBindingSchema } from './flows.js'
 import { GuardCoverageGapKindSchema, GuardScenarioDiagnosisSchema } from './report.js'
@@ -36,31 +35,54 @@ export const GuardTestabilityVerdictSchema = z.union([
 ])
 export type GuardTestabilityVerdict = z.infer<typeof GuardTestabilityVerdictSchema>
 
-/** One scenario realizing a flow, and the surface (driver) it runs on. */
-export const GuardManifestScenarioSchema = z
-  .object({
-    id: z.string().min(1),
-    /** The driver the scenario runs on — the journey's surface type. */
-    surface: GuardDriverIdSchema,
-    /**
-     * The test's status as of the generate that wrote it: `failing` when it failed
-     * its birth execution (committed anyway — the code and the doc disagree),
-     * else `passing`. It is the INVENTORY status, so a read renders a red test
-     * without `guard/result.json`; a `guard run` outcome always wins over it.
-     * Defaults to `passing` so manifests written before failing tests were
-     * committed parse unchanged.
-     */
-    status: GuardTestStatusSchema.default('passing'),
-    /**
-     * The diagnosis a FAILING test commits with — see
-     * {@link GuardScenarioDiagnosisSchema} for the durability contract. Present
-     * whenever a generate that records diagnoses committed the test failing; absent
-     * on passing scenarios and on manifests written before it existed (their red
-     * tests fall back to the prior report's carried rows).
-     */
-    diagnosis: GuardScenarioDiagnosisSchema.optional(),
-  })
-  .strict()
+/**
+ * Fold a LEGACY single-`surface` row into the step-derived `drivers` list. Rows
+ * were written that way until 2026-08-12, when the scenario-level driver was
+ * retired: a scenario mixing cli and web steps recorded `surface: cli` and every
+ * per-driver tally read from it was wrong for exactly that scenario. The manifest
+ * is committed, so old rows keep loading — as a one-driver list, which is what
+ * `surface` always meant. Nothing writes `surface` again.
+ */
+function foldLegacySurface(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+  if (!('surface' in value)) return value
+  const { surface, ...rest } = value as Record<string, unknown>
+  return 'drivers' in rest ? rest : { ...rest, drivers: [surface] }
+}
+
+/** One scenario realizing a flow, and the drivers its STEPS exercise. */
+export const GuardManifestScenarioSchema = z.preprocess(
+  foldLegacySurface,
+  z
+    .object({
+      id: z.string().min(1),
+      /**
+       * The drivers the scenario's steps exercise, in registry order — what
+       * {@link guardScenarioDrivers} reads off the committed file. A scenario that
+       * drives the UI and then reads the result over HTTP records BOTH, so every
+       * per-driver count is a union over the scenarios that actually touch it.
+       */
+      drivers: z.array(GuardDriverIdSchema).min(1),
+      /**
+       * The test's status as of the generate that wrote it: `failing` when it failed
+       * its birth execution (committed anyway — the code and the doc disagree),
+       * else `passing`. It is the INVENTORY status, so a read renders a red test
+       * without `guard/result.json`; a `guard run` outcome always wins over it.
+       * Defaults to `passing` so manifests written before failing tests were
+       * committed parse unchanged.
+       */
+      status: GuardTestStatusSchema.default('passing'),
+      /**
+       * The diagnosis a FAILING test commits with — see
+       * {@link GuardScenarioDiagnosisSchema} for the durability contract. Present
+       * whenever a generate that records diagnoses committed the test failing; absent
+       * on passing scenarios and on manifests written before it existed (their red
+       * tests fall back to the prior report's carried rows).
+       */
+      diagnosis: GuardScenarioDiagnosisSchema.optional(),
+    })
+    .strict(),
+)
 export type GuardManifestScenario = z.infer<typeof GuardManifestScenarioSchema>
 
 /**
@@ -84,25 +106,44 @@ export const GuardManifestGapSchema = z
 export type GuardManifestGap = z.infer<typeof GuardManifestGapSchema>
 
 /**
- * The journeys ONE surface's realization plan referenced for a flow — the
+ * The interfaces ONE surface's realization plan referenced for a flow — the
  * spec→code link as the MATCHER drew it, recorded whether or not a scenario was
  * ever written.
  *
- * Without it, journey usage could only be read back off the written scenarios,
- * so a flow that matched journeys but was refused at authoring (blocked-on a
- * capability the repo hasn't declared) left those journeys looking untouched by
+ * Without it, interface usage could only be read back off the written scenarios,
+ * so a flow that matched interfaces but was refused at authoring (blocked-on a
+ * capability the repo hasn't declared) left those interfaces looking untouched by
  * any spec. This is the planning record, not the realization record: the
  * scenarios array above still says what actually exists.
  */
-export const GuardManifestFlowJourneysSchema = z
+export const GuardManifestFlowInterfacesSchema = z
   .object({
     /** The surface whose plan referenced them. */
     surface: GuardDriverIdSchema,
-    /** Journey ids the plan walks, in first-use order. */
-    journeyIds: z.array(z.string().min(1)),
+    /** Interface ids the plan walks, in first-use order. */
+    interfaceIds: z.array(z.string().min(1)),
   })
   .strict()
-export type GuardManifestFlowJourneys = z.infer<typeof GuardManifestFlowJourneysSchema>
+export type GuardManifestFlowInterfaces = z.infer<typeof GuardManifestFlowInterfacesSchema>
+
+/**
+ * A prior scenario the flow's worker DROPPED while editing (incremental
+ * authoring): its obligation vanished from the spec, so the file was deleted
+ * on purpose. Recorded so the surface counts as accounted for by the settle
+ * invariant — a deliberate deletion is not a coverage hole — and so reports
+ * can say what left and why. `replacedBy` names the scenarios committed on the
+ * same surface in that run, when any.
+ */
+export const GuardManifestRetiredScenarioSchema = z
+  .object({
+    id: z.string().min(1),
+    surface: GuardDriverIdSchema,
+    /** The vanished obligation, as the worker named it. */
+    reason: z.string().min(1),
+    replacedBy: z.array(z.string().min(1)).optional(),
+  })
+  .strict()
+export type GuardManifestRetiredScenario = z.infer<typeof GuardManifestRetiredScenarioSchema>
 
 export const GuardManifestFlowSchema = z
   .object({
@@ -115,16 +156,20 @@ export const GuardManifestFlowSchema = z
     /** The scenarios realizing the flow, one per surface it was authored for. */
     scenarios: z.array(GuardManifestScenarioSchema),
     /**
-     * Per-surface journeys the realization PLAN referenced — written for every
+     * Per-surface interfaces the realization PLAN referenced — written for every
      * surface that got a plan, authored or blocked. Defaults to `[]` so a manifest
-     * written before this field still parses (the journeys read then falls back to
+     * written before this field still parses (the interfaces read then falls back to
      * the written scenarios' own refs).
      */
-    journeys: z.array(GuardManifestFlowJourneysSchema).default([]),
+    interfaces: z.array(GuardManifestFlowInterfacesSchema).default([]),
     /** Hash of the inputs the generator used; unset until a generator authors. */
     generationInputsHash: z.string().nullable().default(null),
     /** Per-surface gaps: why a surface has no scenario. */
     gaps: z.array(GuardManifestGapSchema).default([]),
+    /** Prior scenarios an editing worker deliberately dropped (see
+     *  {@link GuardManifestRetiredScenarioSchema}). Defaults to `[]` so
+     *  manifests written before incremental authoring still parse. */
+    retiredScenarios: z.array(GuardManifestRetiredScenarioSchema).default([]),
     /**
      * True when no synthesized flow claims this entry any more — the flow left
      * `scenarios/flows.json`, but its committed scenarios are real coverage, so
@@ -140,17 +185,71 @@ export const GuardManifestFlowSchema = z
   .strict()
 export type GuardManifestFlow = z.infer<typeof GuardManifestFlowSchema>
 
-export const GuardManifestSchema = z
+/** Drop the retired top-level `version` marker (pre-2026-08-13 writers stamp it)
+ *  before the strict body sees it, so mixed-version stores keep loading. */
+function dropLegacyVersion(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+  if (!('version' in value)) return value
+  const { version: _legacy, ...rest } = value as Record<string, unknown>
+  return rest
+}
+
+/**
+ * One live section a completed generate SAW and deliberately left uncovered —
+ * no flow bound it (untestable prose, a heading with no assertable claim, a
+ * no-flow verdict). Persisted so the next generate's section-change gate can
+ * tell "known, judged, unchanged" from "never seen": without this record every
+ * uncovered section re-entered the work set on every run, forever, because the
+ * verdicts lived only in the gitignored run report. Keyed by the same text
+ * fingerprint the flow bindings use — an edit to the section re-admits it.
+ */
+export const GuardManifestGapSectionSchema = z
   .object({
-    version: z.literal(GUARD_FORMAT_VERSION),
-    flows: z.array(GuardManifestFlowSchema),
+    /** Repo-relative path of the spec document. */
+    doc: z.string(),
+    /** Slugified heading path (the section anchor). */
+    anchor: z.string(),
+    /** `sha256:…` over the normalized section text at the judging generate. */
+    fingerprint: z.string(),
   })
   .strict()
+export type GuardManifestGapSection = z.infer<typeof GuardManifestGapSectionSchema>
+
+/**
+ * One spec document as the last completed generate extracted it. `contentHash`
+ * is the sha256 of the document's bytes — the same input the extraction
+ * session's cache key folds — so the next generate can find the PRIOR
+ * extraction outcome of an edited document and ask the claim-diff gate whether
+ * the edit changed any obligation before paying to re-extract and re-author.
+ */
+export const GuardManifestDocSchema = z
+  .object({
+    /** Repo-relative path of the spec document. */
+    doc: z.string(),
+    /** Hex sha256 over the document's content at the extracting generate. */
+    contentHash: z.string(),
+  })
+  .strict()
+export type GuardManifestDoc = z.infer<typeof GuardManifestDocSchema>
+
+export const GuardManifestSchema = z.preprocess(
+  dropLegacyVersion,
+  z
+    .object({
+      flows: z.array(GuardManifestFlowSchema),
+      /** Absent on manifests written before the field existed — treated as empty. */
+      gapSections: z.array(GuardManifestGapSectionSchema).optional(),
+      /** Absent on manifests written before the claim-diff gate existed — the
+       *  gate then has no prior to compare against and every doc edit re-extracts. */
+      docs: z.array(GuardManifestDocSchema).optional(),
+    })
+    .strict(),
+)
 export type GuardManifest = z.infer<typeof GuardManifestSchema>
 
 /**
  * THE SETTLE INVARIANT — the surfaces the entry PLANNED (a realization plan
- * existed, so `journeys` records the path it walks) but accounts for with NEITHER
+ * existed, so `interfaces` records the path it walks) but accounts for with NEITHER
  * a committed test NOR a gap. Empty ⇒ the invariant holds.
  *
  * A settled flow (one carrying a `generationInputsHash`) is skipped by every
@@ -159,10 +258,13 @@ export type GuardManifest = z.infer<typeof GuardManifestSchema>
  */
 export function unaccountedSurfaces(flow: GuardManifestFlow): GuardDriverId[] {
   const accounted = new Set<GuardDriverId>([
-    ...flow.scenarios.map((s) => s.surface),
+    ...flow.scenarios.flatMap((s) => s.drivers),
     ...flow.gaps.map((g) => g.surface),
+    // A deliberately dropped scenario states why its surface has no test.
+    // (Tolerant of an entry built before the field existed.)
+    ...(flow.retiredScenarios ?? []).map((r) => r.surface),
   ])
-  return flow.journeys.map((j) => j.surface).filter((surface) => !accounted.has(surface))
+  return flow.interfaces.map((j) => j.surface).filter((surface) => !accounted.has(surface))
 }
 
 /**

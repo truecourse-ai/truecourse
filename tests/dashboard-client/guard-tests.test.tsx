@@ -6,19 +6,19 @@
  * covered the test, else the status it was COMMITTED with — guard commits failing
  * tests, so a fresh clone lists its red tests as red), the LEFT PANEL (severity-led
  * rows reading "CLI test · Failing (birth)" plus the flow they serve), the DETAIL,
- * which reads in the order a reader asks: what it checks → result → steps →
- * evidence → the interface it drives, last, and the ONE ruling the detail offers —
- * "don't test this claim" on a FAILING result, scoped to the failing milestone's
- * claim (a passing test has nothing to rule on).
+ * which reads in the order a reader asks: what it checks → the verdict band →
+ * the steps → the Transcript and Interfaces records it can open, and the ONE
+ * ruling the detail offers — "don't test this claim" on a FAILING result, scoped
+ * to the failing milestone's claim (a passing test has nothing to rule on).
  *
  * The steps carry the failure: the diff (expected / actual / the program's output
- * excerpt) reads INSIDE the step that failed, under a section headed by the
- * milestone that step realizes — never as a top-level Expected/Actual pair, and
- * never as a second "Program output" section repeating the transcript below.
+ * excerpt) reads INSIDE the record of the step that failed, next to the claim that
+ * step realizes — never as a top-level Expected/Actual pair, and never as a second
+ * "Program output" section repeating the transcript below.
  *
- * Only the FAILING step collapses (it is the only row with bulk to hide) and it is
- * open by default, per viewed result; a passing or not-reached step is static, and
- * says once — in its own line — what it expects.
+ * EVERY step is one collapsible line and its record opens inline; the failing step
+ * is the only one that starts open, per viewed result. The list itself carries no
+ * group headers — a step's milestone reads in its own record.
  *
  * The pane never scrolls SIDEWAYS: wide data scrolls inside its own block, which
  * is a structural rule (min-w-0 down the flex chain, x-clip on the pane and on the
@@ -86,7 +86,7 @@ const INVENTORY: GuardScenarioRowData[] = [
     file: 'scenarios/tasks/task-lifecycle.cli.1.yaml',
     handWritten: false,
     flowId: FLOW_ID,
-    surface: 'cli',
+    drivers: ['cli'],
     status: 'passing',
     lastResult: result(PASSING_ID, { outcome: 'pass', durationMs: 412 }),
   },
@@ -101,7 +101,7 @@ const INVENTORY: GuardScenarioRowData[] = [
     file: 'scenarios/analyze/pathological.cli.1.yaml',
     handWritten: false,
     flowId: 'handle-pathological-files-without-freezing-analyze',
-    surface: 'cli',
+    drivers: ['cli'],
     status: 'failing',
     lastResult: null,
   },
@@ -113,7 +113,7 @@ const INVENTORY: GuardScenarioRowData[] = [
     file: 'scenarios/tasks/task-export.api.1.yaml',
     handWritten: false,
     flowId: 'task-export',
-    surface: 'api',
+    drivers: ['api'],
     status: 'passing',
     lastResult: result(RUN_FAILED_ID, {
       outcome: 'fail',
@@ -128,7 +128,7 @@ const INVENTORY: GuardScenarioRowData[] = [
     file: 'scenarios/manual/help.yaml',
     handWritten: true,
     flowId: `manual:${MANUAL_ID}`,
-    surface: 'cli',
+    drivers: ['cli'],
     lastResult: null,
   },
 ];
@@ -174,11 +174,11 @@ const FLOW_DETAIL: GuardFlowDetail = {
       durationMs: 412,
       evidencePath: `.truecourse/guard/evidence/${RUN_ID}/${PASSING_ID}`,
       hasEvidence: true,
-      journeyPath: ['cli/tasks-add'],
+      interfacePath: ['cli/tasks-add'],
     },
   ],
   gaps: [],
-  journeyIds: ['cli/tasks-add'],
+  interfaceIds: ['cli/tasks-add'],
   findings: [],
   errors: [],
   generatedAt: '2026-07-24T13:40:00.000Z',
@@ -236,10 +236,10 @@ const BIRTH_FLOW_DETAIL: GuardFlowDetail = {
       },
       evidencePath: '.truecourse/guard/evidence/birth/pathological',
       hasEvidence: true,
-      journeyPath: [],
+      interfacePath: [],
     },
   ],
-  journeyIds: [],
+  interfaceIds: [],
 };
 
 const INTERFACES: GuardInterfaceRow[] = [
@@ -274,29 +274,6 @@ const STEPS = [
   },
   { n: 4, command: 'tasks done 1', expectation: 'exit 0', milestone: 2 },
 ];
-/**
- * The same file told in plain words — what the detail's Story mode renders. It is
- * derived SERVER-SIDE by the shared `describeGuardScenario`, so the client only
- * has to render it; the sentences below are that renderer's own output.
- */
-const STORY = {
-  id: PASSING_ID,
-  title: 'Adding a task lists it and marks it complete',
-  driver: 'cli' as const,
-  promise: FLOW_GOALS.get(FLOW_ID)!,
-  world: ['The sandbox starts with 1 seeded file: tasks.json.'],
-  steps: [
-    { n: 1, does: 'run the program with `init`', expectations: [] },
-    {
-      n: 2,
-      does: 'run the program with `add "write the spec"`',
-      expectations: ['the exit code is 0', 'stdout contains “added”'],
-      milestone: 1,
-    },
-  ],
-  normalizers: ['timestamps are masked before comparison'],
-  binds: [{ doc: DOC, section: 'tasks/creating-tasks' }],
-};
 const LONG_TRANSCRIPT_LINES = 60;
 const RUN_TRANSCRIPT = [
   '$ tasks add "write the spec"',
@@ -320,7 +297,7 @@ beforeEach(() => {
       return json(u.includes('pathological') ? BIRTH_FLOW_DETAIL : FLOW_DETAIL);
     }
     if (u.includes('/guard/scenario?'))
-      return json({ id: PASSING_ID, file: 'x.yaml', content: YAML, driver: 'cli', steps: STEPS, story: STORY });
+      return json({ id: PASSING_ID, file: 'x.yaml', content: YAML, driver: 'cli', steps: STEPS });
     if (u.includes('/guard/finding-evidence')) return new Response(BIRTH_TRANSCRIPT, { status: 200 });
     if (u.includes('/guard/evidence')) return new Response(RUN_TRANSCRIPT, { status: 200 });
     if (u.includes('/guard/decisions')) return decisionsBody();
@@ -603,23 +580,40 @@ const search = () => screen.getByTestId('search').textContent ?? '';
  * "Loading steps…", because a failure must read even for a file that never parses
  * into steps. Finding it therefore settles nothing. TWO fetches fill the page —
  * the scenario source brings the step ROWS, and the flow join brings the result
- * they are painted from (pass/fail/not-reached), the failure card, the evidence
- * pointer and the milestone chain their sections are headed by. Waiting on the
- * container alone reads a half-loaded page, which is only ever a question of
- * which tick the mocked fetch lands on.
+ * they are painted from (pass/fail/not-reached), the verdict band's failure line,
+ * the evidence pointer and the milestone chain the opened records name. The join
+ * lands FIRST here: it re-points the source read at the run (or the birth
+ * evidence path), so the rows the join has not seen are replaced.
  */
 async function findSteps(): Promise<HTMLElement> {
+  // The flow join landed: the verdict band carries the joined result — the run's
+  // duration on a pass, the failing step on a red. Neither exists before it.
+  const band = screen.getByRole('region', { name: 'Test verdict' });
+  await waitFor(() => expect(band).toHaveTextContent(/Failed at step|\d+ms/));
   const steps = await screen.findByLabelText('test steps');
   // The scenario source landed: the file's steps, not the loading line.
   await within(steps).findAllByRole('listitem');
-  // The flow join landed: a milestone section is headed by its CLAIM, and only
-  // the flow detail carries claims. It arrives with the result in one state
-  // update, so this one signal proves both.
-  await waitFor(() =>
-    expect(within(steps).getByText('Milestone 1').parentElement).toHaveTextContent(/Milestone 1 — \S/),
-  );
   return steps;
 }
+
+/** The toggle of one step's collapsible record. */
+const stepToggle = (steps: HTMLElement, n: number | 'setup') =>
+  within(steps).getByRole('button', { name: n === 'setup' ? 'Setup record' : `Step ${n} record` });
+
+/** One step's expanded record — the inline body under its row. */
+const stepBody = (n: number | 'setup' | 'recorded') =>
+  document.getElementById(`guard-step-body-${n}`) as HTMLElement;
+
+/** Expand a step's record and return it. */
+const openStep = async (user: ReturnType<typeof userEvent.setup>, steps: HTMLElement, n: number) => {
+  await user.click(stepToggle(steps, n));
+  return stepBody(n);
+};
+
+/** Open the supporting record's Transcript drawer — it is closed until asked for. */
+const openTranscript = async (user: ReturnType<typeof userEvent.setup>) => {
+  await user.click(screen.getByRole('button', { name: /^Transcript/ }));
+};
 
 describe('GuardTestsPane — the test detail', () => {
   it('opening a test from the panel mirrors ?gtest and renders its detail', async () => {
@@ -634,65 +628,42 @@ describe('GuardTestsPane — the test detail', () => {
     expect(await findSteps()).toBeInTheDocument();
   });
 
-  it('reads what it checks → verdict → steps → evidence → interface, in that order', async () => {
+  it('reads goal → verdict → steps → transcript → interfaces, in that order', async () => {
+    const user = userEvent.setup();
     renderPane(`/repos/r?tab=tests&gtest=${PASSING_ID}`);
     const steps = await findSteps();
 
-    const order = ['What it checks', 'Verdict', 'Steps', 'Evidence', 'Interface'];
-    const positions = order.map((label) => {
-      const el = screen.getByText(label);
-      return { label, top: Array.from(document.querySelectorAll('*')).indexOf(el) };
-    });
+    // The page reads top-down in the order a reader asks: what it checks, the
+    // verdict, the investigation, then the record they can open if they need it.
+    const order = [
+      screen.getByText(FLOW_GOALS.get(FLOW_ID)!),
+      screen.getByRole('region', { name: 'Test verdict' }),
+      steps,
+      screen.getByRole('button', { name: /^Transcript/ }),
+      screen.getByRole('button', { name: /^Interfaces/ }),
+    ];
+    const flat = Array.from(document.querySelectorAll('*'));
+    const positions = order.map((el) => flat.indexOf(el));
     for (let i = 1; i < positions.length; i++) {
-      expect(positions[i].top, `${positions[i].label} after ${positions[i - 1].label}`).toBeGreaterThan(
-        positions[i - 1].top,
-      );
+      expect(positions[i], `element ${i} follows ${i - 1}`).toBeGreaterThan(positions[i - 1]);
     }
 
-    // What it checks: the flow's goal, one line.
-    expect(screen.getByText(FLOW_GOALS.get(FLOW_ID)!)).toBeInTheDocument();
     // The verdict, then the steps as STEPS (not a YAML blob) and the transcript.
-    expect(screen.getByText('passed')).toBeInTheDocument();
+    expect(screen.getByText('Passed')).toBeInTheDocument();
     expect(screen.getByText('Latest state')).toBeInTheDocument();
     expect(within(steps).getAllByRole('listitem')).toHaveLength(STEPS.length);
     // The command reads in the STEP — asked of the page at large it is ambiguous,
     // since the transcript below opens on the same line.
     expect(within(steps).getByText('tasks add "write the spec"')).toBeInTheDocument();
-    // …and the transcript arrives on its own fetch, chained behind the join.
+    // …and the transcript arrives on its own fetch, read by opening its drawer.
+    await openTranscript(user);
     await waitFor(() =>
       expect(screen.getByLabelText('evidence transcript')).toHaveTextContent('$ tasks add "write the spec"'),
     );
-    // The interface renders LAST, as a sequence diagram.
-    const diagram = await screen.findByRole('group', { name: 'Interface cli/tasks-add' });
-    expect(within(diagram).getByText('User')).toBeInTheDocument();
-  });
-
-  // Three readings of ONE file — the page, the same file in plain
-  // words, and its bytes. The Story mode exists so a reviewer who does not know the
-  // scenario format can still say whether the test proves what the doc promises.
-  it('reads the same test as a STORY — the promise, the world, and what must be true', async () => {
-    const user = userEvent.setup();
-    renderPane(`/repos/r?tab=tests&gtest=${PASSING_ID}`);
-    await findSteps();
-
-    await user.click(screen.getByRole('button', { name: 'Story' }));
-    const story = await screen.findByLabelText('test story');
-
-    // The PROMISE leads — the flow's own words, with the title beside it.
-    expect(within(story).getByText(STORY.promise)).toBeInTheDocument();
-    expect(within(story).getByText(STORY.title)).toBeInTheDocument();
-    // The world it runs in, then every step as a sentence with its assertions.
-    expect(within(story).getByText(STORY.world[0])).toBeInTheDocument();
-    expect(within(story).getByText(/run the program with `add "write the spec"`/)).toBeInTheDocument();
-    expect(within(story).getByText(/stdout contains “added”/)).toBeInTheDocument();
-    // A step that asserts nothing says so — never a silent gap beside its siblings.
-    expect(within(story).getByText(/only prepares the world/)).toBeInTheDocument();
-    expect(within(story).getByText(STORY.normalizers[0])).toBeInTheDocument();
-
-    // The mode is a way of LOOKING at the page, so the other readings stay one click
-    // away and the step list is not gone.
-    await user.click(screen.getByRole('button', { name: 'View' }));
-    expect(await findSteps()).toBeInTheDocument();
+    // The interface path is the LAST record, and opens in place.
+    await user.click(screen.getByRole('button', { name: /^Interfaces/ }));
+    expect(screen.getByRole('region', { name: 'Interfaces used by this flow' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open interface cli/tasks-add' })).toBeInTheDocument();
   });
 
   // The status says the test is red; the chip says whose fault that
@@ -704,7 +675,7 @@ describe('GuardTestsPane — the test detail', () => {
     expect(screen.getByText('code drift')).toBeInTheDocument();
     expect(screen.getByText(/Bound the per-file work/)).toBeInTheDocument();
     // The verdict is a chip beside the status, never a replacement for it.
-    expect(screen.getByText('failed (birth)')).toBeInTheDocument();
+    expect(screen.getByText('Failed (birth)')).toBeInTheDocument();
   });
 
   it('a passing test carries no verdict chip — there is nothing to blame', async () => {
@@ -719,10 +690,10 @@ describe('GuardTestsPane — the test detail', () => {
     await findSteps();
     // The stage the failure came from, the step + milestone it broke at, and the
     // CLAIM behind that milestone. The diff itself reads at the step.
-    expect(screen.getByText('failed (birth)')).toBeInTheDocument();
+    expect(screen.getByText('Failed (birth)')).toBeInTheDocument();
     const card = screen.getByText(/Failed at step/).closest('div.rounded.border') as HTMLElement;
     expect(within(card).getByText(/milestone 1/)).toBeInTheDocument();
-    expect(within(card).getByText(BIRTH_CLAIM.title)).toBeInTheDocument();
+    expect(within(card).getByText(new RegExp(BIRTH_CLAIM.title))).toBeInTheDocument();
     expect(within(card).queryByText('Expected')).toBeNull();
     expect(within(card).queryByText('Actual')).toBeNull();
     expect(within(card).queryByLabelText('expected value')).toBeNull();
@@ -733,6 +704,7 @@ describe('GuardTestsPane — the test detail', () => {
   });
 
   it('paints each step from the viewed result — pass, fail, not reached', async () => {
+    const user = userEvent.setup();
     renderPane(`/repos/r?tab=tests&gtest=${BIRTH_FAILED_ID}`);
     const steps = await findSteps();
     // The birth failure broke at step 2 of the four-step file.
@@ -740,68 +712,62 @@ describe('GuardTestsPane — the test detail', () => {
     expect(within(steps).getByLabelText(/Step 2: .* — failed/)).toBeInTheDocument();
     expect(within(steps).getByLabelText(/Step 3: .* — not reached/)).toBeInTheDocument();
     expect(within(steps).getByLabelText(/Step 4: .* — not reached/)).toBeInTheDocument();
-    // A step reads as a step: its command, its env overlay, what it expects — all
-    // of it standing, because a passing step's detail is one line.
+    // A step reads as a step: its command on the closed line, and its env overlay
+    // and what it expects inside the record that line opens.
     expect(within(steps).getByText('tasks list')).toBeInTheDocument();
-    expect(within(steps).getByText(/NO_COLOR=1/)).toBeInTheDocument();
-    expect(within(steps).getByText(/expects exit 0 · stdout contains/)).toBeInTheDocument();
+    const third = await openStep(user, steps, 3);
+    expect(within(third).getByText(/NO_COLOR=1/)).toBeInTheDocument();
+    expect(within(third).getByLabelText('expected value')).toHaveTextContent('exit 0 · stdout contains');
   });
 
-  it('makes ONLY the failing step collapsible, and opens it', async () => {
+  it('makes EVERY step expandable, and opens the failing one', async () => {
     renderPane(`/repos/r?tab=tests&gtest=${BIRTH_FAILED_ID}`);
     const steps = await findSteps();
-    // One toggle on the page, on the failing step, open — carrying the diff.
-    const toggles = within(steps).getAllByRole('button', { expanded: true });
-    expect(toggles).toHaveLength(1);
-    expect(toggles[0]).toHaveAccessibleName('Collapse step 2');
-    expect(within(steps).getByLabelText('expected value')).toBeInTheDocument();
-    // A passing / not-reached step hides one expectation line — no toggle for it.
-    for (const row of within(steps).getAllByRole('listitem')) {
-      const failing = (row.getAttribute('aria-label') ?? '').includes('— failed');
-      expect(within(row).queryAllByRole('button')).toHaveLength(failing ? 1 : 0);
-    }
+    // Every row is one toggle, and exactly one record starts open: the failure's.
+    const open = within(steps).getAllByRole('button', { expanded: true });
+    expect(open).toHaveLength(1);
+    expect(open[0]).toHaveAccessibleName('Step 2 record');
+    expect(within(stepBody(2)).getAllByLabelText('expected value')).toHaveLength(1);
+    expect(within(steps).getAllByRole('button', { name: /^Step \d+ record$/ })).toHaveLength(STEPS.length);
   });
 
   it('closes the failing step on click, and opens it again', async () => {
     const user = userEvent.setup();
     renderPane(`/repos/r?tab=tests&gtest=${BIRTH_FAILED_ID}`);
     const steps = await findSteps();
-    const toggle = within(steps).getByRole('button', { name: 'Collapse step 2' });
+    const toggle = stepToggle(steps, 2);
 
-    // Open by default is a default, not a lock: the diff puts away.
+    // Open by default is a default, not a lock: the record puts away.
     await user.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByLabelText('expected value')).toBeNull();
     expect(screen.queryByLabelText('actual value')).toBeNull();
-    // The step itself never leaves — only its detail did.
+    // The step itself never leaves — only its record did.
     expect(within(steps).getByLabelText(/Step 2: .* — failed/)).toBeInTheDocument();
-    expect(toggle).toHaveAccessibleName('Expand step 2');
 
     await user.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByLabelText('expected value')).toBeInTheDocument();
   });
 
-  it('tells the failing step’s expectation ONCE — the labelled field, not a summary', async () => {
+  it('tells a step’s expectation ONCE — the labelled field, not a summary', async () => {
+    const user = userEvent.setup();
     renderPane(`/repos/r?tab=tests&gtest=${BIRTH_FAILED_ID}`);
     const steps = await findSteps();
-    const failing = within(steps)
-      .getAllByRole('listitem')
-      .find((r) => (r.getAttribute('aria-label') ?? '').includes('— failed'))!;
-    // The labelled diff says what it wanted…
+    const failing = stepBody(2);
+    // The labelled field says what it wanted…
     expect(within(failing).getByText('expected')).toBeInTheDocument();
     expect(within(failing).getByLabelText('expected value')).toHaveTextContent('exit 0');
-    // …so the "expects …" summary line that would repeat it is gone from this row
-    // (the steps that did NOT fail still carry theirs — it is all they have).
-    expect(within(failing).queryByText(/^expects/)).toBeNull();
-    expect(within(steps).getAllByText(/^expects/).length).toBe(STEPS.length - 1);
+    // …so the "expects …" summary line that would repeat it exists on no row at
+    // all, open or closed. One rendering of one fact.
+    await openStep(user, steps, 1);
+    expect(within(steps).queryByText(/^expects/)).toBeNull();
   });
 
   it('reads the diff INSIDE the step that failed — and nowhere else', async () => {
     renderPane(`/repos/r?tab=tests&gtest=${BIRTH_FAILED_ID}`);
     const steps = await findSteps();
-    const rows = within(steps).getAllByRole('listitem');
-    const failing = rows.find((r) => (r.getAttribute('aria-label') ?? '').includes('— failed'))!;
+    const failing = stepBody(2);
 
     // What it wanted, what it got, and what the program printed — all at the step.
     expect(within(failing).getByText('expected')).toBeInTheDocument();
@@ -812,8 +778,9 @@ describe('GuardTestsPane — the test detail', () => {
       'warning: pathological file skipped',
     );
 
-    // Passing and not-reached steps carry none of it…
-    for (const row of rows.filter((r) => r !== failing)) {
+    // Closed rows stay compact lines, so the diff exists only in the one open record.
+    for (const row of within(steps).getAllByRole('listitem')) {
+      if (row.contains(failing)) continue;
       expect(within(row).queryByText('expected')).toBeNull();
       expect(within(row).queryByLabelText('expected value')).toBeNull();
       expect(within(row).queryByLabelText('actual value')).toBeNull();
@@ -830,20 +797,22 @@ describe('GuardTestsPane — the test detail', () => {
     }
   });
 
-  it('a PASSING test shows no diff — and offers no toggle at all', async () => {
+  it('a PASSING test starts with every record closed — and each opens inline', async () => {
+    const user = userEvent.setup();
     renderPane(`/repos/r?tab=tests&gtest=${PASSING_ID}`);
     const steps = await findSteps();
     expect(within(steps).getAllByLabelText(/— passed/)).toHaveLength(STEPS.length);
+    // Nothing failed, so nothing starts open — and no diff reads until asked for.
     expect(screen.queryByLabelText('expected value')).toBeNull();
     expect(screen.queryByLabelText('actual value')).toBeNull();
-    // Nothing failed, so there is nothing to put away: every row is static, and
-    // every row's expectation stands.
-    expect(within(steps).queryAllByRole('button')).toHaveLength(0);
-    expect(within(steps).getAllByText(/^expects/)).toHaveLength(STEPS.length);
-    // The sections the list is read BY are always visible.
-    for (const header of ['Setup', 'Milestone 1', 'Milestone 2']) {
-      expect(within(steps).getByText(header)).toBeInTheDocument();
-    }
+    expect(within(steps).queryAllByRole('button', { expanded: true })).toHaveLength(0);
+    expect(within(steps).getAllByRole('button', { name: /^Step \d+ record$/ })).toHaveLength(STEPS.length);
+    // Every row opens its own record, and a second opens BESIDE the first.
+    const first = await openStep(user, steps, 1);
+    expect(within(first).getByLabelText('expected value')).toHaveTextContent('exit 0');
+    await openStep(user, steps, 2);
+    expect(stepBody(1)).toBeInTheDocument();
+    expect(stepBody(2)).toBeInTheDocument();
   });
 
   it('carries NO Program output section — the excerpt is the step’s, the streams are evidence', async () => {
@@ -856,28 +825,35 @@ describe('GuardTestsPane — the test detail', () => {
     expect(screen.queryByText(/^stderr$/i)).toBeNull();
   });
 
-  it('groups the steps by MILESTONE, headed by the claim — no per-row tags', async () => {
+  it('reads a step’s claim inside its record — the list carries no group headers', async () => {
+    const user = userEvent.setup();
     renderPane(`/repos/r?tab=tests&gtest=${PASSING_ID}`);
     const steps = await findSteps();
-    // The un-annotated preparation step heads its own section…
-    expect(within(steps).getByText('Setup')).toBeInTheDocument();
-    // …then each milestone, named by the claim its steps realize.
-    expect(within(steps).getByText('Milestone 1')).toBeInTheDocument();
-    expect(within(steps).getByText(new RegExp(CLAIMS[0]))).toBeInTheDocument();
-    expect(within(steps).getByText('Milestone 2')).toBeInTheDocument();
-    expect(within(steps).getByText(new RegExp(CLAIMS[1]))).toBeInTheDocument();
-    // The tag that used to ride each row is gone — the header carries it now.
-    expect(within(steps).queryByText(/^milestone \d+$/)).toBeNull();
-    // Sections, not a re-ordering: every step still renders, in file order.
+    // No divider rows: the closed list is steps alone, in file order.
+    expect(within(steps).queryByText('Setup')).toBeNull();
+    expect(within(steps).queryByText('Milestone 1')).toBeNull();
+    for (const claim of CLAIMS) expect(within(steps).queryByText(new RegExp(claim))).toBeNull();
     expect(within(steps).getAllByRole('listitem')).toHaveLength(STEPS.length);
+    // The claim reads inside the record of the step that realizes it, named by
+    // the milestone AND its sentence.
+    const second = await openStep(user, steps, 2);
+    expect(within(second).getByText(`Milestone 1 — ${CLAIMS[0]}`)).toBeInTheDocument();
+    const fourth = await openStep(user, steps, 4);
+    expect(within(fourth).getByText(`Milestone 2 — ${CLAIMS[1]}`)).toBeInTheDocument();
+    // The tag that used to ride each closed row is gone.
+    expect(within(steps).queryByText(/^milestone \d+$/)).toBeNull();
   });
 
-  it('heads a milestone the flow does not name by its number alone', async () => {
+  it('names a milestone the flow does not know by its number alone', async () => {
+    const user = userEvent.setup();
     // The birth flow declares milestone 1 only; the file's step 4 realizes 2.
     renderPane(`/repos/r?tab=tests&gtest=${BIRTH_FAILED_ID}`);
     const steps = await findSteps();
-    expect(within(steps).getByText(new RegExp(BIRTH_CLAIM.title))).toBeInTheDocument();
-    expect(within(steps).getByText('Milestone 2')).toBeInTheDocument();
+    // A milestone the flow DOES name reads its claim in the open record…
+    expect(within(stepBody(2)).getByText(new RegExp(`Milestone 1 — ${BIRTH_CLAIM.title}`))).toBeInTheDocument();
+    // …and the one it does not is its number alone — never a borrowed claim.
+    const fourth = await openStep(user, steps, 4);
+    expect(within(fourth).getByText('Milestone 2')).toBeInTheDocument();
   });
 
   it('switches between the page and the raw file, and defaults to the page', async () => {
@@ -915,6 +891,8 @@ describe('GuardTestsPane — the test detail', () => {
   it('clamps a long transcript and grows it INLINE — never a vertical scroll box', async () => {
     const user = userEvent.setup();
     renderPane(`/repos/r?tab=tests&gtest=${PASSING_ID}`);
+    await findSteps();
+    await openTranscript(user);
     const expander = await screen.findByText(`Show all ${LONG_TRANSCRIPT_LINES} lines`);
     const block = screen.getByLabelText('evidence transcript');
     expect(block.textContent?.split('\n')).toHaveLength(GUARD_CLAMP_LINES);
@@ -925,9 +903,10 @@ describe('GuardTestsPane — the test detail', () => {
     expect(block.className).toContain('overflow-x-auto');
     // Height is still the page's job.
     expect(block.className).not.toMatch(/overflow-y|max-h-/);
-    // Nothing in its ancestry scrolls: the pane is the only scroll context.
+    // Nothing between the block and its pane scrolls: the pane is the only scroll
+    // context any block on this page has, and it is marked as one.
     for (let el = block.parentElement; el && el.tagName !== 'BODY'; el = el.parentElement) {
-      if (el.className.includes('flex-1')) break;
+      if (el.hasAttribute('data-pane')) break;
       expect(el.className).not.toMatch(/overflow-(auto|scroll|y-auto|y-scroll)|max-h-/);
     }
     await user.click(expander);
@@ -941,8 +920,10 @@ describe('GuardTestsPane — the test detail', () => {
   // only scroll the block it is in if every box above that block is allowed to
   // shrink (min-w-0) and none of them scrolls sideways itself.
   it('confines sideways scroll to the data blocks — the pane never scrolls sideways', async () => {
+    const user = userEvent.setup();
     renderPane(`/repos/r?tab=tests&gtest=${BIRTH_FAILED_ID}`);
     await findSteps();
+    await openTranscript(user);
     for (const label of ['expected value', 'actual value', 'step output', 'evidence transcript']) {
       const block = await screen.findByLabelText(label);
       // The block scrolls itself, and can never out-grow the column it sits in.
@@ -958,19 +939,22 @@ describe('GuardTestsPane — the test detail', () => {
     }
     // The pane's own scroll: down, explicitly — `overflow-y-auto` on its own would
     // compute the x axis to `auto` and hand a wide line the whole page.
-    const pane = screen.getByLabelText('evidence transcript').closest('.flex-1') as HTMLElement;
+    const pane = screen.getByLabelText('evidence transcript').closest('[data-pane]') as HTMLElement;
+    expect(pane).not.toBeNull();
     expect(pane.className).toContain('overflow-y-auto');
     expect(pane.className).toContain('overflow-x-hidden');
   });
 
   it('marks a test that failed at BIRTH and reads its birth transcript', async () => {
+    const user = userEvent.setup();
     renderPane(`/repos/r?tab=tests&gtest=${BIRTH_FAILED_ID}`);
     // The status word reads off the INVENTORY, before either fetch lands — the
     // failure it belongs to is the flow join's, so the page must settle first.
     await findSteps();
-    expect(screen.getByText('failed (birth)')).toBeInTheDocument();
-    expect(screen.getByText('timed out after 120s')).toBeInTheDocument();
+    expect(screen.getByText('Failed (birth)')).toBeInTheDocument();
+    expect(within(stepBody(2)).getByLabelText('actual value')).toHaveTextContent('timed out after 120s');
     // A birth failure's transcript is addressed by its stored path, not by a run.
+    await openTranscript(user);
     expect(await screen.findByText(/analyze \./)).toBeInTheDocument();
   });
 
@@ -1066,7 +1050,7 @@ describe('GuardTestsPane — ruling a failing test’s claim out of testing', ()
   it('a PASSING test offers nothing — there is no claim to rule on', async () => {
     renderPane(`/repos/r?tab=tests&gtest=${PASSING_ID}`);
     await findSteps();
-    expect(screen.getByText('passed')).toBeInTheDocument();
+    expect(screen.getByText('Passed')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: RULE })).toBeNull();
   });
 

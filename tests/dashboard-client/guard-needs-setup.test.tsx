@@ -47,7 +47,7 @@ afterEach(cleanup);
 const emptyTotals = (over: Partial<Record<GuardSectionCoverageStatus, number>>) =>
   ({
     fail: 0, error: 0, stale: 0, orphaned: 0, pass: 0, guarded: 0,
-    'needs-setup': 0, 'blocked-on': 0, unrealizable: 0, 'no-journey': 0,
+    'needs-setup': 0, 'blocked-on': 0, unrealizable: 0, 'no-interface': 0,
     web: 0, tui: 0, library: 0, desktop: 0, mobile: 0,
     untestable: 0, 'no-claim': 0, dismissed: 0, unguarded: 0,
     ...over,
@@ -342,12 +342,12 @@ const flowDetail = (needsSetup: GuardNeedsSetup): GuardFlowDetailData => ({
       status: 'needs-setup',
       birthPassed: false,
       hasEvidence: false,
-      journeyPath: [],
+      interfacePath: [],
       gap: { ...NEEDS_SETUP_GAP, needsSetup },
     },
   ],
   gaps: [],
-  journeyIds: [],
+  interfaceIds: [],
   findings: [],
   errors: [],
   generatedAt: '2026-07-29T10:00:00.000Z',

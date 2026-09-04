@@ -3,6 +3,12 @@
  * Repositories lists repositories. A row opens the run as its own page
  * (`/runs/:runId`, see ./RunPage.tsx), never a nested column. The search box
  * narrows by pull request number, commit or branch; Origin is the one filter.
+ *
+ * The rows are EVERY run the store holds — the baseline runs and the
+ * pull-request head runs the gate wrote — and a connected repository re-reads
+ * them when a run of it lands on the socket. The Coverage column names the
+ * coverage version a run executed and shows only when a run names one: a
+ * connected repository's runs do not yet, so it stays out of their table.
  */
 
 import { useMemo, useState } from 'react';
@@ -13,10 +19,11 @@ import { FilterBar } from '@/preview/ui/filter-bar';
 import { HoverPopover } from '@/preview/ui/hover-popover';
 import { GUARD_OUTCOMES, formatGuardTime } from '@/preview/vendor/lib/guard-drifts';
 import { guardStatusMeta } from '@/preview/vendor/lib/guard-status';
-import { useGuardRuns } from '@/preview/vendor/hooks/useGuardRuns';
-import { coverageVersionById } from '@/preview/data/corpus';
+import { coverageVersionById, type CoverageVersion } from '@/preview/data/corpus';
 import type { Repo } from '@/preview/data/types';
 import { useGuardTabJump } from './tab-jump';
+import { useGuardRefresh } from './use-guard-refresh';
+import { useGuardRunList } from './use-guard-run-list';
 
 function verdictOf(h: GuardHistoryEntry): GuardOutcome {
   return h.summary.fail > 0 || h.summary.error > 0 ? 'fail' : 'pass';
@@ -25,7 +32,8 @@ function verdictOf(h: GuardHistoryEntry): GuardOutcome {
 export function RunsTab({ repo }: { repo: Repo }) {
   useGuardTabJump();
   const navigate = useNavigate();
-  const { history, loading } = useGuardRuns(repo.id, true);
+  const reloadKey = useGuardRefresh(repo, ['guard-run']);
+  const { runs: history, loading, error } = useGuardRunList(repo.id, reloadKey);
   const [query, setQuery] = useState('');
   const [originFilter, setOriginFilter] = useState<string[]>([]);
 
@@ -50,6 +58,17 @@ export function RunsTab({ repo }: { repo: Repo }) {
             (h.branch ?? '').toLowerCase().includes(q)),
       );
   }, [history, query, originFilter]);
+
+  // The coverage version each run names, when the picker knows it (fixtures only, today).
+  const versions = useMemo(() => {
+    const out = new Map<string, CoverageVersion>();
+    for (const h of history) {
+      const version = h.coverageVersion ? coverageVersionById(repo.id, h.coverageVersion) : undefined;
+      if (version) out.set(h.runId, version);
+    }
+    return out;
+  }, [history, repo.id]);
+  const showCoverage = versions.size > 0;
 
   const openRun = (runId: string) => navigate(`/preview/repos/${repo.id}/runs/${encodeURIComponent(runId)}`);
 
@@ -84,14 +103,14 @@ export function RunsTab({ repo }: { repo: Repo }) {
               <th className="px-3 py-2 text-left font-semibold">Pull request</th>
               <th className="px-3 py-2 text-left font-semibold">Origin</th>
               <th className="px-3 py-2 text-left font-semibold">Result</th>
-              <th className="px-3 py-2 text-left font-semibold">Coverage</th>
+              {showCoverage && <th className="px-3 py-2 text-left font-semibold">Coverage</th>}
               <th className="px-6 py-2 text-left font-semibold">When</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((h) => {
               const verdict = verdictOf(h);
-              const version = h.coverageVersion ? coverageVersionById(repo.id, h.coverageVersion) : undefined;
+              const version = versions.get(h.runId);
               return (
                 <tr
                   key={h.runId}
@@ -126,15 +145,17 @@ export function RunsTab({ repo }: { repo: Repo }) {
                       </span>
                     </span>
                   </td>
-                  <td className="px-3 py-2.5 text-muted-foreground">{version ? `${version.label} · ${version.sha}` : ''}</td>
+                  {showCoverage && (
+                    <td className="px-3 py-2.5 text-muted-foreground">{version ? `${version.label} · ${version.sha}` : ''}</td>
+                  )}
                   <td className="px-6 py-2.5 text-muted-foreground">{formatGuardTime(h.ranAt)}</td>
                 </tr>
               );
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-6 py-8 text-center text-muted-foreground">
-                  {loading ? 'Loading runs.' : 'No run matches.'}
+                <td colSpan={showCoverage ? 7 : 6} className="px-6 py-8 text-center text-muted-foreground">
+                  {loading ? 'Loading runs.' : error ? error : history.length === 0 ? 'No run yet.' : 'No run matches.'}
                 </td>
               </tr>
             )}

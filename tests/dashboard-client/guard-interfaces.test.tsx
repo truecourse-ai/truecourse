@@ -60,11 +60,13 @@ const SCENARIO_ID = 'task-lifecycle.cli.1';
  * reads the same recipe.
  */
 const RECIPE: GuardRecipeCard = {
-  build: 'pnpm build',
-  entry: ['node', 'dist/tasks.js'],
-  serve: ['node', 'dist/web.js'],
-  services: { up: 'docker compose up -d --wait', down: 'docker compose down' },
-  env: { TASKS_HOME: '.tmp/tasks' },
+  surfaces: {
+    cli: { build: 'pnpm build', entry: ['node', 'dist/tasks.js'] },
+    api: {
+      serve: ['node', 'dist/web.js'],
+      services: { up: 'docker compose up -d --wait', down: 'docker compose down' },
+    },
+  },
   fingerprint: 'sha256:9f2caabbccdd',
   stale: false,
 };
@@ -73,7 +75,7 @@ const RECIPE: GuardRecipeCard = {
 const SURFACES: GuardInterfacesView['surfaces'] = [
   { surface: 'cli', label: 'CLI', runnable: true, interfaces: 5, resources: 2, detected: true, source: 'tree' },
   { surface: 'api', label: 'API', runnable: true, interfaces: 0, resources: 0, detected: false },
-  { surface: 'web', label: 'Web', runnable: false, waitingLabel: 'Needs web driver', interfaces: 0, resources: 0, detected: false },
+  { surface: 'tui', label: 'TUI', runnable: false, waitingLabel: 'Needs TUI driver', interfaces: 0, resources: 0, detected: false },
   { surface: 'desktop', label: 'Desktop', runnable: false, waitingLabel: 'Needs desktop driver', interfaces: 0, resources: 0, detected: false },
 ];
 
@@ -693,7 +695,7 @@ describe('Interfaces tab — the surfaces are the catalog’s, not a banner’s'
     renderPane(CLI_AND_WEB);
     expect(screen.queryByText('Detected surfaces')).not.toBeInTheDocument();
     expect(screen.queryByText(/CLI · runnable ✓/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Web · Needs web driver ⚠/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/TUI · Needs TUI driver ⚠/)).not.toBeInTheDocument();
   });
 
   it('says what an empty catalog means — and offers no action for it', () => {
@@ -1450,7 +1452,6 @@ describe('Interfaces tab — the recipe as a destination', () => {
     expect(opener('CLI')).toHaveAttribute('aria-pressed', 'true');
     expect(within(recipe).getByText('pnpm build')).toBeInTheDocument();
     expect(within(recipe).getByText('node dist/tasks.js')).toBeInTheDocument();
-    expect(within(recipe).getByText('TASKS_HOME=.tmp/tasks')).toBeInTheDocument();
     // The file the card is a reading of is named on the page.
     expect(within(recipe).getByText('.truecourse/scenarios/recipe.json')).toBeInTheDocument();
   });

@@ -24,7 +24,7 @@ import {
   recipePath,
   readManifest,
 } from '@truecourse/guard-runner'
-import { GUARD_FORMAT_VERSION, guardManifestSections, type GuardManifestSectionView } from '@truecourse/shared'
+import { guardManifestSections, type GuardManifestSectionView } from '@truecourse/shared'
 import {
   parseOpenApiSpec,
   isOpenApiDoc,
@@ -33,9 +33,6 @@ import {
   type OpenApiDoc,
 } from '@truecourse/shared/openapi'
 import {
-  EXTRACT_PROMPT_FINGERPRINT,
-  FLOWS_PROMPT_FINGERPRINT,
-  FLOWS_EPIC_PROMPT_FINGERPRINT,
   MATCH_PROMPT_FINGERPRINT,
   GENERATE_PROMPT_FINGERPRINT,
   GENERATE_API_PROMPT_FINGERPRINT,
@@ -44,6 +41,21 @@ import {
 import { readSuppressionIndex, suppressedQuotesIn, suppressionKey } from './suppression.js'
 import { buildOperationIndex, matchedSchemaFingerprint } from './openapi-enrich.js'
 import { securityFingerprintForSection } from './openapi-security.js'
+
+/**
+ * The RETIRED one-shot extract / flows / epic prompts' fingerprints, FROZEN as
+ * literals (plan 04 step 20). They stay in {@link flowGenerationInputsHash} as
+ * constant salt on purpose: swapping in the session prompts' fingerprints (or
+ * dropping these) would move EVERY committed flow's hash and mass-re-author
+ * every user's corpus for no behavioral reason. The trade: an edit to the
+ * session extract/flows prompts no longer re-authors committed flows through
+ * this hash — it re-runs those STAGES via their own caches, and only a flow
+ * whose claims/flows actually changed re-authors (fingerprint-driven, which is
+ * the accurate signal anyway).
+ */
+const RETIRED_EXTRACT_PROMPT_FINGERPRINT = '87fe2fdd9881b428'
+const RETIRED_FLOWS_PROMPT_FINGERPRINT = '654d47c7386fcd58'
+const RETIRED_FLOWS_EPIC_PROMPT_FINGERPRINT = 'fa167e39be3b4a5b'
 
 /** One section fed to the LLM stages — its identity, its text, and area context. */
 export interface SectionInput {
@@ -189,8 +201,8 @@ export function sectionInputsKey(section: {
  * The generation-inputs hash stamped per FLOW — the incremental gate. It moves
  * when the flow's milestone composition changes, when any BOUND SECTION's content
  * key moves (its text, a suppressed quote, a referenced OpenAPI schema, its
- * security context), when a JOURNEY the flow's plans ground on moves (the code
- * surface changed under it — and only those journeys, never the whole catalog, so
+ * security context), when a INTERFACE the flow's plans ground on moves (the code
+ * surface changed under it — and only those interfaces, never the whole catalog, so
  * unrelated route churn re-authors nothing), when the recipe inputs change, when
  * the scenario format version bumps, or when ANY LLM stage's prompt in the flow
  * pipeline changes (extraction, synthesis, matching, authoring, fidelity review).
@@ -202,19 +214,20 @@ export function flowGenerationInputsHash(input: {
   flowFingerprint: string
   /** Every bound section's {@link sectionInputsKey}, in any order (sorted here). */
   sectionKeys: readonly string[]
-  /** The fingerprints of exactly the journeys the flow's plans ground on. */
-  journeyFingerprints: readonly string[]
+  /** The fingerprints of exactly the interfaces the flow's plans ground on. */
+  interfaceFingerprints: readonly string[]
   recipeFingerprint: string
 }): string {
   const parts = [
     input.flowFingerprint,
     [...input.sectionKeys].sort().join(''),
-    [...input.journeyFingerprints].sort().join(''),
+    [...input.interfaceFingerprints].sort().join(''),
     input.recipeFingerprint,
-    String(GUARD_FORMAT_VERSION),
-    EXTRACT_PROMPT_FINGERPRINT,
-    FLOWS_PROMPT_FINGERPRINT,
-    FLOWS_EPIC_PROMPT_FINGERPRINT,
+    // Frozen salt for the retired one-shot stages (see the constants above) —
+    // kept so committed flow hashes did not move on the session cut-over.
+    RETIRED_EXTRACT_PROMPT_FINGERPRINT,
+    RETIRED_FLOWS_PROMPT_FINGERPRINT,
+    RETIRED_FLOWS_EPIC_PROMPT_FINGERPRINT,
     MATCH_PROMPT_FINGERPRINT,
     GENERATE_PROMPT_FINGERPRINT,
     GENERATE_API_PROMPT_FINGERPRINT,
@@ -292,14 +305,18 @@ export function planGuardWork(repoRoot: string, recipeFingerprint?: string): Gua
   }
   sections.sort((a, b) => a.doc.localeCompare(b.doc) || a.anchor.localeCompare(b.anchor))
 
-  // Section CHANGE detection, projected off the flow-keyed manifest: a section is
-  // changed when its live text fingerprint differs from what the flows binding it
-  // recorded, or when no flow binds it at all (never generated for, or accounted
-  // for as a coverage gap). The incremental GATE is per flow — everything global
-  // (recipe, prompts, format, the journeys a flow grounds on) rides
-  // `flowGenerationInputsHash`, so this stays a pure spec-side question.
-  const manifestSections = guardManifestSections(readManifest(repoRoot))
+  // Section CHANGE detection, projected off the flow-keyed manifest: a section
+  // is changed when its live text fingerprint differs from what the flows
+  // binding it recorded — or, when no flow binds it, from what the persisted
+  // gap record judged (a completed generate saw the section and left it
+  // uncovered on purpose). A section in neither is genuinely new work. The
+  // incremental GATE is per flow — everything global (recipe, prompts, format,
+  // the interfaces a flow grounds on) rides `flowGenerationInputsHash`, so this
+  // stays a pure spec-side question.
+  const manifest = readManifest(repoRoot)
+  const manifestSections = guardManifestSections(manifest)
   const byKey = new Map(manifestSections.map((e) => [`${e.doc}\0${e.anchor}`, e]))
+  const gapByKey = new Map((manifest?.gapSections ?? []).map((g) => [`${g.doc}\0${g.anchor}`, g]))
   const seen = new Set<string>()
 
   const work: SectionInput[] = []
@@ -307,7 +324,12 @@ export function planGuardWork(repoRoot: string, recipeFingerprint?: string): Gua
     const key = `${s.doc}\0${s.anchor}`
     seen.add(key)
     const prior = byKey.get(key)
-    if (!prior || prior.fingerprint !== s.fingerprint) work.push(s)
+    if (prior) {
+      if (prior.fingerprint !== s.fingerprint) work.push(s)
+      continue
+    }
+    const gap = gapByKey.get(key)
+    if (!gap || gap.fingerprint !== s.fingerprint) work.push(s)
   }
 
   const orphaned = manifestSections.filter((e) => !seen.has(`${e.doc}\0${e.anchor}`))

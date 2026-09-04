@@ -15,9 +15,9 @@ import {
   writeDoc,
   writeCorpus,
   raw,
-  extractBy,
-  authorBy,
+  extractSessionBy,
   runGenerate,
+  submitWorkerSessions,
 } from './helpers.js'
 
 const repos: string[] = []
@@ -85,10 +85,10 @@ describe('two-sided promises — the negative half SURVIVES the pipeline (G15 re
 
     const res = await runGenerate({
       repoRoot: r,
-      extractRunner: extractBy({
+      extractSession: extractSessionBy({
         strictness: [{ claim: 'valid invocations are accepted and invalid ones are rejected' }],
       }),
-      generateRunner: authorBy({ strictness: twoSided }),
+      flowWorkerSession: submitWorkerSessions(() => twoSided),
     })
 
     expect(res.status).toBe('ok')
@@ -111,7 +111,7 @@ describe('two-sided promises — the negative half SURVIVES the pipeline (G15 re
 
     // And the flow settled — a two-sided realization is a complete one.
     expect(readManifest(r)!.flows.find((f) => f.flowId === 'strictness')!.scenarios).toEqual([
-      { id: 'strictness.cli.1', surface: 'cli', status: 'passing' },
+      { id: 'strictness', drivers: ['cli'], status: 'passing' },
     ])
   })
 })

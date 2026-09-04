@@ -54,13 +54,18 @@ export type StageId =
   | 'contract.repairParse'
   | 'contract.gapJudge'
   // --- guard generate (scenario tests) ---
-  | 'guard.extract'
-  | 'guard.flows'
+  // Only the two remaining ONE-SHOT stages are configurable here. The retired
+  // per-stage ids (`guard.extract`, `guard.flows`, `guard.generate`,
+  // `guard.retry`, `guard.fidelity`, `guard.triage`) became agent SESSIONS
+  // (plan 04), which all run on the one configured session model (§3.4) —
+  // there is no per-stage tier for them, so declaring the ids would advertise
+  // overrides nothing reads.
   | 'guard.match'
-  | 'guard.generate'
-  | 'guard.retry'
-  | 'guard.fidelity'
-  | 'guard.triage'
+  // The claim-diff gate: one call per edited section, deciding whether the edit
+  // changed an obligation before the flows bound to it re-author.
+  | 'guard.claimDiff'
+  // --- guard run (the one LLM call a run can make) ---
+  | 'guard.visualJudge'
   | 'guard.recipe'
   | 'guard.seed'
   // --- guard interfaces (the authored web surface) ---
@@ -94,41 +99,23 @@ export const STAGE_DEFAULTS: Record<StageId, string> = {
   'contract.repairParse': 'sonnet',
   // Auditing already-written gaps is a judgement call, not generation — sonnet.
   'contract.gapJudge': 'sonnet',
-  // Reading a whole document for its testable claims is a judgement call — sonnet.
-  'guard.extract': 'sonnet',
-  // Flow synthesis composes ALREADY-EXTRACTED claims into user-goal paths (and the
-  // epic pass chains those flows): ordering and grouping, not authoring — the
-  // `guard.extract`/`guard.fidelity` judgement family, so sonnet. The prompt is
-  // optimized until sonnet handles it; a weak composition is never fixed by a
-  // bigger model.
-  'guard.flows': 'sonnet',
-  // Realization matching picks, per flow milestone, which of a surface's journeys
-  // could realize it — structured SELECTION over digests, not authoring. The same
-  // judgement family as `guard.flows`/`guard.extract`, so sonnet: haiku under-reasons
-  // nuanced judgement (the weakness that moved `spec.areaTag` off it), and a wrong
-  // plan births a scenario that tests the wrong path.
+  // Realization matching picks, per flow milestone, which of a surface's interfaces
+  // could realize it — structured SELECTION over digests, not authoring: a
+  // judgement call, so sonnet — haiku under-reasons nuanced judgement (the
+  // weakness that moved `spec.areaTag` off it), and a wrong plan births a
+  // scenario that tests the wrong path.
   'guard.match': 'sonnet',
-  // Authoring an executable scenario faithful to a spec claim is the hard,
-  // load-bearing call (a weak scenario is false confidence) — opus.
-  'guard.generate': 'opus',
-  // The one evidence-retry per birth-failed claim — the same authoring task, so
-  // the same tier; a distinct stage so retry spend is attributed to the birth line.
-  'guard.retry': 'opus',
-  // Fidelity review: does a green scenario actually verify its claim, or is it
-  // weak/vacuous/miscast? A focused comprehension JUDGEMENT over one scenario + one
-  // section + one claim — the same family as `guard.extract` (read text, judge),
-  // NOT generation, so far cheaper than the opus authoring tier. Sonnet, not haiku:
-  // the success bar is zero false alarms on honest scenarios, and haiku under-
-  // reasons nuanced faithfulness comparisons (the same weakness that moved
-  // `spec.areaTag` off haiku).
-  'guard.fidelity': 'sonnet',
-  // Failing-test triage: read a failing test's full evidence (the journey
-  // transcript, the flow's spec text, the request-surface grounding) and decide
-  // doc-drift vs code-drift vs generation-defect, with a quoted recommendation. A
-  // judgment whose verdict decides whether the red test commits and, at high
-  // confidence, is acted on without a human — deliberately top-tier like the
-  // overlap verify pass; the failure count keeps the spend small.
-  'guard.triage': 'opus',
+  // Same tier as matching: a judgement over one section's text against its
+  // prior claims, made once per edit per repo. In API mode every stage runs on
+  // the one configured model anyway.
+  'guard.claimDiff': 'sonnet',
+  // READING A SCREENSHOT of a failed web step — the only LLM call `guard run`
+  // makes, and only ever about a failure. Vision comprehension of a real UI is the
+  // top tier's work (a weaker model confidently mis-reads a rendered page, and the
+  // whole value of this annotation is trustworthiness), and it fires so rarely —
+  // once per failing web scenario, cached on the failure identity — that the spend
+  // is negligible. Opus.
+  'guard.visualJudge': 'opus',
   // Proposing a build/entry recipe is a modest structured task — sonnet.
   'guard.recipe': 'sonnet',
   // Drafting a seed script writes REAL code against the app's own ORM and
@@ -144,7 +131,14 @@ export const STAGE_DEFAULTS: Record<StageId, string> = {
 };
 
 export interface LlmConfigBlock {
-  /** Per-stage overrides keyed by stage ID. */
+  /**
+   * Per-stage overrides keyed by stage ID. Parsing stays TOLERANT of retired
+   * ids: a committed config.json still naming a session-era guard stage
+   * (`guard.extract`, `guard.flows`, `guard.generate`, `guard.retry`,
+   * `guard.fidelity`, `guard.triage`) loads fine — `readConfigSync` is a plain
+   * JSON.parse and resolution only ever queries live ids, so a stale key is
+   * inert, never a load failure.
+   */
   stages?: Partial<Record<StageId, string>>;
   /** Model to retry with when the primary is overloaded. */
   fallbackModel?: string;

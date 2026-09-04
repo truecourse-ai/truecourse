@@ -5,7 +5,7 @@ import http from 'node:http'
 const routes = {
   // `/` answers too: with no route surface handed in, the ranking proposes no
   // health path and the runner polls `/` — a fixture that 404s there could never
-  // be verified by a caller that skips journey mapping.
+  // be verified by a caller that skips interface mapping.
   'GET /': () => ({ service: 'speced-api-mini' }),
   'GET /healthz': () => ({ status: 'ok' }),
   'GET /forecast': () => ({ forecast: 'sunny' }),

@@ -252,3 +252,113 @@ describe('resolveScenarioBinds', () => {
     expect(resolveScenarioBinds([{ ...removed, doc: 'docs/missing.md' }], indexFor).kind).toBe('orphaned')
   })
 })
+
+describe('buildDocSectionIndex — the lead region', () => {
+  const frontmattered = md([
+    '---',
+    'title: "Baselines & diff"',
+    'description: "Commit a baseline once."',
+    '---',
+    '',
+    'The first analyze creates `.truecourse/`.',
+    '',
+    '## Setting the baseline',
+    'body',
+  ])
+
+  it('makes a frontmatter-titled lead an anchorable section named by its title', () => {
+    const idx = buildDocSectionIndex('docs/baseline.mdx', frontmattered)
+    expect(idx.sections.map((s) => s.anchor)).toEqual(['baselines-diff', 'setting-the-baseline'])
+    expect(idx.sections[0]).toMatchObject({
+      headingText: 'Baselines & diff',
+      level: 0,
+      startLine: 1,
+    })
+  })
+
+  it('fingerprints the lead over the lead region alone, frontmatter included', () => {
+    const idx = buildDocSectionIndex('docs/baseline.mdx', frontmattered)
+    const leadText = frontmattered.split('\n').slice(0, 7).join('\n')
+    expect(idx.sections[0].fingerprint).toBe(fingerprintText(leadText))
+    // Editing a later section leaves the lead's identity alone — the whole point
+    // of not folding descendants into it.
+    const edited = buildDocSectionIndex('docs/baseline.mdx', `${frontmattered}\nmore body`)
+    expect(edited.sections[0].fingerprint).toBe(idx.sections[0].fingerprint)
+    expect(edited.sections[1].fingerprint).not.toBe(idx.sections[1].fingerprint)
+  })
+
+  it('names the lead by the filename when the doc declares no frontmatter title', () => {
+    const idx = buildDocSectionIndex(
+      'docs/getting-started.md',
+      md(['Some real behaviour stated up front.', '', '## Install', 'body']),
+    )
+    expect(idx.sections.map((s) => s.anchor)).toEqual(['getting-started', 'install'])
+    expect(idx.sections[0].headingText).toBe('getting-started')
+  })
+
+  it('emits no lead section when the doc opens with a heading', () => {
+    const idx = buildDocSectionIndex('docs/spec.md', md(['# Root', 'body', '## Sub', 'more']))
+    expect(idx.sections.map((s) => s.anchor)).toEqual(['root', 'root/sub'])
+  })
+
+  it('emits no lead section when the lead is only frontmatter-less whitespace', () => {
+    const idx = buildDocSectionIndex('docs/spec.md', md(['', '   ', '', '## Sub', 'body']))
+    expect(idx.sections.map((s) => s.anchor)).toEqual(['sub'])
+  })
+
+  it('turns a doc with no headings at all into one lead section', () => {
+    const idx = buildDocSectionIndex('docs/note.md', md(['---', 'title: Note', '---', '', 'Just prose.']))
+    expect(idx.sections.map((s) => s.anchor)).toEqual(['note'])
+    expect(idx.sections[0]).toMatchObject({ level: 0, headingText: 'Note' })
+  })
+
+  it('ignores an unterminated `---` block — that is a horizontal rule, not frontmatter', () => {
+    const idx = buildDocSectionIndex('docs/rule.md', md(['---', 'title: Not frontmatter', '', 'body', '## Sub']))
+    expect(idx.sections.map((s) => s.anchor)).toEqual(['rule', 'sub'])
+  })
+})
+
+describe('buildDocSectionIndex — lead identity is additive', () => {
+  // The load-bearing guarantee: adding the lead must not move ANY heading-derived
+  // anchor, or every repository in the field re-authors on the next generate.
+  const withCollision = md([
+    '---',
+    'title: Overview',
+    '---',
+    '',
+    'Lead prose that states behaviour.',
+    '',
+    '## Overview',
+    'a heading whose slug is the same as the frontmatter title',
+    '',
+    '## Other',
+    'body',
+  ])
+
+  it('lets the HEADING keep its anchor and gives the lead the ordinal', () => {
+    const idx = buildDocSectionIndex('docs/spec.md', withCollision)
+    expect(idx.sections.map((s) => s.anchor)).toEqual(['overview-2', 'overview', 'other'])
+    expect(idx.byAnchor.get('overview')).toMatchObject({ level: 2, headingText: 'Overview' })
+    expect(idx.byAnchor.get('overview-2')).toMatchObject({ level: 0 })
+  })
+
+  it('leaves every heading anchor and fingerprint byte-identical to the lead-less doc', () => {
+    const withLead = buildDocSectionIndex('docs/spec.md', withCollision)
+    // The same document with its lead removed: what derivation saw before leads existed.
+    const leadless = buildDocSectionIndex(
+      'docs/spec.md',
+      md(['## Overview', 'a heading whose slug is the same as the frontmatter title', '', '## Other', 'body']),
+    )
+    const headings = withLead.sections
+      .filter((s) => s.level > 0)
+      .map(({ anchor, fingerprint, headingText, level }) => ({ anchor, fingerprint, headingText, level }))
+    expect(headings).toEqual(
+      leadless.sections.map(({ anchor, fingerprint, headingText, level }) => ({
+        anchor,
+        fingerprint,
+        headingText,
+        level,
+      })),
+    )
+  })
+})

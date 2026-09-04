@@ -29,7 +29,7 @@ vi.mock('../../packages/llm-api/src/model.js', () => ({ buildModel: buildModelMo
 import { createApiTransport } from '../../packages/llm-api/src/index';
 
 // --- spec scan ---------------------------------------------------------------
-// The five spec stages are AGENT SESSIONS now: they build no
+// The five spec stages are AGENT SESSIONS now (plan 02): they build no
 // `LlmRequest`, so they contribute nothing to the request sweep below. Their
 // outcome schemas ride the session driver's toolset instead, and are checked
 // object-rooted in their own describe at the end of this file.
@@ -37,13 +37,6 @@ import { DocVerdictSchema } from '../../packages/core/src/services/spec-scan/cur
 import { AreaSettlementSchema } from '../../packages/core/src/services/spec-scan/settle-areas';
 import { OverlapOutcomeSchema } from '../../packages/core/src/services/spec-scan/overlap';
 import { ScanScopeOutcomeSchema } from '../../packages/core/src/services/spec-scan/orchestrate';
-// --- guard setup -------------------------------------------------------------
-// Its one-shot stages became agent SESSIONS too; like the scan's, their outcome
-// schemas ride the driver's toolset and are checked object-rooted below.
-import { RecipeProposalSchema } from '../../packages/guard-generator/src/schemas.js';
-import { CatalogDraftSchema } from '../../packages/core/src/services/guard-setup/dependency-catalog.js';
-import { SeedSessionOutcomeSchema } from '../../packages/core/src/services/guard-setup/seed-session.js';
-import { AuthProofOutcomeSchema } from '../../packages/core/src/services/guard-setup/auth-proof.js';
 import type { DocCandidate } from '../../packages/spec-consolidator/src/index.js';
 
 // --- contract-extractor ------------------------------------------------------
@@ -65,26 +58,34 @@ import type { MergedArtifact } from '../../packages/contract-extractor/src/merge
 import type { SpecSlice } from '../../packages/contract-extractor/src/types.js';
 
 // --- guard-generator ---------------------------------------------------------
-import { DocExtractionSchema } from '../../packages/guard-generator/src/schemas.js';
+// Guard generate keeps exactly TWO one-shot stages (plan 04 step 20): realization
+// matching and recipe discovery. Extraction, flow synthesis, authoring, the
+// evidence retry, fidelity review and triage are agent SESSIONS (or retired), so
+// they build no `LlmRequest` and contribute nothing to the sweep below — their
+// outcome schemas are checked object-rooted in their own describe at the end.
+import { DocExtractionSchema, FlowSetSchema } from '../../packages/guard-generator/src/schemas.js';
 import {
-  spawnExtractRunner,
-  spawnFlowsRunner,
-  spawnFlowsEpicRunner,
   spawnMatchRunner,
-  spawnGenerateRunner,
-  spawnFidelityRunner,
-  spawnTriageRunner,
   spawnRecipeRunner,
 } from '../../packages/guard-generator/src/runners.js';
 import type {
-  AuthorUserContext,
-  FidelityUserContext,
-  FlowsUserContext,
-  FlowsEpicUserContext,
   MatchUserContext,
   RecipeDiscoveryInput,
 } from '../../packages/guard-generator/src/prompts.js';
-import type { TriageUserContext } from '../../packages/guard-generator/src/triage.js';
+
+// --- guard generate (plan 04) ------------------------------------------------
+import { ExtractOutcomeSchema, GuardFlowWorkerOutcomeSchema } from '../../packages/shared/src/index.js';
+import { EpicSynthesisSchema } from '../../packages/guard-generator/src/schemas.js';
+import { FidelityVerdictSchema } from '../../packages/core/src/services/guard-generate/fidelity.js';
+
+// --- guard setup (plan 03) ---------------------------------------------------
+// Six one-shot stages became agent SESSIONS here too; like the scan's, their
+// outcome schemas ride the driver's toolset and are checked object-rooted below.
+import { RecipeProposalSchema } from '../../packages/guard-generator/src/schemas.js';
+import { CatalogDraftSchema } from '../../packages/core/src/services/guard-setup/dependency-catalog.js';
+import { ReconcileResolutionsSchema } from '../../packages/core/src/services/guard-setup/reconcile-interfaces.js';
+import { SeedSessionOutcomeSchema } from '../../packages/core/src/services/guard-setup/seed-session.js';
+import { AuthProofOutcomeSchema } from '../../packages/core/src/services/guard-setup/auth-proof.js';
 
 // --- analyze (core cli-provider transport branch) ----------------------------
 import { BaseCLIProvider } from '../../packages/core/src/services/llm/cli-provider.js';
@@ -258,107 +259,20 @@ async function collectRealRequests(repo: string): Promise<Collected[]> {
     push('contract.repair', reqs.slice(0, 1));
   }
 
-  // guard generate — every stage's real runner, driven with a minimal context
+  // guard generate — the two remaining one-shot runners, driven with a minimal context
   {
     const c = capture();
     const t = { transport: c.transport };
     const flow = { id: 'checkout', title: 'A shopper checks out', goal: 'buy a thing' };
 
-    await spawnExtractRunner(t)({
-      doc: 'docs/cli.md',
-      outline: [{ anchor: 'version', headingText: 'version', level: 2 }],
-      viewText: '## version\n`relkit --version` prints the version.',
-    });
-    push('guard.extract', c.reqs.splice(0));
-
-    const flowsCtx: FlowsUserContext = {
-      areaId: 'core/checkout',
-      claims: [
-        { doc: 'docs/cli.md', anchor: 'version', claim: 'prints the version', driver: 'cli', required: true },
-      ],
-      docs: [{ doc: 'docs/cli.md', outline: [{ anchor: 'version', headingText: 'version', level: 2 }] }],
-    };
-    await spawnFlowsRunner(t)(flowsCtx);
-    push('guard.flows', c.reqs.splice(0));
-
-    const epicCtx: FlowsEpicUserContext = {
-      digests: [
-        {
-          ref: 'F1',
-          areaId: 'core/checkout',
-          title: flow.title,
-          goal: flow.goal,
-          milestones: [{ doc: 'docs/cli.md', anchor: 'version', claimTitle: 'prints the version' }],
-        },
-      ],
-    };
-    await spawnFlowsEpicRunner(t)(epicCtx);
-    push('guard.flows.epic', c.reqs.splice(0));
-
     const matchCtx: MatchUserContext = {
       flow,
       milestones: [{ order: 1, claim: 'prints the version' }],
       surface: 'cli',
-      journeys: [{ id: 'j1', title: 'version', entry: 'relkit --version', steps: ['invoke relkit --version'] }],
+      interfaces: [{ id: 'j1', title: 'version', entry: 'relkit --version', steps: ['invoke relkit --version'] }],
     };
     await spawnMatchRunner(t)(matchCtx);
     push('guard.match', c.reqs.splice(0));
-
-    const authorCtx: AuthorUserContext = {
-      flow,
-      milestones: [
-        {
-          order: 1,
-          claim: 'prints the version',
-          doc: 'docs/cli.md',
-          sectionHeading: 'version',
-          sectionText: '`relkit --version` prints the version.',
-          realization: ['run --version'],
-        },
-      ],
-      journeyPath: ['j1'],
-      areaTags: ['core/checkout'],
-      driver: 'cli',
-      recipeEntry: ['node', 'dist/cli.js'],
-      recipeBuild: 'pnpm build',
-    };
-    const author = spawnGenerateRunner(t);
-    await author(authorCtx);
-    push('guard.generate', c.reqs.splice(0));
-    await author({ ...authorCtx, driver: 'api', recipeServe: ['node', 'dist/server.js'] });
-    push('guard.generate.api', c.reqs.splice(0));
-
-    const fidelityCtx: FidelityUserContext = {
-      flow,
-      milestones: [
-        {
-          order: 1,
-          claim: 'prints the version',
-          doc: 'docs/cli.md',
-          sectionHeading: 'version',
-          sectionText: '`relkit --version` prints the version.',
-        },
-      ],
-      scenarioYaml: 'id: checkout.cli.1\ntitle: prints the version\n',
-    };
-    await spawnFidelityRunner(t)(fidelityCtx);
-    push('guard.fidelity', c.reqs.splice(0));
-
-    const triageCtx: TriageUserContext = {
-      flow,
-      surface: 'cli',
-      doc: 'docs/cli.md',
-      sectionHeading: 'version',
-      sectionText: '`relkit --version` prints the version.',
-      milestones: [{ order: 1, claim: 'prints the version', failed: true }],
-      scenarioYaml: 'id: checkout.cli.1\n',
-      step: 1,
-      expected: 'exit 0',
-      actual: 'exit 1',
-    };
-    await spawnTriageRunner(t)(triageCtx);
-    push('guard.triage', c.reqs.splice(0));
-
 
     const recipeCtx: RecipeDiscoveryInput = {
       packageJson: '{"name":"relkit","bin":{"relkit":"dist/cli.js"}}',
@@ -422,8 +336,6 @@ function formatCapturingModel() {
 const EXPECTED_OPT_OUTS = [
   'contract.gapJudge', // `verdicts` record
   'contract.reconcile', // `merges` record
-  'guard.generate', // a scenario's `setup.files` / `setup.env` records
-  'guard.generate.api', // the same schema, api driver
   'guard.recipe', // `env` / `servers` records
 ];
 
@@ -445,10 +357,11 @@ describe('every real stage schema is enforced or explicitly opted out', () => {
   });
 
   it('collects a schema from every stage', () => {
-    // 21 since the five spec stages and the seed draft became agent sessions —
+    // 15 since the five spec stages (plan 02), the seed draft (plan 03 step 13)
+    // and guard generate's six content stages (plan 04) became agent sessions —
     // they build no LlmRequest at all. A NEW schema-bearing call site still has
     // to raise it.
-    expect(collected.length).toBeGreaterThanOrEqual(21);
+    expect(collected.length).toBeGreaterThanOrEqual(15);
     // Each collected call site contributed exactly one request.
     expect(new Set(collected.map((c) => c.name)).size).toBe(collected.length);
   });
@@ -496,17 +409,9 @@ describe('every real stage schema is enforced or explicitly opted out', () => {
   // on the API transport — the failure mode this list exists to prevent.
   it('carries a schema on EVERY guard generate stage', () => {
     const guard = collected.filter((c) => c.name.startsWith('guard.')).map((c) => c.name);
-    expect(guard.sort()).toEqual([
-      'guard.extract',
-      'guard.fidelity',
-      'guard.flows',
-      'guard.flows.epic',
-      'guard.generate',
-      'guard.generate.api',
-      'guard.match',
-      'guard.recipe',
-      'guard.triage',
-    ]);
+    // Two one-shots left (plan 04 step 20). A stage reappearing here means a
+    // session was quietly turned back into a transport call.
+    expect(guard.sort()).toEqual(['guard.match', 'guard.recipe']);
   });
 
   it('keeps the analyze path fully enforced', () => {
@@ -734,17 +639,18 @@ describe('spec-scan session outcome schemas', () => {
 });
 
 /**
- * The guard-setup sessions reach a provider the same way: the api driver
- * renders the outcome schema as the injected `outcome` TOOL's input schema, and
- * the Agent SDK driver hands it to `outputFormat.json_schema`. Both places take
- * a JSON SCHEMA OBJECT — a tool's `input_schema` must be `type: "object"` on
- * every provider — so the object-root rule binds a session outcome exactly as
- * it binds a JSON-mode stage.
+ * The guard-setup sessions (plan 03 steps 9–14) reach a provider the same way:
+ * the api driver renders the outcome schema as the injected `outcome` TOOL's
+ * input schema, and the Agent SDK driver hands it to `outputFormat.json_schema`.
+ * Both places take a JSON SCHEMA OBJECT — a tool's `input_schema` must be
+ * `type: "object"` on every provider — so the object-root rule binds a session
+ * outcome exactly as it binds a JSON-mode stage.
  */
 describe('guard-setup session outcome schemas', () => {
   const SETUP_OUTCOMES: Array<[string, ZodType]> = [
     ['guard-setup.recipe-repair', RecipeProposalSchema],
     ['guard-setup.dependency-catalog', CatalogDraftSchema],
+    ['guard-setup.reconcile-interfaces', ReconcileResolutionsSchema],
     ['guard-setup.seed', SeedSessionOutcomeSchema],
     ['guard-setup.auth-proof', AuthProofOutcomeSchema],
   ];
@@ -754,5 +660,31 @@ describe('guard-setup session outcome schemas', () => {
       const rendered = JSON.parse(jsonSchemaHint(schema)) as { type?: string };
       expect(rendered.type, kind).toBe('object');
     }
+  });
+});
+
+/**
+ * Guard generate's six content stages became sessions the same way (plan 04
+ * steps 15–18), so the same rule binds them: the api session driver renders each
+ * `outcomeSchema` as the injected `outcome` TOOL's `inputSchema`
+ * (`packages/llm-api/src/session-driver.ts` → `buildToolset`), and a tool's
+ * input schema must be `type: "object"` on every provider — an `anyOf` root is
+ * rejected before the model ever sees the session.
+ */
+describe('guard-generate session outcome schemas', () => {
+  const GENERATE_OUTCOMES: Array<[string, ZodType]> = [
+    ['guard-generate.extract', ExtractOutcomeSchema],
+    ['guard-generate.flows', FlowSetSchema],
+    ['guard-generate.flows (epic)', EpicSynthesisSchema],
+    ['guard-generate.flow-worker', GuardFlowWorkerOutcomeSchema],
+    ['guard-generate.fidelity', FidelityVerdictSchema],
+  ];
+
+  it('are all object-rooted', () => {
+    const roots = GENERATE_OUTCOMES.map(([kind, schema]) => {
+      const rendered = JSON.parse(jsonSchemaHint(schema)) as { type?: string };
+      return `${kind}: ${rendered.type ?? Object.keys(rendered)[0]}`;
+    });
+    expect(roots).toEqual(GENERATE_OUTCOMES.map(([kind]) => `${kind}: object`));
   });
 });

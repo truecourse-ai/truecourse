@@ -8,7 +8,7 @@ import type { GuardHistoryEntry, GuardOutcome } from '@truecourse/shared';
 import { GUARD_OUTCOMES, formatGuardTime, shortRunId } from '@/lib/guard-drifts';
 
 /** The per-outcome mark used in the compact history mini-tally. */
-const MARK: Record<GuardOutcome, string> = { pass: '✓', fail: '✗', error: '⚠', stale: '~', orphaned: '○' };
+const MARK: Record<GuardOutcome, string> = { pass: '✓', fail: '✗', error: '⚠', blocked: '⊘', stale: '~', orphaned: '○' };
 
 export function GuardRunSummary({
   history,

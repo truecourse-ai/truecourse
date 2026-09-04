@@ -44,7 +44,6 @@ const DOC_CONTENT = '# Alpha\nbody a\n# Beta\nbody b\n';
 
 const yaml = (id: string, section: string): string =>
   [
-    'guard: 2',
     `id: ${id}`,
     `title: ${section} claim`,
     'binds:',
@@ -103,7 +102,7 @@ async function saveSetFor(
         gaps: [],
       });
     }
-    fs.writeFileSync(path.join(src, 'manifest.json'), JSON.stringify({ version: 2, flows }));
+    fs.writeFileSync(path.join(src, 'manifest.json'), JSON.stringify({ flows }));
     await guardStore.saveScenarios({ repoKey, commitSha: commit } satisfies RepoRef, src);
   } finally {
     fs.rmSync(src, { recursive: true, force: true });
@@ -151,7 +150,7 @@ async function makeBaselineRepo(commit: string): Promise<string> {
 
 /** A stored run at `commit` with a single passing scenario. */
 const RUN = (runId: string, commit: string, ranAt = '2026-07-08T00:00:00.000Z') => ({
-  run: { runId, ranAt, branch: 'main', commit, recipeFingerprint: 'sha256:r', scenarioFormat: 2 },
+  run: { runId, ranAt, branch: 'main', commit, recipeFingerprint: 'sha256:r' },
   summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
   scenarios: [
     {
@@ -272,7 +271,7 @@ describe('listGuardScenarios — PR-head baseline fallback (hosted)', () => {
       expect(inv.scenarios.map((s) => s.id)).toEqual(['a1']);
       expect(inv.scenariosCommit).toBe('baseline9999');
       // The recipe card rides the same fallback (one saved set).
-      expect(inv.recipe).toMatchObject({ build: RECIPE.build, entry: RECIPE.entry });
+      expect(inv.recipe).toMatchObject({ surfaces: { cli: { build: RECIPE.build, entry: RECIPE.entry } } });
     } finally {
       fs.rmSync(repo, { recursive: true, force: true });
     }
@@ -308,14 +307,21 @@ describe('readGuardRecipeCard via listGuardScenarios — hosted (no working tree
     // A baseline run exists with a recorded fingerprint — the hosted card must
     // NOT compare a hash-of-nothing against it (that made stale permanently true).
     await guardStore.writeGuardLatest(REPO, {
-      run: { runId: 'run-base', ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'basesha11111', recipeFingerprint: 'sha256:r', scenarioFormat: 2 },
+      run: { runId: 'run-base', ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'basesha11111', recipeFingerprint: 'sha256:r' },
       summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
       scenarios: [{ id: 'a1', title: 'alpha claim', binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x' }, outcome: 'pass', durationMs: 1 }],
       sections: [],
     });
     const inv = await listGuardScenarios(REPO, 'shaA1234567');
     expect(inv.recipe).not.toBeNull();
-    expect(inv.recipe).toMatchObject({ build: RECIPE.build, entry: RECIPE.entry, stale: null, services: null });
+    expect(inv.recipe).toMatchObject({
+      surfaces: { cli: { build: RECIPE.build, entry: RECIPE.entry } },
+      stale: null,
+    });
+    // A recipe with neither an `api` nor a `web` block prepares neither surface —
+    // the card carries no entry for them rather than an empty one.
+    expect(inv.recipe!.surfaces.api).toBeUndefined();
+    expect(inv.recipe!.surfaces.web).toBeUndefined();
   });
 
   it('surfaces api.services (datastore orchestration) on the card', async () => {
@@ -329,16 +335,64 @@ describe('readGuardRecipeCard via listGuardScenarios — hosted (no working tree
     const src = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-read-'));
     try {
       fs.writeFileSync(path.join(src, 'recipe.json'), JSON.stringify(apiRecipe));
-      fs.writeFileSync(path.join(src, 'manifest.json'), JSON.stringify({ version: 2, flows: [] }));
+      fs.writeFileSync(path.join(src, 'manifest.json'), JSON.stringify({ flows: [] }));
       await guardStore.saveScenarios({ repoKey: REPO, commitSha: 'shaSvc123456' }, src);
     } finally {
       fs.rmSync(src, { recursive: true, force: true });
     }
     const inv = await listGuardScenarios(REPO, 'shaSvc123456');
     expect(inv.recipe).toMatchObject({
-      serve: ['node', 'server.js'],
-      services: { up: 'docker compose up -d --wait', down: 'docker compose down' },
+      surfaces: {
+        api: {
+          serve: ['node', 'server.js'],
+          services: { up: 'docker compose up -d --wait', down: 'docker compose down' },
+        },
+      },
     });
+    // Its own `api` block: the server is the api surface's, so nothing marks it
+    // as borrowed from a web surface this recipe does not even declare.
+    expect(inv.recipe!.surfaces.api!.sharedWithWeb).toBeUndefined();
+  });
+
+  /**
+   * THE SHARED SERVER. The runner serves ONE surface for both web steps and
+   * `request` steps, so a recipe with a `web` block and no `api` block still has
+   * an api server — the web block's. The card says so rather than telling an api
+   * reader that nothing is declared, which is the opposite of what runs.
+   */
+  it('gives the api surface the WEB block’s server when the recipe declares no api block', async () => {
+    const webRecipe = {
+      build: 'pnpm build',
+      entry: ['node', 'dist/index.js'],
+      web: { build: 'pnpm build:web', serve: ['node', 'dist/web.js'], healthPath: '/health', readyTimeoutMs: 60000 },
+    };
+    const src = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-read-'));
+    try {
+      fs.writeFileSync(path.join(src, 'recipe.json'), JSON.stringify(webRecipe));
+      fs.writeFileSync(path.join(src, 'manifest.json'), JSON.stringify({ flows: [] }));
+      await guardStore.saveScenarios({ repoKey: REPO, commitSha: 'shaWeb123456' }, src);
+    } finally {
+      fs.rmSync(src, { recursive: true, force: true });
+    }
+    const inv = await listGuardScenarios(REPO, 'shaWeb123456');
+    const surfaces = inv.recipe!.surfaces;
+    // The api surface reads the web block's fields, marked as the web surface's.
+    expect(surfaces.api).toEqual({
+      build: 'pnpm build:web',
+      serve: ['node', 'dist/web.js'],
+      healthPath: '/health',
+      readyTimeoutMs: 60000,
+      sharedWithWeb: true,
+    });
+    // …and the web surface reads the same server as ITS own — unmarked.
+    expect(surfaces.web).toEqual({
+      build: 'pnpm build:web',
+      serve: ['node', 'dist/web.js'],
+      healthPath: '/health',
+      readyTimeoutMs: 60000,
+    });
+    // Nothing was invented in recipe.json: no api block exists to read back.
+    expect(surfaces.api!.services).toBeUndefined();
   });
 });
 
@@ -547,7 +601,7 @@ describe('computeGuardStaleness — hosted (store-composed, no FS)', () => {
     await new PgSpecStore(db).saveSpec({ repoKey: REPO, commitSha: 'shaA1234567' }, 'corpus', { keptDocs: [] });
     await guardStore.writeGuardResult({ repoKey: REPO, commitSha: 'shaA1234567' }, REPORT());
     await guardStore.writeGuardRun(REPO, {
-      run: { runId: 'run1', ranAt: '2026-07-08T00:00:00.000Z', branch: 'main', commit: 'shaA1234567', recipeFingerprint: 'sha256:r', scenarioFormat: 2 },
+      run: { runId: 'run1', ranAt: '2026-07-08T00:00:00.000Z', branch: 'main', commit: 'shaA1234567', recipeFingerprint: 'sha256:r' },
       summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
       scenarios: [{ id: 'a1', title: 'alpha claim', binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x' }, outcome: 'pass', durationMs: 1 }],
       sections: [],
@@ -560,7 +614,7 @@ describe('computeGuardStaleness — hosted (store-composed, no FS)', () => {
     await saveSet('shaA1234567', [['a1', 'alpha']]);
     // A baseline run exists at ANOTHER commit — it must not make the PR head look run.
     await guardStore.writeGuardLatest(REPO, {
-      run: { runId: 'run-base', ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'basesha11111', recipeFingerprint: 'sha256:r', scenarioFormat: 2 },
+      run: { runId: 'run-base', ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'basesha11111', recipeFingerprint: 'sha256:r' },
       summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
       scenarios: [{ id: 'a1', title: 'alpha claim', binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x' }, outcome: 'pass', durationMs: 1 }],
       sections: [],
@@ -626,7 +680,7 @@ describe('computeGuardStaleness — hosted (store-composed, no FS)', () => {
     await saveSet('shaA1234567', [['a1', 'alpha']]);
     await guardStore.writeGuardResult({ repoKey: REPO, commitSha: 'shaA1234567' }, REPORT({ generatedAt: '2026-07-09T00:00:00.000Z' }));
     await guardStore.writeGuardRun(REPO, {
-      run: { runId: 'run1', ranAt: '2026-07-08T00:00:00.000Z', branch: 'main', commit: 'shaA1234567', recipeFingerprint: 'sha256:r', scenarioFormat: 2 },
+      run: { runId: 'run1', ranAt: '2026-07-08T00:00:00.000Z', branch: 'main', commit: 'shaA1234567', recipeFingerprint: 'sha256:r' },
       summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
       scenarios: [{ id: 'a1', title: 'alpha claim', binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x' }, outcome: 'pass', durationMs: 1 }],
       sections: [],
