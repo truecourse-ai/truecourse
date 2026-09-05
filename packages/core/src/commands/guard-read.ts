@@ -42,7 +42,7 @@ import {
   GUARD_SETUP_DEPENDENCIES_FILE,
   GUARD_SETUP_INTERFACES_FILE,
 } from '../services/guard-setup/bundle.js'
-import { corpusFilePath, readCorpus } from '@truecourse/spec-consolidator'
+import { corpusFilePath, CuratedCorpusSchema, type CuratedCorpus } from '@truecourse/spec-consolidator'
 import {
   GUARD_COVERAGE_PLAIN_ORDER,
   GUARD_COVERAGE_STATUS_PRECEDENCE,
@@ -364,12 +364,24 @@ export function composeDocCoverage(
   }
 }
 
+/** The curated corpus a (possibly PR-scoped) view reads, or null when none was scanned. */
+async function readCorpusForView(repoKey: string, ref?: string): Promise<CuratedCorpus | null> {
+  return readPinnedWithBaselineFallback(repoKey, ref, async (commit) => {
+    const raw = await loadSpec({ repoKey, commitSha: commit ?? '' }, 'corpus')
+    if (raw == null) return null
+    const parsed = CuratedCorpusSchema.safeParse(raw)
+    return parsed.success ? parsed.data : null
+  })
+}
+
 /**
  * Every kept doc's sections counted under the five coverage words, through the
  * same per-section derivation the doc view renders ({@link composeDocCoverage})
  * — the constraint: no summary may classify a section differently than the doc
- * view does. The doc universe is the curated corpus; without one it falls back
- * to the docs the guard stores name, and null means nothing to count.
+ * view does. The doc universe is the curated corpus, read through the spec
+ * store at the view's commit (the file in OSS, the scan's stored artifact in a
+ * hosted repo); without one it falls back to the docs the guard stores name,
+ * and null means nothing to count.
  */
 export async function readGuardSectionTotals(
   repoKey: string,
@@ -384,7 +396,7 @@ export async function readGuardSectionTotals(
     externals: guardExternalSetupIndexForView(repoKey),
   }
 
-  const corpusDocs = readCorpus(repoKey)?.docs.map((d) => d.ref)
+  const corpusDocs = (await readCorpusForView(repoKey, ref))?.docs.map((d) => d.ref)
   const docs =
     corpusDocs && corpusDocs.length > 0
       ? corpusDocs
