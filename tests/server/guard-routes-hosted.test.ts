@@ -60,6 +60,7 @@ const runAt = (commit: string, id: string, outcome: GuardLatest['scenarios'][num
 let client: PGlite;
 let db: Db;
 let guardStore: PgGuardStore;
+let specStore: PgSpecStore;
 let app: Express;
 let fixture: TestFixture;
 let repoKey: string;
@@ -101,7 +102,8 @@ beforeEach(async () => {
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
   guardStore = new PgGuardStore(db);
   setGuardStore(guardStore);
-  setSpecStore(new PgSpecStore(db));
+  specStore = new PgSpecStore(db);
+  setSpecStore(specStore);
   setRepoDocReader(async (_repoKey, docPath) => (docPath === DOC ? DOC_CONTENT : null));
 });
 
@@ -206,6 +208,47 @@ describe('Guard routes — hosted, PR-scoped', () => {
     expect(res.body.coverage).toMatchObject({ totalSections: 1 });
     // No generate report exists at the baseline — the PR head's must not leak.
     expect(res.body.lastGenerate).toBeNull();
+  });
+
+  it('status counts sections of every corpus doc from the stored corpus, not only the docs with scenarios', async () => {
+    const OTHER_DOC = 'docs/other.md';
+    // The baseline generate report anchors the repo view's commit, as the hosted job writes it.
+    await guardStore.writeGuardResult(
+      { repoKey, commitSha: 'baselinesha' },
+      {
+        generatedAt: '2026-07-09T00:00:00.000Z',
+        status: 'ok',
+        sectionsTotal: 2,
+        sectionsChanged: 2,
+        skippedUnchanged: 0,
+        noChanges: false,
+        written: [],
+        coverageGaps: [],
+        birthFindings: [],
+        errors: [],
+        extractionFailures: [],
+        orphaned: [],
+      },
+      { baseline: true },
+    );
+    await saveSet('baselinesha', [['a1', 'alpha']]);
+    // The scan's corpus lives in the spec store; a hosted repo has no corpus.json.
+    await specStore.saveSpec({ repoKey, commitSha: 'baselinesha' }, 'corpus', {
+      version: 3,
+      generatedAt: '2026-01-01T00:00:00Z',
+      docs: [
+        { ref: DOC, kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['cli'] },
+        { ref: OTHER_DOC, kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['cli'] },
+      ],
+      areas: [{ id: 'cli', product: 'cli', concern: 'cli', docRefs: [DOC, OTHER_DOC], overlaps: [] }],
+    });
+    setRepoDocReader(async (_repoKey, docPath) =>
+      docPath === DOC ? DOC_CONTENT : docPath === OTHER_DOC ? '# Gamma\nbody c\n' : null,
+    );
+    const res = await request(app).get(url('status')).expect(200);
+    // Alpha (proven) + Beta from the doc the scenarios bind, Gamma from the doc
+    // nothing binds yet; the two without a scenario read as blocked.
+    expect(res.body.sections).toMatchObject({ total: 3, byStatus: { succeeded: 1, blocked: 2 } });
   });
 
   it('coverage?ref= paints sections from the PR head run (not the baseline)', async () => {

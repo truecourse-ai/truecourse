@@ -1,9 +1,10 @@
-// PREVIEW (UI mock, fake data) with four exceptions: on a REAL
-// (provider-connected) repository the Activity tab is the real thing, reading
-// and live-tailing the repository's sessions store, the Interfaces tab reads
-// the server's own interface catalog for that repository, the Dependencies
-// tab reads and registers against its stored dependency catalog, and the
-// Corpus tab reads the corpus its scan stored.
+// PREVIEW (UI mock, fake data) with exceptions: on a REAL (provider-connected)
+// repository the Activity tab is the real thing, reading and live-tailing the
+// repository's sessions store, the Interfaces tab reads the server's own
+// interface catalog for that repository, the Dependencies tab reads and
+// registers against its stored dependency catalog, the Corpus tab reads the
+// corpus its scan stored, the Coverage tab reads the stored coverage summary
+// over it, and the Tests and Runs tabs read what its generate and runs stored.
 
 /**
  * The repository console: one header, ONE menu, no toggle.
@@ -165,6 +166,13 @@ export default function RepoConsole() {
         <div className="min-h-0 min-w-0 flex-1">
           {active === 'settings' ? (
             <SettingsTab repo={repo} />
+          ) : active === 'coverage' && repo.real ? (
+            // REAL, not mock: the coverage of a connected repository is the
+            // server's summary over what its scan, generate and runs stored,
+            // read over `/api/repos/<id>/guard/*` and `/spec/corpus`. The tab
+            // owns its own empty state, so a repository nothing ran on says so
+            // here rather than through the fixture gate below.
+            <CoverageTab repo={repo} />
           ) : active === 'activity' && repo.real ? (
             // REAL, not mock: a provider-connected repository is a real registry
             // entry, so its Activity reads the real sessions store over
