@@ -7913,6 +7913,9 @@ snapshot as the repository's baseline run and every scenario's evidence bundle
 — transcripts as text, a browser run's screenshots and session video as bytes
 — under the Postgres guard store, which the dashboard's evidence routes read
 back. The visual judge stays parked (`TRUECOURSE_GUARD_VISUAL_JUDGE=1`) and,
-when on, rides the asking workspace's provider. Adjudication is the CLI's
+when on, rides the asking workspace's provider. The web spec sources a
+hosted repository registers live as one registry row plus content-addressed
+page bodies, materialized into the scan's clone and into a scratch tree for
+the dashboard's add / refresh / remove. Adjudication is the CLI's
 (`truecourse guard adjudicate`) until it gets a hosted trigger; the CLI run
 bundle and the isolated hosted sandbox are still ahead.

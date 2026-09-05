@@ -19,6 +19,7 @@ import { loadSpecDoc, setSpecStore } from '@truecourse/core/lib/spec-store';
 import { setRepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
 import { setGuardStore } from '@truecourse/core/lib/guard-store';
 import { setGuardOverlayStore } from '@truecourse/core/lib/guard-overlays';
+import { readSpecSourceDoc, setSpecSourcesStore } from '@truecourse/core/lib/spec-sources';
 import { setInferredActionStore } from '@truecourse/core/lib/inferred-action-store';
 import { setRepoConfigStore } from '@truecourse/core/config/project-config';
 import { setUiStateStore } from '@truecourse/core/config/ui-state';
@@ -30,6 +31,7 @@ import { setKvCacheStore } from '@truecourse/llm';
 import {
   PgAnalysisStore,
   PgSpecStore,
+  PgSpecSourcesStore,
   PgGuardStore,
   PgGuardOverlayStore,
   PgInferredActionStore,
@@ -58,11 +60,19 @@ export function installDbStores(
 ): void {
   setAnalysisStore(new PgAnalysisStore(db));
   setSpecStore(new PgSpecStore(db));
+  // The registered web spec sources: one registry row per repo, the page
+  // bodies in the spec content scope, materialized into the scan's clone.
+  setSpecSourcesStore(new PgSpecSourcesStore(db));
   // A document body is read from the scan's snapshot, never from a tree: the
   // doc page, the coverage join and the spec reads all go through this seam,
   // and a connected repository has no working tree to read from. The commit
-  // pins a snapshot (a PR view); without one the newest scan answers.
-  setRepoDocReader((repoKey, docPath, opts) => loadSpecDoc(repoKey, docPath, opts?.commit));
+  // pins a snapshot (a PR view); without one the newest scan answers. A source
+  // page no scan has snapshotted yet (just added) answers from the sources
+  // store, so it can be read before the scan that would keep it.
+  setRepoDocReader(
+    async (repoKey, docPath, opts) =>
+      (await loadSpecDoc(repoKey, docPath, opts?.commit)) ?? (await readSpecSourceDoc(repoKey, docPath)),
+  );
   // Guard run store + scenario corpus + dismissedClaims decisions.
   setGuardStore(new PgGuardStore(db));
   // The supplied-dependency overlays (registered API keys, base URLs, tokens):

@@ -140,6 +140,10 @@
       "types": "./dist/lib/guard-overlays.d.ts",
       "import": "./dist/lib/guard-overlays.js"
     },
+    "./lib/spec-sources": {
+      "types": "./dist/lib/spec-sources.d.ts",
+      "import": "./dist/lib/spec-sources.js"
+    },
     "./lib/guard-read-tree": {
       "types": "./dist/lib/guard-read-tree.d.ts",
       "import": "./dist/lib/guard-read-tree.js"

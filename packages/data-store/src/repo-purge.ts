@@ -19,6 +19,7 @@ import {
   repoConfig,
   repoUiState,
   specSets,
+  specSources,
   guardRuns,
   guardResults,
   guardScenarioSets,
@@ -45,6 +46,7 @@ export async function purgeRepoData(db: Db, repoKey: string): Promise<void> {
     await tx.delete(repoConfig).where(eq(repoConfig.repoKey, repoKey));
     await tx.delete(repoUiState).where(eq(repoUiState.repoKey, repoKey));
     await tx.delete(specSets).where(eq(specSets.repoKey, repoKey));
+    await tx.delete(specSources).where(eq(specSources.repoKey, repoKey));
     await tx.delete(guardRuns).where(eq(guardRuns.repoKey, repoKey));
     await tx.delete(guardResults).where(eq(guardResults.repoKey, repoKey));
     await tx.delete(guardScenarioSets).where(eq(guardScenarioSets.repoKey, repoKey));

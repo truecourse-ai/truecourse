@@ -2,13 +2,14 @@
  * One documentation site, as its own page (`/sources/:sourceId`): the
  * breadcrumb back to Sources, then the agentic site detail (`SpecSourceDetail`:
  * the site's pages as a list, the opened page's snapshot beside it, Refresh and
- * Remove), over fake data. Pages are URL tabs (`?page=`), as everywhere.
+ * Remove). A connected repository's site is the server's, a fixture's is fake
+ * data. Pages are URL tabs (`?page=`), as everywhere.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ChevronRight, Globe, Loader2 } from 'lucide-react';
-import { SpecSourceProvider } from '@/components/spec/spec-source';
+import { SpecSourceProvider, createRepoSpecSource } from '@/components/spec/spec-source';
 import { EmptyState } from '@/components/ui/empty-state';
 import { SpecSourceDetail } from '@/preview/vendor/components/spec/SpecSourceDetail';
 import { useSpecCorpus } from '@/preview/vendor/components/spec/SpecCorpusView';
@@ -19,12 +20,14 @@ import * as api from '@/preview/vendor/lib/api';
 import { corpusHasDoc } from '@/preview/vendor/lib/spec-web-source';
 import { createPreviewSpecSource } from '@/preview/data/fake-api';
 import type { Repo } from '@/preview/data/types';
+import { useGuardRefresh } from './use-guard-refresh';
 import { useGuardTabJump } from './tab-jump';
 
 function SourceBody({ repo, sourceId }: { repo: Repo; sourceId: string }) {
   useGuardTabJump();
   const navigate = useNavigate();
-  const { sources, refetch } = useSpecSources(repo.id, true);
+  const socketKey = useGuardRefresh(repo, ['sources']);
+  const { sources, refetch } = useSpecSources(repo.id, true, socketKey);
   const site = sources?.find((s) => s.id === sourceId) ?? null;
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -118,7 +121,10 @@ function SourceBody({ repo, sourceId }: { repo: Repo; sourceId: string }) {
 }
 
 export function SourcePage({ repo, sourceId }: { repo: Repo; sourceId: string }) {
-  const source = useMemo(() => createPreviewSpecSource(repo.id), [repo.id]);
+  const source = useMemo(
+    () => (repo.real ? createRepoSpecSource(repo.id) : createPreviewSpecSource(repo.id)),
+    [repo.id, repo.real],
+  );
   return (
     <SpecSourceProvider source={source}>
       <SourceBody repo={repo} sourceId={sourceId} />

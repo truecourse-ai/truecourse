@@ -168,11 +168,18 @@ describe('a run record as the shell reads it', () => {
 
   it('reads onboarding off the first scan and the last check off what settled', () => {
     const now = Date.parse('2026-08-25T10:10:00Z');
-    expect(repoRunState([runningScan()], now).onboarding).toBe(true);
+    expect(repoRunState([runningScan()], now)).toMatchObject({ onboarding: true, scanning: true });
 
     const done = runningScan({ status: 'completed', finishedAt: '2026-08-25T10:05:00Z' });
     const state = repoRunState([done], now);
     expect(state.onboarding).toBe(false);
+    expect(state.scanning).toBe(false);
+    // A rescan after the first settled: scanning, not onboarding.
+    const later = new Date(Date.parse(done.startedAt) + 60_000).toISOString();
+    expect(repoRunState([done, runningScan({ runId: 'rescan', startedAt: later })], now)).toMatchObject({
+      onboarding: false,
+      scanning: true,
+    });
     expect(state.lastCheck).toEqual({
       conclusion: 'neutral',
       word: 'Neutral',
