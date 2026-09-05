@@ -23,9 +23,10 @@
  * safe under overlap (the registry is rewritten atomically and a refresh only
  * deletes files it names).
  *
- * Working tree only: the snapshot is real files under the repo's `.truecourse/`,
- * which hosted EE (no checkout) does not have — those requests get a 501, the
- * same shape the guard externals write uses.
+ * The engine works on files. A working tree is edited in place; a hosted repo
+ * (no checkout) runs every write over a scratch tree of its stored sources and
+ * stores what the engine left there (`withSpecSourcesTree`), while the reads
+ * come straight from the store.
  */
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
@@ -41,13 +42,11 @@ import {
   type SpecSource,
 } from '@truecourse/spec-consolidator';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
-import { specsMaterializeInPlace } from '@truecourse/core/lib/spec-store';
+import { readSpecSourcesRegistry, withSpecSourcesTree } from '@truecourse/core/lib/spec-sources';
 import {
   addSpecSourceInProcess,
-  listSpecSourcesInProcess,
   refreshSpecSourcesInProcess,
   removeSpecSourceInProcess,
-  resolveSpecSources,
   sourceRefreshSteps,
   SOURCE_ADD_STEPS,
 } from '@truecourse/core/commands/spec-sources';
@@ -119,15 +118,9 @@ interface SpecSourceRefreshView {
   skipped: SourceSkip[];
 }
 
-/**
- * Snapshots are real files in the repo's working tree, so a hosted repo (no
- * checkout) cannot host a source. Refuse with the same 501 shape the guard
- * externals write uses rather than silently reading an empty registry.
- */
-function requireLocalTree(res: Response): boolean {
-  if (specsMaterializeInPlace()) return true;
-  res.status(501).json({ error: 'Web spec sources require a local working tree.' });
-  return false;
+/** The registered sources, through the seam: the tree's registry or the stored row. */
+async function listSources(repoKey: string): Promise<SpecSource[]> {
+  return (await readSpecSourcesRegistry(repoKey)).sources;
 }
 
 /**
@@ -146,9 +139,9 @@ function sourceErrorStatus(err: unknown): number | null {
 }
 
 /** The engine message, plus the registered ids when the id was the problem. */
-function sourceErrorMessage(repoPath: string, err: unknown): string {
+async function sourceErrorMessage(repoPath: string, err: unknown): Promise<string> {
   if (err instanceof SourceNotFoundError) {
-    const known = safeList(repoPath).map((source) => source.id);
+    const known = (await safeList(repoPath)).map((source) => source.id);
     return known.length === 0
       ? `${err.message} — nothing is registered yet.`
       : `${err.message}. Registered: ${known.join(', ')}.`;
@@ -157,26 +150,26 @@ function sourceErrorMessage(repoPath: string, err: unknown): string {
 }
 
 /** The registry for an error message must never mask the error it explains. */
-function safeList(repoPath: string): SpecSource[] {
+async function safeList(repoPath: string): Promise<SpecSource[]> {
   try {
-    return listSpecSourcesInProcess(repoPath);
+    return await listSources(repoPath);
   } catch {
     return [];
   }
 }
 
-function respondSourceError(
+async function respondSourceError(
   repoPath: string,
   res: Response,
   next: NextFunction,
   err: unknown,
-): void {
+): Promise<void> {
   const status = sourceErrorStatus(err);
   if (status === null) {
     next(err);
     return;
   }
-  res.status(status).json({ error: sourceErrorMessage(repoPath, err) });
+  res.status(status).json({ error: await sourceErrorMessage(repoPath, err) });
 }
 
 /**
@@ -190,14 +183,14 @@ function failRun(
   res: Response,
   next: NextFunction,
   err: unknown,
-): void {
+): Promise<void> {
   emitSpecProgress(repoId, {
     step: 'error',
     percent: 100,
     detail: err instanceof Error ? err.message : String(err),
     kind: 'sources',
   });
-  respondSourceError(repoPath, res, next, err);
+  return respondSourceError(repoPath, res, next, err);
 }
 
 // ---------------------------------------------------------------------------
@@ -207,10 +200,9 @@ function failRun(
 router.get('/:id/spec/sources', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
-    if (!requireLocalTree(res)) return;
-    res.json({ sources: listSpecSourcesInProcess(repo.path).map(sourceView) });
+    res.json({ sources: (await listSources(repo.path)).map(sourceView) });
   } catch (e) {
-    respondSourceError('', res, next, e);
+    await respondSourceError('', res, next, e);
   }
 });
 
@@ -222,13 +214,12 @@ router.get('/:id/spec/sources/:sourceId', async (req: Request, res: Response, ne
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
     repoPath = repo.path;
-    if (!requireLocalTree(res)) return;
     const sourceId = req.params.sourceId as string;
-    const source = listSpecSourcesInProcess(repo.path).find((entry) => entry.id === sourceId);
+    const source = (await listSources(repo.path)).find((entry) => entry.id === sourceId);
     if (!source) throw new SourceNotFoundError(sourceId);
     res.json({ source: sourceDetailView(source) });
   } catch (e) {
-    respondSourceError(repoPath, res, next, e);
+    await respondSourceError(repoPath, res, next, e);
   }
 });
 
@@ -243,12 +234,11 @@ router.post('/:id/spec/sources/preview', async (req: Request, res: Response, nex
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
     repoPath = repo.path;
-    if (!requireLocalTree(res)) return;
     const url = readUrl(req, res);
     if (url === null) return;
     res.json(await previewSource(url));
   } catch (e) {
-    respondSourceError(repoPath, res, next, e);
+    await respondSourceError(repoPath, res, next, e);
   }
 });
 
@@ -274,7 +264,6 @@ router.post('/:id/spec/sources', async (req: Request, res: Response, next: NextF
   try {
     const repo = await resolveProjectForRequest(repoId);
     repoPath = repo.path;
-    if (!requireLocalTree(res)) return;
     const url = readUrl(req, res);
     if (url === null) return;
     const body = (req.body ?? {}) as { id?: unknown };
@@ -282,13 +271,15 @@ router.post('/:id/spec/sources', async (req: Request, res: Response, next: NextF
 
     const tracker = createSocketSpecTracker(repoId, SOURCE_ADD_STEPS.map((s) => ({ ...s })), 'sources');
     started = true;
-    const result = await addSpecSourceInProcess(repo.path, url, {
-      tracker,
-      id,
-      // The client already confirmed against the preview above, so the engine's
-      // gate is a pass-through here — it never blocks an HTTP request.
-      onConfirm: () => true,
-    });
+    const result = await withSpecSourcesTree(repo.path, (tree) =>
+      addSpecSourceInProcess(tree, url, {
+        tracker,
+        id,
+        // The client already confirmed against the preview above, so the engine's
+        // gate is a pass-through here — it never blocks an HTTP request.
+        onConfirm: () => true,
+      }),
+    );
     emitSpecComplete(repoId, 'sources');
     res.json({
       source: sourceView(result.source),
@@ -296,8 +287,8 @@ router.post('/:id/spec/sources', async (req: Request, res: Response, next: NextF
       skipped: result.skipped,
     });
   } catch (e) {
-    if (started) failRun(repoId, repoPath, res, next, e);
-    else respondSourceError(repoPath, res, next, e);
+    if (started) await failRun(repoId, repoPath, res, next, e);
+    else await respondSourceError(repoPath, res, next, e);
   }
 });
 
@@ -319,16 +310,19 @@ async function runRefresh(
   try {
     const repo = await resolveProjectForRequest(repoId);
     repoPath = repo.path;
-    if (!requireLocalTree(res)) return;
-    // Throws SourceNotFoundError (→ 404) for an unknown id, before any fetch.
-    const targets = resolveSpecSources(repo.path, sourceId);
+    // An unknown id is a 404 before any fetch — and before a scratch tree exists.
+    const registered = await listSources(repo.path);
+    const targets = sourceId ? registered.filter((source) => source.id === sourceId) : registered;
+    if (sourceId && targets.length === 0) throw new SourceNotFoundError(sourceId);
     if (targets.length === 0) {
       res.json({ results: [] });
       return;
     }
     const tracker = createSocketSpecTracker(repoId, sourceRefreshSteps(targets), 'sources');
     started = true;
-    const results = await refreshSpecSourcesInProcess(repo.path, { sourceId, tracker });
+    const results = await withSpecSourcesTree(repo.path, (tree) =>
+      refreshSpecSourcesInProcess(tree, { sourceId, tracker }),
+    );
     emitSpecComplete(repoId, 'sources');
     res.json({
       results: results.map(
@@ -343,8 +337,8 @@ async function runRefresh(
       ),
     });
   } catch (e) {
-    if (started) failRun(repoId, repoPath, res, next, e);
-    else respondSourceError(repoPath, res, next, e);
+    if (started) await failRun(repoId, repoPath, res, next, e);
+    else await respondSourceError(repoPath, res, next, e);
   }
 }
 
@@ -372,12 +366,14 @@ router.delete(
     try {
       const repo = await resolveProjectForRequest(repoId);
       repoPath = repo.path;
-      if (!requireLocalTree(res)) return;
-      const removed = removeSpecSourceInProcess(repo.path, req.params.sourceId as string);
+      const sourceId = req.params.sourceId as string;
+      const removed = await withSpecSourcesTree(repo.path, (tree) =>
+        removeSpecSourceInProcess(tree, sourceId),
+      );
       emitSpecComplete(repoId, 'sources');
       res.json({ removed: sourceView(removed) });
     } catch (e) {
-      respondSourceError(repoPath, res, next, e);
+      await respondSourceError(repoPath, res, next, e);
     }
   },
 );

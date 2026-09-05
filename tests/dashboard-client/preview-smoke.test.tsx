@@ -205,7 +205,9 @@ describe('one-product preview', () => {
   it('keeps the workspace shell around every route', () => {
     renderAt('/preview/notifications');
     expect(screen.getByRole('link', { name: 'Home' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Knowledge' })).toBeInTheDocument();
+    // Knowledge is parked: shown in the menu, not a link.
+    expect(screen.getByText('Knowledge')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Knowledge' })).toBeNull();
     // There is no pull request page anywhere: a PR is seen through Runs and Coverage.
     expect(screen.queryByRole('link', { name: 'Pull requests' })).toBeNull();
   });

@@ -346,6 +346,7 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
         return {
           ...repo,
           onboarding: state.onboarding,
+          scanning: state.scanning,
           ...(state.lastCheck ? { lastCheck: state.lastCheck } : {}),
         };
       }),

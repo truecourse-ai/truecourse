@@ -46,6 +46,11 @@ export function setRepoDocReader(fn: RepoDocReader): void {
   reader = fn;
 }
 
+/** Restore the working-tree default (tests). */
+export function resetRepoDocReader(): void {
+  reader = fileRepoDocReader;
+}
+
 /** Read a repo doc through the installed reader (FS in OSS, GitHub in EE). */
 export function readRepoDoc(
   repoKey: string,

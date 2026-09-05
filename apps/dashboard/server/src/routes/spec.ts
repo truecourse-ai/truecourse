@@ -15,7 +15,6 @@ import { openConflicts } from '@truecourse/shared';
 import {
   corpusFilePath,
   decisionsPath,
-  readSourcesFile,
   sourcesDirPath,
   sourcesFilePath,
   SOURCES_REF_PREFIX,
@@ -31,6 +30,7 @@ import {
 } from '@truecourse/core/lib/spec-store';
 import { listContractFiles } from '@truecourse/core/lib/contract-store';
 import { readRepoDoc } from '@truecourse/core/lib/repo-doc-reader';
+import { readSpecSourcesRegistry, specSourcesChangedAt } from '@truecourse/core/lib/spec-sources';
 import { getBackgroundTaskRunner } from '@truecourse/core/lib/background-tasks';
 import { getGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import {
@@ -144,15 +144,16 @@ interface WebDocMeta {
 
 /**
  * Every snapshot page the registry names, by its corpus ref. Read per corpus
- * payload (a small JSON next to the corpus); a corrupt registry yields NO meta
- * rather than failing the corpus read — enrichment is display-only, and the
- * sources routes are where that file's state is reported.
+ * payload through the sources seam (the tree's registry, or a hosted repo's
+ * stored one); a corrupt registry yields NO meta rather than failing the corpus
+ * read — enrichment is display-only, and the sources routes are where that
+ * registry's state is reported.
  */
-function webSourceMeta(repoPath: string): Map<string, WebDocMeta> {
+async function webSourceMeta(repoKey: string): Promise<Map<string, WebDocMeta>> {
   const meta = new Map<string, WebDocMeta>();
   let sources;
   try {
-    sources = readSourcesFile(repoPath).sources;
+    sources = (await readSpecSourcesRegistry(repoKey)).sources;
   } catch {
     return meta;
   }
@@ -181,18 +182,17 @@ function sourceIdOfRef(ref: string): string | null {
  * source's human title + the page's original URL from `sources.json` — the tree
  * labels it `<source> / <page>` instead of the raw ref, and the viewer links out.
  * A page whose source is gone (removed, corpus not rescanned) still tags `web`
- * with the id its ref carries. Repo-local docs are untouched, and hosted EE (no
- * working tree, so no snapshot) is inert. Only optional display fields are added;
- * identity is unchanged.
+ * with the id its ref carries. Repo-local docs are untouched. Only optional
+ * display fields are added; identity is unchanged.
  */
-export function enrichWebSources(
-  repoPath: string,
+export async function enrichWebSources(
+  repoKey: string,
   corpus: CuratedCorpus | null,
-): CuratedCorpus | null {
-  if (!corpus || !specsMaterializeInPlace()) return corpus;
+): Promise<CuratedCorpus | null> {
+  if (!corpus) return corpus;
   const skipped = corpus.skippedDocs ?? [];
   if (![...corpus.docs, ...skipped].some((d) => sourceIdOfRef(d.ref) !== null)) return corpus;
-  const meta = webSourceMeta(repoPath);
+  const meta = await webSourceMeta(repoKey);
   const webFields = (ref: string) => {
     const sourceId = sourceIdOfRef(ref);
     return sourceId ? { origin: 'web' as const, sourceId, ...meta.get(ref) } : null;
@@ -236,7 +236,7 @@ async function corpusPayload(repoPath: string, ref?: string, pr?: number): Promi
     pr !== undefined && !specsMaterializeInPlace() ? { pr } : undefined,
   );
   return {
-    corpus: enrichWebSources(repoPath, await enrichWorkspaceLayer(repoPath, corpus)),
+    corpus: await enrichWebSources(repoPath, await enrichWorkspaceLayer(repoPath, corpus)),
     manualIncludes: decisions.manualIncludes ?? [],
     manualExcludes: decisions.manualExcludes ?? [],
     conflictResolutions: decisions.conflictResolutions ?? [],
@@ -702,22 +702,23 @@ router.get(
     try {
       const repo = await resolveProjectForRequest(req.params.id as string);
 
-      // EE (stored sets, not the live tree): there are no local marker files to
-      // stat, and the gate produces spec → contracts TOGETHER per commit, so the
-      // latest stored sets are always in sync. Report existence from the stores;
-      // nothing is stale.
+      // Hosted (stored sets, not a live tree): there are no local marker files
+      // to stat, and repository docs cannot drift out from under the stored
+      // corpus. The one thing that can is the web sources: an add, a refresh or
+      // a remove stamps the sources row, and a stamp newer than the corpus's own
+      // timestamp means the last scan never saw the current sources.
       if (!specsMaterializeInPlace()) {
-        const [corpus, decisions, contractFiles] = await Promise.all([
+        const [corpus, decisions, contractFiles, sourcesChangedAt] = await Promise.all([
           getCorpus(repo.path),
           getDecisions(repo.path),
           listContractFiles(repo.path, 'contracts'),
+          specSourcesChangedAt(repo.path),
         ]);
         res.json({
           // An include/exclude the stored corpus has not absorbed yet — a Scan
           // would materialize it. Verdicts derive live and never pend.
           decisionsPending: corpus !== null && hasUnabsorbedDecisions(corpus, decisions),
-          // EE has no live tree — docs can't drift out from under the stored corpus.
-          docsChanged: false,
+          docsChanged: sourcesNewerThanCorpus(corpus, sourcesChangedAt),
           hasCorpus: corpus !== null,
           hasGenerated: contractFiles.length > 0,
         });
@@ -775,6 +776,15 @@ function hasPendingDecisions(repoPath: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** True when the sources changed after the corpus was curated. No corpus, or no
+ *  sources, is not stale: there is nothing for a scan to be behind on. */
+function sourcesNewerThanCorpus(corpus: CuratedCorpus | null, sourcesChangedAt: string | null): boolean {
+  if (!corpus || !sourcesChangedAt) return false;
+  const generatedAt = Date.parse(corpus.generatedAt);
+  const changedAt = Date.parse(sourcesChangedAt);
+  return !Number.isNaN(generatedAt) && !Number.isNaN(changedAt) && changedAt > generatedAt;
 }
 
 // The docs-content half of the scan-staleness signal (closes the long-logged

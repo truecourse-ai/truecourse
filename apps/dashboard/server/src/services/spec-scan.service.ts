@@ -26,6 +26,7 @@ import { log } from '@truecourse/core/lib/logger';
 import { createSessionRun, openSessionRun } from '@truecourse/core/lib/sessions-store';
 import { resolveCommitSha } from '@truecourse/core/lib/repo-ref';
 import { saveSpec, saveSpecDocs, specsMaterializeInPlace } from '@truecourse/core/lib/spec-store';
+import { materializeSpecSources, specSourcesMaterializeInPlace } from '@truecourse/core/lib/spec-sources';
 import {
   curateInProcess,
   getDecisions,
@@ -73,6 +74,10 @@ export async function runStoredSpecScan(
     // Persist them into the clone too, so a follow-on generate over this same
     // tree reads them from `decisions.json`. Transient: the clone is discarded.
     writeDecisions(tree.dir, decisions);
+    // The registered web sources live in the store too, and discovery reads
+    // them as files under the tree: without this a hosted repository's sources
+    // would never reach its corpus.
+    if (!specSourcesMaterializeInPlace()) await materializeSpecSources(repoKey, tree.dir);
     // State who this repo IS to the relevance classifier — the tree is a clone
     // in a scratch-named temp dir, so resolving identity from it would offer
     // that scratch name as the product's identity.
