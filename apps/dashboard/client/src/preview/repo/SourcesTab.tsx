@@ -3,12 +3,16 @@
  * Repositories lists repositories, with Add source as the page action. A row
  * opens the site as its own page (`/sources/:sourceId`, see ./SourcePage.tsx):
  * its pages and the snapshot, never a third nested column.
+ *
+ * A CONNECTED repository reads and edits the sources its server stores, and
+ * re-reads them when a source write of it lands on the socket (an add from
+ * another tab, a CLI refresh); a fixture repository reads its fixtures.
  */
 
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { SpecSourceProvider } from '@/components/spec/spec-source';
+import { SpecSourceProvider, createRepoSpecSource } from '@/components/spec/spec-source';
 import { PageHeader } from '@/preview/ui/bits';
 import { SpecSourceAddForm } from '@/preview/vendor/components/spec/SpecSourceAddForm';
 import { useSpecSources } from '@/preview/vendor/hooks/useSpecSources';
@@ -16,12 +20,14 @@ import { formatGuardTime } from '@/preview/vendor/lib/guard-drifts';
 import { pageCount } from '@/preview/vendor/lib/spec-web-source';
 import { createPreviewSpecSource } from '@/preview/data/fake-api';
 import type { Repo } from '@/preview/data/types';
+import { useGuardRefresh } from './use-guard-refresh';
 import { useGuardTabJump } from './tab-jump';
 
 function SourcesBody({ repo }: { repo: Repo }) {
   useGuardTabJump();
   const navigate = useNavigate();
-  const { sources, error, refetch } = useSpecSources(repo.id, true);
+  const reloadKey = useGuardRefresh(repo, ['sources']);
+  const { sources, error, refetch } = useSpecSources(repo.id, true, reloadKey);
   const [adding, setAdding] = useState(false);
   const [query, setQuery] = useState('');
 
@@ -123,7 +129,10 @@ function SourcesBody({ repo }: { repo: Repo }) {
 }
 
 export function SourcesTab({ repo }: { repo: Repo }) {
-  const source = useMemo(() => createPreviewSpecSource(repo.id), [repo.id]);
+  const source = useMemo(
+    () => (repo.real ? createRepoSpecSource(repo.id) : createPreviewSpecSource(repo.id)),
+    [repo.id, repo.real],
+  );
   return (
     <SpecSourceProvider source={source}>
       <SourcesBody repo={repo} />

@@ -4,7 +4,8 @@
 // interface catalog for that repository, the Dependencies tab reads and
 // registers against its stored dependency catalog, the Corpus tab reads the
 // corpus its scan stored, the Coverage tab reads the stored coverage summary
-// over it, and the Tests and Runs tabs read what its generate and runs stored.
+// over it, the Sources tab reads and edits its stored web sources, and the
+// Tests and Runs tabs read what its generate and runs stored.
 
 /**
  * The repository console: one header, ONE menu, no toggle.
@@ -220,6 +221,16 @@ export default function RepoConsole() {
               <RunPage repo={repo} runId={decodeURIComponent(runId)} />
             ) : (
               <RunsTab repo={repo} />
+            )
+          ) : active === 'sources' && repo.real ? (
+            // REAL, not mock: the documentation sites of a connected repository
+            // are its stored web sources, read and edited over
+            // `/api/repos/<id>/spec/sources*` — the same two views the fixture
+            // repositories get, the table and one site as its own page.
+            sourceId ? (
+              <SourcePage repo={repo} sourceId={decodeURIComponent(sourceId)} />
+            ) : (
+              <SourcesTab repo={repo} />
             )
           ) : active === 'corpus' && repo.real ? (
             // REAL, not mock: the corpus of a connected repository is what its

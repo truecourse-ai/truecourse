@@ -41,9 +41,11 @@ export { PREVIEW_BASE };
 /** The brand wordmark face, the one place the UI uses the logo's font (`.brand-wordmark`). */
 const WORDMARK = { fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace", letterSpacing: '0.01em' } as const;
 
-const NAV: { to: string; label: string; icon: LucideIcon }[] = [
+// A `disabled` entry is shown but not a link: the page is parked, and hiding
+// it would make the menu lie about what the product has.
+const NAV: { to: string; label: string; icon: LucideIcon; disabled?: boolean }[] = [
   { to: PREVIEW_BASE, label: 'Home', icon: Home },
-  { to: `${PREVIEW_BASE}/knowledge`, label: 'Knowledge', icon: BookOpen },
+  { to: `${PREVIEW_BASE}/knowledge`, label: 'Knowledge', icon: BookOpen, disabled: true },
   { to: `${PREVIEW_BASE}/notifications`, label: 'Notifications', icon: Bell },
   { to: `${PREVIEW_BASE}/settings`, label: 'Settings', icon: Settings },
 ];
@@ -61,6 +63,7 @@ function NavRow({
   active,
   collapsed,
   badge,
+  disabled,
 }: {
   to: string;
   label: string;
@@ -68,9 +71,10 @@ function NavRow({
   active: boolean;
   collapsed: boolean;
   badge?: number;
+  disabled?: boolean;
 }) {
-  return (
-    <Link to={to} className={rowClass(active, collapsed)} aria-current={active ? 'page' : undefined}>
+  const body = (
+    <>
       <span className="relative flex shrink-0">
         <Icon className="h-4 w-4" />
         {badge != null && badge > 0 && (
@@ -84,6 +88,18 @@ function NavRow({
         )}
       </span>
       {!collapsed && <span className="min-w-0 flex-1 truncate">{label}</span>}
+    </>
+  );
+  if (disabled) {
+    return (
+      <span aria-disabled className={`${rowClass(false, collapsed)} cursor-default opacity-50 hover:bg-transparent hover:text-muted-foreground`} title="Coming soon">
+        {body}
+      </span>
+    );
+  }
+  return (
+    <Link to={to} className={rowClass(active, collapsed)} aria-current={active ? 'page' : undefined}>
+      {body}
     </Link>
   );
 }
@@ -286,6 +302,7 @@ export function PreviewShell({ children }: { children: ReactNode }) {
               icon={item.icon}
               active={isActive(item.to)}
               collapsed={collapsed}
+              {...(item.disabled ? { disabled: true } : {})}
               {...(item.label === 'Notifications' ? { badge: unreadCount } : {})}
             />
           ))}

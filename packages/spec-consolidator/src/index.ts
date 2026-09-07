@@ -164,6 +164,7 @@ export {
   sourcesFilePath,
   sourcesDirPath,
   sourceDirPath,
+  sourceDocAbsPath,
   sourceDocRef,
   sourceIdFromUrl,
   slugifyId,

@@ -15,7 +15,7 @@
  * itself when the scan's completion lands on the socket.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { buildCorpusConflicts } from '@/preview/vendor/shared';
 import { createRepoSpecSource, SpecSourceProvider, type SpecSource } from '@/components/spec/spec-source';
@@ -23,6 +23,10 @@ import { connectSocket } from '@/lib/socket';
 import { CHIP_CLASS, PageHeader } from '@/preview/ui/bits';
 import { FilterBar } from '@/preview/ui/filter-bar';
 import { useSpecCorpus } from '@/preview/vendor/components/spec/SpecCorpusView';
+import { SpecScanButton } from '@/preview/vendor/components/spec/SpecScanButton';
+import * as api from '@/preview/vendor/lib/api';
+import { useRunTrigger } from '@/preview/shell/use-run-trigger';
+import { useGuardRefresh } from './use-guard-refresh';
 import { useGuardScenarios, type GuardScenarioRowData } from '@/preview/vendor/hooks/useGuardScenarios';
 import { formatRelativeTime } from '@/preview/vendor/shared/format/relative-time';
 import { StatusWord, TEST_TONE, TEST_WORD } from '@/preview/ui/status-word';
@@ -99,6 +103,49 @@ function useCorpusRefreshOnScan(repo: Repo, refetch: () => Promise<void>): void 
       socket?.off('spec:complete', onComplete);
     };
   }, [repo.id, repo.real, refetch]);
+}
+
+/**
+ * The staleness signals behind the Scan button's amber dot — decisions the
+ * stored corpus has not absorbed, sources changed since it was curated — read
+ * from the server for a connected repository and re-read when a scan or a
+ * source write of it lands. Absent (all false) until the first read answers.
+ */
+function useScanStaleness(repo: Repo): { decisionsPending: boolean; docsChanged: boolean } {
+  const reloadKey = useGuardRefresh(repo, ['scan', 'sources']);
+  const [state, setState] = useState({ decisionsPending: false, docsChanged: false });
+  useEffect(() => {
+    if (!repo.real) return;
+    let cancelled = false;
+    api
+      .getSpecStaleness(repo.id)
+      .then((s) => !cancelled && setState({ decisionsPending: s.decisionsPending, docsChanged: s.docsChanged }))
+      .catch(() => !cancelled && setState({ decisionsPending: false, docsChanged: false }));
+    return () => {
+      cancelled = true;
+    };
+  }, [repo.id, repo.real, reloadKey]);
+  return state;
+}
+
+/**
+ * The Scan / Rescan action of a connected repository: the same start the
+ * Activity tab offers (a refusal is announced there with its remedy), spinning
+ * while a scan of this repository runs, dotted while the corpus is behind.
+ */
+function RealScanButton({ repo, hasCorpus }: { repo: Repo; hasCorpus: boolean }) {
+  const starter = useRunTrigger(repo.id);
+  const staleness = useScanStaleness(repo);
+  const start = useCallback(() => starter.start('spec-scan'), [starter]);
+  return (
+    <SpecScanButton
+      hasCorpus={hasCorpus}
+      scanning={starter.pending || repo.scanning === true}
+      decisionsPending={staleness.decisionsPending}
+      docsChanged={staleness.docsChanged}
+      onClick={start}
+    />
+  );
 }
 
 type Row =
@@ -217,6 +264,7 @@ function CorpusBody({ repo, versions }: { repo: Repo; versions: ReturnType<typeo
       <PageHeader
         title="Corpus"
         subtitle={shown.length === rows.length ? `${rows.length}` : `${shown.length} of ${rows.length}`}
+        {...(repo.real ? { right: <RealScanButton repo={repo} hasCorpus={corpus.data !== null} /> } : {})}
       />
       <CoverageVersionPicker repo={repo} versions={versions.versions} version={versions.version} onSelect={versions.select} />
       <div className="min-h-0 flex-1 overflow-auto">

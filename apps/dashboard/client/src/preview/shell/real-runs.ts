@@ -180,6 +180,8 @@ export function toFailure(repo: RunRepoRef, run: PublicSessionRun): RunFailure |
 export interface RealRepoRunState {
   /** The repository's first scan is still running. */
   onboarding: boolean;
+  /** Any spec scan is still running — the first one, or a rescan. */
+  scanning: boolean;
   /** Present once something has settled: the row's honest "last check". */
   lastCheck?: Repo['lastCheck'];
 }
@@ -192,15 +194,17 @@ function firstScan(runs: PublicSessionRun[]): PublicSessionRun | undefined {
 }
 
 export function repoRunState(runs: PublicSessionRun[], now: number): RealRepoRunState {
+  const scanning = runs.some((r) => r.command === 'spec-scan' && !isSettled(r));
   const first = firstScan(runs);
-  if (first && !isSettled(first)) return { onboarding: true };
+  if (first && !isSettled(first)) return { onboarding: true, scanning };
 
   const settled = runs
     .filter(isSettled)
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
-  if (!settled) return { onboarding: false };
+  if (!settled) return { onboarding: false, scanning };
   return {
     onboarding: false,
+    scanning,
     lastCheck: {
       conclusion: 'neutral',
       word: 'Neutral',

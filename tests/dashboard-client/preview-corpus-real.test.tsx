@@ -82,8 +82,10 @@ const SCENARIOS = {
 
 const STALENESS = { generateStale: false, runStale: false, hasCorpus: true, hasScenarios: true, hasGenerated: true, hasRun: false };
 
+const FRESH = { decisionsPending: false, docsChanged: false, hasCorpus: true, hasGenerated: false };
+
 /** A world: one connected repository and what its server holds. */
-function serve(options: { corpus?: unknown; corpusStatus?: number } = {}) {
+function serve(options: { corpus?: unknown; corpusStatus?: number; staleness?: typeof FRESH } = {}) {
   const calls: string[] = [];
   window.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
@@ -95,6 +97,8 @@ function serve(options: { corpus?: unknown; corpusStatus?: number } = {}) {
     if (url.pathname === '/api/llm/config') return json({ config: { provider: 'anthropic' }, providers: ['anthropic'] });
     if (rest === 'sessions/runs') return json({ runs: [] });
     if (rest === 'spec/corpus') return json(options.corpus ?? CORPUS, options.corpusStatus ?? 200);
+    if (rest === 'spec/staleness') return json(options.staleness ?? FRESH);
+    if (rest === 'spec/corpus/scan' && method === 'POST') return json({ jobId: 'job-1' }, 202);
     if (rest === 'guard/scenarios') return json(SCENARIOS);
     if (rest === 'guard/latest') return json({ latest: null, pending: null });
     if (rest === 'guard/staleness') return json(STALENESS);
@@ -175,5 +179,25 @@ describe('the Corpus tab of a connected repository', () => {
     renderAt(CORPUS_TAB);
 
     await screen.findByText(/No corpus yet/);
+  });
+
+  it('offers Rescan, which enqueues a scan, and carries no dot while the corpus is current', async () => {
+    const calls = serve();
+    renderAt(CORPUS_TAB);
+    const user = userEvent.setup();
+
+    const button = await screen.findByRole('button', { name: 'Rescan' });
+    expect(screen.queryByLabelText('rescan pending')).toBeNull();
+    await user.click(button);
+    await waitFor(() => expect(calls).toContain(`POST /api/repos/${REAL.id}/spec/corpus/scan`));
+  });
+
+  it('dots Rescan when the sources changed since the last scan', async () => {
+    serve({ staleness: { ...FRESH, docsChanged: true } });
+    renderAt(CORPUS_TAB);
+
+    // The dot's label joins the button's name.
+    await screen.findByRole('button', { name: /Rescan/ });
+    expect(await screen.findByLabelText('rescan pending')).toBeInTheDocument();
   });
 });

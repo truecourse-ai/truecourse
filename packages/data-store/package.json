@@ -22,6 +22,7 @@
     "@truecourse/guard-runner": "workspace:*",
     "@truecourse/llm": "workspace:*",
     "@truecourse/shared": "workspace:*",
+    "@truecourse/spec-consolidator": "workspace:*",
     "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {
