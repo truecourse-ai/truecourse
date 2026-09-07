@@ -7919,3 +7919,22 @@ page bodies, materialized into the scan's clone and into a scratch tree for
 the dashboard's add / refresh / remove. Adjudication is the CLI's
 (`truecourse guard adjudicate`) until it gets a hosted trigger; the CLI run
 bundle and the isolated hosted sandbox are still ahead.
+
+### PR #887 review fixes. STATUS: BUILT
+
+Hosted source fetches reject private and reserved destinations, including index
+and page redirects. Each request connects using its validated DNS results, so a
+second DNS lookup cannot redirect the socket internally. The existing request
+deadline covers DNS, redirects and response reading.
+
+Hosted source edits compare the current Postgres registry to the registry read
+before fetching and return 409 on a conflict. Removing the last source retains
+an empty registry and its timestamp, keeping the corpus stale until rescanned.
+The Sources viewer reads the latest fetched page through `/spec/source-doc` and
+reloads an open page after refresh; corpus reads retain their scan snapshot and
+never substitute current sources for a missing commit-pinned page.
+
+Regression coverage: network address classification, redirects, pinned DNS,
+request deadlines, overlapping store instances, deletion staleness, hosted
+route policy enforcement, current versus historical page reads, and refreshing
+an open Sources page.

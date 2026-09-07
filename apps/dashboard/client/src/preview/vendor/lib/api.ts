@@ -957,6 +957,11 @@ export function getSpecDoc(repoId: string, ref: string, commit?: string): Promis
   );
 }
 
+/** A registered web page's current fetch, independent of the last corpus scan. */
+export function getSpecSourceDoc(repoId: string, ref: string): Promise<{ ref: string; content: string }> {
+  return fetchApi(`/api/repos/${repoId}/spec/source-doc?ref=${encodeURIComponent(ref)}`);
+}
+
 // ---------------------------------------------------------------------------
 // Web spec sources, llms.txt documentation sites snapshotted into the repo as
 // spec docs. Pure fetching (no LLM, no estimate); add/refresh stream progress

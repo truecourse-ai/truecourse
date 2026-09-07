@@ -37,17 +37,26 @@ export interface SpecSourcesSnapshot {
   bodies: Record<string, string>;
 }
 
+/** The registry changed while a hosted edit was fetching its pages. */
+export class SpecSourcesConflictError extends Error {
+  constructor() {
+    super('Sources changed during this request. Reload the sources and retry.');
+    this.name = 'SpecSourcesConflictError';
+  }
+}
+
 /** Pluggable sources store. The file store is the default; the hosted store is a row. */
 export interface SpecSourcesStore {
   /** The registry. Empty when nothing is registered — never null, so callers list. */
   readRegistry(repoKey: string): Promise<SourcesFile>;
   /** One page's markdown by its content hash, or null when the store lacks it. */
   readBody(repoKey: string, contentHash: string): Promise<string | null>;
-  /** Replace the stored sources. An empty registry clears the store. */
-  write(repoKey: string, snapshot: SpecSourcesSnapshot): Promise<void>;
+  /** Replace the sources, including an empty registry's change timestamp.
+   * When expected is supplied, atomically reject a registry that changed since it was read. */
+  write(repoKey: string, snapshot: SpecSourcesSnapshot, expected?: SourcesFile): Promise<void>;
   /**
    * When the sources last changed (an add, a refresh, a remove), as an ISO
-   * stamp, or null when nothing is registered. Compared against the corpus's
+   * stamp, or null when no source has ever been registered. Compared against the corpus's
    * own timestamp, it says whether a scan has seen the current sources.
    */
   changedAt(repoKey: string): Promise<string | null>;
@@ -178,12 +187,16 @@ export async function readSpecSourceDoc(repoKey: string, ref: string): Promise<s
  */
 export async function materializeSpecSources(repoKey: string, treeDir: string): Promise<void> {
   const registry = await active.readRegistry(repoKey);
+  await materializeRegistry(active, repoKey, treeDir, registry);
+}
+
+async function materializeRegistry(store: SpecSourcesStore, repoKey: string, treeDir: string, registry: SourcesFile): Promise<void> {
   if (registry.sources.length === 0) return;
   const bodies: Record<string, string> = {};
   for (const source of registry.sources) {
     for (const doc of source.docs) {
       if (doc.contentHash in bodies) continue;
-      const body = await active.readBody(repoKey, doc.contentHash);
+      const body = await store.readBody(repoKey, doc.contentHash);
       if (body != null) bodies[doc.contentHash] = body;
     }
   }
@@ -200,12 +213,14 @@ export async function withSpecSourcesTree<T>(
   repoKey: string,
   fn: (treeDir: string) => Promise<T> | T,
 ): Promise<T> {
-  if (active.materializesInPlace) return fn(repoKey);
+  const store = active;
+  if (store.materializesInPlace) return fn(repoKey);
   const treeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-spec-sources-'));
   try {
-    await materializeSpecSources(repoKey, treeDir);
+    const expected = await store.readRegistry(repoKey);
+    await materializeRegistry(store, repoKey, treeDir, expected);
     const result = await fn(treeDir);
-    await active.write(repoKey, readSpecSourcesFromTree(treeDir));
+    await store.write(repoKey, readSpecSourcesFromTree(treeDir), expected);
     return result;
   } finally {
     fs.rmSync(treeDir, { recursive: true, force: true });

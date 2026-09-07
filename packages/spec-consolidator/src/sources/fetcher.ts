@@ -16,6 +16,7 @@
  */
 
 import pLimit from 'p-limit';
+import { fetchPublicSource, SourceNetworkPolicyError } from './public-fetch.js';
 import { LlmsTxtFetchError, InvalidSourceUrlError } from './errors.js';
 import { flattenLinks, normalizeSourceUrl, parseLlmsTxt, type LlmsTxtDoc, type LlmsTxtLink } from './llms-txt.js';
 import type { SourceSkip } from './types.js';
@@ -39,6 +40,8 @@ export interface FetchProgress {
 }
 
 export interface FetchOptions {
+  /** Hosted requests must reject non-public destinations, including redirects. */
+  publicOnly?: boolean;
   /** Parallel page requests. Default 6. */
   concurrency?: number;
   /** Per-request timeout. Default 10s. */
@@ -55,6 +58,7 @@ export interface FetchOptions {
 }
 
 interface ResolvedOptions {
+  publicOnly: boolean;
   concurrency: number;
   timeoutMs: number;
   retries: number;
@@ -64,6 +68,7 @@ interface ResolvedOptions {
 
 function resolveOptions(opts: FetchOptions): ResolvedOptions {
   return {
+    publicOnly: opts.publicOnly ?? false,
     concurrency: opts.concurrency ?? DEFAULT_CONCURRENCY,
     timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     retries: opts.retries ?? DEFAULT_RETRIES,
@@ -159,15 +164,16 @@ async function get(url: string, opts: ResolvedOptions): Promise<Response> {
   for (let attempt = 0; ; attempt++) {
     let res: Response;
     try {
-      res = await fetch(url, {
-        redirect: 'follow',
-        headers: {
-          'user-agent': USER_AGENT,
-          accept: 'text/markdown, text/plain;q=0.9, */*;q=0.1',
-        },
-        signal: AbortSignal.timeout(opts.timeoutMs),
-      });
+      const headers = {
+        'user-agent': USER_AGENT,
+        accept: 'text/markdown, text/plain;q=0.9, */*;q=0.1',
+      };
+      const signal = AbortSignal.timeout(opts.timeoutMs);
+      res = opts.publicOnly
+        ? await fetchPublicSource(url, headers, signal)
+        : await fetch(url, { redirect: 'follow', headers, signal });
     } catch (err) {
+      if (err instanceof SourceNetworkPolicyError) throw err;
       if (attempt < opts.retries) {
         await sleep(retryDelayMs(null, attempt, opts));
         continue;

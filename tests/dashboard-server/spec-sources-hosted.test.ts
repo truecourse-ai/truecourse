@@ -14,6 +14,15 @@ import fs from 'node:fs';
 import request from 'supertest';
 import { type Express } from 'express';
 
+// Only this fixture suite replaces the public transport with loopback HTTP.
+// The network-policy suite exercises the real transport and pinned DNS lookup.
+vi.mock('../../packages/spec-consolidator/dist/sources/public-fetch.js', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../packages/spec-consolidator/dist/sources/public-fetch.js')>(),
+  fetchPublicSource: vi.fn((url: string, headers: Record<string, string>, signal: AbortSignal) =>
+    fetch(url, { headers, signal })),
+}));
+import { fetchPublicSource } from '../../packages/spec-consolidator/dist/sources/public-fetch.js';
+
 vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../apps/dashboard/server/src/socket/handlers')>();
   return {
@@ -29,20 +38,21 @@ import { setupTestFixture, teardownTestFixture, type TestFixture } from '../help
 import {
   setSpecStore,
   resetSpecStore,
-  loadSpecDoc,
   saveSpec,
+  saveSpecDocs,
   type SpecStore,
   type RepoRef,
   type SpecArtifact,
 } from '@truecourse/core/lib/spec-store';
 import {
-  readSpecSourceDoc,
   resetSpecSourcesStore,
   setSpecSourcesStore,
+  SpecSourcesConflictError,
   type SpecSourcesSnapshot,
   type SpecSourcesStore,
 } from '@truecourse/core/lib/spec-sources';
 import { resetRepoDocReader, setRepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
+import { readStoredRepoDoc } from '../../apps/dashboard/server/src/stores';
 import { sourcesFilePath } from '../../packages/spec-consolidator/src/index.js';
 import {
   INSTALLATION_MD,
@@ -55,6 +65,7 @@ import { emitSpecComplete } from '../../apps/dashboard/server/src/socket/handler
 /** The hosted spec store, in memory: enough for the corpus read the enrichment rides. */
 function memSpecStore(): SpecStore {
   const rows = new Map<string, unknown>();
+  const snapshots = new Map<string, Record<string, string>>();
   const key = (repoKey: string, artifact: SpecArtifact) => `${repoKey}\x00${artifact}`;
   return {
     materializesInPlace: false,
@@ -77,9 +88,12 @@ function memSpecStore(): SpecStore {
     async loadWorkspaceSpec<T = unknown>() {
       return null as T | null;
     },
-    async saveSpecDocs() {},
-    async loadSpecDoc() {
-      return null;
+    async saveSpecDocs(ref, files) {
+      snapshots.set(`${ref.repoKey}:${ref.commitSha}`, files);
+      snapshots.set(ref.repoKey, files);
+    },
+    async loadSpecDoc(repoKey, ref, commit) {
+      return snapshots.get(commit ? `${repoKey}:${commit}` : repoKey)?.[ref] ?? null;
     },
   } satisfies SpecStore;
 }
@@ -97,9 +111,11 @@ function memSourcesStore(): SpecSourcesStore & { rows: Map<string, SpecSourcesSn
     async readBody(repoKey, sha) {
       return rows.get(repoKey)?.bodies[sha] ?? null;
     },
-    async write(repoKey, next) {
-      if (next.registry.sources.length === 0) rows.delete(repoKey);
-      else rows.set(repoKey, next);
+    async write(repoKey, next, expected) {
+      if (expected && JSON.stringify(expected) !== JSON.stringify(rows.get(repoKey)?.registry ?? { version: 1, sources: [] })) {
+        throw new SpecSourcesConflictError();
+      }
+      rows.set(repoKey, next);
       changed.set(repoKey, new Date().toISOString());
     },
     async changedAt(repoKey) {
@@ -125,10 +141,8 @@ describe('web source routes — hosted (stored sources, no working tree)', () =>
     setSpecSourcesStore(sources);
     // What boot installs: the scan snapshot first, then a source page the
     // sources store holds.
-    setRepoDocReader(
-      async (repoKey, docPath, opts) =>
-        (await loadSpecDoc(repoKey, docPath, opts?.commit)) ?? (await readSpecSourceDoc(repoKey, docPath)),
-    );
+    setRepoDocReader(readStoredRepoDoc);
+    vi.mocked(fetchPublicSource).mockClear();
     vi.mocked(emitSpecComplete).mockClear();
     app = createTestApp();
   });
@@ -170,6 +184,49 @@ describe('web source routes — hosted (stored sources, no working tree)', () =>
     const ref = `.truecourse/specs/sources/${id}/cms/installation.md`;
     const res = await request(app).get(api(`/spec/doc?ref=${encodeURIComponent(ref)}`)).expect(200);
     expect(res.body.content).toBe(INSTALLATION_MD);
+  });
+
+  it('reads refreshed pages independently of the scan and never substitutes a pinned miss', async () => {
+    const id = (await add()).body.source.id as string;
+    const ref = `.truecourse/specs/sources/${id}/cms/installation.md`;
+    await saveSpecDocs({ repoKey: fixture.repoPath, commitSha: 'scan' }, { [ref]: INSTALLATION_MD });
+    site.routes['/cms/installation.md'] = { body: '# New installation instructions' };
+    await request(app).post(api(`/spec/sources/${id}/refresh`)).expect(200);
+    const current = await request(app).get(api(`/spec/source-doc?ref=${encodeURIComponent(ref)}`)).expect(200);
+    expect(current.body.content).toBe('# New installation instructions');
+    const scanned = await request(app).get(api(`/spec/doc?ref=${encodeURIComponent(ref)}&commit=scan`)).expect(200);
+    expect(scanned.body.content).toBe(INSTALLATION_MD);
+    await request(app).get(api(`/spec/doc?ref=${encodeURIComponent(ref)}&commit=before-add`)).expect(404);
+    await request(app).delete(api(`/spec/sources/${id}`)).expect(200);
+    await request(app).get(api(`/spec/source-doc?ref=${encodeURIComponent(ref)}`)).expect(404);
+    await request(app).get(api(`/spec/doc?ref=${encodeURIComponent(ref)}&commit=scan`)).expect(200);
+  });
+
+  it('uses public-only transport for hosted preview, add and refresh', async () => {
+    await request(app).post(api('/spec/sources/preview')).send({ url: llmsTxtUrl(site) }).expect(200);
+    expect(fetchPublicSource).toHaveBeenCalled();
+    vi.mocked(fetchPublicSource).mockClear();
+    const id = (await add()).body.source.id as string;
+    expect(fetchPublicSource).toHaveBeenCalled();
+    vi.mocked(fetchPublicSource).mockClear();
+    await request(app).post(api(`/spec/sources/${id}/refresh`)).expect(200);
+    expect(fetchPublicSource).toHaveBeenCalled();
+  });
+
+  it('rejects a hosted preview of a private address through the real transport', async () => {
+    const actual = await vi.importActual<typeof import('../../packages/spec-consolidator/dist/sources/public-fetch.js')>(
+      '../../packages/spec-consolidator/dist/sources/public-fetch.js',
+    );
+    vi.mocked(fetchPublicSource).mockImplementationOnce(actual.fetchPublicSource);
+    const result = await request(app).post(api('/spec/sources/preview')).send({ url: llmsTxtUrl(site) }).expect(400);
+    expect(result.body.error).toContain('public network');
+    expect(site.hits).toHaveLength(0);
+  });
+
+  it('returns 409 when the store rejects a stale mutation', async () => {
+    vi.spyOn(sources, 'write').mockRejectedValueOnce(new SpecSourcesConflictError());
+    const result = await request(app).post(api('/spec/sources')).send({ url: llmsTxtUrl(site) }).expect(409);
+    expect(result.body.error).toContain('Reload');
   });
 
   it('labels a stored source\'s pages in the corpus', async () => {
@@ -236,10 +293,13 @@ describe('web source routes — hosted (stored sources, no working tree)', () =>
     expect(missing.body.error).toContain(id);
   });
 
-  it('removes a source, clearing the store', async () => {
+  it('removes the last source and keeps the corpus stale until rescanned', async () => {
     const id = (await add()).body.source.id as string;
+    await saveSpec({ repoKey: fixture.repoPath, commitSha: 'seed' }, 'corpus', {
+      version: 3, generatedAt: '2026-01-01T00:00:00Z', docs: [], areas: [], relations: [], skippedDocs: [],
+    });
     await request(app).delete(api(`/spec/sources/${id}`)).expect(200);
-    expect(sources.rows.has(fixture.repoPath)).toBe(false);
+    expect((await request(app).get(api('/spec/staleness')).expect(200)).body.docsChanged).toBe(true);
     expect((await request(app).get(api('/spec/sources')).expect(200)).body.sources).toEqual([]);
     const missing = await request(app).delete(api(`/spec/sources/${id}`)).expect(404);
     expect(missing.body.error).toContain('nothing is registered yet');

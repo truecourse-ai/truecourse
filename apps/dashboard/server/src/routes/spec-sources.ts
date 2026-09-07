@@ -6,6 +6,7 @@
  *
  *   GET    /:id/spec/sources                    the registry: title, page count, last fetch, skipped
  *   GET    /:id/spec/sources/:sourceId          one source + the pages it snapshotted
+ *   GET    /:id/spec/source-doc?ref=...         current fetched page, independent of scans
  *   POST   /:id/spec/sources/preview            what an add WOULD fetch — reads llms.txt, writes nothing
  *   POST   /:id/spec/sources                    register + snapshot every markdown page
  *   POST   /:id/spec/sources/refresh            refetch every registered source
@@ -18,10 +19,9 @@
  * with `spec:complete { kind: 'sources' }`, which lights the Rescan dot (the
  * staleness probe watches `specs/sources.json` + the snapshot tree).
  *
- * Concurrency: like `/spec/corpus/scan`, no server-side lock — the client
- * disables its buttons for the duration of the request. The engine itself is
- * safe under overlap (the registry is rewritten atomically and a refresh only
- * deletes files it names).
+ * Hosted writes compare the stored registry against the one they read before
+ * fetching. An overlapping edit returns 409 instead of replacing newer state.
+ * Hosted fetches validate public destinations and pin DNS for every redirect.
  *
  * The engine works on files. A working tree is edited in place; a hosted repo
  * (no checkout) runs every write over a scratch tree of its stored sources and
@@ -42,7 +42,7 @@ import {
   type SpecSource,
 } from '@truecourse/spec-consolidator';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
-import { readSpecSourcesRegistry, withSpecSourcesTree } from '@truecourse/core/lib/spec-sources';
+import { readSpecSourcesRegistry, readSpecSourceDoc, specSourcesMaterializeInPlace, SpecSourcesConflictError, withSpecSourcesTree } from '@truecourse/core/lib/spec-sources';
 import {
   addSpecSourceInProcess,
   refreshSpecSourcesInProcess,
@@ -129,6 +129,7 @@ async function listSources(repoKey: string): Promise<SpecSource[]> {
  * real bug and goes to `next()`.
  */
 function sourceErrorStatus(err: unknown): number | null {
+  if (err instanceof SpecSourcesConflictError) return 409;
   // An unreadable llms.txt is the user's URL to fix (wrong site, not an llms.txt
   // deployment), not an upstream outage we can act on — same 4xx as a malformed one.
   if (err instanceof InvalidSourceUrlError || err instanceof LlmsTxtFetchError) return 400;
@@ -206,6 +207,26 @@ router.get('/:id/spec/sources', async (req: Request, res: Response, next: NextFu
   }
 });
 
+// Sources previews read the latest fetch, independently of corpus snapshots.
+router.get('/:id/spec/source-doc', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const repo = await resolveProjectForRequest(req.params.id as string);
+    const ref = typeof req.query.ref === 'string' ? req.query.ref : '';
+    if (!ref) {
+      res.status(400).json({ error: 'Missing ?ref=<source page>.' });
+      return;
+    }
+    const content = await readSpecSourceDoc(repo.path, ref);
+    if (content === null) {
+      res.status(404).json({ error: `Doc not found: ${ref}` });
+      return;
+    }
+    res.json({ ref, content });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // ONE source, with the pages it snapshotted. The listing above deliberately drops
 // that array (hundreds of entries per site, on every sidebar mount); the detail
 // pane renders the pages, so it reads them here — one source, when it is opened.
@@ -236,7 +257,7 @@ router.post('/:id/spec/sources/preview', async (req: Request, res: Response, nex
     repoPath = repo.path;
     const url = readUrl(req, res);
     if (url === null) return;
-    res.json(await previewSource(url));
+    res.json(await previewSource(url, { publicOnly: !specSourcesMaterializeInPlace() }));
   } catch (e) {
     await respondSourceError(repoPath, res, next, e);
   }
@@ -273,6 +294,7 @@ router.post('/:id/spec/sources', async (req: Request, res: Response, next: NextF
     started = true;
     const result = await withSpecSourcesTree(repo.path, (tree) =>
       addSpecSourceInProcess(tree, url, {
+        publicOnly: !specSourcesMaterializeInPlace(),
         tracker,
         id,
         // The client already confirmed against the preview above, so the engine's
@@ -321,7 +343,7 @@ async function runRefresh(
     const tracker = createSocketSpecTracker(repoId, sourceRefreshSteps(targets), 'sources');
     started = true;
     const results = await withSpecSourcesTree(repo.path, (tree) =>
-      refreshSpecSourcesInProcess(tree, { sourceId, tracker }),
+      refreshSpecSourcesInProcess(tree, { sourceId, tracker, publicOnly: !specSourcesMaterializeInPlace() }),
     );
     emitSpecComplete(repoId, 'sources');
     res.json({

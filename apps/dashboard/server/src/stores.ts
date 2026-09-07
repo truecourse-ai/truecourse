@@ -16,7 +16,7 @@ import type { DbHandle } from '@truecourse/db';
 import { log } from '@truecourse/core/lib/logger';
 import { setAnalysisStore } from '@truecourse/core/lib/analysis-store';
 import { loadSpecDoc, setSpecStore } from '@truecourse/core/lib/spec-store';
-import { setRepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
+import { setRepoDocReader, type RepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
 import { setGuardStore } from '@truecourse/core/lib/guard-store';
 import { setGuardOverlayStore } from '@truecourse/core/lib/guard-overlays';
 import { readSpecSourceDoc, setSpecSourcesStore } from '@truecourse/core/lib/spec-sources';
@@ -53,6 +53,11 @@ export interface InstallDbStoresOptions {
   masterSecret: string;
 }
 
+/** Corpus reads honor their snapshot; a pinned miss must never read current sources. */
+export const readStoredRepoDoc: RepoDocReader = async (repoKey, docPath, opts) =>
+  (await loadSpecDoc(repoKey, docPath, opts?.commit)) ??
+  (opts?.commit ? null : await readSpecSourceDoc(repoKey, docPath));
+
 /** Swap every core/llm storage seam for its Postgres impl. */
 export function installDbStores(
   { db, lockPool }: DbHandle,
@@ -69,10 +74,7 @@ export function installDbStores(
   // pins a snapshot (a PR view); without one the newest scan answers. A source
   // page no scan has snapshotted yet (just added) answers from the sources
   // store, so it can be read before the scan that would keep it.
-  setRepoDocReader(
-    async (repoKey, docPath, opts) =>
-      (await loadSpecDoc(repoKey, docPath, opts?.commit)) ?? (await readSpecSourceDoc(repoKey, docPath)),
-  );
+  setRepoDocReader(readStoredRepoDoc);
   // Guard run store + scenario corpus + dismissedClaims decisions.
   setGuardStore(new PgGuardStore(db));
   // The supplied-dependency overlays (registered API keys, base URLs, tokens):

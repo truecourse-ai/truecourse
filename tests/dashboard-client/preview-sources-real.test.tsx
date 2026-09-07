@@ -68,6 +68,7 @@ function json(body: unknown, status = 200): Response {
 /** A world: one connected repository whose server holds one source and no corpus yet. */
 function serve() {
   const calls: string[] = [];
+  let refreshed = false;
   window.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const url = new URL(href, window.location.origin);
@@ -77,13 +78,15 @@ function serve() {
     if (url.pathname === '/api/repos') return json([REAL]);
     if (url.pathname === '/api/llm/config') return json({ config: { provider: 'anthropic' }, providers: ['anthropic'] });
     if (rest === 'sessions/runs') return json({ runs: [] });
-    if (rest === 'spec/sources') return json({ sources: [STRAPI] });
-    if (rest === `spec/sources/${SOURCE_ID}`) return json({ source: STRAPI_DETAIL });
+    const fetchedAt = refreshed ? '2026-09-07T12:00:00.000Z' : STRAPI.fetchedAt;
+    if (rest === `spec/sources/${SOURCE_ID}/refresh`) { refreshed = true; return json({ results: [] }); }
+    if (rest === 'spec/sources') return json({ sources: [{ ...STRAPI, fetchedAt }] });
+    if (rest === `spec/sources/${SOURCE_ID}`) return json({ source: { ...STRAPI_DETAIL, fetchedAt } });
     if (rest === 'spec/corpus') return json({ error: 'no corpus' }, 404);
-    if (rest === 'spec/doc') {
+    if (rest === 'spec/source-doc') {
       const ref = url.searchParams.get('ref') ?? '';
       return ref === INSTALL_REF
-        ? json({ ref, content: '# Installation\n\nStrapi runs on Node 20.\n' })
+        ? json({ ref, content: refreshed ? '# Installation\n\nUpdated installation instructions.\n' : '# Installation\n\nStrapi runs on Node 20.\n' })
         : json({ error: `Doc not found: ${ref}` }, 404);
     }
     return json({ error: `not found: ${rest}` }, 404);
@@ -137,8 +140,11 @@ describe('the Sources tab of a connected repository', () => {
 
     await userEvent.click(screen.getByText('Installation'));
     expect(await screen.findByText('Strapi runs on Node 20.')).toBeInTheDocument();
-    expect(calls.some((c) => c.startsWith(`/api/repos/${REAL.id}/spec/doc?ref=`))).toBe(true);
+    expect(calls.some((c) => c.startsWith(`/api/repos/${REAL.id}/spec/source-doc?ref=`))).toBe(true);
     // No scan yet: the page says what would put it in the corpus.
     expect(await screen.findByText('Run Scan to add this page to the corpus.')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    expect(await screen.findByText('Updated installation instructions.')).toBeInTheDocument();
+    expect(screen.queryByText('Strapi runs on Node 20.')).toBeNull();
   });
 });

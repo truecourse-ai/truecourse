@@ -11,10 +11,11 @@
  * disconnect purge drops the whole scope with the row.
  */
 
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { specSources, type Db } from '@truecourse/db';
 import { SourcesFileSchema, type SourcesFile } from '@truecourse/spec-consolidator';
 import type { SpecSourcesSnapshot, SpecSourcesStore } from '@truecourse/core/lib/spec-sources';
+import { SpecSourcesConflictError } from '@truecourse/core/lib/spec-sources';
 import { ContentStore, contentScope } from './content-store.js';
 
 export class PgSpecSourcesStore implements SpecSourcesStore {
@@ -50,21 +51,26 @@ export class PgSpecSourcesStore implements SpecSourcesStore {
     return rows[0]?.updatedAt ?? null;
   }
 
-  async write(repoKey: string, snapshot: SpecSourcesSnapshot): Promise<void> {
-    if (snapshot.registry.sources.length === 0) {
-      await this.db.delete(specSources).where(eq(specSources.repoKey, repoKey));
-      return;
-    }
+  async write(repoKey: string, snapshot: SpecSourcesSnapshot, expected?: SourcesFile): Promise<void> {
     const scope = contentScope.spec(repoKey);
     for (const body of Object.values(snapshot.bodies)) await this.content.putText(scope, body);
     const updatedAt = new Date().toISOString();
-    await this.db
+    // A nonempty expected registry must still exist. Only a first add (empty
+    // expectation) may insert a missing row; a purged registry is a conflict.
+    const written = expected && expected.sources.length > 0 ? await this.db
+      .update(specSources)
+      .set({ registry: snapshot.registry, updatedAt })
+      .where(and(eq(specSources.repoKey, repoKey), eq(specSources.registry, expected)))
+      .returning({ repoKey: specSources.repoKey }) : await this.db
       .insert(specSources)
       .values({ repoKey, registry: snapshot.registry, updatedAt })
       .onConflictDoUpdate({
         target: [specSources.repoKey],
         set: { registry: snapshot.registry, updatedAt },
-      });
+        ...(expected ? { setWhere: eq(specSources.registry, expected) } : {}),
+      })
+      .returning({ repoKey: specSources.repoKey });
+    if (written.length === 0) throw new SpecSourcesConflictError();
   }
 }
 

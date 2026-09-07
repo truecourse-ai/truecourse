@@ -111,7 +111,7 @@ export function SpecSourceDetail({
 
   useEffect(() => {
     void load();
-  }, [load, reloadKey]);
+  }, [load, reloadKey, summary.fetchedAt]);
 
   // The previewed page resolves off the CURRENT listing, so a page dropped by a
   // refresh closes its own preview with nothing to clean up.
@@ -230,6 +230,7 @@ export function SpecSourceDetail({
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {previewDoc ? (
           <SpecDocViewer
+            key={`${previewDoc.ref}:${source?.fetchedAt}`}
             repoId={repoId}
             docRef={previewDoc.ref}
             title={previewDoc.title || previewDoc.path}

@@ -778,8 +778,8 @@ function hasPendingDecisions(repoPath: string): boolean {
   }
 }
 
-/** True when the sources changed after the corpus was curated. No corpus, or no
- *  sources, is not stale: there is nothing for a scan to be behind on. */
+/** True when sources changed after the corpus was curated, including removal
+ *  of the last source. A repository with no corpus has nothing to be behind on. */
 function sourcesNewerThanCorpus(corpus: CuratedCorpus | null, sourcesChangedAt: string | null): boolean {
   if (!corpus || !sourcesChangedAt) return false;
   const generatedAt = Date.parse(corpus.generatedAt);

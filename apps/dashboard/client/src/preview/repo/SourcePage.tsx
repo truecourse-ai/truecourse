@@ -122,7 +122,10 @@ function SourceBody({ repo, sourceId }: { repo: Repo; sourceId: string }) {
 
 export function SourcePage({ repo, sourceId }: { repo: Repo; sourceId: string }) {
   const source = useMemo(
-    () => (repo.real ? createRepoSpecSource(repo.id) : createPreviewSpecSource(repo.id)),
+    () => (repo.real ? {
+      ...createRepoSpecSource(repo.id),
+      getDoc: (ref: string) => api.getSpecSourceDoc(repo.id, ref),
+    } : createPreviewSpecSource(repo.id)),
     [repo.id, repo.real],
   );
   return (
