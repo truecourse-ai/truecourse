@@ -86,7 +86,7 @@ describe('chainGuardOnboarding', () => {
 describe('chainGuardBaselineRefresh — the complement (fires when guard state EXISTS)', () => {
   it('a repo with scenarios refreshes its baseline on the settled commit', async () => {
     const enqueueGuardBaseline = vi.fn().mockResolvedValue('job_b1');
-    const deps = { hasGuardState: vi.fn().mockResolvedValue(true), enqueueGuardBaseline };
+    const deps = { hasScenarios: vi.fn().mockResolvedValue(true), enqueueGuardBaseline };
 
     const jobId = await chainGuardBaselineRefresh(deps, payload, 'succeeded');
 
@@ -103,7 +103,7 @@ describe('chainGuardBaselineRefresh — the complement (fires when guard state E
 
   it('a repo with NO guard state never refreshes (onboarding covers it instead)', async () => {
     const enqueueGuardBaseline = vi.fn();
-    const deps = { hasGuardState: vi.fn().mockResolvedValue(false), enqueueGuardBaseline };
+    const deps = { hasScenarios: vi.fn().mockResolvedValue(false), enqueueGuardBaseline };
 
     expect(await chainGuardBaselineRefresh(deps, payload, 'succeeded')).toBeNull();
     expect(enqueueGuardBaseline).not.toHaveBeenCalled();
@@ -111,18 +111,18 @@ describe('chainGuardBaselineRefresh — the complement (fires when guard state E
 
   it('a failed settle never refreshes', async () => {
     const enqueueGuardBaseline = vi.fn();
-    const hasGuardState = vi.fn();
+    const hasScenarios = vi.fn();
 
-    expect(await chainGuardBaselineRefresh({ hasGuardState, enqueueGuardBaseline }, payload, 'failed')).toBeNull();
-    expect(hasGuardState).not.toHaveBeenCalled();
+    expect(await chainGuardBaselineRefresh({ hasScenarios, enqueueGuardBaseline }, payload, 'failed')).toBeNull();
+    expect(hasScenarios).not.toHaveBeenCalled();
     expect(enqueueGuardBaseline).not.toHaveBeenCalled();
   });
 
   it('coalesced enqueue → null; read/enqueue failures are swallowed', async () => {
-    const coalesced = { hasGuardState: vi.fn().mockResolvedValue(true), enqueueGuardBaseline: vi.fn().mockResolvedValue(null) };
+    const coalesced = { hasScenarios: vi.fn().mockResolvedValue(true), enqueueGuardBaseline: vi.fn().mockResolvedValue(null) };
     expect(await chainGuardBaselineRefresh(coalesced, payload, 'succeeded')).toBeNull();
 
-    const boom = { hasGuardState: vi.fn().mockRejectedValue(new Error('pg down')), enqueueGuardBaseline: vi.fn() };
+    const boom = { hasScenarios: vi.fn().mockRejectedValue(new Error('pg down')), enqueueGuardBaseline: vi.fn() };
     await expect(chainGuardBaselineRefresh(boom, payload, 'succeeded')).resolves.toBeNull();
   });
 });
@@ -142,17 +142,17 @@ describe('generateWasBlocked — the settle-chain suppression predicate', () => 
   });
 
   it('a blocked generate settle enqueues NO baseline run (the "Runs populated, Scenarios empty" bug)', async () => {
-    // The blocked generate persisted an open-conflicts report, so hasGuardState is
+    // The blocked generate persisted an open-conflicts report, so hasScenarios is
     // true — the refresh chain WOULD fire. The settle gate suppresses it on the
     // result before the chain is consulted.
     const enqueueGuardBaseline = vi.fn().mockResolvedValue('job_b1');
-    const hasGuardState = vi.fn().mockResolvedValue(true);
+    const hasScenarios = vi.fn().mockResolvedValue(true);
     const blockedResult = { repoFullName: 'acme/api', scenariosWritten: 0, openConflicts: 2 };
 
     // The wiring onGuardGenerateSettled uses: skip when blocked, else chain.
     const onGuardGenerateSettled = async (result: unknown): Promise<void> => {
       if (generateWasBlocked(result)) return;
-      await chainGuardBaselineRefresh({ hasGuardState, enqueueGuardBaseline }, payload, 'succeeded');
+      await chainGuardBaselineRefresh({ hasScenarios, enqueueGuardBaseline }, payload, 'succeeded');
     };
 
     await onGuardGenerateSettled(blockedResult);

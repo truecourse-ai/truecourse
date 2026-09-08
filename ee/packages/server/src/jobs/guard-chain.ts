@@ -75,16 +75,15 @@ export function generateWasBlocked(result: unknown): boolean {
 export type GuardRefreshSource = GuardBaselineEnqueueRequest;
 
 export interface GuardBaselineRefreshDeps {
-  /** Whether the repo already has hosted guard state (a stored generate report). */
-  hasGuardState(repoKey: string): Promise<boolean>;
+  /** Whether stored scenario files are available for this baseline run. */
+  hasScenarios(repoKey: string, commitSha: string): Promise<boolean>;
   /** Single-flight (pending-buffer-aware) guard-baseline enqueue (null = coalesced/running). */
   enqueueGuardBaseline(req: GuardBaselineEnqueueRequest): Promise<string | null>;
 }
 
 /**
  * Refresh-on-merge / post-generate: enqueue a guard-baseline refresh iff the repo
- * ALREADY has scenarios — the exact COMPLEMENT of {@link chainGuardOnboarding}
- * (which fires only when the repo has none). Wired onto BOTH `onBaselineSettled`
+ * has stored scenario files. A completed generate report alone does not qualify. Wired onto BOTH `onBaselineSettled`
  * (a default-branch merge just re-scanned the corpus → the baseline must re-run
  * against current main) and the guard-generate `onSettled` (a fresh generate just
  * wrote scenarios → warm the baseline so the first PR gate skips the lazy base
@@ -100,7 +99,7 @@ export async function chainGuardBaselineRefresh(
   if (outcome !== 'succeeded') return null;
   const { repoFullName, installationId, defaultBranch, commitSha, workspaceOrgId } = payload;
   try {
-    if (!(await deps.hasGuardState(repoFullName))) return null;
+    if (!(await deps.hasScenarios(repoFullName, commitSha))) return null;
     return await deps.enqueueGuardBaseline({
       repoFullName,
       installationId,
