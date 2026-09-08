@@ -25,6 +25,10 @@
     "./activity-stream": {
       "types": "./dist/activity-stream.d.ts",
       "import": "./dist/activity-stream.js"
+    },
+    "./next-routing-node": {
+      "types": "./dist/next-routing-node.d.ts",
+      "import": "./dist/next-routing-node.js"
     }
   },
   "scripts": {

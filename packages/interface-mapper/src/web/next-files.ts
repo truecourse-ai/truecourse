@@ -1,3 +1,4 @@
+import { nextRouterRoots, nearestNextRoot, nextAppSegments, nextDynamicSegment } from '@truecourse/shared'
 import type { WebPlaceSeed, WebTree } from '../web-tree.js'
 
 // ---------------------------------------------------------------------------
@@ -38,9 +39,6 @@ import type { WebPlaceSeed, WebTree } from '../web-tree.js'
 /** The file extensions Next.js resolves a route file at. */
 const ROUTE_FILE = /\.(?:tsx|jsx|ts|js|mjs)$/
 
-/** What claims an app root — any of the config filenames Next.js accepts. */
-const NEXT_CONFIG = /^next\.config\.(?:js|mjs|cjs|ts|mts)$/
-
 /** Screens of the APP router — one per `page.*`. */
 export function readNextAppRoutes(tree: WebTree): WebPlaceSeed[] {
   return readNextRoutes(tree, 'app', 'next-app', appSegments)
@@ -62,35 +60,13 @@ function readNextRoutes(
 
   const seeds: WebPlaceSeed[] = []
   for (const filePath of tree.files) {
-    const root = nearestRoot(roots, filePath)
+    const root = nearestNextRoot(roots, filePath)
     if (root === null) continue
     const segments = segmentsOf(filePath.slice(root.length + 1).split('/'))
     if (segments === null) continue
     seeds.push({ kind: 'screen', address: `/${segments.join('/')}`, idiom, filePath })
   }
   return seeds
-}
-
-/**
- * The `<app-root>/{,src/}<router>` directories of every Next.js app in the tree.
- * Longest first, so the nearest app wins for a file several apps could claim.
- */
-function nextRouterRoots(tree: WebTree, router: 'app' | 'pages'): string[] {
-  const roots: string[] = (tree.nextAppRoots ?? []).flatMap((appRoot) => [
-    `${appRoot}/${router}`, `${appRoot}/src/${router}`,
-  ])
-  for (const filePath of tree.files) {
-    const cut = filePath.lastIndexOf('/')
-    if (cut < 0 || !NEXT_CONFIG.test(filePath.slice(cut + 1))) continue
-    const appRoot = filePath.slice(0, cut)
-    roots.push(`${appRoot}/${router}`, `${appRoot}/src/${router}`)
-  }
-  return [...new Set(roots)].sort((a, b) => b.length - a.length)
-}
-
-/** The root this file is served by, or `null` when no router owns it. */
-function nearestRoot(roots: readonly string[], filePath: string): string | null {
-  return roots.find((root) => filePath.startsWith(`${root}/`)) ?? null
 }
 
 /**
@@ -101,15 +77,7 @@ function appSegments(relative: string[]): string[] | null {
   const fileName = relative[relative.length - 1]
   if (!fileName || !/^page\.(?:tsx|jsx|ts|js|mjs)$/.test(fileName)) return null
 
-  const segments: string[] = []
-  for (const directory of relative.slice(0, -1)) {
-    if (directory.startsWith('_') || directory.startsWith('@')) return null
-    if (/^\((?:\.{1,3})\)/.test(directory)) return null // an interception, not a place
-    if (/^\(.*\)$/.test(directory)) continue // a group organizes, it does not address
-    const segment = dynamicSegment(directory)
-    if (segment !== null) segments.push(segment)
-  }
-  return segments
+  return nextAppSegments(relative.slice(0, -1))
 }
 
 /**
@@ -125,25 +93,10 @@ function pagesSegments(relative: string[]): string[] | null {
 
   const segments: string[] = []
   for (const directory of relative.slice(0, -1)) {
-    const segment = dynamicSegment(directory)
+    const segment = nextDynamicSegment(directory)
     if (segment !== null) segments.push(segment)
   }
-  const leaf = dynamicSegment(fileName.replace(ROUTE_FILE, ''))
+  const leaf = nextDynamicSegment(fileName.replace(ROUTE_FILE, ''))
   if (leaf !== null && leaf !== 'index') segments.push(leaf)
   return segments
-}
-
-/**
- * One directory name as an address segment: a slot becomes `{name}`, a catch-all
- * `{...name}`, and an OPTIONAL catch-all becomes nothing at all — it matches its
- * own parent, so the address it yields is the parent's.
- */
-function dynamicSegment(name: string): string | null {
-  const optionalCatchAll = /^\[\[\.\.\.(.+)\]\]$/.exec(name)
-  if (optionalCatchAll) return null
-  const catchAll = /^\[\.\.\.(.+)\]$/.exec(name)
-  if (catchAll) return `{...${catchAll[1]}}`
-  const slot = /^\[(.+)\]$/.exec(name)
-  if (slot) return `{${slot[1]}}`
-  return name
 }

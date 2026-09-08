@@ -1,0 +1,5 @@
+{
+  "name": "next-expense-api-fixture",
+  "private": true,
+  "dependencies": { "next": "^15.0.0" }
+}

@@ -246,11 +246,9 @@ describe('extractRequestContracts — the exported-handler idioms (Next.js)', ()
         return NextResponse.json({ id: 1 });
       }
     `);
-    // One contract, two join points — whichever location a future registration
-    // derivation records, the contract is there.
-    expect(byRouteLocation.size).toBe(2);
+    // One contract at the same declaration site as the App Router registration.
+    expect(byRouteLocation.size).toBe(1);
     const contracts = [...byRouteLocation.values()];
-    expect(contracts[0]).toEqual(contracts[1]);
     expect(contracts[0].bodyFields).toEqual([
       { name: 'title', required: 'unknown' },
       { name: 'done', required: 'unknown' },

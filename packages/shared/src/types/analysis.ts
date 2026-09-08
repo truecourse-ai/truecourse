@@ -373,7 +373,7 @@ export type OutboundRequest = z.infer<typeof OutboundRequestSchema>
 // ---------------------------------------------------------------------------
 
 export const RouteRegistrationSchema = z.object({
-  httpMethod: z.enum(['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'ALL']),
+  httpMethod: z.enum(['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS', 'ALL']),
   path: z.string(),
   handlerName: z.string(),
   /** What the handler reads off the request; absent when nothing was visible. */
