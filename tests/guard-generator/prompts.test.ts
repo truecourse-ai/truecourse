@@ -1187,8 +1187,10 @@ describe('guard-generator prompts', () => {
     // "journey" retired in favour of "interface" across stores, schemas and copy,
     // and this prompt renders that vocabulary, so its text moved without a single
     // rule moving with it. A rename, not vocabulary growth.
-    expect(MATCH_PROMPT_FINGERPRINT).toBe('3ef011ad233400d1')
-    expect(fingerprint(MATCH_SYSTEM_PROMPT)).toBe('3ef011ad233400d1')
+    // Re-pinned 2026-09-08: proof requirements distinguish browser-visible
+    // milestones from HTTP protocol promises, so cached matches must rerun.
+    expect(MATCH_PROMPT_FINGERPRINT).toBe('39aa6af02fb9d42b')
+    expect(fingerprint(MATCH_SYSTEM_PROMPT)).toBe('39aa6af02fb9d42b')
   })
 
   it('buildMatchUserPrompt renders the milestones and the catalog digest (ids, entries, steps)', () => {

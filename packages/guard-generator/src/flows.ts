@@ -80,6 +80,7 @@ export interface FlowClaimInput {
   title: string
   /** The surface hint extraction assigned; runnable surfaces must be accounted for. */
   driver: GuardDriverId
+  alternativeDrivers?: GuardDriverId[]
   /**
    * The extraction session's structured needs for this claim (plan 04 step 15),
    * read by flow synthesis (and its `check_flows` needs-vs-catalog binding).
@@ -233,7 +234,7 @@ function normalizeText(text: string): string {
 export function flowAreaClaimsMaterial(area: FlowSynthesisArea): string {
   return area.claims
     .map((c) => {
-      const base = `${c.doc}\0${normalizeText(c.anchor)}\0${normalizeText(c.title)}\0${c.driver}`
+      const base = `${c.doc}\0${normalizeText(c.anchor)}\0${normalizeText(c.title)}\0${c.driver}${c.alternativeDrivers?.length ? `\0alternatives:${[...new Set(c.alternativeDrivers)].sort().join(',')}` : ''}`
       const needs = (c.needs ?? [])
         .map((n) => `${n.kind}\0${normalizeText(n.name)}${n.detail ? `\0${normalizeText(n.detail)}` : ''}`)
         .sort()
@@ -377,6 +378,7 @@ function orderMilestones(raw: { milestone: SynthesizedMilestone; claim: FlowClai
       doc: e.claim.doc,
       anchor: e.claim.anchor,
       claimTitle: e.claim.title,
+      proofDrivers: [...new Set([e.claim.driver, ...(e.claim.alternativeDrivers ?? [])])].sort(),
       ...(e.milestone.note ? { note: e.milestone.note } : {}),
     })
   }
@@ -440,7 +442,7 @@ function validateAreaSynthesis(
   }
 
   const uncoveredClaims = index.all
-    .filter((c) => isRunnableDriver(c.driver) && !covered.has(claimKey(c.doc, c.anchor, c.title)))
+    .filter((c) => [c.driver, ...(c.alternativeDrivers ?? [])].some(isRunnableDriver) && !covered.has(claimKey(c.doc, c.anchor, c.title)))
     .map(describeClaim)
 
   return { flows, noFlowClaims, unknownReferences, uncoveredClaims }

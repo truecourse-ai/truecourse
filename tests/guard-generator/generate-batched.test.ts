@@ -116,7 +116,10 @@ describe('generateGuards — multi-flow attribution', () => {
     })
     expect(loadScenarios(r).scenarios.map((s) => s.id).sort()).toEqual(['alpha', 'beta'])
     const flows = new Map(readManifest(r)!.flows.map((f) => [f.flowId, f]))
-    expect(flows.get('alpha')!.scenarios).toEqual([{ id: 'alpha', drivers: ['cli'], status: 'passing' }])
+    expect(flows.get('alpha')!.scenarios).toEqual([{
+      id: 'alpha', drivers: ['cli'], status: 'passing',
+      milestoneCoverage: [{ milestone: 1, driver: 'cli' }],
+    }])
     expect(flows.get('alpha')!.generationInputsHash).toBeTruthy()
     // beta's test is committed with its failing status, so its flow SETTLED too.
     expect(flows.get('beta')!.scenarios).toMatchObject([

@@ -86,7 +86,7 @@ describe('generateGuards — api surface authoring + birth', () => {
     const section = guardManifestSections(readManifest(r)).find((s) => s.anchor === 'list')!
     expect(section.scenarioIds).toEqual(['list'])
     expect(readManifest(r)!.flows.find((f) => f.flowId === 'list')!.scenarios).toEqual([
-      { id: 'list', drivers: ['api'], status: 'passing' },
+      { id: 'list', drivers: ['api'], status: 'passing', milestoneCoverage: [{ milestone: 1, driver: 'api' }] },
     ])
   }, 60_000)
 
@@ -184,7 +184,7 @@ describe('generateGuards — api surface authoring + birth', () => {
     expect(res.flows).toMatchObject({ settled: 1, unsettled: 0 })
   }, 60_000)
 
-  it('authors a flow’s cli and api surfaces in separate single-driver calls', async () => {
+  it('authors a flow’s declared cli and api alternatives in separate single-driver calls', async () => {
     // One scenario per (flow, surface): a surface never rides another's authoring
     // call, so each call carries exactly one driver's framing and system prompt.
     const r = repo()
@@ -197,7 +197,7 @@ describe('generateGuards — api surface authoring + birth', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, cliInterface(['relkit']), apiInterface('GET', '/todos')),
-      extractSession: listExtract,
+      extractSession: extractSessionBy({ list: [{ driver: 'api', alternativeDrivers: ['cli'], claim: 'The todo list can be retrieved' }], version: { untestable: 'covered elsewhere' } }),
       flowWorkerSession: submitWorkerSessions(
         (task) =>
           task.surface === 'api'
@@ -246,7 +246,7 @@ describe('generateGuards — api surface authoring + birth', () => {
       flowWorkerSession: submitWorkerSessions(() => raw('relkit --version exits 0', PASSING_STEPS)),
     })
 
-    expect(res.written.map((w) => w.surface)).toEqual(['cli'])
+    expect(res.written).toEqual([])
     const gap = res.coverageGaps.find((g) => g.flowId === 'list' && g.surface === 'api')!
     expect(gap.kind).toBe('no-interface')
     expect(readManifest(r)!.flows.find((f) => f.flowId === 'list')!.gaps).toEqual([

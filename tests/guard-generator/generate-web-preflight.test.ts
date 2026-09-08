@@ -62,7 +62,7 @@ describe('generateGuards — the web browser preflight', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, webInterface()),
-      extractSession: extractSessionBy({}),
+      extractSession: extractSessionBy({ home: [{ driver: 'web' }] }),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         sessionsSeen.push(task.workItem)
         return undefined
@@ -91,7 +91,7 @@ describe('generateGuards — the web browser preflight', () => {
     await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, webInterface()),
-      extractSession: extractSessionBy({}),
+      extractSession: extractSessionBy({ home: [{ driver: 'web' }] }),
       flowWorkerSession: flowWorkerSessionOf(async () => undefined),
       browserPreflight: async () => ({ ok: false, reason: 'no chromium (test)' }),
     })
@@ -102,7 +102,7 @@ describe('generateGuards — the web browser preflight', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, webInterface()),
-      extractSession: extractSessionBy({}),
+      extractSession: extractSessionBy({ home: [{ driver: 'web' }] }),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         sessionsSeen.push(task.workItem)
         return {

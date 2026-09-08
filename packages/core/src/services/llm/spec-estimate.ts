@@ -140,6 +140,7 @@ import {
   loadSpecScope,
   driverRecipeKey,
   isRunnableDriver,
+  flowDriversToMatch,
   runnableDriverIds,
   violatesSettleInvariant,
   dismissedClaimKey,
@@ -663,13 +664,13 @@ async function planGuardSessionStages(repoRoot: string, plan: GuardWorkPlan): Pr
     const live: FlowClaimInput[] = [];
     for (const c of snapped.claims) {
       if (dismissed.has(dismissedClaimKey(doc.doc, c.sectionAnchor, c.claim))) continue;
-      if (!isRunnableDriver(c.driver)) continue;
-      if (!preparedSet.has(c.driver)) continue;
+      if (![c.driver, ...(c.alternativeDrivers ?? [])].some((driver) => isRunnableDriver(driver) && preparedSet.has(driver))) continue;
       live.push({
         doc: doc.doc,
         anchor: c.sectionAnchor,
         title: c.claim,
         driver: c.driver,
+        ...(c.alternativeDrivers ? { alternativeDrivers: c.alternativeDrivers } : {}),
         ...(c.needs && c.needs.length > 0 ? { needs: c.needs } : {}),
       });
     }
@@ -804,6 +805,7 @@ async function planGuardRealizationStages(
       const plannedPairs: { surface: GuardDriverId; fingerprints: string[] }[] = [];
       let unknown = false;
       for (const catalog of matchable) {
+        if (!flowDriversToMatch(flow).includes(catalog.surface)) continue;
         const cached = await readCachedMatch(repoRoot, flow, catalog);
         if (!cached) {
           matchCalls++;

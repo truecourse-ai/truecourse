@@ -63,6 +63,7 @@ import {
   listGuardFlows,
   readGuardFlowDetail,
   readGuardFlowsForView,
+  readGuardScenariosForView,
   readGuardInterfaces,
   readGuardClaims,
   readGuardClaimsForView,
@@ -211,6 +212,7 @@ router.get('/:id/guard/coverage', async (req: Request, res: Response, next: Next
     // the manifest/flows/result join falls back to the baseline set the gate executed.
     res.json(
       composeDocCoverage(doc, content, {
+        scenarios: await readGuardScenariosForView(repo.path, commit),
         manifest: await readManifestForView(repo.path, commit),
         latest: await readGuardRunForView(repo.path, commit),
         result: await readGuardReport(repo.path, commit),

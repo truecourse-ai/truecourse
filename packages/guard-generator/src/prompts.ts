@@ -2612,6 +2612,11 @@ ${OUTPUT_ONLY_GUARDRAIL}
 - Match on BEHAVIOR, not on wording. An interface whose entry is \`tasks add\` realizes
   "creating a task returns its id" even though neither text quotes the other.
 
+# Proof requirements
+A browser interaction can prove user-visible milestones without a separate API test.
+It cannot prove HTTP status codes, malformed requests, headers or raw response bodies.
+Never substitute a visible UI result for a protocol-specific promise.
+
 # The api surface also owns the SERVER PROCESS
 The api surface does not only send requests: a test on it starts the service (with
 any environment it likes), signals it, reads what it writes to stdout/stderr, and

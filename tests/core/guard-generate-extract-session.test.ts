@@ -256,7 +256,7 @@ describe('EXTRACT_SESSION_SYSTEM_PROMPT', () => {
   it('classifies programmatic-API claims as library, by consumption form', () => {
     expect(EXTRACT_SESSION_SYSTEM_PROMPT).toContain('IMPORTING it from user code')
     expect(EXTRACT_SESSION_SYSTEM_PROMPT).toContain('documented consumption form')
-    expect(EXTRACT_SESSION_SYSTEM_PROMPT).toContain('web/tui/library claims')
+    expect(EXTRACT_SESSION_SYSTEM_PROMPT).toContain('tui/library claims')
   })
 
   it('states the closed NEEDS vocabulary the outcome schema enforces', () => {
@@ -393,11 +393,11 @@ describe('the extract seam', () => {
     expect(result.data.untestable.map((n) => n.sectionAnchor)).toEqual([LISTING])
   })
 
-  it('keeps the claims’ needs through the fold', async () => {
+  it('keeps claim needs and proof alternatives through the cached fold', async () => {
     const r = docRepo()
     const [doc] = docsOf(r)
     await primeExtractCache(r, doc, {
-      claims: [claim(CREATING, { needs: [{ kind: 'credential', name: 'github-token' }] })],
+      claims: [claim(CREATING, { alternativeDrivers: ['web'], needs: [{ kind: 'credential', name: 'github-token' }] })],
       untestable: [],
     })
     const seams = createGuardGenerateSessionSeams({ repoRoot: r, transport: 'api' })
@@ -406,6 +406,7 @@ describe('the extract seam', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.data.claims[0].needs).toEqual([{ kind: 'credential', name: 'github-token' }])
+    expect(result.data.claims[0].alternativeDrivers).toEqual(['web'])
   })
 
   it('ticks progress once per doc, cache hits included', async () => {

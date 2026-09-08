@@ -28,6 +28,7 @@ import { createHash } from 'node:crypto'
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import {
   interfaceEntryLabel,
+  flowDriversToMatch,
   interfaceFingerprint,
   type GuardDriverId,
   type GuardFlow,
@@ -243,7 +244,7 @@ export async function planFlowMatching(
   const pairs: MatchPairPlan[] = []
   for (const flow of flows) {
     for (const catalog of catalogs) {
-      if (catalog.interfaces.length === 0) continue
+      if (catalog.interfaces.length === 0 || !flowDriversToMatch(flow).includes(catalog.surface)) continue
       const cacheKey = matchCacheKey(flow, catalog)
       pairs.push({
         flowId: flow.id,
@@ -308,6 +309,8 @@ function validateMatch(
       if (!issues.unknownMilestones.includes(entry.milestone)) issues.unknownMilestones.push(entry.milestone)
       continue
     }
+    const required = flow.milestones.find((m) => m.order === entry.milestone)?.proofDrivers
+    if (required && !required.includes(catalog.surface)) continue
     covered.add(entry.milestone)
     steps.push({ interface: iface, milestone: entry.milestone, ...(entry.note ? { note: entry.note } : {}) })
   }

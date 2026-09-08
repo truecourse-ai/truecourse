@@ -88,9 +88,10 @@ describe('flowGenerationInputsHash — the frozen retirement salt', () => {
    * discipline at all (a committed delete-account scenario deleted the seeded
    * principal mid-run).
    */
-  const GOLDEN = 'sha256:9403ee4cf224fd488980f0442bba14a1fdc155fe4347ba79c5d10e541e8914ba'
+  // Updated for milestone proof-driver matching; old driver accounting must regenerate.
+  const GOLDEN = 'sha256:2221ce7527a92eab7908b1fddfde0841bbb4f30fe15c6c048174db795e5bbf4a'
 
-  it('is byte-identical to what the pre-retirement code produced', () => {
+  it('retains the retirement salt with the current matching doctrine', () => {
     expect(
       flowGenerationInputsHash({
         flowFingerprint: 'f',

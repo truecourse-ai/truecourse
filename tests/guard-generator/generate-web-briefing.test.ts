@@ -63,7 +63,7 @@ describe('generateGuards — the web briefing advertises the seed fixtures', () 
     await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, webInterface()),
-      extractSession: extractSessionBy({}),
+      extractSession: extractSessionBy({ home: [{ driver: 'web' }] }),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         briefings.push(await task.prepare())
         return {

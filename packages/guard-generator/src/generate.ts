@@ -144,6 +144,8 @@ import {
   type GuardTestStatus,
   type GuardUnadjudicatedStage,
   milestoneOrder,
+  flowDriversToMatch,
+  scenarioMilestoneProof,
   type Interface,
   type InterfaceResource,
 } from '@truecourse/shared'
@@ -1208,12 +1210,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           })
           continue
         }
-        if (!isRunnableDriver(c.driver)) {
+        const proofDrivers = [c.driver, ...(c.alternativeDrivers ?? [])]
+        if (!proofDrivers.some(isRunnableDriver)) {
           // A claim on a surface with no driver yet is recorded coverage honesty.
           coverageGaps.push({ doc: s.doc, anchor: s.anchor, kind: 'awaiting-driver', driver: c.driver, reason: c.reason })
           continue
         }
-        if (!driverPrepared(recipe, c.driver)) {
+        if (!proofDrivers.some((driver) => isRunnableDriver(driver) && driverPrepared(recipe, driver))) {
           // A runnable claim whose driver has no recipe preparation is an honest
           // blocked-on gap — never composed into a flow that could only die.
           coverageGaps.push({
@@ -1230,6 +1233,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           anchor: s.anchor,
           title: c.claim,
           driver: c.driver,
+          ...(c.alternativeDrivers ? { alternativeDrivers: c.alternativeDrivers } : {}),
           // The extraction session's structured needs ride into flow synthesis
           // (plan 04 step 15 → 16); the one-shot path carries none.
           ...(c.needs && c.needs.length > 0 ? { needs: c.needs } : {}),
@@ -1554,11 +1558,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     }
   }
 
-  // 6. Match — one (cached) verdict per (flow, surface). The surfaces a flow is
-  // accounted for are the runnable ones the recipe prepares, plus any surface the
-  // catalog detected: a mapped-but-unrunnable surface is honest coverage
-  // accounting ("realizable on web — awaiting the web driver"), not silence.
-  const surfaces = accountedSurfaces(recipe, catalogs)
+  // 6. Match only drivers that can verify a milestone of this flow. Recipe
+  // preparation is availability, never evidence that a flow requires that driver.
+  const surfacesByFlow = new Map(liveFlows.map((flow) => [flow.id, flowDriversToMatch(flow)]))
   /** One flow's match outcome, folded back in flow order (item 134). */
   interface FlowMatchResult {
     work?: FlowWork
@@ -1569,7 +1571,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   }
 
   const works: FlowWork[] = []
-  const matchPairs = liveFlows.length * surfaces.filter((s) => matchable(s, recipe, catalogs)).length
+  const matchPairs = liveFlows.reduce((n, flow) => n + surfacesByFlow.get(flow.id)!.filter((s) => matchable(s, recipe, catalogs)).length, 0)
   let matchDone = 0
   // Match outcomes, for the total-loss abort after the loop. A cache HIT makes no
   // call and is counted nowhere; an `unrealizable` verdict is an ANSWER, not a loss.
@@ -1614,28 +1616,24 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     const plans = new Map<GuardDriverId, RealizationPlan>()
     const gaps: GuardManifestGap[] = []
     const serverBySurface = new Map<GuardDriverId, string>()
-    for (const surface of surfaces) {
+    for (const surface of surfacesByFlow.get(flow.id)!) {
       const surfaceCatalog = catalogs.get(surface)
       const interfaceCount = surfaceCatalog?.interfaces.length ?? 0
       if (!isRunnableDriver(surface)) {
-        if (interfaceCount > 0) {
-          gaps.push({
-            surface,
-            kind: 'awaiting-driver',
-            driver: surface,
-            reason: `${interfaceCount} ${surface} interface(s) could realize this flow — ${guardDriver(surface)?.waitingLabel ?? `needs the ${surface} driver`}`,
-          })
-        }
+        gaps.push({
+          surface,
+          kind: 'awaiting-driver',
+          driver: surface,
+          reason: `the flow names ${surface} as a proof driver — ${guardDriver(surface)?.waitingLabel ?? `needs the ${surface} driver`}`,
+        })
         continue
       }
       if (!driverPrepared(recipe, surface)) {
-        if (interfaceCount > 0) {
-          gaps.push({
-            surface,
-            kind: 'blocked-on',
-            reason: composeBlockedOnReason([missingPrepNoun(surface)], oneLine(flow.title)),
-          })
-        }
+        gaps.push({
+          surface,
+          kind: 'blocked-on',
+          reason: composeBlockedOnReason([missingPrepNoun(surface)], oneLine(flow.title)),
+        })
         continue
       }
       if (!surfaceCatalog || interfaceCount === 0) {
@@ -2320,6 +2318,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           }
           return parts.join('; ')
         }
+        const proof = scenarioMilestoneProof(raw.steps)
+        const wrongDriver = task.work.flow.milestones.filter((m) => m.proofDrivers && !proof.some((p) => p.milestone === m.order && m.proofDrivers!.includes(p.driver)))
+        if (wrongDriver.length > 0) return `milestone(s) ${wrongDriver.map((m) => m.order).join(', ')} need assertions using their proof drivers: ${wrongDriver.map((m) => `${m.order}: ${m.proofDrivers!.join(' or ')}`).join('; ')}`
         const composition = compositionDefectOf(raw, recipe)
         if (composition) return composition
         const exampleDefect = exampleFidelityDefect(
@@ -3436,6 +3437,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     const keptIds = new Set<string>()
     const writtenFiles = new Map<string, string>()
     const priorsOnSurface = priorScenariosBySurface(work)
+    const carryPrior = (scenario: GuardManifestScenario): void => {
+      if (keptIds.has(scenario.id)) return
+      // A retained old test is still a test, but not proof of new requirements.
+      const { milestoneCoverage, ...rest } = scenario
+      scenarios.push(work.prior?.flowFingerprint === work.flow.fingerprint ? scenario : rest)
+      keptIds.add(scenario.id)
+    }
     let unsettledFlow = false
     for (const [surface] of work.plans) {
       const ref = `${work.flow.id}\0${surface}`
@@ -3464,6 +3472,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         scenarios.push({
           id: c.scenario.id,
           drivers: guardScenarioDrivers(c.scenario),
+          milestoneCoverage: scenarioMilestoneProof(c.scenario.steps),
           status,
           ...(finding ? { diagnosis: diagnosisOf(finding, file) } : {}),
         })
@@ -3499,14 +3508,16 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       // is that sibling's now, not a carried prior.
       if (committedHere.length === 0 && dropsHere.length === 0) {
         for (const s of priorsOnSurface.get(surface) ?? []) {
-          if (keptIds.has(s.id)) continue
-          scenarios.push(s)
-          keptIds.add(s.id)
+          carryPrior(s)
         }
       }
       if (committedHere.length > 0) {
         for (const r of retired) if (r.surface === surface) r.replacedBy = [...committedHere]
       }
+    }
+    const assignedPriors = new Set([...priorsOnSurface.values()].flatMap((rows) => rows.map((s) => s.id)))
+    for (const prior of work.prior?.scenarios ?? []) {
+      if (!assignedPriors.has(prior.id)) carryPrior(prior)
     }
     // Now the deletions: every prior id neither re-written nor carried, plus
     // the OLD file of a re-written id whose path moved.
@@ -3708,16 +3719,17 @@ type PriorScenarioIndex = ReadonlyMap<string, { yaml: string; scenario: GuardSce
 /**
  * Which surface each of the flow's committed scenarios belongs to — the
  * deterministic owner rule for edit mode: the first runnable driver (registry
- * order) that both the scenario drives and the flow planned this run; a
- * scenario driving no planned surface falls to the first planned surface, so
- * every prior is briefed somewhere and never twice.
+ * order) that both the scenario drives and the flow planned this run.
+ * Scenarios without a current plan are carried separately. Driver selection
+ * cannot silently retire an existing test, especially a failing one.
  */
 function priorScenariosBySurface(work: FlowWork): Map<GuardDriverId, GuardManifestScenario[]> {
   const out = new Map<GuardDriverId, GuardManifestScenario[]>()
   const planned = [...work.plans.keys()]
   if (planned.length === 0) return out
   for (const s of work.prior?.scenarios ?? []) {
-    const owner = runnableDriverIds.find((d) => s.drivers.includes(d) && work.plans.has(d)) ?? planned[0]!
+    const owner = runnableDriverIds.find((d) => s.drivers.includes(d) && work.plans.has(d))
+    if (!owner) continue
     const list = out.get(owner)
     if (list) list.push(s)
     else out.set(owner, [s])
@@ -3775,6 +3787,7 @@ function manifestEntry(
   return {
     flowId: work.flow.id,
     flowFingerprint: work.flow.fingerprint,
+    milestones: work.flow.milestones,
     bindings: work.flow.bindings,
     scenarios: scenarios.slice().sort((a, b) => a.id.localeCompare(b.id)),
     retiredScenarios: retiredScenarios.slice().sort((a, b) => a.id.localeCompare(b.id)),
@@ -3799,18 +3812,6 @@ function primarySection(flow: GuardFlow, byKey: ReadonlyMap<string, SectionInput
     if (section) return section
   }
   return null
-}
-
-/**
- * The surfaces a flow is accounted for: every runnable driver the recipe prepares
- * (where a scenario could exist) UNION every surface the interface mapper detected
- * (so a mapped-but-unrunnable surface is visible coverage, not silence). Registry
- * order, so the accounting is deterministic.
- */
-function accountedSurfaces(recipe: Recipe, catalogs: ReadonlyMap<GuardDriverId, SurfaceCatalog>): GuardDriverId[] {
-  const wanted = new Set<GuardDriverId>(catalogs.keys())
-  for (const id of runnableDriverIds) if (driverPrepared(recipe, id)) wanted.add(id)
-  return [...wanted].sort()
 }
 
 /** True when this surface reaches the matcher (runnable, prepared, catalog non-empty). */
