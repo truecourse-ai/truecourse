@@ -75,29 +75,36 @@ export function RunsTab({ repo }: { repo: Repo }) {
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <PageHeader title="Runs" subtitle={rows.length === history.length ? `${history.length}` : `${rows.length} of ${history.length}`} />
-      <div className="flex shrink-0 flex-wrap items-center gap-x-6 gap-y-1 border-b border-border px-6 py-2">
+      <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-x-6 gap-y-2 border-b border-border px-6 py-2 [&>div]:border-0 [&>div]:p-0">
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           aria-label="Search runs"
           placeholder="Search runs (PR, commit, branch)"
-          className="w-64 rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          className="w-64 max-w-full shrink-0 rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
         />
-        <div className="flex flex-wrap items-center gap-x-4 [&>div]:border-0 [&>div]:px-0 [&>div]:py-0">
-          <FilterBar
-            label="Origin"
-            ariaLabel="Filter runs by origin"
-            options={originOptions}
-            selected={originFilter}
-            onChange={setOriginFilter}
-          />
-        </div>
+        <FilterBar
+          label="Origin"
+          ariaLabel="Filter runs by origin"
+          options={originOptions}
+          selected={originFilter}
+          onChange={setOriginFilter}
+        />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto">
-        <table className="w-full border-collapse text-[13px]" aria-label="Runs">
+      <div className="min-h-0 min-w-0 flex-1 overflow-auto">
+        <table className={`w-full table-fixed border-collapse text-[13px] ${showCoverage ? 'min-w-6xl' : 'min-w-4xl'}`} aria-label="Runs">
+          <colgroup>
+            <col className="w-32" />
+            <col />
+            <col className="w-28" />
+            <col className="w-20" />
+            <col className="w-64" />
+            {showCoverage && <col className="w-44" />}
+            <col className="w-52" />
+          </colgroup>
           <thead className="sticky top-0 z-10 bg-card">
-            <tr className="border-b border-border text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <tr className="whitespace-nowrap border-b border-border text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               <th className="px-6 py-2 text-left font-semibold">Commit</th>
               <th className="px-3 py-2 text-left font-semibold">Branch</th>
               <th className="px-3 py-2 text-left font-semibold">Pull request</th>
@@ -121,19 +128,23 @@ export function RunsTab({ repo }: { repo: Repo }) {
                   }}
                   className="cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/40 focus:bg-muted/40 focus:outline-none"
                 >
-                  <td className="px-6 py-2.5 font-mono text-[12px] text-foreground">{h.commit ?? h.runId}</td>
-                  <td className="px-3 py-2.5 font-mono text-[12px] text-foreground">{h.branch ?? ''}</td>
+                  <td className="px-6 py-2.5 font-mono text-[12px] text-foreground">
+                    <span className="block truncate" title={h.commit ?? h.runId}>{h.commit?.slice(0, 8) ?? h.runId}</span>
+                  </td>
+                  <td className="px-3 py-2.5 font-mono text-[12px] text-foreground">
+                    <span className="block truncate" title={h.branch ?? ''}>{h.branch ?? ''}</span>
+                  </td>
                   <td className="px-3 py-2.5 text-foreground">{h.pullRequest != null ? `#${h.pullRequest}` : ''}</td>
                   <td className="px-3 py-2.5">
                     <span className={CHIP_CLASS}>{h.origin ?? 'hosted'}</span>
                   </td>
                   <td className="px-3 py-2.5">
-                    <span className="flex items-center gap-3">
+                    <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
                       <span className="inline-flex shrink-0 items-center gap-1.5 text-[10px] font-medium text-foreground">
                         <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${guardStatusMeta(verdict).dot}`} />
                         {verdict === 'fail' ? 'Failed' : 'Passed'}
                       </span>
-                      <span className="inline-flex items-center gap-2 tabular-nums">
+                      <span className="inline-flex flex-wrap items-center gap-2 tabular-nums">
                         {GUARD_OUTCOMES.filter((o) => h.summary[o] > 0).map((o) => (
                           <HoverPopover key={o} portal width="narrow" content={`${h.summary[o]} ${guardStatusMeta(o).label}`}>
                             <span className="inline-flex items-center gap-1 text-[10px] text-foreground">
@@ -146,9 +157,13 @@ export function RunsTab({ repo }: { repo: Repo }) {
                     </span>
                   </td>
                   {showCoverage && (
-                    <td className="px-3 py-2.5 text-muted-foreground">{version ? `${version.label} · ${version.sha}` : ''}</td>
+                    <td className="px-3 py-2.5 text-muted-foreground">
+                      <span className="block truncate" title={version ? `${version.label} · ${version.sha}` : ''}>
+                        {version ? `${version.label} · ${version.sha}` : ''}
+                      </span>
+                    </td>
                   )}
-                  <td className="px-6 py-2.5 text-muted-foreground">{formatGuardTime(h.ranAt)}</td>
+                  <td className="whitespace-nowrap px-6 py-2.5 text-muted-foreground">{formatGuardTime(h.ranAt)}</td>
                 </tr>
               );
             })}
@@ -165,4 +180,3 @@ export function RunsTab({ repo }: { repo: Repo }) {
     </div>
   );
 }
-

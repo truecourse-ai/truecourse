@@ -267,22 +267,30 @@ function CorpusBody({ repo, versions }: { repo: Repo; versions: ReturnType<typeo
         {...(repo.real ? { right: <RealScanButton repo={repo} hasCorpus={corpus.data !== null} /> } : {})}
       />
       <CoverageVersionPicker repo={repo} versions={versions.versions} version={versions.version} onSelect={versions.select} />
-      <div className="min-h-0 flex-1 overflow-auto">
-        <div className="sticky top-0 z-10 flex flex-wrap items-center gap-x-6 gap-y-1 border-b border-border bg-card px-6 py-2">
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            aria-label="Search the corpus"
-            placeholder="Search documents and conflicts"
-            className="w-64 rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-          />
-          <div className="flex flex-wrap items-center gap-x-4 [&>div]:border-0 [&>div]:px-0 [&>div]:py-0">
-            <FilterBar label="Type" ariaLabel="Filter by type" options={typeOptions} selected={typeFilter} onChange={setTypeFilter} />
-            <FilterBar label="Status" ariaLabel="Filter documents by status" options={statusOptions} selected={statusFilter} onChange={setStatusFilter} multi />
-            <FilterBar label="Area" ariaLabel="Filter by area" options={areaOptions} selected={areaFilter} onChange={setAreaFilter} multi />
-          </div>
-        </div>
-        <table className="w-full border-collapse text-[13px]" aria-label="Spec corpus">
+      <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-border bg-card px-6 py-2 [&>div]:border-0 [&>div]:p-0">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          aria-label="Search the corpus"
+          placeholder="Search documents and conflicts"
+          className="w-64 max-w-full shrink-0 rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+        />
+        <FilterBar label="Type" ariaLabel="Filter by type" options={typeOptions} selected={typeFilter} onChange={setTypeFilter} />
+        <FilterBar label="Status" ariaLabel="Filter documents by status" options={statusOptions} selected={statusFilter} onChange={setStatusFilter} multi />
+        <FilterBar label="Area" ariaLabel="Filter by area" options={areaOptions} selected={areaFilter} onChange={setAreaFilter} multi />
+      </div>
+      <div className="min-h-0 min-w-0 flex-1 overflow-auto">
+        {/* Keep long corpus notes from sizing the table and pushing metadata off screen. */}
+        <table className="w-full min-w-4xl table-fixed border-collapse text-[13px]" aria-label="Spec corpus">
+          <colgroup>
+            <col />
+            <col className="w-24" />
+            <col className="w-40" />
+            <col className="w-24" />
+            <col className="w-24" />
+            <col className="w-28" />
+            <col className="w-36" />
+          </colgroup>
           <thead className="bg-card">
             <tr className="border-b border-border text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               <th className="px-6 py-2 text-left font-semibold">Document</th>
@@ -307,16 +315,18 @@ function CorpusBody({ repo, versions }: { repo: Repo; versions: ReturnType<typeo
               >
                 <td className="px-6 py-2.5">
                   <span className="flex items-center gap-2">
-                    <span className="min-w-0 truncate text-foreground">{r.title}</span>
+                    <span className="min-w-0 truncate text-foreground" title={r.title}>{r.title}</span>
                     {r.kind === 'conflict' && <span className={CHIP_CLASS}>conflict</span>}
                     {r.kind === 'doc' && r.web && <span className={CHIP_CLASS}>site</span>}
                   </span>
                   {r.kind === 'doc' && (
-                    <span className="block truncate font-mono text-[11px] text-muted-foreground">{r.ref}</span>
+                    <span className="block truncate font-mono text-[11px] text-muted-foreground" title={r.ref}>{r.ref}</span>
                   )}
                 </td>
                 <td className="px-3 py-2.5">
-                  <span className={CHIP_CLASS}>{r.area}</span>
+                  <span className={`${CHIP_CLASS} max-w-full`} title={r.area}>
+                    <span className="truncate">{r.area}</span>
+                  </span>
                 </td>
                 <td className="px-3 py-2.5">
                   {r.kind === 'doc' ? (
