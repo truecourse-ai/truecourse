@@ -8,15 +8,18 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import type { GuardCoveragePlainStatus } from '@/preview/vendor/shared';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import type { GuardCoveragePlainStatus, GuardLastRunSummary } from '@/preview/vendor/shared';
+import type { Repo } from '@/preview/data/types';
 import { GUARD_COVERAGE_PLAIN_ORDER } from '@/preview/vendor/shared';
 import { CompositionBar, fiveWordSegments } from '@/preview/vendor/components/guard/GuardCoverageOverview';
 import { PageHeader, ProviderIcon } from '@/preview/ui/bits';
 import { StatusWord, CONCLUSION_TONE } from '@/preview/ui/status-word';
 import { statusSummary } from '@/preview/data/corpus-fixtures';
 import { usePreviewState } from '@/preview/shell/preview-state';
+import { relativeTime } from '@/preview/shell/real-runs';
 import { ConnectDialog } from './ConnectDialog';
+import { useHomeSummaries } from './use-home-summaries';
 
 type ByStatus = Record<GuardCoveragePlainStatus, number>;
 
@@ -31,11 +34,24 @@ function add(into: ByStatus, from: ByStatus | undefined): void {
 
 function proven(by: ByStatus): string {
   const total = GUARD_COVERAGE_PLAIN_ORDER.reduce((n, k) => n + by[k], 0);
-  return total === 0 ? '' : `${Math.round((by.succeeded / total) * 100)}%`;
+  return total === 0 ? '—' : `${Math.round((by.succeeded / total) * 100)}%`;
+}
+
+function checkForRun(run: GuardLastRunSummary): Repo['lastCheck'] {
+  const counts = run.summary;
+  const conclusion = counts.fail > 0 || counts.error > 0 ? 'failure'
+    : counts.total > 0 && counts.pass === counts.total ? 'success' : 'neutral';
+  return {
+    conclusion,
+    word: conclusion === 'failure' ? 'Failing' : conclusion === 'success' ? 'Passing' : 'Neutral',
+    summary: `${counts.pass} passed, ${counts.fail} failed, ${counts.error} errors, ${counts.blocked ?? 0} blocked, ${counts.stale} stale, ${counts.orphaned} orphaned`,
+    at: relativeTime(run.ranAt),
+  };
 }
 
 export default function HomePage() {
   const { workspace, repos } = usePreviewState();
+  const summaries = useHomeSummaries(repos);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [connectOpen, setConnectOpen] = useState(searchParams.get('connect') === '1');
@@ -49,12 +65,20 @@ export default function HomePage() {
   const perRepo = useMemo(
     () =>
       repos.map((repo) => {
-        const summary = statusSummary(repo.id);
-        const sections = summary.sections?.byStatus ?? summary.coverage?.byStatus ?? zero();
-        const flows = summary.coverage?.flows.byStatus ?? zero();
-        return { repo, sections, flows, sectionTotal: summary.sections?.total ?? 0, withTests: summary.coverage?.withScenarios ?? 0 };
+        const loaded = repo.real ? summaries.get(repo.id) : undefined;
+        const summary = repo.real ? loaded?.status : statusSummary(repo.id);
+        const sections = summary?.sections?.byStatus ?? summary?.coverage?.byStatus ?? zero();
+        const flows = summary?.coverage?.flows.byStatus ?? zero();
+        const sectionTotal = summary?.sections?.total ?? summary?.coverage?.totalSections ?? 0;
+        const lastRun = repo.real ? summary?.lastRun : null;
+        const lastCheck = lastRun ? checkForRun(lastRun) : repo.lastCheck;
+        const requirementsEmpty = repo.real && !loaded ? 'Loading…'
+          : loaded?.statusError ? 'Coverage unavailable'
+          : loaded?.corpus || summary?.sections ? 'No requirements yet'
+          : loaded?.corpusError ? 'Requirements unavailable' : 'no corpus yet';
+        return { repo, loaded, sections, flows, sectionTotal, lastCheck, lastRun, requirementsEmpty };
       }),
-    [repos],
+    [repos, summaries],
   );
 
   const totals = useMemo(() => {
@@ -68,6 +92,8 @@ export default function HomePage() {
     }
     return { sections, flows, sectionTotal };
   }, [perRepo]);
+  const loading = perRepo.some(({ repo, loaded }) => repo.real && !loaded);
+  const incomplete = perRepo.some(({ loaded }) => loaded?.statusError);
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
@@ -88,6 +114,8 @@ export default function HomePage() {
         <div className="grid grid-cols-1 gap-x-10 gap-y-5 border-b border-border px-6 py-5 lg:grid-cols-2">
           <CompositionBar label="Requirements" segments={fiveWordSegments(totals.sections)} totalLabel={`${totals.sectionTotal} sections · ${proven(totals.sections)} proven`} />
           <CompositionBar label="Flows" segments={fiveWordSegments(totals.flows)} />
+          {!loading && !incomplete && totals.sectionTotal === 0 && <p className="text-xs text-muted-foreground">No requirements yet.</p>}
+          {(loading || incomplete) && <p role="status" className="text-xs text-muted-foreground lg:col-span-2">{loading ? 'Loading repository summaries…' : 'Totals exclude repositories whose coverage could not be loaded.'}</p>}
         </div>
 
         <table className="w-full border-collapse text-[13px]" aria-label="Repositories by coverage">
@@ -101,7 +129,7 @@ export default function HomePage() {
             </tr>
           </thead>
           <tbody>
-            {perRepo.map(({ repo, sections, sectionTotal }) => {
+            {perRepo.map(({ repo, loaded, sections, sectionTotal, lastCheck, lastRun, requirementsEmpty }) => {
               const segments = fiveWordSegments(sections).filter((s) => s.count > 0);
               return (
                 <tr
@@ -109,7 +137,7 @@ export default function HomePage() {
                   tabIndex={0}
                   onClick={() => navigate(`/preview/repos/${repo.id}/coverage`)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') navigate(`/preview/repos/${repo.id}/coverage`);
+                    if (e.key === 'Enter' && e.target === e.currentTarget) navigate(`/preview/repos/${repo.id}/coverage`);
                   }}
                   className="cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/40 focus:bg-muted/40 focus:outline-none"
                 >
@@ -142,18 +170,32 @@ export default function HomePage() {
                         </span>
                       </span>
                     ) : (
-                      <span className="text-muted-foreground">no corpus yet</span>
+                      <span className="text-muted-foreground">{requirementsEmpty}</span>
                     )}
                   </td>
                   <td className="px-3 py-2.5 text-right tabular-nums text-foreground">{proven(sections)}</td>
                   <td className="px-3 py-2.5">
-                    <span className="flex items-center gap-2">
-                      <StatusWord tone={CONCLUSION_TONE[repo.lastCheck.conclusion]} word={repo.lastCheck.word} />
-                      <span className="text-muted-foreground">{repo.lastCheck.at}</span>
-                    </span>
+                    <Link
+                      to={`/preview/repos/${repo.id}/${!repo.real || lastRun ? 'runs' : 'activity'}`}
+                      onClick={(event) => event.stopPropagation()}
+                      title={lastCheck.summary}
+                      className="flex items-center gap-2 hover:underline"
+                    >
+                      <StatusWord tone={CONCLUSION_TONE[lastCheck.conclusion]} word={lastCheck.word} />
+                      <span className="text-muted-foreground">{lastCheck.at}</span>
+                    </Link>
                   </td>
                   <td className="px-6 py-2.5 text-muted-foreground">
-                    <span className="font-mono text-[12px] text-foreground">{repo.baselineSha}</span> · {repo.baselineAt}
+                    {repo.real ? (
+                      !loaded ? 'Loading…' : loaded.corpusError ? 'Baseline unavailable' : loaded.corpus ? (
+                        <>
+                          <span title={loaded.corpus.corpusCommit} className="font-mono text-[12px] text-foreground">{loaded.corpus.corpusCommit?.slice(0, 7) ?? repo.defaultBranch}</span>
+                          {' · '}{relativeTime(loaded.corpus.corpus.generatedAt)}
+                        </>
+                      ) : 'no baseline yet'
+                    ) : (
+                      <><span className="font-mono text-[12px] text-foreground">{repo.baselineSha}</span> · {repo.baselineAt}</>
+                    )}
                   </td>
                 </tr>
               );
