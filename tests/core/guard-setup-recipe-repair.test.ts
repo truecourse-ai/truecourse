@@ -210,6 +210,19 @@ describe('recipeRepairSessionDef', () => {
 });
 
 describe('recipeRepairBriefing', () => {
+  it('grounds SQLite repair in its local file instead of requiring a datastore daemon', () => {
+    const text = recipeRepairBriefing({
+      repoRoot: '/tmp/x',
+      inputs: { packageJson: '{}', presentInputs: ['package.json'] },
+      inputsFingerprint: 'sha256:abc',
+      database: { type: 'sqlite', driver: 'node:sqlite' },
+      datastoreUrls: [],
+      composeGenerated: false,
+    });
+    expect(text).toContain('Seed and server must use the same file');
+    expect(text).toContain('SQLite itself needs no api.services daemon');
+  });
+
   it('leads with the failed proposal and the engine verdict, and states a generated compose', () => {
     const text = recipeRepairBriefing({
       repoRoot: '/tmp/x',

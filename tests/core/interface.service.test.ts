@@ -7,6 +7,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { seedDraftGate } from '@truecourse/guard-generator';
 import { mapInterfaces, interfaceTypeFingerprints } from '../../packages/core/src/services/interface.service';
 import { ensureRepoTruecourseDir } from '../../packages/core/src/config/paths';
 import { interfaceFingerprint } from '../../packages/shared/src/interfaces';
@@ -654,4 +655,37 @@ describe('mapInterfaces refuses to overwrite a hand-authored catalog', () => {
     await mapInterfaces(repo, { probeExec: null });
     expect(JSON.parse(fs.readFileSync(authored, 'utf-8'))).toEqual(webCatalog);
   });
+});
+
+
+describe('built-in Node SQLite seed grounding', () => {
+  it.each([
+    ['lib/store.ts', "import { DatabaseSync } from 'node:sqlite'; export const db = new DatabaseSync(process.env.SQLITE_PATH || './data/expenses.sqlite');"],
+    ['lib/store.js', "import * as sqlite from 'node:sqlite'; export const db = new sqlite.DatabaseSync(':memory:');"],
+  ])('detects SQLite from source without a package dependency: %s', async (file, source) => {
+    writeRepo({
+      'package.json': JSON.stringify({ name: 'expense-tracker', dependencies: { next: '15.0.0', react: '19.0.0' } }),
+      [file]: source,
+    });
+    const result = await mapInterfaces(repo, { probeExec: null });
+    expect(result.database).toMatchObject({ type: 'sqlite', driver: 'node:sqlite', tables: [], relations: [] });
+    expect(result.database!.appImports.some(line => line.includes('node:sqlite'))).toBe(true);
+  });
+
+  it('does not infer SQLite from a similarly named local module', async () => {
+    writeRepo({
+      'package.json': JSON.stringify({ name: 'app', dependencies: { next: '15.0.0' } }),
+      'lib/store.ts': "import { DatabaseSync } from './node:sqlite'; export const db = new DatabaseSync();",
+    });
+    expect((await mapInterfaces(repo, { probeExec: null })).database).toBeNull();
+  });
+});
+
+
+it('makes a node:sqlite CREATE TABLE schema available to seed setup', async () => {
+  fs.cpSync(new URL('../fixtures/node-sqlite', import.meta.url), repo, { recursive: true });
+  const mapped = await mapInterfaces(repo, { probeExec: null });
+  expect(mapped.database?.driver).toBe('node:sqlite');
+  expect(mapped.database?.tables.map(table => table.name)).toEqual(['expenses', 'metadata']);
+  expect(seedDraftGate({ recipe: { build: 'true', api: { serve: ['node', 'server.js'] } }, database: mapped.database })).toEqual({ ok: true });
 });

@@ -146,7 +146,10 @@ export function recipeRepairBriefing(ctx: RecipeRepairContext): string {
   if (ctx.database) {
     lines.push(
       '',
-      `The analyzer detected a database dependency: ${ctx.database.driver}/${ctx.database.type}. A server that needs one and has no \`api.services\` to bring one up will die at boot on a connection nobody could make.`,
+      `The analyzer detected a database dependency: ${ctx.database.driver}/${ctx.database.type}.`,
+      ctx.database.type === 'sqlite'
+        ? 'SQLite is embedded: inspect the app\'s database filename, environment variables, directory permissions and initialization. Seed and server must use the same file; SQLite itself needs no api.services daemon.'
+        : 'Check how the app connects to its datastore and whether api.services brings that datastore up before the server boots.',
     );
   }
   if (ctx.datastoreUrls.length > 0) {

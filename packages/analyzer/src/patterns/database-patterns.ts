@@ -26,6 +26,7 @@ export const DATABASE_IMPORT_MAP: Record<string, { type: DatabaseType; driver: s
   'drizzle-orm/mysql-core': { type: 'mysql', driver: 'drizzle' },
 
   // SQLite drivers
+  'node:sqlite': { type: 'sqlite', driver: 'node:sqlite' },
   'better-sqlite3': { type: 'sqlite', driver: 'better-sqlite3' },
   'sqlite3': { type: 'sqlite', driver: 'sqlite3' },
   'drizzle-orm/sqlite-core': { type: 'sqlite', driver: 'drizzle' },
