@@ -63,6 +63,8 @@ export interface GuardInterfacePlaceView {
   address?: string;
   /** Tasks already authored at this place (directly or on a place it hosts). */
   authored: string[];
+  /** Tasks or readable facts still need a source reading. */
+  needsAuthoring: boolean;
 }
 
 export interface GuardInterfacesAuthorView {
@@ -91,6 +93,7 @@ export function readGuardInterfacesAuthorView(repoRoot: string): GuardInterfaces
       title: item.place.title,
       ...(item.place.address ? { address: item.place.address } : {}),
       authored: item.existing,
+      needsAuthoring: item.needsAuthoring,
     })),
     derived: countBySurface(derived?.interfaces ?? []),
     authored: countBySurface(authored?.interfaces ?? []),
@@ -106,7 +109,7 @@ function countBySurface(interfaces: readonly { type: string }[]): Record<string,
 
 export interface RunGuardInterfaceAuthorOptions {
   repoRoot: string;
-  /** Author only these places; default = every screen with nothing authored yet. */
+  /** Author only these places; default = every screen needing tasks or readable facts. */
   places?: readonly string[];
   /** Re-author places that already carry tasks. */
   replace?: boolean;
@@ -329,6 +332,6 @@ function runStatus(
   signal?: AbortSignal,
 ): 'completed' | 'failed' | 'interrupted' {
   if (signal?.aborted) return 'interrupted';
-  if (places.length > 0 && places.every((place) => place.status === 'failed')) return 'failed';
+  if (places.length > 0 && places.every((place) => place.status === 'failed' || place.status === 'rejected')) return 'failed';
   return 'completed';
 }

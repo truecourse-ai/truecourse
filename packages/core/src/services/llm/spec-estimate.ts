@@ -153,6 +153,7 @@ import {
   loadRecipe,
   readGuardDecisions,
   readAuthoredInterfaceCatalog,
+  webScreensNeedingReadables,
   readInterfaceCatalog,
   readMergedInterfaceCatalog,
   readManifest as readGuardManifest,
@@ -1008,12 +1009,13 @@ export async function estimateGuardSetup(
   const derivedCatalog = readInterfaceCatalog(repoRoot);
   const authoredCatalog = readAuthoredInterfaceCatalog(repoRoot);
   const interfacesSettled =
-    !replace && authoredCatalog !== null && settled('interfaces') === interfacesFingerprint(repoRoot);
+    !replace && authoredCatalog !== null && settled('interfaces') === interfacesFingerprint(repoRoot) &&
+    webScreensNeedingReadables(derivedCatalog, authoredCatalog).size === 0;
   const staleAuthoredIds = new Set(
     staleAuthoredPlaceDiagnostics(derivedCatalog, authoredCatalog).map((d) => d.subject),
   );
   const authorable = planWorkItems(derivedCatalog, authoredCatalog).filter(
-    (item) => !staleAuthoredIds.has(item.place.id) && (replace || item.existing.length === 0),
+    (item) => !staleAuthoredIds.has(item.place.id) && (replace || item.needsAuthoring),
   );
   const authorItems = interfacesSettled ? 0 : authorable.length;
   const reconcileMax = interfacesSettled ? 0 : 1;

@@ -80,9 +80,22 @@ describe('the read view', () => {
     expect(view.derived).toEqual({ cli: 1 });
     expect(view.authored).toEqual({ web: 1 });
     expect(view.places).toEqual([
-      { id: 'root', kind: 'screen', title: '/', address: '/', authored: ['web/add-repository-by-path'] },
-      { id: 'repos-repoid', kind: 'screen', title: '/repos/{repoId}', address: '/repos/{repoId}', authored: [] },
+      { id: 'root', kind: 'screen', title: '/', address: '/', authored: ['web/add-repository-by-path'], needsAuthoring: true },
+      { id: 'repos-repoid', kind: 'screen', title: '/repos/{repoId}', address: '/repos/{repoId}', authored: [], needsAuthoring: true },
     ]);
+  });
+
+  it('reports readable enrichment as work to the CLI, including nested places', () => {
+    fs.writeFileSync(guardInterfacesPath(repo), JSON.stringify(DERIVED));
+    const complete = { ...AUTHORED, resources: { web: [{ ...DERIVED.resources!.web[0],
+      readables: { markers: [], elements: [], controls: [], rows: [] },
+    }] } };
+    fs.writeFileSync(guardAuthoredInterfacesPath(repo), JSON.stringify(complete));
+    expect(readGuardInterfacesAuthorView(repo).places[0].needsAuthoring).toBe(false);
+    fs.writeFileSync(guardAuthoredInterfacesPath(repo), JSON.stringify({ ...complete, resources: { web: [
+      ...complete.resources.web, { id: 'details', kind: 'dialog', of: 'root', title: 'Details' },
+    ] } }));
+    expect(readGuardInterfacesAuthorView(repo).places[0].needsAuthoring).toBe(true);
   });
 
   it('reads an unmapped repository as unmapped rather than as a repo with no places', () => {

@@ -63,6 +63,8 @@ import {
   hashableRecipeText,
   readGuardSetup,
   readInterfaceCatalog,
+  readAuthoredInterfaceCatalog,
+  webScreensNeedingReadables,
   resolveSeedScript,
   FINGERPRINT_INPUTS,
   RecipeSchema,
@@ -751,7 +753,8 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         throw new SetupStepNotReadyError('interfaces', 'no interfaces row in guard/setup.json')
       }
       opts.onStepDone?.('interfaces', 'replayed — the authored catalog stands as it is')
-    } else if (settled('interfaces') === interfacesFp && authoredExists && opts.replace !== true) {
+    } else if (settled('interfaces') === interfacesFp && authoredExists && opts.replace !== true &&
+      webScreensNeedingReadables(readInterfaceCatalog(repoRoot), readAuthoredInterfaceCatalog(repoRoot)).size === 0) {
       steps.push({ key: 'interfaces', status: 'skipped', reason: 'unchanged', inputFingerprint: interfacesFp })
       opts.onStepDone?.('interfaces', 'unchanged')
     } else if (opts.authorInterfaces) {

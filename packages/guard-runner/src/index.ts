@@ -409,6 +409,7 @@ export {
   mergeInterfaceLists,
   mergeRegistries,
   staleAuthoredPlaceDiagnostics,
+  webScreensNeedingReadables,
   type InterfaceMergeDiagnostic,
   readInterfaceCatalogRaw,
   readGuardFlowsCorpus,

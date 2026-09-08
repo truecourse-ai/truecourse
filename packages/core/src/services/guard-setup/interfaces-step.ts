@@ -22,7 +22,7 @@
  *    never imports the command layer. The engine already decided the step
  *    should RUN (fingerprint moved, authored file absent, or `--replace`);
  *    what remains here is the cheap zero-work check: when every screen
- *    already carries authored tasks (and no replace was asked), no authoring
+ *    has authored tasks and established readable facts (and no replace was asked), no authoring
  *    run is started at all — a run record with zero sessions would be noise.
  *
  * An authoring failure fails the STEP, never setup (the engine's contract);
@@ -124,13 +124,13 @@ export function buildInterfacesStep(
     const authored = readAuthoredInterfaceCatalog(input.repoRoot);
     const stale = new Set(staleAuthoredPlaceDiagnostics(derived, authored).map((d) => d.subject));
     const workable = planWorkItems(derived, authored).filter(
-      (item) => !stale.has(item.place.id) && (input.replace || item.existing.length === 0),
+      (item) => !stale.has(item.place.id) && (input.replace || item.needsAuthoring),
     );
     if (workable.length === 0) {
       return {
         status: 'ok',
         reason: joinNotes(
-          'every derived screen already carries authored tasks — zero sessions',
+          'every derived screen already has authored tasks and established readable facts — zero sessions',
           notes,
         ),
         // The reconcile session (when one ran) lives under the SETUP run.
@@ -148,7 +148,7 @@ export function buildInterfacesStep(
         recorded.diagnostics = [...(recorded.diagnostics ?? []), ...run.diagnostics];
       }
       const allFailed =
-        run.places.length > 0 && run.places.every((place) => place.status === 'failed');
+        run.places.length > 0 && run.places.every((place) => place.status === 'failed' || place.status === 'rejected');
       return {
         status: allFailed ? 'failed' : 'ok',
         reason: joinNotes(

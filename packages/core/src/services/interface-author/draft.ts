@@ -17,9 +17,8 @@
  * The CONTRACT is absent for a third reason, and it is the schema's own: the
  * contract union has `cli` and `api` members only, and `contract.surface` must
  * equal the interface's type — a web task cannot carry one at all. What a web
- * place SHOWS is its resource's `readables`, which this pass does not author
- * either (a deliberate deferral: dialogs and panels are a
- * component-graph question, and readables are a vocabulary of their own).
+ * place SHOWS is its resource's `readables`, authored from the same source
+ * reading as its tasks, using the shared assertion vocabulary.
  *
  * Every rule below is checked against the MERGED catalog — the derived snapshot
  * joined with the authored file the draft would land in — because that is the
@@ -32,7 +31,7 @@ import {
   GUARD_WEB_ROLES,
   InterfaceOperationEntrySchema,
   InterfaceResourceIdSchema,
-  InterfaceResourceKindSchema,
+  InterfaceResourceSchema,
   InterfaceActivateStepSchema,
   InterfaceInputStepSchema,
   InterfaceNavigateStepSchema,
@@ -105,24 +104,11 @@ export const AuthoredTaskSchema = z
   .strict()
 export type AuthoredTask = z.infer<typeof AuthoredTaskSchema>
 
-/**
- * A place the tasks need that no derivation produced — a dialog that opens over
- * a screen, a panel that swaps in on one. Screens derive, so a screen
- * here is the exception: an app whose routing idiom no reader recognizes.
- * `readables` is deliberately absent — see the file header.
- */
-export const AuthoredPlaceSchema = z
-  .object({
-    id: InterfaceResourceIdSchema,
-    kind: InterfaceResourceKindSchema,
-    title: z.string().min(1),
-    /** The place this one sits ON (a panel) or OVER (a dialog). A screen has none. */
-    of: InterfaceResourceIdSchema.optional(),
-    /** Screens only — the address a navigate step reaches it by. */
-    address: z.string().min(1).optional(),
-    description: z.string().min(1).optional(),
-  })
-  .strict()
+/** A new place or an enrichment of this screen and its nested places. */
+export const AuthoredPlaceSchema = InterfaceResourceSchema.refine(
+  (place) => place.kind === 'screen' || place.kind === 'panel' || place.kind === 'dialog',
+  { path: ['kind'], message: 'web authoring declares screens, panels and dialogs only' },
+)
 export type AuthoredPlace = z.infer<typeof AuthoredPlaceSchema>
 
 /**
@@ -245,7 +231,12 @@ export interface ValidateFragmentInput {
  *     registry already defines and never redefines it as something else.
  */
 export function validateFragment(input: ValidateFragmentInput): FragmentValidation {
-  const { derived, authored, fragment } = input
+  const { derived, authored } = input
+  const draft = AuthoredFragmentSchema.safeParse(input.fragment)
+  if (!draft.success) {
+    return { ok: false, errors: draft.error.issues.map((issue) => `${issue.path.join('.')} — ${issue.message}`) }
+  }
+  const fragment = draft.data
   const replaceable = input.replaceable ?? new Set<string>()
   const errors: string[] = []
   const stamped = stampFragment(fragment)
@@ -301,12 +292,31 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
 
   // ---- 4. reachable, and located where it says -----------------------------
   const places = new Map<string, InterfaceResource>()
-  for (const place of [
-    ...(derived?.resources?.[AUTHORED_SURFACE] ?? []),
-    ...(authored?.resources?.[AUTHORED_SURFACE] ?? []),
-    ...stamped.resources,
-  ]) {
-    places.set(place.id, place as InterfaceResource)
+  const existingPlaces = new Map(
+    (mergeInterfaceCatalogs(derived, authored)?.resources?.[AUTHORED_SURFACE] ?? []).map((place) => [place.id, place]),
+  )
+  const seenPlaces = new Set<string>()
+  for (const place of stamped.resources) {
+    if (seenPlaces.has(place.id)) errors.push(`\`${place.id}\` is declared twice in this draft`)
+    seenPlaces.add(place.id)
+    const prior = existingPlaces.get(place.id)
+    // Enrichment cannot change another task's location or move a derived route.
+    for (const key of ['kind', 'of', 'address'] as const) {
+      if (prior && place[key] !== undefined && prior[key] !== undefined && place[key] !== prior[key]) {
+        errors.push(`\`${place.id}\` cannot change its existing \`${key}\` during authoring`)
+      }
+    }
+  }
+  const candidate = candidateAuthored(authored, stamped, replaceable, derived)
+  for (const place of mergeInterfaceCatalogs(derived, candidate)?.resources?.[AUTHORED_SURFACE] ?? []) {
+    places.set(place.id, place)
+  }
+  if (input.scope) {
+    for (const place of stamped.resources) {
+      if (screenFor(place.id, places)?.id !== input.scope.screenId) {
+        errors.push(`\`${place.id}\` is not a resource of \`${input.scope.screenId}\` — enrich only this screen and its nested places`)
+      }
+    }
   }
   for (const task of stamped.interfaces) {
     const first = task.steps[0]
@@ -359,7 +369,6 @@ export function validateFragment(input: ValidateFragmentInput): FragmentValidati
   }
 
   // ---- the structural half: the merged catalog has to parse ---------------
-  const candidate = candidateAuthored(authored, stamped, replaceable)
   const parsed = InterfacesFileSchema.safeParse(mergeInterfaceCatalogs(derived, candidate))
   if (!parsed.success) {
     for (const issue of parsed.error.issues) {
@@ -379,17 +388,37 @@ export function candidateAuthored(
   authored: InterfacesFile | null,
   stamped: ReturnType<typeof stampFragment>,
   replaceable: ReadonlySet<string> = new Set(),
+  derived: InterfacesFile | null = null,
 ): InterfacesFile {
   const kept = (authored?.interfaces ?? []).filter(
     (iface) => !replaceable.has(iface.id) || stamped.interfaces.some((t) => t.id === iface.id),
   )
+  // Catalog merging overlays whole resources. Materialize each enrichment over
+  // both prior halves before storing it, retaining omitted fields and readable
+  // kinds. An explicit [] replaces a kind; absence never erases established facts.
+  const baseline = new Map<string, InterfaceResource>()
+  for (const place of [...(derived?.resources?.[AUTHORED_SURFACE] ?? []), ...(authored?.resources?.[AUTHORED_SURFACE] ?? [])]) {
+    const prior = baseline.get(place.id)
+    baseline.set(place.id, {
+      ...prior, ...place,
+      ...(place.readables ? { readables: { ...prior?.readables, ...place.readables } } : {}),
+    })
+  }
+  const resources = stamped.resources.map((place) => {
+    const prior = baseline.get(place.id)
+    return {
+      ...prior,
+      ...place,
+      ...(place.readables ? { readables: { ...prior?.readables, ...place.readables } } : {}),
+    }
+  })
   return {
     version: 2,
     generatedAt: authored?.generatedAt ?? '',
     recipeFingerprint: authored?.recipeFingerprint ?? '',
     interfaces: overlay(kept, stamped.interfaces),
     ...registry('states', authored?.states, stamped.states),
-    ...registry('resources', authored?.resources, stamped.resources),
+    ...registry('resources', authored?.resources, resources),
   }
 }
 
