@@ -62,6 +62,8 @@ export interface WebPlaceSeed {
 export type WebPlace = WebPlaceSeed
 
 export interface DeriveWebPlacesOptions {
+  /** App roots whose package manifest declares Next.js, supplied by the caller. */
+  nextAppRoots?: readonly string[]
   /**
    * Absolute directory of the app the recipe SERVES (`recipe.web.app`, resolved
    * against the repo). A monorepo holds several routable apps and only one is
@@ -76,6 +78,7 @@ export interface DeriveWebPlacesOptions {
 export interface WebTree {
   files: readonly string[]
   analyses: readonly FileAnalysis[]
+  nextAppRoots?: readonly string[]
 }
 
 /** The idiom registry, in precedence order. */
@@ -103,6 +106,7 @@ export function deriveWebPlacesFromTree(
   const tree: WebTree = {
     files: fileAnalyses.map((analysis) => analysis.filePath),
     analyses: fileAnalyses,
+    nextAppRoots: options.nextAppRoots,
   }
 
   const analyses = new Map(fileAnalyses.map((analysis) => [analysis.filePath, analysis]))

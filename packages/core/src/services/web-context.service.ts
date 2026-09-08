@@ -30,6 +30,7 @@ import {
 import type { FileAnalysis, InterfacesFile } from '@truecourse/shared';
 import { log } from '../lib/logger.js';
 import { analyzeWorkingTree } from './interface.service.js';
+import { nextAppRoots } from './next-app-roots.js';
 
 export interface DeriveWebAuthoringContextOptions {
   /** Reuse analyses instead of re-reading the tree (a caller that already has them). */
@@ -71,7 +72,9 @@ export async function deriveWebAuthoringContext(
   }
 
   try {
-    const { seeds } = formWebResources(deriveWebPlacesFromTree(fileAnalyses));
+    const { seeds } = formWebResources(deriveWebPlacesFromTree(fileAnalyses, {
+      nextAppRoots: nextAppRoots(repoRoot, fileAnalyses),
+    }));
     if (seeds.size === 0) return empty(fileAnalyses.length);
     const contexts = deriveWebPlaceContexts({
       repoRoot,
