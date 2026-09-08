@@ -76,38 +76,43 @@ export function DependenciesTab({ repo }: { repo: Repo }) {
         title="Dependencies"
         subtitle={rows.length === all.length ? `${all.length}` : `${rows.length} of ${all.length}`}
       />
-      <div className="flex shrink-0 flex-wrap items-center gap-x-6 gap-y-1 border-b border-border px-6 py-2">
+      <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-border px-6 py-2 [&>div]:border-0 [&>div]:p-0">
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           aria-label="Search dependencies"
           placeholder="Search dependencies"
-          className="w-64 rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          className="w-64 max-w-full shrink-0 rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
         />
-        <div className="flex flex-wrap items-center gap-x-4 [&>div]:border-0 [&>div]:px-0 [&>div]:py-0">
-          <FilterBar
-            label="Class"
-            ariaLabel="Filter dependencies by class"
-            options={classOptions}
-            selected={classFilter}
-            onChange={setClassFilter}
-            multi
-          />
-          <FilterBar
-            label="State"
-            ariaLabel="Filter dependencies by state"
-            options={stateOptions}
-            selected={stateFilter}
-            onChange={setStateFilter}
-            multi
-          />
-        </div>
+        <FilterBar
+          label="Class"
+          ariaLabel="Filter dependencies by class"
+          options={classOptions}
+          selected={classFilter}
+          onChange={setClassFilter}
+          multi
+        />
+        <FilterBar
+          label="State"
+          ariaLabel="Filter dependencies by state"
+          options={stateOptions}
+          selected={stateFilter}
+          onChange={setStateFilter}
+          multi
+        />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto">
-        <table className="w-full border-collapse text-[13px]" aria-label="Dependencies">
+      <div className="min-h-0 min-w-0 flex-1 overflow-auto">
+        <table className="w-full min-w-3xl table-fixed border-collapse text-[13px]" aria-label="Dependencies">
+          <colgroup>
+            <col />
+            <col className="w-36" />
+            <col className="w-36" />
+            <col className="w-40" />
+            <col className="w-28" />
+          </colgroup>
           <thead className="sticky top-0 z-10 bg-card">
-            <tr className="border-b border-border text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <tr className="whitespace-nowrap border-b border-border text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               <th className="px-6 py-2 text-left font-semibold">Dependency</th>
               <th className="px-3 py-2 text-left font-semibold">Class</th>
               <th className="px-3 py-2 text-left font-semibold">Type</th>
@@ -130,13 +135,13 @@ export function DependenciesTab({ repo }: { repo: Repo }) {
                   className="cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/40 focus:bg-muted/40 focus:outline-none"
                 >
                   <td className="px-6 py-2.5">
-                    <span className="block truncate text-foreground">{d.name}</span>
-                    <span className="block truncate text-[11px] text-muted-foreground">{d.summary}</span>
+                    <span className="block truncate text-foreground" title={d.name}>{d.name}</span>
+                    <span className="block truncate text-[11px] text-muted-foreground" title={d.summary}>{d.summary}</span>
                   </td>
                   <td className="px-3 py-2.5">
-                    <span className={CHIP_CLASS}>{CLASS_LABEL[d.class]}</span>
+                    <span className={`${CHIP_CLASS} whitespace-nowrap`}>{CLASS_LABEL[d.class]}</span>
                   </td>
-                  <td className="px-3 py-2.5 text-muted-foreground">{type?.label ?? ''}</td>
+                  <td className="whitespace-nowrap px-3 py-2.5 text-muted-foreground">{type?.label ?? ''}</td>
                   <td className="px-3 py-2.5">
                     {state && (
                       <span className="inline-flex shrink-0 items-center gap-1.5 text-[10px] font-medium text-foreground">

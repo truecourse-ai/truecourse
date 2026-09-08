@@ -12,7 +12,8 @@
  * builds a second filter control.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
+import { Combobox } from '@base-ui/react/combobox';
 import { Search, X } from 'lucide-react';
 
 export interface FilterOption {
@@ -89,7 +90,7 @@ function FilterChips({ label, options, selected, onChange, multi, ariaLabel }: R
     <div
       role="group"
       aria-label={ariaLabel}
-      className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border px-3 py-2"
+      className="flex min-w-0 max-w-full flex-wrap items-center gap-1 border-b border-border px-3 py-2"
     >
       <span className="mr-1 shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
       {options.map((o) => {
@@ -126,24 +127,13 @@ function FilterChips({ label, options, selected, onChange, multi, ariaLabel }: R
 
 /**
  * The many-options shape: the selection as removable pills plus a search input
- * that reveals a scrollable, type-narrowed list of the rest. The list expands
- * INLINE (not a floating popover) so a panel's `overflow-hidden` can't clip it.
+ * that reveals a scrollable, type-narrowed list of the rest. Portal the popup
+ * so it neither expands the toolbar nor gets clipped by a scrolling panel.
  */
 function FilterCombobox({ label, options, selected, onChange, multi, ariaLabel }: Required<Pick<FilterBarProps, 'label' | 'options' | 'selected' | 'onChange' | 'multi' | 'ariaLabel'>>) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  // Close the suggestion list when focus/clicks leave the widget.
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [open]);
 
   const q = query.trim().toLowerCase();
   const selectedList = options.filter((o) => selected.includes(o.key));
@@ -152,41 +142,63 @@ function FilterCombobox({ label, options, selected, onChange, multi, ariaLabel }
   );
 
   return (
-    <div ref={containerRef} role="group" aria-label={ariaLabel} className="shrink-0 border-b border-border">
-      <div className="flex flex-wrap items-center gap-1 px-3 py-2">
+    <Combobox.Root<FilterOption, boolean>
+      multiple={multi}
+      items={suggestions}
+      filter={null}
+      value={multi ? selectedList : selectedList[0] ?? null}
+      onValueChange={(value, details) => {
+        // Escape dismisses the search popup; selected filters have explicit removal controls.
+        if (details.reason === 'escape-key') {
+          details.cancel();
+          return;
+        }
+        onChange((Array.isArray(value) ? value : value ? [value] : []).map((o) => o.key));
+        setQuery('');
+      }}
+      isItemEqualToValue={(a, b) => a.key === b.key}
+      itemToStringLabel={(o) => o.label}
+      inputValue={query}
+      onInputValueChange={(value, details) => {
+        // The selection is shown in pills; keep the input for searching.
+        if (details.reason === 'input-change' || details.reason === 'input-clear') setQuery(value);
+      }}
+      open={open}
+      onOpenChange={(next, details) => {
+        if (multi && details.reason === 'item-press') details.cancel();
+        else setOpen(next);
+      }}
+    >
+      <div ref={containerRef} role="group" aria-label={ariaLabel} className="flex min-w-0 max-w-full flex-wrap items-center gap-1 border-b border-border px-3 py-2">
         <span className="mr-1 shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
         {selectedList.map((o) => (
           <span
             key={o.key}
-            className="inline-flex items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-[10px] text-primary-foreground"
+            className="inline-flex max-w-full items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-[10px] text-primary-foreground"
           >
-            {o.label}
-            {o.count == null ? '' : ` ${o.count}`}
+            <span className="min-w-0 truncate" title={o.label}>
+              {o.label}
+              {o.count == null ? '' : ` ${o.count}`}
+            </span>
             <button
               type="button"
               aria-label={`Remove ${o.label}`}
               onClick={() => onChange(toggle(selected, o.key, multi))}
-              className="hover:opacity-80"
+              className="shrink-0 hover:opacity-80"
             >
               <X className="h-2.5 w-2.5" />
             </button>
           </span>
         ))}
-        <div className="flex min-w-[7rem] flex-1 items-center gap-1">
+        <div className="flex w-36 max-w-full items-center gap-1">
           <Search className="h-3 w-3 shrink-0 text-muted-foreground" />
-          <input
-            ref={inputRef}
-            value={query}
+          <Combobox.Input
             // Distinct from the GROUP's name: a screen reader announces the
             // control's own job, and a test can address either one.
             aria-label={`Type to filter ${label}`}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setOpen(true);
-            }}
             onFocus={() => setOpen(true)}
             placeholder={selectedList.length ? 'Add…' : 'Type to filter…'}
-            className="w-full bg-transparent text-[11px] text-foreground placeholder:text-muted-foreground/70 focus:outline-none"
+            className="min-w-0 w-full bg-transparent text-[11px] text-foreground placeholder:text-muted-foreground/70 focus:outline-none"
           />
         </div>
         {selected.length > 0 && (
@@ -199,30 +211,29 @@ function FilterCombobox({ label, options, selected, onChange, multi, ariaLabel }
           </button>
         )}
       </div>
-      {open && suggestions.length > 0 && (
-        <div className="max-h-48 overflow-y-auto border-t border-border/60 py-1">
-          {suggestions.map((o) => (
-            <button
-              key={o.key}
-              type="button"
-              onClick={() => {
-                onChange(toggle(selected, o.key, multi));
-                setQuery('');
-                inputRef.current?.focus();
-              }}
-              className="flex w-full items-center justify-between gap-2 px-3 py-1 text-left text-[11px] text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-            >
-              <span className="truncate">{o.label}</span>
-              {o.count != null && <span className="shrink-0 text-[10px]">{o.count}</span>}
-            </button>
-          ))}
-        </div>
-      )}
-      {open && suggestions.length === 0 && q !== '' && (
-        <div className="border-t border-border/60 px-3 py-2 text-[11px] text-muted-foreground/70">
-          Nothing matches “{query}”.
-        </div>
-      )}
-    </div>
+      <Combobox.Portal>
+        <Combobox.Positioner anchor={containerRef} align="start" sideOffset={4} className="z-50">
+          <Combobox.Popup className="w-64 max-w-(--available-width) overflow-hidden rounded-md border border-border bg-popover text-popover-foreground">
+            <Combobox.List aria-label={`${label} options`} className="max-h-[min(12rem,var(--available-height))] overflow-y-auto py-1">
+              {suggestions.map((o) => (
+                <Combobox.Item
+                  key={o.key}
+                  value={o}
+                  className="flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-1 text-left text-[11px] text-muted-foreground data-highlighted:bg-muted/50 data-highlighted:text-foreground"
+                >
+                  <span className="truncate">{o.label}</span>
+                  {o.count != null && <span className="shrink-0 text-[10px]">{o.count}</span>}
+                </Combobox.Item>
+              ))}
+              {suggestions.length === 0 && (
+                <div className="px-3 py-2 text-[11px] text-muted-foreground">
+                  {q ? `Nothing matches “${query}”.` : 'All options selected.'}
+                </div>
+              )}
+            </Combobox.List>
+          </Combobox.Popup>
+        </Combobox.Positioner>
+      </Combobox.Portal>
+    </Combobox.Root>
   );
 }

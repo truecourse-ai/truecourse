@@ -196,6 +196,21 @@ describe('the Tests tab of a connected repository', () => {
 });
 
 describe('the Runs tab of a connected repository', () => {
+  it('shows a short commit while preserving the full hash for hover and search', async () => {
+    const commit = '3ec877a68bc423373220f9ee2fda3d93ba368680';
+    serve({ history: { runs: [{ ...HISTORY.runs[0], commit }, HISTORY.runs[1]] } });
+    renderAt(`/preview/repos/${REAL.id}/runs`);
+    const user = userEvent.setup();
+    const table = await screen.findByRole('table', { name: 'Runs' });
+    const shortCommit = await within(table).findByText(commit.slice(0, 8));
+    expect(shortCommit).toHaveAttribute('title', commit);
+
+    await user.type(screen.getByRole('textbox', { name: 'Search runs' }), commit);
+    expect(within(table).getAllByRole('row')).toHaveLength(2);
+    expect(within(table).getByText(commit.slice(0, 8))).toBeInTheDocument();
+    expect(within(table).queryByText('f00d123')).not.toBeInTheDocument();
+  });
+
   it('lists every stored run, newest first, naming its pull request and origin', async () => {
     const calls = serve();
     renderAt(`/preview/repos/${REAL.id}/runs`);
