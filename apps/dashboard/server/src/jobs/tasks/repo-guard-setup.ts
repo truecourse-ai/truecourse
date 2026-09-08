@@ -1,3 +1,4 @@
+import { dashboardActivity } from '../../services/dashboard-activity.service.js';
 /**
  * `repo.guard-setup` — `truecourse guard setup` over an ephemeral clone.
  *
@@ -35,7 +36,7 @@ import type { JobDefinition, JobPayload } from '@truecourse/jobs';
 import { startWorkspaceLlm, type WorkspaceLlm } from '../../services/workspace-llm.service.js';
 import { acquireWorkTree } from '../../services/work-tree.service.js';
 import { materializeStoredSpec } from '../materialize-spec.js';
-import { firstLine, mirrorTracker, type OnboardingJobRequest } from './onboarding.js';
+import { firstLine, type OnboardingJobRequest } from './onboarding.js';
 
 export const REPO_GUARD_SETUP_TASK = 'repo.guard-setup';
 
@@ -71,66 +72,72 @@ export function createRepoGuardSetupTask(
     traceMeta: (payload) => ({ repoFullName: payload.repoFullName }),
 
     async run(ctx) {
-      const { repoFullName, only, refresh } = ctx.payload;
-      const llm = await startLlm(ctx.payload.workspaceOrgId);
+      return dashboardActivity(ctx, 'guard-setup', GUARD_SETUP_STEPS, async (activityRun, activityTracker) => {
+        const { repoFullName, only, refresh } = ctx.payload;
+        const llm = await startLlm(ctx.payload.workspaceOrgId);
 
-      await ctx.phase('clone');
-      const tree = await acquireWorkTree(repoFullName);
-      try {
-        const commitSha = await resolveCommitSha(tree.dir);
-        const ref = { repoKey: repoFullName, commitSha };
-        if (!(await materializeStoredSpec(ref, tree.dir))) {
-          throw new Error(
-            `${repoFullName} has no scanned spec yet — run the spec scan before guard setup.`,
-          );
+        await ctx.phase('clone');
+        const tree = await acquireWorkTree(repoFullName);
+        try {
+          const commitSha = await resolveCommitSha(tree.dir);
+          activityRun.setGitRef?.(commitSha);
+          activityTracker.done('clone');
+          const ref = { repoKey: repoFullName, commitSha };
+          if (!(await materializeStoredSpec(ref, tree.dir))) {
+            throw new Error(
+              `${repoFullName} has no scanned spec yet — run the spec scan before guard setup.`,
+            );
+          }
+          // The NEWEST bundle, not this commit's: what carries the settle spine
+          // forward is the last setup that ran, whatever commit it ran on.
+          const stored = await loadGuardSetupBundle(repoFullName);
+          if (stored) materializeGuardSetupBundle(tree.dir, stored);
+          // The registered instances go in beside it, as the two gitignored files
+          // the engine reads them from. The bundle collected below never carries
+          // them: a secret enters only through the dashboard, never out of a clone.
+          await materializeGuardOverlays(repoFullName, tree.dir);
+
+          const { report } = await runSetup(tree.dir, {
+            driver: llm.driver(),
+            transport: llm.transport(),
+            transportMode: llm.mode,
+            sessionsKey: repoFullName,
+            sessionRun: activityRun,
+            eagerRun: true,
+            tracker: activityTracker,
+            ...(ctx.signal ? { signal: ctx.signal } : {}),
+            ...(only ? { only } : {}),
+            // A hosted refresh IS the consent to replace the seed: the script lives
+            // in the bundle, never in a hand-edited tree, and the request said so.
+            ...(refresh ? { refresh: true, confirmSeedReplace: async () => true } : {}),
+          });
+
+          const files = collectGuardSetupBundle(tree.dir);
+          if (Object.keys(files).length > 0) await saveGuardSetupBundle(ref, files);
+
+          const reason = firstLine(report.reason);
+          if (report.status !== 'ok') activityRun.setError({ message: reason || 'Setup did not complete' });
+          return {
+            result: { repoFullName, status: report.status, ...(reason ? { reason } : {}) },
+            notification:
+              report.status === 'ok'
+                ? {
+                    level: 'success',
+                    title: 'Guard setup complete',
+                    body: `${repoFullName} — the recipe and its dependencies are ready.`,
+                    data: { repoFullName },
+                  }
+                : {
+                    level: 'error',
+                    title: 'Guard setup did not complete',
+                    body: `${repoFullName} — ${reason || 'setup was refused.'}`,
+                    data: { repoFullName },
+                  },
+          };
+        } finally {
+          tree.dispose();
         }
-        // The NEWEST bundle, not this commit's: what carries the settle spine
-        // forward is the last setup that ran, whatever commit it ran on.
-        const stored = await loadGuardSetupBundle(repoFullName);
-        if (stored) materializeGuardSetupBundle(tree.dir, stored);
-        // The registered instances go in beside it, as the two gitignored files
-        // the engine reads them from. The bundle collected below never carries
-        // them: a secret enters only through the dashboard, never out of a clone.
-        await materializeGuardOverlays(repoFullName, tree.dir);
-
-        const { report } = await runSetup(tree.dir, {
-          driver: llm.driver(),
-          transport: llm.transport(),
-          transportMode: llm.mode,
-          sessionsKey: repoFullName,
-          eagerRun: true,
-          tracker: mirrorTracker(ctx, GUARD_SETUP_STEPS),
-          ...(ctx.signal ? { signal: ctx.signal } : {}),
-          ...(only ? { only } : {}),
-          // A hosted refresh IS the consent to replace the seed: the script lives
-          // in the bundle, never in a hand-edited tree, and the request said so.
-          ...(refresh ? { refresh: true, confirmSeedReplace: async () => true } : {}),
-        });
-
-        const files = collectGuardSetupBundle(tree.dir);
-        if (Object.keys(files).length > 0) await saveGuardSetupBundle(ref, files);
-
-        const reason = firstLine(report.reason);
-        return {
-          result: { repoFullName, status: report.status, ...(reason ? { reason } : {}) },
-          notification:
-            report.status === 'ok'
-              ? {
-                  level: 'success',
-                  title: 'Guard setup complete',
-                  body: `${repoFullName} — the recipe and its dependencies are ready.`,
-                  data: { repoFullName },
-                }
-              : {
-                  level: 'error',
-                  title: 'Guard setup did not complete',
-                  body: `${repoFullName} — ${reason || 'setup was refused.'}`,
-                  data: { repoFullName },
-                },
-        };
-      } finally {
-        tree.dispose();
-      }
+      });
     },
 
     onError: (err, payload) => ({

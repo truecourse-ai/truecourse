@@ -18,6 +18,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import type { ChecklistItem, SessionEvent } from '@truecourse/agent-loop';
+import { createUIMessageStreamResponse, type UIMessageChunk } from 'ai';
 
 vi.mock('@/lib/socket', () => {
   const socket = {
@@ -205,6 +206,32 @@ function renderAt(search: string) {
 
 beforeEach(() => {
   serve([]);
+});
+
+it('shows partial progress in the existing thread, then replaces it with one completed turn', async () => {
+  const run = scan({ activityStream: 'ai-sdk-v1', sessions: [session({ status: 'running' })] });
+  serve([run]);
+  const snapshotFetch = window.fetch;
+  let sink!: ReadableStreamDefaultController<UIMessageChunk>;
+  const stream = new ReadableStream<UIMessageChunk>({ start(controller) { sink = controller; } });
+  window.fetch = vi.fn(async (input, init) => {
+    if (String(input).includes('/stream?')) return createUIMessageStreamResponse({ stream });
+    return snapshotFetch(input, init);
+  });
+  const view = renderAt(`?run=${run.runId}&ses=ses-1`);
+  await waitFor(() => expect(window.fetch).toHaveBeenCalledWith(expect.stringContaining('/stream?after=-1'), expect.objectContaining({ method: 'GET' })));
+  sink.enqueue({ type: 'start', messageId: run.runId });
+  sink.enqueue({ type: 'data-progress', transient: true, data: { 'ses-1': { kind: 'text', turnId: 'm1', text: 'Reading the specification live' } } });
+  await screen.findByText('Reading the specification live');
+  sink.enqueue({ type: 'data-activity', id: 'event-1', data: { kind: 'session-event', cursor: 100, sessionId: 'ses-1', event: {
+    type: 'assistant-turn', seq: 1, ts: at(1), text: 'Finished reading the specification.',
+    usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreateTokens: 0, costUsd: 0, costSource: 'unpriced' },
+  } } });
+  await screen.findByText('Finished reading the specification.');
+  expect(screen.queryByText('Reading the specification live')).not.toBeInTheDocument();
+  expect(screen.getAllByText('Finished reading the specification.')).toHaveLength(1);
+  sink.enqueue({ type: 'finish', finishReason: 'stop' }); sink.close();
+  view.unmount();
 });
 
 afterEach(() => {

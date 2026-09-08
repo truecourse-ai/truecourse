@@ -13,6 +13,7 @@ import { StepTracker, estimateStepPhase, type AnalysisStep } from '../../package
 import { readCorpus } from '../../packages/spec-consolidator/src/index.js';
 import type { DecisionsFile } from '../../packages/spec-consolidator/src/index.js';
 import { docPathOf, outcome, stubDriver, toolResult } from './spec-scan-session-stub';
+import { readActivityEvents } from '../../packages/core/src/lib/activity-journal';
 
 let repo: string;
 beforeEach(() => {
@@ -85,6 +86,15 @@ const scanOptions = (driver = scanDriver()) => ({
   skipGit: true,
 });
 describe('curateInProcess', () => {
+  it('opts dashboard scans into direct replay and lets the hosted caller finish after saving', async () => {
+    const result = await curateInProcess(repo, { ...scanOptions(), source: 'dashboard', deferRunCompletion: true });
+    const journal = readActivityEvents(result.sessionsRunDir);
+    expect(journal[0]).toMatchObject({ kind: 'run', run: { activityStream: 'ai-sdk-v1' } });
+    expect(journal.some(e => e.kind === 'session-event' && e.event.type === 'outcome')).toBe(true);
+    const run = JSON.parse(fs.readFileSync(path.join(result.sessionsRunDir, 'run.json'), 'utf8'));
+    expect(run.status).toBe('running');
+    expect(run.finishedAt).toBeUndefined();
+  });
   it('curates the repo docs into corpus.json', async () => {
     const { curate } = await curateInProcess(repo, scanOptions());
     expect(curate.stats.docsKept).toBe(2);

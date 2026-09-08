@@ -13,6 +13,7 @@
 
 import { eq, inArray, or, sql } from 'drizzle-orm';
 import {
+  activityRuns,
   analyses,
   analysisCurrent,
   analysisHistory,
@@ -40,6 +41,7 @@ const likeLiteral = (s: string): string => s.replace(/[\\%_]/g, (c) => `\\${c}`)
 
 export async function purgeRepoData(db: Db, repoKey: string): Promise<void> {
   await db.transaction(async (tx) => {
+    await tx.delete(activityRuns).where(eq(activityRuns.repoKey, repoKey));
     await tx.delete(analyses).where(eq(analyses.repoKey, repoKey));
     await tx.delete(analysisCurrent).where(eq(analysisCurrent.repoKey, repoKey));
     await tx.delete(analysisHistory).where(eq(analysisHistory.repoKey, repoKey));

@@ -308,7 +308,7 @@ router.post(
         if (e instanceof LlmProbeFailedError) {
           // The run exists only to carry the failure, so Activity shows a failed
           // scan rather than nothing at all.
-          recordFailedScanRun(repo.path, { message: e.message, kind: 'llm-probe' });
+          await recordFailedScanRun(repo.path, { message: e.message, kind: 'llm-probe' });
           res.status(502).json({ error: e.code, message: e.message });
           return;
         }

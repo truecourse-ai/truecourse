@@ -1,3 +1,5 @@
+export * from './activity.js';
+import { activityRuns, activityEvents } from './activity.js';
 /**
  * The full ee Postgres schema, composed from per-feature files. One schema, one
  * migration history, one `migrate()` — see `../db.ts`.
@@ -46,6 +48,8 @@ import {
 } from './guard.js';
 
 export const schema = {
+  activityRuns,
+  activityEvents,
   ghInstallations,
   ghRepos,
   ghBaselines,

@@ -65,7 +65,7 @@ import { resolveFallbackModel, resolveModel } from '../config/llm-models.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
 import { estimateGuardSetup } from '../services/llm/spec-estimate.js';
 import { mapInterfaces } from '../services/interface.service.js';
-import { sessionRunDir, type SessionRunStartedInfo } from '../lib/sessions-store.js';
+import { sessionRunDir, type SessionRunStartedInfo, type SessionRunStore } from '../lib/sessions-store.js';
 import {
   AUTH_PROOF_SESSION_KIND,
   buildAuthProof,
@@ -135,6 +135,8 @@ export interface GuardSetupInProcessOptions {
    * `repoRoot`.
    */
   sessionsKey?: string;
+  /** Hosted lifecycle owns this run and its final result persistence. */
+  sessionRun?: SessionRunStore;
   /**
    * Open the run record up front rather than on the first session, so a hosted
    * run is watchable from the moment it starts — including one that fails
@@ -370,6 +372,7 @@ export async function guardSetupInProcess(
   const sessionsAvailable = options.llm !== 'agent' && options.recipeRunner === undefined;
   const sessionContextOptions = {
     repoRoot,
+    ...(options.sessionRun ? { run: options.sessionRun } : {}),
     stepSessionKinds: GUARD_SETUP_STEP_SESSION_KINDS,
     ...(options.sessionsKey ? { sessionsKey: options.sessionsKey } : {}),
     ...(options.tracker ? { tracker: options.tracker } : {}),
@@ -545,7 +548,7 @@ export async function guardSetupInProcess(
     throw e;
   } finally {
     // Close the sessions-store run, when any session actually ran under it.
-    sessionContext?.finish(options.signal?.aborted === true, closingFailure ?? undefined);
+    await sessionContext?.finish(options.signal?.aborted === true, closingFailure ?? undefined);
     if (llmLog) {
       setLlmCallSink(undefined);
       llmLog.finish(Date.now() - startedAt);

@@ -40,7 +40,7 @@ import {
 } from '@truecourse/shared/llm';
 import type { SessionDriver, SessionEvent } from '@truecourse/agent-loop';
 import path from 'node:path';
-import { createSessionRun, type SessionRunStartedInfo } from '../lib/sessions-store.js';
+import { createStoredSessionRun, type SessionRunStartedInfo } from '../lib/sessions-store.js';
 import { resolveCommitSha } from '../lib/repo-ref.js';
 import {
   createConfiguredApiTransport,
@@ -173,43 +173,43 @@ export async function runGuardInterfaceAuthoring(
 ): Promise<GuardInterfaceAuthorRun> {
   const { repoRoot } = opts;
   const gitRef = await resolveCommitSha(repoRoot);
-  const run = createSessionRun(opts.sessionsKey ?? repoRoot, { command: 'guard-interfaces', gitRef });
-  opts.onRunStarted?.({ command: 'guard-interfaces', runId: run.runId, dir: run.dir });
-  // A hosted caller hands over the workspace's own driver; a checkout resolves
-  // one from the saved config.
-  const { driver, mode, attribution } = opts.driver
-    ? {
-        driver: opts.driver,
-        mode: opts.transportMode ?? effectiveLlmMode(opts.transport),
-        attribution: opts.driver.attribution,
-      }
-    : createConfiguredSessionDriver({
-        ...(opts.transport ? { transport: opts.transport } : {}),
-        cwd: repoRoot,
-        providerStateDir: path.join(run.dir, 'provider'),
-      });
-  // Which model answered is part of what a run MEANS: a transcript read after
-  // a config change, or after a fallback swap, must not need the config of the
-  // day to be interpretable.
-  const llm = {
-    mode,
-    provider: attribution.provider,
-    model: attribution.model,
-    ...(attribution.fallbackModel ? { fallbackModel: attribution.fallbackModel } : {}),
-  };
-  run.setLlm(llm);
-
-  // The GROUNDING, once per run and amortised over every place in it:
-  // the route module of each place, the modules it renders, and the api effects
-  // its requests join to. One analyzer pass, so the sessions read instead of
-  // rediscovering. It degrades to nothing rather than failing the run.
-  opts.onStatus?.('reading the working tree');
-  const context = await deriveWebAuthoringContext(repoRoot, { catalog: readInterfaceCatalog(repoRoot) });
-  opts.onStatus?.(
-    `context: ${context.contexts.size} place(s) grounded from ${context.files} file(s) in ${context.seconds}s`,
-  );
-
+  const run = await createStoredSessionRun(opts.sessionsKey ?? repoRoot, { command: 'guard-interfaces', gitRef, activityStream: !!opts.sessionsKey });
   try {
+    opts.onRunStarted?.({ command: 'guard-interfaces', runId: run.runId, dir: run.dir });
+    // A hosted caller hands over the workspace's own driver; a checkout resolves
+    // one from the saved config.
+    const { driver, mode, attribution } = opts.driver
+      ? {
+          driver: opts.driver,
+          mode: opts.transportMode ?? effectiveLlmMode(opts.transport),
+          attribution: opts.driver.attribution,
+        }
+      : createConfiguredSessionDriver({
+          ...(opts.transport ? { transport: opts.transport } : {}),
+          cwd: repoRoot,
+          providerStateDir: path.join(run.dir, 'provider'),
+        });
+    // Which model answered is part of what a run MEANS: a transcript read after
+    // a config change, or after a fallback swap, must not need the config of the
+    // day to be interpretable.
+    const llm = {
+      mode,
+      provider: attribution.provider,
+      model: attribution.model,
+      ...(attribution.fallbackModel ? { fallbackModel: attribution.fallbackModel } : {}),
+    };
+    run.setLlm(llm);
+
+    // The GROUNDING, once per run and amortised over every place in it:
+    // the route module of each place, the modules it renders, and the api effects
+    // its requests join to. One analyzer pass, so the sessions read instead of
+    // rediscovering. It degrades to nothing rather than failing the run.
+    opts.onStatus?.('reading the working tree');
+    const context = await deriveWebAuthoringContext(repoRoot, { catalog: readInterfaceCatalog(repoRoot) });
+    opts.onStatus?.(
+      `context: ${context.contexts.size} place(s) grounded from ${context.files} file(s) in ${context.seconds}s`,
+    );
+
     const result = await authorWebInterfaces({
       repoRoot,
       driver,
@@ -259,9 +259,9 @@ export async function runGuardInterfaceAuthoring(
       ...(reconcile ? { reconcile } : {}),
     };
   } catch (error) {
-    run.finish('failed');
+    run.finish(opts.signal?.aborted ? 'interrupted' : 'failed', { error: { message: error instanceof Error ? error.message : String(error) } });
     throw error;
-  }
+  } finally { await run.flush?.(); }
 }
 
 export interface RunGuardInterfaceReconcileOptions {

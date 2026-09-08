@@ -11,6 +11,14 @@
  */
 
 import type { SessionDef } from './session-def.js';
+import { z } from 'zod';
+
+/** Ephemeral display progress. Never enters the transcript or turn budget. */
+export const SessionProgressSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('text'), turnId: z.string(), text: z.string() }),
+  z.object({ kind: z.literal('tool'), toolCallId: z.string(), toolName: z.string(), elapsedSeconds: z.number().nonnegative() }),
+]);
+export type SessionProgress = z.infer<typeof SessionProgressSchema>;
 import type {
   RawPayload,
   SessionEvent,
@@ -75,6 +83,7 @@ export interface SessionRunInput {
    *  raw escape hatch — its native wire payload — which the shell
    *  carries onto the persisted envelope. */
   onEvent(event: SessionEventBody & { raw?: RawPayload }): void;
+  onProgress?: (progress: SessionProgress) => void;
   signal: AbortSignal;
 }
 

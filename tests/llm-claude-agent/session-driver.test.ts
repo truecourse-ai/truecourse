@@ -160,6 +160,32 @@ function runSession(sdk: SdkModule, overrides?: Partial<SessionRunInput>) {
 // ---------------------------------------------------------------------------
 
 describe('claude agent session driver', () => {
+  it('streams text and tool progress without splitting one complete assistant turn', async () => {
+    const progress: unknown[] = [];
+    const { sdk, captured } = fakeSdk(async function* (ctx) {
+      await ctx.nextUserMessage(); yield init();
+      const partial = (event: object, parent: string | null = null): SdkMessage => ({ type: 'stream_event', parent_tool_use_id: parent, event });
+      yield partial({ type: 'message_start', message: { id: 'turn-1' } });
+      yield partial({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } });
+      yield partial({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Read ' } });
+      yield { ...assistant([{ type: 'text', text: 'Read ' }]), message: { id: 'turn-1', content: [{ type: 'text', text: 'Read ' }], usage: { input_tokens: 4, output_tokens: 2 } } };
+      yield partial({ type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'docs.' } });
+      yield partial({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'SECRET CHILD' } }, 'child');
+      yield { type: 'tool_progress', parent_tool_use_id: null, tool_use_id: 'tool-1', tool_name: 'mcp__session__probe', elapsed_time_seconds: 3 };
+      yield { ...assistant([{ type: 'text', text: 'docs.' }]), message: { id: 'turn-1', content: [{ type: 'text', text: 'docs.' }], usage: { input_tokens: 4, output_tokens: 2 } } };
+      yield success({ verdict: 'keep' });
+    });
+    const { handle, events } = runSession(sdk, { onProgress: p => progress.push(p) });
+    await handle.done;
+    expect(captured.options?.includePartialMessages).toBe(true);
+    expect(progress).toContainEqual({ kind: 'text', turnId: 'turn-1', text: 'Read \ndocs.' });
+    expect(progress).toContainEqual({ kind: 'tool', toolCallId: 'tool-1', toolName: 'probe', elapsedSeconds: 3 });
+    expect(JSON.stringify(progress)).not.toContain('SECRET CHILD');
+    const turns = events.filter(e => e.type === 'assistant-turn');
+    expect(turns).toHaveLength(1);
+    expect(turns[0]).toMatchObject({ text: 'Read \ndocs.', usage: { inputTokens: 4, outputTokens: 2 } });
+  });
+
   it('declares live steering, native structured outcome, and resume-at-message', () => {
     const { sdk } = fakeSdk(async function* () {});
     const driver = createClaudeAgentSessionDriver({ sdk });

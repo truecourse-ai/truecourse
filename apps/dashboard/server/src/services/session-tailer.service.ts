@@ -21,6 +21,7 @@ import { watch, type FSWatcher } from 'chokidar';
 import type { SessionCommand, SessionEvent } from '@truecourse/agent-loop';
 import { RunRecordSchema } from '@truecourse/agent-loop';
 import {
+  subscribeStoredSessionRuns,
   sessionRunDir,
   sessionsDir,
   toPublicRunRecord,
@@ -74,7 +75,7 @@ export function acquireRunTail(target: RunTailTarget, sink: RunTailSink): void {
       if (run) sink.onRunUpdated(run);
       return;
     }
-    if (!base.endsWith('.jsonl')) return;
+    if (!base.endsWith('.jsonl') || base === 'activity.jsonl') return;
     const sessionId = base.slice(0, -'.jsonl'.length);
     for (const event of consumeAppended(offsets, file)) sink.onEvent(sessionId, event);
   };
@@ -119,7 +120,7 @@ export function stopAllRunTails(): void {
 // ---------------------------------------------------------------------------
 
 interface RunsWatch {
-  watcher: FSWatcher;
+  watcher: Pick<FSWatcher, 'close'>;
   refs: number;
   pending?: ReturnType<typeof setTimeout>;
 }
@@ -133,6 +134,17 @@ export function acquireRunsWatch(repoPath: string, onChange: () => void): void {
   const existing = runsWatches.get(repoPath);
   if (existing) {
     existing.refs++;
+    return;
+  }
+  const entry: RunsWatch = { watcher: { close: async () => {} }, refs: 1 };
+  const notify = () => {
+    clearTimeout(entry.pending);
+    entry.pending = setTimeout(onChange, RUNS_DEBOUNCE_MS);
+  };
+  const unsubscribe = subscribeStoredSessionRuns(repoPath, notify);
+  if (unsubscribe) {
+    entry.watcher = { close: async () => { unsubscribe(); } };
+    runsWatches.set(repoPath, entry);
     return;
   }
   // chokidar (4.x, pinned) never attaches to a directory that does not exist:
@@ -152,7 +164,7 @@ export function acquireRunsWatch(repoPath: string, onChange: () => void): void {
   }
   // depth 2: sessions/<command>/<runId>/run.json
   const watcher = watch(sessionsDir(repoPath), { ignoreInitial: true, depth: 2 });
-  const entry: RunsWatch = { watcher, refs: 1 };
+  entry.watcher = watcher;
   const onFile = (file: string): void => {
     if (path.basename(file) !== 'run.json') return;
     clearTimeout(entry.pending);
@@ -239,7 +251,7 @@ function statSize(file: string): number {
 
 function listJsonl(dir: string): string[] {
   try {
-    return fs.readdirSync(dir).filter((name) => name.endsWith('.jsonl'));
+    return fs.readdirSync(dir).filter((name) => name.endsWith('.jsonl') && name !== 'activity.jsonl');
   } catch {
     return [];
   }

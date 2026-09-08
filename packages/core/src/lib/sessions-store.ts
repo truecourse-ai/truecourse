@@ -27,6 +27,7 @@ import {
 } from '@truecourse/agent-loop';
 import { getRepoTruecourseDir } from '../config/paths.js';
 import { atomicWriteJson } from './atomic-write.js';
+import { appendActivityEvent, publishActivityProgress, readActivityEvents, validateActivityCursor } from './activity-journal.js';
 
 /**
  * Where a repo's sessions live. The default is the repo tree
@@ -63,7 +64,7 @@ export function sessionsDir(repoDir: string): string {
 export interface SessionRunStartedInfo {
   command: SessionCommand;
   runId: string;
-  /** The run directory, `<repo>/.truecourse/sessions/<command>/<runId>`. */
+  /** Stable local run path for file history or provider scratch state. Postgres history is not stored here. */
   dir: string;
 }
 
@@ -86,9 +87,17 @@ export function sessionRunDir(repoDir: string, command: SessionCommand, runId: s
 /** A live handle on one run's records — the shell writes through it. */
 export interface SessionRunStore {
   readonly runId: string;
-  /** The run directory, `<repo>/.truecourse/sessions/<command>/<runId>`. */
+  /** Stable local run path for file history or provider scratch state. Postgres history is not stored here. */
   readonly dir: string;
   record(): RunRecord;
+  /** Drain ordered async writes before the owning job settles. */
+  flush?(): Promise<void>;
+  subscribeActivity?(notify: () => void): () => void;
+  readActivity?(after: number): Promise<import('@truecourse/shared/activity-stream').ActivityEvent[]>;
+  validateActivityCursor?(after: number): Promise<void>;
+  /** Dashboard reads load only this session; synchronous persistence reads belong to live writers. */
+  readTranscript?(sessionId: string, since: number): Promise<SessionEvent[]>;
+  setGitRef?(gitRef: string): void;
   /** What `runAgentLoop` persists through. */
   readonly persistence: SessionPersistence;
   /** Advertise the live session API (URL + token, never a bare port). */
@@ -123,7 +132,7 @@ export interface SessionRunStore {
 
 export function createSessionRun(
   repoDir: string,
-  opts: { command: SessionCommand; gitRef: string; now?: () => Date },
+  opts: { command: SessionCommand; gitRef: string; now?: () => Date; activityStream?: boolean },
 ): SessionRunStore {
   // Starting a run is the boot the sweep belongs to: before this
   // process writes a new record, every run left `running` by a process that
@@ -140,10 +149,12 @@ export function createSessionRun(
     status: 'running',
     pid: process.pid,
     sessions: [],
+    ...(opts.activityStream ? { activityStream: 'ai-sdk-v1' as const } : {}),
   };
   const dir = sessionRunDir(repoDir, opts.command, runId);
   fs.mkdirSync(dir, { recursive: true });
   atomicWriteJson(path.join(dir, 'run.json'), record);
+  if (record.activityStream) appendActivityEvent(dir, { kind: 'run', run: toPublicRunRecord(record) });
   return openRun(dir, record);
 }
 
@@ -162,15 +173,25 @@ export function openSessionRun(
 
 function openRun(dir: string, record: RunRecord): SessionRunStore {
   const runJsonPath = path.join(dir, 'run.json');
-  const write = (): void => atomicWriteJson(runJsonPath, record);
+  const write = (): void => {
+    atomicWriteJson(runJsonPath, record);
+    if (record.activityStream) appendActivityEvent(dir, { kind: 'run', run: toPublicRunRecord(record) });
+  };
 
   return {
     runId: record.runId,
     dir,
     record: () => record,
+    setGitRef(gitRef) { record.gitRef = gitRef; write(); },
     persistence: {
+      ...(record.activityStream ? {
+        publishProgress: (sessionId: string, progress: import('@truecourse/agent-loop').SessionProgress) => {
+          if (record.status === 'running') publishActivityProgress(dir, sessionId, progress);
+        },
+      } : {}),
       appendEvent(sessionId, event) {
         fs.appendFileSync(transcriptPath(dir, sessionId), JSON.stringify(event) + '\n');
+        if (record.activityStream) appendActivityEvent(dir, { kind: 'session-event', sessionId, event });
       },
       updateIndex(entry: SessionIndexEntry) {
         const i = record.sessions.findIndex((s) => s.sessionId === entry.sessionId);
@@ -216,6 +237,30 @@ function openRun(dir: string, record: RunRecord): SessionRunStore {
 function transcriptPath(dir: string, sessionId: string): string {
   // Session ids are minted by us (uuids), but keep filenames safe anyway.
   return path.join(dir, `${sessionId.replace(/[^A-Za-z0-9._-]/g, '_')}.jsonl`);
+}
+
+/** Repair a crash between a transcript/snapshot write and its journal append. */
+export function recoverSessionActivity(run: SessionRunStore): void {
+  if (!run.record().activityStream) return;
+  const journal = readActivityEvents(run.dir);
+  const seen = new Map<string, Set<number>>();
+  let lastRun: PublicRunRecord | undefined;
+  for (const entry of journal) {
+    if (entry.kind === 'run') lastRun = entry.run;
+    else {
+      const seqs = seen.get(entry.sessionId) ?? new Set<number>();
+      seqs.add(entry.event.seq); seen.set(entry.sessionId, seqs);
+    }
+  }
+  for (const name of fs.readdirSync(run.dir)) {
+    if (!name.endsWith('.jsonl') || name === 'activity.jsonl') continue;
+    const sessionId = name.slice(0, -6);
+    for (const event of run.persistence.readEvents(sessionId)) {
+      if (!seen.get(sessionId)?.has(event.seq)) appendActivityEvent(run.dir, { kind: 'session-event', sessionId, event });
+    }
+  }
+  const current = toPublicRunRecord(run.record());
+  if (JSON.stringify(lastRun) !== JSON.stringify(current)) appendActivityEvent(run.dir, { kind: 'run', run: current });
 }
 
 /**
@@ -321,7 +366,9 @@ function sweepRuns(
         session.status = 'parked';
       }
     }
-    atomicWriteJson(path.join(sessionRunDir(repoDir, run.command, run.runId), 'run.json'), run);
+    const dir = sessionRunDir(repoDir, run.command, run.runId);
+    atomicWriteJson(path.join(dir, 'run.json'), run);
+    if (run.activityStream) appendActivityEvent(dir, { kind: 'run', run: toPublicRunRecord(run) });
     interrupted.push(run);
   }
   return interrupted;
@@ -334,4 +381,51 @@ function defaultIsProcessAlive(pid: number): boolean {
   } catch {
     return false;
   }
+}
+
+/** Dashboard storage boundary. File-mode callers retain the synchronous store. */
+export interface SessionRunBackend {
+  subscribeRepo(repoKey: string, notify: () => void): () => void;
+  create(repoKey: string, opts: Parameters<typeof createSessionRun>[1]): Promise<SessionRunStore>;
+  open(repoKey: string, command: SessionCommand, runId: string): Promise<SessionRunStore>;
+  list(repoKey: string, command?: SessionCommand): Promise<RunRecord[]>;
+}
+export class SessionRunNotFoundError extends Error {
+  constructor() { super('Session run not found'); }
+}
+let backend: SessionRunBackend | undefined;
+export function setSessionRunBackend(value: SessionRunBackend | undefined): void { backend = value; }
+export async function createStoredSessionRun(repoKey: string, opts: Parameters<typeof createSessionRun>[1]): Promise<SessionRunStore> {
+  return backend && !path.isAbsolute(repoKey) ? backend.create(repoKey, opts) : createSessionRun(repoKey, opts);
+}
+export async function openStoredSessionRun(repoKey: string, command: SessionCommand, runId: string): Promise<SessionRunStore> {
+  if (backend && !path.isAbsolute(repoKey)) return backend.open(repoKey, command, runId);
+  try { return openSessionRun(repoKey, command, runId); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new SessionRunNotFoundError();
+    throw error;
+  }
+}
+export async function listStoredSessionRuns(repoKey: string, command?: SessionCommand): Promise<RunRecord[]> {
+  return backend && !path.isAbsolute(repoKey) ? backend.list(repoKey, command) : listSessionRuns(repoKey, command);
+}
+export async function readStoredActivity(run: SessionRunStore, after = -1) {
+  if (run.readActivity) return run.readActivity(after);
+  return readActivityEvents(run.dir, after);
+}
+
+export async function validateStoredActivityCursor(run: SessionRunStore, after: number): Promise<void> {
+  if (run.validateActivityCursor) return run.validateActivityCursor(after);
+  validateActivityCursor(run.dir, after);
+}
+
+export async function readStoredTranscript(run: SessionRunStore, sessionId: string, since = -1): Promise<SessionEvent[]> {
+  if (run.readTranscript) return run.readTranscript(sessionId, since);
+  const events = run.persistence.readEvents(sessionId);
+  return since >= 0 ? events.filter(event => event.seq > since) : events;
+}
+
+/** undefined means the caller should watch the file store. */
+export function subscribeStoredSessionRuns(repoKey: string, notify: () => void): (() => void) | undefined {
+  return backend && !path.isAbsolute(repoKey) ? backend.subscribeRepo(repoKey, notify) : undefined;
 }

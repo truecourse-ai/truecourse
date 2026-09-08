@@ -303,6 +303,10 @@
     "./types/snapshot": {
       "types": "./dist/types/snapshot.d.ts",
       "import": "./dist/types/snapshot.js"
+    },
+    "./lib/activity-journal": {
+      "types": "./dist/lib/activity-journal.d.ts",
+      "import": "./dist/lib/activity-journal.js"
     }
   },
   "scripts": {

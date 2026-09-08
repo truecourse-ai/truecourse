@@ -18,6 +18,9 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowUpRight, Bot, Check, ChevronDown, ChevronRight } from 'lucide-react';
 import type { SessionEvent, SessionIndexEntry } from '@truecourse/agent-loop';
+import type { ActivityProgress } from '@truecourse/shared/activity-stream';
+
+export const SessionProgressContext = createContext<Readonly<ActivityProgress>>({});
 import { buildCorpusConflicts, resolutionForConflict } from '@truecourse/shared';
 import * as api from '@/lib/api';
 import type { SpecConflictResolution } from '@/lib/api';
@@ -417,6 +420,7 @@ export function SessionThread({ repoId, session, events, loading, error }: {
   loading: boolean;
   error: string | null;
 }) {
+  const progress = useContext(SessionProgressContext)[session.sessionId];
   const rows = toChatRows(events);
   const running = session.status === 'running' || session.status === 'waiting';
 
@@ -488,7 +492,9 @@ export function SessionThread({ repoId, session, events, loading, error }: {
   // plain "Working") stands as the newest message.
   const lastRow = rows[rows.length - 1];
   const workingText =
-    running && !(lastRow?.kind === 'action' && lastRow.inFlight)
+    running && progress
+      ? progress.kind === 'text' ? progress.text : `${progress.toolName} · ${Math.floor(progress.elapsedSeconds)}s`
+      : running && !(lastRow?.kind === 'action' && lastRow.inFlight)
       ? session.status === 'waiting'
         ? "I'm waiting on an answer to my question above."
         : "Still working. I'll post updates here as I go …"

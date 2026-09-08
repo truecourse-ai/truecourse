@@ -35,3 +35,5 @@ export {
   type PendingGuardBaselineInput,
   type PendingGuardBaselineView,
 } from './jobs-store.js';
+
+export { PgSessionRunStore } from './session-run-store.js';

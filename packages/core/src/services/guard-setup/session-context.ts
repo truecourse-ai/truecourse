@@ -69,7 +69,7 @@ export interface GuardSetupSessionContext {
    * did — and lands in the record so a surface that never saw the process
    * still reads why.
    */
-  finish(aborted: boolean, failure?: RunError): void;
+  finish(aborted: boolean, failure?: RunError): void | Promise<void>;
 }
 
 /** One session failure as a reason a setup report row can carry. */
@@ -98,6 +98,7 @@ interface SessionContextBase {
    * ephemeral clone deleted the moment the run settles.
    */
   sessionsKey?: string;
+  run?: SessionRunStore;
   /** A per-run `--llm-transport` flag; the saved selection answers otherwise.
    *  Ignored when a driver is injected — that caller already chose. */
   transport?: LlmTransportFlag;
@@ -150,7 +151,7 @@ export function createGuardSetupSessionContext(
 
   const build = async (): Promise<{ run: SessionRunStore; driver: SessionDriver }> => {
     const gitRef = await resolveCommitSha(opts.repoRoot);
-    const store = createSessionRun(opts.sessionsKey ?? opts.repoRoot, {
+    const store = opts.run ?? createSessionRun(opts.sessionsKey ?? opts.repoRoot, {
       command: 'guard-setup',
       gitRef,
     });
@@ -191,7 +192,10 @@ export function createGuardSetupSessionContext(
     if (!run) return;
     untap?.();
     untap = null;
-    if (aborted) run.finish('interrupted');
+    if (opts.run) {
+      if (failure) run.setError(failure);
+      else if (failed > 0 && completed === 0) run.setError({ message: 'All setup sessions failed' });
+    } else if (aborted) run.finish('interrupted');
     else if (failure) run.finish('failed', { error: failure });
     else run.finish(failed > 0 && completed === 0 ? 'failed' : 'completed');
     run = null;
@@ -224,7 +228,7 @@ export function createGuardSetupSessionContext(
       // before its own creation settled) — close it the moment it exists. A
       // build that failed leaves nothing to close.
       const pending = acquired;
-      if (pending) void pending.then(() => close(aborted, failure)).catch(() => {});
+      if (pending) return pending.then(() => close(aborted, failure));
     },
   };
 }

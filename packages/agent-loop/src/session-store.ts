@@ -62,6 +62,8 @@ const RunRecordFieldsSchema = z.object({
   startedAt: z.string(),
   finishedAt: z.string().optional(),
   status: RunStatusSchema,
+  /** Dashboard runs with direct publication and durable AI SDK stream replay. */
+  activityStream: z.literal('ai-sdk-v1').optional(),
   /**
    * How the run presents ITSELF, in the same block vocabulary its sessions'
    * outcomes use — the phase checklist is a `checklist` block, nothing more.
@@ -128,6 +130,10 @@ export type RunRecord = z.infer<typeof RunRecordFieldsSchema>;
  * a dead process's memory.
  */
 export interface SessionPersistence {
+  /** Await committed history before the session returns its outcome. */
+  flush?(): Promise<void>;
+  /** Optional live channel. CLI stores and replay transcripts do not need it. */
+  publishProgress?(sessionId: string, progress: import('./session-driver.js').SessionProgress): void;
   appendEvent(sessionId: string, event: SessionEvent): void;
   updateIndex(entry: SessionIndexEntry): void;
   /** Full transcript read-back; tolerates (drops) a crash-truncated final
