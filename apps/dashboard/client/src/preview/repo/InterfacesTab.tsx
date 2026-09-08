@@ -1,18 +1,15 @@
-/**
- * Interfaces: a flat table of the repository's interface catalog (one row per
- * invocable thing: a CLI command, an API operation, a web task), the way
- * Repositories lists repositories. A row opens the interface as its own page
- * (`/interfaces/:id`, see ./InterfacePage.tsx). Search by title or id; Surface
- * and Origin are the filters.
- */
+/** Full-width catalog of screens, operations and commands. Rows open their own detail page. */
 
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import type { GuardInterfaceRow, GuardInterfacesView } from '@/preview/vendor/shared';
-import { guardDriver } from '@/preview/vendor/shared';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import type { GuardInterfaceRow, GuardInterfacesView } from '@truecourse/shared';
+import { guardDriver } from '@truecourse/shared';
+import { GuardMethodLabel } from '@/components/guard/GuardMethodLabel';
+import { useGuardFlows } from '@/hooks/useGuardFlows';
+import { catalogOrigins, catalogUsage, interfaceCatalog } from './interface-catalog';
 import { CHIP_CLASS, PageHeader } from '@/preview/ui/bits';
 import { FilterBar } from '@/preview/ui/filter-bar';
-import { useGuardInterfaces } from '@/preview/vendor/hooks/useGuardInterfaces';
+import { useGuardInterfaces } from '@/hooks/useGuardInterfaces';
 import type { Repo } from '@/preview/data/types';
 import { useGuardTabJump } from './tab-jump';
 import { useGuardRefresh } from './use-guard-refresh';
@@ -46,6 +43,8 @@ export function InterfacesTab({ repo }: { repo: Repo }) {
 
   const reloadKey = useGuardRefresh(repo, ['guard-setup']);
   const interfaces = useGuardInterfaces(repo.id, true, reloadKey);
+  const flows = useGuardFlows(repo.id, true, reloadKey);
+  const catalog = useMemo(() => interfaceCatalog(interfaces.view), [interfaces.view]);
   const [query, setQuery] = useState('');
   const [surfaceFilter, setSurfaceFilter] = useState<string[]>([]);
   const [originFilter, setOriginFilter] = useState<string[]>([]);
@@ -67,21 +66,25 @@ export function InterfacesTab({ repo }: { repo: Repo }) {
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return all.filter(
-      (i) =>
-        (!q || i.title.toLowerCase().includes(q) || i.id.toLowerCase().includes(q)) &&
-        (surfaceFilter.length === 0 || surfaceFilter.includes(i.type)) &&
-        (originFilter.length === 0 || originFilter.includes(i.origin ?? 'derived')),
+    return catalog.rows.filter((row) =>
+      (!q || row.search.includes(q)) &&
+      (surfaceFilter.length === 0 || surfaceFilter.includes(row.surface)) &&
+      (originFilter.length === 0 || catalogOrigins(row).some((origin) => originFilter.includes(origin))),
     );
-  }, [all, query, surfaceFilter, originFilter]);
+  }, [catalog, query, surfaceFilter, originFilter]);
 
-  const openInterface = (id: string) => navigate(`/preview/repos/${repo.id}/interfaces/${encodeURIComponent(id)}`);
+  const hidden = catalog.hidden.filter((h) => surfaceFilter.length === 0 || surfaceFilter.includes(h.surface));
+  const rowUrl = (id: string) => `/preview/repos/${repo.id}/interfaces/${encodeURIComponent(id)}`;
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <PageHeader
         title="Interfaces"
-        subtitle={rows.length === all.length ? `${all.length}` : `${rows.length} of ${all.length}`}
+        subtitle={(['screen', 'operation', 'command', 'entries'] as const).flatMap((kind) => {
+          const matching = rows.filter((r) => r.kind === kind);
+          const count = kind === 'entries' ? matching.reduce((n, r) => n + r.members.length, 0) : matching.length;
+          return count ? [`${count} ${kind === 'entries' ? `entry point${count === 1 ? '' : 's'}` : `${kind}${count === 1 ? '' : 's'}`}`] : [];
+        }).join(' · ') || '0 interfaces'}
       />
       <div className="flex shrink-0 flex-wrap items-center gap-x-6 gap-y-1 border-b border-border px-6 py-2">
         <input
@@ -110,47 +113,50 @@ export function InterfacesTab({ repo }: { repo: Repo }) {
         </div>
       </div>
 
+      {flows.view?.recipe && (
+        <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-6 py-2 text-xs">
+          <span className="text-muted-foreground">Preparation</span>
+          {surfaceOptions.filter((s) => surfaceFilter.length === 0 || surfaceFilter.includes(s.key)).map((s) => (
+            <Link key={s.key} to={rowUrl(`recipe:${s.key}`)} className="rounded-sm text-foreground underline decoration-border underline-offset-4 hover:decoration-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">{s.label} recipe</Link>
+          ))}
+        </div>
+      )}
       <div className="min-h-0 flex-1 overflow-auto">
         <table className="w-full border-collapse text-[13px]" aria-label="Interfaces">
           <thead className="sticky top-0 z-10 bg-card">
             <tr className="border-b border-border text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               <th className="px-6 py-2 text-left font-semibold">Interface</th>
               <th className="px-3 py-2 text-left font-semibold">Surface</th>
-              <th className="px-3 py-2 text-left font-semibold">Group</th>
+              <th className="px-3 py-2 text-left font-semibold">Kind</th>
+              <th className="px-3 py-2 text-right font-semibold">Interfaces</th>
               <th className="px-3 py-2 text-left font-semibold">Origin</th>
               <th className="px-6 py-2 text-right font-semibold">Used by</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((i) => (
-              <tr
-                key={i.id}
-                tabIndex={0}
-                onClick={() => openInterface(i.id)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') openInterface(i.id);
-                }}
-                className="cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/40 focus:bg-muted/40 focus:outline-none"
-              >
+            {rows.map((row) => (
+              <tr key={row.id} onClick={(event) => {
+                if (!(event.target as HTMLElement).closest('a')) navigate(rowUrl(row.id));
+              }} className="cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/40 focus-within:bg-muted/40">
                 <td className="px-6 py-2.5">
-                  <span className="block truncate text-foreground">{i.title}</span>
-                  <span className="block truncate font-mono text-[11px] text-muted-foreground">{i.id}</span>
+                  <Link to={rowUrl(row.id)} className="block rounded-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                    <span className="flex items-baseline gap-2">
+                      {row.method && <GuardMethodLabel method={row.method} fixed size="md" />}
+                      <span className={row.kind === 'operation' || row.kind === 'command' ? 'font-mono' : ''}>{row.title}</span>
+                    </span>
+                    <span className="mt-0.5 block text-[11px] text-muted-foreground">{row.hint}</span>
+                  </Link>
                 </td>
-                <td className="px-3 py-2.5">
-                  <span className={CHIP_CLASS}>{guardDriver(i.type)?.label ?? i.type}</span>
-                </td>
-                <td className="px-3 py-2.5 text-muted-foreground">{i.group ?? ''}</td>
-                <td className="px-3 py-2.5">
-                  <span className={CHIP_CLASS}>{i.origin ?? 'derived'}</span>
-                </td>
-                <td className="px-6 py-2.5 text-right tabular-nums text-foreground">
-                  {i.flows.length} test{i.flows.length === 1 ? '' : 's'}
-                </td>
+                <td className="px-3 py-2.5"><span className={CHIP_CLASS}>{guardDriver(row.surface)?.label ?? row.surface}</span></td>
+                <td className="px-3 py-2.5 text-muted-foreground">{row.kind === 'entries' ? 'Entry points' : row.kind === 'screen' ? 'Screen' : row.kind === 'operation' ? 'Operation' : 'Command'}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums">{row.members.length}</td>
+                <td className="px-3 py-2.5"><div className="flex flex-wrap gap-1">{catalogOrigins(row).map((origin) => <span key={origin} className={CHIP_CLASS}>{origin}</span>)}</div></td>
+                <td className="px-6 py-2.5 text-right tabular-nums whitespace-nowrap">{catalogUsage(row)} {catalogUsage(row) === 1 ? 'test' : 'tests'}</td>
               </tr>
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-6 py-8 text-center text-muted-foreground">
+                <td colSpan={6} className="px-6 py-8 text-center text-muted-foreground">
                   {interfaces.loading
                     ? 'Loading interfaces.'
                     : interfaces.error
@@ -163,6 +169,7 @@ export function InterfacesTab({ repo }: { repo: Repo }) {
             )}
           </tbody>
         </table>
+        {hidden.length > 0 && <p className="px-6 py-3 text-xs text-muted-foreground">{hidden.map((h) => h.text).join(' · ')}</p>}
       </div>
     </div>
   );

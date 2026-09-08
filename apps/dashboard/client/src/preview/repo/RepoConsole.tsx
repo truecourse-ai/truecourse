@@ -185,8 +185,8 @@ export default function RepoConsole() {
             // REAL, not mock: the interface catalog of a connected repository is
             // derived from that repository's own tree, so this surface reads the
             // server's catalog over `/api/repos/<id>/guard/interfaces`. Same two
-            // views as the fixture repositories get — the table, and one
-            // interface as its own page — over real data.
+            // views as the fixture repositories get: the full-width catalog
+            // of screens, operations and commands, and each row as its own page.
             interfaceId ? (
               <InterfacePage repo={repo} interfaceId={decodeURIComponent(interfaceId)} />
             ) : (
