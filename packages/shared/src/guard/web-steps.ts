@@ -12,7 +12,7 @@
  *   - the LOCATOR is closed to the handles a USER perceives ({@link GuardWebLocatorSchema});
  *   - the step declares its own DRIVER ({@link webDriver});
  *   - the address is asserted ORIGIN-STRIPPED ({@link GuardWebExpectSchema});
- *   - the verb set is CLOSED at seven ({@link GuardWebStepSchema});
+ *   - the verb set is CLOSED at eight ({@link GuardWebStepSchema});
  *   - a step may CAPTURE what the page shows ({@link GuardWebCaptureSchema}), into
  *     the same scenario-wide namespace a cli or api step captures into.
  */
@@ -144,7 +144,16 @@ export const GUARD_WEB_ROLES = [
  * act on the first" — the intent is on the page, not guessed by the driver, so an
  * UNDECLARED ambiguity still fails as loudly as ever.
  */
+/** A named container narrows an action without relying on DOM selectors. */
+export const GuardWebScopeSchema = z.object({
+  role: z.enum(GUARD_WEB_ROLES),
+  name: z.string().min(1),
+  exact: z.boolean().optional(),
+}).strict()
+export type GuardWebScope = z.infer<typeof GuardWebScopeSchema>
+
 const locatorEscapes = {
+  within: GuardWebScopeSchema.optional(),
   /** Demand the WHOLE value rather than a case-insensitive substring. */
   exact: z.boolean().optional(),
   /** Act on the FIRST of several legitimate matches. See the strictness note above. */
@@ -552,6 +561,18 @@ export const GuardWebFillStepSchema = z
   })
   .strict()
 
+/** Choose a native select option by its visible label. Custom menus use click. */
+export const GuardWebSelectStepSchema = z.object({
+  driver: webDriver,
+  select: GuardWebLocatorSchema,
+  option: z.string().min(1),
+  expect: GuardWebExpectSchema.optional(),
+  capture,
+  timeoutMs,
+  note,
+  milestone,
+}).strict()
+
 /**
  * THE MIME TYPES a file can be typed by its NAME. Closed, and closed at the formats
  * an app actually asks a user for — because the type is what the page's own accept
@@ -773,8 +794,8 @@ export const GuardWebCredentialStepSchema = z
 
 /**
  * ONE web step — one action, or one assertion, taken by a real browser against the
- * web surface the sandbox serves. The verbs are closed at seven: navigate, click,
- * fill, upload, history, credential, expect. There is deliberately no hover, no scroll, no
+ * web surface the sandbox serves. The verbs are closed at eight: navigate, click,
+ * fill, select, upload, history, credential, expect. There is deliberately no hover, no scroll, no
  * keyboard: each would be a promise about how the page is OPERATED rather than what
  * it PROMISES, and the vocabulary grows only when a real claim cannot be stated
  * without it — which is exactly what `history` was (2026-08-11: "Back and Forward
@@ -794,19 +815,21 @@ export type GuardWebExpect = z.infer<typeof GuardWebExpectSchema>
 export type GuardWebFile = z.infer<typeof GuardWebFileSchema>
 export type GuardWebNavigateStep = z.infer<typeof GuardWebNavigateStepSchema>
 export type GuardWebClickStep = z.infer<typeof GuardWebClickStepSchema>
+export type GuardWebSelectStep = z.infer<typeof GuardWebSelectStepSchema>
 export type GuardWebFillStep = z.infer<typeof GuardWebFillStepSchema>
 export type GuardWebUploadStep = z.infer<typeof GuardWebUploadStepSchema>
 export type GuardWebHistoryStep = z.infer<typeof GuardWebHistoryStepSchema>
 export type GuardWebCredentialStep = z.infer<typeof GuardWebCredentialStepSchema>
 export type GuardWebExpectStep = z.infer<typeof GuardWebExpectStepSchema>
 /** The union is spelled out from its members (not inferred from the schema)
- *  because the schema below is annotated with it: seven strict members exceed
+ *  because the schema below is annotated with it: the strict members exceed
  *  what tsc will serialize into a declaration (TS7056), and the explicit alias
  *  keeps every schema built on the union emittable. */
 export type GuardWebStep =
   | GuardWebNavigateStep
   | GuardWebClickStep
   | GuardWebFillStep
+  | GuardWebSelectStep
   | GuardWebUploadStep
   | GuardWebHistoryStep
   | GuardWebCredentialStep
@@ -816,6 +839,7 @@ export const GuardWebStepSchema: z.ZodType<GuardWebStep, z.ZodTypeDef, unknown> 
   GuardWebNavigateStepSchema,
   GuardWebClickStepSchema,
   GuardWebFillStepSchema,
+  GuardWebSelectStepSchema,
   GuardWebUploadStepSchema,
   GuardWebHistoryStepSchema,
   GuardWebCredentialStepSchema,
@@ -846,6 +870,10 @@ export function isWebFillStep(step: GuardWebStep): step is GuardWebFillStep {
   return 'fill' in step
 }
 
+export function isWebSelectStep(step: GuardWebStep): step is GuardWebSelectStep {
+  return 'select' in step
+}
+
 /** True when the web step hands a file to a control a user would operate. */
 export function isWebUploadStep(step: GuardWebStep): step is GuardWebUploadStep {
   return 'upload' in step
@@ -873,6 +901,7 @@ export function isWebExpectStep(step: GuardWebStep): step is GuardWebExpectStep 
     !isWebNavigateStep(step) &&
     !isWebClickStep(step) &&
     !isWebFillStep(step) &&
+    !isWebSelectStep(step) &&
     !isWebUploadStep(step) &&
     !isWebHistoryStep(step) &&
     !isWebCredentialStep(step)
@@ -943,7 +972,7 @@ export function webLocatorHandle(locator: GuardWebLocator): {
 /** `button “Save”` / `first placeholder “Search”` — one locator, in a reader's words. */
 export function describeWebLocator(locator: GuardWebLocator): string {
   const { kind, value } = webLocatorHandle(locator)
-  return `${locator.pick === 'first' ? 'first ' : ''}${kind} “${value}”${locator.exact ? ' (exact)' : ''}`
+  return `${locator.pick === 'first' ? 'first ' : ''}${kind} “${value}”${locator.exact ? ' (exact)' : ''}${locator.within ? ` within ${describeWebLocator(locator.within)}` : ''}`
 }
 
 /**
@@ -1014,6 +1043,7 @@ export function describeWebExpect(expect: GuardWebExpect | undefined): string {
 export function describeWebCommand(step: GuardWebStep): string {
   if (isWebNavigateStep(step)) return `navigate ${step.navigate}`
   if (isWebClickStep(step)) return `click ${describeWebLocator(step.click)}`
+  if (isWebSelectStep(step)) return `select “${step.option}” in ${describeWebLocator(step.select)}`
   if (isWebFillStep(step)) return `fill ${describeWebLocator(step.fill)} with “${step.value}”`
   // The file's NAME and the control, and never a byte of the payload: a base64
   // fixture is unreadable noise in a step list and a `text` file may be data the

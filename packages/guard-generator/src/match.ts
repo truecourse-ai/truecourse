@@ -29,6 +29,7 @@ import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import {
   interfaceEntryLabel,
   flowDriversToMatch,
+  describeWebLocator,
   interfaceFingerprint,
   type GuardDriverId,
   type GuardFlow,
@@ -122,7 +123,7 @@ function stepSummary(step: InterfaceStep): string {
     case 'navigate':
       return `navigate: ${step.route}`
     default:
-      return `${step.kind}: ${step.target}`
+      return `${step.kind}${step.kind === 'input' && step.mode ? ` (${step.mode})` : ''}: ${step.target}${step.within ? ` within ${describeWebLocator(step.within)}` : ''}`
   }
 }
 
@@ -160,9 +161,9 @@ function driverVerb(step: InterfaceStep, driver: GuardDriverId): string {
     case 'navigate':
       return `navigate: ${step.route}`
     case 'input':
-      return `fill: ${step.target}`
+      return `${step.mode === 'select' ? 'select' : 'fill'}: ${step.target}${step.within ? ` within ${describeWebLocator(step.within)}` : ''}`
     default:
-      return `click: ${step.target}`
+      return `click: ${step.target}${step.within ? ` within ${describeWebLocator(step.within)}` : ''}`
   }
 }
 

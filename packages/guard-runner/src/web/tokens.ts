@@ -20,6 +20,7 @@ import type {
 import {
   isWebClickStep,
   isWebFillStep,
+  isWebSelectStep,
   isWebNavigateStep,
   isWebUploadStep,
   webLocatorValueKey,
@@ -39,7 +40,12 @@ type Tok = (text: string) => string
 function resolveLocator<T extends object>(locator: T, tok: Tok): T {
   const key = webLocatorValueKey(locator)
   const value = (locator as Record<string, unknown>)[key]
-  return typeof value === 'string' ? { ...locator, [key]: tok(value) } : locator
+  const within = (locator as { within?: GuardWebLocator }).within
+  return {
+    ...locator,
+    ...(typeof value === 'string' ? { [key]: tok(value) } : {}),
+    ...(within ? { within: resolveLocator(within, tok) } : {}),
+  }
 }
 
 /** A text matcher with every authored value resolved — the comparands included. */
@@ -158,6 +164,9 @@ export function resolveWebStep(step: GuardWebStep, tok: Tok): GuardWebStep {
   if (isWebClickStep(step)) return { ...step, click: resolveLocator(step.click, tok), ...expect, ...capture }
   if (isWebFillStep(step)) {
     return { ...step, fill: resolveLocator(step.fill, tok), value: tok(step.value), ...expect, ...capture }
+  }
+  if (isWebSelectStep(step)) {
+    return { ...step, select: resolveLocator(step.select, tok), option: tok(step.option), ...expect, ...capture }
   }
   if (isWebUploadStep(step)) {
     return {

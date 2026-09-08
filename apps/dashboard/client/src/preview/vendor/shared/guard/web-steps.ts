@@ -144,7 +144,16 @@ export const GUARD_WEB_ROLES = [
  * act on the first", the intent is on the page, not guessed by the driver, so an
  * UNDECLARED ambiguity still fails as loudly as ever.
  */
+/** A named container narrows an action without relying on DOM selectors. */
+export const GuardWebScopeSchema = z.object({
+  role: z.enum(GUARD_WEB_ROLES),
+  name: z.string().min(1),
+  exact: z.boolean().optional(),
+}).strict()
+export type GuardWebScope = z.infer<typeof GuardWebScopeSchema>
+
 const locatorEscapes = {
+  within: GuardWebScopeSchema.optional(),
   /** Demand the WHOLE value rather than a case-insensitive substring. */
   exact: z.boolean().optional(),
   /** Act on the FIRST of several legitimate matches. See the strictness note above. */
@@ -552,6 +561,18 @@ export const GuardWebFillStepSchema = z
   })
   .strict()
 
+/** Choose a native select option by its visible label. Custom menus use click. */
+export const GuardWebSelectStepSchema = z.object({
+  driver: webDriver,
+  select: GuardWebLocatorSchema,
+  option: z.string().min(1),
+  expect: GuardWebExpectSchema.optional(),
+  capture,
+  timeoutMs,
+  note,
+  milestone,
+}).strict()
+
 /**
  * THE MIME TYPES a file can be typed by its NAME. Closed, and closed at the formats
  * an app actually asks a user for, because the type is what the page's own accept
@@ -759,6 +780,7 @@ export const GuardWebStepSchema = z.union([
   GuardWebNavigateStepSchema,
   GuardWebClickStepSchema,
   GuardWebFillStepSchema,
+  GuardWebSelectStepSchema,
   GuardWebUploadStepSchema,
   GuardWebHistoryStepSchema,
   GuardWebExpectStepSchema,
@@ -775,6 +797,7 @@ export type GuardWebExpect = z.infer<typeof GuardWebExpectSchema>
 export type GuardWebFile = z.infer<typeof GuardWebFileSchema>
 export type GuardWebNavigateStep = z.infer<typeof GuardWebNavigateStepSchema>
 export type GuardWebClickStep = z.infer<typeof GuardWebClickStepSchema>
+export type GuardWebSelectStep = z.infer<typeof GuardWebSelectStepSchema>
 export type GuardWebFillStep = z.infer<typeof GuardWebFillStepSchema>
 export type GuardWebUploadStep = z.infer<typeof GuardWebUploadStepSchema>
 export type GuardWebHistoryStep = z.infer<typeof GuardWebHistoryStepSchema>
@@ -805,6 +828,10 @@ export function isWebFillStep(step: GuardWebStep): step is GuardWebFillStep {
   return 'fill' in step
 }
 
+export function isWebSelectStep(step: GuardWebStep): step is GuardWebSelectStep {
+  return 'select' in step
+}
+
 /** True when the web step hands a file to a control a user would operate. */
 export function isWebUploadStep(step: GuardWebStep): step is GuardWebUploadStep {
   return 'upload' in step
@@ -828,6 +855,7 @@ export function isWebExpectStep(step: GuardWebStep): step is GuardWebExpectStep 
     !isWebNavigateStep(step) &&
     !isWebClickStep(step) &&
     !isWebFillStep(step) &&
+    !isWebSelectStep(step) &&
     !isWebUploadStep(step) &&
     !isWebHistoryStep(step)
   )
@@ -897,7 +925,7 @@ export function webLocatorHandle(locator: GuardWebLocator): {
 /** `button “Save”` / `first placeholder “Search”`, one locator, in a reader's words. */
 export function describeWebLocator(locator: GuardWebLocator): string {
   const { kind, value } = webLocatorHandle(locator)
-  return `${locator.pick === 'first' ? 'first ' : ''}${kind} “${value}”${locator.exact ? ' (exact)' : ''}`
+  return `${locator.pick === 'first' ? 'first ' : ''}${kind} “${value}”${locator.exact ? ' (exact)' : ''}${locator.within ? ` within ${describeWebLocator(locator.within)}` : ''}`
 }
 
 /**
@@ -968,6 +996,7 @@ export function describeWebExpect(expect: GuardWebExpect | undefined): string {
 export function describeWebCommand(step: GuardWebStep): string {
   if (isWebNavigateStep(step)) return `navigate ${step.navigate}`
   if (isWebClickStep(step)) return `click ${describeWebLocator(step.click)}`
+  if (isWebSelectStep(step)) return `select “${step.option}” in ${describeWebLocator(step.select)}`
   if (isWebFillStep(step)) return `fill ${describeWebLocator(step.fill)} with “${step.value}”`
   // The file's NAME and the control, and never a byte of the payload: a base64
   // fixture is unreadable noise in a step list and a `text` file may be data the

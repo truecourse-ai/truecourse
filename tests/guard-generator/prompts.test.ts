@@ -1278,8 +1278,11 @@ describe('GENERATE_WEB_SYSTEM_PROMPT — the third authoring arm', () => {
     expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('"click": { "role": "button", "name": "Add Repository" }')
   })
 
-  it('closes the verb set at six, tags every step, and bans the sleep', () => {
-    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('# The verb vocabulary — six verbs, closed')
+  it('teaches native selection and scoped targets, tags every step, and bans sleep', () => {
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('# The web action vocabulary')
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('Never fill a native select')
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('"option": "Food & drink"')
+    expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('Preserve the plan\'s scope')
     expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('Every web step declares `driver: web`')
     expect(GENERATE_WEB_SYSTEM_PROMPT).toContain('no sleep verb, ever')
     // Addresses are surface-relative; url matches origin-stripped.
@@ -1309,7 +1312,8 @@ describe('GENERATE_WEB_SYSTEM_PROMPT — the third authoring arm', () => {
     // …and again with the blast-radius cut (`world` + shared-world doctrine).
     // …and once more when the `credential` step became the sign-in channel
     // (the login form is for flows ABOUT signing in).
-    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('bc362be57f0801e8')
+    // Native selection and named-container scopes change the authored vocabulary.
+    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('4c877b39de6e603a')
   })
 
   it('a web batch advertises the world credentials as the sign-in channel, and the fixture block defers to it', () => {

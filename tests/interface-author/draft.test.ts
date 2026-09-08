@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   AuthoredTaskSchema,
+  AuthoredFragmentSchema,
   stampFragment,
   validateFragment,
   type AuthoredFragment,
@@ -349,3 +350,16 @@ describe('resource enrichment', () => {
     }
   })
 })
+
+
+describe('control type and scope survive authoring', () => {
+  it('accepts native select input and a confirmation scoped to its dialog', () => {
+    const steps = [
+      { kind: 'input' as const, target: 'combobox "Category"', mode: 'select' as const, within: { role: 'dialog' as const, name: 'Edit expense' } },
+      { kind: 'activate' as const, target: 'button "Delete expense"', within: { role: 'dialog' as const, name: 'Delete expense', exact: true } },
+    ];
+    const parsed = AuthoredFragmentSchema.parse(fragment({ interfaces: [task({ steps })] }));
+    expect(parsed.interfaces[0].steps).toEqual(steps);
+    expect(validate(parsed).errors).toEqual([]);
+  });
+});

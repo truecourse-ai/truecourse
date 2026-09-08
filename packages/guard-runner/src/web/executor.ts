@@ -27,6 +27,7 @@ import {
   describeWebSubject,
   isWebClickStep,
   isWebFillStep,
+  isWebSelectStep,
   isWebHistoryStep,
   isWebNavigateStep,
   isWebUploadStep,
@@ -175,19 +176,22 @@ async function readVisibleText(page: Page): Promise<string> {
  * 0 or 1 and the strict must-be-unambiguous check never fires for declared grids.
  */
 export function webLocator(page: Page, target: GuardWebLocator): Locator {
+  const root = target.within
+    ? page.getByRole(target.within.role, { name: target.within.name, exact: target.within.exact ?? false })
+    : page
   const exact = target.exact ?? false
   const base =
     'role' in target
-      ? page.getByRole(target.role, { name: target.name, exact })
+      ? root.getByRole(target.role, { name: target.name, exact })
       : 'placeholder' in target
-        ? page.getByPlaceholder(target.placeholder, { exact })
+        ? root.getByPlaceholder(target.placeholder, { exact })
         : 'label' in target
-          ? page.getByLabel(target.label, { exact })
+          ? root.getByLabel(target.label, { exact })
           : 'text' in target
-            ? page.getByText(target.text, { exact })
+            ? root.getByText(target.text, { exact })
             : 'title' in target
-              ? page.getByTitle(target.title, { exact })
-              : page.getByAltText(target.alt, { exact })
+              ? root.getByTitle(target.title, { exact })
+              : root.getByAltText(target.alt, { exact })
   return target.pick === 'first' ? base.first() : base
 }
 
@@ -269,6 +273,14 @@ async function awaitTarget(
     if (signal?.aborted) return { mismatch: await targetMismatch(page, target, found, what) }
     const locator = webLocator(page, target)
     try {
+      if (target.within) {
+        const scope = await resolveOne(page, target.within, 'within')
+        if ('mismatch' in scope) {
+          if (Date.now() >= deadline) return scope
+          await tick()
+          continue
+        }
+      }
       found = await locator.count()
       if (found === 1 && (await locator.isVisible())) return { locator }
     } catch {
@@ -290,6 +302,10 @@ async function resolveOne(
   target: GuardWebLocator,
   what: string,
 ): Promise<{ locator: Locator } | { mismatch: ExpectMismatch }> {
+  if (target.within) {
+    const scope = await resolveOne(page, target.within, 'within')
+    if ('mismatch' in scope) return scope
+  }
   const locator = webLocator(page, target)
   const found = await locator.count().catch(() => 0)
   if (found === 1) return { locator }
@@ -458,12 +474,8 @@ async function evaluateWebExpect(page: Page, expect: GuardWebExpect): Promise<We
     const expected = describeTextMatcher(label, expect.text)
     let scoped: { text: string } | { mismatch: ExpectMismatch }
     if (expect.within) {
-      const scope = webLocator(page, expect.within)
-      const found = await scope.count().catch(() => 0)
-      scoped =
-        found === 1
-          ? { text: await scope.innerText().catch(() => '') }
-          : { mismatch: await targetMismatch(page, expect.within, found, 'the text of') }
+      const scope = await resolveOne(page, expect.within, 'the text of')
+      scoped = 'mismatch' in scope ? scope : { text: await scope.locator.innerText().catch(() => '') }
     } else {
       scoped = { text: await readVisibleText(page) }
     }
@@ -485,9 +497,14 @@ async function evaluateWebExpect(page: Page, expect: GuardWebExpect): Promise<We
   // so a toolbar that lost a single button says WHICH one.
   for (const target of webVisibleTargets(expect.visible)) {
     const expected = `${describeWebLocator(target)} is visible`
-    const locator = webLocator(page, target)
-    const found = await locator.count().catch(() => 0)
-    const visible = found === 1 && (await locator.isVisible().catch(() => false))
+    const resolved = await resolveOne(page, target, 'to see')
+    if ('mismatch' in resolved) {
+      record({ subject: 'visible', expected, actual: resolved.mismatch.actual }, resolved.mismatch)
+      continue
+    }
+    const locator = resolved.locator
+    const found = 1
+    const visible = await locator.isVisible().catch(() => false)
     if (visible) {
       record({ subject: 'visible', expected, actual: expected }, null)
     } else {
@@ -667,6 +684,10 @@ async function readOneCapture(
   const what = `to capture “${name}” from`
 
   if (get === 'count') {
+    if (spec.from.within) {
+      const scope = await resolveOne(page, spec.from.within, 'within')
+      if ('mismatch' in scope) return scope
+    }
     const found = await webLocator(page, spec.from).count().catch(() => 0)
     return { value: String(found) }
   }
@@ -813,6 +834,10 @@ export async function executeWebStep(opts: ExecuteWebStepOptions): Promise<WebSt
       const target = await awaitTarget(page, step.fill, 'to fill', deadline, opts.signal)
       if ('mismatch' in target) mismatch = target.mismatch
       else await target.locator.fill(step.value, { timeout: Math.max(1, deadline - Date.now()) })
+    } else if (isWebSelectStep(step)) {
+      const target = await awaitTarget(page, step.select, 'to select in', deadline, opts.signal)
+      if ('mismatch' in target) mismatch = target.mismatch
+      else await target.locator.selectOption({ label: step.option }, { timeout: Math.max(1, deadline - Date.now()) })
     } else if (isWebUploadStep(step)) {
       const target = await awaitTarget(page, step.upload, 'to upload to', deadline, opts.signal)
       if ('mismatch' in target) {
