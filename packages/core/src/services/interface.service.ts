@@ -29,6 +29,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   analyzeFile,
+  resolveRequestContracts,
   collectDatastoreUrls,
   collectOutboundRequests,
   databaseFromManifest,
@@ -347,7 +348,7 @@ async function deriveInterfaces(
 ): Promise<DerivedCatalog> {
   let fileAnalyses: readonly FileAnalysis[];
   try {
-    fileAnalyses = opts.fileAnalyses ?? (await analyzeWorkingTree(repoPath));
+    fileAnalyses = resolveRequestContracts(repoPath, opts.fileAnalyses ?? (await analyzeWorkingTree(repoPath)));
   } catch (error) {
     log.warn(`interface mapping: analysis failed, catalog is empty (${errorText(error)})`);
     return {

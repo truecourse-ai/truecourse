@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import request from 'supertest';
 import { type Express } from 'express';
+import { mapInterfaces } from '../../packages/core/src/services/interface.service';
 import { createTestApp } from '../helpers/test-app';
 import { GuardInterfacesViewSchema } from '../../packages/shared/src/index';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
@@ -175,6 +176,34 @@ describe('Guard interfaces — the contract passthrough', () => {
   });
   afterEach(async () => {
     await teardownTestFixture(fixture.project.slug);
+  });
+
+  it('serves helper-derived expense contracts from the persisted catalog', async () => {
+    fs.rmSync(path.join(root, '.truecourse/guard/interfaces.json'));
+    fs.cpSync(path.resolve('tests/fixtures/next-expense-app'), root, { recursive: true });
+    const mapped = await mapInterfaces(root, { probeExec: null });
+    const saved = JSON.parse(fs.readFileSync(mapped.snapshotPath, 'utf8'));
+    const res = await request(app).get(url('interfaces')).expect(200);
+    const view = GuardInterfacesViewSchema.parse(res.body);
+    expect(view.interfaces.filter((entry) => entry.type === 'api')).toHaveLength(5);
+    for (const entry of view.interfaces) {
+      expect(entry.contract).toEqual(saved.interfaces.find((stored: { id: string }) => stored.id === entry.id).contract);
+    }
+    const get = view.interfaces.find((entry) => entry.id === 'api/get-api-expenses')!.contract!;
+    expect(get.surface).toBe('api');
+    if (get.surface !== 'api') throw new Error('expected HTTP contract');
+    expect(get.operation.request?.query?.map((field) => field.name).sort()).toEqual(['category', 'from', 'page', 'q', 'to']);
+    expect(get.operation.produces?.statuses).toEqual([{ status: '200' }, { status: '400' }, { status: '500' }]);
+    expect(get.operation.produces?.body).toContainEqual({ marker: '"expenses"' });
+    const identity = (catalog: typeof mapped.catalog) => catalog.interfaces.map((entry) => [entry.id, entry.fingerprint]);
+    const handler = path.join(root, 'app/api/expenses/route.ts');
+    fs.writeFileSync(handler, fs.readFileSync(handler, 'utf8').replace(')), 201)', ')), 202)'));
+    const remapped = await mapInterfaces(root, { probeExec: null });
+    expect(identity(remapped.catalog)).toEqual(identity(mapped.catalog));
+    const post = remapped.catalog.interfaces.find((entry) => entry.id === 'api/post-api-expenses')!.contract!;
+    if (post.surface !== 'api') throw new Error('expected HTTP contract');
+    expect(post.operation.produces?.statuses).toContainEqual({ status: '202' });
+    expect(post.operation.produces?.statuses).not.toContainEqual({ status: '201' });
   });
 
   it('serves the contract verbatim, and validates against the wire schema', async () => {

@@ -1873,6 +1873,13 @@ describe('Interfaces tab — the contract', () => {
     expect(within(writes).getByText('none')).toBeInTheDocument();
   });
 
+  it('explains that a detected API endpoint can have unresolved contract details', async () => {
+    renderPane(API_MAPPED, '/repos/r?tab=interfaces&ginterface=' + encodeURIComponent(API_MAPPED.interfaces[0].id));
+    expect(await screen.findByText('No contract derived')).toBeInTheDocument();
+    expect(screen.getByText('The endpoint was found, but its request and response details could not be extracted from the source.')).toBeInTheDocument();
+    expect(screen.queryByText('Request')).not.toBeInTheDocument();
+  });
+
   it('says so plainly when the catalog carries no contract — nothing is filled in', async () => {
     renderPane(WITH_CONTRACT, '/repos/r?tab=interfaces&ginterface=cli%2Ftasks-list');
     expect(await screen.findByText('No contract derived')).toBeInTheDocument();
