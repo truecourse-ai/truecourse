@@ -46,6 +46,7 @@ export function RunConversation({
   repoId,
   run,
   liveEvents,
+  connectionError,
   openSessionId,
   onOpenSession,
   onBack,
@@ -55,6 +56,7 @@ export function RunConversation({
   run: PublicSessionRun;
   /** Socket-pushed events per session for THIS run. */
   liveEvents: ReadonlyMap<string, readonly SessionEvent[]>;
+  connectionError?: string | null;
   /** The session whose thread is open (`?ses=`), or null. */
   openSessionId: string | null;
   onOpenSession: (sessionId: string | null) => void;
@@ -92,6 +94,11 @@ export function RunConversation({
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
+      {connectionError && (
+        <div role="status" className="shrink-0 border-b border-border px-6 py-2 text-xs text-muted-foreground">
+          {connectionError}
+        </div>
+      )}
       <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-6 text-xs">
         <button
           type="button"

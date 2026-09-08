@@ -413,6 +413,9 @@ function startSession<TOutcome>(
           ...(input.sharedPrefix ? { sharedPrefix: input.sharedPrefix } : {}),
           ...(resume ? { resume } : {}),
           onEvent: track,
+          ...(persistence.publishProgress ? {
+            onProgress: (progress: import('./session-driver.js').SessionProgress) => persistence.publishProgress!(sessionId, progress),
+          } : {}),
           signal: controller.signal,
         });
         if (pendingInterrupt) void handle.interrupt();
@@ -558,7 +561,7 @@ function startSession<TOutcome>(
   })();
 
   return {
-    outcome,
+    outcome: outcome.finally(() => persistence.flush?.()),
     steer: (message) => handle?.steer(message),
     status: () => status,
   };

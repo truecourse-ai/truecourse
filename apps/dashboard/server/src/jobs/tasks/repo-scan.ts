@@ -65,7 +65,7 @@ export function createRepoScanTask(
         // The probe died before curate could open a run — create one carrying
         // the reason, so Activity shows a failed scan instead of nothing at all.
         if (err instanceof LlmProbeFailedError) {
-          recordFailedScanRun(repoFullName, { message: err.message, kind: 'llm-probe' });
+          await recordFailedScanRun(repoFullName, { message: err.message, kind: 'llm-probe' });
         }
         throw err;
       }

@@ -190,6 +190,8 @@ async function runReconcile(
     updateIndex: (entry: Parameters<
       Awaited<ReturnType<GuardSetupSessionContext['acquire']>>['persistence']['updateIndex']
     >[0]) => acquired!.persistence.updateIndex(entry),
+    flush: async () => { await acquired?.persistence.flush?.(); },
+    publishProgress: (sessionId: string, progress: import('@truecourse/agent-loop').SessionProgress) => acquired?.persistence.publishProgress?.(sessionId, progress),
     readEvents: (sessionId: string) => acquired?.persistence.readEvents(sessionId) ?? [],
   };
 

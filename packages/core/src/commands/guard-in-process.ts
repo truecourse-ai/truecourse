@@ -57,7 +57,7 @@ import { getGit } from '../lib/git.js';
 import { getGuardExecutor } from '../lib/guard-executor.js';
 import { guardsMaterializeInPlace } from '../lib/guard-store.js';
 import { resolveCommitSha } from '../lib/repo-ref.js';
-import { createSessionRun, type SessionRunStartedInfo } from '../lib/sessions-store.js';
+import { createSessionRun, type SessionRunStartedInfo, type SessionRunStore } from '../lib/sessions-store.js';
 import {
   agentTransport,
   cliTransport,
@@ -253,6 +253,8 @@ export interface GuardGenerateInProcessOptions {
    * ephemeral clone deleted after the run (a hosted job). Defaults to `repoRoot`.
    */
   sessionsKey?: string;
+  /** Hosted lifecycle owns completion after result persistence. */
+  sessionRun?: SessionRunStore;
   /**
    * What the run record says it ran on. A caller that built the transport
    * itself knows (the workspace's provider); unset, the session driver's own
@@ -403,7 +405,7 @@ export async function guardGenerateInProcess(
   // FIRST: a generate that started and was stopped by a gate — a blocked
   // corpus, a declined estimate, an unusable provider config — is still a
   // generate that started, and Activity must say so and why.
-  const run = createSessionRun(options.sessionsKey ?? repoRoot, {
+  const run = options.sessionRun ?? createSessionRun(options.sessionsKey ?? repoRoot, {
     command: 'guard-generate',
     gitRef: await resolveCommitSha(repoRoot),
   });
@@ -418,6 +420,11 @@ export async function guardGenerateInProcess(
       }),
     );
   });
+
+  const finishRun: SessionRunStore['finish'] = (status, opts) => {
+    if (!options.sessionRun) run.finish(status, opts);
+    else if (opts?.error) run.setError(opts.error);
+  };
 
   let transport: LlmTransport | undefined;
   try {
@@ -443,11 +450,11 @@ export async function guardGenerateInProcess(
     untap?.();
     // A stop the user asked for is not a failure; a gate that refused is, and
     // the record carries its reason under the gate's own kind.
-    if (e instanceof EstimateDeclined) run.finish('interrupted');
+    if (e instanceof EstimateDeclined) finishRun('interrupted');
     else if (e instanceof OpenConflictsError) {
-      run.finish('failed', { error: { message: firstLine(e.message) ?? e.message, kind: 'open-conflicts' } });
+      finishRun('failed', { error: { message: firstLine(e.message) ?? e.message, kind: 'open-conflicts' } });
     } else {
-      run.finish('failed', { error: { message: (e as Error).message, kind: 'llm-config' } });
+      finishRun('failed', { error: { message: (e as Error).message, kind: 'llm-config' } });
     }
     throw e;
   }
@@ -714,7 +721,7 @@ export async function guardGenerateInProcess(
       // (what `guard status` and the dashboard read) with a partial abort. The
       // caller still gets the failure — loudly, and non-zero.
       if (!options.only || options.only === 'worker') persistGuardReport(repoRoot, guard);
-      run.finish('failed', {
+      finishRun('failed', {
         error: { message: firstLine(guard.reason) ?? `generate ended ${guard.status}`, kind: guard.status },
       });
       return { guard, sessionsRunDir: run.dir };
@@ -727,7 +734,7 @@ export async function guardGenerateInProcess(
     // a partial run's counts would read as a whole one's.
     if (guard.stoppedAfter) {
       tracker?.done(STEPS[cur], `stopped after ${guard.stoppedAfter}`);
-      run.finish('completed');
+      if (!options.sessionRun) finishRun('completed');
       return { guard, sessionsRunDir: run.dir };
     }
 
@@ -751,15 +758,15 @@ export async function guardGenerateInProcess(
     // on every completed generate (including the noChanges no-op); NOT on a thrown
     // error, which never reaches here — the report describes a completed generate.
     persistGuardReport(repoRoot, guard);
-    run.finish('completed');
+    if (!options.sessionRun) finishRun('completed');
 
     return { guard, sessionsRunDir: run.dir };
   } catch (e) {
     tracker?.error(STEPS[cur], (e as Error).message);
     // A stop the caller asked for is not a failure; anything else lands its
     // reason on the record, the only place a watcher can read it.
-    if (options.signal?.aborted) run.finish('interrupted');
-    else run.finish('failed', { error: { message: (e as Error).message, kind: 'generate' } });
+    if (options.signal?.aborted) finishRun('interrupted');
+    else finishRun('failed', { error: { message: (e as Error).message, kind: 'generate' } });
     throw e;
   } finally {
     untap?.();

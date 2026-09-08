@@ -14,6 +14,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { deriveWebAuthoringContext } from '../../packages/core/src/services/web-context.service';
+import { mapInterfaces } from '../../packages/core/src/services/interface.service';
+import { planWorkItems } from '../../packages/core/src/services/interface-author/author';
 import type { InterfacesFile } from '../../packages/shared/src/index';
 
 let repo: string;
@@ -80,6 +82,35 @@ afterEach(() => {
 });
 
 describe('deriveWebAuthoringContext', () => {
+  it('maps and prepares authoring for a Next.js app with no config file', async () => {
+    writeApp();
+    fs.unlinkSync(path.join(repo, 'next.config.js'));
+    write('package.json', JSON.stringify({ dependencies: { next: '16.0.0' } }));
+
+    const { catalog } = await mapInterfaces(repo, { probeExec: null });
+    expect(catalog.resources?.web?.map((place) => place.address)).toEqual(['/tasks']);
+    expect(planWorkItems(catalog, null).map((item) => item.place.id)).toEqual(['tasks']);
+    const { contexts } = await deriveWebAuthoringContext(repo, { catalog });
+    expect(contexts.get('tasks')?.module).toBe('app/tasks/page.tsx');
+    expect(contexts.get('tasks')?.renders).toEqual(['components/task-list.tsx']);
+  });
+
+  it('recognizes only Next.js packages in a mixed monorepo without config files', async () => {
+    write('package.json', JSON.stringify({ private: true }));
+    write('apps/web/package.json', JSON.stringify({ devDependencies: { next: '16.0.0' } }));
+    write('apps/web/src/pages/index.tsx', 'export default function Home() { return <h1>Home</h1> }');
+    write('apps/web/src/pages/api/tasks.ts', 'export default function handler() {}');
+    write('apps/admin/package.json', JSON.stringify({ dependencies: { react: '19.0.0' } }));
+    write('apps/admin/src/pages/Settings.tsx', 'export default function Settings() { return <h1>Settings</h1> }');
+    write('apps/broken/package.json', '{');
+    write('apps/broken/app/page.tsx', 'export default function Home() { return <h1>Home</h1> }');
+
+    const { catalog } = await mapInterfaces(repo, { probeExec: null });
+    expect(catalog.resources?.web?.map((place) => place.address)).toEqual(['/']);
+    const { contexts } = await deriveWebAuthoringContext(repo, { catalog });
+    expect([...contexts.values()].map((context) => context.module)).toEqual(['apps/web/src/pages/index.tsx']);
+  });
+
   it('grounds each derived place in the module that renders it and the api it calls', async () => {
     writeApp();
     const { contexts, files } = await deriveWebAuthoringContext(repo, { catalog: CATALOG });

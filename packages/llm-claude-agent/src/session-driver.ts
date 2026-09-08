@@ -38,6 +38,8 @@ import { loadSdk } from './sdk-import.js';
 import type {
   SdkAssistantMessage,
   SdkMcpToolResult,
+  SdkPartialAssistantMessage,
+  SdkToolProgressMessage,
   SdkMessage,
   SdkModule,
   SdkQuery,
@@ -196,6 +198,8 @@ async function runClaudeAgentSession(
     raws: SdkAssistantMessage[];
   }
   let pendingTurn: PendingTurn | undefined;
+  let progressTurnId: string | undefined;
+  const progressBlocks = new Map<number, string>();
   const flushTurn = (): void => {
     if (!pendingTurn) return;
     const text = pendingTurn.texts.join('\n');
@@ -247,6 +251,7 @@ async function runClaudeAgentSession(
   });
 
   const options: SdkQueryOptions = {
+    ...(input.onProgress ? { includePartialMessages: true } : {}),
     // -- isolation invariants, hardcoded ------------------------------
     tools: [], // no built-in tools
     disallowedTools: ['ToolSearch'], // deferred tool loading steals the first turn (spike)
@@ -320,8 +325,35 @@ async function runClaudeAgentSession(
   // wrapped, and a result we already hold wins over the trailing throw.
   try {
     for await (const message of query as AsyncIterable<SdkMessage>) {
-      if (message.type !== 'assistant') flushTurn();
+      // Partial blocks and tool heartbeats are not turn boundaries. In particular,
+      // partials may arrive BETWEEN same-message-id complete assistant blocks.
+      if (message.type !== 'assistant' && message.type !== 'stream_event' && message.type !== 'tool_progress') flushTurn();
       switch (message.type) {
+        case 'stream_event': {
+          const partial = message as SdkPartialAssistantMessage;
+          if (partial.parent_tool_use_id !== null || !input.onProgress) break;
+          const event = partial.event;
+          if (event.type === 'message_start') {
+            if (pendingTurn && pendingTurn.id !== event.message?.id) flushTurn();
+            progressTurnId = event.message?.id;
+            progressBlocks.clear();
+          } else if (progressTurnId && typeof event.index === 'number') {
+            if (event.type === 'content_block_start' && event.content_block?.type === 'text') {
+              progressBlocks.set(event.index, event.content_block.text ?? '');
+            } else if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+              progressBlocks.set(event.index, (progressBlocks.get(event.index) ?? '') + (event.delta.text ?? ''));
+            } else break;
+            input.onProgress({ kind: 'text', turnId: progressTurnId, text: [...progressBlocks].sort(([a], [b]) => a - b).map(([, text]) => text).join('\n') });
+          }
+          break;
+        }
+        case 'tool_progress': {
+          const progress = message as SdkToolProgressMessage;
+          if (progress.parent_tool_use_id === null && Number.isFinite(progress.elapsed_time_seconds)) {
+            input.onProgress?.({ kind: 'tool', toolCallId: progress.tool_use_id, toolName: bareToolName(progress.tool_name), elapsedSeconds: Math.max(0, progress.elapsed_time_seconds) });
+          }
+          break;
+        }
         case 'system': {
           const system = message as SdkSystemMessage;
           // The harness owns this retry; we own the RECORD of it (item 11).
@@ -634,8 +666,6 @@ function mapResultError(result: SdkResultMessage): SessionFailure {
  * did anything.
  */
 const IGNORED_MESSAGE_TYPES = new Set([
-  'stream_event',
-  'tool_progress',
   'thinking_tokens',
   'status',
   'auth_status',

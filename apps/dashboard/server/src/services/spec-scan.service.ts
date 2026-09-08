@@ -11,11 +11,9 @@
  * apart. Cancellation is the job's too — the `AbortSignal` threaded in here is
  * the one the harness trips when a repository is disconnected mid-scan.
  *
- * Progress reaches the client through the two channels the manual Scan already
- * used, so no new plumbing exists for it: the socket spec tracker
- * (`spec:progress` in the repo's room) and the sessions store's own `run.json`
- * — keyed by the repo IDENTITY, not the throwaway clone, so the repo's runs
- * watcher sees every write and the transcripts outlive the clone.
+ * Activity streams directly from the sessions store's durable journal. The
+ * existing socket spec tracker still serves other progress surfaces. Records
+ * use the repository identity, so both history and transcripts outlive the clone.
  */
 
 import fs from 'node:fs';
@@ -23,7 +21,7 @@ import path from 'node:path';
 import type { RunError } from '@truecourse/agent-loop';
 import type { CuratedCorpus } from '@truecourse/spec-consolidator';
 import { log } from '@truecourse/core/lib/logger';
-import { createSessionRun, openSessionRun } from '@truecourse/core/lib/sessions-store';
+import { createStoredSessionRun, openStoredSessionRun } from '@truecourse/core/lib/sessions-store';
 import { resolveCommitSha } from '@truecourse/core/lib/repo-ref';
 import { saveSpec, saveSpecDocs, specsMaterializeInPlace } from '@truecourse/core/lib/spec-store';
 import { materializeSpecSources, specSourcesMaterializeInPlace } from '@truecourse/core/lib/spec-sources';
@@ -89,6 +87,7 @@ export async function runStoredSpecScan(
       repoIdentity,
       sessionsKey: repoKey,
       ...options,
+      deferRunCompletion: true,
       onRunStarted: (info) => {
         runId = info.runId;
         options.onRunStarted?.(info);
@@ -112,12 +111,24 @@ export async function runStoredSpecScan(
       // scope orchestrator and auto-resolved conflicts reopen.
       await saveDecisions(repoKey, result.curate.decisions);
     }
+    if (runId) {
+      const run = await openStoredSessionRun(repoKey, 'spec-scan', runId);
+      run.finish(options.signal?.aborted ? 'interrupted' : 'completed');
+      await run.flush?.();
+    }
     return result;
   } catch (err) {
     // A cancelled scan is not a failed one — it stopped because the caller said
     // so, and the record already says `interrupted`.
     if (runId && !options.signal?.aborted) {
-      stampRunError(repoKey, runId, { message: messageOf(err) });
+      const run = await openStoredSessionRun(repoKey, 'spec-scan', runId);
+      if (run.record().status === 'running' || run.record().status === 'completed') run.finish('failed', { error: { message: messageOf(err) } });
+      else if (!run.record().error) run.setError({ message: messageOf(err) });
+      await run.flush?.();
+    } else if (runId && options.signal?.aborted) {
+      const run = await openStoredSessionRun(repoKey, 'spec-scan', runId);
+      if (run.record().status === 'running') run.finish('interrupted');
+      await run.flush?.();
     }
     throw err;
   } finally {
@@ -152,20 +163,22 @@ export function snapshotDocs(treeDir: string, corpus: CuratedCorpus): Record<str
  * died before `curateInProcess` could create one. Best-effort: a store that
  * cannot be written must not turn one failure into two.
  */
-export function recordFailedScanRun(repoKey: string, error: RunError): void {
+export async function recordFailedScanRun(repoKey: string, error: RunError): Promise<void> {
   try {
-    createSessionRun(repoKey, { command: 'spec-scan', gitRef: 'unknown' }).finish('failed', {
-      error,
-    });
+    const run = await createStoredSessionRun(repoKey, { command: 'spec-scan', gitRef: 'unknown', activityStream: true });
+    run.finish('failed', { error });
+    await run.flush?.();
   } catch (err) {
     log.warn(`[spec-scan] could not record the failed scan for ${repoKey}: ${messageOf(err)}`);
   }
 }
 
 /** Stamp the reason onto a run that already exists (and already finished). */
-export function stampRunError(repoKey: string, runId: string, error: RunError): void {
+export async function stampRunError(repoKey: string, runId: string, error: RunError): Promise<void> {
   try {
-    openSessionRun(repoKey, 'spec-scan', runId).setError(error);
+    const run = await openStoredSessionRun(repoKey, 'spec-scan', runId);
+    run.setError(error);
+    await run.flush?.();
   } catch (err) {
     log.warn(`[spec-scan] could not stamp the scan failure for ${repoKey}: ${messageOf(err)}`);
   }

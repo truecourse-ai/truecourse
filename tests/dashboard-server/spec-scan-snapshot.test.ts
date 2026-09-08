@@ -14,7 +14,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
-import { PgSpecStore } from '@truecourse/data-store';
+import { PgSpecStore, PgSessionRunStore } from '@truecourse/data-store';
 import type { CuratedCorpus } from '../../packages/spec-consolidator/src/index.js';
 
 vi.mock('@truecourse/core/commands/spec-in-process', async (importOriginal) => ({
@@ -32,12 +32,14 @@ import { hashContent, readSourcesFile } from '../../packages/spec-consolidator/s
 import { PgSpecSourcesStore } from '@truecourse/data-store';
 import { runStoredSpecScan, snapshotDocs } from '../../apps/dashboard/server/src/services/spec-scan.service';
 import { setWorkTreeProvider } from '../../apps/dashboard/server/src/services/work-tree.service';
+import { createStoredSessionRun, openStoredSessionRun, readStoredActivity, setSessionRunBackend, setSessionsRootResolver, resetSessionsRootResolver } from '@truecourse/core/lib/sessions-store';
 
 const REPO = 'acme/widgets';
 
 let client: PGlite;
 let db: Db;
 let tree: string;
+let history: string;
 
 const git = (cwd: string, ...args: string[]): string =>
   execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim();
@@ -58,6 +60,8 @@ beforeEach(async () => {
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
   setSpecStore(new PgSpecStore(db));
   setSpecSourcesStore(new PgSpecSourcesStore(db));
+  history = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-scan-history-'));
+  setSessionsRootResolver(() => history);
   setRepoDocReader((repoKey, docPath, opts) => loadSpecDoc(repoKey, docPath, opts?.commit));
 
   tree = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'tc-scan-snapshot-')));
@@ -74,6 +78,10 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
+  setSessionRunBackend(undefined);
+  resetSessionsRootResolver();
+  fs.rmSync(history, { recursive: true, force: true });
   setWorkTreeProvider(null);
   resetSpecSourcesStore();
   resetSpecStore();
@@ -90,6 +98,30 @@ describe('snapshotDocs', () => {
 });
 
 describe('the hosted scan', () => {
+  it.each([['file', false], ['file', true], ['postgres', false], ['postgres', true]] as const)('finishes after saving with %s history, persistence failure=%s', async (storage, fail) => {
+    if (storage === 'postgres') setSessionRunBackend(new PgSessionRunStore(db));
+    let runId = '';
+    vi.mocked(curateInProcess).mockImplementationOnce(async (_root, options) => {
+      expect(options?.deferRunCompletion).toBe(true);
+      const run = await createStoredSessionRun(REPO, { command: 'spec-scan', gitRef: 'abc', activityStream: true });
+      runId = run.runId;
+      options?.onRunStarted?.({ command: 'spec-scan', runId, dir: run.dir });
+      return { curate: { corpus: corpus(['docs/orders.md']), decisions: { version: 2 } } } as never;
+    });
+    const save = PgSpecStore.prototype.saveSpec;
+    vi.spyOn(PgSpecStore.prototype, 'saveSpec').mockImplementation(async function (ref, artifact, json) {
+      expect((await openStoredSessionRun(REPO, 'spec-scan', runId)).record().status).toBe('running');
+      if (fail) throw new Error('Cannot persist corpus');
+      return save.call(this, ref, artifact, json);
+    });
+    if (fail) await expect(runStoredSpecScan(REPO, { source: 'dashboard' })).rejects.toThrow('Cannot persist corpus');
+    else await runStoredSpecScan(REPO, { source: 'dashboard' });
+    const run = await openStoredSessionRun(REPO, 'spec-scan', runId);
+    expect(run.record().status).toBe(fail ? 'failed' : 'completed');
+    expect((await readStoredActivity(run)).at(-1)).toMatchObject({ kind: 'run', run: { status: fail ? 'failed' : 'completed' } });
+    if (fail) expect(run.record().error?.message).toBe('Cannot persist corpus');
+  });
+
   it('stores the documents under the scan commit, where the doc reader finds them after the clone is gone', async () => {
     vi.mocked(curateInProcess).mockResolvedValue({
       curate: { corpus: corpus(['docs/orders.md', '.truecourse/specs/sources/stripe/refunds.md']), decisions: { version: 2 } },

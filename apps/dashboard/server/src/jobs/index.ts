@@ -21,7 +21,7 @@ import {
   type JobTask,
   type StartWorker,
 } from '@truecourse/jobs';
-import { listSessionRuns } from '@truecourse/core/lib/sessions-store';
+import { listStoredSessionRuns } from '@truecourse/core/lib/sessions-store';
 import { log } from '@truecourse/core/lib/logger';
 import type { Db } from '@truecourse/db';
 import {
@@ -92,7 +92,7 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
     request: OnboardingJobRequest,
     payload: Record<string, unknown>,
   ): Promise<EnqueueResult> => {
-    if (repoIsWorking(request.repoFullName, command)) return { status: 'busy' };
+    if (await repoIsWorking(request.repoFullName, command)) return { status: 'busy' };
     const jobId = await jobs.singleFlightEnqueue(
       task,
       request.workspaceOrgId,
@@ -191,11 +191,7 @@ const jobKey = (task: string, repoFullName: string): string => `${task}:${repoFu
  * session-run store is the one place a run of a repo is visible whoever started
  * it (it sweeps dead-pid runs as it reads, so `running` means a live process).
  */
-function repoIsWorking(repoFullName: string, command: RepoCommand): boolean {
+async function repoIsWorking(repoFullName: string, command: RepoCommand): Promise<boolean> {
   if (command === 'guard-run') return false;
-  try {
-    return listSessionRuns(repoFullName, command).some((run) => run.status === 'running');
-  } catch {
-    return false; // no store yet — nothing is running
-  }
+  return (await listStoredSessionRuns(repoFullName, command)).some((run) => run.status === 'running');
 }

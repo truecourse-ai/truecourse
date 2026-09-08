@@ -33,7 +33,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import type { Runner } from 'graphile-worker';
 import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
-import { JobStore, NotificationStore, PgGuardStore, PgGuardOverlayStore, PgSpecStore } from '@truecourse/data-store';
+import { JobStore, NotificationStore, PgSessionRunStore, PgGuardStore, PgGuardOverlayStore, PgSpecStore } from '@truecourse/data-store';
 import { registerJob, type JobTask, type StartWorker } from '@truecourse/jobs';
 import type { JobView } from '@truecourse/shared';
 // The dist entries the server itself imports — a source-path import here would
@@ -54,6 +54,9 @@ import { setGuardOverlayStore, writeGuardOverlays } from '@truecourse/core/lib/g
 import { setSpecStore, saveSpec } from '@truecourse/core/lib/spec-store';
 import {
   listSessionRuns,
+  listStoredSessionRuns,
+  openStoredSessionRun,
+  setSessionRunBackend,
   setSessionsRootResolver,
   resetSessionsRootResolver,
 } from '@truecourse/core/lib/sessions-store';
@@ -178,6 +181,7 @@ afterEach(async () => {
   setRepoJobsCanceller(null);
   setWorkTreeProvider(null);
   await jobs.stop();
+  setSessionRunBackend(undefined);
   await client.close();
   fs.rmSync(path.join(process.env.TRUECOURSE_HOME as string, 'sessions'), {
     recursive: true,
@@ -421,7 +425,8 @@ describe('the guard setup job', () => {
     await jobs.start();
   });
 
-  it('saves the bundle under the clone’s commit and records a watchable run', async () => {
+  it.each(['file', 'postgres'])('saves the bundle and records a watchable run with %s history', async storage => {
+    if (storage === 'postgres') setSessionRunBackend(new PgSessionRunStore(db));
     const outcome = await jobs.enqueueGuardSetup(request);
     expect(outcome.status).toBe('queued');
     await Promise.all(running);
@@ -443,9 +448,10 @@ describe('the guard setup job', () => {
 
     // The run record lives under the repo IDENTITY (never the throwaway clone),
     // carries the provider it ran on, and mirrors the step checklist.
-    const [run] = listSessionRuns(REPO, 'guard-setup');
-    expect(run).toMatchObject({ status: 'completed', llm: { mode: 'api', provider: 'test' } });
+    const [run] = await listStoredSessionRuns(REPO, 'guard-setup');
+    expect(run).toMatchObject({ activityStream: 'ai-sdk-v1', status: 'completed', llm: { mode: 'api', provider: 'test' } });
     expect(checklistKeys(run)).toEqual([
+      'clone',
       'recipe',
       'detect',
       'catalog',
@@ -741,7 +747,8 @@ describe('the guard generate job', () => {
     expect(disposed).toEqual([clone]);
   });
 
-  it('materializes the stored state, then saves the set, the baseline report and the evidence', async () => {
+  it.each(['file', 'postgres'])('materializes and persists generated results with %s activity history', async storage => {
+    if (storage === 'postgres') setSessionRunBackend(new PgSessionRunStore(db));
     await saveSetupBundle();
     await writeGuardDecisions(REPO, { dismissedClaims: [DISMISSED], dismissedFlows: [] });
 
@@ -847,6 +854,29 @@ describe('the guard generate job', () => {
     const [job] = await jobsOfType('repo.guard-generate');
     expect(job).toMatchObject({ status: 'failed', error: 'every extract call failed' });
     expect(await readGuardBaselineCommit(REPO)).toBeNull();
+  });
+
+  it('keeps Postgres activity running until results save and records a persistence failure', async () => {
+    await saveSetupBundle();
+    setSessionRunBackend(new PgSessionRunStore(db));
+    let checked = false;
+    class FailingResults extends PgGuardStore {
+      override async writeGuardResult(): Promise<void> {
+        const [run] = await listStoredSessionRuns(REPO, 'guard-generate');
+        expect(run.status).toBe('running');
+        checked = true;
+        throw new Error('result persistence failed');
+      }
+    }
+    setGuardStore(new FailingResults(db));
+    await jobs.enqueueGuardGenerate(request);
+    await Promise.all(running);
+    expect(checked).toBe(true);
+    const [run] = await listStoredSessionRuns(REPO, 'guard-generate');
+    expect(run).toMatchObject({ status: 'failed', error: { message: 'result persistence failed' } });
+    const opened = await openStoredSessionRun(REPO, 'guard-generate', run.runId);
+    const events = await opened.readActivity!(-1);
+    expect(events.some(e => e.kind === 'run' && e.run.status === 'completed')).toBe(false);
   });
 
   it('a cancelled generate leaves the store exactly as it found it', async () => {
@@ -1019,11 +1049,13 @@ describe('the guard run job', () => {
   });
 
   it('runs the stored set over setup’s recipe, then saves the baseline run and its evidence', async () => {
+    setSessionRunBackend(new PgSessionRunStore(db));
     await storeGeneratedSet();
     await saveSetupBundle();
 
     await jobs.enqueueGuardRun(request);
     await Promise.all(running);
+    expect(await listStoredSessionRuns(REPO)).toEqual([]);
 
     const [job] = await jobsOfType('repo.guard-run');
     expect(job?.error).toBeNull();

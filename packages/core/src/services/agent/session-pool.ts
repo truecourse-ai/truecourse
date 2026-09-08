@@ -373,6 +373,8 @@ function tee(
   observeIndex: (entry: SessionIndexEntry) => void,
 ): SessionPersistence {
   return {
+    ...(persistence.flush ? { flush: persistence.flush.bind(persistence) } : {}),
+    ...(persistence.publishProgress ? { publishProgress: persistence.publishProgress.bind(persistence) } : {}),
     appendEvent(sessionId, event) {
       persistence.appendEvent(sessionId, event)
       observe(event)

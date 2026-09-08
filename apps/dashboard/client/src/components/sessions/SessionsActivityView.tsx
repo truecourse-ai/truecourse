@@ -23,6 +23,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useSessionRuns } from '@/hooks/useSessionRuns';
 import { useRunStream } from '@/hooks/useRunStream';
 import { RunConversation } from './RunConversation';
+import { SessionProgressContext } from './SessionThread';
 import { RunsIndex } from './RunsIndex';
 import type { RunStarter } from './run-model';
 
@@ -79,11 +80,13 @@ export function SessionsActivityView({
 
   // The live tail of the open run, while its process is alive. Joined BEFORE
   // the transcript snapshots resolve; overlap dedups by seq.
-  const { liveEvents, liveRun } = useRunStream(
+  const usesActivityStream = listedRun?.activityStream === 'ai-sdk-v1';
+  const { liveEvents, liveRun, connectionError, progress } = useRunStream(
     repoId,
     listedRun?.command ?? null,
     listedRun?.runId ?? null,
-    listedRun?.status === 'running',
+    listedRun?.status === 'running' || usesActivityStream,
+    usesActivityStream,
   );
   // The pushed record is always fresher than the listing's.
   const run = liveRun && liveRun.runId === listedRun?.runId ? liveRun : listedRun;
@@ -96,16 +99,19 @@ export function SessionsActivityView({
 
   if (run) {
     return (
+      <SessionProgressContext.Provider value={progress}>
       <RunConversation
         key={run.runId}
         repoId={repoId}
         run={run}
         liveEvents={liveEvents}
+        connectionError={connectionError}
         openSessionId={sesParam}
         onOpenSession={openSession}
         onBack={() => openRun(null)}
         {...(starter ? { starter } : {})}
       />
+      </SessionProgressContext.Provider>
     );
   }
 

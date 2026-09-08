@@ -96,6 +96,26 @@ export interface SdkRateLimitEvent {
   [k: string]: unknown;
 }
 
+export interface SdkPartialAssistantMessage {
+  type: 'stream_event';
+  parent_tool_use_id: string | null;
+  event: {
+    type: string;
+    index?: number;
+    message?: { id?: string };
+    content_block?: { type: string; text?: string };
+    delta?: { type: string; text?: string };
+  };
+}
+
+export interface SdkToolProgressMessage {
+  type: 'tool_progress';
+  parent_tool_use_id: string | null;
+  tool_use_id: string;
+  tool_name: string;
+  elapsed_time_seconds: number;
+}
+
 export interface SdkResultSuccess {
   type: 'result';
   subtype: 'success';
@@ -131,6 +151,8 @@ export type SdkMessage =
   | SdkSystemMessage
   | SdkResultMessage
   | SdkRateLimitEvent
+  | SdkPartialAssistantMessage
+  | SdkToolProgressMessage
   | { type: string; [k: string]: unknown };
 
 // ---------------------------------------------------------------------------

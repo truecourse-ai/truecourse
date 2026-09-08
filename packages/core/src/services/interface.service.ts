@@ -80,6 +80,7 @@ import type {
   InterfacesFile,
 } from '@truecourse/shared';
 import { log } from '../lib/logger.js';
+import { nextAppRoots } from './next-app-roots.js';
 
 export interface MapInterfacesOptions {
   /** Map these analyses instead of re-analyzing the tree (callers that already have them). */
@@ -402,7 +403,10 @@ async function deriveInterfaces(
   // `source.web` means what it means everywhere else: which ladder read the area.
   try {
     const appRoot = servedWebAppRoot(repoPath);
-    webPlaces.push(...deriveWebPlacesFromTree(fileAnalyses, appRoot ? { appRoot } : {}));
+    webPlaces.push(...deriveWebPlacesFromTree(fileAnalyses, {
+      ...(appRoot ? { appRoot } : {}),
+      nextAppRoots: nextAppRoots(repoPath, fileAnalyses),
+    }));
     source.web = 'tree';
   } catch (error) {
     log.warn(`interface mapping: web derivation failed, web catalog is empty (${errorText(error)})`);

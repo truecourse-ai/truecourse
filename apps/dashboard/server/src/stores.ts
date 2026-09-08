@@ -25,10 +25,11 @@ import { setRepoConfigStore } from '@truecourse/core/config/project-config';
 import { setUiStateStore } from '@truecourse/core/config/ui-state';
 import { setRegistryStore } from '@truecourse/core/config/registry';
 import { setAnalyzeLock } from '@truecourse/core/lib/analyze-lock';
-import { setSessionsRootResolver } from '@truecourse/core/lib/sessions-store';
+import { setSessionsRootResolver, setSessionRunBackend } from '@truecourse/core/lib/sessions-store';
 import { getGlobalDir } from '@truecourse/core/config/paths';
 import { setKvCacheStore } from '@truecourse/llm';
 import {
+  PgSessionRunStore,
   PgAnalysisStore,
   PgSpecStore,
   PgSpecSourcesStore,
@@ -104,16 +105,15 @@ export function installDbStores(
   // pool).
   setAnalyzeLock(new PgAnalyzeLock(lockPool));
 
-  // Session transcripts are the one store still on disk (they are an append
-  // stream the run watcher tails). Key them by repo IDENTITY under the global
-  // dir so they survive the ephemeral clone; an absolute key is a real local
-  // path (tests, file-mode tools sharing the process) and keeps the in-tree
-  // default.
+  // Stable identities for stream subscriptions, provider scratch paths, and
+  // importing pre-migration file histories. New dashboard history uses Postgres.
   setSessionsRootResolver((repoDirOrKey) =>
     path.isAbsolute(repoDirOrKey)
       ? path.join(repoDirOrKey, '.truecourse', 'sessions')
       : path.join(getGlobalDir(), 'sessions', repoDirName(repoDirOrKey)),
   );
+
+  setSessionRunBackend(new PgSessionRunStore(db, lockPool));
 
   // Disconnecting a repo purges its per-repo rows (they key on the bare repo
   // key with no workspace column — left behind, the next workspace to connect

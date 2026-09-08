@@ -25,13 +25,13 @@ import type { WebPlaceSeed, WebTree } from '../web-tree.js'
 //    it is excluded by construction rather than by a rule — and `pages/api/**`,
 //    which is not, is excluded explicitly below.
 //
-// THE GATE is `next.config.*`. Without it this reader is a menace: `pages/` is
+// THE GATE is `next.config.*` or a manifest declaring Next.js. `pages/` is
 // one of the most common directory names in a React codebase and `page.tsx` one
 // of the most common filenames. strapi's admin panel keeps 40-odd components
 // under `admin/src/pages/`, and an ungated reader turns every one of them into a
 // screen at an address the app has never served. So a router root is only a
-// router root when a Next.js config file sits at its app root — and the NEAREST
-// such config wins, which is what makes this correct in a monorepo where several
+// router root when a config or dependency identifies its app root. The NEAREST
+// root wins, which is what makes this correct in a monorepo where several
 // apps each have their own.
 // ---------------------------------------------------------------------------
 
@@ -73,10 +73,12 @@ function readNextRoutes(
 
 /**
  * The `<app-root>/{,src/}<router>` directories of every Next.js app in the tree.
- * Longest first, so the nearest config wins for a file several apps could claim.
+ * Longest first, so the nearest app wins for a file several apps could claim.
  */
 function nextRouterRoots(tree: WebTree, router: 'app' | 'pages'): string[] {
-  const roots: string[] = []
+  const roots: string[] = (tree.nextAppRoots ?? []).flatMap((appRoot) => [
+    `${appRoot}/${router}`, `${appRoot}/src/${router}`,
+  ])
   for (const filePath of tree.files) {
     const cut = filePath.lastIndexOf('/')
     if (cut < 0 || !NEXT_CONFIG.test(filePath.slice(cut + 1))) continue

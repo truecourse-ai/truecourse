@@ -53,7 +53,7 @@ import {
 import { CURATE_DOC_SESSION_KIND } from '../services/spec-scan/curate-doc.js';
 import { SETTLE_AREAS_SESSION_KIND } from '../services/spec-scan/settle-areas.js';
 import { OVERLAP_SESSION_KIND } from '../services/spec-scan/overlap.js';
-import { createSessionRun, type SessionRunStartedInfo } from '../lib/sessions-store.js';
+import { createStoredSessionRun, type SessionRunStartedInfo } from '../lib/sessions-store.js';
 import { resolveCommitSha } from '../lib/repo-ref.js';
 import {
   createConfiguredSessionDriver,
@@ -364,6 +364,8 @@ export interface SpecCurateInProcessResult {
 }
 
 export interface CurateInProcessOptions {
+  /** The dashboard finishes only after its server-side corpus persistence succeeds. */
+  deferRunCompletion?: boolean;
   tracker?: StepTracker;
   source?: TelemetrySource;
   /**
@@ -522,13 +524,15 @@ export async function curateInProcess(
   // The sessions run + transcript store: `sessions/spec-scan/<runId>/`.
   // Created after the estimate gate, so a declined scan leaves no run record.
   const gitRef = await resolveCommitSha(repoRoot);
-  const run = createSessionRun(options.sessionsKey ?? repoRoot, { command: 'spec-scan', gitRef });
+  const run = await createStoredSessionRun(options.sessionsKey ?? repoRoot, {
+    command: 'spec-scan', gitRef, activityStream: options.source === 'dashboard',
+  });
   options.onRunStarted?.({ command: 'spec-scan', runId: run.runId, dir: run.dir });
   // Mirror the step checklist into the run record as the run's own display:
   // the CLI renders the tracker locally, but the dashboard can only see what
   // run.json carries, and the early phases (discover/tag) have no sessions to
   // show progress through.
-  tracker?.tap((p) => {
+  const untap = tracker?.tap((p) => {
     if (!p.steps) return;
     run.setChecklist(
       p.steps.map((step) => {
@@ -651,7 +655,9 @@ export async function curateInProcess(
       // A cancelled scan is not a failed one: it stopped because the caller
       // said so, which is the same word the boot sweep gives a run whose
       // process died under it.
-      run.finish(e instanceof ScanAbortedError ? 'interrupted' : 'failed');
+      run.finish(e instanceof ScanAbortedError ? 'interrupted' : 'failed', {
+        ...(e instanceof ScanAbortedError ? {} : { error: { message: e instanceof Error ? e.message : String(e) } }),
+      });
       throw e;
     }
 
@@ -672,7 +678,7 @@ export async function curateInProcess(
           : 'anchors verified',
       );
     }
-    run.finish('completed');
+    if (!options.deferRunCompletion) run.finish('completed');
 
     // A partial (single-step) run never reports telemetry — its counts would
     // read as a whole scan's.
@@ -700,9 +706,9 @@ export async function curateInProcess(
   } catch (e) {
     // The run record is closed exactly once; the inner catch handled the scan
     // path, this covers the estimate/telemetry edges around it.
-    if (run.record().status === 'running') run.finish('failed');
+    if (run.record().status === 'running') run.finish('failed', { error: { message: e instanceof Error ? e.message : String(e) } });
     throw e;
-  }
+  } finally { untap?.(); await run.flush?.(); }
 }
 
 // ---------------------------------------------------------------------------

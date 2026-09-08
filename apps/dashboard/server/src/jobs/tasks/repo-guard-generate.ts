@@ -1,3 +1,4 @@
+import { dashboardActivity } from '../../services/dashboard-activity.service.js';
 /**
  * `repo.guard-generate` — `truecourse guard generate` over an ephemeral clone.
  *
@@ -43,7 +44,7 @@ import {
   persistGeneratedGuard,
   readGeneratedReport,
 } from '../materialize-guard.js';
-import { firstLine, mirrorTracker, type OnboardingJobRequest } from './onboarding.js';
+import { firstLine, type OnboardingJobRequest } from './onboarding.js';
 
 export const REPO_GUARD_GENERATE_TASK = 'repo.guard-generate';
 
@@ -85,118 +86,124 @@ export function createRepoGuardGenerateTask(
     traceMeta: (payload) => ({ repoFullName: payload.repoFullName }),
 
     async run(ctx) {
-      const { repoFullName } = ctx.payload;
-      const llm = await startLlm(ctx.payload.workspaceOrgId);
+      return dashboardActivity(ctx, 'guard-generate', GUARD_GENERATE_STEPS, async (activityRun, activityTracker) => {
+        const { repoFullName } = ctx.payload;
+        const llm = await startLlm(ctx.payload.workspaceOrgId);
 
-      await ctx.phase('clone');
-      const tree = await acquireWorkTree(repoFullName);
-      try {
-        const commitSha = await resolveCommitSha(tree.dir);
-        const ref = { repoKey: repoFullName, commitSha };
-        if (!(await materializeStoredSpec(ref, tree.dir))) {
-          throw new Error(
-            `${repoFullName} has no scanned spec yet — run the spec scan before generating scenarios.`,
-          );
-        }
-        await materializeStoredGuardState(repoFullName, tree.dir);
-        // Setup's bundle goes in LAST: its recipe and catalogs are the current
-        // truth, whatever the scenario set was generated against.
-        const bundle = await loadGuardSetupBundle(repoFullName);
-        if (!bundle) {
-          throw new Error(
-            `${repoFullName} has not been set up yet — run guard setup before generating scenarios.`,
-          );
-        }
-        materializeGuardSetupBundle(tree.dir, bundle);
-        // The registered instances beside it: what a supplied dependency is
-        // provided with decides which sections generate can author.
-        await materializeGuardOverlays(repoFullName, tree.dir);
-
-        let guard;
+        await ctx.phase('clone');
+        const tree = await acquireWorkTree(repoFullName);
         try {
-          ({ guard } = await runGenerate(tree.dir, {
-            transport: llm.transport(),
-            transportMode: llm.mode,
-            attribution: llm.driver().attribution,
-            sessionsKey: repoFullName,
-            tracker: mirrorTracker(ctx, GUARD_GENERATE_STEPS),
-            requireExistingRecipe: true,
-            ...(ctx.signal ? { signal: ctx.signal } : {}),
-          }));
-        } catch (err) {
-          if (ctx.signal?.aborted) throw err;
-          if (err instanceof OpenConflictsError) {
-            await writeGuardResult(ref, buildOpenConflictsReport(err, new Date().toISOString()), {
-              baseline: true,
-            });
-            const result: GuardGenerateJobResult = {
-              repoFullName,
-              status: 'open-conflicts',
-              written: 0,
-              birthFindings: 0,
-              noChanges: false,
-              openConflicts: err.conflicts.length,
-            };
-            return {
-              result,
-              notification: {
-                level: 'warning',
-                title: 'Scenario generation blocked',
-                body: `${repoFullName} — ${firstLine(err.message)}`,
-                data: { repoFullName, openConflicts: err.conflicts.length },
-              },
-            };
+          const commitSha = await resolveCommitSha(tree.dir);
+          activityRun.setGitRef?.(commitSha);
+          activityTracker.done('clone');
+          const ref = { repoKey: repoFullName, commitSha };
+          if (!(await materializeStoredSpec(ref, tree.dir))) {
+            throw new Error(
+              `${repoFullName} has no scanned spec yet — run the spec scan before generating scenarios.`,
+            );
           }
-          throw err;
-        }
-        // A stop the user asked for: the harness settles the row cancelled, and
-        // a store that never saw this run is exactly what a cancel means.
-        if (ctx.signal?.aborted) return { notification: null };
-        if (guard.status !== 'ok') {
-          throw new Error(guard.reason ?? `guard generate ended ${guard.status}.`);
-        }
+          await materializeStoredGuardState(repoFullName, tree.dir);
+          // Setup's bundle goes in LAST: its recipe and catalogs are the current
+          // truth, whatever the scenario set was generated against.
+          const bundle = await loadGuardSetupBundle(repoFullName);
+          if (!bundle) {
+            throw new Error(
+              `${repoFullName} has not been set up yet — run guard setup before generating scenarios.`,
+            );
+          }
+          materializeGuardSetupBundle(tree.dir, bundle);
+          // The registered instances beside it: what a supplied dependency is
+          // provided with decides which sections generate can author.
+          await materializeGuardOverlays(repoFullName, tree.dir);
 
-        // The report the engine left in the tree is what gets stored, so the
-        // row's counts come from it too — never from a result it could differ from.
-        const report = readGeneratedReport(tree.dir) ?? buildGuardReport(guard, new Date().toISOString());
-        await persistGeneratedGuard(ref, tree.dir, report);
-
-        const written = report.written.length;
-        const findings = report.birthFindings.length;
-        const result: GuardGenerateJobResult = {
-          repoFullName,
-          status: 'ok',
-          written,
-          birthFindings: findings,
-          noChanges: report.noChanges,
-          openConflicts: 0,
-        };
-        return {
-          result,
-          notification: report.noChanges
-            ? {
-                level: 'success',
-                title: 'Scenarios up to date',
-                body: `${repoFullName} — nothing changed since the last generate.`,
-                data: { repoFullName },
-              }
-            : findings > 0
-              ? {
+          let guard;
+          try {
+            ({ guard } = await runGenerate(tree.dir, {
+              transport: llm.transport(),
+              transportMode: llm.mode,
+              attribution: llm.driver().attribution,
+              sessionsKey: repoFullName,
+              sessionRun: activityRun,
+              tracker: activityTracker,
+              requireExistingRecipe: true,
+              ...(ctx.signal ? { signal: ctx.signal } : {}),
+            }));
+          } catch (err) {
+            if (ctx.signal?.aborted) throw err;
+            if (err instanceof OpenConflictsError) {
+              activityRun.setError({ message: err.message, kind: 'open-conflicts' });
+              await writeGuardResult(ref, buildOpenConflictsReport(err, new Date().toISOString()), {
+                baseline: true,
+              });
+              const result: GuardGenerateJobResult = {
+                repoFullName,
+                status: 'open-conflicts',
+                written: 0,
+                birthFindings: 0,
+                noChanges: false,
+                openConflicts: err.conflicts.length,
+              };
+              return {
+                result,
+                notification: {
                   level: 'warning',
-                  title: 'Scenarios generated — findings to review',
-                  body: `${repoFullName} — ${written} scenario${written === 1 ? '' : 's'} written, ${findings} birth finding${findings === 1 ? '' : 's'}.`,
-                  data: { repoFullName, written, birthFindings: findings },
-                }
-              : {
-                  level: 'success',
-                  title: 'Scenarios generated',
-                  body: `${repoFullName} — ${written} scenario${written === 1 ? '' : 's'} written.`,
-                  data: { repoFullName, written },
+                  title: 'Scenario generation blocked',
+                  body: `${repoFullName} — ${firstLine(err.message)}`,
+                  data: { repoFullName, openConflicts: err.conflicts.length },
                 },
-        };
-      } finally {
-        tree.dispose();
-      }
+              };
+            }
+            throw err;
+          }
+          // A stop the user asked for: the harness settles the row cancelled, and
+          // a store that never saw this run is exactly what a cancel means.
+          if (ctx.signal?.aborted) return { notification: null };
+          if (guard.status !== 'ok') {
+            throw new Error(guard.reason ?? `guard generate ended ${guard.status}.`);
+          }
+
+          // The report the engine left in the tree is what gets stored, so the
+          // row's counts come from it too — never from a result it could differ from.
+          const report = readGeneratedReport(tree.dir) ?? buildGuardReport(guard, new Date().toISOString());
+          await persistGeneratedGuard(ref, tree.dir, report);
+
+          const written = report.written.length;
+          const findings = report.birthFindings.length;
+          const result: GuardGenerateJobResult = {
+            repoFullName,
+            status: 'ok',
+            written,
+            birthFindings: findings,
+            noChanges: report.noChanges,
+            openConflicts: 0,
+          };
+          return {
+            result,
+            notification: report.noChanges
+              ? {
+                  level: 'success',
+                  title: 'Scenarios up to date',
+                  body: `${repoFullName} — nothing changed since the last generate.`,
+                  data: { repoFullName },
+                }
+              : findings > 0
+                ? {
+                    level: 'warning',
+                    title: 'Scenarios generated — findings to review',
+                    body: `${repoFullName} — ${written} scenario${written === 1 ? '' : 's'} written, ${findings} birth finding${findings === 1 ? '' : 's'}.`,
+                    data: { repoFullName, written, birthFindings: findings },
+                  }
+                : {
+                    level: 'success',
+                    title: 'Scenarios generated',
+                    body: `${repoFullName} — ${written} scenario${written === 1 ? '' : 's'} written.`,
+                    data: { repoFullName, written },
+                  },
+          };
+        } finally {
+          tree.dispose();
+        }
+      });
     },
 
     onError: (err, payload) => ({
