@@ -99,6 +99,14 @@ describe('mapInterfaces', () => {
     expect(new Date(result.catalog.generatedAt).toString()).not.toBe('Invalid Date');
 
     expect(readSnapshot()).toEqual(result.catalog);
+    expect(readSnapshot().interfaces.find((entry) => entry.id === 'cli/deploy')?.contract).toMatchObject({
+      surface: 'cli',
+      command: {
+        description: 'Deploy a service to an environment',
+        positionals: [{ name: 'service', required: true }],
+        options: [{ flag: '--env', short: '-e', valueHint: 'name', takesValue: true, valueRequired: true }],
+      },
+    });
   });
 
   it('fingerprints each surface over its interface set, order-independently', async () => {

@@ -1,7 +1,8 @@
 /**
  * Interface construction for the cli surface — the one place a command path turns
  * into a {@link Interface}, so the tree derivation and the probe fallback produce
- * BYTE-IDENTICAL interfaces for the same surface. That identity is what lets a
+ * identically fingerprinted interfaces for the same surface. Calling details
+ * may differ with what each source establishes. That identity is what lets a
  * catalog switch sources without spraying drift across the scenario corpus.
  *
  * ONE entry per invocable command, never a tree folded into one entry: `rules`,
@@ -9,7 +10,7 @@
  * {@link Interface.group}.
  */
 
-import { interfaceFingerprint, type Interface } from '@truecourse/shared'
+import { interfaceFingerprint, type Interface, type InterfaceCommandContract } from '@truecourse/shared'
 
 /** One command as either derivation found it: its argv path and the flags it takes. */
 export interface CliInterfaceSeed {
@@ -19,6 +20,8 @@ export interface CliInterfaceSeed {
   flags: string[]
   /** Cosmetic one-liner (the command's description) — never fingerprinted. */
   label?: string
+  /** Calling details established by the source, outside interface identity. */
+  contract?: InterfaceCommandContract
 }
 
 /**
@@ -55,6 +58,7 @@ export function buildCliInterfaces(seeds: readonly CliInterfaceSeed[]): Interfac
       ...(group ? { group } : {}),
       entry,
       steps,
+      ...(seed.contract ? { contract: { surface: 'cli' as const, command: seed.contract } } : {}),
       fingerprint: interfaceFingerprint({ type: 'cli', entry, steps }),
     })
   }

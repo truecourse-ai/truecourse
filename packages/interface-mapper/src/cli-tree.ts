@@ -6,6 +6,7 @@
 
 import type { CliCommand, FileAnalysis, Interface } from '@truecourse/shared'
 import { buildCliInterfaces, type CliInterfaceSeed } from './cli-interfaces.js'
+import { cliOption, cliPositionals, mergeCliContracts } from './cli-contracts.js'
 
 /**
  * One interface per command path across every analyzed file. A command declared in
@@ -29,6 +30,8 @@ export function deriveCliInterfacesFromTree(fileAnalyses: readonly FileAnalysis[
         if (!existing.flags.includes(flag.flag)) existing.flags.push(flag.flag)
       }
       if (!existing.label && command.description) existing.label = command.description
+      const contract = mergeCliContracts(existing.contract, seedOf(command).contract)
+      if (contract) existing.contract = contract
     }
   }
 
@@ -37,9 +40,21 @@ export function deriveCliInterfacesFromTree(fileAnalyses: readonly FileAnalysis[
 }
 
 function seedOf(command: CliCommand): CliInterfaceSeed {
+  const options = command.flags.flatMap((flag) => {
+    const option = flag.syntax ? cliOption(flag.syntax, flag.description) : undefined
+    return option ? [option] : []
+  })
+  const positionals = (command.argumentSyntax ?? []).flatMap(cliPositionals)
+  const contract = {
+    path: [...command.path],
+    ...(command.description ? { description: command.description } : {}),
+    ...(options.length ? { options } : {}),
+    ...(positionals.length ? { positionals } : {}),
+  }
   return {
     path: [...command.path],
     flags: command.flags.map((f) => f.flag),
     ...(command.description ? { label: command.description } : {}),
+    ...(command.description || options.length || positionals.length ? { contract } : {}),
   }
 }

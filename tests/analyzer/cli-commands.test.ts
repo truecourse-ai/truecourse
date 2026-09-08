@@ -109,7 +109,7 @@ describe('extractCliCommands — commander', () => {
   it('carries descriptions and flag descriptions', () => {
     const deploy = commanderCli(program).find((c) => c.name === 'deploy')
     expect(deploy?.description).toBe('Deploy a service to an environment')
-    expect(deploy?.flags[0]).toEqual({ flag: '--env', description: 'Target environment' })
+    expect(deploy?.flags[0]).toEqual({ flag: '--env', syntax: '-e, --env <name>', description: 'Target environment' })
   })
 
   it('names the handler for a direct reference and for a single-call arrow body', () => {
@@ -352,7 +352,7 @@ describe('FileAnalysis.cliCommands wiring', () => {
       expect.objectContaining({
         name: 'build',
         path: ['build'],
-        flags: [{ flag: '--watch', description: 'Rebuild on change' }],
+        flags: [{ flag: '--watch', syntax: '--watch', description: 'Rebuild on change' }],
         handlerName: 'runBuild',
       }),
     ])

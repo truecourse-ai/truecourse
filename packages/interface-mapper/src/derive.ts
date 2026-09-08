@@ -37,6 +37,7 @@ import { deriveCliInterfacesFromTree } from './cli-tree.js'
 import { deriveCliInterfacesFromProbes, type CliProbeOptions } from './cli-probes.js'
 import { buildCliInterfaces, type CliInterfaceSeed } from './cli-interfaces.js'
 import type { MapperDiagnostic } from './diagnostics.js'
+import { mergeCliContracts } from './cli-contracts.js'
 
 export interface DeriveCliInterfacesOptions {
   /** The analyzed working tree. Its `cliCommands` artifacts are the primary source. */
@@ -92,9 +93,8 @@ interface SourcedSeed {
 
 /**
  * The union of the two cli derivations (both non-trivial). Deterministic and
- * pure; the interfaces are rebuilt through {@link buildCliInterfaces} so union
- * output stays byte-identical with what a single-source derivation of the same
- * surface would produce.
+ * pure; rebuilding through {@link buildCliInterfaces} preserves the same identity
+ * as a single-source derivation while retaining both sources' calling details.
  */
 export function unionCliInterfaces(
   fromTree: readonly Interface[],
@@ -161,14 +161,21 @@ export function unionCliInterfaces(
       })
     }
 
-    // Tree wins the description: `seed.label` is the tree's, and a probe seed
-    // never carries one — help parsing reads names and flags, not prose.
-    seeds.push({ ...seed, flags })
+    // Tree descriptions take precedence; probes fill missing contract regions.
+    const contract = mergeCliContracts(seed.contract, probe?.seed.contract)
+    seeds.push({ ...seed, flags, ...(contract ? { contract: {
+      ...contract,
+      ...(contract.options ? { options: contract.options.filter((option) => flags.includes(option.flag)) } : {}),
+    } } : {}) })
   }
 
   for (const { key, seed } of probes) {
     if (treeKeys.has(key)) continue
-    seeds.push({ path: seed.path, flags: seed.flags.filter((flag) => !IMPLICIT_HELP_FLAGS.has(flag)) })
+    const flags = seed.flags.filter((flag) => !IMPLICIT_HELP_FLAGS.has(flag))
+    seeds.push({ ...seed, flags, ...(seed.contract ? { contract: {
+      ...seed.contract,
+      ...(seed.contract.options ? { options: seed.contract.options.filter((option) => flags.includes(option.flag)) } : {}),
+    } } : {}) })
     diagnostics.push({
       surface: 'cli',
       kind: 'tree-missing-command',
@@ -200,6 +207,7 @@ function seedsOf(interfaces: readonly Interface[]): SourcedSeed[] {
         path: [...step.command],
         flags: [...step.flags],
         ...(step.label ? { label: step.label } : {}),
+        ...(iface.contract?.surface === 'cli' ? { contract: iface.contract.command } : {}),
       },
     })
   }

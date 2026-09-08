@@ -15,6 +15,7 @@ import { createSandbox, executeStep } from '@truecourse/guard-runner'
 import path from 'node:path'
 import type { Interface } from '@truecourse/shared'
 import { buildCliInterfaces, buildRootCliInterface, type CliInterfaceSeed } from './cli-interfaces.js'
+import { cliHelpContract, mergeCliContracts } from './cli-contracts.js'
 
 /** Hard ceiling on subprocesses one cli mapping may spawn. */
 export const MAX_CLI_PROBES = 24
@@ -67,9 +68,15 @@ export async function deriveCliInterfacesFromProbes(opts: CliProbeOptions): Prom
   const help = await probe(['--help'])
   // The usage dialect is read at the ROOT only: a command's own help opens with
   // `<prog> <command> …`, which names the command being probed, not a child.
-  const root = parseCliHelp(`${transcript(bare)}\n${transcript(help)}`, { usageProgram: programName })
+  const rootText = `${transcript(bare)}\n${transcript(help)}`
+  const root = parseCliHelp(rootText, { usageProgram: programName })
 
-  if (root.subcommands.length === 0) return [buildRootCliInterface(programName, root.flags)]
+  if (root.subcommands.length === 0) {
+    const iface = buildRootCliInterface(programName, root.flags)
+    const contract = cliHelpContract(rootText, programName, [])
+    if (contract) iface.contract = { surface: 'cli', command: contract }
+    return [iface]
+  }
 
   const seeds: CliInterfaceSeed[] = []
   for (const command of root.subcommands) {
@@ -77,10 +84,18 @@ export async function deriveCliInterfacesFromProbes(opts: CliProbeOptions): Prom
     // Over budget: the command is still real (the root help listed it), it just
     // has no observed flag set.
     const parsed = capture ? parseCliHelp(transcript(capture)) : EMPTY_HELP
-    seeds.push({ path: [command], flags: parsed.flags })
+    const contract = mergeCliContracts(
+      cliHelpContract(transcript(capture), programName, [command], [command]),
+      cliHelpContract(rootText, programName, [command]),
+    )
+    seeds.push({ path: [command], flags: parsed.flags, ...(contract ? { contract } : {}) })
     // One level of expansion: nested commands are read out of the transcript we
     // already have, never probed further.
-    for (const nested of parsed.subcommands) seeds.push({ path: [command, nested], flags: [] })
+    for (const nested of parsed.subcommands) {
+      const path = [command, nested]
+      const contract = cliHelpContract(transcript(capture), programName, path, [command])
+      seeds.push({ path, flags: [], ...(contract ? { contract } : {}) })
+    }
   }
 
   seeds.sort((a, b) => a.path.join(' ').localeCompare(b.path.join(' ')))

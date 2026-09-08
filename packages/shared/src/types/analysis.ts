@@ -534,6 +534,8 @@ export type RpcRouter = z.infer<typeof RpcRouterSchema>
 export const CliCommandFlagSchema = z.object({
   /** `--json`, `--limit`, `-y` — the value placeholder is stripped. */
   flag: z.string(),
+  /** Original declaration, retaining aliases and value placeholders when available. */
+  syntax: z.string().optional(),
   description: z.string().optional(),
 })
 
@@ -550,6 +552,8 @@ export const CliCommandSchema = z.object({
   /** Full argv path from the program root, outermost first. */
   path: z.array(z.string()),
   flags: z.array(CliCommandFlagSchema),
+  /** Explicit positional declarations, in source order. Absent on older artifacts. */
+  argumentSyntax: z.array(z.string()).optional(),
   description: z.string().optional(),
   /** The action/handler symbol, when it is a named function (arrow bodies resolve
    *  to the single call they make; ambiguous bodies leave this unset). */

@@ -46,6 +46,7 @@ import { GuardInterfacesPanel } from '@/components/guard/GuardInterfacesPanel';
 import { GuardInterfacesPane } from '@/components/guard/GuardInterfacesPane';
 import { useGuardInterfaces } from '@/hooks/useGuardInterfaces';
 import { useGuardInterfaceMember, useGuardInterfaceTabs } from '@/hooks/useGuardInterfaceTabs';
+import { cliHelpContract } from '../../packages/interface-mapper/src/cli-contracts';
 
 const json = (body: unknown) =>
   new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -1041,6 +1042,25 @@ describe('Interfaces tab — an operation, opened directly', () => {
 
 /** THE COMMAND PAGE — one cli interface, whole. A row IS the command. */
 describe('Interfaces tab — a command', () => {
+  it('renders arguments and description derived from usage-only CLI help', async () => {
+    const command = cliHelpContract('Usage:\n  filecli write <path> <content>   Write content to a file\n', 'filecli', ['write']);
+    expect(command).toBeDefined();
+    const view = {
+      ...MAPPED,
+      interfaces: [{ ...MAPPED.interfaces[0]!, id: 'cli/write', title: 'write',
+        entry: { command: ['write'] }, steps: [{ kind: 'invoke' as const, command: ['write'], flags: [] }],
+        contract: { surface: 'cli' as const, command: command! },
+      }],
+    };
+    renderPane(view, '/repos/r?tab=interfaces&ginterface=cli%2Fwrite');
+    expect(await screen.findByText('Write content to a file')).toBeInTheDocument();
+    expect(screen.getByText('Positional arguments')).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: 'path' })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: 'content' })).toBeInTheDocument();
+    expect(screen.queryByText('No contract derived')).not.toBeInTheDocument();
+    expect(screen.queryByText('Input and output')).not.toBeInTheDocument();
+  });
+
   it('is the command’s own page: no member list, the contract straight away', async () => {
     renderPane(WITH_CONTRACT, '/repos/r?tab=interfaces&gplace=cli%3Atasks-add');
     const header = within(screen.getByRole('heading', { name: 'tasks add' }).parentElement!);
