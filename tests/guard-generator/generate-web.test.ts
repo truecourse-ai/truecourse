@@ -93,7 +93,7 @@ describe('generateGuards — the web authoring arm (real browser)', () => {
       const res = await runGenerate({
         repoRoot: r,
         interfaces: interfacesOf(r, webInterface()),
-        extractSession: extractSessionBy({}),
+        extractSession: extractSessionBy({ home: [{ driver: 'web' }] }),
         flowWorkerSession: submitWorkerSessions(() => rawWeb('The home page shows the fixture heading', PASSING_WEB_STEPS)),
       })
 
@@ -117,7 +117,7 @@ describe('generateGuards — the web authoring arm (real browser)', () => {
       const res = await runGenerate({
         repoRoot: r,
         interfaces: interfacesOf(r, cliInterface(['relkit']), webInterface()),
-        extractSession: extractSessionBy({}),
+        extractSession: extractSessionBy({ home: [{ driver: 'web' }] }),
         flowWorkerSession: submitWorkerSessions((task) =>
           task.surface === 'web'
             ? rawWeb('Notes written by the CLI appear on the notes page', [

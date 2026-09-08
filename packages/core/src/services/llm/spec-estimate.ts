@@ -140,6 +140,7 @@ import {
   loadSpecScope,
   driverRecipeKey,
   isRunnableDriver,
+  flowDriversToMatch,
   runnableDriverIds,
   violatesSettleInvariant,
   dismissedClaimKey,
@@ -153,6 +154,7 @@ import {
   loadRecipe,
   readGuardDecisions,
   readAuthoredInterfaceCatalog,
+  webScreensNeedingReadables,
   readInterfaceCatalog,
   readMergedInterfaceCatalog,
   readManifest as readGuardManifest,
@@ -662,13 +664,13 @@ async function planGuardSessionStages(repoRoot: string, plan: GuardWorkPlan): Pr
     const live: FlowClaimInput[] = [];
     for (const c of snapped.claims) {
       if (dismissed.has(dismissedClaimKey(doc.doc, c.sectionAnchor, c.claim))) continue;
-      if (!isRunnableDriver(c.driver)) continue;
-      if (!preparedSet.has(c.driver)) continue;
+      if (![c.driver, ...(c.alternativeDrivers ?? [])].some((driver) => isRunnableDriver(driver) && preparedSet.has(driver))) continue;
       live.push({
         doc: doc.doc,
         anchor: c.sectionAnchor,
         title: c.claim,
         driver: c.driver,
+        ...(c.alternativeDrivers ? { alternativeDrivers: c.alternativeDrivers } : {}),
         ...(c.needs && c.needs.length > 0 ? { needs: c.needs } : {}),
       });
     }
@@ -803,6 +805,7 @@ async function planGuardRealizationStages(
       const plannedPairs: { surface: GuardDriverId; fingerprints: string[] }[] = [];
       let unknown = false;
       for (const catalog of matchable) {
+        if (!flowDriversToMatch(flow).includes(catalog.surface)) continue;
         const cached = await readCachedMatch(repoRoot, flow, catalog);
         if (!cached) {
           matchCalls++;
@@ -1008,12 +1011,13 @@ export async function estimateGuardSetup(
   const derivedCatalog = readInterfaceCatalog(repoRoot);
   const authoredCatalog = readAuthoredInterfaceCatalog(repoRoot);
   const interfacesSettled =
-    !replace && authoredCatalog !== null && settled('interfaces') === interfacesFingerprint(repoRoot);
+    !replace && authoredCatalog !== null && settled('interfaces') === interfacesFingerprint(repoRoot) &&
+    webScreensNeedingReadables(derivedCatalog, authoredCatalog).size === 0;
   const staleAuthoredIds = new Set(
     staleAuthoredPlaceDiagnostics(derivedCatalog, authoredCatalog).map((d) => d.subject),
   );
   const authorable = planWorkItems(derivedCatalog, authoredCatalog).filter(
-    (item) => !staleAuthoredIds.has(item.place.id) && (replace || item.existing.length === 0),
+    (item) => !staleAuthoredIds.has(item.place.id) && (replace || item.needsAuthoring),
   );
   const authorItems = interfacesSettled ? 0 : authorable.length;
   const reconcileMax = interfacesSettled ? 0 : 1;

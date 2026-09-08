@@ -22,7 +22,7 @@
 
 import type { SessionBudget, SessionDef } from '@truecourse/agent-loop'
 import type { WebPlaceContext } from '@truecourse/interface-mapper'
-import type { InterfaceState, InterfacesFile } from '@truecourse/shared'
+import type { InterfaceResource, InterfaceState, InterfacesFile } from '@truecourse/shared'
 import { AuthoredFragmentSchema, type AuthoredFragment } from './draft.js'
 import { buildAuthorTools } from './tools.js'
 
@@ -82,9 +82,11 @@ export function placeWorkItem(placeId: string): string {
 }
 
 export interface PlaceBriefingInput {
-  place: { id: string; title: string; address?: string; kind: string }
+  place: InterfaceResource
   /** Ids of the tasks already authored at this place. */
   existing: readonly string[]
+  /** Explicit re-authoring may replace tasks; enrichment preserves them. */
+  replaceTasks?: boolean
   /** What the AST pass knows about this place, when it knows anything. */
   context?: WebPlaceContext
   /** The worlds the catalog already names — the ids this session reuses. */
@@ -92,7 +94,7 @@ export interface PlaceBriefingInput {
   /** Every screen the catalog knows, in catalog order — what `to` may name. */
   screens: readonly { id: string; address?: string }[]
   /** The dialogs and panels that sit on THIS place — what `of` already names. */
-  nested: readonly { id: string; kind: string; title: string }[]
+  nested: readonly InterfaceResource[]
 }
 
 /**
@@ -125,13 +127,14 @@ export interface PlaceBriefingInput {
 export function placeBriefing({
   place,
   existing,
+  replaceTasks = false,
   context,
   states,
   screens,
   nested,
 }: PlaceBriefingInput): string {
   const lines = [
-    `Author the web tasks of ONE place.`,
+    `Author the web tasks and readable facts of ONE place.`,
     ``,
     `  place    ${place.id} (${place.kind})`,
     `  address  ${place.address ?? '— (this place has no address of its own; it sits on one)'}`,
@@ -146,10 +149,19 @@ export function placeBriefing({
   if (existing.length > 0) {
     lines.push(
       ``,
-      `Already authored here — re-author these only if the source no longer matches them:`,
+      replaceTasks
+        ? `Re-authoring these tasks: return the complete surviving task list, keeping unchanged ids and steps.`
+        : `Already authored here. Preserve these tasks: do not return or replace them during enrichment.`,
       ...existing.map((id) => `  ${id}`),
     )
   }
+  lines.push(
+    ``,
+    `Existing resource definitions, including readable facts. Reuse ids and owning places.`,
+    JSON.stringify([place, ...nested], null, 2),
+    `Return resource enrichments even when no new task is needed (interfaces: []).`,
+    `Omitted readable kinds stay unknown or retain existing facts; [] establishes none.`,
+  )
   lines.push(...nestedLines(place.id, nested))
   lines.push(...screenLines(screens))
   lines.push(...registryLines(states))
@@ -158,7 +170,7 @@ export function placeBriefing({
     context
       ? `Start from the module above and the modules it renders. Then account for their`
       : `Start by finding the module that renders this place. Then account for its`,
-    `controls: which of them a user performs a TASK with, and which are decoration.`,
+    `controls and rendered content, including conditional content and repeated rows.`,
   )
   return lines.join('\n')
 }
@@ -229,7 +241,7 @@ function contextLines(context: WebPlaceContext): string[] {
  */
 function nestedLines(
   placeId: string,
-  nested: readonly { id: string; kind: string; title: string }[],
+  nested: readonly InterfaceResource[],
 ): string[] {
   if (nested.length === 0) return []
   return [
@@ -313,7 +325,7 @@ function block(label: string, values: readonly string[]): string[] {
 /** The column every value in the briefing table starts at — `place`/`address`'s. */
 const GUTTER = ' '.repeat(11)
 
-const SYSTEM_PROMPT = `You author WEB INTERFACES for TrueCourse: the catalog of what a user can DO in an application's UI, read off the application's own source.
+const SYSTEM_PROMPT = `You author WEB INTERFACES for TrueCourse: the catalog of what a user can do and read in an application's UI, read off the application's own source.
 
 # What you are producing
 
@@ -337,6 +349,8 @@ Each task carries:
   - \`{"kind": "navigate", "route": "/repos/{repoId}"}\` — moving to an address.
   - \`{"kind": "activate", "target": "button \\"Analyze\\""}\` — a click, a tap, a submit.
   - \`{"kind": "input", "target": "textbox \\"Repository path\\""}\` — putting a value in a field.
+- For a native HTML \`<select>\`, record an \`input\` with \`mode: "select"\`. Its target is the field's role/name (usually combobox); generation chooses an option by visible label. Use \`mode: "fill"\` for editable text controls, including editable comboboxes. Custom non-editable menus use activate steps to open the menu and choose the option. Read the rendered control before deciding.
+- An input or activate step inside a named dialog/panel can carry \`within: { "role": "dialog", "name": "Delete expense", "exact": true }\`. Use the actual container's role/name to distinguish a confirmation button from the page's identically named opener. Do not rely on the first match when only the dialog's control serves the task.
 - \`at\` — the place the task is performed at: this place, or a dialog or panel on it. **The briefing lists both** — the places already on this one, and every screen the catalog knows.
 - \`to\` — the place it leaves the user at, ONLY when it moves them. A task that acts in place carries \`at\` alone.
 - \`startingState\` / \`endState\` — ids from the state registry: the world the task assumes, and the world it leaves. **The briefing lists the registry — reuse an id from it before you mint one**, and mint only when no id there names that world. **A task that CHANGES the world states its \`endState\`** — anything that creates, edits, deletes, enables, invites or cancels leaves a world different from the one it found, and that difference is what a scenario asserts. Omit \`endState\` only for a task that leaves the data exactly as it was (a navigation, a filter, a read).
@@ -350,6 +364,22 @@ Each task carries:
 4. **One task, one entry.** Two tasks with the same entry and the same steps are one task. Never author a task \`list_interfaces\` already shows.
 5. **A state is a WORLD, not a place.** "a rule is silenced" is a state; "the rules dialog is open" is a place — that belongs in \`at\`/\`to\`. Every state id you reference is defined once — either it is already in the registry the briefing lists, and you reference it and define nothing, or it is new and you define it in \`states\` with one line saying what world it names. Redefining a registry id with different words is refused: other places' tasks already chain to it.
 6. **Nothing is guessed.** Every step target, every route, every api effect comes from something you READ in the source. What you cannot establish goes in \`unresolved\`, one line each.
+
+# What the page shows
+
+Author readable facts in each owning resource's \`readables\`, including the existing derived screen. Return the screen with its existing id, kind, title and address; add panels/dialogs with \`of\` naming their actual parent. Follow the rendered component tree, including nested dialogs, tab panels, shared controls and translation files. Put a fact on its innermost owning place once; screen details aggregate nested places automatically. Enrichment must not move or reparent existing places.
+
+Use the shared readable and locator schemas supplied in the outcome:
+- \`markers\`: stable visible text, e.g. {"id":"empty-list","marker":"No documents found","when":"the document list is empty"}. Optional \`within\` scopes the text. Do not record a current user's data, a sample count, or an i18n key as a stable marker.
+- \`elements\`: non-interactive visible elements, e.g. {"id":"page-heading","element":{"role":"heading","name":"Documents"}}.
+- \`controls\`: states the source exposes, e.g. {"id":"include-archived","control":{"role":"checkbox","name":"Include archived"},"states":["checked"]}. State names are checked, pressed, selected, expanded, disabled. Declare exposure, never a presumed state value. Read the component implementation to establish native or ARIA state support.
+- \`rows\`: the repeated item's actual rendered text as a template, e.g. {"id":"document-row","item":"row","template":"<title> <status>","slots":[{"name":"title","kind":"text"},{"name":"status","kind":"enum","values":["Draft","Signed"]}],"when":"documents exist"}. Name every varying slot; use count only for numeric counts and enum only when source establishes the whole rendered set. Use the real item role, not row for an arbitrary div. Add \`within\` only when the source supplies a real container locator. Do not invent a table name for an unnamed table.
+
+Readable locators use the existing user-visible vocabulary: role/name, label, placeholder, text, title or alt, never CSS, XPath or test ids. Use \`when\` to state source conditions, including permissions, loading, empty states and selected tabs. Readable ids are optional; reuse existing ids and keep new names stable within the owning resource.
+
+For every resource you can fully inspect, consider all four kinds. An explicit [] means you established that it has none of that kind. Omit a kind if you cannot establish it, and explain the gap in \`unresolved\`. Never fill arrays just to populate a table, and never mark uninspected content empty. Existing kinds omitted from an enrichment are preserved; a supplied kind replaces that kind, so include its surviving established facts. Readables alone are a valid outcome with \`interfaces: []\`. They do not require a new task or changed task steps.
+
+Every fact must come from source you READ (or source already provided in the briefing pack). Use the session's read_file/search_repo tools for evidence, and run check_draft on the resource facts as well as the tasks. These tools provide source evidence, not live browser observation; do not claim to have inspected runtime state.
 
 # Findings — what the repository says that the source does not do
 
@@ -382,7 +412,7 @@ The catalog follows the CODE regardless: author the task as the source has it, a
 - \`list_interfaces\` — what is already catalogued (web ids so you never author a duplicate; the api list is there to confirm an id, not to hunt for one).
 - \`search_repo\` and \`read_file\` — the application's source. The accessible names are in the JSX (\`aria-label\`, button text, label elements); when a name is an i18n key, the locale file holds the string a user actually reads.
 - \`check_draft\` — the exact rules the write path enforces, run against a draft. **Run it EARLY**: as soon as you have read the briefing's module, draft the first task or two and check them, before you read anything further. A misreading — the wrong address, a locator shape that is refused, a task located at another screen — comes back in one turn instead of at the outcome, where a fragment that breaks a rule is dropped whole and the place is left with nothing. Then run it again on the complete draft, before you produce the outcome.
-- Then produce the outcome: the tasks, any new states, any place the catalog is missing, \`unresolved\`, and \`findings\`.
+- Then produce the outcome: the tasks, any new states, resource enrichments and new places with their readables, \`unresolved\`, and \`findings\`.
 
 # What good looks like
 

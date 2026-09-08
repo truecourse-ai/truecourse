@@ -334,7 +334,7 @@ export function flowsSessionBriefing(
       `doc: ${c.doc}`,
       `anchor: ${c.anchor}`,
       `claim: ${c.title}`,
-      `surface: ${c.driver}   account: ${isRunnableDriver(c.driver) ? 'required' : 'optional'}`,
+      `proof drivers (alternatives): ${[c.driver, ...(c.alternativeDrivers ?? [])].join(', ')}   account: ${[c.driver, ...(c.alternativeDrivers ?? [])].some(isRunnableDriver) ? 'required' : 'optional'}`,
       ...renderNeeds(c),
     )
   }

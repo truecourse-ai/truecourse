@@ -45,6 +45,8 @@ import {
 import { corpusFilePath, CuratedCorpusSchema, type CuratedCorpus } from '@truecourse/spec-consolidator'
 import {
   GUARD_COVERAGE_PLAIN_ORDER,
+  scenarioMilestoneProof,
+  coversFlowMilestones,
   GUARD_COVERAGE_STATUS_PRECEDENCE,
   GUARD_DRIVERS,
   type GuardDriverDef,
@@ -247,6 +249,7 @@ export function guardExternalSetupIndexForView(repoKey: string): GuardExternalSe
 
 /** The parsed store inputs the coverage join reads (all nullable — absent stores). */
 export interface GuardCoverageSources {
+  scenarios?: readonly GuardScenario[]
   manifest: GuardManifest | null
   latest: GuardLatest | null
   result: GuardGenerateReport | null
@@ -388,6 +391,7 @@ export async function readGuardSectionTotals(
   ref?: string,
 ): Promise<GuardSectionTotals | null> {
   const sources: GuardCoverageSources = {
+    scenarios: await readGuardScenariosForView(repoKey, ref),
     manifest: await readManifestForView(repoKey, ref),
     latest: await readGuardRunForView(repoKey, ref),
     result: await readGuardReport(repoKey, ref),
@@ -425,9 +429,7 @@ export async function readGuardSectionTotals(
 
 /** Everything the flow join reads: the coverage sources plus (where the caller
  *  has it) the committed corpus, which names each scenario's surface and interface. */
-interface FlowJoinSources extends GuardCoverageSources {
-  scenarios?: readonly GuardScenario[]
-}
+type FlowJoinSources = GuardCoverageSources
 
 /**
  * The flow inputs indexed together — the synthesized corpus (identity +
@@ -492,11 +494,15 @@ function buildFlowJoin(sources: FlowJoinSources): FlowJoin {
   const driverByScenario = new Map<string, GuardDriverId>()
   for (const s of scenarioById.values()) driverByScenario.set(s.id, guardScenarioDrivers(s)[0])
   const birthStatusByScenario = new Map<string, GuardTestStatus>()
+  for (const written of sources.result?.written ?? []) birthStatusByScenario.set(written.id, written.status ?? 'passing')
   for (const flow of manifestFlows.values()) {
     for (const s of flow.scenarios) {
       driverByScenario.set(s.id, s.drivers[0])
       birthStatusByScenario.set(s.id, s.status)
     }
+  }
+  for (const scenario of scenarioById.values()) {
+    if (!birthStatusByScenario.has(scenario.id)) birthStatusByScenario.set(scenario.id, 'never-run')
   }
 
   // Every scenario the flow owns, whichever store knows it: the manifest declares
@@ -654,12 +660,33 @@ function flowSurfaces(flowId: string, join: FlowJoin): GuardFlowSurface[] {
   const surfaces = (join.scenarioIdsByFlow.get(flowId) ?? []).map((id) =>
     scenarioSurface(id, join.driverByScenario.get(id), join),
   )
+  const flow = join.corpus.get(flowId)
+  const milestones = flow?.milestones ?? entry?.milestones ?? []
+  const fingerprint = flow?.fingerprint ?? entry?.flowFingerprint
+  for (const row of surfaces) {
+    const scenario = row.scenarioId ? join.scenarioById.get(row.scenarioId) : undefined
+    const recorded = entry?.scenarios.find((s) => s.id === row.scenarioId)
+    // A scenario for an older composition cannot settle this flow's new promises.
+    const current = scenario ? scenario.flow?.fingerprint === fingerprint : entry?.flowFingerprint === fingerprint
+    const proof = current ? (scenario ? scenarioMilestoneProof(scenario.steps) : recorded?.milestoneCoverage ?? []) : []
+    const complete = coversFlowMilestones(milestones, proof)
+    if (complete !== undefined) {
+      row.coverageComplete = complete
+      if (row.status === 'guarded' && !join.birthStatusByScenario.has(row.scenarioId!)) row.status = 'never-run'
+    }
+  }
+  const proven = surfaces.some((s) => s.coverageComplete === true && (s.status === 'pass' || s.status === 'guarded'))
   const gaps = entry ? entry.gaps : (join.reportGapsByFlow.get(flowId) ?? [])
   for (const gap of gaps) {
     const flowGap = toFlowGap(gap, join.externals)
     surfaces.push({
       ...(gap.surface ? { surface: gap.surface } : {}),
       status: gapStatus(gap, flowGap.needsSetup),
+      // Only unsuccessful realization attempts can be alternatives. Failures,
+      // authoring errors, dismissals and unrelated/legacy gaps never disappear.
+      ...(proven && gap.surface && milestones.some((m) => m.proofDrivers?.includes(gap.surface!)) &&
+        ['no-interface', 'unrealizable', 'blocked-on', 'awaiting-driver'].includes(gap.kind)
+        ? { coveredByAlternative: true } : {}),
       gap: flowGap,
     })
   }
@@ -695,11 +722,15 @@ function rollUpFlow(surfaces: readonly GuardFlowSurface[]): {
   reason?: string
   needsSetup?: GuardNeedsSetup
 } {
-  const status = worstCoverageStatus(surfaces.map((s) => s.status))
+  const candidates = surfaces.filter((s) => !s.coveredByAlternative)
+  const complete = candidates.some((s) => s.coverageComplete === true && (s.status === 'pass' || s.status === 'guarded'))
+  const incomplete = !complete && candidates.some((s) => s.coverageComplete === false && (s.status === 'pass' || s.status === 'guarded'))
+  const status = worstCoverageStatus(candidates.map((s) =>
+    incomplete && (s.status === 'pass' || s.status === 'guarded') ? 'unguarded' : s.status))
   const winner = surfaces.find((s) => s.status === status && s.gap)
   return {
     status,
-    ...(winner?.gap ? { reason: winner.gap.reason } : {}),
+    ...(winner?.gap ? { reason: winner.gap.reason } : incomplete && status === 'unguarded' ? { reason: 'No successful scenario verifies every milestone with an appropriate driver.' } : {}),
     ...(winner?.gap?.needsSetup ? { needsSetup: winner.gap.needsSetup } : {}),
   }
 }
@@ -1076,6 +1107,11 @@ async function loadGuardCorpusForView(
   return { ...(commit !== undefined ? { commit } : {}), scenarios, manifest }
 }
 
+/** The scenario assertions used by flow and section coverage, at the same view ref. */
+export async function readGuardScenariosForView(repoKey: string, ref?: string): Promise<GuardScenario[]> {
+  return (await loadGuardCorpusForView(repoKey, ref))?.scenarios ?? []
+}
+
 // ---------------------------------------------------------------------------
 // Flows tab — the inventory drill-down (list + detail).
 // ---------------------------------------------------------------------------
@@ -1192,7 +1228,10 @@ function flowBucket(flowId: string, join: FlowJoin): GuardFlowBucket {
   const entry = join.manifestFlows.get(flowId)
   if (!entry) return 'ungenerated'
   if (entry.scenarios.length === 0) return 'blocked'
-  return entry.gaps.length === 0 ? 'guarded' : 'partial'
+  const surfaces = flowSurfaces(flowId, join)
+  const unresolved = surfaces.some((s) => s.gap && !s.coveredByAlternative)
+  const incomplete = surfaces.some((s) => s.coverageComplete === false) && !surfaces.some((s) => s.coverageComplete === true)
+  return unresolved || incomplete ? 'partial' : 'guarded'
 }
 
 /**
@@ -1332,7 +1371,7 @@ function flowListItem(
     flowId,
     title: flowTitle(flowId, join),
     goal: flow?.goal ?? '',
-    status: worstCoverageStatus(surfaces.map((s) => s.status)),
+    status: rollUpFlow(surfaces).status,
     bucket: flowBucket(flowId, join),
     epic: (flow?.composedOf.length ?? 0) > 0,
     composedOf: flow?.composedOf ?? [],
@@ -1477,6 +1516,7 @@ export async function readGuardFlowDetail(
         birthPassed: false,
         hasEvidence: false,
         interfacePath: [],
+        ...(surface.coveredByAlternative ? { coveredByAlternative: true } : {}),
         ...(surface.gap ? { gap: surface.gap } : {}),
       }
     }
@@ -1530,6 +1570,7 @@ export async function readGuardFlowDetail(
       // committed red test still says whose fault it is.
       ...birthTriage(run != null, surface.scenarioId, birth, diagnosisByScenario),
       interfacePath: scenario?.interface?.path ?? [],
+      ...(surface.coverageComplete !== undefined ? { coverageComplete: surface.coverageComplete } : {}),
     }
   })
 
@@ -1541,7 +1582,7 @@ export async function readGuardFlowDetail(
     flowId,
     title: flowTitle(flowId, join),
     goal: flow?.goal ?? '',
-    status: worstCoverageStatus(surfaces.map((s) => s.status)),
+    status: rollUpFlow(surfaces).status,
     bucket: flowBucket(flowId, join),
     epic: (flow?.composedOf.length ?? 0) > 0,
     manual: isManualFlowId(flowId),

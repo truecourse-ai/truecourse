@@ -24,6 +24,10 @@ import type {
   TurnUsage,
 } from '../../packages/agent-loop/src/index'
 import { authorWebInterfaces, planWorkItems } from '../../packages/core/src/services/interface-author/author'
+import { readGuardInterfaces } from '../../packages/core/src/commands/guard-read'
+import { collectGuardSetupBundle, materializeGuardSetupBundle } from '../../packages/core/src/services/guard-setup/bundle'
+import { resetGuardStore, setGuardStore, type GuardStore } from '../../packages/core/src/lib/guard-store'
+import { buildScreens, screenShowRows } from '../../apps/dashboard/client/src/lib/interface-pom'
 import type { AuthoredFragment } from '../../packages/core/src/services/interface-author/draft'
 import { InterfacesFileSchema, type InterfacesFile } from '../../packages/shared/src/index'
 import {
@@ -121,6 +125,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  resetGuardStore()
   fs.rmSync(repo, { recursive: true, force: true })
 })
 
@@ -494,11 +499,11 @@ describe('a session that fails', () => {
 })
 
 describe('re-running', () => {
-  it('skips the places that already carry tasks, and re-authors them on --replace', async () => {
+  it('skips places with tasks and established readable kinds, and re-authors them on --replace', async () => {
     const { persistence } = memoryPersistence()
     const script: Script = async (place) =>
       place === 'root'
-        ? { kind: 'outcome', value: HOME_FRAGMENT }
+        ? { kind: 'outcome', value: { ...HOME_FRAGMENT, resources: [{ ...DERIVED.resources!.web[0], readables: { markers: [], elements: [], controls: [], rows: [] } }] } }
         : { kind: 'outcome', value: { interfaces: [] } }
 
     await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(script).driver, persistence })
@@ -1204,5 +1209,109 @@ describe('sessions run in a pool, the fold does not', () => {
       signal: controller.signal,
     })
     expect(started).toEqual(['root'])
+  })
+})
+
+// This chain starts at the authoring session's source/tools and output. Both
+// read modes and the screen model consume the resulting stored catalog bytes.
+describe('readable authoring through storage and the screen read view', () => {
+  it('enriches an action-only catalog, including nested facts, without changing tasks', async () => {
+    const { persistence } = memoryPersistence()
+    await authorWebInterfaces({ repoRoot: repo, persistence, places: ['root'],
+      driver: scriptedDriver(async () => ({ kind: 'outcome', value: HOME_FRAGMENT })).driver })
+    const oldTasks = readAuthoredFile().interfaces
+    fs.writeFileSync(path.join(repo, 'src/Home.tsx'), `export function Home({ repos, includeArchived }) {
+      return <main><h1>Repositories</h1>
+        <label><input type="checkbox" checked={includeArchived} />Include archived</label>
+        <section aria-label="Repository list"><ul>{repos.map(repo => <li>{repo.name}</li>)}</ul></section>
+        <dialog aria-label="Repository details"><section aria-label="Status"><p>No analysis yet</p></section></dialog>
+      </main>
+    }`)
+    const fragment: AuthoredFragment = {
+      interfaces: [],
+      resources: [
+        { id: 'root', kind: 'screen', title: '/', readables: {
+          markers: [], elements: [{ id: 'heading', element: { role: 'heading', name: 'Repositories' } }],
+          controls: [{ id: 'include-archived', control: { label: 'Include archived' }, states: ['checked'] }], rows: [],
+        } },
+        { id: 'repo-list', kind: 'panel', title: 'Repository list', of: 'root', readables: {
+          markers: [], elements: [], controls: [], rows: [{ id: 'repository', within: { role: 'region', name: 'Repository list' },
+            item: 'listitem', template: '<name>', slots: [{ name: 'name', kind: 'text' }] }],
+        } },
+        { id: 'repo-details', kind: 'dialog', title: 'Repository details', of: 'root', readables: {
+          markers: [], elements: [], controls: [], rows: [],
+        } },
+        { id: 'repo-status', kind: 'panel', title: 'Status', of: 'repo-details', readables: {
+          markers: [{ id: 'no-analysis', marker: 'No analysis yet', when: 'the Repository details dialog is open' }],
+          elements: [], controls: [], rows: [],
+        } },
+      ],
+    }
+    const { driver } = scriptedDriver(async (place, input) => {
+      expect(place).toBe('root')
+      expect(input.initialMessages.join('\n')).toContain('Preserve these tasks')
+      const source = await callTool(input, 'read_file', { path: 'src/Home.tsx' })
+      expect(source).toContain('<h1>Repositories</h1>')
+      expect(source).toContain('repos.map(repo => <li>{repo.name}</li>)')
+      expect(source).toContain('checked={includeArchived}')
+      expect(source).toContain('No analysis yet')
+      expect(await callTool(input, 'check_draft', fragment)).toContain('The draft is valid')
+      return { kind: 'outcome', value: fragment }
+    })
+    // A named place selects enrichment; replacing existing tasks requires --replace.
+    const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['root'] })
+    expect(result.places[0].status).toBe('authored')
+    expect(result.authored).toBe(0)
+    expect(result.path).toBe(guardAuthoredInterfacesPath(repo))
+    expect(readAuthoredFile().interfaces).toEqual(oldTasks)
+    const local = await readGuardInterfaces(repo)
+    const screen = buildScreens('web', local.resources!.web, local.interfaces).find((s) => s.place.id === 'root')!
+    const rows = screenShowRows(screen)
+    expect(rows.map((row) => [row.kind, row.part.id])).toEqual([
+      ['renders', 'root'], ['click', 'root'], ['lists', 'repo-list'], ['shows', 'repo-status'],
+    ])
+    expect(rows.find((row) => row.kind === 'lists')).toMatchObject({ what: '<name>', locator: expect.stringContaining('Repository list') })
+    expect(rows.find((row) => row.kind === 'shows')!.when).toContain('dialog is open')
+    expect(local.resources!.web[0].address).toBe('/')
+
+    const bundle = collectGuardSetupBundle(repo)
+    const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-readables-clone-'))
+    try {
+      materializeGuardSetupBundle(clone, bundle)
+      expect((await readGuardInterfaces(clone)).resources).toEqual(local.resources)
+    } finally {
+      fs.rmSync(clone, { recursive: true, force: true })
+    }
+    setGuardStore({ mode: 'db', loadGuardSetupBundle: async () => bundle,
+      readGuardBaselineCommit: async () => null } as unknown as GuardStore)
+    const hosted = await readGuardInterfaces('acme/app')
+    expect(hosted.resources).toEqual(local.resources)
+    expect(screenShowRows(buildScreens('web', hosted.resources!.web, hosted.interfaces)[0])).toEqual(rows)
+    resetGuardStore()
+
+    const before = fs.readFileSync(guardAuthoredInterfacesPath(repo), 'utf-8')
+    const rerun = await authorWebInterfaces({ repoRoot: repo, persistence,
+      driver: scriptedDriver(async (place) => {
+        expect(place).toBe('repos-repoid')
+        return { kind: 'outcome', value: { interfaces: [] } }
+      }).driver })
+    expect(rerun.skipped).toEqual(['root'])
+    expect(fs.readFileSync(guardAuthoredInterfacesPath(repo), 'utf-8')).toBe(before)
+  })
+
+  it('keeps incomplete readable kinds eligible, and persists a read-only screen', async () => {
+    const { persistence } = memoryPersistence()
+    const run = (resources: AuthoredFragment['resources']) => authorWebInterfaces({ repoRoot: repo, persistence,
+      driver: scriptedDriver(async (place) => ({ kind: 'outcome', value: place === 'root'
+        ? { interfaces: [], resources } : { interfaces: [] } })).driver })
+    await run([{ ...DERIVED.resources!.web[0], readables: { markers: [] } }])
+    expect(planWorkItems(DERIVED, readAuthoredFile())[0].needsAuthoring).toBe(true)
+    const result = await run([{ ...DERIVED.resources!.web[0], readables: { elements: [], controls: [], rows: [] } }])
+    expect(result.places[0].status).toBe('authored')
+    expect(readAuthoredFile().resources!.web[0].readables).toEqual({ markers: [], elements: [], controls: [], rows: [] })
+    expect(planWorkItems(DERIVED, readAuthoredFile())[0].needsAuthoring).toBe(false)
+    const withNested = readAuthoredFile()
+    withNested.resources!.web.push({ id: 'nested', kind: 'dialog', of: 'root', title: 'Nested' })
+    expect(planWorkItems(DERIVED, withNested)[0].needsAuthoring).toBe(true)
   })
 })

@@ -29,10 +29,9 @@
  *     `await req.json()` and `req.nextUrl.searchParams.get('x')`;
  *   - Next.js pages/api — `export default function handler(req, res)`, which is
  *     the Express shape behind a default export.
- * The two Next shapes have no route REGISTRATION in the tree today, so their
- * contracts are keyed by the exported declaration's location and join nothing
- * until a registration derivation mints routes at those locations — deliberate:
- * covering the read idiom here means contracts appear the day that lands.
+ * App Router contracts join filesystem route registrations at the exported
+ * declaration/specifier location. Pages API contracts remain unjoined until
+ * method-aware legacy route extraction is implemented.
  * (NestJS decorator routes are the one idiom NOT read here: their facts are
  * decorator-borne, so `routes/nest-decorators.ts` attaches the contract while it
  * builds the registration.)
@@ -67,12 +66,10 @@ import type {
   ResponseContract,
   SupportedLanguage,
 } from '@truecourse/shared'
+import { nextHandlerExports } from './routes/next-handlers.js'
 import { stringLiteral, walk } from './outbound-requests.js'
 
 const HTTP_METHODS = new Set(['get', 'post', 'put', 'delete', 'patch', 'all'])
-
-/** The verb names a Next.js app-router route module exports its handlers as. */
-const HANDLER_EXPORT_NAMES = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
 
 /** Function shapes a handler / validator can be written as. */
 const FUNCTION_NODES = new Set([
@@ -134,11 +131,9 @@ export interface RequestContractExtraction {
    * its contract. All FOUR coordinates, deliberately: chained registrations
    * (`new Hono().post('/a', h).post('/b', h)`) share a start position — every
    * link of a chain starts where the chain's head does — so a start-only key
-   * would hand one handler's contract to every route in the chain. For the two
-   * exported-handler idioms with no registration in the tree (Next app-router,
-   * pages/api) the contract is keyed at BOTH the `export_statement` and the
-   * declaration inside it, so a future registration derivation can join on
-   * whichever location it records.
+   * would hand one handler's contract to every route in the chain. App Router
+   * contracts use the exported declaration or specifier site. Legacy pages/api
+   * contracts retain both export and declaration sites, without route detection.
    */
   byRouteLocation: Map<string, RequestContract>
   validators: RequestValidator[]
@@ -539,16 +534,16 @@ function contextRecordSource(value: SyntaxNode, reqOf: string): 'body' | 'query'
 }
 
 // ---------------------------------------------------------------------------
-// Exported handlers with no registration in the tree (Next.js)
+// Exported handlers (Next.js)
 // ---------------------------------------------------------------------------
 
 /**
  * Contracts for the two Next.js handler shapes, keyed by DECLARATION location
  * (see {@link RequestContractExtraction.byRouteLocation}): a verb-named export
  * (`export async function POST(req)`) walks the fetch-Request idiom, a default
- * export with a `(req, res)` signature walks the Express idiom. Neither joins a
- * route today — the tree derives no registrations for them — so these entries
- * are inert until that derivation exists, and cost nothing meanwhile.
+ * export with a `(req, res)` signature walks the Express idiom. App Router
+ * export resolution is shared with the route extractor so aliases and multiple
+ * declarations on one line keep the correct method-specific contract.
  */
 function collectExportedHandlerContracts(
   root: SyntaxNode,
@@ -581,42 +576,15 @@ function collectExportedHandlerContracts(
       }
       continue
     }
-
-    // app-router: `export async function POST(req)` / `export const POST = async (req) => …`.
-    for (const child of statement.namedChildren) {
-      if (!child) continue
-      if (child.type === 'function_declaration' || child.type === 'generator_function_declaration') {
-        const name = child.childForFieldName('name')?.text
-        if (name && HANDLER_EXPORT_NAMES.has(name)) emitFetchHandler(child, statement, child, byRouteLocation)
-        continue
-      }
-      if (child.type === 'lexical_declaration' || child.type === 'variable_declaration') {
-        for (const declarator of child.namedChildren) {
-          if (declarator?.type !== 'variable_declarator') continue
-          const name = declarator.childForFieldName('name')
-          const value = declarator.childForFieldName('value')
-          if (name?.type !== 'identifier' || !HANDLER_EXPORT_NAMES.has(name.text)) continue
-          if (value && FUNCTION_NODES.has(value.type)) emitFetchHandler(value, statement, declarator, byRouteLocation)
-        }
-      }
-    }
   }
-}
-
-function emitFetchHandler(
-  handler: SyntaxNode,
-  statement: SyntaxNode,
-  declaration: SyntaxNode,
-  byRouteLocation: Map<string, RequestContract>,
-): void {
-  const requestVar = paramNames(handler)[0]
-  if (!requestVar) return
-  const sink = newSink()
-  harvestFetchHandler(handler, requestVar, sink)
-  const contract = buildContract(sink)
-  if (!contract) return
-  byRouteLocation.set(locationKey(statement), contract)
-  byRouteLocation.set(locationKey(declaration), contract)
+  for (const { handler, node } of nextHandlerExports(root)) {
+    if (!handler) continue
+    const sink = newSink()
+    // Responses are extractable even when a handler does not take a request.
+    harvestFetchHandler(handler, paramNames(handler)[0] ?? '', sink)
+    const contract = buildContract(sink)
+    if (contract) byRouteLocation.set(locationKey(node), contract)
+  }
 }
 
 /**

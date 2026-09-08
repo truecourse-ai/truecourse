@@ -7,6 +7,7 @@
  */
 
 import type { FileAnalysis, DatabaseType, TableInfo, RelationInfo } from '@truecourse/shared'
+import { parseNodeSqliteSchema } from './node-sqlite.js'
 import { parsePrismaSchema } from './prisma.js'
 import { parseDrizzleSchema } from './drizzle.js'
 import { parseSqlAlchemySchema } from './sqlalchemy.js'
@@ -52,6 +53,13 @@ export const EF_CORE_SCHEMA_PARSER: ServiceSchemaParser = {
 }
 
 export const SCHEMA_PARSERS: SchemaParserEntry[] = [
+  {
+    name: 'NodeSQLite',
+    scope: 'file',
+    matchesImport: (fa) => fa.imports.some(imp => imp.source === 'node:sqlite' && !imp.isTypeOnly),
+    parse: parseNodeSqliteSchema,
+    detectDbType: () => 'sqlite',
+  },
   {
     name: 'Drizzle',
     scope: 'file',

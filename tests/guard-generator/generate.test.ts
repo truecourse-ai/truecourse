@@ -270,7 +270,7 @@ describe('generateGuards — realization gaps', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, cliInterface(['relkit']), tuiInterface),
-      extractSession: versionCliBgUntestable,
+      extractSession: extractSessionBy({ version: [{ driver: 'cli', alternativeDrivers: ['tui'] }], background: { untestable: 'background' } }),
       flowWorkerSession: authorsEvery(),
     })
 
@@ -298,7 +298,7 @@ describe('generateGuards — realization gaps', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, cliInterface(['relkit']), webInterface()),
-      extractSession: versionCliBgUntestable,
+      extractSession: extractSessionBy({ version: [{ driver: 'cli', alternativeDrivers: ['web'] }], background: { untestable: 'background' } }),
       flowWorkerSession: submitWorkerSessions(
         (task) => {
           surfaces.push(task.surface)
@@ -1294,7 +1294,7 @@ describe('generateGuards — worker robustness', () => {
     expect(res.written.map((w) => w.flowId)).toEqual(['help'])
     expect(res.errors.map((e) => e.anchor)).toEqual(['version'])
     expect(flowEntry(r, 'version')?.generationInputsHash).toBeNull()
-    expect(flowEntry(r, 'help')?.scenarios).toEqual([{ id: 'help', drivers: ['cli'], status: 'passing' }])
+    expect(flowEntry(r, 'help')?.scenarios).toEqual([{ id: 'help', drivers: ['cli'], status: 'passing', milestoneCoverage: [{ milestone: 1, driver: 'cli' }] }])
   }, 60_000)
 
   it('an invalid `matches` regex never reaches a sandbox — the pre-flight names it', async () => {
@@ -1336,7 +1336,7 @@ describe('generateGuards — manifest + orphans', () => {
           flowId: 'a-removed-flow',
           flowFingerprint: 'sha256:old',
           bindings: [{ doc: 'docs/gone.md', anchor: 'removed/section', fingerprint: 'sha256:old' }],
-          scenarios: [{ id: 'orphan', drivers: ['cli'], status: 'passing' }],
+          scenarios: [{ id: 'orphan', drivers: ['cli'], status: 'passing', milestoneCoverage: [{ milestone: 1, driver: 'cli' }] }],
           generationInputsHash: 'sha256:x',
           gaps: [],
         },
@@ -1354,7 +1354,7 @@ describe('generateGuards — manifest + orphans', () => {
     expect(res.orphaned).toEqual([{ doc: 'docs/gone.md', anchor: 'removed/section', scenarioIds: ['orphan'] }])
     expect(() => GuardManifestSchema.parse(readManifest(r)!)).not.toThrow()
     expect(flowEntry(r, 'a-removed-flow')?.scenarios).toEqual([
-      { id: 'orphan', drivers: ['cli'], status: 'passing' },
+      { id: 'orphan', drivers: ['cli'], status: 'passing', milestoneCoverage: [{ milestone: 1, driver: 'cli' }] },
     ])
     // MARKED: nothing derives it any more, so every reader can say why it has no
     // goal and no milestones instead of rendering a hollow flow.
@@ -1362,7 +1362,7 @@ describe('generateGuards — manifest + orphans', () => {
     // A flow synthesis still produces is never marked.
     expect(flowEntry(r, 'version')?.orphaned).toBeUndefined()
     expect(flowEntry(r, 'version')?.scenarios).toEqual([
-      { id: 'version', drivers: ['cli'], status: 'passing' },
+      { id: 'version', drivers: ['cli'], status: 'passing', milestoneCoverage: [{ milestone: 1, driver: 'cli' }] },
     ])
   }, 60_000)
 
@@ -1907,8 +1907,8 @@ describe('generateGuards — the per-flow pipeline', () => {
     })
 
     expect(res.written.map((w) => w.flowId).sort()).toEqual(['alpha', 'beta'])
-    expect(flowEntry(r, 'alpha')?.scenarios).toEqual([{ id: 'alpha', drivers: ['cli'], status: 'passing' }])
-    expect(flowEntry(r, 'beta')?.scenarios).toEqual([{ id: 'beta', drivers: ['cli'], status: 'passing' }])
+    expect(flowEntry(r, 'alpha')?.scenarios).toEqual([{ id: 'alpha', drivers: ['cli'], status: 'passing', milestoneCoverage: [{ milestone: 1, driver: 'cli' }] }])
+    expect(flowEntry(r, 'beta')?.scenarios).toEqual([{ id: 'beta', drivers: ['cli'], status: 'passing', milestoneCoverage: [{ milestone: 1, driver: 'cli' }] }])
     expect(loadScenarios(r).scenarios.map((s) => s.id).sort()).toEqual(['alpha', 'beta'])
     expect(fs.existsSync(path.join(scenariosDir(r), 'a', 'alpha.yaml'))).toBe(true)
   }, 90_000)

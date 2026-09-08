@@ -73,10 +73,20 @@ Return the SMALLEST set of claims that captures what a section actually guarante
 # Drivers — which kind of test could assert the claim
 - cli — a command-line program's behavior when invoked with arguments (and optional stdin): its exit code, what it writes to stdout/stderr, or the files it creates or changes.
 - api — an HTTP/RPC service's response, or the datastore state a request leaves — AND the behavior of the service PROCESS itself: that it starts (or refuses to start) under a given configuration, that it applies migrations at boot, what it writes while serving, that it shuts down on SIGTERM/SIGINT, that its state survives a restart. A claim about the SERVER's own lifecycle is an \`api\` claim; \`cli\` is for a COMMAND a user runs to completion.
-  cli and api are the drivers tests are authored for today; still extract web/tui/library claims so the coverage picture stays honest.
+  cli, api and web are runnable; still extract tui/library claims for coverage accounting.
 - web — a browser UI (navigation, clicks, visible content).
 - tui — an interactive terminal UI (keystrokes, on-screen contents).
 - library — the package's programmatic API, consumed by IMPORTING it from user code. The deciding line is the documented consumption form: the SAME capability is \`cli\` when the docs invoke a command and \`library\` when they tell the user to write importing code.
+
+Choose the driver from what must be OBSERVED, not the implementation behind it.
+A user adding, editing or deleting an item and seeing the result is a web claim even
+when the UI calls a server. It does not require a separate API test. HTTP status
+codes, malformed HTTP requests, headers and raw response bodies require targeted
+api verification; clicking through a UI cannot prove those contracts.
+Set \`alternativeDrivers\` only when each listed driver can independently prove the
+ENTIRE same claim. These are alternatives, not extra mandatory variants. Omit it
+when there is no genuine alternative. Do not list api just because a UI uses HTTP,
+or web for an API contract whose protocol details are not visible in the UI.
 
 # Faithfulness — the prime directive
 Extract ONLY what the text states. Never infer a behavior the words do not state. A claim that overreaches the prose is worse than a missing one. When a section is background, rationale, definitions, naming, design history, a pure cross-reference, or needs a capability no driver has, record an untestable note instead of forcing a weak claim.
@@ -109,7 +119,7 @@ When the briefing carries a RESOLVED — STALE block, those verbatim sentences l
 - \`check_claims\` — REQUIRED before you finish: call it with your complete draft. It snaps every anchor against the live section index exactly as the engine will, so a wrong anchor costs one turn here instead of a dropped claim at the fold. Fix what it reports, then produce the outcome.
 
 # The outcome
-One object: { "claims": [ { "claim", "driver", "sectionAnchor", "reason", "needs": [ { "kind", "name", "detail"? } ] } ], "untestable": [ { "sectionAnchor", "reason" } ] }. "reason" on a claim states the observable a test would assert.`
+One object: { "claims": [ { "claim", "driver", "alternativeDrivers"?, "sectionAnchor", "reason", "needs": [ { "kind", "name", "detail"? } ] } ], "untestable": [ { "sectionAnchor", "reason" } ] }. "reason" on a claim states the observable a test would assert.`
 
 /** The prompt half of every extract-session cache key — exported for the
  *  step-20 estimate rework, which must probe the REAL keys. */

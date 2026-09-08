@@ -16,8 +16,9 @@ export const GUARD_RECIPE_FILE = '.truecourse/scenarios/recipe.json';
 
 export function GuardRecipeDetail({
   recipe,
+  surface,
 }: {
-  /** The surface whose preparation is being read; the card is not yet scoped by it. */
+  /** The surface whose preparation is being read. */
   surface?: GuardDriverId;
   recipe: GuardRecipeCardData;
 }) {
@@ -30,7 +31,7 @@ export function GuardRecipeDetail({
         <span className="font-mono text-[12px] text-foreground">{GUARD_RECIPE_FILE}</span>
       </div>
       <div className="mt-3">
-        <GuardRecipeCard recipe={recipe} />
+        <GuardRecipeCard recipe={recipe} {...(surface ? { surface } : {})} />
       </div>
     </div>
   );

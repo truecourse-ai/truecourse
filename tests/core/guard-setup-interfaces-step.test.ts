@@ -72,6 +72,9 @@ function authored(places: string[]): InterfacesFile {
       at,
       fingerprint: `sha256:web-${i}`,
     })),
+    resources: { web: DERIVED.resources!.web.filter((p) => places.includes(p.id)).map((p) => ({
+      ...p, readables: { markers: [], elements: [], controls: [], rows: [] },
+    })) },
   };
 }
 
@@ -137,7 +140,7 @@ function authoring(
 }
 
 describe('buildInterfacesStep — the authoring half', () => {
-  it('spends ZERO sessions when every derived screen already carries tasks', async () => {
+  it('spends ZERO sessions when every derived screen has tasks and established readables', async () => {
     const r = repo();
     writeHalves(r, { authoredPlaces: ['root', 'repos-repoid'] });
     const { author, calls } = authoring();
@@ -150,6 +153,32 @@ describe('buildInterfacesStep — the authoring half', () => {
     expect(calls).toEqual([]);
     expect(result.sessionRunId).toBeUndefined();
     expect(stub.spend.sessions).toBe(0);
+  });
+
+  it('enriches existing action-only catalogs and screens with unknown nested readables', async () => {
+    const r = repo();
+    writeHalves(r, { authoredPlaces: ['root', 'repos-repoid'] });
+    const half = authored(['root', 'repos-repoid']);
+    delete half.resources;
+    fs.writeFileSync(guardAuthoredInterfacesPath(r), JSON.stringify(half));
+    const first = authoring();
+    await buildInterfacesStep(stubContext().context, { author: first.author })(stepInput(r));
+    expect(first.calls).toHaveLength(1);
+
+    const nested = authored(['root', 'repos-repoid']);
+    nested.resources!.web.push({ id: 'details', kind: 'dialog', of: 'root', title: 'Details' });
+    fs.writeFileSync(guardAuthoredInterfacesPath(r), JSON.stringify(nested));
+    const second = authoring();
+    await buildInterfacesStep(stubContext().context, { author: second.author })(stepInput(r));
+    expect(second.calls).toHaveLength(1);
+  });
+
+  it('does not report wholly rejected authoring as successful setup', async () => {
+    const r = repo();
+    writeHalves(r);
+    const { author } = authoring({ places: [{ status: 'rejected' }] });
+    const result = await buildInterfacesStep(stubContext().context, { author })(stepInput(r));
+    expect(result.status).toBe('failed');
   });
 
   it('runs the authoring when a screen has no tasks, and records its run id', async () => {

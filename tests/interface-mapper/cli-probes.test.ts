@@ -283,6 +283,17 @@ describe('deriveCliInterfacesFromProbes — the usage-only dialect', () => {
       ['read'],
       ['write'],
     ])
+    expect(interfaces.find((entry) => entry.id === 'cli/write')?.contract).toEqual({
+      surface: 'cli',
+      command: {
+        path: ['filecli', 'write'],
+        description: 'Write content to a file',
+        positionals: [{ name: 'path', required: true }, { name: 'content', required: true }],
+      },
+    })
+    expect(interfaces.find((entry) => entry.id === 'cli/read')?.contract).toMatchObject({
+      command: { positionals: [{ name: 'path', required: true }] },
+    })
   })
 })
 

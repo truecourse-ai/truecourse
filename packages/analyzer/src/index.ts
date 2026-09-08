@@ -232,3 +232,5 @@ export {
   type RoslynFile,
   type RoslynHostViolation,
 } from './roslyn-host-client.js'
+
+export { resolveRequestContracts } from './request-contract-resolution.js'

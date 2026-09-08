@@ -22,7 +22,7 @@ import {
 } from '@truecourse/ee-data-store';
 import { createJobs, type Jobs } from '@truecourse/jobs';
 import { log } from '@truecourse/core/lib/logger';
-import { readGuardResult, readGuardLatest } from '@truecourse/core/lib/guard-store';
+import { readGuardResult, readGuardLatest, listScenarioFiles } from '@truecourse/core/lib/guard-store';
 import { emitRepoLifecycle } from '@truecourse/core/lib/repo-lifecycle';
 import { loadWorkspaceSpec } from '@truecourse/core/lib/spec-store';
 import { getWorkspaceDecisions, type CuratedCorpus } from '@truecourse/core/commands/spec-in-process';
@@ -272,8 +272,7 @@ export async function registerJobs(
   // already onboarded (refresh-on-merge is issue 06). Wired onto the baseline
   // definition's `onSettled` hook, which runs once the single-flight key is free.
   // Whether a repo already has hosted guard state (a stored generate report) —
-  // shared by the onboarding chain (fires when absent) and the baseline-refresh
-  // chain (fires when present); they are exact complements. Anchored at the
+  // used by onboarding to avoid repeating a completed attempt. Anchored at the
   // repo's scanned default-branch baseline (gh_baselines): a commit-less read
   // returns the NEWEST row by createdAt, which can be a PR head's regenerated
   // report — that must never make an un-onboarded repo look onboarded. No
@@ -284,24 +283,35 @@ export async function registerJobs(
     return (await readGuardResult(repoKey, baseline.commitSha)) !== null;
   };
 
+  // A report records an attempt, including one that wrote no tests. Run only
+  // stored scenario files. Prefer the requested commit; an explicit empty report
+  // must not borrow old tests. Scan refreshes can reuse their anchored baseline.
+  const hasScenarios = async (repoKey: string, commitSha?: string): Promise<boolean> => {
+    if (commitSha) {
+      if ((await listScenarioFiles(repoKey, commitSha)).length > 0) return true;
+      if (await readGuardResult(repoKey, commitSha)) return false;
+    }
+    const baseline = await gateStore.getBaseline(repoKey);
+    return !!baseline && (await listScenarioFiles(repoKey, baseline.commitSha)).length > 0;
+  };
+
   const onBaselineSettled = async (
     payload: BaselineJobPayload,
     outcome: JobOutcomeStatus,
   ): Promise<void> => {
     await replayPendingBaseline(pendingBaselines, enqueueBaseline, payload);
-    // Complementary chains: a repo with NO guard state onboards (generate); a repo
+    // A repo with NO guard state onboards (generate); a repo
     // that ALREADY has scenarios refreshes its baseline against current main. The
     // spec scan just re-materialized the corpus, so the baseline runs the newest.
     await chainGuardOnboarding({ hasGuardState, enqueueGuardGenerate }, payload, outcome);
-    await chainGuardBaselineRefresh({ hasGuardState, enqueueGuardBaseline }, payload, outcome);
+    await chainGuardBaselineRefresh({ hasScenarios, enqueueGuardBaseline }, payload, outcome);
     // The scan re-curated the corpus — tell any open Spec tab to refresh (routed
     // by the dashboard server into the repo's room as `spec:complete`).
     if (outcome === 'succeeded') await emitRepoLifecycle(payload.repoFullName, 'scan');
   };
 
-  // After a guard-generate settles: on success a fresh generate just wrote
-  // scenarios, so warm the baseline (skip the first PR's lazy base run). Reuses the
-  // refresh chain — hasGuardState is now true, so it fires exactly once.
+  // After a successful generate, warm the baseline only when scenario files
+  // exist. A metadata-only result is a completed attempt, but has nothing to run.
   const onGuardGenerateSettled = async (
     payload: GuardGenerateEnqueueRequest & { jobId: string },
     outcome: JobOutcomeStatus,
@@ -315,7 +325,7 @@ export async function registerJobs(
     // (hasGuardState is now true) but saved NO scenarios — chaining a baseline run
     // would strand a run row against an empty Scenarios tab. Suppress it.
     if (generateWasBlocked(result)) return;
-    await chainGuardBaselineRefresh({ hasGuardState, enqueueGuardBaseline }, payload, outcome);
+    await chainGuardBaselineRefresh({ hasScenarios, enqueueGuardBaseline }, payload, outcome);
   };
 
   // After a guard-baseline settles (success OR failure): replay the repo's
@@ -399,7 +409,7 @@ export async function registerJobs(
     backfillSettled = runGuardBackfill({
       listRepos: () => selectOperatorRepoEnumeration(opts.db).listAllRepos(),
       baselineCommit: async (repo) => (await gateStore.getBaseline(repo))?.commitSha ?? null,
-      hasScenarios: hasGuardState,
+      hasScenarios,
       hasBaseline: async (repoKey) => (await readGuardLatest(repoKey)) !== null,
       isBackfilled: (repo) => guardBackfillMarkers.isMarked(repo),
       markBackfilled: (repo) => guardBackfillMarkers.mark(repo),

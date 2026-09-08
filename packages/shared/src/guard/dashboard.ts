@@ -80,7 +80,7 @@ export type GuardSectionCoverageStatus =
 
 /**
  * Every coverage status in WORST-FIRST precedence — the ONE order every rollup
- * uses (surface → flow → section).
+ * uses after flow alternatives are resolved (surface → flow → section).
  *
  * The ORDER OF TIERS is {@link GUARD_COVERAGE_PLAIN_ORDER}, the five-word coverage
  * vocabulary: Failed → Blocked → Never run → Succeeded → Not testable. A rollup
@@ -373,6 +373,10 @@ export const GuardFlowSurfaceSchema = z
     stage: GuardResultStageSchema.optional(),
     /** True when the run flagged interface drift on this scenario (never an outcome). */
     interfaceDrifted: z.boolean().optional(),
+    /** This attempt asserts every milestone using an accepted driver. Unknown for legacy records. */
+    coverageComplete: z.boolean().optional(),
+    /** The gap remains visible, but another successful scenario proves the entire flow. */
+    coveredByAlternative: z.boolean().optional(),
     gap: GuardFlowGapSchema.optional(),
   })
   .strict()
@@ -387,7 +391,7 @@ export const GuardSectionFlowSchema = z
   .object({
     flowId: z.string(),
     title: z.string(),
-    /** Worst status over the flow's surfaces (`unguarded` when never generated). */
+    /** Worst applicable status after complete alternative proofs are accounted for. */
     status: GuardSectionCoverageStatusSchema,
     /** The gap text behind `status`, when a gap decided it. */
     reason: z.string().optional(),
@@ -778,7 +782,7 @@ export const GuardFlowListItemSchema = z
     title: z.string(),
     /** One-line user goal; empty for a Manual pseudo-flow (a scenario has no goal). */
     goal: z.string(),
-    /** Worst status over the flow's surfaces (`unguarded` when never generated). */
+    /** Worst applicable status after complete alternative proofs are accounted for. */
     status: GuardSectionCoverageStatusSchema,
     /** Coverage bucket — the filter/tally key (`guarded | partial | blocked | ungenerated`). */
     bucket: GuardFlowBucketSchema,
@@ -988,6 +992,10 @@ export const GuardFlowScenarioRowSchema = z
     hasEvidence: z.boolean(),
     /** Interface ids this scenario grounds on (its realization path, in order). */
     interfacePath: z.array(z.string()).default([]),
+    /** This attempt asserts every milestone using an accepted driver. Unknown for legacy records. */
+    coverageComplete: z.boolean().optional(),
+    /** The gap remains visible, but another successful scenario proves the entire flow. */
+    coveredByAlternative: z.boolean().optional(),
     gap: GuardFlowGapSchema.optional(),
   })
   .strict()

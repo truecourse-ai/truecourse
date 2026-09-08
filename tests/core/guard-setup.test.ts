@@ -370,6 +370,16 @@ describe('estimateGuardSetupCost', () => {
     expect((await estimateGuardSetupCost(r)).stages).toEqual([]);
   });
 
+  it('prices readable enrichment despite an unchanged settled fingerprint', async () => {
+    const r = settledRepo();
+    const file = guardAuthoredInterfacesPath(r);
+    const authored = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    delete authored.resources.web[0].readables;
+    fs.writeFileSync(file, JSON.stringify(authored));
+    const stages = byKind(await estimateGuardSetupCost(r));
+    expect(stages['guard-interfaces.web-tasks'].calls).toBeGreaterThan(0);
+  });
+
   it('prices every session again under --refresh', async () => {
     const r = settledRepo();
 
@@ -443,6 +453,7 @@ function settledRepo(): string {
       version: 2,
       generatedAt: '2026-08-19T00:00:00.000Z',
       recipeFingerprint: 'sha256:recipe',
+      resources: { web: [{ ...derived.resources!.web[0], readables: { markers: [], elements: [], controls: [], rows: [] } }] },
       interfaces: [
         {
           id: 'web/open-root',

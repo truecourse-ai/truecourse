@@ -28,6 +28,8 @@ import { createHash } from 'node:crypto'
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import {
   interfaceEntryLabel,
+  flowDriversToMatch,
+  describeWebLocator,
   interfaceFingerprint,
   type GuardDriverId,
   type GuardFlow,
@@ -121,7 +123,7 @@ function stepSummary(step: InterfaceStep): string {
     case 'navigate':
       return `navigate: ${step.route}`
     default:
-      return `${step.kind}: ${step.target}`
+      return `${step.kind}${step.kind === 'input' && step.mode ? ` (${step.mode})` : ''}: ${step.target}${step.within ? ` within ${describeWebLocator(step.within)}` : ''}`
   }
 }
 
@@ -159,9 +161,9 @@ function driverVerb(step: InterfaceStep, driver: GuardDriverId): string {
     case 'navigate':
       return `navigate: ${step.route}`
     case 'input':
-      return `fill: ${step.target}`
+      return `${step.mode === 'select' ? 'select' : 'fill'}: ${step.target}${step.within ? ` within ${describeWebLocator(step.within)}` : ''}`
     default:
-      return `click: ${step.target}`
+      return `click: ${step.target}${step.within ? ` within ${describeWebLocator(step.within)}` : ''}`
   }
 }
 
@@ -243,7 +245,7 @@ export async function planFlowMatching(
   const pairs: MatchPairPlan[] = []
   for (const flow of flows) {
     for (const catalog of catalogs) {
-      if (catalog.interfaces.length === 0) continue
+      if (catalog.interfaces.length === 0 || !flowDriversToMatch(flow).includes(catalog.surface)) continue
       const cacheKey = matchCacheKey(flow, catalog)
       pairs.push({
         flowId: flow.id,
@@ -308,6 +310,8 @@ function validateMatch(
       if (!issues.unknownMilestones.includes(entry.milestone)) issues.unknownMilestones.push(entry.milestone)
       continue
     }
+    const required = flow.milestones.find((m) => m.order === entry.milestone)?.proofDrivers
+    if (required && !required.includes(catalog.surface)) continue
     covered.add(entry.milestone)
     steps.push({ interface: iface, milestone: entry.milestone, ...(entry.note ? { note: entry.note } : {}) })
   }

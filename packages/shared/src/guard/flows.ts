@@ -18,6 +18,7 @@
 import crypto from 'node:crypto'
 import { z } from 'zod'
 import type { GuardCoverageGapKind } from './report.js'
+import { GuardDriverIdSchema } from './drivers.js'
 
 /**
  * One step of a flow's path: an extracted claim, addressed by the section it was
@@ -34,6 +35,8 @@ export const GuardFlowMilestoneSchema = z
     anchor: z.string().min(1),
     /** The extracted claim's stable text. */
     claimTitle: z.string().min(1),
+    /** Each listed driver can prove this entire milestone independently. Absent on legacy flows. */
+    proofDrivers: z.array(GuardDriverIdSchema).min(1).optional(),
     /** Optional free-text note from synthesis (why this step sits here). */
     note: z.string().optional(),
   })
@@ -390,7 +393,7 @@ export function flowFingerprint(milestones: readonly GuardFlowMilestone[]): stri
   const ordered = [...milestones].sort((a, b) => a.order - b.order)
   const digest = crypto
     .createHash('sha256')
-    .update(ordered.map(flowMilestoneKey).join('\n'), 'utf-8')
+    .update(ordered.map((m) => flowMilestoneKey(m) + (m.proofDrivers ? `\0${[...new Set(m.proofDrivers)].sort().join(',')}` : '')).join('\n'), 'utf-8')
     .digest('hex')
   return `sha256:${digest}`
 }

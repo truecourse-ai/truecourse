@@ -233,6 +233,7 @@ interface CommandDraft {
    *  so they are re-sorted into declaration order at emit. */
   flags: (CliCommandFlag & { offset: number })[]
   flagKeys: Set<string>
+  argumentSyntax: { syntax: string; offset: number }[]
 }
 
 function extractJsCliCommands(tree: Tree, filePath: string): CliCommand[] {
@@ -246,7 +247,7 @@ function extractJsCliCommands(tree: Tree, filePath: string): CliCommand[] {
     const key = pathKey(path)
     let draft = drafts.get(key)
     if (!draft) {
-      draft = { name: path[path.length - 1], path, location: null, flags: [], flagKeys: new Set() }
+      draft = { name: path[path.length - 1], path, location: null, flags: [], flagKeys: new Set(), argumentSyntax: [] }
       drafts.set(key, draft)
     }
     return draft
@@ -270,19 +271,26 @@ function extractJsCliCommands(tree: Tree, filePath: string): CliCommand[] {
           const path = [...parent.path, name]
           const draft = draftFor(path)
           if (!draft.location) draft.location = commandCallLocation(node, filePath)
+          const args = node.childForFieldName('arguments')
+          const syntax = commandSyntax(args?.namedChild(0) ?? null)
+          if (syntax) draft.argumentSyntax.push({ syntax: syntax.replace(/^\S+\s*/, ''), offset: args!.startIndex })
           applyInlineArgs(draft, node, parent.kind)
           // Only the ARGUMENTS see the builder binding (yargs' `(y) => y.command(…)`);
           // the callee chain keeps the enclosing scope.
           const inner = parent.kind === 'yargs' ? builderScope(node, scope, path) : scope
-          const args = node.childForFieldName('arguments')
           if (args) for (const arg of args.namedChildren) if (arg) visit(arg, inner)
           visit(callee, scope)
           return
         }
       } else if (callee?.type === 'member_expression') {
-        if (OPTION_METHODS.has(property)) {
+        if (property === 'argument' || property === 'arguments') {
           const ref = resolveIn(receiver, scope)
-          if (ref && ref.path.length > 0) addFlags(draftFor(ref.path), property, node)
+          const args = node.childForFieldName('arguments')
+          const syntax = stringLiteral(args?.namedChild(0) ?? null)
+          if (ref && ref.path.length > 0 && syntax) draftFor(ref.path).argumentSyntax.push({ syntax, offset: args!.startIndex })
+        } else if (OPTION_METHODS.has(property)) {
+          const ref = resolveIn(receiver, scope)
+          if (ref && ref.path.length > 0) addFlags(draftFor(ref.path), property, node, ref.kind)
         } else if (DESCRIPTION_METHODS.has(property)) {
           const ref = resolveIn(receiver, scope)
           const args = node.childForFieldName('arguments')
@@ -310,6 +318,7 @@ function extractJsCliCommands(tree: Tree, filePath: string): CliCommand[] {
       flags: [...d.flags]
         .sort((a, b) => a.offset - b.offset)
         .map(({ offset: _offset, ...flag }) => flag),
+      argumentSyntax: [...d.argumentSyntax].sort((a, b) => a.offset - b.offset).map((arg) => arg.syntax),
       ...(d.description ? { description: d.description } : {}),
       ...(d.handlerName ? { handlerName: d.handlerName } : {}),
       location: d.location,
@@ -464,6 +473,13 @@ function commandNameFromNode(node: SyntaxNode | null): string | null {
   return COMMAND_WORD.test(head) ? head : null
 }
 
+function commandSyntax(node: SyntaxNode | null): string | null {
+  if (!node) return null
+  if (node.type === 'array') return commandSyntax(node.namedChild(0))
+  if (node.type === 'object') return commandSyntax(pairValue(node, ['command']))
+  return stringLiteral(node)
+}
+
 /**
  * The description/handler a `.command(…)` call passes INLINE rather than through a
  * chained method: commander's and yargs' second string argument, yargs' fourth
@@ -538,7 +554,7 @@ function firstParameterName(fn: SyntaxNode): string | null {
 // Flags
 // ---------------------------------------------------------------------------
 
-function addFlags(draft: CommandDraft, method: string, callNode: SyntaxNode): void {
+function addFlags(draft: CommandDraft, method: string, callNode: SyntaxNode, kind: FrameworkKind): void {
   const args = callNode.childForFieldName('arguments')
   if (!args) return
   const first = args.namedChild(0)
@@ -556,6 +572,7 @@ function addFlags(draft: CommandDraft, method: string, callNode: SyntaxNode): vo
       stringLiteral(optionArgs?.namedChild(0) ?? null),
       stringLiteral(optionArgs?.namedChild(1) ?? null),
       offset,
+      kind === 'commander',
     )
     return
   }
@@ -569,7 +586,7 @@ function addFlags(draft: CommandDraft, method: string, callNode: SyntaxNode): vo
       const describe = value?.type === 'object'
         ? stringLiteral(pairValue(value, ['describe', 'desc', 'description']))
         : null
-      pushFlag(draft, key, describe, pair.startIndex)
+      pushFlag(draft, key, describe, pair.startIndex, false)
     }
     return
   }
@@ -580,7 +597,7 @@ function addFlags(draft: CommandDraft, method: string, callNode: SyntaxNode): vo
   const describe = second?.type === 'object'
     ? stringLiteral(pairValue(second, ['describe', 'desc', 'description']))
     : stringLiteral(second ?? null)
-  pushFlag(draft, spec, describe, offset)
+  pushFlag(draft, spec, describe, offset, kind === 'commander')
 }
 
 function pushFlag(
@@ -588,11 +605,12 @@ function pushFlag(
   spec: string | null,
   description: string | null,
   offset: number,
+  hasValueSyntax: boolean,
 ): void {
   const flag = canonicalFlag(spec)
   if (!flag || draft.flagKeys.has(flag)) return
   draft.flagKeys.add(flag)
-  draft.flags.push({ flag, ...(description ? { description } : {}), offset })
+  draft.flags.push({ flag, ...(spec && hasValueSyntax ? { syntax: spec } : {}), ...(description ? { description } : {}), offset })
 }
 
 /**

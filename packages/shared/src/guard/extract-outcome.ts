@@ -50,6 +50,8 @@ export const SessionExtractedClaimSchema = z
     claim: z.string().min(1),
     /** The surface whose driver could assert it. */
     driver: z.enum(guardDriverIds),
+    /** Other drivers that can independently verify the entire same claim. */
+    alternativeDrivers: z.array(z.enum(guardDriverIds)).optional(),
     /** An anchor copied verbatim from the briefed outline (re-snapped anyway). */
     sectionAnchor: z.string().min(1),
     /** The observable a test would assert. */

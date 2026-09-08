@@ -311,7 +311,7 @@ export const WORKER_KIND = 'guard-generate.flow-worker'
 
 /** How a section's claims are described in an {@link extractSessionBy} spec. */
 export type ClaimSpec =
-  | Array<{ claim?: string; driver?: 'cli' | 'api' | 'web' | 'tui' | 'library'; reason?: string; needs?: ExtractedClaimWithNeeds['needs'] }>
+  | Array<{ claim?: string; driver?: 'cli' | 'api' | 'web' | 'tui' | 'library'; reason?: string; alternativeDrivers?: ExtractedClaimWithNeeds['alternativeDrivers']; needs?: ExtractedClaimWithNeeds['needs'] }>
   | { untestable: string }
 
 /**
@@ -342,6 +342,7 @@ export function extractSessionBy(
               driver: c.driver ?? 'cli',
               sectionAnchor: section.anchor,
               reason: c.reason ?? 'exit code is observable',
+              ...(c.alternativeDrivers ? { alternativeDrivers: c.alternativeDrivers } : {}),
               ...(c.needs ? { needs: c.needs } : {}),
             })
           }

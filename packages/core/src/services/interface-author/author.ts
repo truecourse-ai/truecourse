@@ -65,13 +65,13 @@ import {
   readAuthoredInterfaceCatalog,
   readInterfaceCatalog,
   staleAuthoredPlaceDiagnostics,
+  webScreensNeedingReadables,
 } from '@truecourse/guard-runner'
 import type { WebPlaceContext } from '@truecourse/interface-mapper'
 import type { InterfaceResource, InterfacesFile, MapperDiagnostic } from '@truecourse/shared'
 import { defaultPoolConcurrency, runSessionPool } from '../agent/session-pool.js'
 import {
   AUTHORED_SURFACE,
-  candidateAuthored,
   registryStates,
   stampFragment,
   validateFragment,
@@ -87,7 +87,7 @@ export interface AuthorRunOptions {
   repoRoot: string
   driver: SessionDriver
   persistence: SessionPersistence
-  /** Author only these place ids; default = every screen with no authored task yet. */
+  /** Author only these place ids; default = every screen needing tasks or readable facts. */
   places?: readonly string[]
   /** Re-author places that already carry authored tasks (their tasks may be replaced). */
   replace?: boolean
@@ -123,7 +123,7 @@ export type AuthorProgress =
 export interface PlaceResult {
   placeId: string
   sessionId: string
-  /** `authored` = tasks landed; `empty` = the session honestly found none;
+  /** `authored` = tasks or resources landed; `empty` = the session found neither;
    *  `rejected` = the outcome broke a rule the write path enforces;
    *  `failed` = the session itself did not reach an outcome. */
   status: 'authored' | 'empty' | 'rejected' | 'failed'
@@ -154,7 +154,7 @@ export interface AuthorRunResult {
   authored: number
   /** The authored catalog path, when anything was written. */
   path?: string
-  /** Places that were skipped because they already carry authored tasks. */
+  /** Places whose tasks and readable facts are already established. */
   skipped: string[]
   /**
    * Every finding the run's sessions reported, in work-list order and tagged
@@ -177,6 +177,8 @@ export interface AuthorWorkItem {
   place: InterfaceResource
   /** Ids of the authored tasks whose location resolves to this place. */
   existing: string[]
+  /** Tasks or readable facts still need a source reading. */
+  needsAuthoring: boolean
 }
 
 /**
@@ -199,7 +201,14 @@ export function planWorkItems(
     if (!screen) continue
     located.set(screen, [...(located.get(screen) ?? []), task.id])
   }
-  return screens.map((place) => ({ place, existing: located.get(place.id) ?? [] }))
+  const missing = webScreensNeedingReadables(derived, authored)
+  return screens.map((place) => ({
+    place,
+    existing: located.get(place.id) ?? [],
+    needsAuthoring: missing.has(place.id) || (
+      !located.has(place.id) && !authored?.resources?.web?.some((p) => p.id === place.id && p.readables)
+    ),
+  }))
 }
 
 /** Every web place both halves know, the authored one winning on a shared id. */
@@ -256,7 +265,7 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   const selected = all.filter((item) => {
     if (stale.has(item.place.id)) return false
     if (named) return named.has(item.place.id)
-    if (item.existing.length > 0 && !opts.replace) {
+    if (!item.needsAuthoring && !opts.replace) {
       skipped.push(item.place.id)
       return false
     }
@@ -317,9 +326,9 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
     serialKey: (item) => clusterOf.get(item.place.id)!.id,
     sharedPrefix: (item) => prefixOf(item.place.id),
     session: (item) => {
-      // A named/`--replace` re-author may replace THIS place's own tasks and
+      // An explicit `--replace` re-author may replace THIS place's own tasks and
       // nothing else: every other authored entry is somebody else's work.
-      const replaceable = new Set(named || opts.replace ? item.existing : [])
+      const replaceable = new Set(opts.replace ? item.existing : [])
       replaceableOf.set(item.place.id, replaceable)
       briefed.set(item.place.id, authored)
       return interfaceAuthorSessionDef({
@@ -339,6 +348,7 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
         placeBriefing({
           place: item.place,
           existing: item.existing,
+          replaceTasks: Boolean(opts.replace),
           states: registryStates(derived, briefedWith),
           screens: screenTable(places),
           nested: placesOn(item.place.id, places),
@@ -464,7 +474,7 @@ function foldOnePlace(input: FoldInput): { place: PlaceResult; candidate?: Inter
   const findings = [...(outcome.output.findings ?? [])]
   const { fragment, raced } = pruneRacedTasks(outcome.output, briefedWith, authored, replaceable)
   const racedField = raced.length > 0 ? { raced } : {}
-  if (fragment.interfaces.length === 0) {
+  if (fragment.interfaces.length === 0 && (fragment.resources?.length ?? 0) === 0) {
     // Either the session honestly found nothing, or everything it found was
     // authored by a peer first. Both are empty, and `raced` says which.
     return {
@@ -504,7 +514,7 @@ function foldOnePlace(input: FoldInput): { place: PlaceResult; candidate?: Inter
       problems: [],
       ...racedField,
     },
-    candidate: validation.authored ?? candidateAuthored(authored, stampFragment(fragment), replaceable),
+    candidate: validation.authored,
   }
 }
 
@@ -570,10 +580,8 @@ function screenTable(
 function placesOn(
   screenId: string,
   places: ReadonlyMap<string, InterfaceResource>,
-): { id: string; kind: string; title: string }[] {
-  return [...places.values()]
-    .filter((place) => place.kind !== 'screen' && screenOf(place.id, places) === screenId)
-    .map((place) => ({ id: place.id, kind: place.kind, title: place.title }))
+): InterfaceResource[] {
+  return [...places.values()].filter((place) => place.kind !== 'screen' && screenOf(place.id, places) === screenId)
 }
 
 /** The place a session authors — its screen, and the address it sits at. */

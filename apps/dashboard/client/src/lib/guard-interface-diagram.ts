@@ -8,7 +8,7 @@
  * the renderer.
  */
 
-import { guardDriver } from '@truecourse/shared';
+import { guardDriver, describeWebLocator } from '@truecourse/shared';
 import type { GuardDriverId, Interface, InterfaceStep } from '@truecourse/shared';
 
 /** The actor every interface starts from — the person driving the surface. */
@@ -54,9 +54,9 @@ export function interfaceStepLabel(step: InterfaceStep): string {
     case 'navigate':
       return `navigate ${step.route}`;
     case 'input':
-      return `fill ${step.target}`;
+      return `${step.mode === 'select' ? 'select' : 'fill'} ${step.target}${step.within ? ` within ${describeWebLocator(step.within)}` : ''}`;
     default:
-      return `activate ${step.target}`;
+      return `activate ${step.target}${step.within ? ` within ${describeWebLocator(step.within)}` : ''}`;
   }
 }
 

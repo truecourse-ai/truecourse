@@ -28,6 +28,7 @@ vi.mock('@/lib/socket', () => {
 });
 
 import PreviewApp from '@/preview/PreviewApp';
+import type { GuardDriverId, GuardInterfaceRow, GuardInterfacesView } from '@truecourse/shared';
 
 if (!Element.prototype.scrollTo) {
   Element.prototype.scrollTo = (() => {}) as Element['scrollTo'];
@@ -88,7 +89,7 @@ const DEPENDENCIES = {
   ],
 };
 
-const surface = (id: string, label: string, source?: string) => ({
+const surface = (id: GuardDriverId, label: string, source?: 'tree' | 'probes') => ({
   surface: id,
   label,
   runnable: true,
@@ -109,7 +110,7 @@ const EMPTY_CATALOG = {
 };
 
 /** One connected repository and what its server answers. */
-function serve(options: { interfaces?: unknown; interfacesStatus?: number } = {}) {
+function serve(options: { interfaces?: unknown; interfacesStatus?: number; recipe?: unknown } = {}) {
   const calls: string[] = [];
   window.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
@@ -123,7 +124,8 @@ function serve(options: { interfaces?: unknown; interfacesStatus?: number } = {}
     if (rest === 'guard/dependencies') return json(DEPENDENCIES);
     if (rest === 'guard/interfaces') return json(options.interfaces ?? EMPTY_CATALOG, options.interfacesStatus ?? 200);
     if (rest === 'guard/scenarios') return json({ recipe: null, scenarios: [] });
-    if (rest === 'guard/flows') return json({ flows: [], recipe: null });
+    if (rest === 'guard/flows') return json({ flows: [], recipe: options.recipe ?? null });
+    if (rest === 'guard/interface/raw') return json({ content: '{"id":"web/save"}', format: 'json' });
     return json({ error: `not found: ${rest}` }, 404);
   }) as unknown as typeof window.fetch;
   return calls;
@@ -190,5 +192,134 @@ describe('the Interfaces tab of a connected repository', () => {
 
     await screen.findByText(/the catalog could not be read/);
     expect(screen.queryByText('No interface matches.')).toBeNull();
+  });
+});
+
+
+function entry(id: string, title: string, type: GuardInterfaceRow['type'], extra: Partial<GuardInterfaceRow> = {}): GuardInterfaceRow {
+  return { id, title, type, entry: { command: [title] }, fingerprint: 'sha256:abc',
+    steps: [], flows: [], scenarioIds: [], ...extra };
+}
+
+const CATALOG: GuardInterfacesView = {
+  ...EMPTY_CATALOG,
+  interfaces: [
+    entry('web/save', 'Save settings', 'web', { at: 'settings-dialog', origin: 'authored',
+      steps: [{ kind: 'activate', target: 'Save changes' }], endState: 'saved',
+      scenarioIds: ['settings.web.1'], flows: [{ flowId: 'settings', title: 'Configure settings', realized: true }] }),
+    entry('web/edit', 'Edit profile', 'web', { at: 'profile', origin: 'derived',
+      steps: [{ kind: 'input', target: 'Display name' }], scenarioIds: ['settings.web.2', 'profile.web.1'] }),
+    entry('web/open', 'Open profile', 'web', { origin: 'authored', steps: [{ kind: 'navigate', route: '/profile' }] }),
+    entry('api/post-profile', 'Create profile', 'api', { resource: 'profiles', entry: { method: 'POST', path: '/profiles' } }),
+    entry('api/get-profile', 'List profiles', 'api', { resource: 'profiles', entry: { method: 'GET', path: '/profiles' } }),
+    entry('cli/profile-list', 'List profiles command', 'cli', { entry: { command: ['app', 'profile', 'list'] } }),
+  ],
+  resources: {
+    web: [
+      { id: 'profile', title: 'Profile', kind: 'screen', address: '/profile' },
+      { id: 'settings-dialog', title: 'Settings dialog', kind: 'dialog', of: 'profile',
+        readables: { markers: [{ marker: 'Saved successfully' }] } },
+      { id: 'empty', title: 'Empty screen', kind: 'screen' },
+    ],
+    api: [{ id: 'profiles', title: '/profiles', kind: 'rest-noun' }],
+  },
+  states: { web: [{ id: 'saved', description: 'The profile changes are saved' }] },
+};
+
+describe('the full-page interface catalog', () => {
+  it('aggregates dialog actions into screens and orders API operations while keeping commands separate', async () => {
+    serve({ interfaces: CATALOG });
+    renderAt(`/preview/repos/${REAL.id}/interfaces`);
+    const table = await screen.findByRole('table', { name: 'Interfaces' });
+    await within(table).findByRole('link', { name: 'Profile /profile' });
+    const rows = within(table).getAllByRole('row');
+    expect(rows).toHaveLength(6); // header, ways in, screen, two operations, command
+    expect(within(table).queryByText('Settings dialog')).toBeNull();
+    expect(within(table).queryByText('Save settings')).toBeNull();
+    expect(within(table).queryByText('Empty screen')).toBeNull();
+    expect(rows[2]).toHaveTextContent('2 tests'); // same flow on two actions counts once, plus id-only reference
+    expect(rows[3]).toHaveTextContent('GET');
+    expect(rows[4]).toHaveTextContent('POST');
+    expect(rows[5]).toHaveTextContent('app profile list');
+    expect(screen.getByText('1 screen with nothing to do hidden')).toBeInTheDocument();
+  });
+
+  it('finds a screen by its nested action and keeps mixed-origin screens in either origin filter', async () => {
+    serve({ interfaces: CATALOG });
+    renderAt(`/preview/repos/${REAL.id}/interfaces`);
+    const user = userEvent.setup();
+    const table = await screen.findByRole('table', { name: 'Interfaces' });
+    await within(table).findByRole('link', { name: 'Profile /profile' });
+    await user.type(screen.getByLabelText('Search interfaces'), 'Save changes');
+    expect(within(table).getAllByRole('row')).toHaveLength(2);
+    await user.click(screen.getByRole('button', { name: 'derived 4' }));
+    expect(within(table).getByRole('link', { name: 'Profile /profile' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'authored 2' }));
+    expect(within(table).getByRole('link', { name: 'Profile /profile' })).toBeInTheDocument();
+  });
+
+  it('opens a screen as its own page, expands its action and returns to the full catalog', async () => {
+    serve({ interfaces: CATALOG });
+    renderAt(`/preview/repos/${REAL.id}/interfaces`);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('link', { name: 'Profile /profile' }));
+    expect(await screen.findByText('Actions · 2')).toBeInTheDocument();
+    expect(screen.getByText('The page shows · 1')).toBeInTheDocument();
+    expect(screen.getByText(/Saved successfully/)).toBeInTheDocument();
+    await user.click(screen.getByText('Save settings'));
+    expect(await screen.findByText('Sequence')).toBeInTheDocument();
+    expect(screen.getByText('The profile changes are saved')).toBeInTheDocument();
+    expect(screen.queryByText('No contract derived')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Close web:/ })).toBeNull();
+    await user.click(within(screen.getByRole('heading', { name: 'Profile', level: 1 }).closest('nav')!).getByRole('link', { name: 'Interfaces' }));
+    expect(await screen.findByRole('table', { name: 'Interfaces' })).toBeInTheDocument();
+  });
+
+  it('opens an old task URL on its owning screen with the action expanded and allows collapse', async () => {
+    serve({ interfaces: CATALOG });
+    renderAt(`/preview/repos/${REAL.id}/interfaces/web%2Fsave`);
+    const user = userEvent.setup();
+    expect(await screen.findByText('Sequence')).toBeInTheDocument();
+    expect(screen.getByText('Actions · 2')).toBeInTheDocument();
+    await user.click(screen.getByText('Save settings'));
+    expect(screen.queryByText('Sequence')).toBeNull();
+    await user.click(screen.getByText('Save settings'));
+    await user.click(screen.getByRole('button', { name: 'JSON' }));
+    expect(await screen.findByText('{"id":"web/save"}')).toBeInTheDocument();
+  });
+
+  it('opens an API operation directly and follows its sibling on the same endpoint', async () => {
+    serve({ interfaces: CATALOG });
+    renderAt(`/preview/repos/${REAL.id}/interfaces/api:get-profile`);
+    const user = userEvent.setup();
+    expect(await screen.findByRole('heading', { name: 'GET /profiles' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'POST /profiles' }));
+    expect(await screen.findByRole('heading', { name: 'POST /profiles' })).toBeInTheDocument();
+  });
+
+  it('filters by surface and opens the entry points outside any screen', async () => {
+    serve({ interfaces: CATALOG });
+    renderAt(`/preview/repos/${REAL.id}/interfaces`);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Web 3' }));
+    const table = screen.getByRole('table', { name: 'Interfaces' });
+    expect(within(table).getAllByRole('row')).toHaveLength(3);
+    expect(within(table).queryByText('Operation')).toBeNull();
+    await user.click(within(table).getByRole('link', { name: /Ways in/ }));
+    await user.click(await screen.findByText('Open profile'));
+    expect(await screen.findByText('Sequence')).toBeInTheDocument();
+    expect(screen.queryByText('No contract derived')).toBeNull();
+  });
+
+  it('opens a recipe scoped to its selected surface', async () => {
+    serve({ interfaces: CATALOG, recipe: { surfaces: {
+      web: { serve: ['pnpm', 'web'] }, cli: { build: 'pnpm build', entry: ['node', 'cli.js'] },
+    }, fingerprint: 'sha256:abc', stale: false } });
+    renderAt(`/preview/repos/${REAL.id}/interfaces`);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('link', { name: 'Web recipe' }));
+    const recipe = await screen.findByRole('region', { name: 'Recipe' });
+    expect(within(recipe).getByText('pnpm web')).toBeInTheDocument();
+    expect(within(recipe).queryByText('pnpm build')).toBeNull();
   });
 });

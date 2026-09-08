@@ -3,7 +3,7 @@
  * authoring run that fills the half no derivation produces.
  *
  *   guard interfaces            what the catalog knows: places, and the tasks on them
- *   guard interfaces author     author the missing web tasks, one agent session per place
+ *   guard interfaces author     author missing web tasks and readable facts, one agent session per place
  *   guard interfaces reconcile  collapse the state registry's synonyms (one LLM call)
  *
  * The read view is free and LLM-less, like every other `guard` view, and it is
@@ -95,12 +95,12 @@ export async function runGuardInterfacesAuthor(
     process.exit(1);
   }
   const selected = view.places.filter((place) =>
-    named ? named.has(place.id) : opts.replace || place.authored.length === 0,
+    named ? named.has(place.id) : opts.replace || place.needsAuthoring,
   );
   const work = opts.limit != null ? selected.slice(0, opts.limit) : selected;
   if (work.length === 0) {
     p.log.info(
-      "Every place already carries a task. `--replace` re-authors them, `--place <id>` picks one.",
+      "Every place has established tasks and readable facts. `--replace` re-authors them, `--place <id>` picks one.",
     );
     p.outro("Nothing to do.");
     return;
@@ -205,8 +205,8 @@ export async function runGuardInterfacesAuthor(
   const failed = run.places.filter((place) => place.status === "failed" || place.status === "rejected");
   if (failed.length > 0) process.exitCode = 1;
   p.outro(
-    run.authored > 0
-      ? `Review the authored tasks and commit \`guard/interfaces.authored.json\`${
+    run.path !== undefined
+      ? `Review the authored tasks and readable facts and commit \`guard/interfaces.authored.json\`${
           run.findingsLedger ? " and `guard/interfaces.findings.md`" : ""
         }.`
       : run.findingsLedger
@@ -367,7 +367,7 @@ function printView(view: GuardInterfacesAuthorView): void {
       .map((place) => {
         const tasks =
           place.authored.length === 0 ? "no tasks" : `${place.authored.length} task(s)`;
-        return `${place.id.padEnd(28)} ${(place.address ?? "—").padEnd(28)} ${tasks}`;
+        return `${place.id.padEnd(28)} ${(place.address ?? "—").padEnd(28)} ${tasks}${place.needsAuthoring ? "; needs authoring" : ""}`;
       })
       .join("\n"),
   );
@@ -377,7 +377,9 @@ function printPlace(place: PlaceResult): void {
   const spent = `${place.spent.turns} turn(s)`;
   switch (place.status) {
     case "authored":
-      p.log.success(`${place.placeId} — ${place.taskIds.length} task(s), ${spent}\n  ${place.taskIds.join("\n  ")}`);
+      p.log.success(place.taskIds.length > 0
+        ? `${place.placeId} — ${place.taskIds.length} task(s), ${spent}\n  ${place.taskIds.join("\n  ")}`
+        : `${place.placeId} — resource facts saved, ${spent}`);
       break;
     case "empty":
       p.log.info(`${place.placeId} — no task the source states, ${spent}`);

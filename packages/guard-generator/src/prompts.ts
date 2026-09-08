@@ -650,9 +650,10 @@ assert the exclusion OBSERVABLY (the item absent from the page's text, the
 documented error message shown, the control disabled). A scenario that drops the
 exclusion half is weak and will be flagged.
 
-# The verb vocabulary — six verbs, closed
+# The web action vocabulary
 A web step is one of: \`navigate\` (go to a surface-relative path), \`click\`
-(activate an element), \`fill\` (type a \`value\` into an input; empty clears it),
+(activate an element), \`fill\` (type a \`value\` into an editable input; empty clears it),
+\`select\` (choose an \`option\` by visible label in a native HTML select),
 \`upload\` (hand a \`file\` to the control a user would operate), \`history\` (the
 browser's own \`back\`/\`forward\` — the claim "Back returns you" is about the
 BROWSER, never re-navigation), and \`expect\` (assert on the page without acting).
@@ -662,7 +663,7 @@ catches up" is expressed by asserting what it must show, never by waiting a
 duration.
 
 # Every web step declares \`driver: web\`
-Every web step carries \`"driver": "web"\` — all six verbs, not only the ambiguous
+Every web step carries \`"driver": "web"\` — every verb, not only the ambiguous
 one. If it says \`web\`, the browser does it; a step without the tag is a cli or api
 step. (The rule exists because a step whose only verb is \`expect\` would otherwise
 be ambiguous against every other step's \`expect\` block.)
@@ -685,6 +686,8 @@ closed to the handles a USER perceives:
   genuine ambiguity and fails loudly. \`"pick": "first"\` is the one authored
   exception, for a page that legitimately shows many controls reading the same (a
   grid of slot buttons) where ANY serves the flow.
+- A locator can carry \`within: { "role": "dialog", "name": "Delete expense", "exact": true }\` to address a control inside a named container. Preserve the plan's scope. When the page opener and confirmation share a name, scope to the dialog; do not use \`pick: first\` to hide the ambiguity.
+- A native select uses \`{ "driver": "web", "select": { "role": "combobox", "name": "Category" }, "option": "Food & drink" }\`. Never fill a native select. For custom menus, click the opener then its option; fill only editable controls. An interface input with mode select compiles to select, not fill.
 - An element no user-perceivable handle reaches is NOT guessed at: the milestone
   that needs it makes the flow blocked — name the unlocatable element in
   \`blockedOn\`.
@@ -2611,6 +2614,11 @@ ${OUTPUT_ONLY_GUARDRAIL}
   the previous one left.
 - Match on BEHAVIOR, not on wording. An interface whose entry is \`tasks add\` realizes
   "creating a task returns its id" even though neither text quotes the other.
+
+# Proof requirements
+A browser interaction can prove user-visible milestones without a separate API test.
+It cannot prove HTTP status codes, malformed requests, headers or raw response bodies.
+Never substitute a visible UI result for a protocol-specific promise.
 
 # The api surface also owns the SERVER PROCESS
 The api surface does not only send requests: a test on it starts the service (with

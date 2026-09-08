@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { interfaceDigest, realizationLines } from '../../packages/guard-generator/src/match';
 import { mapInterfacesSafely } from '../../packages/guard-generator/src/generate';
 import { guardAuthoredInterfacesPath, guardInterfacesPath } from '@truecourse/guard-runner';
 import { interfaceFingerprint, type Interface, type InterfaceResource } from '@truecourse/shared';
@@ -108,4 +109,24 @@ describe('mapInterfacesSafely', () => {
     expect(mapped.interfaces.map((j) => [j.id, j.origin])).toEqual([['cli/add', 'derived']]);
     expect(mapped.resources).toBeUndefined();
   });
+});
+
+
+it('preserves native selection and dialog scope in the generation briefing', () => {
+  const scoped = iface({
+    id: 'web/edit-expense', type: 'web', entry: { method: 'GET', path: '/expenses/{id}' },
+    steps: [
+      { kind: 'input', target: 'combobox "Category"', mode: 'select', within: { role: 'dialog', name: 'Edit expense' } },
+      { kind: 'activate', target: 'button "Delete expense"', within: { role: 'dialog', name: 'Delete expense', exact: true } },
+    ],
+  });
+  const lines = realizationLines(scoped, 'web');
+  expect(lines[0]).toContain('select: combobox "Category" within dialog “Edit expense”');
+  expect(lines[0]).not.toContain('fill:');
+  expect(lines[1]).toContain('within dialog “Delete expense”');
+  expect(interfaceDigest(scoped).steps[0]).toContain('select');
+  expect(interfaceDigest(scoped).steps[1]).toContain('within dialog');
+  const legacy = iface({ ...scoped, steps: [{ kind: 'input', target: 'textbox "Description"' }] });
+  expect(realizationLines(legacy, 'web')[0]).toContain('fill: textbox');
+  expect(legacy.fingerprint).not.toBe(scoped.fingerprint);
 });

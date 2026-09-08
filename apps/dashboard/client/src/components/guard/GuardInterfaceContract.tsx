@@ -922,7 +922,9 @@ export function GuardInterfaceContract({
           <EmptyState
             icon={FileQuestion}
             title="No contract derived"
-            body="The mapper derives it; nothing is filled in on its behalf."
+            body={iface.type === 'api'
+              ? 'The endpoint was found, but its request and response details could not be extracted from the source.'
+              : 'The mapper derives it; nothing is filled in on its behalf.'}
           />
         </div>
       </Section>

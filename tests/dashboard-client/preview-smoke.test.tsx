@@ -177,9 +177,9 @@ describe('one-product preview', () => {
 
   it('opens an interface from ?interface= on the interfaces tab', async () => {
     renderAt('/preview/repos/orders-api/interfaces?interface=api/post-refunds');
-    // GuardInterfaceDiagram + GuardInterfaceContract: the sequence and the
-    // contract slot, which no other surface draws.
-    expect((await screen.findAllByText('Sequence')).length).toBeGreaterThan(0);
+    // API links open the operation's contract directly.
+    expect(await screen.findByRole('heading', { name: 'POST /v1/refunds' })).toBeInTheDocument();
+    expect(screen.getByText('api/post-refunds')).toBeInTheDocument();
   });
 
   it('renders /preview/knowledge as the enterprise page, two levels', async () => {

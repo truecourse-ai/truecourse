@@ -26,6 +26,7 @@ import {
   isWebCredentialStep,
   isWebExpectStep,
   isWebFillStep,
+  isWebSelectStep,
   isWebHistoryStep,
   isWebNavigateStep,
   isWebStep,
@@ -699,3 +700,22 @@ describe('web rendering helpers', () => {
     ).toBe('address contains “/notes” · page text is “hi” · main “M” is visible')
   })
 })
+
+
+describe('native selection and scoped actions', () => {
+  const within = { role: 'dialog' as const, name: 'Edit expense', exact: true };
+  it('parses selection as an action, keeps its scope and renders the visible option', () => {
+    const step = GuardWebStepSchema.parse({ driver: 'web', select: { role: 'combobox', name: 'Category', within }, option: 'Food & drink' });
+    expect(isWebSelectStep(step)).toBe(true);
+    expect(isWebExpectStep(step)).toBe(false);
+    expect(GuardSandboxStepSchema.parse(step)).toEqual(step);
+    expect(describeWebCommand(step)).toContain('select “Food & drink”');
+    expect(describeWebCommand(step)).toContain('within dialog “Edit expense”');
+  });
+  it('keeps scoping semantic and refuses mixed actions or unnamed options', () => {
+    expect(() => GuardWebStepSchema.parse({ driver: 'web', select: { role: 'combobox', name: 'Category' }, option: '' })).toThrow();
+    expect(() => GuardWebStepSchema.parse({ driver: 'web', select: { role: 'combobox', name: 'Category' }, option: 'Food', fill: { label: 'Category' }, value: 'Food' })).toThrow();
+    expect(() => GuardWebLocatorSchema.parse({ role: 'button', name: 'Delete', within: { css: '#confirm' } })).toThrow();
+    expect(() => GuardWebLocatorSchema.parse({ role: 'button', name: 'Delete', within: { ...within, pick: 'first' } })).toThrow();
+  });
+});

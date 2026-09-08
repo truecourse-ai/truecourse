@@ -71,6 +71,33 @@ describe('deriveCliInterfacesFromTree', () => {
     })
   })
 
+  it('preserves calling grammar in a contract without inventing input/output facts', () => {
+    expect(interfaces.find((entry) => entry.id === 'cli/deploy')?.contract).toEqual({
+      surface: 'cli',
+      command: {
+        path: ['deploy'],
+        description: 'Deploy a service to an environment',
+        positionals: [{ name: 'service', required: true }],
+        options: [
+          { flag: '--env', short: '-e', takesValue: true, valueRequired: true, valueHint: 'name', description: 'Target environment' },
+          { flag: '--dry-run', takesValue: false, valueRequired: false, description: 'Print the plan without applying it' },
+        ],
+      },
+    })
+  })
+
+  it('keeps inline and chained positional arguments in declaration order', () => {
+    const [entry] = deriveCliInterfacesFromTree([analyze('cli.ts', `
+      import { Command } from 'commander'
+      new Command().command('write <path>').argument('<content>').argument('[extra...]')
+        .option('-m, --mode [name]', 'Optional mode')
+    `)])
+    expect(entry?.contract).toMatchObject({ command: {
+      positionals: [{ name: 'path', required: true }, { name: 'content', required: true }, { name: 'extra', required: false, variadic: true }],
+      options: [{ flag: '--mode', short: '-m', takesValue: true, valueRequired: false, valueHint: 'name' }],
+    } })
+  })
+
   it('maps nothing for a repo with no cli surface', () => {
     const service = analyze(
       'src/report.ts',
@@ -101,6 +128,10 @@ describe('deriveCliInterfacesFromTree', () => {
     const merged = deriveCliInterfacesFromTree([base, plugin])
     expect(merged.map((j) => j.id)).toEqual(['cli/db', 'cli/db-migrate'])
     expect(merged[1].steps[0]).toMatchObject({ flags: ['--to', '--dry-run'] })
+    expect(merged[1].contract).toMatchObject({ command: { options: expect.arrayContaining([
+      expect.objectContaining({ flag: '--to', valueHint: 'version' }),
+      expect.objectContaining({ flag: '--dry-run', takesValue: false }),
+    ]) } })
   })
 })
 

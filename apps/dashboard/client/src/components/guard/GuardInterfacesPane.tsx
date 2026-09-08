@@ -360,6 +360,7 @@ export function GuardInterfacesPane({
   loading,
   error,
   tabs,
+  showTabs = true,
   member,
   onMember,
   recipe = null,
@@ -375,6 +376,8 @@ export function GuardInterfacesPane({
   error: string | null;
   /** The ROW tab set — its ids are `<surface>:<placeId|slug>`. */
   tabs: GuardTabsState;
+  /** Full-page routes provide their own breadcrumb navigation. */
+  showTabs?: boolean;
   /** The member expanded inside the open row, by interface id. */
   member?: string | null;
   onMember?: (interfaceId: string | null) => void;
@@ -579,10 +582,10 @@ export function GuardInterfacesPane({
   const body = (() => {
     // The recipe is a second subject for ONE body — the surface's preparation. It
     // wins while it is open, and any row selection closes it on the way in.
-    if (recipeSurface && recipe) {
-      return (
-        <GuardRecipeDetail recipe={recipe} surface={recipeSurface} />
-      );
+    if (recipeSurface) {
+      if (recipe) return <GuardRecipeDetail recipe={recipe} surface={recipeSurface} />;
+      if (loading) return <Centered><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></Centered>;
+      return <EmptyState icon={Braces} title="No preparation recipe" body={error ?? 'Setup has not stored a recipe for this repository yet.'} />;
     }
 
     if (!view.mapped || view.interfaces.length === 0) {
@@ -731,7 +734,7 @@ export function GuardInterfacesPane({
     <div className="flex h-full flex-col overflow-hidden">
       {/* No Overview chip: with nothing open this pane IS its no-selection
           state — "pick a place", and nothing else to read. */}
-      <GuardTabStrip
+      {showTabs && <GuardTabStrip
         tabs={tabItems}
         activeId={recipeSurface ? null : activeId}
         onSelect={(t) => {
@@ -739,7 +742,7 @@ export function GuardInterfacesPane({
           open(t.id, t.pinned);
         }}
         onClose={close}
-      />
+      />}
       <div className="relative min-h-0 flex-1 overflow-hidden">{body}</div>
     </div>
   );

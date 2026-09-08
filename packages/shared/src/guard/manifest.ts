@@ -16,7 +16,8 @@
 
 import { z } from 'zod'
 import { GuardDriverIdSchema, type GuardDriverId } from './drivers.js'
-import { GuardFlowBindingSchema } from './flows.js'
+import { GuardFlowBindingSchema, GuardFlowMilestoneSchema } from './flows.js'
+import { GuardMilestoneProofSchema } from './proof.js'
 import { GuardCoverageGapKindSchema, GuardScenarioDiagnosisSchema } from './report.js'
 import { GuardTestStatusSchema } from './result.js'
 
@@ -63,6 +64,9 @@ export const GuardManifestScenarioSchema = z.preprocess(
        * per-driver count is a union over the scenarios that actually touch it.
        */
       drivers: z.array(GuardDriverIdSchema).min(1),
+      /** Assertion drivers per milestone, valid for this entry's flowFingerprint.
+       * Absent on legacy scenarios and retained tests for older requirements. */
+      milestoneCoverage: z.array(GuardMilestoneProofSchema).optional(),
       /**
        * The test's status as of the generate that wrote it: `failing` when it failed
        * its birth execution (committed anyway — the code and the doc disagree),
@@ -151,6 +155,8 @@ export const GuardManifestFlowSchema = z
     flowId: z.string().min(1),
     /** The flow's milestone-composition fingerprint at generation time. */
     flowFingerprint: z.string().min(1),
+    /** Requirements retained when the separate flow corpus is unavailable. */
+    milestones: z.array(GuardFlowMilestoneSchema).optional(),
     /** The sections the flow binds (doc + anchor + section fingerprint). */
     bindings: z.array(GuardFlowBindingSchema),
     /** The scenarios realizing the flow, one per surface it was authored for. */

@@ -7,6 +7,9 @@
  * over PGlite — so this exercises the real wiring around them.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
@@ -134,6 +137,20 @@ const seedGhBaseline = (commitSha: string) =>
     capturedAt: '2026-07-09T00:00:00.000Z',
   });
 
+/** Persist the same bundle shape generation saves, including metadata-only sets. */
+async function seedScenarioSet(commitSha: string, withScenario = true) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-chain-set-'));
+  try {
+    fs.writeFileSync(path.join(root, 'recipe.json'), JSON.stringify({ build: 'true' }));
+    fs.writeFileSync(path.join(root, 'flows.json'), JSON.stringify({ flows: [] }));
+    fs.writeFileSync(path.join(root, 'manifest.json'), JSON.stringify({ flows: {} }));
+    if (withScenario) fs.writeFileSync(path.join(root, 'expense.yaml'), 'id: expense\ntitle: expense\nsteps: []\n');
+    await new PgGuardStore(db).saveScenarios({ repoKey: REPO, commitSha }, root);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
 describe('registerJobs — enqueueGuardGenerate', () => {
   it('creates the single-flight job row, enqueues on the runner, and dedupes', async () => {
     const jobs = await reg();
@@ -198,6 +215,7 @@ describe('registerJobs — baseline→guard onboarding chain', () => {
     // against current main.
     await seedGhBaseline('earlier00');
     await writeGuardResult({ repoKey: REPO, commitSha: 'earlier00' }, makeReport());
+    await seedScenarioSet('earlier00');
     const onBaselineSettled = await settledHook();
 
     await onBaselineSettled(baselinePayload, 'succeeded');
@@ -247,6 +265,7 @@ describe('registerJobs — generate→baseline chain', () => {
   it('a successful generate (scenarios now stored) chains a guard-baseline refresh', async () => {
     await seedGhBaseline('abc1234567');
     await writeGuardResult({ repoKey: REPO, commitSha: 'abc1234567' }, makeReport());
+    await seedScenarioSet('abc1234567');
     const onGuardGenerateSettled = await generateSettledHook();
 
     await onGuardGenerateSettled(baselinePayload, 'succeeded');
@@ -255,6 +274,44 @@ describe('registerJobs — generate→baseline chain', () => {
     const [task, payload] = addJobMock.mock.calls[0]!;
     expect(task).toBe(GUARD_BASELINE_TASK);
     expect(payload).toMatchObject(enqueueReq);
+  });
+
+  it('a completed report with only metadata files never chains a run', async () => {
+    await seedGhBaseline('abc1234567');
+    await writeGuardResult({ repoKey: REPO, commitSha: 'abc1234567' }, makeReport());
+    await seedScenarioSet('abc1234567', false);
+    const settled = await generateSettledHook();
+    await settled(baselinePayload, 'succeeded', { written: 0, openConflicts: 0 });
+    expect(addJobMock).not.toHaveBeenCalled();
+  });
+
+  it('zero newly written tests still runs unchanged stored scenarios', async () => {
+    await seedGhBaseline('abc1234567');
+    await writeGuardResult({ repoKey: REPO, commitSha: 'abc1234567' }, makeReport());
+    await seedScenarioSet('abc1234567');
+    const settled = await generateSettledHook();
+    await settled(baselinePayload, 'succeeded', { written: 0, noChanges: true });
+    expect(addJobMock).toHaveBeenCalledTimes(1);
+    expect(addJobMock.mock.calls[0]![0]).toBe(GUARD_BASELINE_TASK);
+  });
+
+  it('reads the generated commit even when the scanned baseline points elsewhere', async () => {
+    await seedGhBaseline('earlier00');
+    await seedScenarioSet('abc1234567');
+    const settled = await generateSettledHook();
+    await settled(baselinePayload, 'succeeded');
+    expect(addJobMock.mock.calls[0]![0]).toBe(GUARD_BASELINE_TASK);
+  });
+
+  it('does not borrow old or PR scenarios after generation removes all tests', async () => {
+    await seedGhBaseline('earlier00');
+    await seedScenarioSet('earlier00');
+    await seedScenarioSet('prheadsha99');
+    await writeGuardResult({ repoKey: REPO, commitSha: 'abc1234567' }, makeReport());
+    await seedScenarioSet('abc1234567', false);
+    const settled = await generateSettledHook();
+    await settled(baselinePayload, 'succeeded', { written: 0 });
+    expect(addJobMock).not.toHaveBeenCalled();
   });
 
   it('a no-corpus generate (no scenarios stored) chains nothing', async () => {

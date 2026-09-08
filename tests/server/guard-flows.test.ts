@@ -491,6 +491,39 @@ describe('Guard flow read surfaces', () => {
 
   // --- Flows tab: list + detail --------------------------------------------
 
+  it('rolls complete alternatives up identically in the list, detail and section coverage', async () => {
+    seed();
+    const milestones = FLOWS_FILE.flows[0].milestones.map((m) => ({ ...m, proofDrivers: ['cli', 'api'] }));
+    writeJson('.truecourse/scenarios/flows.json', {
+      ...FLOWS_FILE, flows: [{ ...FLOWS_FILE.flows[0], milestones }],
+    });
+    writeJson('.truecourse/scenarios/manifest.json', {
+      ...MANIFEST, flows: [{
+        ...MANIFEST.flows[0], milestones,
+        scenarios: [{ id: SCENARIO_ID, drivers: ['cli'], status: 'passing', milestoneCoverage: milestones.map((m) => ({ milestone: m.order, driver: 'cli' })) }],
+        gaps: [{ surface: 'api', kind: 'no-interface', reason: 'No API variant mapped' }],
+      }],
+    });
+    writeJson('.truecourse/guard/LATEST.json', {
+      ...LATEST, scenarios: [{ ...LATEST.scenarios[0], outcome: 'pass' }],
+    });
+    const list = await request(app).get(url('flows')).expect(200);
+    const flow = list.body.flows.find((f: any) => f.flowId === FLOW_ID);
+    expect(flow).toMatchObject({ status: 'pass', bucket: 'guarded' });
+    expect(flow.surfaces.find((s: any) => s.gap)).toMatchObject({ coveredByAlternative: true, status: 'no-interface' });
+    const detail = await request(app).get(url(`flows/${FLOW_ID}`)).expect(200);
+    expect(GuardFlowDetailSchema.safeParse(detail.body).success).toBe(true);
+    expect(detail.body).toMatchObject({ status: 'pass', bucket: 'guarded' });
+    const coverage = await request(app).get(url(`coverage?doc=${encodeURIComponent(DOC)}`)).expect(200);
+    expect(coverage.body.sections.find((s: any) => s.anchor === 'tasks/creating-tasks').status).toBe('pass');
+    // Local edits are read from the scenario, even if the manifest still describes the old full proof.
+    write(SCENARIO_FILE, SCENARIO_YAML.replace('    milestone: 4', ''));
+    const partialList = await request(app).get(url('flows')).expect(200);
+    expect(partialList.body.flows.find((f: any) => f.flowId === FLOW_ID)).toMatchObject({ status: 'no-interface', bucket: 'partial' });
+    const partialCoverage = await request(app).get(url(`coverage?doc=${encodeURIComponent(DOC)}`)).expect(200);
+    expect(partialCoverage.body.sections.find((s: any) => s.anchor === 'tasks/creating-tasks').status).toBe('no-interface');
+  });
+
   describe('flows list', () => {
     it('joins the corpus, manifest, run and report into one row per flow', async () => {
       seed();
@@ -767,8 +800,12 @@ describe('Guard flow read surfaces', () => {
       seed();
       const manual = await request(app).get(url(`flows/${encodeURIComponent(`manual:${MANUAL_ID}`)}`)).expect(200);
       expect(manual.body).toMatchObject({ manual: true, title: '`tasks --help` prints usage', milestones: [], status: 'pass' });
-      expect(manual.body.surfaces[0]).toMatchObject({ surface: 'cli', scenarioId: MANUAL_ID, birthPassed: true, outcome: 'pass' });
+      expect(manual.body.surfaces[0]).toMatchObject({ surface: 'cli', scenarioId: MANUAL_ID, birthPassed: false, outcome: 'pass' });
 
+      // A handwritten test has no birth execution; removing its run cannot leave it green.
+      writeJson('.truecourse/guard/LATEST.json', { ...LATEST, scenarios: [] });
+      const unrun = await request(app).get(url(`flows/${encodeURIComponent(`manual:${MANUAL_ID}`)}`)).expect(200);
+      expect(unrun.body.status).toBe('never-run');
       await request(app).get(url('flows/nope')).expect(404);
     });
   });

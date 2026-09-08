@@ -23,7 +23,7 @@
 import crypto from 'node:crypto'
 import { z } from 'zod'
 import { GuardDriverIdSchema } from './guard/drivers.js'
-import { GUARD_WEB_ROLES, GUARD_WEB_STATES, GuardWebLocatorSchema } from './guard/web-steps.js'
+import { GUARD_WEB_ROLES, GUARD_WEB_STATES, GuardWebLocatorSchema, GuardWebScopeSchema } from './guard/web-steps.js'
 
 /** The closed step vocabulary, shared by every surface. */
 export const InterfaceStepKindSchema = z.enum([
@@ -72,7 +72,10 @@ export const InterfaceNavigateStepSchema = z
 export const InterfaceInputStepSchema = z
   .object({
     kind: z.literal('input'),
+    /** Native selects choose a visible option; text controls use fill. */
+    mode: z.enum(['fill', 'select']).optional(),
     target: z.string().min(1),
+    within: GuardWebScopeSchema.optional(),
     label: z.string().optional(),
   })
   .strict()
@@ -82,6 +85,7 @@ export const InterfaceActivateStepSchema = z
   .object({
     kind: z.literal('activate'),
     target: z.string().min(1),
+    within: GuardWebScopeSchema.optional(),
     label: z.string().optional(),
   })
   .strict()
@@ -1720,7 +1724,12 @@ function stepIdentity(step: InterfaceStep): string {
     case 'navigate':
       return [step.kind, normalizeToken(step.route)].join('\u0000')
     default:
-      return [step.kind, normalizeToken(step.target)].join('\u0000')
+      return [
+        step.kind,
+        normalizeToken(step.target),
+        ...(step.kind === 'input' && step.mode === 'select' ? ['select'] : []),
+        ...(step.within ? ['within', step.within.role, normalizeToken(step.within.name), String(step.within.exact ?? false)] : []),
+      ].join('\u0000')
   }
 }
 

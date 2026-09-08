@@ -1,8 +1,8 @@
 /**
  * The fake interface catalog (./orders-api.catalog.ts, ./other-repos.ts) folded
- * into the EXACT payload shape the vendored INTERFACES surfaces consume,
- * so the Interfaces tab renders the vendored `GuardInterfacesPanel` /
- * `GuardInterfacesPane` / `GuardInterfaceDiagram` unchanged over fake data.
+ * into the interface view payload. The full-width catalog and shared
+ * `GuardInterfacesPane` join these entries into screens, operations and
+ * commands just as they do for connected repositories.
  *
  * One catalog entry is one interface row: a `cli:orders-create` command becomes
  * `cli/orders-create` with an invoke step carrying its flags, an api operation

@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   AuthoredTaskSchema,
+  AuthoredFragmentSchema,
   stampFragment,
   validateFragment,
   type AuthoredFragment,
@@ -307,3 +308,58 @@ describe('the state registry is shared property', () => {
     expect(result.errors.some((e) => e.includes('already names'))).toBe(true)
   })
 })
+
+describe('resource enrichment', () => {
+  const screen = DERIVED.resources!.web[0]
+  it('preserves omitted metadata and readable kinds while replacing explicit arrays', () => {
+    const derived: InterfacesFile = { ...DERIVED, resources: { web: [{ ...screen,
+      description: 'The home screen', readables: { elements: [{ element: { role: 'heading', name: 'Home' } }] },
+    }] } }
+    const first = validate({ interfaces: [], resources: [{ id: 'root', title: '/', kind: 'screen',
+      readables: { markers: [{ id: 'empty', marker: 'No repositories' }] },
+    }] }, { derived, scope: { screenId: 'root', address: '/' } })
+    expect(first.errors).toEqual([])
+    const resource = first.authored!.resources!.web[0]
+    expect(resource).toMatchObject({ address: '/', description: 'The home screen', readables: {
+      markers: [{ id: 'empty', marker: 'No repositories' }], elements: [{ element: { role: 'heading', name: 'Home' } }],
+    } })
+    const second = validate({ interfaces: [], resources: [{ id: 'root', title: '/', kind: 'screen', readables: { markers: [] } }] },
+      { derived, authored: first.authored! })
+    expect(second.authored!.resources!.web[0].readables).toEqual({ markers: [], elements: resource.readables!.elements })
+    expect(second.authored!.resources!.web[0].readables).not.toHaveProperty('rows')
+  })
+
+  it('rejects resource-only writes outside the screen scope and changes to place identity', () => {
+    const foreign = validate({ interfaces: [], resources: [{ ...DERIVED.resources!.web[1], readables: { markers: [] } }] },
+      { scope: { screenId: 'root', address: '/' } })
+    expect(foreign.errors.join('\n')).toContain('not a resource of `root`')
+    expect(validate({ interfaces: [], resources: [{ ...screen, address: '/elsewhere' }] }).errors.join('\n')).toContain('cannot change its existing `address`')
+    expect(validate({ interfaces: [], resources: [screen, screen] }).errors.join('\n')).toContain('declared twice')
+    expect(validate({ interfaces: [], resources: [{ id: 'cli-group', kind: 'command-group', title: 'CLI', of: 'root' }] }).ok).toBe(false)
+  })
+
+  it('uses the shared readable validators for locators, slots, states and ids', () => {
+    const bad = [
+      { elements: [{ element: { css: '#heading' } }] },
+      { controls: [{ control: { role: 'checkbox', name: 'Enabled' }, states: ['visible'] }] },
+      { rows: [{ item: 'row', template: '<name>', slots: [{ name: 'wrong', kind: 'text' }] }] },
+      { markers: [{ id: 'same', marker: 'Home' }], elements: [{ id: 'same', element: { role: 'heading', name: 'Home' } }] },
+    ]
+    for (const readables of bad) {
+      expect(validate({ interfaces: [], resources: [{ ...screen, readables }] } as AuthoredFragment).ok).toBe(false)
+    }
+  })
+})
+
+
+describe('control type and scope survive authoring', () => {
+  it('accepts native select input and a confirmation scoped to its dialog', () => {
+    const steps = [
+      { kind: 'input' as const, target: 'combobox "Category"', mode: 'select' as const, within: { role: 'dialog' as const, name: 'Edit expense' } },
+      { kind: 'activate' as const, target: 'button "Delete expense"', within: { role: 'dialog' as const, name: 'Delete expense', exact: true } },
+    ];
+    const parsed = AuthoredFragmentSchema.parse(fragment({ interfaces: [task({ steps })] }));
+    expect(parsed.interfaces[0].steps).toEqual(steps);
+    expect(validate(parsed).errors).toEqual([]);
+  });
+});

@@ -850,6 +850,7 @@ describe('runGuardSetup — the interfaces step (plan 03 step 11)', () => {
           generatedAt: '2026-08-19T00:00:00.000Z',
           recipeFingerprint: 'sha256:recipe',
           interfaces: [],
+          resources: { web: [{ ...DERIVED.resources!.web[0], readables: { markers: [], elements: [], controls: [], rows: [] } }] },
         }),
       )
     }
@@ -900,6 +901,29 @@ describe('runGuardSetup — the interfaces step (plan 03 step 11)', () => {
     const three = await runGuardSetup(baseOpts(r, { authorInterfaces: third.seam }))
     writeGuardSetup(r, three.report)
     expect(third.inputs).toHaveLength(1)
+  })
+
+  it('reopens a settled interfaces step until missing readable kinds are established', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    writeCatalogs(r, { authored: true })
+    const first = await runGuardSetup(baseOpts(r, { authorInterfaces: step().seam }))
+    writeGuardSetup(r, first.report)
+    const file = JSON.parse(fs.readFileSync(guardAuthoredInterfacesPath(r), 'utf-8'))
+    delete file.resources.web[0].readables.rows
+    fs.writeFileSync(guardAuthoredInterfacesPath(r), JSON.stringify(file))
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const pending = step()
+      const run = await runGuardSetup(baseOpts(r, { authorInterfaces: pending.seam }))
+      expect(pending.inputs).toHaveLength(1)
+      expect(run.report.steps.find((s) => s.key === 'interfaces')!.status).toBe('ok')
+      writeGuardSetup(r, run.report)
+    }
+    file.resources.web[0].readables.rows = []
+    fs.writeFileSync(guardAuthoredInterfacesPath(r), JSON.stringify(file))
+    const complete = step()
+    await runGuardSetup(baseOpts(r, { authorInterfaces: complete.seam }))
+    expect(complete.inputs).toHaveLength(0)
   })
 
   it('--replace never skips, and the seam is told', async () => {

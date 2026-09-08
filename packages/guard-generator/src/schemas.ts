@@ -263,6 +263,7 @@ export type SeedProposal = z.infer<typeof SeedProposalSchema>
 export const ExtractedClaimSchema = z.object({
   claim: z.string().min(1),
   driver: z.enum(CLAIM_DRIVERS),
+  alternativeDrivers: z.array(z.enum(CLAIM_DRIVERS)).optional(),
   sectionAnchor: z.string().min(1),
   reason: z.string().min(1),
 })

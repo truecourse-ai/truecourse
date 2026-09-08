@@ -1,5 +1,6 @@
 import type { Node as SyntaxNode, Tree } from 'web-tree-sitter'
 import type { RouteRegistration, RouterMount, RpcRouter, SupportedLanguage } from '@truecourse/shared'
+import { extractNextAppRoutes } from './routes/next-handlers.js'
 import { extractPythonRoutes } from './routes/python.js'
 import { extractCSharpRoutes } from './routes/csharp.js'
 import { extractNestControllerRoutes } from './routes/nest-decorators.js'
@@ -138,23 +139,24 @@ export function extractRouteRegistrations(
 }
 
 /**
- * The JavaScript/TypeScript side is not one idiom but three, so it dispatches
+ * The JavaScript/TypeScript side has several idioms, so it dispatches
  * again — by IDIOM this time, each reader in its own module beside the
  * per-language ones:
  *
  *  - routes CALLED on a router (`router.get('/x', h)`) — below, the original;
  *  - routes DECLARED as decorators (NestJS) — `routes/nest-decorators.js`;
+ *  - routes declared by Next App Router files and explicit HTTP method exports;
  *  - routes DECLARED as data (Strapi route tables) — `routes/strapi-tables.js`;
  *  - operations declared as an RPC TREE (tRPC) — `routes/trpc-routers.js`, whose
  *    product is not a route at all: a router node names no address, so it is
  *    carried as its own fact and composed into operations by the mapper.
  *
  * A file is normally written in exactly one of them, and each reader carries its
- * own gate, so running all four costs one extra walk and no cross-talk.
+ * own gate. Next filesystem evidence is read only for route.ts/route.js candidates.
  */
 function extractJsRoutes(tree: Tree, filePath: string): RouteExtraction {
   const strapi = extractStrapiRouteTables(tree, filePath)
-  const routes: RouteRegistration[] = [...extractNestControllerRoutes(tree, filePath), ...strapi.routes]
+  const routes: RouteRegistration[] = [...extractNestControllerRoutes(tree, filePath), ...strapi.routes, ...extractNextAppRoutes(tree, filePath)]
   const mounts: RouterMount[] = [...strapi.mounts]
 
   const catchAll = new Set<string>()

@@ -105,7 +105,7 @@ interface Backend {
   llm?: () => Response;
 }
 
-/** A server answering the registry and the GitHub connect routes; everything else 404s. */
+/** A server answering the registry, connect routes and empty guard summaries. */
 function serve(backend: Backend = {}) {
   const posted: LinkBody[] = [];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -113,6 +113,9 @@ function serve(backend: Backend = {}) {
     const { pathname } = new URL(href, window.location.origin);
     const method = (init?.method ?? 'GET').toUpperCase();
     if (pathname === '/api/repos' && method === 'GET') return json(backend.registry ?? []);
+    if (/^\/api\/repos\/[^/]+\/guard\/status$/.test(pathname)) {
+      return json({ coverage: null, sections: null, lastRun: null, lastGenerate: null });
+    }
     if (pathname === '/api/llm/config' && backend.llm) return backend.llm();
     if (pathname === '/api/github/status') return backend.status?.() ?? json(status());
     const listing = /^\/api\/github\/installations\/(\d+)\/repos$/.exec(pathname);
@@ -124,8 +127,7 @@ function serve(backend: Backend = {}) {
       posted.push(body);
       return (await backend.link?.(body)) ?? json({ ok: true }, 201);
     }
-    // Every per-repo guard route: the preview's own shim would answer these from
-    // the fixtures, and a repository with no fixtures has nothing to answer with.
+    // A newly connected repository has no stored corpus or run snapshots.
     return json({ error: 'not found' }, 404);
   });
   window.fetch = fetchMock as unknown as typeof window.fetch;
@@ -224,10 +226,10 @@ describe('connecting a repository through the GitHub App', () => {
     renderAt('/preview');
     const name = await screen.findByText('linkwarden/linkwarden');
     expect(screen.queryByText('local-thing')).toBeNull();
-    // No fixtures are keyed by its slug, so its requirements cell is the empty
-    // one and its proven share is blank.
+    // Wait for the stored summary before asserting the empty state.
     const row = name.closest('tr')!;
-    expect(within(row).getByText('no corpus yet')).toBeInTheDocument();
+    expect(await within(row).findByText('no corpus yet')).toBeInTheDocument();
+    expect(within(row).getByText('—')).toBeInTheDocument();
     expect(within(row).getByText('Neutral')).toBeInTheDocument();
   });
 

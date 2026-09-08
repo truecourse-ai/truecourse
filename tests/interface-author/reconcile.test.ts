@@ -287,3 +287,15 @@ describe('over the store', () => {
     expect([result.before, result.after, result.merged]).toEqual([0, 0, 0])
   })
 })
+
+it('preserves resource readables while reconciling task states', async () => {
+  const authored = authoredCatalog()
+  authored.resources = { web: [{ ...DERIVED.resources!.web[0], readables: {
+    markers: [{ id: 'empty', marker: 'No documents' }],
+    controls: [{ control: { role: 'checkbox', name: 'Include archived' }, states: ['checked'] }],
+  } }] }
+  const result = await reconcileStates({ derived: DERIVED, authored })
+  expect(result.status).toBe('reconciled')
+  expect(result.authored!.resources).toEqual(authored.resources)
+  expect(result.authored!.interfaces.map((task) => task.fingerprint)).toEqual(authored.interfaces.map((task) => task.fingerprint))
+})

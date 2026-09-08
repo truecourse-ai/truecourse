@@ -2821,3 +2821,15 @@ describe('interface provenance', () => {
     }
   })
 })
+
+
+it('fingerprints native selection and scoped targets without invalidating legacy fill steps', () => {
+  const steps = [{ kind: 'input' as const, target: 'combobox "Category"' }];
+  const base = { type: 'web' as const, entry: { method: 'GET', path: '/' }, steps };
+  const original = interfaceFingerprint(base);
+  expect(interfaceFingerprint({ ...base, steps: [{ ...steps[0], mode: 'fill' }] })).toBe(original);
+  expect(interfaceFingerprint({ ...base, steps: [{ ...steps[0], mode: 'select' }] })).not.toBe(original);
+  const scoped = { ...steps[0], within: { role: 'dialog' as const, name: 'Edit expense' } };
+  expect(interfaceFingerprint({ ...base, steps: [scoped] })).not.toBe(original);
+  expect(interfaceFingerprint({ ...base, steps: [{ ...scoped, within: { ...scoped.within, exact: true } }] })).not.toBe(interfaceFingerprint({ ...base, steps: [scoped] }));
+});
