@@ -35,7 +35,7 @@ vi.mock('../../packages/core/dist/services/llm/session-driver.js', () => ({
 }));
 
 import { setDefaultTransport, type LlmTransport } from '@truecourse/shared/llm';
-import { readGuardResult, manifestPath, writeGuardResult } from '@truecourse/guard-runner';
+import { readGuardResult, readManifest, manifestPath, writeGuardResult } from '@truecourse/guard-runner';
 import { GuardGenerateReportSchema, type GuardGenerateReport } from '@truecourse/shared';
 import { corpusFilePath } from '../../packages/spec-consolidator/src/index.js';
 import { runSpecScan } from '../../tools/cli/src/commands/spec.js';
@@ -266,7 +266,7 @@ const CLAIM = 'version works';
 async function answerSpecSideSession(call: StubCall): Promise<ReturnType<typeof outcome> | null> {
   if (call.kind === 'guard-generate.extract') {
     const draft = {
-      claims: [{ claim: CLAIM, driver: 'cli', sectionAnchor: 'version', reason: 'the exit code is observable', needs: [] }],
+      claims: [{ claim: CLAIM, driver: 'cli', sectionAnchor: 'version', reason: 'the exit code is observable', verification: { scope: 'configuration', method: 'behavior', observable: 'Command exits 0', cases: [{ id: 'command-result', claim: CLAIM, method: 'behavior', requires: ['process'], conditions: [] }] }, needs: [] }],
       untestable: [],
     };
     await callTool(call, 'check_claims', draft);
@@ -299,7 +299,7 @@ function matchOnlyTransport(): LlmTransport {
   return async (req) => {
     if (req.stage === 'guard.match') {
       const interfaceId = /^--- id: (.+)$/m.exec(req.user)?.[1] ?? '';
-      return JSON.stringify({ plan: [{ interfaceId, milestone: 1 }] });
+      return JSON.stringify({ plan: [{ interfaceId, milestone: 1, checks: ['command-result'] }] });
     }
     return '{}';
   };
@@ -375,13 +375,22 @@ describe('guard generate — every fidelity child was lost', () => {
       if (call.kind === 'guard-generate.fidelity') {
         return TRANSPORT_FAILURE('claude API error (api 429): usage limit reached');
       }
-      const submitted = await callTool(call, 'submit_scenario', {
-        yaml: ['title: prints the version', 'steps:', '  - run: ["--version"]', '    expect: { exit: 0 }', '    milestone: 1'].join('\n'),
-        expectedReds: [],
-      });
+      if (call.input.resume) {
+        // The case-disposition gate asks once for current engine evidence. A
+        // provider outage does not require writing a duplicate scenario.
+        const current = /CURRENT REMAINING: (\[.*\])/.exec(call.briefing)?.[1];
+        expect(current).toBeDefined();
+        const remaining = JSON.parse(current!);
+        expect(remaining[0].reasonKind).toBe('review-unavailable');
+        return outcome({ kind: 'blocked', perMilestone: [{ order: 1, capability: 'Independent review is unavailable.' }], remaining });
+      }
+      const yaml = ['title: prints the version', 'steps:', '  - run: ["--version"]', '    expect: { exit: 0 }', '    milestone: 1', '    checks: [command-result]'].join('\n');
+      await callTool(call, 'run_scenario', { yaml });
+      const submitted = await callTool(call, 'submit_scenario', { yaml, expectedReds: [] });
       const sha = /under sha ([0-9a-f]{64})/.exec(submitted.content)?.[1];
       if (!sha) return TRANSPORT_FAILURE(`the submission was refused: ${submitted.content}`);
-      return outcome({ kind: 'settled', scenarioYamlSha: sha, expectedReds: [] });
+      // A lost reviewer preserves the executable scenario but cannot complete its obligations.
+      return outcome({ kind: 'blocked', perMilestone: [{ order: 1, capability: 'Independent fidelity review is unavailable after the provider returned API 429.' }] });
     };
     setDefaultTransport(matchOnlyTransport());
     const { out, exitCode } = await capture(() => runGuardGenerate({ cwd: r, yes: true }));
@@ -395,6 +404,9 @@ describe('guard generate — every fidelity child was lost', () => {
     expect(report!.status).toBe('ok');
     expect(report!.written).toHaveLength(1);
     expect(report!.unadjudicated).toEqual([{ stage: 'guard.fidelity', affected: 1 }]);
+    const flow = readManifest(r)!.flows[0];
+    expect(flow.scenarios[0].reviewed).toBe(false);
+    expect(flow.generationInputsHash).toBeNull();
     // The corpus really landed — the whole point of not aborting.
     expect(fs.existsSync(manifestPath(r))).toBe(true);
   }, 60_000);

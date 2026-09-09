@@ -1,3 +1,5 @@
+import { GuardBlockerSchema, GuardObligationRefSchema } from './verification.js'
+import { GuardCaseEvidenceSchema } from './proof.js'
 /**
  * `scenarios/manifest.json` — the binding record for the committed scenarios, the
  * guard analogue of `contracts/manifest.json`. It is keyed by FLOW (v2): each
@@ -67,6 +69,12 @@ export const GuardManifestScenarioSchema = z.preprocess(
       /** Assertion drivers per milestone, valid for this entry's flowFingerprint.
        * Absent on legacy scenarios and retained tests for older requirements. */
       milestoneCoverage: z.array(GuardMilestoneProofSchema).optional(),
+      /** False when the assertion review was unavailable. */
+      reviewed: z.boolean().optional(),
+      caseEvidence: z.array(GuardCaseEvidenceSchema).optional(),
+      /** The exact parsed scenario independently reviewed for these cases. */
+      reviewedScenarioFingerprint: z.string().min(1).optional(),
+      reviewPolicyVersion: z.number().int().positive().optional(),
       /**
        * The test's status as of the generate that wrote it: `failing` when it failed
        * its birth execution (committed anyway — the code and the doc disagree),
@@ -99,7 +107,12 @@ export const GuardManifestGapSchema = z
     /** The surface the gap is about. */
     surface: GuardDriverIdSchema,
     kind: GuardCoverageGapKindSchema,
+    /** Case-level gap scope. Absent only for historical whole-milestone gaps. */
+    obligations: z.array(GuardObligationRefSchema).min(1).optional(),
+    /** Exact obligations this gap leaves uncovered; absent in older manifests. */
+    milestones: z.array(z.number().int().positive()).min(1).optional(),
     reason: z.string(),
+    blocker: GuardBlockerSchema.optional(),
     /** Present iff `kind === 'awaiting-driver'` — the non-runnable driver awaited. */
     driver: GuardDriverIdSchema.optional(),
   })

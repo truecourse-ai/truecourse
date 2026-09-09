@@ -1,3 +1,4 @@
+import { GuardBlockerSchema, GuardObligationRefSchema } from './verification.js'
 /**
  * The persisted last-generate report — written to `.truecourse/guard/result.json`
  * at the end of every `guard generate` (the `contracts/result.json` convention).
@@ -63,15 +64,14 @@ export type GuardWrittenScenario = z.infer<typeof GuardWrittenScenarioSchema>
  * noise/won't-fix in `scenarios/decisions.json`, so generate settles it explicitly
  * instead of silently disappearing it), or the two REALIZATION kinds a flow's
  * surface can end in:
- *  - `no-interface` — the surface's interface catalog is EMPTY: nothing was mapped
- *    that could serve the flow. Usually "the mapper can't see your code" (an
- *    extraction gap), and must never read as "your product lacks the feature".
- *  - `unrealizable` — the catalog is healthy, matching examined it, and no interface
- *    path serves the flow's milestones: the real "the spec claims this; no code
- *    surface offers it" signal.
- * Both stay GAPS (never findings) while matcher precision is unmeasured — a bogus
- * finding is the worst failure mode. Every kind but `awaiting-driver` carries no
- * driver, so the refine below holds.
+ *  - `no-interface` — a required executable action is missing from the catalog,
+ *    including an entirely empty catalog. This is a mapping gap, never evidence
+ *    that the product lacks the behavior.
+ *  - `blocked-on` — a required observation or fixture is unavailable.
+ *  - `unrealizable` — legacy refusal reports, retained for compatibility. Current
+ *    matching emits per-milestone mapping or capability gaps instead.
+ * Gaps are not findings. Every kind but `awaiting-driver` carries no driver,
+ * so the refine below holds.
  *
  * A single `awaiting-driver` kind (+ a `driver` discriminator) replaces the old
  * flat `api`/`web`/`tui` kinds: one code path handles every future driver, and a
@@ -100,7 +100,11 @@ export const GuardCoverageGapSchema = z
     doc: z.string(),
     anchor: z.string(),
     kind: GuardCoverageGapKindSchema,
+    milestones: z.array(z.number().int().positive()).min(1).optional(),
+    /** Case-level gap scope. Absent only for historical whole-milestone gaps. */
+    obligations: z.array(GuardObligationRefSchema).min(1).optional(),
     reason: z.string(),
+    blocker: GuardBlockerSchema.optional(),
     /** Present iff `kind === 'awaiting-driver'` — the non-runnable driver awaited. */
     driver: GuardDriverIdSchema.optional(),
     /**

@@ -1,3 +1,6 @@
+import { reconcileRemaining, type RepairIssue } from './worker-repair.js'
+import { verificationRequirements, caseEvidenceDefect, type GuardEvidenceProofContext, type GuardCaseEvidence, type GuardRemainingObligation } from '@truecourse/shared'
+import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
 /**
  * `guard generate` orchestration — the LLM pipeline that turns spec FLOWS into
  * committed scenarios. The generation unit is the flow (a user-goal path over
@@ -78,6 +81,8 @@ import {
   credentialServers,
   buildRouteManifest,
   loadRecipe,
+  preparationCatalog,
+  validateScenarioPreparation,
   loadDependencyCatalog,
   recipePath,
   preflightEntry,
@@ -98,6 +103,14 @@ import {
   isWorldBootFailure,
 } from '@truecourse/guard-runner'
 import {
+  guardCoverageProgress,
+  describeOutstandingObligations,
+  GUARD_REVIEW_POLICY_VERSION,
+  scenarioMilestoneScopeDefect,
+  milestoneRefs,
+  coversFlowMilestones,
+  verificationCapabilityGap,
+  verificationCasePreparation,
   DEFAULT_AUTO_RESOLVE_ESCALATE_AFTER,
   autoResolutionKey,
   composeBlockedOnReason,
@@ -179,7 +192,7 @@ import {
   type FidelityUserContext,
 } from './prompts.js'
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
-import { WorldClassifySchema, type RawGeneratedScenario } from './schemas.js'
+import { WorldClassifySchema, rawScenarioSchemaFor, type RawGeneratedScenario } from './schemas.js'
 import { EMPTY_CLAIM_DIFF_GATE, docContentHash, rememberDocTexts, reuseCosmeticExtractions } from './claim-diff.js'
 import {
   spawnRecipeRunner,
@@ -215,6 +228,8 @@ import {
   interfaceDigest,
   matchFlow,
   realizationLines,
+  realizationAssignmentFingerprint,
+  partitionPlanPreparations,
   type RealizationPlan,
   type SurfaceCatalog,
 } from './match.js'
@@ -768,6 +783,7 @@ export interface FlowWorkerToolReport {
  *  everything here is engine-derived, so the child grounds on the same
  *  material the one-shot reviewer did. */
 export interface WorkerFidelityInput {
+  proofContext: GuardEvidenceProofContext
   flowFingerprint: string
   /** The flow's bound section content keys (the fidelity key's section half). */
   sectionKeys: readonly string[]
@@ -780,7 +796,7 @@ export interface WorkerFidelityInput {
 }
 
 export type WorkerFidelityVerdict =
-  | { kind: 'faithful' }
+  | { kind: 'faithful'; evidence?: GuardCaseEvidence[] }
   | { kind: 'flagged'; mismatch: string; confidence: 'high' | 'medium' | 'low' }
   /** The child session (or its dispatch) failed — the green is accepted
    *  UNREVIEWED and the run reports the stage unadjudicated (the item-88
@@ -802,6 +818,12 @@ export interface FlowWorkerCacheMaterial {
   mode: 'scratch' | 'edit'
   /** sha256 of each briefed prior yaml (edit mode; empty for scratch). */
   priorShas: readonly string[]
+}
+
+export interface FlowWorkerReview {
+  policyVersion: typeof GUARD_REVIEW_POLICY_VERSION
+  scenarioFingerprint: string
+  caseEvidence: GuardCaseEvidence[]
 }
 
 /** One (flow, surface) work unit of the worker pool — engine closures inside. */
@@ -861,6 +883,9 @@ export interface FlowWorkerTask {
   /** Whether an accepted submission with this sha is in the engine stash — the
    *  reject gate for a `settled` outcome referencing nothing. */
   hasStash(sha: string): boolean
+  /** Live completion validation, shared by the session, fold and cache gates. */
+  validateOutcome(outcome: GuardFlowWorkerOutcome): string | undefined
+  stashedReview(sha: string): FlowWorkerReview | undefined
   /** The stashed accepted yaml for the sha — what core writes into the cache
    *  entry beside a settled outcome. Returns undefined (⇒ core writes NO
    *  entry) for a green that was accepted with its fidelity review
@@ -875,7 +900,7 @@ export interface FlowWorkerTask {
    * runs the session. One element for a legacy entry; several for an edit-mode
    * settle.
    */
-  confirmCached(scenarios: readonly { yaml: string; expectedReds: readonly GuardExpectedRed[] }[]): Promise<boolean>
+  confirmCached(scenarios: readonly { yaml: string; expectedReds: readonly GuardExpectedRed[]; review?: FlowWorkerReview }[]): Promise<boolean>
 }
 
 /** One task's result as the seam reports it back for the engine's routing. */
@@ -1234,6 +1259,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           title: c.claim,
           driver: c.driver,
           ...(c.alternativeDrivers ? { alternativeDrivers: c.alternativeDrivers } : {}),
+          ...(c.verification ? { verification: c.verification } : {}),
           // The extraction session's structured needs ride into flow synthesis
           // (plan 04 step 15 → 16); the one-shot path carries none.
           ...(c.needs && c.needs.length > 0 ? { needs: c.needs } : {}),
@@ -1494,6 +1520,19 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     unsettledAreas: synthesis.unsettled.map((u) => ({ areaId: u.areaId, reason: u.reason })),
   }
 
+  const committedScenariosById = new Map(loadScenarios(repoRoot).scenarios.map(s => [s.id, s]))
+  const priorProofCurrent = (work: FlowWork, prior: GuardManifestScenario): boolean => {
+    const scenario = committedScenariosById.get(prior.id)
+    if (!scenario || prior.reviewed === false || work.prior?.flowFingerprint !== work.flow.fingerprint ||
+      scenario.flow?.fingerprint !== work.flow.fingerprint || scenarioPreparationDefect(work.flow, recipe, scenario)) return false
+    if (!work.flow.bindings.every(b => scenario.binds.some(s =>
+      s.doc === b.doc && s.section === b.anchor && s.fingerprint === b.fingerprint))) return false
+    return !work.flow.milestones.some(m => m.verification?.cases) ||
+      (prior.reviewPolicyVersion === GUARD_REVIEW_POLICY_VERSION &&
+        prior.reviewedScenarioFingerprint === scenarioReviewFingerprint(scenario) &&
+        !caseEvidenceDefect(work.flow.milestones, scenario.steps, prior.caseEvidence))
+  }
+
   const priorManifest = readManifest(repoRoot)
   const priorFlows = new Map((priorManifest?.flows ?? []).map((f) => [f.flowId, f]))
   // Carried into the final manifest write when a degraded run cannot re-judge
@@ -1633,6 +1672,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           surface,
           kind: 'blocked-on',
           reason: composeBlockedOnReason([missingPrepNoun(surface)], oneLine(flow.title)),
+          blocker: { kind: 'configuration', action: `Configure ${missingPrepNoun(surface)} in .truecourse/scenarios/recipe.json.` },
         })
         continue
       }
@@ -1666,6 +1706,16 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       localMatchCalls++
       const outcome = await limit(() => matchFlow(repoRoot, flow, surfaceCatalog, matchRunner))
       options.onMatchProgress?.(++matchDone, matchPairs)
+      if (outcome.kind === 'plan' || outcome.kind === 'gap') {
+        for (const gap of outcome.gaps) gaps.push({ surface,
+          kind: gap.kind === 'mapping' ? 'no-interface' : 'blocked-on',
+          reason: `Milestone ${gap.milestone}: ${gap.reason}`,
+          milestones: [gap.milestone],
+          ...(gap.checks ? { obligations: gap.checks.map(caseId => ({ milestone: gap.milestone, caseId })) } : {}),
+          ...(gap.kind === 'mapping' ? { blocker: { kind: 'generation' as const, action: `Run guard interfaces author to map ${gap.checks?.join(', ') ?? gap.milestone}: ${gap.reason}. Source ${flow.milestones.find(m => m.order === gap.milestone)?.doc}#${flow.milestones.find(m => m.order === gap.milestone)?.anchor}; retain existing valid interfaces.` } } : {}),
+          ...(gap.kind === 'capability' ? { blocker: { kind: 'unsupported-capability' as const, capabilities: verificationRequirements(flow.milestones.find(m => m.order === gap.milestone)?.verification, gap.checks) } } : {}),
+        })
+      }
       if (outcome.kind === 'plan') {
         // GATE B (post-match, authoritative): the paths the plan will ACTUALLY drive
         // decide the server. A plan whose app has no server — or one that spans two
@@ -1692,17 +1742,24 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           }
           if (bound.kind === 'bound') serverBySurface.set(surface, bound.server)
         }
-        plans.set(surface, outcome.plan)
-      } else if (outcome.kind === 'unrealizable') {
-        gaps.push({ surface, kind: 'unrealizable', reason: outcome.reason })
-      } else {
+        const prepared = partitionPlanPreparations(flow, outcome.plan, preparationCatalog(recipe))
+        for (const row of prepared.missing) gaps.push({ surface, kind: 'blocked-on', milestones: [row.milestone],
+          obligations: [{ milestone: row.milestone, caseId: row.caseId }],
+          blocker: { kind: 'configuration', action: `Refresh Guard Setup preparations to provide a verified ${row.requirement} private starting state.` },
+          reason: `Case ${row.milestone}/${row.caseId} needs a verified ${row.requirement} preparation profile.` })
+        if (prepared.plan) plans.set(surface, prepared.plan)
+      } else if (outcome.kind === 'error') {
         localMatchCallErrors++
         localFirstMatchError ??= outcome.reason
-        localErrors.push({ doc: primary.doc, anchor: primary.anchor, message: `matching (${surface}) ${outcome.reason}` })
+        localErrors.push({ flowId: flow.id, doc: primary.doc, anchor: primary.anchor, message: `matching (${surface}) ${outcome.reason}` })
       }
     }
 
-    const interfaceFingerprints = [...plans.values()].flatMap((p) => p.interfaces.map((j) => j.fingerprint))
+    const interfaceFingerprints = [...plans.values()].flatMap((p) => [
+      realizationAssignmentFingerprint(p),
+      ...p.interfaces.map((j) => j.fingerprint),
+      ...(p.surface === 'web' ? [catalogs.get('web')!.fingerprint] : []),
+    ])
     const inputsHash = flowGenerationInputsHash({
       flowFingerprint: flow.fingerprint,
       sectionKeys,
@@ -1713,7 +1770,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     // A settled entry that leaves a planned surface unaccounted for (no test, no
     // gap) is a hole nothing can heal: its hash skips the flow forever. Its hash is
     // DISREGARDED, so the flow re-runs here and settles honestly — no migration.
-    let changed = !prior || prior.generationInputsHash !== inputsHash || violatesSettleInvariant(prior)
+    const invalidCaseReview = !!prior && flow.milestones.some(m => m.verification?.cases) && prior.scenarios.some(s =>
+      s.reviewed !== false && (s.reviewPolicyVersion !== GUARD_REVIEW_POLICY_VERSION || !committedScenariosById.has(s.id) || s.reviewedScenarioFingerprint !== scenarioReviewFingerprint(committedScenariosById.get(s.id)) ||
+        scenarioPreparationDefect(flow, recipe, committedScenariosById.get(s.id)!) ||
+        caseEvidenceDefect(flow.milestones, committedScenariosById.get(s.id)!.steps, s.caseEvidence)))
+    let changed = !prior || prior.generationInputsHash !== inputsHash || violatesSettleInvariant(prior) || invalidCaseReview
     // THE PER-FLOW CLAIM-DIFF GATE: when the only inputs that moved are bound
     // sections the gate judged cosmetic (their prior extraction was reused, so
     // the claims — and this flow's fingerprint — are byte-identical), the hash
@@ -1721,7 +1782,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     // and the flow stays unchanged. The unchanged branch re-stamps the NEW hash,
     // so the next generate is a genuine no-op. A settle-invariant violation
     // still wins: an unaccounted surface must re-run regardless.
-    if (changed && prior && prior.generationInputsHash !== null && !violatesSettleInvariant(prior) && claimDiff.cosmetic.size > 0) {
+    if (changed && prior && !invalidCaseReview && prior.generationInputsHash !== null && !violatesSettleInvariant(prior) && claimDiff.cosmetic.size > 0) {
       let substituted = false
       const priorSectionKeys = boundSections.map((s) => {
         const priorFingerprint = claimDiff.cosmetic.get(flowSectionKey(s.doc, s.anchor))
@@ -1830,6 +1891,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         reason: gap.reason,
         flowId: w.flow.id,
         surface: gap.surface,
+        ...(gap.blocker ? { blocker: gap.blocker } : {}),
+        ...(gap.milestones ? { milestones: gap.milestones } : {}),
+        ...(gap.obligations ? { obligations: gap.obligations } : {}),
         ...(gap.driver ? { driver: gap.driver } : {}),
       })
     }
@@ -2067,7 +2131,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // deletes anything, indexed by id — the yaml a worker is briefed to edit and
   // the interface fingerprints the moved-inputs summary compares against.
   const priorYamlById: PriorScenarioIndex = new Map(
-    loadScenarios(repoRoot).scenarios.map((s) => [s.id, { yaml: serializeScenarioYaml(s), scenario: s }]),
+    [...committedScenariosById.values()].map((s) => [s.id, { yaml: serializeScenarioYaml(s), scenario: s }]),
   )
   // `drop_scenario` calls the fold accepted, per (flow, surface) — persist
   // deletes those files and the manifest retires them with their reasons.
@@ -2157,6 +2221,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // forever. Left unsettled, the next generate re-works the flow and
   // adjudicates it for real (re-authoring is a cache hit).
   const unadjudicatedRefs = new Set<string>()
+  const unreviewedScenarioIds = new Set<string>()
+  const caseEvidenceById = new Map<string, GuardCaseEvidence[]>()
   // Failures the auto-resolve loop RETIRED this run (no committed row) — the
   // flow still re-attempts, so persist unsettles it.
   const autoRetiredRefs = new Set<string>()
@@ -2220,6 +2286,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         expectedReds: GuardExpectedRed[]
         /** The fidelity child was unavailable — accepted unreviewed. */
         fidelityUnreviewed: boolean
+        review?: FlowWorkerReview
       }
       const stash = new Map<string, WorkerStashEntry>()
 
@@ -2252,7 +2319,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         /** The finding of an unresolved fidelity rejection — cleared when a
          *  later submission is accepted, folded as a rejection otherwise. */
         pendingFidelityFinding?: GuardBirthFinding
-      }
+        rejectionByObligation: Map<string, string>
+        repairIssues: Map<string, RepairIssue>
+        requestedRepairs: Map<string, Map<string, Set<string>>>
+        repairAttempts: Map<string, Set<string>>
+            }
       const states = new Map<string, WorkerTaskState>()
       for (const task of runnable) {
         // EDIT MODE resolution, deterministic: the flow has a committed entry
@@ -2280,6 +2351,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           priors,
           drops: [],
           fidelityFlags: 0,
+          rejectionByObligation: new Map(),
+          repairIssues: new Map(),
+          requestedRepairs: new Map(),
+          repairAttempts: new Map(),
         })
       }
 
@@ -2303,24 +2378,24 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       /** The det pre-flight — the SAME four checks the one-shot re-ask loop
        *  corrected on, returned as one model-facing line; a defect costs one
        *  tool turn instead of a sandbox run. */
-      const preflightDefect = (task: AuthorTask, raw: RawGeneratedScenario): string | null => {
-        const uncovered = uncoveredMilestones(task.work.flow, raw)
-        const unknown = unknownMilestones(task.work.flow, raw)
-        if (uncovered.length > 0 || unknown.length > 0) {
-          const parts: string[] = []
-          if (uncovered.length > 0) {
-            parts.push(
-              `milestone(s) ${uncovered.join(', ')} are realized by no step — every flow milestone needs a step carrying its \`milestone\` number`,
-            )
-          }
-          if (unknown.length > 0) {
-            parts.push(`step \`milestone\` value(s) ${unknown.join(', ')} match no milestone of this flow`)
-          }
-          return parts.join('; ')
+      const preflightDefect = (task: AuthorTask, raw: RawGeneratedScenario, requireCoverage = true): string | null => {
+        // Probes may inspect prerequisites without claiming coverage. Submitted
+        // scenarios, and probes that select cases, still need valid proof tags.
+        const selectsCoverage = raw.steps.some((step) => step.milestone !== undefined || step.checks?.length)
+        const scopeDefect = requireCoverage || selectsCoverage
+          ? scenarioMilestoneScopeDefect(task.work.flow.milestones, raw.steps)
+          : undefined
+        if (scopeDefect) return scopeDefect
+        for (const p of scenarioMilestoneProof(raw.steps)) {
+          const m = task.work.flow.milestones.find((m) => m.order === p.milestone)
+          const assigned = assignedMilestones(task.work.flow, task.plan).find(m => m.order === p.milestone)
+          if (!assigned || p.checks?.some(id => !assigned.verification?.cases?.some(c => c.id === id)))
+            return `Milestone ${p.milestone} selects cases outside this worker assignment.`
+          const gap = verificationCapabilityGap(m?.verification, p.driver, p.checks)
+          if (gap) return gap
         }
-        const proof = scenarioMilestoneProof(raw.steps)
-        const wrongDriver = task.work.flow.milestones.filter((m) => m.proofDrivers && !proof.some((p) => p.milestone === m.order && m.proofDrivers!.includes(p.driver)))
-        if (wrongDriver.length > 0) return `milestone(s) ${wrongDriver.map((m) => m.order).join(', ')} need assertions using their proof drivers: ${wrongDriver.map((m) => `${m.order}: ${m.proofDrivers!.join(' or ')}`).join('; ')}`
+        const preparationDefect = scenarioPreparationDefect(task.work.flow, recipe, raw)
+        if (preparationDefect) return preparationDefect
         const composition = compositionDefectOf(raw, recipe)
         if (composition) return composition
         const exampleDefect = exampleFidelityDefect(
@@ -2356,7 +2431,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
        *    in a serialized tail-only invocation this same generate.
        */
       const mutatorDraftGate = (task: AuthorTask, raw: RawGeneratedScenario): FlowWorkerToolReport | null => {
-        if (raw.world !== 'mutates') return null
+        if (raw.world !== 'mutates' || raw.setup?.preparation) return null
         if (!recipe.api?.services?.reset) {
           return {
             content:
@@ -2451,7 +2526,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         const outcome = round.outcomes[0]
         if (!outcome) return { report: { content: 'the runner produced no result for the scenario', isError: true } }
         if (outcome.result.unservedRoute) unservedByRef.set(taskKey(task), outcome)
+        else unservedByRef.delete(taskKey(task))
         if (outcome.result.outcome === 'error') lastExecutionErrorByRef.set(taskKey(task), outcome)
+        else lastExecutionErrorByRef.delete(taskKey(task))
         return { result: outcome.result }
       }
 
@@ -2563,6 +2640,95 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         )
       }
 
+      const taskProgress = (state: WorkerTaskState, extra: readonly WorkerStashEntry[] = []) => {
+        const work = state.task.work
+        const rows = new Map<string, { proof: ReturnType<typeof scenarioMilestoneProof>; passing: boolean }>()
+        const flowStates = [...states.values()].filter(s => s.task.work.flow.id === work.flow.id)
+        const dropped = new Set(flowStates.flatMap(s => s.drops.map(d => d.id)))
+        if (work.prior?.flowFingerprint === work.flow.fingerprint) {
+          for (const prior of work.prior.scenarios) {
+            const scenario = committedScenariosById.get(prior.id)
+            if (dropped.has(prior.id) || !priorProofCurrent(work, prior)) continue
+            rows.set(prior.id, { proof: scenarioMilestoneProof(scenario!.steps), passing: prior.status === 'passing' })
+          }
+        }
+        for (const entry of [...stash.values(), ...extra]) {
+          if (entry.candidate.flow.id !== work.flow.id) continue
+          const scenario = entry.candidate.scenario
+          // A replacement invalidates its prior proof even when its review failed.
+          rows.delete(scenario.id)
+          if (entry.fidelityUnreviewed || dropped.has(scenario.id)) continue
+          if (work.flow.milestones.some(m => m.verification?.cases) &&
+            (entry.review?.policyVersion !== GUARD_REVIEW_POLICY_VERSION ||
+              entry.review.scenarioFingerprint !== scenarioReviewFingerprint(scenario) ||
+              caseEvidenceDefect(work.flow.milestones, scenario.steps, entry.review.caseEvidence))) continue
+          rows.set(scenario.id, { proof: scenarioMilestoneProof(scenario.steps), passing: entry.result.outcome === 'pass' })
+        }
+        const milestones = assignedMilestones(work.flow, state.task.plan)
+        return guardCoverageProgress(milestones, [...rows.values()].flatMap(r => r.proof),
+          [...rows.values()].filter(r => r.passing).flatMap(r => r.proof))
+      }
+      const outstandingFeedback = (state: WorkerTaskState) => {
+        const remaining = taskProgress(state).outstanding
+        const notes = [...new Set(remaining.map(o => state.rejectionByObligation.get(`${o.milestone}:${o.caseId ?? ''}`)).filter(Boolean))]
+        return describeOutstandingObligations(remaining) + (notes.length ? '\nPrevious review findings for remaining obligations:\n' + notes.join('\n') : '')
+      }
+      const rememberRejection = (state: WorkerTaskState, candidate: BirthCandidate, reason: string,
+        reasonKind: RepairIssue['reasonKind'] = 'assertion', source: RepairIssue['source'] = 'review') => {
+        const issueId = scenarioReviewFingerprint({ setup: candidate.scenario.setup ?? null, steps: candidate.scenario.steps, normalize: candidate.scenario.normalize ?? [], reasonKind, source }).slice(7, 23)
+        for (const proof of scenarioMilestoneProof(candidate.scenario.steps)) {
+          for (const id of proof.checks ?? ['']) {
+            state.rejectionByObligation.set(`${proof.milestone}:${id}`, reason)
+            state.repairIssues.set(`${proof.milestone}:${id}`, { reasonKind, evidence: reason, issueId, source })
+          }
+        }
+      }
+      const recordRemainingGaps = (state: WorkerTaskState, supplied?: GuardRemainingObligation[]) => {
+        const remainder = reconcileRemaining(taskProgress(state).outstanding, state.repairIssues, supplied).current
+        for (const row of remainder) state.task.work.gaps.push({ surface: state.task.surface, kind: 'blocked-on', milestones: [row.milestone],
+          obligations: [{ milestone: row.milestone, ...(row.caseId ? { caseId: row.caseId } : {}) }],
+          blocker: { kind: row.reasonKind === 'preparation' ? 'configuration' : row.reasonKind === 'unsupported-capability' ? 'unsupported-capability' : 'generation' },
+          reason: `${row.milestone}/${row.caseId ?? 'legacy'}: ${row.reasonKind}: ${row.evidence}` })
+      }
+      const validateTaskOutcome = (state: WorkerTaskState, outcome: GuardFlowWorkerOutcome): string | undefined => {
+        const progress = taskProgress(state)
+        if ((outcome.kind === 'blocked' || outcome.kind === 'retired') && progress.outstanding.some(o => o.caseId)) {
+          const reconciled = reconcileRemaining(progress.outstanding, state.repairIssues, outcome.remaining)
+          let requested = state.requestedRepairs.get(reconciled.identity)
+          if (!requested) {
+            requested = new Map(reconciled.repairable.map(row => {
+              const key = `${row.milestone}:${row.caseId ?? ''}`
+              return [key, new Set(state.repairAttempts.get(key) ?? [])]
+            }))
+            state.requestedRepairs.set(reconciled.identity, requested)
+          }
+          const unattempted = reconciled.repairable.filter(row => {
+            const key = `${row.milestone}:${row.caseId ?? ''}`
+            const before = requested!.get(key) ?? new Set<string>()
+            return ![...(state.repairAttempts.get(key) ?? [])].some(candidate => !before.has(candidate))
+          })
+          if (reconciled.problems.length || unattempted.length) {
+            return 'Outcome needs correction: remaining work must follow the current case-specific findings. ' +
+              'Submit a changed executable candidate for each actionable case before retiring; correcting remaining-case prose or resubmitting the same behavior is not a repair attempt. ' +
+              'Preserve accepted portions. This correction does not grant more budget.\n' +
+              (unattempted.length ? `Cases still needing a repair submission: ${unattempted.map(row => `${row.milestone}:${row.caseId}`).join(', ')}.\n` : '') +
+              reconciled.problems.join('\n') + '\nCURRENT REMAINING: ' + JSON.stringify(reconciled.current)
+          }
+          return undefined
+        }
+        if (outcome.kind === 'blocked' && outcome.perMilestone?.some(m => !progress.outstanding.some(o => o.milestone === m.order)))
+          return 'Outcome refused: blockers must identify outstanding milestones assigned to this worker.'
+        if (outcome.kind !== 'settled') return undefined
+        if (settledScenariosOf(outcome).some(s => stash.get(s.scenarioYamlSha)?.candidate.ref !== taskKey(state.task)))
+          return 'Outcome refused: the settled outcome references a sha the engine never accepted for this task.'
+        if (outcome.droppedScenarios?.some(d => !state.drops.some(p => p.id === d.id)))
+          return 'Outcome refused: a dropped scenario must first be accepted through drop_scenario.'
+        if (!progress.complete) return 'Outcome refused: generation is incomplete. Keep the accepted portions and verify these remaining obligations before settling:\n' +
+          outstandingFeedback(state) +
+          '\nIf execution cannot proceed, report the concrete blocker or retire with the observed evidence.'
+        return undefined
+      }
+
       const acceptSubmission = (
         state: WorkerTaskState,
         candidate: BirthCandidate,
@@ -2573,14 +2739,24 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       ): FlowWorkerToolReport => {
         const yamlText = serializeScenarioYaml(candidate.scenario)
         const sha = sha256Hex(yamlText)
+        stash.delete(sha) // Reaccepting A after B makes A the latest replacement.
         stash.set(sha, {
           candidate,
           yaml: yamlText,
           result,
           expectedReds: [...expectedReds],
           fidelityUnreviewed: unreviewed,
+          ...(!unreviewed ? { review: { policyVersion: GUARD_REVIEW_POLICY_VERSION,
+            scenarioFingerprint: scenarioReviewFingerprint(candidate.scenario),
+            caseEvidence: caseEvidenceById.get(candidate.scenario.id) ?? [] } } : {}),
         })
         state.acceptedSha = sha
+        if (!unreviewed) for (const proof of scenarioMilestoneProof(candidate.scenario.steps)) {
+          for (const id of proof.checks ?? ['']) {
+            state.rejectionByObligation.delete(`${proof.milestone}:${id}`)
+            state.repairIssues.delete(`${proof.milestone}:${id}`)
+          }
+        }
         state.pendingFidelityFinding = undefined
         // A CONVERGED heal: the acceptance retracts the taint an earlier flag in
         // THIS session recorded, exactly as it retracts the pending finding — the
@@ -2589,12 +2765,20 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         // the FINAL state (rejection, retirement, no later acceptance) keeps its
         // taint: nothing re-adds after the pool except the fold's `retired` arm.
         flaggedFlows.delete(autoResolutionKey(candidate.flow.id, candidate.surface))
-        const outcomeHint = JSON.stringify({ kind: 'settled', scenarioYamlSha: sha, expectedReds })
+        const progress = taskProgress(state)
+        const acceptedById = new Map([...stash.entries()].filter(([, e]) => e.candidate.ref === candidate.ref)
+          .map(([acceptedSha, e]) => [e.candidate.scenario.id, { scenarioYamlSha: acceptedSha, expectedReds: e.expectedReds }]))
+        const additionalScenarios = [...acceptedById.values()].filter(e => e.scenarioYamlSha !== sha)
+        const outcomeHint = JSON.stringify({ kind: 'settled', scenarioYamlSha: sha, expectedReds,
+          ...(additionalScenarios.length ? { additionalScenarios } : {}),
+          ...(state.drops.length ? { droppedScenarios: state.drops } : {}) })
         return {
           content:
             `accepted — the engine stashed this exact yaml under sha ${sha}.` +
             (note ? `\n${note}` : '') +
-            `\nEnd the session by producing the outcome: ${outcomeHint}`,
+            `\nReviewed obligations: ${progress.authored.length}/${progress.required.length}. Accepted portions are retained even if remaining work blocks.` +
+            (progress.complete ? `\nAll assigned obligations are accounted for. Finish with: ${outcomeHint}` :
+              `\nRemaining obligations (continue authoring; do not settle):\n${outstandingFeedback(state)}`),
         }
       }
 
@@ -2608,6 +2792,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       ): Promise<FlowWorkerToolReport> => {
         const task = state.task
         const condensed = renderCondensedResult(result)
+        if (result.outcome !== 'pass') rememberRejection(state, candidate, condensed, result.preparationFailure ? 'preparation' : 'assertion', 'execution')
         if (result.outcome !== 'pass' && result.outcome !== 'fail') {
           return {
             content: `not accepted — the confirmation run did not settle pass/fail:\n${condensed}`,
@@ -2624,18 +2809,28 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             }
           }
           // Step 18 — the fidelity CHILD (fresh context is the independence).
-          const verdict = await judge({
+          let verdict = await judge({
             flowFingerprint: task.work.flow.fingerprint,
             sectionKeys: task.work.sectionKeys,
             scenarioBehavior: scenarioBehavior(candidate.scenario),
+            proofContext: { milestones: task.work.flow.milestones, steps: candidate.scenario.steps },
             briefing: workerFidelityBriefing(task.work, candidate, condensed),
           })
+          if (verdict.kind === 'faithful') {
+            const defect = caseEvidenceDefect(task.work.flow.milestones, candidate.scenario.steps, verdict.evidence)
+            if (defect) {
+              rememberRejection(state, candidate, defect, 'annotation')
+              return { content: `Review evidence is invalid (not a semantic fidelity rejection): ${defect}. Repair the cited annotations or obtain corrected review evidence.`, isError: true }
+            }
+            else if (verdict.evidence) caseEvidenceById.set(candidate.scenario.id, verdict.evidence)
+          }
           if (verdict.kind === 'flagged') {
             const key = autoResolutionKey(candidate.flow.id, candidate.surface)
             const firstFlag = state.fidelityFlags === 0
             state.fidelityFlags++
             taintFlow(candidate.flow.id, candidate.surface, candidate.scenario.title, verdict.mismatch)
             const finding = fidelityFinding(candidate, verdict.mismatch)
+            rememberRejection(state, candidate, verdict.mismatch)
             if (firstFlag && verdict.confidence === 'high' && autoResolveCount(key) < escalateAfter) {
               // The in-loop self-heal (no separate re-author round — the
               // WORKER revises); the ledger bump keeps the budget honest.
@@ -2655,18 +2850,19 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             return {
               content:
                 `REJECTED — the fidelity judge flagged this candidate${firstFlag ? '' : ' too'} (${verdict.confidence}): ${verdict.mismatch}\n` +
-                'Either author a scenario that genuinely verifies the milestones, or end the session with a `retired` outcome.',
+                'Repair this candidate using the current finding, or submit an independently valid portion for review. Keep each remaining case explicit if preparation or execution prevents completion.',
               isError: true,
             }
           }
           const unreviewed = verdict.kind === 'unavailable'
+          if (unreviewed) rememberRejection(state, candidate, verdict.reason, 'review-unavailable')
           return acceptSubmission(
             state,
             candidate,
             result,
             [],
             unreviewed,
-            unreviewed
+            verdict.kind === 'unavailable'
               ? `NOTE: the fidelity judge was unavailable (${verdict.reason}); the green is accepted UNREVIEWED and the run will report it unadjudicated.`
               : undefined,
           )
@@ -2698,6 +2894,30 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               'Copy the observed actual into predictedActual (the prediction proves you ran it), then submit again.',
             isError: true,
           }
+        }
+        if (task.work.flow.milestones.some(m => m.verification?.cases?.length)) {
+          const verdict = await judge({ flowFingerprint: task.work.flow.fingerprint,
+            sectionKeys: task.work.sectionKeys, scenarioBehavior: scenarioBehavior(candidate.scenario),
+            proofContext: { milestones: task.work.flow.milestones, steps: candidate.scenario.steps },
+            briefing: workerFidelityBriefing(task.work, candidate, condensed) +
+              '\nDECLARED EXPECTED FAILURE: review the selected assertion contract, not a claim of passing execution.' })
+          if (verdict.kind === 'unavailable') {
+            rememberRejection(state, candidate, verdict.reason, 'review-unavailable')
+            return acceptSubmission(state, candidate, result, expectedReds, true,
+              `Review unavailable: ${verdict.reason}. Accepted as unreviewed; required cases remain outstanding.`)
+          }
+          if (verdict.kind === 'faithful') {
+            const issue = caseEvidenceDefect(task.work.flow.milestones, candidate.scenario.steps, verdict.evidence)
+            if (issue) { rememberRejection(state, candidate, issue, 'annotation'); return { content: `Review evidence is invalid (not a semantic fidelity rejection): ${issue}`, isError: true } }
+          }
+          const defect = verdict.kind === 'flagged' ? verdict.mismatch :
+            caseEvidenceDefect(task.work.flow.milestones, candidate.scenario.steps, verdict.evidence)
+          if (defect) {
+            state.pendingFidelityFinding = fidelityFinding(candidate, defect)
+            rememberRejection(state, candidate, defect)
+            return { content: `not accepted — the expected failure still needs faithful case assertions: ${defect}`, isError: true }
+          }
+          if (verdict.kind === 'faithful' && verdict.evidence) caseEvidenceById.set(candidate.scenario.id, verdict.evidence)
         }
         return acceptSubmission(state, candidate, result, expectedReds, false)
       }
@@ -2735,7 +2955,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           cacheMaterial: {
             flowFingerprint: task.work.flow.fingerprint,
             sectionKeys: task.work.sectionKeys,
-            interfaceFingerprints: task.plan.interfaces.map((j) => j.fingerprint),
+            interfaceFingerprints: [
+              realizationAssignmentFingerprint(task.plan),
+              ...task.plan.interfaces.map((j) => j.fingerprint),
+              ...(task.surface === 'web' ? [catalogs.get('web')!.fingerprint] : []),
+            ],
             recipeFingerprint,
             mode: editMode ? 'edit' : 'scratch',
             priorShas: priorScenarios.map((p) => sha256Hex(p.yaml)),
@@ -2754,6 +2978,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                 docText,
                 externalServices: externalServiceHints,
                 apiInterfaces,
+                webInterfaces: catalogs.get('web')?.interfaces ?? [],
                 outboundRequests: outboundRequestHints,
                 outboundRequestsOverflow,
                 ...(mapped.resources ? { resources: mapped.resources } : {}),
@@ -2799,12 +3024,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               '',
               'Work the loop: draft the scenario as YAML, `run_scenario` it, revise on the evidence, then `submit_scenario`; end the session with the outcome object.',
             )
+            lines.push('', 'OUTSTANDING ASSIGNED OBLIGATIONS:', outstandingFeedback(state))
             return lines.join('\n')
           },
           runScenario: async (yamlText) => {
             const parsed = parseRawScenarioYaml(yamlText, task.surface)
             if ('error' in parsed) return { content: parsed.error, isError: true }
-            const defect = preflightDefect(task, parsed.raw)
+            const defect = preflightDefect(task, parsed.raw, false)
             if (defect) return { content: `pre-flight defect (not executed): ${defect}`, isError: true }
             const gate = mutatorDraftGate(task, parsed.raw)
             if (gate) return gate
@@ -2812,6 +3038,16 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             if ('error' in built) return { content: `the scenario does not build: ${built.error}`, isError: true }
             const run = await executeOnce(built.candidate, task)
             if ('report' in run) return run.report
+            if (run.result.outcome !== 'pass') rememberRejection(state, built.candidate, renderCondensedResult(run.result), run.result.preparationFailure ? 'preparation' : 'assertion', 'execution')
+            if (run.result.outcome === 'pass') for (const proof of scenarioMilestoneProof(built.candidate.scenario.steps)) {
+              for (const id of proof.checks ?? ['']) {
+                const key = `${proof.milestone}:${id}`
+                if (state.repairIssues.get(key)?.source === 'execution') {
+                  state.repairIssues.delete(key)
+                  state.rejectionByObligation.delete(key)
+                }
+              }
+            }
             return {
               content: renderCondensedResult(run.result),
               ...(run.result.outcome === 'pass' ? {} : { isError: true }),
@@ -2848,13 +3084,30 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             if (defect) return { content: `pre-flight defect (not executed): ${defect}`, isError: true }
             const gate = mutatorDraftGate(task, parsed.raw)
             if (gate) return gate
+            if (state.priors.size === 0 && state.acceptedSha) {
+              // A subsequent accepted portion gets its own identity, even when
+              // it tests a different case of an already covered milestone.
+              id = assignScenarioId(task.work.flow.id, task.surface, usedIds)
+            }
             const built = buildCandidate(state, parsed.raw, id)
             if ('error' in built) return { content: `the scenario does not build: ${built.error}`, isError: true }
+            for (const proof of scenarioMilestoneProof(built.candidate.scenario.steps)) for (const caseId of proof.checks ?? ['']) {
+              const key = `${proof.milestone}:${caseId}`
+              const attempt = scenarioReviewFingerprint({ setup: built.candidate.scenario.setup ?? null,
+                steps: built.candidate.scenario.steps.filter(step => !step.checks?.length ||
+                  (step.checks.includes(caseId) && milestoneRefs(step.milestone).includes(proof.milestone))),
+                normalize: built.candidate.scenario.normalize ?? [] })
+              const attempts = state.repairAttempts.get(key) ?? new Set<string>()
+              attempts.add(attempt)
+              state.repairAttempts.set(key, attempts)
+            }
             const run = await executeOnce(built.candidate, task)
             if ('report' in run) return run.report
             return settleSubmission(state, built.candidate, run.result, expectedReds, judge)
           },
           hasStash: (sha) => stash.get(sha)?.candidate.ref === ref,
+          validateOutcome: outcome => validateTaskOutcome(state, outcome),
+          stashedReview: sha => stash.get(sha)?.candidate.ref === ref ? stash.get(sha)?.review : undefined,
           stashedYaml: (sha) => {
             const entry = stash.get(sha)
             if (!entry || entry.candidate.ref !== ref) return undefined
@@ -2896,26 +3149,37 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             // stands only when each verdict still reproduces. One element for
             // a legacy entry; several for an edit-mode settle.
             if (cached.length === 0) return false
-            const stashed: { sha: string; entry: WorkerStashEntry }[] = []
-            for (const { yaml: scenarioYaml, expectedReds } of cached) {
+            const candidates: WorkerStashEntry[] = []
+            for (const { yaml: scenarioYaml, expectedReds, review } of cached) {
               const scenario = parseScenarioYaml(scenarioYaml)
-              if (!scenario) return false
+              if (!scenario || !review || review.policyVersion !== GUARD_REVIEW_POLICY_VERSION ||
+                review.scenarioFingerprint !== scenarioReviewFingerprint(scenario) ||
+                scenario.flow?.fingerprint !== task.work.flow.fingerprint ||
+                !task.work.flow.bindings.every(b => scenario.binds.some(s => s.doc === b.doc && s.section === b.anchor && s.fingerprint === b.fingerprint)) ||
+                caseEvidenceDefect(task.work.flow.milestones, scenario.steps, review.caseEvidence)) return false
+              const authored = rawScenarioSchemaFor(task.surface).safeParse(scenario)
+              if (!authored.success || preflightDefect(task, authored.data)) return false
+              const candidate: BirthCandidate = { flow: task.work.flow, surface: task.surface,
+                section: task.work.primary, scenario, ref }
+              candidates.push({ candidate, yaml: scenarioYaml, expectedReds: [...expectedReds], review,
+                fidelityUnreviewed: false, result: { id: scenario.id, title: scenario.title,
+                  binds: scenario.binds[0], outcome: expectedReds.length ? 'fail' : 'pass', durationMs: 0 } })
+            }
+            // Reject incomplete or stale cache entries before spending a sandbox run.
+            if (!taskProgress(state, candidates).complete) return false
+            const stashed: { sha: string; entry: WorkerStashEntry }[] = []
+            for (const entry of candidates) {
+              const { candidate, yaml: scenarioYaml, expectedReds, review } = entry
+              const scenario = candidate.scenario
               // A cached MUTATOR must not execute outside the serialized tail
               // (or at all without a declared reset) — a confirmation run is an
               // execution like any other. Treated as a miss: the session runs,
               // and the draft gate rules there.
               if (
-                scenario.world === 'mutates' &&
+                scenario.world === 'mutates' && !scenario.setup?.preparation &&
                 (!recipe.api?.services?.reset || !destructiveFlowIds.has(task.work.flow.id))
               ) {
                 return false
-              }
-              const candidate: BirthCandidate = {
-                flow: task.work.flow,
-                surface: task.surface,
-                section: task.work.primary,
-                scenario,
-                ref,
               }
               const run = await executeOnce(candidate, task)
               if ('report' in run) {
@@ -2937,6 +3201,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                       },
                       expectedReds: [...expectedReds],
                       fidelityUnreviewed: false,
+                      review,
                     },
                   })
                   continue
@@ -2952,14 +3217,18 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                   result: run.result,
                   expectedReds: [...expectedReds],
                   fidelityUnreviewed: false,
+                  review,
                 },
               })
             }
+            if (!taskProgress(state, stashed.map(s => s.entry)).complete) return false
             // All reproduced: the hit stands, every candidate is stashed for
             // the fold, and their ids are reserved exactly as a session would.
             for (const { sha, entry } of stashed) {
               usedIds.add(entry.candidate.scenario.id)
+              stash.delete(sha)
               stash.set(sha, entry)
+              if (entry.review) caseEvidenceById.set(entry.candidate.scenario.id, entry.review.caseEvidence)
             }
             state.acceptedSha = stashed[0]!.sha
             return true
@@ -3137,6 +3406,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             continue
           }
           if (result.kind === 'failed') {
+            if (taskProgress(state).required.some(o => o.caseId)) recordRemainingGaps(state)
             if (settleIfUnserved(ref, task)) continue
             task.errored = true
             // When an execution errored, the error is built off the ENGINE's
@@ -3165,6 +3435,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           // object root), so narrowing on `kind` no longer narrows the payload
           // fields: the `!`s below stand on the parse the loop already did.
           const outcome = result.outcome
+          if ((outcome.kind === 'blocked' || outcome.kind === 'retired') && taskProgress(state).required.some(o => o.caseId))
+            recordRemainingGaps(state, outcome.remaining)
           // A TAINTED flow whose worker completed a fresh answer (accepted
           // scenario or an honest block) overwrote the poisoned cache entry —
           // its taint clears at run end unless the session re-flagged it
@@ -3178,6 +3450,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             freshlyAuthoredTaints.add(autoResolutionKey(work.flow.id, surface))
           }
           if (outcome.kind === 'settled') {
+            const incomplete = validateTaskOutcome(state, outcome)
+            if (incomplete) {
+              task.errored = true
+              errors.push({ doc: work.primary.doc, anchor: work.primary.anchor, kind: 'authoring',
+                flowId: work.flow.id, surface, message: incomplete })
+              continue
+            }
             // Every accepted scenario, primary first — one for a from-scratch
             // author, several for an edit-mode settle. Each sha must be a stash
             // entry of THIS task; the seam's reject hook already converts a
@@ -3216,10 +3495,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             if (drops.length > 0) dropsByRef.set(ref, drops.map((d) => ({ ...d })))
             for (const { entry } of accepted) {
               if (entry!.result.outcome === 'pass') {
-                if (entry!.fidelityUnreviewed) {
-                  fidelityUnreviewed++
-                  unadjudicatedRefs.add(ref)
-                }
                 pushInto(persisted, ref, entry!.candidate)
               } else {
                 // A committed red: its diagnosis is the WORKER's confirmed
@@ -3235,6 +3510,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             continue
           }
           if (outcome.kind === 'blocked') {
+            if (taskProgress(state).required.some(o => o.caseId)) continue
             const capabilities = [
               ...new Set(outcome.perMilestone!.map((m) => m.capability.trim().toLowerCase()).filter(Boolean)),
             ]
@@ -3243,7 +3519,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               externalServices,
             )
             const reason = composeBlockedOnReason(blockedOn, oneLine(work.flow.title))
-            work.gaps.push({ surface, kind: 'blocked-on', reason })
+            work.gaps.push({ surface, kind: 'blocked-on', reason, milestones: outcome.perMilestone!.map((m) => m.order) })
             coverageGaps.push({
               doc: work.primary.doc,
               anchor: work.primary.anchor,
@@ -3274,6 +3550,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           // bump instead (one auto-resolution per flow per run, as on the
           // one-shot path).
           if (settleIfUnserved(ref, task)) continue
+          const remainder = reconcileRemaining(taskProgress(state).outstanding, state.repairIssues, outcome.remaining).current
+          if (taskProgress(state).required.some(o => o.caseId) && !remainder.some(o => o.reasonKind === 'assertion')) {
+            task.errored = true
+            continue
+          }
           taintFlow(work.flow.id, surface, work.flow.title, oneLine(outcome.lastEvidence!))
           if (state.pendingFidelityFinding) {
             pushInto(fidelityRejections, ref, state.pendingFidelityFinding)
@@ -3298,6 +3579,31 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             }
             pushInto(withheldFailures, ref, finding)
           }
+        }
+      }
+
+      // Acceptance belongs to the scenario, not the worker's final outcome.
+      // A later blocked/retired/failed attempt cannot discard an earlier verified subset.
+      const acceptedById = new Map<string, WorkerStashEntry>()
+      for (const entry of stash.values()) acceptedById.set(entry.candidate.scenario.id, entry)
+      for (const entry of acceptedById.values()) {
+        const { candidate, result } = entry
+        const ref = candidate.ref
+        failedTests.set(ref, (failedTests.get(ref) ?? []).filter((f) => f.candidate.scenario.id !== candidate.scenario.id))
+        persisted.set(ref, (persisted.get(ref) ?? []).filter((c) => c.scenario.id !== candidate.scenario.id))
+        if (entry.fidelityUnreviewed) {
+          unadjudicatedRefs.add(ref)
+          unreviewedScenarioIds.add(candidate.scenario.id)
+          caseEvidenceById.delete(candidate.scenario.id)
+          fidelityUnreviewed++
+        }
+        if (result.outcome === 'pass') {
+          pushInto(persisted, ref, candidate)
+        } else if (result.outcome === 'fail') {
+          const finding = toFinding({ candidate, result })
+          const declared = entry.expectedReds.find((r) => r.step === (result.failure?.step ?? 1))
+          if (declared) finding.expectedRed = declared
+          pushInto(failedTests, ref, { candidate, finding })
         }
       }
 
@@ -3440,8 +3746,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     const carryPrior = (scenario: GuardManifestScenario): void => {
       if (keptIds.has(scenario.id)) return
       // A retained old test is still a test, but not proof of new requirements.
-      const { milestoneCoverage, ...rest } = scenario
-      scenarios.push(work.prior?.flowFingerprint === work.flow.fingerprint ? scenario : rest)
+      const { milestoneCoverage, caseEvidence, reviewedScenarioFingerprint, reviewPolicyVersion, ...rest } = scenario
+      const current = priorProofCurrent(work, scenario)
+      scenarios.push(current ? scenario : rest)
       keptIds.add(scenario.id)
     }
     let unsettledFlow = false
@@ -3473,6 +3780,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           id: c.scenario.id,
           drivers: guardScenarioDrivers(c.scenario),
           milestoneCoverage: scenarioMilestoneProof(c.scenario.steps),
+          ...(caseEvidenceById.has(c.scenario.id) ? { caseEvidence: caseEvidenceById.get(c.scenario.id), reviewedScenarioFingerprint: scenarioReviewFingerprint(c.scenario), reviewPolicyVersion: GUARD_REVIEW_POLICY_VERSION } : {}),
+          ...(unreviewedScenarioIds.has(c.scenario.id) ? { reviewed: false } : {}),
           status,
           ...(finding ? { diagnosis: diagnosisOf(finding, file) } : {}),
         })
@@ -3501,15 +3810,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       ) {
         unsettledFlow = true
       }
-      // A surface that committed nothing and dropped nothing CARRIES the priors
-      // it owns: their files stay and their rows re-list, so a blocked or
+      // Every surface carries the priors it did not explicitly replace or drop.
+      // Their files stay and their rows re-list, so a blocked or
       // retired edit never erases coverage (the flow is unsettled anyway when
       // the worker did not settle). An id a sibling surface re-wrote this run
       // is that sibling's now, not a carried prior.
-      if (committedHere.length === 0 && dropsHere.length === 0) {
-        for (const s of priorsOnSurface.get(surface) ?? []) {
-          carryPrior(s)
-        }
+      for (const s of priorsOnSurface.get(surface) ?? []) {
+        if (!keptIds.has(s.id) && !dropsHere.some((d) => d.id === s.id)) carryPrior(s)
       }
       if (committedHere.length > 0) {
         for (const r of retired) if (r.surface === surface) r.replacedBy = [...committedHere]
@@ -3518,6 +3825,32 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     const assignedPriors = new Set([...priorsOnSurface.values()].flatMap((rows) => rows.map((s) => s.id)))
     for (const prior of work.prior?.scenarios ?? []) {
       if (!assignedPriors.has(prior.id)) carryPrior(prior)
+    }
+    const proof = scenarios.filter((s) => s.status === 'passing' && s.reviewed !== false).flatMap((s) => s.milestoneCoverage ?? [])
+    const passingProgress = guardCoverageProgress(work.flow.milestones, proof)
+    const isCovered = (o: { milestone: number; caseId?: string }) => !passingProgress.outstanding.some(m =>
+      m.milestone === o.milestone && (!o.caseId || m.caseId === o.caseId))
+    work.gaps = work.gaps.flatMap(g => {
+      if (g.obligations) {
+        const obligations = g.obligations.filter(o => !isCovered(o))
+        return obligations.length ? [{ ...g, obligations, milestones: [...new Set(obligations.map(o => o.milestone))] }] : []
+      }
+      return g.milestones?.every(milestone => isCovered({ milestone })) ? [] : [g]
+    })
+    // Reviewed application failures account for authorship without claiming passing coverage.
+    const authoredProof = scenarios.filter(s => (s.status === 'passing' || s.status === 'failing') && s.reviewed !== false)
+      .flatMap(s => s.milestoneCoverage ?? [])
+    const outstanding = guardCoverageProgress(work.flow.milestones, authoredProof).outstanding
+    if (outstanding.length && (scenarios.length || work.flow.milestones.some(m => m.verification?.cases))) {
+      unsettledFlow = true
+      for (const o of outstanding) {
+        if (work.gaps.some(g => g.obligations ? g.obligations.some(r => r.milestone === o.milestone && (!r.caseId || r.caseId === o.caseId)) : g.milestones?.includes(o.milestone))) continue
+        const m = work.flow.milestones.find(m => m.order === o.milestone)!
+        work.gaps.push({ surface: m.proofDrivers?.[0] ?? [...work.plans.keys()][0] ?? 'cli',
+          kind: 'blocked-on', milestones: [m.order], obligations: [{ milestone: o.milestone, ...(o.caseId ? { caseId: o.caseId } : {}) }], blocker: { kind: 'generation' },
+          reason: o.caseId ? `Milestone ${m.order} has unverified case: ${o.caseId} (${o.claim})`
+            : `Milestone ${m.order} has no verified scenario yet: ${m.claimTitle}` })
+      }
     }
     // Now the deletions: every prior id neither re-written nor carried, plus
     // the OLD file of a re-written id whose path moved.
@@ -3638,6 +3971,19 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const birthPassed =
     written.filter((w) => w.status === 'passing').length +
     [...fidelityRejections.values()].reduce((n, list) => n + list.length, 0)
+
+  const liveWorkIds = new Set(works.map((w) => w.flow.id))
+  for (let i = coverageGaps.length - 1; i >= 0; i--) {
+    if (coverageGaps[i].flowId && liveWorkIds.has(coverageGaps[i].flowId!)) coverageGaps.splice(i, 1)
+  }
+  for (const work of works) for (const gap of work.gaps) coverageGaps.push({
+    doc: work.primary.doc, anchor: work.primary.anchor, flowId: work.flow.id,
+    surface: gap.surface, kind: gap.kind, reason: gap.reason,
+    ...(gap.driver ? { driver: gap.driver } : {}),
+    ...(gap.blocker ? { blocker: gap.blocker } : {}),
+    ...(gap.milestones ? { milestones: gap.milestones } : {}),
+    ...(gap.obligations ? { obligations: gap.obligations } : {}),
+  })
 
   return {
     status: 'ok',
@@ -4139,25 +4485,6 @@ function compositionDefectOf(scenario: RawGeneratedScenario, recipe: Recipe): st
   )
 }
 
-/** The flow milestones no step of the scenario realizes. */
-function uncoveredMilestones(flow: GuardFlow, scenario: RawGeneratedScenario): number[] {
-  const covered = new Set(
-    scenario.steps.map((s) => milestoneOrder(s.milestone)).filter((m): m is number => typeof m === 'number'),
-  )
-  return flow.milestones.map((m) => m.order).filter((order) => !covered.has(order))
-}
-
-/** `milestone` values on the scenario's steps that match no milestone of the flow. */
-function unknownMilestones(flow: GuardFlow, scenario: RawGeneratedScenario): number[] {
-  const known = new Set(flow.milestones.map((m) => m.order))
-  const out: number[] = []
-  for (const step of scenario.steps) {
-    const order = milestoneOrder(step.milestone)
-    if (typeof order === 'number' && !known.has(order) && !out.includes(order)) out.push(order)
-  }
-  return out
-}
-
 /**
  * Assemble the FULL authoring context for one task — the grounding block
  * (interface contracts, the bound server's reachable other-operations, outbound
@@ -4182,6 +4509,7 @@ function assembleAuthorCtx(opts: {
   docText: ReadonlyMap<string, string>
   externalServices: ExternalServiceHint[]
   apiInterfaces: Interface[]
+  webInterfaces: Interface[]
   outboundRequests: OutboundRequestHint[]
   outboundRequestsOverflow: number
   resources?: Record<string, InterfaceResource[]>
@@ -4194,7 +4522,12 @@ function assembleAuthorCtx(opts: {
     ? opts.apiInterfaces.filter((j) => !servedByOtherApp(opts.serverIndex, boundApp, interfaceEntryPath(j)))
     : opts.apiInterfaces
   const other = buildOtherOperationHints(reachableInterfaces, interfaceContracts)
-  return buildAuthorCtx(
+  const webApp = opts.recipe.web?.app
+  const webSetup = task.surface === 'web'
+    ? opts.webInterfaces.filter((j) => !task.plan.interfaces.some((own) => own.id === j.id) &&
+        !servedByOtherApp(opts.serverIndex, webApp, interfaceEntryPath(j)))
+    : []
+  const ctx = buildAuthorCtx(
     task.work,
     task.surface,
     task.plan,
@@ -4210,9 +4543,10 @@ function assembleAuthorCtx(opts: {
       otherOperationsOverflow: other.overflow,
       outboundRequests: opts.outboundRequests,
       outboundRequestsOverflow: opts.outboundRequestsOverflow,
-      resources: buildResourceHints(task.plan.interfaces, opts.resources),
+      resources: buildResourceHints([...task.plan.interfaces, ...webSetup], opts.resources),
     },
   )
+  return { ...ctx, ...(webSetup.length ? { webSetupInterfaces: webSetup.map(interfaceDigest) } : {}) }
 }
 
 // --- Flow-worker helpers (plan 04 step 17) -----------------------------------
@@ -4321,12 +4655,14 @@ function workerFidelityBriefing(work: FlowWork, candidate: BirthCandidate, captu
   const ctx: FidelityUserContext = {
     flow: { id: work.flow.id, title: work.flow.title, goal: work.flow.goal },
     milestones: [...work.flow.milestones]
+      .filter((m) => scenarioMilestoneProof(candidate.scenario.steps).some((p) => p.milestone === m.order))
       .sort((a, b) => a.order - b.order)
       .map((m) => {
         const section = work.sections.get(m.order)
         return {
           order: m.order,
           claim: m.claimTitle,
+          ...(m.verification ? { verification: { ...m.verification, ...(m.verification.cases ? { cases: m.verification.cases.filter(c => scenarioMilestoneProof(candidate.scenario.steps).some(p => p.milestone === m.order && p.checks?.includes(c.id))) } : {}) } } : {}),
           doc: m.doc,
           sectionHeading: section?.headingText ?? m.anchor,
           sectionText: section?.fullText || section?.ownText || '',
@@ -4336,6 +4672,11 @@ function workerFidelityBriefing(work: FlowWork, candidate: BirthCandidate, captu
   }
   return [
     buildFidelityUserPrompt(ctx),
+    '',
+    'SELECTED CASES: ' + JSON.stringify(scenarioMilestoneProof(candidate.scenario.steps)),
+    'FULL FLOW CONTEXT (not additional claimed coverage):',
+    ...work.flow.milestones.map((m) => `${m.order}. ${m.claimTitle}`),
+    'Review only the selected milestones, but require source-grounded setup for any earlier state they depend on. Reject a broken chain, fabricated state, or a title claiming omitted coverage.',
     '',
     'CONFIRMATION CAPTURE (the engine ran this scenario in a fresh sandbox just now):',
     capture,
@@ -4423,6 +4764,7 @@ function buildAuthorCtx(
       : surface === 'web'
         ? webPreparationCtx(recipe)
         : { recipeEntry: recipe.entry }),
+    preparations: preparationCatalog(recipe),
     recipeBuild: recipe.build,
     probes,
   }
@@ -4454,9 +4796,34 @@ function webPreparationCtx(
   }
 }
 
+/** The same preparation contract applies to new submissions, cached and retained proof. */
+function scenarioPreparationDefect(flow: GuardFlow, recipe: Recipe, scenario: Parameters<typeof validateScenarioPreparation>[1]): string | undefined {
+  const defect = validateScenarioPreparation(recipe, scenario)
+  if (defect) return defect
+  for (const proof of scenarioMilestoneProof(scenario.steps)) {
+    const milestone = flow.milestones.find(m => m.order === proof.milestone)
+    for (const c of milestone?.verification?.cases ?? []) {
+      const preparation = verificationCasePreparation(c)
+      if (!proof.checks?.includes(c.id) || !preparation) continue
+      const profile = scenario.setup?.preparation && recipe.preparations?.[scenario.setup.preparation]
+      if (!profile || (preparation === 'empty' && profile.baseline !== 'empty'))
+        return `Case ${proof.milestone}/${c.id} requires setup.preparation selecting a verified ${preparation} private world.`
+    }
+  }
+  return undefined
+}
+
+/** Cases assigned to this worker, excluding independently blocked siblings. */
+function assignedMilestones(flow: GuardFlow, plan: RealizationPlan): GuardFlow['milestones'] {
+  return flow.milestones.filter(m => plan.steps.some(s => s.milestone === m.order)).map(m => {
+    if (!m.verification?.cases) return m
+    const checks = new Set(plan.steps.filter(s => s.milestone === m.order).flatMap(s => s.checks ?? []))
+    return { ...m, verification: { ...m.verification, cases: m.verification.cases.filter(c => checks.has(c.id)) } }
+  })
+}
 /** The flow's milestones as authoring sees them, in path order. */
 function authorMilestones(work: FlowWork, plan: RealizationPlan, surface: GuardDriverId): AuthorMilestone[] {
-  return [...work.flow.milestones]
+  return assignedMilestones(work.flow, plan)
     .sort((a, b) => a.order - b.order)
     .map((m) => {
       const section = work.sections.get(m.order)
@@ -4470,6 +4837,7 @@ function authorMilestones(work: FlowWork, plan: RealizationPlan, surface: GuardD
       return {
         order: m.order,
         claim: m.claimTitle,
+        ...(m.verification ? { verification: m.verification } : {}),
         doc: m.doc,
         sectionHeading: section?.headingText ?? m.anchor,
         sectionText: section?.fullText || section?.ownText || '',
@@ -4830,4 +5198,3 @@ function settledSiblings(index: readonly SiblingScenario[], task: AuthorTask): S
     .slice(0, SIBLING_BRIEFING_MAX)
     .map((o) => o.s)
 }
-

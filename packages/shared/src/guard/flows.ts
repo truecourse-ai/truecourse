@@ -15,6 +15,7 @@
  * rule so re-wrapped prose never moves it.
  */
 
+import { GuardVerificationSchema } from './verification.js'
 import crypto from 'node:crypto'
 import { z } from 'zod'
 import type { GuardCoverageGapKind } from './report.js'
@@ -37,6 +38,7 @@ export const GuardFlowMilestoneSchema = z
     claimTitle: z.string().min(1),
     /** Each listed driver can prove this entire milestone independently. Absent on legacy flows. */
     proofDrivers: z.array(GuardDriverIdSchema).min(1).optional(),
+    verification: GuardVerificationSchema.optional(),
     /** Optional free-text note from synthesis (why this step sits here). */
     note: z.string().optional(),
   })
@@ -238,9 +240,9 @@ const FLOW_WORKER_OPTIONAL_FIELDS = {
   // (`droppedScenarios`). Both absent on a from-scratch author — the legacy
   // one-scenario shape stays byte-identical, so old cache entries still parse.
   settled: ['additionalScenarios', 'droppedScenarios'],
-  blocked: ['lastEvidence', 'attempts'],
+  blocked: ['lastEvidence', 'attempts', 'remaining'],
   'journey-defect': ['lastEvidence', 'attempts'],
-  retired: [],
+  retired: ['remaining'],
 } as const satisfies Record<keyof typeof FLOW_WORKER_PAYLOAD_FIELDS, readonly string[]>
 
 /** One accepted scenario beyond the primary: its stashed sha + declared reds. */
@@ -261,6 +263,17 @@ export const GuardDroppedScenarioSchema = z
   })
   .strict()
 export type GuardDroppedScenario = z.infer<typeof GuardDroppedScenarioSchema>
+
+/** Current reason an assigned obligation remains unfinished. Historical outcomes
+ * may omit this field; new workers reconcile it against engine observations. */
+export const GuardRemainingObligationSchema = z.object({
+  milestone: z.number().int().positive(),
+  caseId: z.string().min(1).optional(),
+  reasonKind: z.enum(['assertion', 'annotation', 'preparation', 'unsupported-capability', 'review-unavailable', 'not-attempted']),
+  evidence: z.string().min(1),
+  issueId: z.string().min(1).optional(),
+}).strict()
+export type GuardRemainingObligation = z.infer<typeof GuardRemainingObligationSchema>
 
 /**
  * The `guard-generate.flow-worker` session's outcome (plan 04 step 17) —
@@ -305,6 +318,7 @@ export const GuardFlowWorkerOutcomeSchema = z
     /** retired: the last run's evidence — why no faithful scenario could be produced.
      *  blocked MAY carry it too: the run evidence behind the block. */
     lastEvidence: z.string().min(1).optional(),
+    remaining: z.array(GuardRemainingObligationSchema).optional(),
     /** settled (edit mode): scenarios accepted beyond the primary, each by its stashed sha. */
     additionalScenarios: z.array(GuardSettledScenarioSchema).optional(),
     /** settled (edit mode): prior scenarios the worker dropped, each with the vanished obligation. */
@@ -393,7 +407,7 @@ export function flowFingerprint(milestones: readonly GuardFlowMilestone[]): stri
   const ordered = [...milestones].sort((a, b) => a.order - b.order)
   const digest = crypto
     .createHash('sha256')
-    .update(ordered.map((m) => flowMilestoneKey(m) + (m.proofDrivers ? `\0${[...new Set(m.proofDrivers)].sort().join(',')}` : '')).join('\n'), 'utf-8')
+    .update(ordered.map((m) => flowMilestoneKey(m) + (m.proofDrivers ? `\0${[...new Set(m.proofDrivers)].sort().join(',')}` : '') + (m.verification ? `\0verification:${JSON.stringify(m.verification)}` : '')).join('\n'), 'utf-8')
     .digest('hex')
   return `sha256:${digest}`
 }

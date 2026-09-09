@@ -1,3 +1,4 @@
+import { GuardCaseEvidenceSchema, caseEvidenceIssues, formatCaseEvidenceIssues, type GuardEvidenceProofContext } from '@truecourse/shared'
 /**
  * THE FIDELITY JUDGE CHILD — `guard-generate.fidelity` (plan 04 step 18): a
  * depth-1 session `submit_scenario` dispatches (via `ctx.dispatchChild`) for
@@ -53,11 +54,28 @@ const FIDELITY_CHILD_ADDENDUM = `
   briefed text alone does not settle a judgment. The briefing already carries
   every section in full — most reviews need no tool call.
 - The briefing also carries the CONFIRMATION CAPTURE: the engine really ran
-  this scenario in a fresh sandbox just now, and it passed. Judge whether that
-  pass MEANS the flow's claims hold.
+  this scenario in a fresh sandbox just now. For a pass, judge whether it proves
+  the selected claims. For a declared expected failure, judge the assertion contract
+  against the spec; do not count unexecuted assertions as passing evidence.
 - End the session with the outcome object (this replaces the JSON-reply
   instruction above):
-    { "verdict": "faithful" }
+    { "verdict": "faithful", "evidence": [{ "milestone": 1, "caseId": "literal-percent", "steps": [3, 4], "reason": "These assertions compare the literal-percent results with the controlled records." }] }
+- When the briefing lists explicit cases, evidence is REQUIRED for each SELECTED
+  case. Every cited step must itself carry the matching milestone and checks case id,
+  contain an executable assertion, and use an accepted proof driver. Cite one-based
+  assertion steps, not setup, contextual assertions for other cases, or bare requests. Verify the
+  inputs exercise the named condition and the assertions would detect its failure.
+  A milestone/check annotation alone is never proof. Omitted cases stay uncovered;
+  do not reject a faithful subset for failing to test unselected cases.
+- The engine validates evidence references before completion. If it returns issues,
+  repair citations within this review session using the eligible tagged assertion
+  indices, but only when those assertions actually prove the selected case. Never
+  invent annotations or silently treat supporting context as executable proof.
+  If the scenario lacks required assertions or annotations, return flagged and name
+  the precise scenario change required. A missing extracted case does not broaden
+  an existing selected case; judge the selected case's stated requirement.
+- For negative UI assertions inspect the mapped actionable controls in the tested
+  states. Do not require a proof about arbitrary future labels or unrelated pages.
   or
     { "verdict": "flagged", "mismatch": "<one sentence naming what the scenario fails to verify>", "confidence": "high" | "medium" | "low" }`
 
@@ -87,6 +105,11 @@ export const FidelityVerdictSchema = z
     /** flagged: one sentence naming what the scenario fails to verify. */
     mismatch: z.string().min(1).optional(),
     confidence: z.enum(['high', 'medium', 'low']).optional(),
+    // Parse numeric citations before validating their range/integrality against
+    // the scenario so the child can repair them through validateOutcome. The
+    // persisted GuardCaseEvidenceSchema remains strict; no invalid citation can
+    // complete or enter the cache when engine proof context is present.
+    evidence: z.array(GuardCaseEvidenceSchema.extend({ steps: z.array(z.number()) })).optional(),
   })
   .strict()
   .superRefine((value, ctx) => {
@@ -172,12 +195,25 @@ function readClaimSectionTool(universe: GuardDocUniverse): SessionTool {
   })
 }
 
-export function fidelitySessionDef(universe: GuardDocUniverse): SessionDef<FidelityVerdict> {
+function evidenceCorrection(verdict: FidelityVerdict, context?: GuardEvidenceProofContext): string | undefined {
+  if (verdict.verdict !== 'faithful') return undefined
+  if (!context) {
+    const parsed = z.array(GuardCaseEvidenceSchema).safeParse(verdict.evidence ?? [])
+    return parsed.success ? undefined : `Invalid proof references: ${parsed.error.message}`
+  }
+  const issues = caseEvidenceIssues(context.milestones, context.steps, verdict.evidence)
+  if (!issues.length) return undefined
+  return `The faithful verdict has invalid proof references; this is an evidence-metadata repair, not a semantic rejection.\n${formatCaseEvidenceIssues(issues)}\nRecheck the selected cases and repair only the citations that the existing tagged assertions support. If eligible assertions do not prove the selected requirement, return flagged with the specific missing assertion or annotation; do not invent proof.`
+}
+
+export function fidelitySessionDef(universe: GuardDocUniverse, proofContext?: GuardEvidenceProofContext): SessionDef<FidelityVerdict> {
+  const context = proofContext ? structuredClone(proofContext) : undefined
   return {
     kind: FIDELITY_SESSION_KIND,
     systemPrompt: FIDELITY_SESSION_SYSTEM_PROMPT,
     tools: [readClaimSectionTool(universe)],
     outcomeSchema: FidelityVerdictSchema,
+    validateOutcome: verdict => evidenceCorrection(verdict, context),
     budget: FIDELITY_SESSION_BUDGET,
   }
 }
@@ -214,17 +250,28 @@ export async function judgeWorkerFidelity(opts: {
   const cached = await getCacheEntry(opts.repoRoot, FIDELITY_SESSION_CACHE_NAME, key).catch(() => null)
   if (cached !== null) {
     const parsed = FidelityVerdictSchema.safeParse(cached)
-    if (parsed.success) return toWorkerVerdict(parsed.data)
+    if (parsed.success && !evidenceCorrection(parsed.data, opts.input.proofContext)) return toWorkerVerdict(parsed.data)
   }
 
   opts.tally.ran++
-  const outcome = await opts.ctx.dispatchChild(fidelitySessionDef(opts.universe), [opts.input.briefing])
+  const outcome = await opts.ctx.dispatchChild(fidelitySessionDef(opts.universe, opts.input.proofContext), [opts.input.briefing])
   if (outcome.status === 'completed') {
     opts.tally.spent.turns += outcome.spent.turns
     opts.tally.spent.tokens += outcome.spent.tokens
     opts.tally.spent.costUsd += outcome.spent.costUsd
-    await setCacheEntry(opts.repoRoot, FIDELITY_SESSION_CACHE_NAME, key, outcome.output).catch(() => undefined)
-    return toWorkerVerdict(outcome.output)
+    // Defend the cache boundary even when a custom dispatch bypasses the loop.
+    const parsed = FidelityVerdictSchema.safeParse(outcome.output)
+    const defect = parsed.success ? evidenceCorrection(parsed.data, opts.input.proofContext) : `Malformed fidelity verdict: ${parsed.error.message}`
+    if (!parsed.success || defect) {
+      opts.tally.failed++
+      opts.tally.allTransport = false
+      const reason = defect ?? 'Malformed fidelity verdict'
+      opts.tally.firstError ??= reason
+      return { kind: 'unavailable', reason }
+    }
+    const verdict = parsed.data
+    await setCacheEntry(opts.repoRoot, FIDELITY_SESSION_CACHE_NAME, key, verdict).catch(() => undefined)
+    return toWorkerVerdict(verdict)
   }
   opts.tally.failed++
   opts.tally.spent.turns += outcome.spent.turns
@@ -240,6 +287,6 @@ function toWorkerVerdict(verdict: FidelityVerdict): WorkerFidelityVerdict {
   // The schema's superRefine pairs `mismatch`/`confidence` with the flagged
   // verdict, and every value here came through a parse — the halves are present.
   return verdict.verdict === 'faithful'
-    ? { kind: 'faithful' }
+    ? { kind: 'faithful', ...(verdict.evidence ? { evidence: verdict.evidence } : {}) }
     : { kind: 'flagged', mismatch: verdict.mismatch!, confidence: verdict.confidence! }
 }

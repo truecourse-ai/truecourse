@@ -98,6 +98,8 @@ import {
   buildFlowAreas,
   buildSurfaceCatalogs,
   readCachedMatch,
+  realizationAssignmentFingerprint,
+  partitionPlanPreparations,
   readFlowsFile,
   sectionInputsKey,
   flowGenerationInputsHash,
@@ -776,6 +778,12 @@ async function planGuardRealizationStages(
   flowStage: GuardSessionWorkPlan,
 ): Promise<GuardRealizationPlan> {
   const surfaces = preparedSurfaces(repoRoot);
+  let availablePreparations: ReturnType<typeof preparationCatalog> = [];
+  try {
+    const recipe = loadRecipe(repoRoot, recipePath(repoRoot))?.recipe;
+    if (recipe) availablePreparations = preparationCatalog(recipe);
+  } catch { /* Invalid recipes are repaired before runtime matching. */ }
+
   // The MERGED catalog — the matcher runs against both halves, so an estimate that
   // read the derived one alone would price no work at all for the hand-authored
   // surfaces (every web surface there is).
@@ -820,7 +828,13 @@ async function planGuardRealizationStages(
           continue;
         }
         if (!cached.plan) continue; // an `unrealizable` surface starts no worker
-        const fingerprints = cached.plan.interfaces.map((j) => j.fingerprint);
+        const preparedPlan = partitionPlanPreparations(flow, cached.plan, availablePreparations).plan;
+        if (!preparedPlan) continue;
+        const fingerprints = [
+          realizationAssignmentFingerprint(preparedPlan),
+          ...preparedPlan.interfaces.map((j) => j.fingerprint),
+          ...(catalog.surface === 'web' ? [catalog.fingerprint] : []),
+        ];
         plannedPairs.push({ surface: catalog.surface, fingerprints });
         interfaceFingerprints.push(...fingerprints);
       }
