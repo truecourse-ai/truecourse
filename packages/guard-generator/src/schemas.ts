@@ -32,7 +32,7 @@ import {
   type GuardDriverId,
   type GuardWebStep,
 } from '@truecourse/shared'
-import { isNoOpEntry, NO_OP_ENTRY_MESSAGE, RecipeWebSchema } from '@truecourse/guard-runner'
+import { isNoOpEntry, NO_OP_ENTRY_MESSAGE, RecipeWebSchema, RecipePreparationSchema } from '@truecourse/guard-runner'
 
 /** The per-section classification summary recorded in the manifest, derived from
  *  extraction (kept shape — the dashboard renders it as a coverage verdict). */
@@ -160,6 +160,7 @@ export const RecipeProposalSchema = z
       .optional(),
     env: z.record(z.string(), z.string()).optional(),
     api: RecipeApiProposalSchema.optional(),
+    preparations: z.record(z.string().regex(/^[a-z0-9][a-z0-9._-]*$/), RecipePreparationSchema).optional(),
     /**
      * The BROWSER surface — the runner's own `web` block, verbatim (serve argv,
      * healthPath, env, `app` naming the served workspace app in a monorepo).

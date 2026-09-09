@@ -1,3 +1,4 @@
+import type { GuardSetupPreparationSession } from '@truecourse/guard-generator';
 /**
  * SINGLE-STEP MODE — `guard setup --only-<step>`, driven through the core
  * adapter (`guardSetupInProcess({ only })`) because the merge of
@@ -125,6 +126,7 @@ function seams(): {
   catalogSession: GuardSetupCatalogSession;
   authorInterfaces: GuardSetupInterfacesStep;
   seedSession: GuardSetupSeedSession;
+  preparationSession: GuardSetupPreparationSession;
   verifyAuth: GuardSetupAuthStep;
 } {
   const reached: string[] = [];
@@ -141,6 +143,10 @@ function seams(): {
     seedSession: async () => {
       reached.push('seed');
       return { status: 'skipped', reason: 'stubbed in this test' };
+    },
+    preparationSession: async () => {
+      reached.push('preparations');
+      return {status:'skipped',reason:'stubbed in this test'};
     },
     verifyAuth: async () => {
       reached.push('auth');
@@ -271,9 +277,10 @@ describe('the persisted report', () => {
       'catalog',
       'interfaces',
       'seed',
+      'preparations',
       'auth',
     ]);
-    expect(whole.reached).toEqual(['catalog', 'interfaces', 'seed', 'auth']);
+    expect(whole.reached).toEqual(['catalog', 'interfaces', 'seed', 'preparations', 'auth']);
 
     // One step, forced: --refresh with --only-<step> re-runs that step alone.
     const single = seams();
@@ -294,6 +301,7 @@ describe('the persisted report', () => {
       'catalog',
       'interfaces',
       'seed',
+      'preparations',
       'auth',
     ]);
     // …with the untouched rows carried forward verbatim (their fingerprints are
@@ -329,6 +337,44 @@ describe('estimateGuardSetupCost({ only })', () => {
       expect(['guard-setup.reconcile-interfaces', 'guard-interfaces.web-tasks']).toContain(
         stage.stage,
       );
+    }
+  });
+});
+
+describe('--only-preparations', () => {
+  it('reauthors legacy profiles and estimates that work even when their old fingerprint is settled', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    const recipe = JSON.parse(fs.readFileSync(recipePath(r), 'utf8'));
+    recipe.preparations = { legacy: { baseline: 'empty', scope: 'instance', env: { SEED_STORE: '${directory}/store.json' },
+      seed: { script: 'old-seed.mjs', provides: {} }, verify: { script: 'old-verify.mjs' } } };
+    fs.writeFileSync(recipePath(r), JSON.stringify(recipe));
+    fs.writeFileSync(path.join(r, 'old-seed.mjs'), 'export {}');
+    fs.writeFileSync(path.join(r, 'old-verify.mjs'), 'export {}');
+    await guardSetupInProcess(r, { interfaces: interfaces(), recipeRunner: neverCalled, ...seams() });
+    const estimate = await estimateGuardSetupCost(r, { only: 'preparations' });
+    expect(estimate.stages?.find(stage => stage.stage === 'guard-setup.preparations')?.calls).toBeGreaterThan(0);
+    const selected = seams();
+    await guardSetupInProcess(r, { only: 'preparations', interfaces: interfaces(), recipeRunner: neverCalled, ...selected });
+    expect(selected.reached).toEqual(['preparations']);
+  });
+  it('refreshes private profiles without rerunning or replacing the existing seed and interfaces', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    const whole = seams();
+    await guardSetupInProcess(r, { interfaces: interfaces(), recipeRunner: neverCalled, ...whole });
+    const before = readGuardSetup(r);
+    const recipeBefore = fs.readFileSync(recipePath(r), 'utf8');
+    const selected = seams();
+    await guardSetupInProcess(r, {
+      only: 'preparations', refresh: true,
+      interfaces: interfaces(), recipeRunner: neverCalled, ...selected,
+    });
+    expect(selected.reached).toEqual(['preparations']);
+    expect(fs.readFileSync(recipePath(r), 'utf8')).toBe(recipeBefore);
+    const after = readGuardSetup(r);
+    for (const key of ['recipe', 'catalog', 'interfaces', 'seed', 'auth']) {
+      expect(after?.steps.find(row => row.key === key)).toEqual(before?.steps.find(row => row.key === key));
     }
   });
 });

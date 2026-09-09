@@ -1,3 +1,4 @@
+import { buildCredentialRedactor } from '../api/redact.js'
 /**
  * The API step driver — an HTTP request against the surface the SANDBOX serves.
  *
@@ -92,6 +93,23 @@ export function apiStepDriver(opts: ApiStepDriverOptions): StepDriver {
         message,
       })
 
+      const secrets = new Map([...(ctx.credentials ?? [])].map(([name, credential]) => [name, credential.value]))
+      const redact = buildCredentialRedactor(secrets)
+      let wireHeaders: Record<string, string> | undefined
+      try {
+        wireHeaders = authored.request.headers && Object.fromEntries(Object.entries(authored.request.headers).map(([name, template]) => {
+          let value = '', end = 0
+          for (const match of template.matchAll(/\{\{cred:([^}]+)\}\}/g)) {
+            value += ctx.tok(template.slice(end, match.index))
+            const secret = secrets.get(match[1])
+            if (secret === undefined) throw new Error(`credential "${match[1]}" is not provided for this scenario's served surface`)
+            value += secret
+            end = match.index! + match[0].length
+          }
+          return [name, value + ctx.tok(template.slice(end))]
+        }))
+      } catch (error) { return failedToSend(error instanceof Error ? error.message : String(error)) }
+
       if (!opts.served.declared) return failedToSend(NO_SERVED_SURFACE_INFRA)
       if (resolved.expect.schema === true) return failedToSend(NO_SCHEMA_BINDING_INFRA)
 
@@ -117,11 +135,12 @@ export function apiStepDriver(opts: ApiStepDriverOptions): StepDriver {
         for (;;) {
           capture = await executeApiRequest({
             baseUrl: surface.server.baseUrl,
-            request: resolved.request,
+            request: { ...resolved.request, ...(wireHeaders ? { headers: wireHeaders } : {}) },
             timeoutMs: Math.max(1, stepDeadline - Date.now()),
             ...(ctx.signal ? { signal: ctx.signal } : {}),
             cookies,
           })
+          capture = { ...capture, bodyText: redact(capture.bodyText), headers: Object.fromEntries(Object.entries(capture.headers).map(([key,value]) => [key,redact(value)])) }
           if (ctx.signal?.aborted) return { status: 'aborted' }
 
           // A request that never completed is INFRASTRUCTURE: the surface was

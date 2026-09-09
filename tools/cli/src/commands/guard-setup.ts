@@ -230,6 +230,7 @@ const SETUP_STEP_LABEL: Record<GuardSetupOnlyStep, string> = {
   catalog: "dependency catalog",
   interfaces: "interface authoring",
   seed: "seed",
+  preparations: "private preparations",
   auth: "auth proof",
 };
 

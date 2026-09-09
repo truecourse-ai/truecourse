@@ -1,3 +1,4 @@
+import { prepareScenario, validateScenarioPreparation, type PreparedScenarioWorld } from './preparation.js'
 /**
  * `guard run` orchestration: load the recipe, load scenarios, build once, run the
  * scenarios in parallel sandboxes, map outcomes into a `GuardLatest`, and write it
@@ -720,7 +721,8 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     // logins, the per-server boot preflight — belongs to the api pool alone and is
     // gated on `apiPool` below. A web-only selection therefore gets the seeded
     // datastore its app reads and boots no api server for scenarios it will not run.
-    const apiPool = apiRunnableExec.length > 0
+    const apiPool = apiRunnableExec.some((p) => !p.scenario.setup?.preparation)
+    const sharedDataNeeded = runnable.some((p) => !p.scenario.setup?.preparation)
     /** Per bound server: its absolutized serve argv and its boot env. */
     const serverBoot = new Map<string, { resolvedServe: string[]; env: Record<string, string> }>()
     let apiCredentials: Map<string, string> | undefined
@@ -863,7 +865,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
           // or a reset that was not declared then): restore before booting on
           // top of the damage. A failed reset falls through to `up` — the up's
           // own failure, or the run's results, are the honest signal.
-          if (api.services.reset && fs.existsSync(guardWorldDirtyMarkerPath(repoRoot))) {
+          if (sharedDataNeeded && api.services.reset && fs.existsSync(guardWorldDirtyMarkerPath(repoRoot))) {
             const reset = await runBuild(
               repoRoot,
               api.services.reset,
@@ -890,7 +892,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
         // fixtures feed `{{fixture:…}}`.
         const credentials: [string, string][] = []
         let fixtures: Map<string, Record<string, unknown>> | undefined
-        if (api.seed) {
+        if (api.seed && sharedDataNeeded) {
           try {
             const seeded = await runSeed({
               repoRoot,
@@ -958,7 +960,9 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       // single-server recipe gets, labelled so a reader knows which one died.
       let credentialRequestError: CredentialRequestError | null = null
       const labelServers = resolvedServers.servers.size > 1
+      const sharedServerNames = new Set(apiRunnableExec.filter((p) => !p.scenario.setup?.preparation).map((p) => boundServerById.get(p.scenario.id)!.name))
       for (const name of [...serversNeeded].sort()) {
+        if (!sharedServerNames.has(name) && !loginsByServer.has(name)) continue
         const server = resolvedServers.servers.get(name)
         const boot = serverBoot.get(name)
         if (!server || !boot) continue
@@ -1204,20 +1208,48 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       if (cancel.signal.aborted) return null
       // WHICH EXECUTOR — the same steps-derived question the preparation split
       // asked, asked once more where the scenario is actually dispatched.
-      const outcome =
+      let privateWorld: PreparedScenarioWorld | undefined
+      let outcome: GuardScenarioResult
+      const startedAt = Date.now()
+      try {
+      const preparationError = validateScenarioPreparation(loaded.recipe, scenario)
+      if (preparationError) throw new Error(preparationError)
+      if (scenario.setup?.preparation) privateWorld = await prepareScenario({
+        repoRoot, recipe: loaded.recipe, profile: scenario.setup.preparation,
+        signal: cancel.signal, timeoutMs: opts.buildTimeoutMs,
+      })
+      const privateCredentials = privateWorld && new Map([...privateWorld.credentials].map(([name, c]) => [name, c.value]))
+      const privateCredentialView = (serverName: string) => {
+        const credentials = new Map<string, string>()
+        const foreign = new Map<string, readonly string[]>()
+        for (const [name, value] of privateCredentials ?? []) {
+          const declaration = loaded.recipe.preparations![scenario.setup!.preparation!].seed.provides.credentials![name]
+          const allowed = credentialServers(declaration, resolvedServers)
+          if (allowed.includes(serverName)) credentials.set(name, value)
+          else foreign.set(name, allowed)
+        }
+        return { credentials, foreign }
+      }
+      const scenarioCredentialsFor = privateWorld ? privateCredentialView : credentialsFor
+      const privateWebCredentials = privateWorld && new Map([...privateWorld.credentials].filter(([name]) => {
+        const declaration = loaded.recipe.preparations![scenario.setup!.preparation!].seed.provides.credentials![name]
+        const servedName = [...resolvedServers.servers.values()].find((server) => loaded.recipe.web?.app && server.app === loaded.recipe.web.app)?.name ?? resolvedServers.defaultServer
+        return credentialServers(declaration, resolvedServers).includes(servedName)
+      }))
+      outcome =
         isApiServerScenario(scenario)
           ? await runApiScenario(scenario, {
               repoRoot,
               runId,
               unique: scenarioUnique(runNonce, scenario.id),
               server: boundServer(scenario.id),
-              recipeEnv: serverBoot.get(boundServerById.get(scenario.id)!.name)!.env,
-              credentials: credentialsFor(boundServerById.get(scenario.id)!.name).credentials,
-              foreignCredentials: credentialsFor(boundServerById.get(scenario.id)!.name).foreign,
+              recipeEnv: { ...serverBoot.get(boundServerById.get(scenario.id)!.name)!.env, ...(privateWorld?.env ?? {}) },
+              credentials: scenarioCredentialsFor(boundServerById.get(scenario.id)!.name).credentials,
+              foreignCredentials: scenarioCredentialsFor(boundServerById.get(scenario.id)!.name).foreign,
               servesPath: servesPathFor(boundServerById.get(scenario.id)!),
               externalSecrets,
               externalTargets,
-              fixtures: apiFixtures,
+              fixtures: privateWorld?.fixtures ?? apiFixtures,
               responseSchemas: resolveScenarioResponseSchemas(
                 operationSchemaIndex,
                 scenario as GuardApiScenario,
@@ -1233,7 +1265,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               runId,
               unique: scenarioUnique(runNonce, scenario.id),
               resolvedEntry: resolvedEntry!,
-              recipeEnv: loaded.recipe.env,
+              recipeEnv: { ...loaded.recipe.env, ...(privateWorld?.env ?? {}) },
               ...(loaded.recipe.expose ? { expose: loaded.recipe.expose } : {}),
               // Every binding is `provided` by construction — the gate above kept the
               // rest out of `runnable` — so this only ever materializes real instances.
@@ -1244,10 +1276,10 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               // one world has one copy of it. Undefined when the seed did not run —
               // which the scenario reports as such, `seedDeclared` telling it apart
               // from a fixture that simply does not exist.
-              ...(apiFixtures ? { fixtures: apiFixtures } : {}),
+              ...((privateWorld?.fixtures ?? apiFixtures) ? { fixtures: privateWorld?.fixtures ?? apiFixtures } : {}),
               ...(api?.seed ? { seedDeclared: true } : {}),
-              ...(webSurface ? { web: webSurface } : {}),
-              ...(apiCredentials && apiCredentials.size > 0 ? { credentials: worldCredentials() } : {}),
+              ...(webSurface ? { web: privateWorld ? { ...webSurface, env: { ...webSurface.env, ...privateWorld.env } } : webSurface } : {}),
+              ...(privateWorld ? { credentials: privateWebCredentials! } : apiCredentials && apiCredentials.size > 0 ? { credentials: worldCredentials() } : {}),
               stepTimeoutMs,
               capturePassEvidence,
               signal: cancel.signal,
@@ -1255,9 +1287,27 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               // Only the cli/web pool: an api scenario has no screen to look at.
               ...(opts.visualJudge ? { visualJudge: opts.visualJudge } : {}),
             })
+      } catch (error) {
+        if (!scenario.setup?.preparation) throw error
+        outcome = { id: scenario.id, title: scenario.title, binds: scenario.binds[0],
+          ...(scenario.flow ? { flowId: scenario.flow.id } : {}), outcome: 'error',
+          preparationFailure: { profile: scenario.setup!.preparation!, stage: 'prepare' },
+          durationMs: Date.now() - startedAt,
+          failure: { step: 0, expected: 'the selected preparation to provide a verified private baseline',
+            actual: error instanceof Error ? error.message : String(error) } }
+      } finally {
+        // Driver routines close browsers and servers before returning; data cleanup runs last.
+        try { await privateWorld?.close() } catch {
+          outcome = { id: scenario.id, title: scenario.title, binds: scenario.binds[0], outcome: 'error',
+            preparationFailure: { profile: scenario.setup!.preparation!, stage: 'cleanup' },
+            durationMs: Date.now() - startedAt, failure: { step: 0,
+              expected: 'private preparation cleanup to finish', actual: 'Preparation cleanup failed for its owned namespace' } }
+        }
+      }
       if (cancel.signal.aborted) return null
       const result: GuardScenarioResult = {
         ...outcome,
+        ...(privateWorld ? { preparation: privateWorld.evidence } : {}),
         ...(verdict.kind === 'executable' && verdict.remappedTo ? { remappedTo: verdict.remappedTo } : {}),
         ...annotate(scenario),
       }
@@ -1283,7 +1333,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     // settled, and the world is restored afterwards (`api.services.reset`) so
     // the damage cannot reach the next run either.
     const isWorldMutator = ({ scenario }: (typeof runnable)[number]): boolean =>
-      scenario.world === 'mutates'
+      scenario.world === 'mutates' && !scenario.setup?.preparation
     const mainRunnable = runnable.filter((x) => !isWorldMutator(x))
     const tailRunnable = runnable.filter(
       (x) => isWorldMutator(x) && !externalBlockedIds.has(x.scenario.id),

@@ -152,6 +152,7 @@ import {
   computeRecipeFingerprint,
   loadDependencyCatalog,
   loadRecipe,
+  preparationCatalog,
   readGuardDecisions,
   readAuthoredInterfaceCatalog,
   webScreensNeedingReadables,
@@ -163,6 +164,9 @@ import {
   type Recipe,
 } from '@truecourse/guard-runner';
 import {
+  PREPARATION_SESSION_KIND,
+  PREPARATION_SESSION_BUDGET,
+  PREPARATION_PROMPT,
   AUTH_PROOF_BUDGET,
   AUTH_PROOF_SESSION_KIND,
   DEPENDENCY_CATALOG_BUDGET,
@@ -208,6 +212,7 @@ const STAGE_LABELS: Record<string, string> = {
   [INTERFACE_AUTHOR_SESSION_KIND]: 'Authoring web tasks',
   [SEED_SESSION_KIND]: 'Preparing data + principals',
   [AUTH_PROOF_SESSION_KIND]: 'Verifying supplied auth',
+  [PREPARATION_SESSION_KIND]: 'Preparing private test data',
   // guard generate (session kinds — plan 04; recipe + match are still one-shots)
   guardRecipe: 'Discovering recipe',
   guardMatch: 'Matching flows',
@@ -235,6 +240,7 @@ const EXPECTED_TURNS: Record<string, number> = {
   [INTERFACE_AUTHOR_SESSION_KIND]: 15, // measured mean of the 2026-08-18 documenso run
   [SEED_SESSION_KIND]: 12,
   [AUTH_PROOF_SESSION_KIND]: 3,
+  [PREPARATION_SESSION_KIND]: 12,
   // guard generate (plan 04 step 20) — PROVISIONAL, to re-ground on transcript
   // data once a few session-era generates have run.
   [EXTRACT_SESSION_KIND]: 3,
@@ -260,6 +266,7 @@ const SESSION_OUTPUT_TOKENS: Record<string, number> = {
   [INTERFACE_AUTHOR_SESSION_KIND]: 800,
   [SEED_SESSION_KIND]: 3000, // the outcome carries the whole script (≈ GUARD_SEED_OUTPUT_TOKENS below)
   [AUTH_PROOF_SESSION_KIND]: 150,
+  [PREPARATION_SESSION_KIND]: 5_000, // Multiple seed/verification scripts form the final outcome.
   // guard generate (plan 04 step 20) — provisional.
   [EXTRACT_SESSION_KIND]: 1500, // the outcome carries a doc's whole claim set
   [FLOWS_SESSION_KIND]: 1200, // an area's flows + no-flow reasons
@@ -932,6 +939,7 @@ const SETUP_KIND_CHARS: Record<string, { system: number; briefing: number }> = {
   [INTERFACE_AUTHOR_SESSION_KIND]: { system: 8_000, briefing: 12_000 },
   [SEED_SESSION_KIND]: { system: 5_500, briefing: GUARD_SEED_BODY_CHARS + 9_000 },
   [AUTH_PROOF_SESSION_KIND]: { system: 1_800, briefing: 1_200 },
+  [PREPARATION_SESSION_KIND]: { system: PREPARATION_PROMPT.length, briefing: 12_000 },
 };
 
 /**
@@ -1042,6 +1050,15 @@ export async function estimateGuardSetup(
     seedItems = cached ? 0 : 1;
   }
 
+  // ---- private preparations: one authoring session per changed recipe --------
+  // A profile is not evidence that this setup step already settled. The runtime
+  // skips only its current recorded fingerprint; old setups must run this step.
+  const preparationSettled = recipe !== undefined && settled('preparations') === computeRecipeFingerprint(repoRoot) &&
+    preparationCatalog(recipe).length === Object.keys(recipe.preparations ?? {}).length;
+  const preparationItems = preparationSettled ? 0 : 1;
+  // Upstream recipe/seed work can move the fingerprint before this step starts.
+  const preparationMax = !preparationSettled || repairMax > 0 || seedMax > 0 ? 1 : 0;
+
   // ---- auth proof: one session per supplied catalog entry (never cached) ----
   const suppliedEntries = loadDependencyCatalog(repoRoot).dependencies.filter(
     (d) => d.class === 'supplied',
@@ -1115,6 +1132,13 @@ export async function estimateGuardSetup(
       bound: 'prove-by-execution; skipped when no database schema is detected (unknowable offline)',
     }),
     setupStage({
+      kind: PREPARATION_SESSION_KIND,
+      budget: PREPARATION_SESSION_BUDGET,
+      items: preparationItems,
+      maxItems: preparationMax,
+      bound: 'one private preparation authoring session; skipped only when its recipe fingerprint is unchanged',
+    }),
+    setupStage({
       kind: AUTH_PROOF_SESSION_KIND,
       budget: AUTH_PROOF_BUDGET,
       items: authItems,
@@ -1129,6 +1153,7 @@ export async function estimateGuardSetup(
     catalog: [DEPENDENCY_CATALOG_SESSION_KIND],
     interfaces: [RECONCILE_INTERFACES_SESSION_KIND, INTERFACE_AUTHOR_SESSION_KIND],
     seed: [SEED_SESSION_KIND],
+    preparations: [PREPARATION_SESSION_KIND],
     auth: [AUTH_PROOF_SESSION_KIND],
   };
   const included = opts.only

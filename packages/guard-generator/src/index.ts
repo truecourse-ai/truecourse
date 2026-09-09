@@ -448,3 +448,5 @@ export {
 } from './validate.js'
 export { apiAuthEvidence, probeCandidatesFromInterfaces, requiredResources } from './seed-evidence.js'
 export type { ApiAuthEvidence, RequiredResource } from './seed-evidence.js'
+
+export type { GuardSetupPreparationSession, GuardSetupPreparationSessionInput } from './setup.js'

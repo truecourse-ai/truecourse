@@ -480,6 +480,7 @@ guardCmd
   .option("--only-catalog", "Run only the dependency-catalog step (recipe replayed from recipe.json)")
   .option("--only-interfaces", "Run only the interface-authoring step (earlier steps replayed from disk)")
   .option("--only-seed", "Run only the seed step (earlier steps replayed from disk)")
+  .option("--only-preparations", "Run only private starting-state preparation (preserves other setup artifacts)")
   .option("--only-auth", "Run only the auth-proof step (earlier steps replayed from disk)")
   .action(async (options) => {
     const only = (
@@ -488,6 +489,7 @@ guardCmd
         ["catalog", options.onlyCatalog],
         ["interfaces", options.onlyInterfaces],
         ["seed", options.onlySeed],
+        ["preparations", options.onlyPreparations],
         ["auth", options.onlyAuth],
       ] as const
     )

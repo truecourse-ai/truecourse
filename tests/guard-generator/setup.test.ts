@@ -250,7 +250,7 @@ describe('runGuardSetup — the gates', () => {
 // ---------------------------------------------------------------------------
 
 describe('runGuardSetup — the step spine (plan 03 step 8)', () => {
-  it('records six rows in taxonomy order, and the record round-trips the schema', async () => {
+  it('records seven rows in taxonomy order, and the record round-trips the schema', async () => {
     const r = fixtureRepo()
     writeRecipe(r)
     const seed = seedSeam()
@@ -264,6 +264,7 @@ describe('runGuardSetup — the step spine (plan 03 step 8)', () => {
       'catalog',
       'interfaces',
       'seed',
+      'preparations',
       'auth',
     ])
     // detect is free: it always runs, so it has no fingerprint to settle on.
@@ -287,6 +288,7 @@ describe('runGuardSetup — the step spine (plan 03 step 8)', () => {
       'catalog',
       'interfaces',
       'seed',
+      'preparations',
       'auth',
     ])
   })

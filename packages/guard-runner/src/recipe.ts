@@ -18,7 +18,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { z } from 'zod'
-import { GUARD_HTTP_METHODS } from '@truecourse/shared'
+import { GuardPreparationNameSchema, GuardPreparationBaselineSchema, GUARD_HTTP_METHODS } from '@truecourse/shared'
 import { dependenciesPath, recipePath } from './store.js'
 
 /**
@@ -191,6 +191,37 @@ export const RecipeApiSeedSchema = z
       .strict(),
   })
   .strict()
+
+/** Every preparation script is repository-owned; runtime validates realpath containment. */
+export const RecipePreparationScriptSchema = z.object({
+  script: z.string().min(1).refine((p) => !p.startsWith('/') && !p.split(/[\\/]/).includes('..'), 'script must stay inside the repository'),
+}).strict()
+/** Runner-executed, unfiltered collection reads. Expected values are known inputs,
+ * not values captured from the application response being checked. */
+export const RecipePreparationBaselineCheckSchema = z.object({
+  path: z.string().regex(/^\/(?!\/)/).refine(p => !p.includes('?') && !p.includes('#'), 'baseline reads must be unfiltered collection paths'),
+  server: z.string().min(1).optional(),
+  credential: z.string().min(1).optional(),
+  counts: z.record(z.string().min(1), z.number().int().nonnegative()).refine(v => Object.keys(v).length > 0, 'declare at least one global record count'),
+  totals: z.record(z.string().min(1), z.number().finite()).optional(),
+}).strict()
+export const RecipePreparationSchema = z.object({
+  baseline: GuardPreparationBaselineSchema,
+  scope: z.literal('instance'),
+  // Optional only to read older recipes. Execution refuses profiles without checks.
+  baselineChecks: z.array(RecipePreparationBaselineCheckSchema).min(1).optional(),
+  env: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).refine((key) => !key.startsWith('GUARD_'), 'GUARD_ bindings are runner-owned'), z.string().min(1))
+    .refine((env) => Object.keys(env).length > 0, 'a profile must own datastore bindings')
+    .refine((env) => Object.values(env).every((v) => /\$\{(?:directory|namespace)\}/.test(v) &&
+      !/\$\{(?!directory\}|namespace\})/.test(v)), 'every binding must use ${directory} or ${namespace}, with no other references'),
+  seed: RecipeApiSeedSchema.omit({ command: true }).extend({ script: RecipePreparationScriptSchema.shape.script }),
+  /** Node script that observes both prepared apps, mutates the peer, and proves the primary unchanged.
+   * Writes {fixtures:{verification:{baseline:<empty|seeded>,isolated:true}}} to GUARD_SEED_OUT. */
+  verify: RecipePreparationScriptSchema,
+  /** Optional namespace cleanup. Receives only the owned allocation, even after failed seeding. */
+  cleanup: RecipePreparationScriptSchema.optional(),
+}).strict()
+export type RecipePreparation = z.infer<typeof RecipePreparationSchema>
 
 /**
  * One env var an external service needs BEYOND its base URL (an API key, an
@@ -651,6 +682,7 @@ export const RecipeSchema = z
       .optional(),
     /** The api driver's preparation layer; present when the repo has api scenarios. */
     api: RecipeApiSchema.optional(),
+    preparations: z.record(GuardPreparationNameSchema, RecipePreparationSchema).optional(),
     /**
      * The web surface's preparation layer; present when any scenario carries web
      * steps. See {@link RecipeWebSchema}. It is not a third "driver block" beside
@@ -1042,6 +1074,12 @@ export function computeRecipeFingerprint(repoRoot: string): string {
     // re-author the flows that were authored against those rows — the same rule
     // `provides` already obeys. Absent, unreadable, or pointing outside the repo:
     // nothing is folded, and staleness is exactly what it was before the field.
+    for (const preparationScript of resolvePreparationScripts(repoRoot, raw)) {
+      hash.update(path.relative(repoRoot, preparationScript))
+      hash.update('\0')
+      hash.update(fs.readFileSync(preparationScript))
+      hash.update('\0')
+    }
     const scriptAbs = resolveSeedScript(repoRoot, raw)
     if (scriptAbs) {
       hash.update('api.seed.script')
@@ -1284,4 +1322,19 @@ function resolveOnHostPath(command: string): string {
     }
   }
   return command
+}
+
+/** All preparation behavior travels with setup, including cleanup and verification. */
+export function resolvePreparationScripts(repoRoot: string, rawRecipe: string): string[] {
+  let profiles: Record<string, RecipePreparation>
+  try { profiles = JSON.parse(rawRecipe).preparations ?? {} } catch { return [] }
+  const root = fs.realpathSync(repoRoot)
+  return [...new Set(Object.values(profiles).flatMap((profile) =>
+    [profile.seed?.script, profile.verify?.script, profile.cleanup?.script].flatMap((rel) => {
+      if (!rel || path.isAbsolute(rel) || rel.split(/[\\/]/).includes('..')) return []
+      try {
+        const abs = fs.realpathSync(path.resolve(root, rel))
+        return abs.startsWith(root + path.sep) && fs.statSync(abs).isFile() ? [path.resolve(repoRoot, rel)] : []
+      } catch { return [] }
+    })))].sort()
 }
