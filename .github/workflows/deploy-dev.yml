@@ -1,26 +1,27 @@
 name: Deploy (dev)
 
-# Two opt-in ways to deploy the shared Dev Container App — nothing auto-deploys:
-#   1. Label a PR `deploy-dev` → builds that PR's branch (pushes while labeled
-#      re-deploy; remove the label to stop).
-#   2. Actions → Deploy (dev) → Run workflow → pick a branch (usually main) →
-#      builds that branch's HEAD. Use this to roll merged main onto Dev.
-# Unlike prod, dev allows any branch and has no reviewer gate — it's the safe
-# place to try things.
-# The foundation resources (ACR, Container Apps env, identity, Key Vault) are
-# discovered from the resource group at runtime, so the only variables you set are
-# the OIDC identity + AZURE_RG + APP_NAME. GitHub touches nothing in the runtime
-# path: it builds in ACR and deploys via OIDC, no stored secret.
+# PR deployment remains opt-in. First migration is manual and separate from
+# normal deployments. All runs share one lock; see infra/azure/README.md.
 on:
   pull_request:
     branches: [main]
     types: [labeled, synchronize]
   workflow_dispatch:
+    inputs:
+      operation:
+        description: 'prepare creates only the environment; migrate stops the drained legacy app; deploy updates v2'
+        type: choice
+        options: [deploy, prepare, migrate]
+        default: deploy
+      migration_confirmation:
+        description: 'For migrate only: jobs-drained-producers-paused (all workspaces, including queued jobs and follow-ups)'
+        type: string
+        default: ''
 
 permissions:
-  id-token: write      # OIDC federated login to Azure (no stored secret)
+  id-token: write
   contents: read
-  pull-requests: write # post the Dev URL as a comment (PR runs only)
+  pull-requests: write
 
 concurrency:
   group: deploy-dev
@@ -28,14 +29,32 @@ concurrency:
 
 jobs:
   deploy:
-    # Manual dispatch always runs; PR runs only when the `deploy-dev` label is on.
     if: >
       github.event_name == 'workflow_dispatch' ||
       contains(github.event.pull_request.labels.*.name, 'deploy-dev')
     runs-on: ubuntu-latest
     environment: dev
+    env:
+      OPERATION: ${{ inputs.operation || 'deploy' }}
+      MIGRATION_CONFIRMATION: ${{ inputs.migration_confirmation }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Load checked-in dev configuration
+        id: config
+        env:
+          CONFIGURED_RG: ${{ vars.AZURE_RG }}
+        run: |
+          set -euo pipefail
+          RG=$(jq -er .resourceGroup infra/azure/dev.json)
+          test "$CONFIGURED_RG" = "$RG" || { echo '::error::AZURE_RG must match dev.json'; exit 1; }
+          if [[ "$OPERATION" == migrate ]]; then
+            test "$GITHUB_EVENT_NAME" = workflow_dispatch
+            test "$MIGRATION_CONFIRMATION" = jobs-drained-producers-paused || {
+              echo '::error::Read the migration runbook and confirm the drain before migrating.'; exit 1;
+            }
+          fi
+          jq -r 'to_entries[] | "\(.key)=\(.value)"' infra/azure/dev.json >> "$GITHUB_OUTPUT"
 
       - uses: azure/login@v2
         with:
@@ -43,62 +62,149 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Discover foundation resources in the RG
+      - name: Resolve existing foundation resources
         id: infra
+        env:
+          RG: ${{ steps.config.outputs.resourceGroup }}
+          ACR: ${{ steps.config.outputs.acrName }}
+          IDENTITY: ${{ steps.config.outputs.identityName }}
         run: |
-          RG="${{ vars.AZURE_RG }}"
+          set -euo pipefail
+          ACR_LOGIN=$(az acr show -g "$RG" -n "$ACR" --query loginServer -o tsv)
+          IDENTITY_ID=$(az identity show -g "$RG" -n "$IDENTITY" --query id -o tsv)
+          # The foundation creates one vault per RG. Fail on ambiguity, never pick [0] silently.
+          VAULTS=$(az keyvault list -g "$RG" -o json)
+          KV_NAME=$(jq -er 'if length == 1 then .[0].name else error("Expected exactly one dev Key Vault") end' <<< "$VAULTS")
+          KV_URI=$(jq -er '.[0].properties.vaultUri' <<< "$VAULTS")
           {
-            echo "acr_name=$(az acr list -g "$RG" --query '[0].name' -o tsv)"
-            echo "acr_login=$(az acr list -g "$RG" --query '[0].loginServer' -o tsv)"
-            echo "env_id=$(az containerapp env list -g "$RG" --query '[0].id' -o tsv)"
-            echo "identity_id=$(az identity list -g "$RG" --query '[0].id' -o tsv)"
-            echo "kv_uri=$(az keyvault list -g "$RG" --query '[0].properties.vaultUri' -o tsv)"
+            echo "acr_login=$ACR_LOGIN"
+            echo "identity_id=$IDENTITY_ID"
+            echo "kv_name=$KV_NAME"
+            echo "kv_uri=$KV_URI"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Build & push image (ACR builds it — no local Docker)
-        id: build
+      - name: Check migration state before changing resources
+        if: env.OPERATION != 'prepare'
+        env:
+          RG: ${{ steps.config.outputs.resourceGroup }}
+          APP: ${{ steps.config.outputs.appName }}
+          ENVIRONMENT: ${{ steps.config.outputs.environmentName }}
+          LEGACY_APP: ${{ steps.config.outputs.legacyAppName }}
+          LEGACY_ENV: ${{ steps.config.outputs.legacyEnvironmentName }}
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            TAG="pr-${{ github.event.pull_request.number }}-${GITHUB_SHA::7}"
+          set -euo pipefail
+          APPS=$(az containerapp list -g "$RG" -o json)
+          EXISTS=$(jq --arg name "$APP" '[.[] | select(.name == $name)] | length' <<< "$APPS")
+          if [[ "$OPERATION" == migrate ]]; then
+            test "$EXISTS" = 0 || { echo '::error::Replacement already exists. Use deploy for recovery; do not repeat migration.'; exit 1; }
           else
-            TAG="${{ github.ref_name }}-${GITHUB_SHA::7}"
+            test "$EXISTS" = 1 || { echo '::error::Run the explicit migration first.'; exit 1; }
+            jq -e --arg name "$APP" --arg suffix "/managedEnvironments/$ENVIRONMENT" \
+              '.[] | select(.name == $name) | (.properties.environmentId // .properties.managedEnvironmentId) | endswith($suffix)' \
+              <<< "$APPS" >/dev/null
+            bash infra/azure/legacy-app.sh assert-stopped "$RG" "$LEGACY_APP" "$LEGACY_ENV"
           fi
-          TAG="${TAG//\//-}"   # ref names can contain slashes; tags can't
-          az acr build --registry "${{ steps.infra.outputs.acr_name }}" \
-            --image "truecourse:${TAG}" --file Dockerfile .
-          echo "image=${{ steps.infra.outputs.acr_login }}/truecourse:${TAG}" >> "$GITHUB_OUTPUT"
 
-      - name: Create-or-update the Dev Container App
-        id: deploy
+      - name: Provision only the replacement environment
+        id: environment
+        env:
+          RG: ${{ steps.config.outputs.resourceGroup }}
+          ENVIRONMENT: ${{ steps.config.outputs.environmentName }}
+          LOCATION: ${{ steps.config.outputs.location }}
+          LOGS: ${{ steps.config.outputs.logAnalyticsWorkspaceName }}
+          APP: ${{ steps.config.outputs.appName }}
         run: |
-          URL=$(az deployment group create -g "${{ vars.AZURE_RG }}" -n containerapp-dev \
-            -f infra/azure/containerapp.bicep \
-            -p name="${{ vars.APP_NAME }}" \
-               image="${{ steps.build.outputs.image }}" \
-               environmentId="${{ steps.infra.outputs.env_id }}" \
-               identityId="${{ steps.infra.outputs.identity_id }}" \
-               acrLoginServer="${{ steps.infra.outputs.acr_login }}" \
-               keyVaultUri="${{ steps.infra.outputs.kv_uri }}" \
+          set -euo pipefail
+          OUTPUTS=$(az deployment group create -g "$RG" -n environment-dev-v2 \
+            --mode Incremental -f infra/azure/environment.bicep \
+            -p name="$ENVIRONMENT" location="$LOCATION" logAnalyticsWorkspaceName="$LOGS" \
+            --query properties.outputs -o json)
+          ENV_ID=$(jq -er .environmentId.value <<< "$OUTPUTS")
+          DOMAIN=$(jq -er .defaultDomain.value <<< "$OUTPUTS")
+          {
+            echo "id=$ENV_ID"
+            echo "url=https://$APP.$DOMAIN"
+          } >> "$GITHUB_OUTPUT"
+          echo "Replacement URL: https://$APP.$DOMAIN" >> "$GITHUB_STEP_SUMMARY"
+          echo "Operation: $OPERATION. Preparation does not create or start an app." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build and push image in ACR
+        if: env.OPERATION != 'prepare'
+        id: build
+        env:
+          ACR: ${{ steps.config.outputs.acrName }}
+          ACR_LOGIN: ${{ steps.infra.outputs.acr_login }}
+        run: |
+          set -euo pipefail
+          # Commit-only tags avoid interpolating branch names into shell code.
+          TAG="dev-${GITHUB_SHA::12}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          az acr build --registry "$ACR" --image "truecourse:$TAG" --file Dockerfile .
+          echo "image=$ACR_LOGIN/truecourse:$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Deactivate the drained legacy app and wait for zero replicas
+        if: env.OPERATION == 'migrate'
+        env:
+          RG: ${{ steps.config.outputs.resourceGroup }}
+          LEGACY_APP: ${{ steps.config.outputs.legacyAppName }}
+          LEGACY_ENV: ${{ steps.config.outputs.legacyEnvironmentName }}
+        run: bash infra/azure/legacy-app.sh deactivate "$RG" "$LEGACY_APP" "$LEGACY_ENV"
+
+      - name: Set replacement URL references after the legacy app stops
+        if: env.OPERATION == 'migrate'
+        env:
+          KV: ${{ steps.infra.outputs.kv_name }}
+          URL: ${{ steps.environment.outputs.url }}
+        run: |
+          set -euo pipefail
+          # Only these URL values change; no credentials are read or printed.
+          az keyvault secret set --vault-name "$KV" --name workos-app-url --value "$URL" -o none
+          az keyvault secret set --vault-name "$KV" --name workos-redirect-uri --value "$URL/api/auth/callback" -o none
+
+      - name: Create or update the replacement dev app
+        if: env.OPERATION != 'prepare'
+        id: deploy
+        env:
+          RG: ${{ steps.config.outputs.resourceGroup }}
+          APP: ${{ steps.config.outputs.appName }}
+          LOCATION: ${{ steps.config.outputs.location }}
+          LEGACY_APP: ${{ steps.config.outputs.legacyAppName }}
+          LEGACY_ENV: ${{ steps.config.outputs.legacyEnvironmentName }}
+          IMAGE: ${{ steps.build.outputs.image }}
+          ENV_ID: ${{ steps.environment.outputs.id }}
+          IDENTITY_ID: ${{ steps.infra.outputs.identity_id }}
+          ACR_LOGIN: ${{ steps.infra.outputs.acr_login }}
+          KV_URI: ${{ steps.infra.outputs.kv_uri }}
+          CPU: ${{ steps.config.outputs.cpu }}
+          MEMORY: ${{ steps.config.outputs.memory }}
+          PROFILE: ${{ steps.config.outputs.workloadProfileName }}
+          MIN_REPLICAS: ${{ steps.config.outputs.minReplicas }}
+          MAX_REPLICAS: ${{ steps.config.outputs.maxReplicas }}
+        run: |
+          set -euo pipefail
+          bash infra/azure/legacy-app.sh assert-stopped "$RG" "$LEGACY_APP" "$LEGACY_ENV"
+          URL=$(az deployment group create -g "$RG" -n containerapp-dev-v2 \
+            --mode Incremental -f infra/azure/containerapp.bicep \
+            -p name="$APP" location="$LOCATION" image="$IMAGE" environmentId="$ENV_ID" \
+               identityId="$IDENTITY_ID" acrLoginServer="$ACR_LOGIN" keyVaultUri="$KV_URI" \
+               cpu="$CPU" memory="$MEMORY" workloadProfileName="$PROFILE" \
+               minReplicas="$MIN_REPLICAS" maxReplicas="$MAX_REPLICAS" \
             --query properties.outputs.url.value -o tsv)
           echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Deployed dev: $URL. Image: $IMAGE" >> "$GITHUB_STEP_SUMMARY"
+          echo 'Authentication, event streaming, and guard checks remain operator rollout checks. See infra/azure/README.md.' >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Job summary
-        run: |
-          echo "🚀 Deployed to **Dev**: ${{ steps.deploy.outputs.url }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Image: \`${{ steps.build.outputs.image }}\`" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Comment the Dev URL
+      - name: Comment the dev URL
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+          IMAGE: ${{ steps.build.outputs.image }}
         with:
           script: |
-            const url = '${{ steps.deploy.outputs.url }}';
-            const image = '${{ steps.build.outputs.image }}';
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `🚀 Deployed to **Dev**: ${url}\n\nImage: \`${image}\`\n` +
-                `_The Dev environment is shared — the most recent push wins._`,
+              body: `Deployed to Dev: ${process.env.URL}\n\nImage: \`${process.env.IMAGE}\`\n` +
+                'The dev environment is shared. The most recent deployment wins.',
             });

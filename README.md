@@ -1271,6 +1271,19 @@ pnpm test               # Run tests
 
 The full test suite requires the C# Roslyn host to be built (same requirement as [analyzing C#](#prerequisites)): the C# e2e test fails without it, and the Roslyn semantic-rule tests silently skip. It also needs Playwright's Chromium (`playwright-core install chromium` above): the guard web-driver suites fail rather than skip without it. CI installs both before running tests (`.github/actions/setup`); do the same locally, once per checkout/worktree.
 
+## Hosted Azure deployment
+
+The enterprise dev deployment uses checked-in Azure infrastructure and opt-in
+GitHub Actions. The replacement configuration targets `truecourse-dev-v2` in a
+workload-profiles environment, with 4 vCPU, 8 GiB and one replica. Production
+resource defaults are unchanged.
+
+The replacement is implemented; the Azure migration is **not yet performed**.
+Follow the [Azure setup and migration runbook](infra/azure/README.md) for the
+explicit preparation, job drain, legacy shutdown and URL cutover. The existing
+database and identity are reused, so the old and new workers must not run at the
+same time. [PLAN.md](PLAN.md) tracks implementation and deployment separately.
+
 ## Community
 
 Join the [TrueCourse Discord](https://discord.gg/TanxB63arz) to ask questions, share feedback, and follow what's shipping.

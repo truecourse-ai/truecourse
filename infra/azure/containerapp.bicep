@@ -33,6 +33,14 @@ param image string
 @description('Edition: enterprise (Postgres + SSO) or community (file-based).')
 param edition string = 'enterprise'
 
+@description('vCPU count as a string so fractional CPU values can be passed to Bicep.')
+param cpu string = '0.5'
+
+param memory string = '1Gi'
+
+@description('Empty preserves legacy environment behavior. Use Consumption in a workload-profiles environment.')
+param workloadProfileName string = ''
+
 param minReplicas int = 1
 param maxReplicas int = 1
 param targetPort int = 3001
@@ -88,6 +96,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
   }
   properties: {
     managedEnvironmentId: environmentId
+    ...(empty(workloadProfileName) ? {} : { workloadProfileName: workloadProfileName })
     configuration: {
       activeRevisionsMode: 'Single'
       ingress: {
@@ -110,8 +119,8 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
           name: 'truecourse'
           image: image
           resources: {
-            cpu: json('0.5')
-            memory: '1Gi'
+            cpu: json(cpu)
+            memory: memory
           }
           env: concat(plainEnvVars, secretEnvVars)
           probes: [

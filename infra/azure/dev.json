@@ -1,0 +1,16 @@
+{
+  "resourceGroup": "rg-truecourse-dev",
+  "location": "westus3",
+  "appName": "truecourse-dev-v2",
+  "environmentName": "truecourse-dev-cae-v2",
+  "legacyAppName": "truecourse-dev",
+  "legacyEnvironmentName": "truecourse-cae",
+  "logAnalyticsWorkspaceName": "truecourse-logs",
+  "acrName": "truecourseacrk7ncoyeug2nb2",
+  "identityName": "truecourse-id",
+  "cpu": "4",
+  "memory": "8Gi",
+  "workloadProfileName": "Consumption",
+  "minReplicas": 1,
+  "maxReplicas": 1
+}
