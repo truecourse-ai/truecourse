@@ -151,15 +151,17 @@ afterEach(() => {
 });
 
 describe('the Dependencies tab of a connected repository', () => {
-  it('lists the stored catalog joined with its registered instances', async () => {
+  it('lists supplied dependencies and hides resources created by tests', async () => {
     const calls = serve();
     renderAt(`/preview/repos/${REAL.id}/dependencies`);
 
     const table = await screen.findByRole('table', { name: 'Dependencies' });
     await within(table).findByText('anthropic');
-    expect(within(table).getByText('target-file')).toBeInTheDocument();
-    expect(within(table).getByText('supplied')).toBeInTheDocument();
-    expect(within(table).getByText('step-creatable')).toBeInTheDocument();
+    expect(within(table).queryByText('target-file')).not.toBeInTheDocument();
+    expect(within(table).getByText('Credentials')).toBeInTheDocument();
+    expect(within(table).getByText('Unprovided')).toBeInTheDocument();
+    expect(within(table).queryByText('supplied')).not.toBeInTheDocument();
+    expect(within(table).queryByText('step-creatable')).not.toBeInTheDocument();
     expect(calls).toContain(`/api/repos/${REAL.id}/guard/dependencies`);
   });
 

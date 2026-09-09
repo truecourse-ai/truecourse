@@ -1,6 +1,6 @@
 /**
- * The DEPENDENCIES tab, every class of starting state the program under test
- * needs, and what this machine provides for each.
+ * The DEPENDENCIES tab, supplied resources and their registration state.
+ * Internal test resources are excluded by useGuardDependencies.
  *
  * The house shape, not a card stack: the shared {@link EntityList} on the LEFT
  * (one row per catalog entry, plus every external service the recipe declares, its
@@ -68,7 +68,7 @@ export function GuardDependenciesPane({ repoId, reloadKey = 0, onOpenFlow }: Gua
   // Each open tab reads by the dependency it resolves to, a tab a CTA opened by
   // service name says which entry answers for it, not the name of the link.
   const tabItems = useMemo<GuardTabStripItem[]>(
-    () => openTabs.map((t) => ({ ...t, label: resolve(t.id)?.name ?? t.id, title: t.id, icon: Plug })),
+    () => openTabs.filter((t) => resolve(t.id)).map((t) => ({ ...t, label: resolve(t.id)!.name, title: t.id, icon: Plug })),
     [openTabs, resolve],
   );
 
@@ -108,8 +108,8 @@ export function GuardDependenciesPane({ repoId, reloadKey = 0, onOpenFlow }: Gua
           renderRow={(d) => <GuardDependencyListRow dependency={d} />}
           emptyText={
             view.detectionAvailable
-              ? 'Nothing declared yet.'
-              : 'Nothing has looked yet. Run `truecourse guard setup` to detect what this repo depends on.'
+              ? 'No dependencies to configure.'
+              : 'Run setup to discover dependencies.'
           }
         />
       </CollapsibleAside>
