@@ -16,5 +16,7 @@ export function errorHandler(
     log.error(err.stack);
   }
 
-  res.status(statusCode).json({ error: message });
+  // Driver errors may include SQL parameters containing entire transcripts
+  // or credentials. Keep internal failure details out of browser responses.
+  res.status(statusCode).json({ error: statusCode >= 500 ? 'Internal server error. Please try again.' : message });
 }

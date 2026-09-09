@@ -15,6 +15,27 @@ type Command = Record['command'];
 type Event = ReturnType<Store['persistence']['readEvents']>[number];
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
+/** JSONB cannot represent NUL or lone UTF-16 surrogates from tool/provider
+ * output. Store the transcript as serialized JSON text inside the envelope,
+ * keeping only the sequence searchable. Decoding restores the exact event.
+ * Existing inline events remain readable without rewriting stored history.
+ */
+function encodeActivityBody(body: ActivityEventBody): { [key: string]: unknown } {
+  if (body.kind === 'run') return body;
+  return {
+    kind: body.kind, sessionId: body.sessionId, event: { seq: body.event.seq },
+    eventEncoding: 'json-v1', eventJson: JSON.stringify(body.event),
+  };
+}
+
+function decodeActivityEvent(body: { [key: string]: unknown }, cursor: number): ActivityEvent {
+  if (body.kind === 'session-event' && body.eventEncoding === 'json-v1') {
+    if (typeof body.eventJson !== 'string') throw new Error('Invalid stored activity transcript');
+    return ActivityEventSchema.parse({ ...body, event: JSON.parse(body.eventJson), cursor });
+  }
+  return ActivityEventSchema.parse({ ...body, cursor });
+}
+
 /** Ordered asynchronous writes behind the pipeline's synchronous progress callbacks.
  * A job MUST await flush before settling. Publication happens after commit.
  */
@@ -122,7 +143,7 @@ export class PgSessionRunStore implements SessionRunBackend {
         if (!inserted.length) return;
         // Bounded inserts avoid PostgreSQL's parameter limit on long histories.
         for (let i = 0; i < events.length; i += 200) {
-          await tx.insert(activityEvents).values(events.slice(i, i + 200).map(({ cursor, ...body }) => ({ runId: record.runId, cursor, body })));
+          await tx.insert(activityEvents).values(events.slice(i, i + 200).map(({ cursor, ...body }) => ({ runId: record.runId, cursor, body: encodeActivityBody(body) })));
         }
       });
     }
@@ -204,7 +225,7 @@ export class PgSessionRunStore implements SessionRunBackend {
   private async readEvents(runId: string, after: number): Promise<ActivityEvent[]> {
     await this.validateCursor(runId, after);
     const rows = await this.db.select().from(activityEvents).where(and(eq(activityEvents.runId, runId), gt(activityEvents.cursor, after))).orderBy(asc(activityEvents.cursor));
-    return rows.map(row => ActivityEventSchema.parse({ ...row.body, cursor: row.cursor }));
+    return rows.map(row => decodeActivityEvent(row.body, row.cursor));
   }
 
   private async readTranscript(runId: string, sessionId: string, since: number): Promise<Event[]> {
@@ -215,7 +236,7 @@ export class PgSessionRunStore implements SessionRunBackend {
       since >= 0 ? sql`(${activityEvents.body}->'event'->>'seq')::bigint > ${since}` : undefined,
     )).orderBy(asc(activityEvents.cursor));
     return rows.map(row => {
-      const entry = ActivityEventSchema.parse({ ...row.body, cursor: row.cursor });
+      const entry = decodeActivityEvent(row.body, row.cursor);
       if (entry.kind !== 'session-event') throw new Error('Expected a session transcript event');
       return entry.event;
     });
@@ -239,7 +260,7 @@ export class PgSessionRunStore implements SessionRunBackend {
           if (owned && (row.owner !== this.owner || !row.leaseActive)) throw new Error('Activity writer lost its lease');
           if (!owned && row.record.status === 'running') throw new Error('Activity writer does not own this run');
           if (row.record.status !== 'running' && state?.status === 'running') throw new Error('Activity run is already terminal');
-          await tx.insert(activityEvents).values({ runId: record.runId, cursor: row.nextCursor, body: value });
+          await tx.insert(activityEvents).values({ runId: record.runId, cursor: row.nextCursor, body: encodeActivityBody(value) });
           await tx.update(activityRuns).set({
             nextCursor: row.nextCursor + 1,
             ...(state ? { record: state } : {}),
