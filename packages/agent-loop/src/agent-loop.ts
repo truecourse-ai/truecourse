@@ -497,6 +497,37 @@ function startSession<TOutcome>(
       result = await runOnce({ cursor, events }, [def.outcomePrecondition.message]);
     }
 
+    // Task-state validation must happen before finalization, including an outcome
+    // delivered during wrap-up. A smaller candidate cannot redefine completion.
+    let outcomeRefusals = 0;
+    let schemaRepairs = 0;
+    while (result.kind === 'outcome' && (def.validateOutcome || def.outcomeSchemaRepairs)) {
+      const parsed = def.outcomeSchema.safeParse(result.value);
+      let correction: string | undefined;
+      if (!parsed.success) {
+        if (schemaRepairs >= (def.outcomeSchemaRepairs ?? 0)) break;
+        schemaRepairs++;
+        correction = `Outcome schema needs correction. Repair the terminal object without discarding accepted work. This uses the existing session budget.\n${parsed.error.issues.map(issue => `${issue.path.join('.') || 'outcome'}: ${issue.message}`).join('\n')}`;
+      } else {
+        try {
+          correction = await def.validateOutcome?.(parsed.data);
+        } catch (error) {
+          return fail({ kind: 'malformed', detail: `outcome validator failed: ${String(error)}`, retryability: 'none' }, result.resumeCursor);
+        }
+      }
+      if (!correction) break;
+      // The fallback refusal bound also protects against a defective driver that
+      // returns outcomes without emitting assistant-turn usage events.
+      if (interruptCause !== undefined || ++outcomeRefusals >
+        def.budget.turns * (def.budget.maxResumes + 1) + WRAP_UP_TURNS) {
+        if (interruptCause === 'context') return fail({ kind: 'context-exhausted', retryability: 'none' }, result.resumeCursor);
+        if (interruptCause === 'aborted') return fail({ kind: 'transport', detail: 'aborted by caller', class: 'unknown', retryability: 'none' }, result.resumeCursor);
+        return fail({ kind: 'budget-exhausted', notReached: correction, retryability: 'none' }, result.resumeCursor);
+      }
+      const events = [...priorEvents, ...persistence.readEvents(sessionId)];
+      result = await runOnce({ cursor: result.resumeCursor ?? input.resume?.cursor, events }, [correction]);
+    }
+
     // -----------------------------------------------------------------------
     // finalize: the outcome requirement — a session cannot end
     // without a structured outcome its schema accepts
