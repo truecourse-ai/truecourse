@@ -1238,6 +1238,8 @@ export const InterfaceSchema = z
     /** The surface — a driver-registry id (the driver that would run its scenarios). */
     type: GuardDriverIdSchema,
     title: z.string().min(1),
+    /** Supporting actions are executable like tasks; absent on older catalogs. */
+    purpose: z.enum(['task', 'control']).optional(),
     /**
      * The FAMILY this invocable thing belongs to — the `rules` command tree, the
      * `analyses` route family, the page a web task acts on. One entry is one

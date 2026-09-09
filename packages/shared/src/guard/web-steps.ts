@@ -368,7 +368,31 @@ export const GuardWebClassSchema = z
  * The members are additive and every one of them is optional: an expectation
  * written before they existed asserts exactly what it always did.
  */
-export const GuardWebExpectSchema = z
+/** Cardinality and absence address all matches, never an authored first match. */
+const allMatchesLocator = GuardWebLocatorSchema.refine((target) => target.pick === undefined, {
+  message: '`pick: first` cannot be used for an assertion about all matching elements',
+})
+
+/**
+ * Count visually visible matches, including aria-hidden elements, for every
+ * locator kind. Detached and CSS-hidden elements do not count. A named scope
+ * must itself resolve uniquely; a missing scope is not evidence of zero matches.
+ */
+export const GuardWebCountSchema = z.object({
+  target: allMatchesLocator,
+  equals: z.number().int().nonnegative(),
+}).strict()
+
+/** Current DOM value, or the calendar date from the browser clock and timezone. */
+export const GuardWebInputValueSchema = z.object({
+  target: GuardWebLocatorSchema,
+  expected: z.union([
+    GuardStreamMatcherSchema,
+    z.object({ browserDate: z.literal('today') }).strict(),
+  ]),
+}).strict()
+
+const webExpectSchema = z
   .object({
     text: GuardStreamMatcherSchema.optional(),
     /** Read `text` from THIS element instead of the whole page. */
@@ -377,6 +401,10 @@ export const GuardWebExpectSchema = z
     url: GuardStreamMatcherSchema.optional(),
     /** An element that must be present and visible — or a list of them. */
     visible: z.union([GuardWebLocatorSchema, z.array(GuardWebLocatorSchema).min(1)]).optional(),
+    /** No matching element may be visible; detached elements satisfy this too. */
+    hidden: z.union([allMatchesLocator, z.array(allMatchesLocator).min(1)]).optional(),
+    count: GuardWebCountSchema.optional(),
+    inputValue: GuardWebInputValueSchema.optional(),
     /** An ARIA state of one element. See {@link GuardWebStateSchema}. */
     state: GuardWebStateSchema.optional(),
     /** One attribute of one element (the document element by default). */
@@ -390,14 +418,20 @@ export const GuardWebExpectSchema = z
       e.text !== undefined ||
       e.url !== undefined ||
       e.visible !== undefined ||
+      e.hidden !== undefined ||
+      e.count !== undefined ||
+      e.inputValue !== undefined ||
       e.state !== undefined ||
       e.attribute !== undefined ||
       e.class !== undefined,
-    { message: 'a web expectation needs one of text | url | visible | state | attribute | class' },
+    { message: 'a web expectation needs one of text | url | visible | hidden | count | inputValue | state | attribute | class' },
   )
   .refine((e) => e.within === undefined || e.text !== undefined, {
     message: '`within` scopes the `text` matcher — a scope with nothing to match is not an assertion',
   })
+
+// Keep nested step declaration types bounded as the additive vocabulary grows.
+export const GuardWebExpectSchema: z.ZodType<GuardWebExpect> = webExpectSchema
 
 /** The presence targets one expectation carries, as a list (empty when it carries none). */
 export function webVisibleTargets(
@@ -811,7 +845,7 @@ export type GuardWebCaptures = z.infer<typeof GuardWebCapturesSchema>
 export type GuardWebStateExpect = z.infer<typeof GuardWebStateSchema>
 export type GuardWebAttributeExpect = z.infer<typeof GuardWebAttributeSchema>
 export type GuardWebClassExpect = z.infer<typeof GuardWebClassSchema>
-export type GuardWebExpect = z.infer<typeof GuardWebExpectSchema>
+export type GuardWebExpect = z.infer<typeof webExpectSchema>
 export type GuardWebFile = z.infer<typeof GuardWebFileSchema>
 export type GuardWebNavigateStep = z.infer<typeof GuardWebNavigateStepSchema>
 export type GuardWebClickStep = z.infer<typeof GuardWebClickStepSchema>
@@ -913,6 +947,8 @@ export function webStepPatterns(step: GuardWebStep): Array<{ where: string; patt
   return [
     ...(step.expect?.text ? matcherPatterns('expect.text', step.expect.text) : []),
     ...(step.expect?.url ? matcherPatterns('expect.url', step.expect.url) : []),
+    ...(step.expect?.inputValue && !('browserDate' in step.expect.inputValue.expected)
+      ? matcherPatterns('expect.inputValue.expected', step.expect.inputValue.expected) : []),
     ...(step.expect?.attribute?.value
       ? matcherPatterns('expect.attribute.value', step.expect.attribute.value)
       : []),
@@ -1032,6 +1068,15 @@ export function describeWebExpect(expect: GuardWebExpect | undefined): string {
   }
   for (const target of webVisibleTargets(expect.visible)) {
     parts.push(`${describeWebLocator(target)} is visible`)
+  }
+  for (const target of webVisibleTargets(expect.hidden)) {
+    parts.push(`${describeWebLocator(target)} is hidden or absent`)
+  }
+  if (expect.count) parts.push(`${describeWebLocator(expect.count.target)} has ${expect.count.equals} visible matches`)
+  if (expect.inputValue) {
+    const expected = expect.inputValue.expected
+    parts.push(`${describeWebLocator(expect.inputValue.target)} value ${'browserDate' in expected
+      ? "is today's date in the browser timezone" : describeStreamMatcher(expected)}`)
   }
   if (expect.state) parts.push(describeWebState(expect.state))
   if (expect.attribute) parts.push(describeWebAttribute(expect.attribute))
