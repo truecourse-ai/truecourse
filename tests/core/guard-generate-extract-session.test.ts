@@ -113,6 +113,7 @@ function claim(sectionAnchor: string, over: Partial<ExtractOutcome['claims'][num
     driver: 'cli',
     sectionAnchor,
     reason: 'stdout carries the new id',
+    verification: { method: 'behavior', scope: 'configuration', observable: 'stdout carries the new id', cases: [{ id: 'created-id', claim: 'Print the created task id', method: 'behavior', requires: ['process'], conditions: [] }] },
     needs: [],
     ...over,
   }
@@ -211,6 +212,17 @@ describe('guard-generate.extract — the session def through the loop', () => {
 // ---------------------------------------------------------------------------
 
 describe('validateExtractDraft — the check the fold re-runs', () => {
+  it('rechecks the final outcome for missing cases and mixed observation scopes', () => {
+    const doc = docsOf(docRepo())[0]
+    const def = extractSessionDef({ doc, universe: buildGuardDocUniverse([doc]) })
+    const missing = { claims: [claim(CREATING, { verification: undefined })], untestable: [] }
+    expect(def.outcomeSchema.safeParse(missing).success).toBe(false)
+    const v = claim(CREATING).verification!
+    const mixed = { claims: [claim(CREATING, { verification: { ...v, scope: 'web', method: 'datastore' } })], untestable: [] }
+    expect(def.outcomeSchema.safeParse(mixed).success).toBe(false)
+    expect(def.outcomeSchema.safeParse({ claims: [claim(CREATING)], untestable: [] }).success).toBe(true)
+  })
+
   it('passes a loose-but-snappable anchor and refuses an unsnappable one', () => {
     const doc = docsOf(docRepo())[0]
     expect(validateExtractDraft({ claims: [claim('Creating Tasks')], untestable: [] }, doc)).toEqual([])
@@ -629,5 +641,42 @@ describe('extractSessionCacheKey', () => {
     expect(key).toMatch(/^[0-9a-f]{64}$/)
     expect(extractSessionCacheKey({ content: 'b', suppressedQuotes: [] })).not.toBe(key)
     expect(createHash('sha256').update('a').digest('hex')).not.toBe(key)
+  })
+})
+
+describe('source-grounded observation boundaries', () => {
+  // These fixtures exercise deterministic metadata validation, not a real model's
+  // understanding of prose. The prompt remains responsible for semantic splitting.
+  it('keeps UI save/edit/table requirements independent of protocol and invisible metadata', () => {
+    const r = docRepo(); const doc = docsOf(r)[0]
+    const web = (id: string, text: string): ExtractOutcome['claims'][number] => claim(CREATING, { claim: text, driver: 'web',
+      verification: { scope: 'web', method: 'behavior', observable: text,
+        cases: [{ id, claim: text, method: 'behavior', requires: ['browser'], conditions: [] }] } })
+    const post = web('post-save', 'Save closes the dialog and refreshes totals')
+    const edit = web('edit-reload', 'An edit survives reload')
+    const table = web('date-order', 'Expense rows descend by date')
+    const api = claim(CREATING, { claim: 'POST creates a record and edits preserve createdAt', driver: 'api',
+      verification: { scope: 'api', method: 'behavior', observable: 'HTTP response and subsequent read', cases: [
+        { id: 'post-contract', claim: 'POST creates the record', method: 'behavior', requires: ['http'], conditions: [] },
+        { id: 'created-at', claim: 'An edit preserves createdAt', method: 'behavior', requires: ['http'], conditions: [] },
+      ] } })
+    expect(validateExtractDraft({ claims: [post, edit, table, api], untestable: [] }, doc)).toEqual([])
+    for (const c of [post, edit, table]) {
+      const mixed = { ...c, verification: { ...c.verification!, cases: [...c.verification!.cases!, api.verification!.cases![0]] } }
+      expect(validateExtractDraft({ claims: [mixed], untestable: [] }, doc).join(' ')).toContain('Move protocol')
+    }
+    expect(validateExtractDraft({ claims: [{ ...post, alternativeDrivers: ['api'] }], untestable: [] }, doc).join(' ')).toContain('web proof only')
+  })
+  it('separates pristine empty-state proof from filtered-empty presentation', () => {
+    const r = docRepo(); const doc = docsOf(r)[0]
+    const empty = claim(CREATING, { claim: 'A pristine empty ledger has a zero total', driver: 'web', verification: {
+      scope: 'web', method: 'behavior', observable: 'Empty list and zero total', cases: [{ id: 'empty-ledger', claim: 'Empty ledger total is zero', method: 'behavior', requires: ['browser'], conditions: ['fresh-state'], preparation: 'empty' }],
+    } })
+    const filtered = claim(CREATING, { claim: 'A filter with no matching records shows no results', driver: 'web', verification: {
+      scope: 'web', method: 'behavior', observable: 'Filtered empty list', cases: [{ id: 'filtered-empty', claim: 'No matching rows', method: 'behavior', requires: ['browser'], conditions: [] }],
+    } })
+    expect(validateExtractDraft({ claims: [empty, filtered], untestable: [] }, doc)).toEqual([])
+    const merged = { ...empty, verification: { ...empty.verification!, cases: [...empty.verification!.cases!, ...filtered.verification!.cases!] } }
+    expect(validateExtractDraft({ claims: [merged], untestable: [] }, doc).join(' ')).toContain('different starting')
   })
 })

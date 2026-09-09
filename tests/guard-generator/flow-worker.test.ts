@@ -98,25 +98,27 @@ function draft(title: string, steps: unknown, milestones = 1): string {
 // ---------------------------------------------------------------------------
 
 describe('run_scenario — the deterministic pre-flight', () => {
-  it('an uncovered milestone is refused WITHOUT executing anything', async () => {
+  it('executes an untagged diagnostic probe but refuses to submit it as coverage', async () => {
     const r = seed()
     const exec = countingExecutor()
-    let report!: { content: string; isError?: boolean }
+    let probe!: { content: string; isError?: boolean }
+    let submission!: { content: string; isError?: boolean }
     await runGenerate({
       repoRoot: r,
       executor: exec.executor,
       extractSession: extractSessionBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
-        // No `milestone` on any step ⇒ milestone 1 is realized by nothing.
-        report = await task.runScenario(scenarioYaml(raw('nothing realizes milestone 1', PASSING_STEPS)))
-        return { kind: 'outcome', outcome: { kind: 'retired', attempts: 1, lastEvidence: 'pre-flight' } }
+        const yaml = scenarioYaml(raw('inspect the prerequisite', PASSING_STEPS))
+        probe = await task.runScenario(yaml)
+        submission = await task.submitScenario(yaml, [], faithfulJudge)
+        return { kind: 'outcome', outcome: { kind: 'retired', attempts: 1, lastEvidence: 'probe only' } }
       }),
     })
-
-    expect(report.isError).toBe(true)
-    expect(report.content).toContain('pre-flight defect (not executed)')
-    expect(report.content).toContain('milestone(s) 1 are realized by no step')
-    expect(exec.calls).toBe(0)
+    expect(probe.isError, probe.content).not.toBe(true)
+    expect(submission.isError).toBe(true)
+    expect(submission.content).toContain('Select at least one milestone to verify')
+    expect(exec.calls).toBe(1)
+    expect(loadScenarios(r).scenarios).toHaveLength(0)
   })
 
   it('an unknown milestone number is refused WITHOUT executing anything', async () => {
@@ -136,7 +138,7 @@ describe('run_scenario — the deterministic pre-flight', () => {
     })
 
     expect(report.isError).toBe(true)
-    expect(report.content).toContain('match no milestone of this flow')
+    expect(report.content).toContain('matches no milestone of this flow')
     expect(exec.calls).toBe(0)
   })
 
@@ -433,7 +435,7 @@ describe('the engine stash is what the fold persists', () => {
     })
 
     expect(res.written).toEqual([])
-    expect(res.errors.some((e) => e.message.includes('settled with a sha the engine never accepted'))).toBe(true)
+    expect(res.errors.some((e) => e.message.includes('sha the engine never accepted'))).toBe(true)
     expect(readManifest(r)!.flows.find((f) => f.flowId === 'version')!.generationInputsHash).toBeNull()
   })
 
@@ -1010,6 +1012,7 @@ describe('confirmCached', () => {
   it('re-runs the cached yaml and stands only when the verdict still reproduces', async () => {
     const r = seed()
     let firstAccepted = ''
+    let review: ReturnType<FlowWorkerTask['stashedReview']>
     // Round 1: settle the flow and keep the committed yaml.
     await runGenerate({
       repoRoot: r,
@@ -1018,6 +1021,7 @@ describe('confirmCached', () => {
         const accepted = await task.submitScenario(draft('the version prints', PASSING_STEPS), [], faithfulJudge)
         const sha = acceptedSha(accepted)!
         firstAccepted = task.stashedYaml(sha)!
+        review = task.stashedReview(sha)
         return { kind: 'outcome', outcome: { kind: 'settled', scenarioYamlSha: sha, expectedReds: [] } }
       }),
     })
@@ -1035,10 +1039,11 @@ describe('confirmCached', () => {
         mispredicted = await task.confirmCached([
           {
             yaml: firstAccepted,
+            review,
             expectedReds: [{ step: 1, predictedActual: 'never happens', verdict: 'code-drift', brief: 'b' }],
           },
         ])
-        confirmed = await task.confirmCached([{ yaml: firstAccepted, expectedReds: [] }])
+        confirmed = await task.confirmCached([{ yaml: firstAccepted, expectedReds: [], review }])
         const sha = yamlSha(firstAccepted)
         expect(task.hasStash(sha)).toBe(true)
         return { kind: 'outcome', outcome: { kind: 'settled', scenarioYamlSha: sha, expectedReds: [] } }

@@ -26,3 +26,9 @@ export * from './dashboard.js'
 export * from './summary.js'
 export * from './dependencies.js'
 export * from './proof.js'
+
+export * from './verification.js'
+
+export * from './coverage-progress.js'
+
+export * from './preparation.js'

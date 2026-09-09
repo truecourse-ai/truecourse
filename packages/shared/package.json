@@ -11,6 +11,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./guard-proof-node": {
+      "truecourse-source": "./src/guard/proof-node.ts",
+      "types": "./dist/guard/proof-node.d.ts",
+      "import": "./dist/guard/proof-node.js"
+    },
     "./llm": {
       "truecourse-source": "./src/llm/transport.ts",
       "types": "./dist/llm/transport.d.ts",

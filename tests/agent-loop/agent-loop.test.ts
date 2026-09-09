@@ -1716,3 +1716,75 @@ function dummyToolCtx(): ToolContext {
     dispatchChild: () => Promise.reject(new Error('driver ctx used')),
   };
 }
+
+describe('live outcome validation', () => {
+  it('repairs malformed terminal fields before validating task state and keeps cumulative usage', async () => {
+    let calls = 0;
+    let validated = 0;
+    const { driver, runs } = fakeDriver(async ({ input, emit }) => {
+      await emit({ type: 'assistant-turn', text: 'finish', usage: usage(100) });
+      if (++calls === 1) return { kind: 'outcome', value: { wrong: 1 }, resumeCursor: 'schema-cursor' };
+      expect(input.resume?.cursor).toBe('schema-cursor');
+      expect(input.initialMessages[0]).toContain('Outcome schema needs correction');
+      expect(input.initialMessages[0]).toContain('verdict');
+      return { kind: 'outcome', value: { verdict: 'done' } };
+    });
+    const { persistence } = memoryPersistence();
+    const result = await runAgentLoop({ def: makeDef({ outcomeSchemaRepairs: 2, validateOutcome: () => { validated++; return undefined; } }),
+      workItem: 'flow', initialMessages: [], driver, persistence, sessionId: 'schema-repair' }).outcome;
+    expect(result.status).toBe('completed');
+    expect(result.spent.turns).toBe(2);
+    expect(runs).toHaveLength(2);
+    expect(validated).toBe(1);
+    expect(persistence.readEvents('schema-repair').filter(e => e.type === 'outcome')).toHaveLength(1);
+  });
+  it('bounds repeated malformed outcomes without invoking semantic validation', async () => {
+    const { driver, runs } = fakeDriver(async ({ emit }) => {
+      await emit({ type: 'assistant-turn', text: 'invalid', usage: usage(1) });
+      return { kind: 'outcome', value: { wrong: 1 } };
+    });
+    const { persistence } = memoryPersistence();
+    const result = await runAgentLoop({ def: makeDef({ outcomeSchemaRepairs: 2, validateOutcome: () => { throw Error('must not validate malformed data'); } }),
+      workItem: 'flow', initialMessages: [], driver, persistence, sessionId: 'schema-bound' }).outcome;
+    expect(result).toMatchObject({ status: 'failed', failure: { kind: 'malformed' } });
+    expect(runs).toHaveLength(3);
+  });
+  it('continues a refused completion over the same transcript and cumulative usage', async () => {
+    let accepted = false
+    const { driver, runs } = fakeDriver(async ({ input, emit }) => {
+      await emit({ type: 'assistant-turn', text: 'finish', usage: usage(100) })
+      if (input.resume) {
+        expect(input.initialMessages).toEqual(['Still missing cancellation'])
+        expect(input.resume.events.some(e => e.type === 'assistant-turn')).toBe(true)
+        accepted = true
+      }
+      return { kind: 'outcome', value: { verdict: 'done' }, resumeCursor: 'cursor-1' }
+    })
+    const { persistence } = memoryPersistence()
+    const result = await runAgentLoop({ def: makeDef({ validateOutcome: () => accepted ? undefined : 'Still missing cancellation' }),
+      workItem: 'flow', initialMessages: ['go'], driver, persistence, sessionId: 'coverage' }).outcome
+    expect(result.status).toBe('completed')
+    expect(result.spent.turns).toBe(2)
+    expect(runs).toHaveLength(2)
+    expect(persistence.readEvents('coverage').filter(e => e.type === 'outcome')).toHaveLength(1)
+  })
+  it('cannot certify incomplete work by returning an outcome during budget exhaustion', async () => {
+    const { driver, runs } = fakeDriver(async ({ emit }) => {
+      await emit({ type: 'assistant-turn', text: 'finish', usage: usage(100) })
+      return { kind: 'outcome', value: { verdict: 'done' } }
+    })
+    const { persistence } = memoryPersistence()
+    const result = await runAgentLoop({ def: makeDef({ budget: { turns: 1, maxResumes: 0, tokenCeiling: 1000 }, validateOutcome: () => 'Five cases remain' }),
+      workItem: 'flow', initialMessages: ['go'], driver, persistence, sessionId: 'bounded' }).outcome
+    expect(result).toMatchObject({ status: 'failed', failure: { kind: 'budget-exhausted' } })
+    expect(runs.length).toBeLessThanOrEqual(1 + WRAP_UP_TURNS)
+    expect(persistence.readEvents('bounded').filter(e => e.type === 'outcome')).toHaveLength(0)
+  })
+  it('records a validator defect without treating it as a successful outcome', async () => {
+    const { driver } = fakeDriver(async () => ({ kind: 'outcome', value: { verdict: 'done' } }))
+    const { persistence } = memoryPersistence()
+    const result = await runAgentLoop({ def: makeDef({ validateOutcome: () => { throw new Error('validation failed') } }),
+      workItem: 'flow', initialMessages: ['go'], driver, persistence, sessionId: 'defect' }).outcome
+    expect(result).toMatchObject({ status: 'failed', failure: { kind: 'malformed', detail: 'outcome validator failed: Error: validation failed' } })
+  })
+})

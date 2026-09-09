@@ -43,7 +43,7 @@ import {
   type GuardDoc,
   type WorkerFidelityInput,
 } from '@truecourse/guard-generator'
-import type { GuardExpectedRed } from '@truecourse/shared'
+import { GUARD_REVIEW_POLICY_VERSION, type GuardExpectedRed } from '@truecourse/shared'
 import {
   FIDELITY_SESSION_BUDGET,
   FIDELITY_SESSION_CACHE_NAME,
@@ -105,6 +105,8 @@ const sha256 = (text: string): string => createHash('sha256').update(text).diges
 
 const YAML = 'title: Create a task\nsteps:\n  - run: ["add", "milk"]\n    expect:\n      exit: 0\n    milestone: 1\n'
 
+const reviewFor = (yaml: string) => ({ policyVersion: GUARD_REVIEW_POLICY_VERSION, scenarioFingerprint: sha256(yaml), caseEvidence: [] })
+
 /** A recording {@link FlowWorkerTask} whose closures answer from a script. */
 interface FakeTask {
   task: FlowWorkerTask
@@ -147,6 +149,8 @@ function fakeTask(over: Partial<FlowWorkerTask> = {}, flowId = 'create-a-task'):
       return { content: `accepted — the engine stashed this exact yaml under sha ${sha}.` }
     },
     hasStash: (sha) => stash.has(sha),
+    validateOutcome: () => undefined,
+    stashedReview: sha => stash.has(sha) ? reviewFor(stash.get(sha)!) : undefined,
     stashedYaml: (sha) => stash.get(sha),
     dropScenario: () => ({ content: 'not accepted — nothing to edit', isError: true }),
     droppedIds: () => [],
@@ -225,8 +229,9 @@ describe('flowWorkerSessionDef', () => {
     // contract (`replaces`, `drop_scenario`, multi-scenario settled). Only a
     // flow that is WORK consults the worker cache, so the roll costs one miss
     // per re-authoring flow, never a corpus-wide re-author.
-    expect(FLOW_WORKER_CLI_PROMPT_FINGERPRINT).toBe('5406c21dc97e4407')
-    expect(FLOW_WORKER_API_PROMPT_FINGERPRINT).toBe('e56a653332160975')
+    // Rolled to require executable repair attempts rather than corrected retirement prose.
+    expect(FLOW_WORKER_CLI_PROMPT_FINGERPRINT).toBe('62717249036b9947')
+    expect(FLOW_WORKER_API_PROMPT_FINGERPRINT).toBe('9642326fd5bf06a7')
   })
 
   it('routes both tools to the task’s engine closures', async () => {
@@ -329,6 +334,8 @@ describe('the flow-worker pool’s cache', () => {
     await setCacheEntry(r, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task), {
       outcome: { kind: 'settled', scenarioYamlSha: sha256(YAML), expectedReds: [] },
       scenarioYaml: YAML,
+      version: GUARD_REVIEW_POLICY_VERSION,
+      reviews: [reviewFor(YAML)],
     })
 
     const { byTask, summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], mutatorTasks: [], docs: docsOf(r) })
@@ -349,7 +356,7 @@ describe('the flow-worker pool’s cache', () => {
   it('a cached settled entry whose confirmation FAILS is a miss — the session runs and overwrites it', async () => {
     const r = docRepo()
     const { task, calls } = fakeTask({ confirmCached: async () => false })
-    const stale = { outcome: { kind: 'settled' as const, scenarioYamlSha: sha256('stale'), expectedReds: [] }, scenarioYaml: 'stale' }
+    const stale = { outcome: { kind: 'settled' as const, scenarioYamlSha: sha256('stale'), expectedReds: [] }, scenarioYaml: 'stale', version: GUARD_REVIEW_POLICY_VERSION, reviews: [reviewFor('stale')] }
     await setCacheEntry(r, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task), stale)
     sessionScript = settleScript
 
@@ -363,6 +370,8 @@ describe('the flow-worker pool’s cache', () => {
     expect(entry).toEqual({
       outcome: { kind: 'settled', scenarioYamlSha: sha256(YAML), expectedReds: [] },
       scenarioYaml: YAML,
+      version: GUARD_REVIEW_POLICY_VERSION,
+      reviews: [reviewFor(YAML)],
     })
   })
 
@@ -399,6 +408,8 @@ describe('the flow-worker pool’s cache', () => {
       outcome: outcomeCached,
       scenarioYaml: YAML,
       scenarioYamls: [YAML, YAML2],
+      version: GUARD_REVIEW_POLICY_VERSION,
+      reviews: [reviewFor(YAML), reviewFor(YAML2)],
     })
 
     const { byTask, summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], mutatorTasks: [], docs: docsOf(r) })
@@ -424,6 +435,8 @@ describe('the flow-worker pool’s cache', () => {
       },
       // One yaml for two accepted shas: nothing can be confirmed.
       scenarioYaml: YAML,
+      version: GUARD_REVIEW_POLICY_VERSION,
+      reviews: [reviewFor(YAML)],
     })
     sessionScript = settleScript
 
@@ -459,6 +472,8 @@ describe('the flow-worker pool’s cache', () => {
       },
       scenarioYaml: YAML,
       scenarioYamls: [YAML, YAML2],
+      version: GUARD_REVIEW_POLICY_VERSION,
+      reviews: [reviewFor(YAML), reviewFor(YAML2)],
     })
   })
 
@@ -534,6 +549,8 @@ describe('the flow-worker pool’s cache', () => {
     await setCacheEntry(r, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task), {
       outcome: { kind: 'settled', scenarioYamlSha: sha256(YAML), expectedReds: [] },
       scenarioYaml: YAML,
+      version: GUARD_REVIEW_POLICY_VERSION,
+      reviews: [reviewFor(YAML)],
     })
     sessionScript = settleScript
 
@@ -554,6 +571,8 @@ describe('the flow-worker pool’s cache', () => {
     expect(await getCacheEntry(r, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task))).toEqual({
       outcome: { kind: 'settled', scenarioYamlSha: sha256(YAML), expectedReds: [] },
       scenarioYaml: YAML,
+      version: GUARD_REVIEW_POLICY_VERSION,
+      reviews: [reviewFor(YAML)],
     })
     // The cache lives under the KEPT one-shot name.
     expect(FLOW_WORKER_CACHE_NAME).toBe('guard/generate')
@@ -723,6 +742,7 @@ describe('the flow-worker pool’s waves and progress', () => {
 // ---------------------------------------------------------------------------
 
 const FIDELITY_INPUT: WorkerFidelityInput = {
+  proofContext: { milestones: [], steps: [] },
   flowFingerprint: 'flow-fp',
   sectionKeys: ['b', 'a'],
   scenarioBehavior: JSON.stringify({ title: 't', steps: [] }),

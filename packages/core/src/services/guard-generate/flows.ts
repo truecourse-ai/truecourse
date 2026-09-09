@@ -76,6 +76,20 @@ A flow is what a USER is trying to achieve, in the order they would do it.
 - \`title\`: the user goal in the document's own words. \`goal\`: one sentence stating what the user gets when the whole path works.
 - Group by GOAL, not by document or section: claims from different documents of the area belong in one flow when the user experiences them as one path.
 
+# Independently provable obligations (enforced by check_flows and final validation)
+Keep normal user journeys separate from implementation inspection, schema checks,
+concurrency guarantees and injected failure/recovery checks. Group only when they
+form an actual dependent path and share the needed verification method. Do not
+make ordinary CRUD depend on proving a transaction implementation or a forced 500.
+Retain every required guarantee, including ones whose verification is unavailable.
+Respect the full verification scope, cases, conditions and preparation metadata below.
+Never merge UI post-save behavior with a protocol POST contract, UI edit/reload with
+unexposed creation timestamps, or a pristine empty ledger with a filtered-empty list.
+Preserve their independent case IDs and source references. Source claims that still
+mix these boundaries are upstream defects: report them precisely in check_flows;
+do not silently drop clauses, invent case IDs, or broaden proof drivers. A case
+requiring a common transition must keep that transition in its composed path.
+
 # Coverage honesty — the rule you are graded on
 Every claim marked \`account: required\` MUST appear either as a milestone of at least one flow, or in \`noFlowClaims\` with a one-sentence reason. Never silently drop one. A claim MAY appear in more than one flow when it genuinely belongs to both. Claims marked \`account: optional\` sit on surfaces with no test runner today: use one as a milestone when it truly belongs to the path, but you never have to account for it.
 Legitimate \`noFlowClaims\` reasons: the claim is an edge/error condition no user path reaches, it restates another claim, or it describes a static property rather than something a user does. "It didn't fit" is not a reason.
@@ -334,6 +348,7 @@ export function flowsSessionBriefing(
       `doc: ${c.doc}`,
       `anchor: ${c.anchor}`,
       `claim: ${c.title}`,
+      ...(c.verification ? [`verification: ${JSON.stringify(c.verification)}`] : []),
       `proof drivers (alternatives): ${[c.driver, ...(c.alternativeDrivers ?? [])].join(', ')}   account: ${[c.driver, ...(c.alternativeDrivers ?? [])].some(isRunnableDriver) ? 'required' : 'optional'}`,
       ...renderNeeds(c),
     )

@@ -4,10 +4,10 @@
  * so the Dependencies tab renders the vendored `GuardDependenciesPane` /
  * `GuardDependencyDetail` unchanged.
  *
- * EVERY class of starting state is a row, which is the whole point of the page:
- * a step-creatable one is listed and has nothing to register (`state: null`), a
- * seedable one the same, and only a SUPPLIED one carries a registration the user
- * fills in. A supplied dependency that names a third-party service also carries
+ * The wire payload retains every class of starting state, like the engine.
+ * useGuardDependencies hides step-creatable and seedable resources from the UI;
+ * only supplied resources have a registration the user fills in.
+ * A supplied dependency that names a third-party service also carries
  * the external-service half, which is what turns its row into a base URL, a
  * token and the headers this machine sends.
  *

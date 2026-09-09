@@ -453,3 +453,8 @@ export {
   dismissGuardClaim,
   undismissGuardClaim,
 } from './decisions.js'
+
+export { RecipePreparationSchema, RecipePreparationScriptSchema, resolvePreparationScripts } from './recipe.js'
+export type { RecipePreparation } from './recipe.js'
+export { prepareScenario, validateScenarioPreparation, preparationCatalog } from './preparation.js'
+export type { PreparedScenarioWorld } from './preparation.js'

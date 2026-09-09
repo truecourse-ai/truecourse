@@ -32,6 +32,20 @@ function read(s: GuardCoverageSources) {
 }
 
 describe('coverage across alternative flow proofs', () => {
+  it('combines independently verified scenarios without losing a remaining obligation', () => {
+    const s = sources()
+    const entry = s.manifest!.flows[0]
+    entry.scenarios[0].milestoneCoverage = [{ milestone: 1, driver: 'web' }]
+    expect(read(s).flow.status).toBe('no-interface')
+    entry.scenarios.push({ id: 'expenses.second', drivers: ['web'], status: 'passing', reviewed: true, milestoneCoverage: [{ milestone: 2, driver: 'web' }] })
+    expect(read(s).flow.status).toBe('guarded')
+    entry.scenarios[1].reviewed = false
+    expect(read(s).flow.status).toBe('no-interface')
+    entry.scenarios[1].reviewed = true
+    entry.scenarios[1].status = 'failing'
+    expect(read(s).flow.status).toBe('fail')
+  })
+
   it('a successful full web proof settles the flow while keeping the unavailable API alternative visible', () => {
     const { section, flow } = read(sources())
     expect(flow.status).toBe('guarded')
@@ -124,6 +138,9 @@ describe('coverage across alternative flow proofs', () => {
     })
     s.manifest = null
     expect(read(s).flow.status).toBe('guarded')
+    s.scenarios[0].binds[0].fingerprint = 'sha256:old-section'
+    expect(read(s).flow.status).toBe('no-interface')
+    s.scenarios[0].binds[0].fingerprint = 'sha256:section'
     const written = s.result.written
     s.result.written = []
     expect(read(s).flow.status).toBe('no-interface')

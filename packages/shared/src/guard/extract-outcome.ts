@@ -1,3 +1,4 @@
+import { GuardVerificationSchema } from './verification.js'
 /**
  * THE CLAIM-EXTRACTION SESSION OUTCOME — what one `guard-generate.extract`
  * agent session returns for ONE spec document (SPEC_GUARD_PLAN item's session
@@ -52,6 +53,7 @@ export const SessionExtractedClaimSchema = z
     driver: z.enum(guardDriverIds),
     /** Other drivers that can independently verify the entire same claim. */
     alternativeDrivers: z.array(z.enum(guardDriverIds)).optional(),
+    verification: GuardVerificationSchema.optional(),
     /** An anchor copied verbatim from the briefed outline (re-snapped anyway). */
     sectionAnchor: z.string().min(1),
     /** The observable a test would assert. */

@@ -1,3 +1,4 @@
+import { GUARD_REVIEW_POLICY_VERSION } from '@truecourse/shared';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -7,12 +8,14 @@ import { z } from 'zod';
 import { createTestApp } from '../helpers/test-app';
 import {
   GuardFlowDetailSchema,
+  GuardScenarioSchema,
   GuardFlowsViewCoreSchema,
   GuardInterfacesViewSchema,
   GuardRunFlowSchema,
   GuardSectionFlowSchema,
   guardCoverageWord,
 } from '../../packages/shared/src/index';
+import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 
 /**
@@ -341,6 +344,47 @@ describe('Guard flow read surfaces', () => {
   });
   afterEach(async () => {
     await teardownTestFixture(fixture.project.slug);
+  });
+
+  it('reports passing scenarios separately from independently reviewed case coverage', async () => {
+    const verification = { scope: 'web', method: 'behavior', observable: 'Visible items', cases: [
+      { id: 'create', claim: 'Created item appears', method: 'behavior', requires: ['browser'], conditions: [] },
+      { id: 'reload', claim: 'Item survives reload', method: 'behavior', requires: ['browser'], conditions: [] },
+    ] };
+    const milestones = [{ order: 1, doc: DOC, anchor: 'tasks/creating-tasks', claimTitle: 'Create and reload', proofDrivers: ['web'], verification }];
+    const bindings = [{ doc: DOC, anchor: 'tasks/creating-tasks', fingerprint: FP.creating }];
+    write(DOC, DOC_CONTENT);
+    writeJson('.truecourse/scenarios/flows.json', { version: 1, generatedAt: '2026-09-09T00:00:00Z', flows: [{ id: 'case-flow', title: 'Create and reload', goal: 'Create and reload', fingerprint: 'sha256:cases', milestones, bindings, composedOf: [], synthesisInputsHash: 'sha256:inputs' }], noFlowClaims: [] });
+    const evidence = [{ milestone: 1, caseId: 'create', steps: [1], reason: 'The created item is visible.' }];
+    const scenario = { id: 'case-test', title: 'Create', binds: [{ doc: DOC, section: bindings[0].anchor, fingerprint: FP.creating }], flow: { id: 'case-flow', fingerprint: 'sha256:cases' }, steps: [{ driver: 'web', navigate: '/items', milestone: 1, checks: ['create'], expect: { visible: { text: 'Created item' } } }] };
+    // JSON is valid YAML and uses the ordinary scenario loader.
+    writeJson('.truecourse/scenarios/tasks/case-test.yaml', scenario);
+    const manifest = { flows: [{ flowId: 'case-flow', flowFingerprint: 'sha256:cases', milestones, bindings, scenarios: [{ id: 'case-test', drivers: ['web'], status: 'passing', reviewed: true, caseEvidence: evidence, reviewPolicyVersion: GUARD_REVIEW_POLICY_VERSION, reviewedScenarioFingerprint: scenarioReviewFingerprint(GuardScenarioSchema.parse(scenario)), milestoneCoverage: [{ milestone: 1, driver: 'web', checks: ['create'] }] }], gaps: [{ surface: 'web', kind: 'blocked-on', milestones: [1], obligations: [{ milestone: 1, caseId: 'reload' }], reason: 'Milestone 1: reload is not verified', blocker: { kind: 'generation' } }, { surface: 'web', kind: 'no-interface', milestones: [1], obligations: [{ milestone: 1, caseId: 'create' }], reason: 'Historical missing create action', blocker: { kind: 'generation' } }] }] };
+    writeJson('.truecourse/scenarios/manifest.json', manifest);
+    const response = await request(app).get(url('flows')).expect(200);
+    expect(response.body.flows.find((f: any) => f.flowId === 'case-flow').progress).toEqual({ execution: 'passed', scenarios: 1, passed: 1, coverage: 'partial', verified: 1, total: 2, unit: 'cases', category: 'behavior', generation: 'incomplete' });
+    const detail = await request(app).get(url('flows/case-flow')).expect(200);
+    expect(detail.body.progress).toEqual(response.body.flows[0].progress);
+    const gapSurfaces = response.body.flows[0].surfaces.filter((s: any) => s.gap);
+    expect(gapSurfaces.find((s: any) => s.gap.obligations[0].caseId === 'reload').coveredByAlternative).toBeUndefined();
+    expect(gapSurfaces.find((s: any) => s.gap.obligations[0].caseId === 'create').coveredByAlternative).toBe(true);
+    expect(detail.body.gaps.find((g: any) => g.obligations[0].caseId === 'reload')).toMatchObject({ milestones: [1], obligations: [{ milestone: 1, caseId: 'reload' }] });
+    manifest.flows[0].scenarios[0].reviewPolicyVersion = GUARD_REVIEW_POLICY_VERSION - 1;
+    writeJson('.truecourse/scenarios/manifest.json', manifest);
+    const obsolete = await request(app).get(url('flows')).expect(200);
+    expect(obsolete.body.flows[0].progress).toMatchObject({ execution: 'passed', coverage: 'unverified', verified: 0 });
+    manifest.flows[0].scenarios[0].reviewPolicyVersion = GUARD_REVIEW_POLICY_VERSION;
+    writeJson('.truecourse/scenarios/manifest.json', manifest);
+    scenario.steps[0].expect.visible.text = 'A weaker assertion';
+    writeJson('.truecourse/scenarios/tasks/case-test.yaml', scenario);
+    const edited = await request(app).get(url('flows')).expect(200);
+    expect(edited.body.flows[0].progress).toMatchObject({ execution: 'passed', coverage: 'unverified', verified: 0 });
+    scenario.steps[0].expect.visible.text = 'Created item';
+    writeJson('.truecourse/scenarios/tasks/case-test.yaml', scenario);
+    manifest.flows[0].scenarios[0].caseEvidence = [];
+    writeJson('.truecourse/scenarios/manifest.json', manifest);
+    const unreviewed = await request(app).get(url('flows')).expect(200);
+    expect(unreviewed.body.flows[0].progress).toMatchObject({ execution: 'passed', coverage: 'unverified', verified: 0, total: 2 });
   });
 
   // --- The wire contract the client codes against --------------------------

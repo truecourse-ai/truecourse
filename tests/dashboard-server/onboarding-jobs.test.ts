@@ -418,6 +418,7 @@ describe('the guard setup job', () => {
             },
             authorInterfaces: async () => ({ status: 'skipped', reason: 'stubbed in this suite' }),
             seedSession: async () => ({ status: 'skipped', reason: 'stubbed in this suite' }),
+            preparationSession: async () => ({ status: 'skipped', reason: 'stubbed in this suite' }),
             verifyAuth: async () => ({ status: 'skipped', reason: 'stubbed in this suite' }),
           }),
       },
@@ -457,6 +458,7 @@ describe('the guard setup job', () => {
       'catalog',
       'interfaces',
       'seed',
+      'preparations',
       'auth',
     ]);
   }, 60_000);

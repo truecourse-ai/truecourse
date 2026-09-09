@@ -1,3 +1,4 @@
+import { GuardProgressSummary } from '@/components/guard/GuardProgressSummary';
 /**
  * A flow's MAIN-PANE detail, on ONE rule:
  *
@@ -312,6 +313,7 @@ export function GuardFlowDetail({
   return (
     <div className="flex h-full flex-col bg-background">
       <div className="border-b border-border bg-card px-6 py-4">
+
         <div className="flex flex-wrap items-center gap-2">
           {/* The SAME word the flow wears in the list — one vocabulary, one table. */}
           <GuardFlowStatusChip
@@ -353,6 +355,12 @@ export function GuardFlowDetail({
           detail.orphaned && (
             <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">{GUARD_UNDERIVED_SENTENCE}</p>
           )
+        )}
+        {detail.progress && (
+          <details className="mt-3 text-xs text-muted-foreground">
+            <summary className="cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">Execution and coverage details</summary>
+            <div className="pt-2"><GuardProgressSummary progress={detail.progress} /></div>
+          </details>
         )}
       </div>
 

@@ -213,7 +213,7 @@ describe('generateGuards — realization gaps', () => {
     expect(res.interfaces).toEqual({ total: 0, bySurface: {} })
   })
 
-  it('a matcher refusal settles as an `unrealizable` gap carrying its stated reason', async () => {
+  it('a matcher refusal records a mapping gap without inferring absent behavior', async () => {
     const r = seed()
 
     const res = await runGenerate({
@@ -223,14 +223,14 @@ describe('generateGuards — realization gaps', () => {
     })
 
     expect(res.written).toEqual([])
-    const gap = res.coverageGaps.find((g) => g.kind === 'unrealizable')!
+    const gap = res.coverageGaps.find((g) => g.kind === 'no-interface')!
     expect(gap.flowId).toBe('version')
     expect(gap.reason).toContain('the catalog only lists `boom`')
     expect(flowEntry(r, 'version')?.generationInputsHash).not.toBeNull() // settled, not blocked
     expect(res.flows.settled).toBe(1)
   })
 
-  it('a milestone no interface realizes is unrealizable after ONE corrective re-ask', async () => {
+  it('a partial plan retains the mapped portion after one corrective re-ask', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC }])
@@ -241,9 +241,8 @@ describe('generateGuards — realization gaps', () => {
       repoRoot: r,
       extractSession: extractSessionBy({}),
       flowsAreaSession: flowOfAllSession('the two-step path'),
-      // The plan covers the first milestone and nothing else; the engine re-asks
-      // once, then settles the STATED signal rather than authoring against a plan
-      // that walks only half the path. (Matching is STILL a one-shot stage.)
+      flowWorkerSession: authorsEvery(),
+      // A bounded correction preserves the usable portion and records the omission.
       matchRunner: async (ctx) => {
         calls++
         return { plan: [{ interfaceId: ctx.interfaces[0].id, milestone: 1 }] }
@@ -251,9 +250,9 @@ describe('generateGuards — realization gaps', () => {
     })
 
     expect(calls).toBe(2) // the call + exactly one corrective re-ask
-    expect(res.written).toEqual([])
-    const gap = res.coverageGaps.find((g) => g.kind === 'unrealizable')!
-    expect(gap.reason).toContain('no interface realizes milestone 2')
+    expect(res.written).toHaveLength(1)
+    const gap = res.coverageGaps.find((g) => g.kind === 'no-interface')!
+    expect(gap.reason).toContain('Milestone 2')
   })
 
   it('a surface whose runner has not shipped is an awaiting-driver gap on the flow', async () => {
@@ -316,6 +315,39 @@ describe('generateGuards — realization gaps', () => {
     expect(briefings.get('web')).toContain('Web surface serve command')
     expect(briefings.get('web')).toContain('polled until 2xx before the first browser step')
   }, 60_000)
+})
+
+describe('browser setup grounding', () => {
+  it('briefs creation controls outside the matched plan, and refreshes that context when the catalog changes', async () => {
+    const r = repo()
+    writeRecipe(r, { web: { serve: ['node', 'server.js'], healthPath: '/', app: '.' } })
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, DOC_CONTENT)
+    const create: Interface = { id: 'web/create', type: 'web', title: 'Create a record',
+      entry: { method: 'GET', path: '/' }, steps: [{ kind: 'activate', target: 'button "Add record"' }],
+      fingerprint: 'sha256:create' }
+    const briefings: string[] = []
+    const cacheInputs: string[][] = []
+    const run = (setup: Interface) => runGenerate({
+      repoRoot: r,
+      interfaces: interfacesOf(r, webInterface(), setup),
+      extractSession: extractSessionBy({ version: [{ driver: 'web' }], background: { untestable: 'background' } }),
+      matchRunner: async () => ({ plan: [{ interfaceId: 'web/board', milestone: 1 }] }),
+      flowWorkerSession: submitWorkerSessions((task) => {
+        cacheInputs.push(task.cacheMaterial.interfaceFingerprints)
+        return { blocked: [{ order: 1, capability: 'missing-data: record' }] }
+      }, { onBriefing: (_task, briefing) => briefings.push(briefing) }),
+    })
+    await run(create)
+    expect(briefings).toHaveLength(1)
+    expect(briefings[0]).toContain('BROWSER ACTIONS AVAILABLE FOR SETUP')
+    expect(briefings[0]).toContain('activate: button "Add record"')
+    expect(briefings[0]).toContain('Do not edit shared fixtures')
+    await run({ ...create, steps: [{ kind: 'activate', target: 'button "New record"' }], fingerprint: 'sha256:create-v2' })
+    expect(briefings).toHaveLength(2)
+    expect(briefings[1]).toContain('activate: button "New record"')
+    expect(cacheInputs[0]).not.toEqual(cacheInputs[1])
+  })
 })
 
 describe('generateGuards — blocked-on world-state gaps', () => {
@@ -602,9 +634,8 @@ describe('generateGuards — the committed scenario', () => {
     // Plural binds — one per bound section, in milestone order, pinned to the LIVE
     // index (the model's own binding is overwritten, never trusted).
     expect(written.binds).toEqual([...bindsFor(r, DOC, 'help'), ...bindsFor(r, DOC, 'version')])
-    // The flow's own goal rides the artifact, so a reader of the file
-    // alone knows what it is FOR — `flows.json` may no longer name this flow.
-    expect(written.promise).toBe('walk 2 milestone(s)')
+    // The artifact promises only its selected milestone claims.
+    expect(written.promise).toBe('help claim version claim')
     // The flow + interface references the runner reads for drift.
     expect(written.flow).toEqual({
       id: 'a-user-checks-the-version-then-the-help',

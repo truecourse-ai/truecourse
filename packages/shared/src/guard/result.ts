@@ -1,3 +1,4 @@
+import { GuardPreparationEvidenceSchema } from './preparation.js'
 /**
  * Guard run result types — the materialized current state a `guard run` writes to
  * `.truecourse/guard/LATEST.json` and the dashboard / `guard status` read back.
@@ -188,6 +189,8 @@ export type GuardBlockedDependency = z.infer<typeof GuardBlockedDependencySchema
 
 export const GuardScenarioResultSchema = z
   .object({
+    preparation: GuardPreparationEvidenceSchema.optional(),
+    preparationFailure: z.object({profile:z.string(),stage:z.enum(['prepare','cleanup'])}).optional(),
     id: z.string(),
     title: z.string(),
     /**

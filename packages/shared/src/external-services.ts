@@ -97,6 +97,17 @@ export const BaseUrlEnvSchema = z
   .strict()
 export type BaseUrlEnv = z.infer<typeof BaseUrlEnvSchema>
 
+/** A source-proven credential input. Never includes the value or header expression. */
+export const CredentialEnvSchema = z.object({
+  envVar: z.string().min(1),
+  evidence: z.array(z.object({
+    filePath: z.string(),
+    line: z.number().int().positive(),
+    header: z.string().min(1),
+  }).strict()).min(1),
+}).strict()
+export type CredentialEnv = z.infer<typeof CredentialEnvSchema>
+
 /**
  * One detected third party. `service` is the CANONICAL registry name (`stripe`,
  * `aws-sqs`) — the identity that gets stamped into a blocked-on gap reason and
@@ -133,6 +144,8 @@ export const DetectedExternalServiceSchema = z
      * it falls back to) before the name-only guesses.
      */
     baseUrlEnvs: z.array(BaseUrlEnvSchema).optional(),
+    /** Environment values traced into authentication headers for this service. */
+    credentialEnvs: z.array(CredentialEnvSchema).optional(),
   })
   .strict()
 export type DetectedExternalService = z.infer<typeof DetectedExternalServiceSchema>

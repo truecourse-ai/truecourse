@@ -4,16 +4,12 @@
  * says HOW the code can be driven (code-derived, spec-blind). One call per (flow,
  * surface) reads the flow's milestones and that surface's catalog DIGEST — ids,
  * entry descriptors, step summaries; never code — and returns either an ordered
- * realization plan (which interface walks which milestone) or an explicit
- * `unrealizable` reason.
+ * realization plan, explicit per-milestone gaps, or both.
  *
- * Both failure shapes are GAPS, never findings, and they are deliberately
- * un-conflated because their remedies are opposite:
- *  - an EMPTY catalog for the surface never reaches the model at all — the caller
- *    settles it as `no-interface` ("the mapper can't see this surface");
- *  - a matcher refusal (or a plan that still misses a milestone after the one
- *    corrective re-ask) settles as `unrealizable` ("the spec promises this; no code
- *    surface offers it").
+ * An empty catalog and a missing executable action are mapping gaps. Neither
+ * establishes that the application lacks the behavior. Capability gaps identify
+ * observations or fixtures the selected driver cannot provide. Valid portions
+ * remain available for authoring while the remaining gaps stay visible.
  *
  * Every interface id the model returns is validated against the catalog and every
  * milestone against the flow — a plan is never trusted to name something real.
@@ -27,6 +23,8 @@
 import { createHash } from 'node:crypto'
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import {
+  verificationCapabilityGap,
+  verificationCasePreparation,
   interfaceEntryLabel,
   flowDriversToMatch,
   describeWebLocator,
@@ -36,7 +34,7 @@ import {
   type Interface,
   type InterfaceStep,
 } from '@truecourse/shared'
-import { RealizationMatchSchema, type RealizationStep } from './schemas.js'
+import { RealizationMatchSchema, type RealizationStep, type RealizationGap, type RealizationMatch } from './schemas.js'
 import {
   MATCH_PROMPT_FINGERPRINT,
   type InterfaceDigest,
@@ -86,7 +84,7 @@ export function buildSurfaceCatalogs(interfaces: readonly Interface[]): Map<Guar
   const out = new Map<GuardDriverId, SurfaceCatalog>()
   for (const [surface, list] of byType) {
     const body = list
-      .map((j) => j.fingerprint || interfaceFingerprint(j))
+      .map((j) => `${j.fingerprint || interfaceFingerprint(j)}:${JSON.stringify(interfaceDigest(j).context ?? [])}`)
       .sort()
       .join('\n')
     out.set(surface, {
@@ -110,6 +108,15 @@ export function interfaceDigest(iface: Interface): InterfaceDigest {
     title: iface.title,
     entry: interfaceEntryLabel(iface.entry),
     steps: iface.steps.map(stepSummary),
+    ...((iface.purpose || iface.at || iface.to || iface.startingState || iface.endState) ? {
+      context: [
+        ...(iface.purpose ? [`purpose: ${iface.purpose}`] : []),
+        ...(iface.at ? [`at: ${iface.at}`] : []),
+        ...(iface.to ? [`to: ${iface.to}`] : []),
+        ...(iface.startingState ? [`requires state: ${iface.startingState}`] : []),
+        ...(iface.endState ? [`leaves state: ${iface.endState}`] : []),
+      ],
+    } : {}),
   }
 }
 
@@ -185,6 +192,7 @@ export function matchCacheKey(
     .update(
       [
         MATCH_PROMPT_FINGERPRINT,
+        'case-assignments-v1',
         catalog.surface,
         catalog.fingerprint,
         flow.fingerprint,
@@ -205,15 +213,16 @@ export async function readCachedMatch(
   flow: GuardFlow,
   catalog: SurfaceCatalog,
   cacheKey = matchCacheKey(flow, catalog),
-): Promise<{ plan: RealizationPlan | null; unrealizable?: string } | null> {
+): Promise<{ plan: RealizationPlan | null } | null> {
+  if (!capabilityPartition(flow, catalog.surface).flow.milestones.length) return { plan: null }
   const cached = await getCacheEntry(repoRoot, MATCH_CACHE_NAME, cacheKey)
   if (!cached) return null
   const parsed = RealizationMatchSchema.safeParse(cached)
-  if (!parsed.success) return null
-  if (parsed.data.unrealizable) return { plan: null, unrealizable: parsed.data.unrealizable }
-  const v = validateMatch(flow, catalog, parsed.data.plan)
-  if (hasIssues(v.issues)) return null
-  return { plan: { surface: catalog.surface, steps: v.steps, interfaces: pathOf(v.steps) } }
+  if (!parsed.success || parsed.data.unrealizable) return null
+  const issues = matchReferenceIssues(flow, catalog, parsed.data)
+  if (describeMatchIssues(issues)) return null
+  const { steps } = validateMatch(flow, catalog, parsed.data.plan)
+  return { plan: steps.length ? { surface: catalog.surface, steps, interfaces: pathOf(steps) } : null }
 }
 
 /** One planned (flow, surface) match — the estimate and the run read the same row. */
@@ -272,20 +281,20 @@ export interface RealizedMilestone {
 export interface RealizationPlan {
   surface: GuardDriverId
   /** The plan entries in the model's order, validated against flow + catalog. */
-  steps: { interface: Interface; milestone: number; note?: string }[]
+  steps: { interface: Interface; milestone: number; checks?: string[]; note?: string }[]
   /** The distinct interfaces the plan walks, in first-use order — the scenario's `interface.path`. */
   interfaces: Interface[]
 }
 
 /** A flow's verdict on one surface: a plan, a stated refusal, or a stage failure. */
 export type MatchOutcome =
-  | { kind: 'plan'; plan: RealizationPlan; calls: number }
-  | { kind: 'unrealizable'; reason: string; calls: number }
+  | { kind: 'plan'; plan: RealizationPlan; gaps: RealizationGap[]; calls: number }
+  | { kind: 'gap'; gaps: RealizationGap[]; calls: number }
   | { kind: 'error'; reason: string; calls: number }
 
 /** Validation of one raw match reply against the flow and the surface's catalog. */
 interface MatchValidation {
-  steps: { interface: Interface; milestone: number; note?: string }[]
+  steps: { interface: Interface; milestone: number; checks?: string[]; note?: string }[]
   issues: MatchIssues
 }
 
@@ -297,7 +306,7 @@ function validateMatch(
   const byId = new Map(catalog.interfaces.map((j) => [j.id, j]))
   const milestoneOrders = new Set(flow.milestones.map((m) => m.order))
   const issues: MatchIssues = { unknownInterfaces: [], uncoveredMilestones: [], unknownMilestones: [] }
-  const steps: { interface: Interface; milestone: number; note?: string }[] = []
+  const steps: { interface: Interface; milestone: number; checks?: string[]; note?: string }[] = []
   const covered = new Set<number>()
 
   for (const entry of raw) {
@@ -313,18 +322,10 @@ function validateMatch(
     const required = flow.milestones.find((m) => m.order === entry.milestone)?.proofDrivers
     if (required && !required.includes(catalog.surface)) continue
     covered.add(entry.milestone)
-    steps.push({ interface: iface, milestone: entry.milestone, ...(entry.note ? { note: entry.note } : {}) })
+    steps.push({ interface: iface, milestone: entry.milestone, ...(entry.checks ? { checks: entry.checks } : {}), ...(entry.note ? { note: entry.note } : {}) })
   }
   issues.uncoveredMilestones = flow.milestones.map((m) => m.order).filter((order) => !covered.has(order))
   return { steps, issues }
-}
-
-function hasIssues(issues: MatchIssues): boolean {
-  return (
-    issues.unknownInterfaces.length > 0 ||
-    issues.unknownMilestones.length > 0 ||
-    issues.uncoveredMilestones.length > 0
-  )
 }
 
 /** The plan's distinct interfaces in first-use order — the scenario's interface path. */
@@ -339,7 +340,7 @@ function pathOf(steps: readonly { interface: Interface }[]): Interface[] {
   return out
 }
 
-/** The engine's own `unrealizable` reason when a validated plan still misses milestones. */
+/** Missing catalog coverage after the bounded correction. */
 function uncoveredReason(flow: GuardFlow, orders: readonly number[]): string {
   const titles = orders
     .map((order) => flow.milestones.find((m) => m.order === order)?.claimTitle ?? `milestone ${order}`)
@@ -353,10 +354,97 @@ function buildContext(flow: GuardFlow, catalog: SurfaceCatalog): MatchUserContex
     milestones: flow.milestones
       .slice()
       .sort((a, b) => a.order - b.order)
-      .map((m) => ({ order: m.order, claim: m.claimTitle, ...(m.note ? { note: m.note } : {}) })),
+      .map((m) => ({ order: m.order, claim: m.claimTitle, ...(m.verification ? { verification: m.verification } : {}), ...(m.note ? { note: m.note } : {}) })),
     surface: catalog.surface,
     interfaces: catalog.interfaces.map(interfaceDigest),
   }
+}
+
+/** Cases are assigned independently; multiple grounded actions may serve one case. */
+function obligationKeys(milestone: number, checks?: readonly string[]): string[] {
+  return checks?.map(c => `${milestone}/${c}`) ?? [String(milestone)]
+}
+
+function eligibleMilestones(flow: GuardFlow, surface: GuardDriverId) {
+  return flow.milestones.filter(m => !m.proofDrivers || m.proofDrivers.includes(surface))
+}
+
+function missingDispositions(flow: GuardFlow, catalog: SurfaceCatalog, data: RealizationMatch): { milestone: number; checks?: string[] }[] {
+  const assigned = new Set([...data.plan, ...data.gaps].flatMap(p => obligationKeys(p.milestone, p.checks)))
+  return eligibleMilestones(flow, catalog.surface).flatMap(m => {
+    const cases = m.verification?.cases
+    if (cases?.length) {
+      const checks = cases.filter(c => !assigned.has(`${m.order}/${c.id}`)).map(c => c.id)
+      return checks.length ? [{ milestone: m.order, checks }] : []
+    }
+    return assigned.has(String(m.order)) ? [] : [{ milestone: m.order }]
+  })
+}
+
+/** Give the corrective call and the persisted error the same actionable details. */
+function matchReferenceIssues(flow: GuardFlow, catalog: SurfaceCatalog, data: RealizationMatch): MatchIssues {
+  const issues = validateMatch(flow, catalog, data.plan).issues
+  const byOrder = new Map(flow.milestones.map(m => [m.order, m]))
+  const planned = new Set(data.plan.flatMap(p => obligationKeys(p.milestone, p.checks)))
+  const seen = new Set<string>()
+  const gapErrors: string[] = []
+  for (const [kind, entries] of [['plan', data.plan], ['gap', data.gaps]] as const) {
+    for (const entry of entries) {
+      const m = byOrder.get(entry.milestone)
+      if (!m) {
+        if (kind === 'gap') gapErrors.push(`gap names unknown milestone ${entry.milestone}`)
+      } else {
+        const cases = m.verification?.cases
+        if (cases?.length && !entry.checks?.length) gapErrors.push(`${kind} milestone ${m.order} must name explicit checks`)
+        if (!cases?.length && entry.checks?.length) gapErrors.push(`${kind} milestone ${m.order} has no case metadata; omit checks`)
+        for (const check of entry.checks ?? []) if (!cases?.some(c => c.id === check)) gapErrors.push(`${kind} milestone ${m.order} names unknown check ${check}`)
+        if (entry.checks && new Set(entry.checks).size !== entry.checks.length) gapErrors.push(`${kind} milestone ${m.order} repeats a check`)
+        if (m.proofDrivers && !m.proofDrivers.includes(catalog.surface)) gapErrors.push(`${kind} milestone ${m.order} does not accept ${catalog.surface} proof`)
+        if (kind === 'plan') {
+          const reason = verificationCapabilityGap(m.verification, catalog.surface, entry.checks)
+          if (reason) gapErrors.push(`milestone ${entry.milestone} cannot be planned: ${reason}`)
+        }
+      }
+      if (kind === 'gap') for (const key of obligationKeys(entry.milestone, entry.checks)) {
+        const label = entry.checks ? `milestone ${entry.milestone} check ${key.split('/')[1]}` : `milestone ${entry.milestone}`
+        if (planned.has(key)) gapErrors.push(`${label} appears in both plan and gaps; use one disposition`)
+        if (seen.has(key)) gapErrors.push(`${label} has duplicate gaps; combine the reasons into one gap`)
+        seen.add(key)
+      }
+    }
+  }
+  const missing = missingDispositions(flow, catalog, data)
+  gapErrors.push(...missing.filter(m => m.checks).map(m => `milestone ${m.milestone} has unaccounted checks: ${m.checks!.join(', ')}`))
+  return { ...issues, uncoveredMilestones: missing.filter(m => !m.checks).map(m => m.milestone), gapErrors }
+}
+
+/** Remove only cases whose observations the selected driver cannot provide. */
+function capabilityPartition(flow: GuardFlow, surface: GuardDriverId): { flow: GuardFlow; gaps: RealizationGap[] } {
+  const gaps: RealizationGap[] = []
+  const milestones = eligibleMilestones(flow, surface).flatMap(m => {
+    const verification = m.verification
+    if (verification?.cases?.length) {
+      const cases = verification.cases.filter(c => {
+        const reason = verificationCapabilityGap(verification, surface, [c.id])
+        if (reason) gaps.push({ milestone: m.order, checks: [c.id], kind: 'capability', reason })
+        return !reason
+      })
+      return cases.length ? [{ ...m, verification: { ...verification, cases } }] : []
+    }
+    const reason = verificationCapabilityGap(verification, surface)
+    if (reason) gaps.push({ milestone: m.order, kind: 'capability', reason })
+    return reason ? [] : [m]
+  })
+  return { flow: { ...flow, milestones }, gaps }
+}
+
+function describeMatchIssues(issues: MatchIssues): string {
+  return [
+    ...(issues.unknownInterfaces.length ? [`unknown interface ids: ${issues.unknownInterfaces.join(', ')}`] : []),
+    ...(issues.unknownMilestones.length ? [`unknown milestone numbers: ${issues.unknownMilestones.join(', ')}`] : []),
+    ...(issues.gapErrors ?? []),
+    ...(issues.uncoveredMilestones.length ? [`unaccounted milestones: ${issues.uncoveredMilestones.join(', ')}`] : []),
+  ].join('; ')
 }
 
 /**
@@ -372,27 +460,39 @@ export async function matchFlow(
   runner: MatchRunner,
   cacheKey = matchCacheKey(flow, catalog),
 ): Promise<MatchOutcome> {
-  const base = buildContext(flow, catalog)
-
-  const settle = (data: { plan: RealizationStep[]; unrealizable?: string }): MatchOutcome | null => {
-    if (data.unrealizable) return { kind: 'unrealizable', reason: data.unrealizable, calls: 0 }
-    const v = validateMatch(flow, catalog, data.plan)
-    if (hasIssues(v.issues)) return null
-    return {
-      kind: 'plan',
-      plan: { surface: catalog.surface, steps: v.steps, interfaces: pathOf(v.steps) },
-      calls: 0,
+  const { flow: matchableFlow, gaps: capabilityGaps } = capabilityPartition(flow, catalog.surface)
+  if (matchableFlow.milestones.length === 0) return { kind: 'gap', gaps: capabilityGaps, calls: 0 }
+  const base = buildContext(matchableFlow, catalog)
+  const settle = (data: RealizationMatch, calls: number, repairMissing = false): MatchOutcome | null => {
+    const rawGaps: RealizationGap[] = data.unrealizable
+      ? matchableFlow.milestones.map(m => ({ milestone: m.order,
+        ...(m.verification?.cases?.length ? { checks: m.verification.cases.map(c => c.id) } : {}),
+        kind: 'mapping', reason: data.unrealizable! }))
+      : [...data.gaps]
+    // Cached rows already contain deterministic capability gaps; append only ones
+    // not already represented, so fresh responses and cache replay share validation.
+    const represented = new Set(rawGaps.flatMap(g => obligationKeys(g.milestone, g.checks)))
+    const gaps = [...rawGaps, ...capabilityGaps.filter(g => obligationKeys(g.milestone, g.checks).some(k => !represented.has(k)))]
+    const combined = { ...data, gaps }
+    const missing = missingDispositions(flow, catalog, combined)
+    if (repairMissing) for (const entry of missing) {
+      const milestone = flow.milestones.find(m => m.order === entry.milestone)!
+      const claims = entry.checks?.map(id => milestone.verification!.cases!.find(c => c.id === id)!.claim).join('; ')
+      gaps.push({ ...entry, kind: 'mapping', reason: `${uncoveredReason(flow, [entry.milestone])}${claims ? ` — missing cases: ${claims}` : ''}. Reconcile the interface catalog against ${milestone.doc}#${milestone.anchor}; preserve the existing mapped actions.` })
     }
+    const issues = matchReferenceIssues(flow, catalog, combined)
+    if (describeMatchIssues(issues)) return null
+    const v = validateMatch(flow, catalog, data.plan)
+    return v.steps.length
+      ? { kind: 'plan', plan: { surface: catalog.surface, steps: v.steps, interfaces: pathOf(v.steps) }, gaps, calls }
+      : { kind: 'gap', gaps, calls }
   }
 
   const cached = await getCacheEntry(repoRoot, MATCH_CACHE_NAME, cacheKey)
   if (cached) {
     const parsed = RealizationMatchSchema.safeParse(cached)
-    if (parsed.success) {
-      // A cached verdict was validated before it was written, so this re-check is a
-      // formality — but it keeps a hand-edited cache file from producing a plan the
-      // engine would never have accepted.
-      const settled = settle(parsed.data)
+    if (parsed.success && !parsed.data.unrealizable) {
+      const settled = settle(parsed.data, 0)
       if (settled) return settled
     }
   }
@@ -401,47 +501,60 @@ export async function matchFlow(
   let ctx: MatchUserContext = base
   for (let attempt = 0; attempt < 2; attempt++) {
     let raw: unknown
-    try {
-      calls++
-      raw = await runner(ctx)
-    } catch (e) {
-      return { kind: 'error', reason: `match call failed: ${(e as Error).message}`, calls }
-    }
+    try { calls++; raw = await runner(ctx) }
+    catch (e) { return { kind: 'error', reason: `match call failed: ${(e as Error).message}`, calls } }
     const parsed = RealizationMatchSchema.safeParse(raw)
     if (!parsed.success) {
-      if (attempt > 0) return { kind: 'error', reason: `match output invalid after re-ask: ${flattenZodError(parsed.error)}`, calls }
+      if (attempt > 0) return { kind: 'error', reason: `match output invalid after re-ask: ${flattenZodError(parsed.error)}; output: ${quoteInvalidOutput(raw)}`, calls }
       ctx = { ...base, correction: { invalidOutput: quoteInvalidOutput(raw) } }
       continue
     }
-    if (parsed.data.unrealizable) {
-      await setCacheEntry(repoRoot, MATCH_CACHE_NAME, cacheKey, parsed.data)
-      return { kind: 'unrealizable', reason: parsed.data.unrealizable, calls }
-    }
-    const v = validateMatch(flow, catalog, parsed.data.plan)
-    if (hasIssues(v.issues)) {
-      if (attempt > 0) {
-        // The model had its correction and still cannot walk the whole path. That IS
-        // the honest verdict: uncovered milestones read as unrealizable (the signal),
-        // while an answer that keeps naming interfaces the catalog doesn't have is a
-        // stage failure, not a statement about the product.
-        if (v.issues.uncoveredMilestones.length > 0 && v.issues.unknownInterfaces.length === 0) {
-          return { kind: 'unrealizable', reason: uncoveredReason(flow, v.issues.uncoveredMilestones), calls }
-        }
-        return {
-          kind: 'error',
-          reason: `match named ${v.issues.unknownInterfaces.length} interface id(s) outside the catalog after re-ask (${v.issues.unknownInterfaces[0]})`,
-          calls,
-        }
-      }
-      ctx = { ...base, issues: v.issues }
+    // A refusal gets one bounded re-ask: preserve whatever can be verified and
+    // identify missing catalog actions explicitly. Neither reply inspects code.
+    if (parsed.data.unrealizable && attempt === 0) {
+      ctx = { ...base, correction: { invalidOutput: `${quoteInvalidOutput(raw)}\nA missing catalog action does not establish absent application behavior. Return any grounded plan portions plus per-milestone mapping/capability gaps. Do not invent actions.` } }
       continue
     }
-    await setCacheEntry(repoRoot, MATCH_CACHE_NAME, cacheKey, parsed.data)
-    return {
-      kind: 'plan',
-      plan: { surface: catalog.surface, steps: v.steps, interfaces: pathOf(v.steps) },
-      calls,
+    const settled = settle(parsed.data, calls, attempt > 0)
+    if (settled) {
+      const data = settled.kind === 'plan'
+        ? { plan: settled.plan.steps.map((s) => ({ interfaceId: s.interface.id, milestone: s.milestone, ...(s.checks ? { checks: s.checks } : {}), ...(s.note ? { note: s.note } : {}) })), gaps: settled.gaps }
+        : settled.kind === 'gap' ? { gaps: settled.gaps } : null
+      if (data) await setCacheEntry(repoRoot, MATCH_CACHE_NAME, cacheKey, data)
+      return settled
     }
+    const issues = matchReferenceIssues(matchableFlow, catalog, parsed.data)
+    if (attempt > 0) return { kind: 'error', reason: `match references invalid after re-ask: ${describeMatchIssues(issues)}; output: ${quoteInvalidOutput(raw)}`, calls }
+    ctx = { ...base, issues,
+      correction: { invalidOutput: quoteInvalidOutput(raw) } }
   }
   return { kind: 'error', reason: 'match exhausted its attempts', calls }
+}
+
+/** Stable ordered action/case assignment shared by generation and cost estimation. */
+export function realizationAssignmentFingerprint(plan: RealizationPlan): string {
+  return createHash('sha256').update(JSON.stringify(plan.steps.map(s => [s.milestone, [...(s.checks ?? [])].sort(), s.interface.id]))).digest('hex')
+}
+
+/** Preparation removes only cases that cannot acquire their required starting state. */
+export function partitionPlanPreparations(
+  flow: GuardFlow,
+  plan: RealizationPlan,
+  available: readonly { baseline: 'empty' | 'seeded' }[],
+): { plan: RealizationPlan | null; missing: { milestone: number; caseId: string; requirement: 'empty' | 'controlled' }[] } {
+  const missing = new Map<string, { milestone: number; caseId: string; requirement: 'empty' | 'controlled' }>()
+  const steps = plan.steps.flatMap(step => {
+    if (!step.checks) return [step]
+    const milestone = flow.milestones.find(m => m.order === step.milestone)
+    const checks = step.checks.filter(id => {
+      const c = milestone?.verification?.cases?.find(c => c.id === id)
+      const requirement = c && verificationCasePreparation(c)
+      if (!requirement || available.some(p => requirement === 'controlled' || p.baseline === 'empty')) return true
+      missing.set(`${step.milestone}:${id}`, { milestone: step.milestone, caseId: id, requirement })
+      return false
+    })
+    return checks.length ? [{ ...step, checks }] : []
+  })
+  return { plan: steps.length ? { ...plan, steps, interfaces: plan.interfaces.filter(i => steps.some(s => s.interface.id === i.id)) } : null,
+    missing: [...missing.values()] }
 }

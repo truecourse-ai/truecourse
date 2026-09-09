@@ -21,9 +21,8 @@
  *  - NEVER INVENT A VARIABLE. `baseUrlEnv` is required by the schema and is injected
  *    into the app's env at every run; a service detection saw no base-URL override
  *    variable for is reported as UNDECLARABLE, not declared with a guess.
- *  - NEVER EDIT AN EXISTING DECLARATION. The skeleton only ever ADDS services. A
- *    service the user already declared (possibly by hand, possibly with values) is
- *    left byte-identical.
+ *  - PRESERVE EXISTING CONFIGURATION. Only missing, source-proven credential
+ *    requirements may be added to an existing service. Saved values stay intact.
  *  - A `baseUrlEnv` MUST PLAUSIBLY HOLD AN ORIGIN. Detection's candidates include
  *    credential and identifier variables (`DAILY_API_KEY`, `CLOSECOM_CLIENT_ID`,
  *    `CLOUDFLARE_ZONE_ID` — the finding-58 class at mint time, cal.diy
@@ -46,7 +45,9 @@ import type { Recipe, RecipeApiExternal } from '@truecourse/guard-runner'
 export interface ExternalsSkeleton {
   /** Service → the declaration to write into `api.externals`. Empty ⇒ no write. */
   declare: Record<string, RecipeApiExternal>
-  /** Services already present in `api.externals` — untouched. */
+  /** Existing services extended only with newly detected credential requirements. */
+  update: Record<string, RecipeApiExternal>
+  /** Services already present in `api.externals`, including those extended by `update`. */
   alreadyDeclared: string[]
   /** Detected services with no base-URL variable to point anywhere; never guessed. */
   undeclarable: string[]
@@ -89,12 +90,21 @@ export function deriveExternalsSkeleton(
   ])
 
   const declare: Record<string, RecipeApiExternal> = {}
+  const update: Record<string, RecipeApiExternal> = {}
   const alreadyDeclared: string[] = []
   const undeclarable: string[] = []
 
   for (const service of [...detected].sort((a, b) => a.service.localeCompare(b.service))) {
+    const credentials = Object.fromEntries((service.credentialEnvs ?? [])
+      .filter(c => !owned.has(c.envVar) && !recipePinned.has(c.envVar))
+      .map(c => [c.envVar, {}]))
     if (service.service in existing) {
       alreadyDeclared.push(service.service)
+      if (Object.keys(credentials).length > 0) {
+        const prior = existing[service.service]!
+        update[service.service] = { ...prior, env: { ...prior.env, ...credentials } }
+        for (const name of Object.keys(credentials)) owned.add(name)
+      }
       continue
     }
     const vars = baseUrlVars(service).filter(
@@ -110,14 +120,18 @@ export function deriveExternalsSkeleton(
       if (v.defaultUrl) endpoints[v.envVar] = v.defaultUrl
     }
     for (const v of vars) owned.add(v.envVar)
+    // A variable already declared as a URL cannot also be declared under env.
+    for (const v of vars) delete credentials[v.envVar]
+    for (const name of Object.keys(credentials)) owned.add(name)
     declare[service.service] = {
       baseUrlEnv: primary.envVar,
       ...(Object.keys(endpoints).length > 0 ? { endpoints } : {}),
+      ...(Object.keys(credentials).length > 0 ? { env: credentials } : {}),
       description: describe(service),
     }
   }
 
-  return { declare, alreadyDeclared, undeclarable }
+  return { declare, update, alreadyDeclared, undeclarable }
 }
 
 /** A name that holds a credential or an identifier (`…_API_KEY`, `…_CLIENT_ID`,

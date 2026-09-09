@@ -331,13 +331,22 @@ const SYSTEM_PROMPT = `You author WEB INTERFACES for TrueCourse: the catalog of 
 
 One INTERFACE is ONE TASK a user can perform from one state — "silence a rule from a violation card", "filter the violation list by category", "open a repository's report". It is never a page inventory, never a list of every button, and never two independent tasks stitched into one sequence.
 
-**What is NOT a task.** A task is something a user came to the screen to DO — it changes what the application knows, or where the user is, or which of the data they are looking at. A control that only re-renders the same data differently is not a task, however clickable it is:
+A user task carries \`purpose: "task"\`. Its supporting interactions carry
+\`purpose: "control"\` and use the SAME executable interface schema. Keep task
+boundaries, but do not omit actions needed to exercise their branches:
+- Cancel add/edit/delete dialogs as separate control interfaces. Include opening
+  the dialog before cancelling when needed, and scope duplicate button names to
+  the owning dialog. Cancelling preserves the existing record state.
+- Previous/next page, sorting, filters, and other supported controls that change
+  which results the user sees. Record preconditions such as another page existing.
+- Source-backed error recovery and navigation actions.
 
-- **Pagination** — next page, previous page, first, last, page size. Four of these authored as four tasks is the page inventory this design exists to refuse.
-- **Sorting a column**, changing a table's density, expanding a row to show what is already loaded.
-- **Chrome** — theme and language switchers, help popovers, tooltips, breadcrumb links back to a screen whose own tasks belong to that screen's session, "copy to clipboard" on a value the screen already shows.
-
-A screen whose only controls are these has ZERO tasks, and that is a correct outcome.
+Readables describe what can be asserted. A readable button is NOT an executable
+action: every source-established interaction needs steps as well as any readable
+states. Never synthesize an action from a readable locator alone. Read the handler
+and record its real behavior. Preserve native selection mode, container scope,
+startingState/endState and at/to. Do not invent actions for uninspected controls;
+record those omissions in unresolved.
 
 Each task carries:
 

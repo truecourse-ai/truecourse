@@ -1,3 +1,4 @@
+import { GuardPreparationNameSchema } from './preparation.js'
 /**
  * The guard scenario — the committed, declarative test that realizes ONE
  * spec flow. One YAML file per scenario under `.truecourse/scenarios/<area>/`.
@@ -420,6 +421,8 @@ export const GuardExternalsSchema = z.record(z.string().min(1), GuardExternalSch
 
 export const GuardSetupSchema = z
   .object({
+    /** A recipe-owned, verified private datastore for this complete execution. */
+    preparation: GuardPreparationNameSchema.optional(),
     /** Declarative sandbox seeding: sandbox-relative path → file content. */
     files: z.record(z.string(), z.string()).optional(),
     env: z.record(z.string(), z.string()).optional(),

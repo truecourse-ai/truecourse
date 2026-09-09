@@ -263,6 +263,26 @@ beforeEach(() => buildModelMock.mockReset());
 
 for (const fixture of [apiFixture(), sdkFixture()]) {
   describe(`driver conformance: ${fixture.name}`, () => {
+    it('continues a semantically incomplete outcome with both driver protocols', async () => {
+      let reviews = 0;
+      const driver = fixture.make([
+        { kind: 'tool', name: 'probe', args: { value: 'hi' } },
+        { kind: 'outcome', value: { verdict: 'keep' } },
+        { kind: 'tool', name: 'probe', args: { value: 'missing case' } },
+        { kind: 'outcome', value: { verdict: 'keep' } },
+      ]);
+      const { persistence } = memoryPersistence();
+      const result = await loop(driver, persistence, {
+        def: makeDef({ validateOutcome: () => ++reviews === 1 ? 'Verify the remaining case before completing.' : undefined }),
+      }).outcome;
+      expect(result.status).toBe('completed');
+      expect(reviews).toBe(2);
+      const events = persistence.readEvents('s1');
+      expect(events.filter(e => e.type === 'outcome')).toHaveLength(1);
+      expect(events.some(e => e.type === 'user-message' && e.content.includes('remaining case'))).toBe(true);
+      expect(events.filter(e => e.type === 'tool-result')).toHaveLength(2);
+    });
+
     it('completes a tool round-trip with a schema-valid outcome', async () => {
       const driver = fixture.make([
         { kind: 'text', text: 'thinking' },

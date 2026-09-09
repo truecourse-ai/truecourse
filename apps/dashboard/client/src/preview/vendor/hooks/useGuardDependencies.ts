@@ -12,7 +12,7 @@
  * user's problem to fix and the detail renders it inline.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import * as api from '@/preview/vendor/lib/api';
 import { ApiError } from '@/preview/vendor/lib/api';
 import type { GuardDependenciesView, GuardDependencyPatch } from '@/preview/vendor/types/guard-dependencies';
@@ -76,5 +76,12 @@ export function useGuardDependencies(
     [repoId],
   );
 
-  return { view, loading, error, save, saving, refetch };
+  // Test-created and seeded resources stay in the engine's catalog. Every
+  // dependency page shares this projection, including after registration saves.
+  const visibleView = useMemo(() => view && ({
+    ...view,
+    dependencies: view.dependencies.filter((dependency) => dependency.class === 'supplied'),
+  }), [view]);
+
+  return { view: visibleView, loading, error, save, saving, refetch };
 }

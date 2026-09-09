@@ -29,6 +29,7 @@ export {
   type FlowWorkerSessionSeam,
   type FlowWorkerSessionResult,
   type FlowWorkerTask,
+  type FlowWorkerReview,
   type FlowWorkerToolReport,
   type FlowWorkerCacheMaterial,
   type WorkerFidelityInput,
@@ -56,6 +57,8 @@ export {
   buildSurfaceCatalogs,
   interfaceDigest,
   realizationLines,
+  realizationAssignmentFingerprint,
+  partitionPlanPreparations,
   matchCacheKey,
   MATCH_CACHE_NAME,
   type MatchOutcome,
@@ -274,6 +277,7 @@ export {
 } from './endpoint-probe.js'
 
 export { deriveExternalsSkeleton, type ExternalsSkeleton } from './externals-skeleton.js'
+export { detectedCredentialVars, extendCredentialRegistrations } from './credential-registrations.js'
 
 export {
   birthValidate,
@@ -447,3 +451,5 @@ export {
 } from './validate.js'
 export { apiAuthEvidence, probeCandidatesFromInterfaces, requiredResources } from './seed-evidence.js'
 export type { ApiAuthEvidence, RequiredResource } from './seed-evidence.js'
+
+export type { GuardSetupPreparationSession, GuardSetupPreparationSessionInput } from './setup.js'

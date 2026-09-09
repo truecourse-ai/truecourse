@@ -363,3 +363,17 @@ describe('control type and scope survive authoring', () => {
     expect(validate(parsed).errors).toEqual([]);
   });
 });
+
+
+describe('supporting browser controls', () => {
+  it('persists executable cancel branches and pagination alongside tasks', () => {
+    const controls = ['cancel-add', 'cancel-edit', 'cancel-delete', 'previous-page', 'next-page'].map((id) => task({
+      id: `web/${id}`, title: id, purpose: 'control', at: 'root',
+      steps: [{ kind: 'activate', target: `button "${id}"` }],
+    }))
+    const result = validate(fragment({ interfaces: [task(), ...controls] }))
+    expect(result.errors).toEqual([])
+    expect(result.authored!.interfaces.filter((i) => i.purpose === 'control')).toHaveLength(5)
+    expect(result.authored!.interfaces.every((i) => i.steps.length > 0)).toBe(true)
+  })
+})

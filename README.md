@@ -220,6 +220,8 @@ Only genuine within-area **disagreements** flag as overlaps — docs that agree 
 
 **2. Guard setup** (`truecourse guard setup`) — The cheap preparation stage between the scan and the generator, and a **prerequisite** for it: `guard generate` refuses to run until it has been done. It derives and *proves* the recipe (install → build → boot, then a live call against a real route of every declared server), detects the third parties and the database this repo uses, **declares** every detected external API in `recipe.json`, and drafts the one seed script that creates both the rows and the authenticated principals your scenarios need — running it for real and validating its manifest before either artifact is written. At most two LLM calls.
 
+The dashboard's Dependencies view shows supplied resources, such as credentials, external services and registered projects. Resources that tests create or seed remain in the pipeline's dependency catalog but are hidden from dependency lists and detail pages. A prepared repository with only internal resources shows "No dependencies to configure."
+
 Why it is a separate stage rather than something `guard generate` figures out: all of these facts live in `recipe.json`, and editing `recipe.json` moves the recipe fingerprint, which re-authors every section generated against it. Discovering them as a byproduct of the expensive stage means every fix costs a full regenerate. Discovering them first means every fix is free. The same logic is why setup declares external services you have *no account for*: the DECLARATION is what enters the fingerprint, the API key is not — so handing guard a key later touches only the gitignored `scenarios/externals.local.json` and re-authors nothing.
 
 It is idempotent: a bare re-run over a prepared repo reports and no-ops. `--refresh` re-derives, and replacing an existing seed script always asks first (in a non-TTY it refuses rather than clobber a hand-edited file). Output: `guard/setup.json` (the record + detection snapshot, gitignored), plus whatever it wrote to `recipe.json` and the seed script — both committable, both yours to review.
@@ -228,7 +230,69 @@ It is idempotent: a bare re-run over a prepared repo reports and no-ops. `--refr
 
 Two authoring guarantees ride generation: a section's own **worked example** (a fenced block) is seeded into its test **byte-for-byte** — never paraphrased, the engine byte-checks the committed scenario against the doc's bytes — and a **two-sided promise** ("valid X is accepted, invalid X is rejected") gets steps for **both halves**, so exclusion logic that silently breaks can't stay green. And a last line of defense guards the whole run: when a large sample of birth steps is overwhelmingly inert — a cli entry answering everything instantly with nothing, or an api server answering every route with the same empty status — generate **aborts as a recipe failure** (nothing is written) instead of committing a green corpus that proves nothing.
 
-**Generation also adjudicates what it wrote**, and that adjudication now actually runs on the default OSS transport (it did not in 0.8.0 — see below). Two stages judge the corpus after birth: a **fidelity review** (up to one call per green scenario — does this test actually verify the claim it binds to?) and a **failure triage** (up to one call per failing test — is the repo wrong, the doc wrong, or our test wrong?). Both were quietly disabled for OSS runs through 0.8.0 — they were gated on a transport the OSS CLI never installs, so they cost nothing and returned nothing. They now always run, which is a **real increase in what a generate bills** versus 0.8.0 for the same repo. The pre-flight estimate always priced both stages, so the ceiling you confirm is unchanged and still an upper bound — but the invoice is not where you should discover this. If either stage loses *every* call (a rate limit, an outage, an expired login), the run **still writes its scenarios** — those verdicts are annotation about tests birth has already executed, and throwing away a whole generate's spend over them costs strictly more — and reports the stage as **unadjudicated** in the summary, in `guard status`, and in the dashboard. The affected flows are deliberately left **unsettled**, so re-running generate once the model is reachable adjudicates exactly them; authoring is cached on unchanged specs, so that re-run pays for the verdicts, not for writing the tests again.
+Generation independently reviews each submitted passing scenario. Scenarios with explicit cases also receive a fidelity review when they reproduce a declared failure. The worker supplies the expected failure diagnosis; the engine confirms the observed failure before accepting it. The reviewer then checks whether the assertions establish the selected requirements. If review is unavailable, generation retains the executed scenario as unreviewed and leaves the flow incomplete for another attempt. Review calls contribute to generation cost.
+
+Browser catalogs include executable supporting controls, such as cancelling a dialog or changing pages, alongside user tasks. Each control must be grounded in inspected source, with its locator scope and state requirements. A readable button alone does not establish an executable action. Matching preserves usable portions and reports missing catalog actions separately from missing verification capabilities.
+
+Claims carry a verification method: observable behavior, filesystem inspection, datastore inspection, controlled concurrency, or implementation inspection. Extraction separates independently provable guarantees. For example, exact returned cents and the absence of floating-point multiplication are separate obligations. A successful HTTP response cannot prove an internal implementation guarantee; unsupported inspection remains a visible capability gap.
+
+Newly extracted claims also declare a verification scope (`web`, `api`, `configuration`, or `implementation`) and independently falsifiable cases. Extraction and flow synthesis reject mixed observation scopes or incompatible starting/failure conditions before authoring. Browser behavior is checked through the UI; API behavior through the protocol. Fresh state is a preparation condition. An explicit SQLite representation or transaction guarantee stays a separate system contract.
+
+Scenario assertions select case IDs with `checks`. The independent fidelity reviewer must identify the executable assertion steps proving every selected case; a milestone tag or a passing response alone does not establish coverage. The manifest stores that evidence and a fingerprint of the reviewed scenario. Generated titles and promises describe only the selected cases. Generation preserves accepted portions when later cases block or fail review, and combines their coverage across scenarios. Missing cases remain retryable. Changed scenarios, stale bindings and unreviewed tests cannot complete coverage. Older artifacts remain readable. Milestones without explicit cases retain legacy accounting; explicit cases require current review evidence.
+
+After each acceptance, the worker receives the exact remaining case IDs and claims, including unresolved review findings. A premature `settled` response resumes the same session under its remaining budget. Accepted portions survive a later blocker or budget exhaustion, and incomplete flows keep no completion hash so the next generation attempts the missing work. Generation can be complete with a reviewed failing test; passing execution still requires the assertions to pass.
+
+Worker completion caches include the review policy version, scenario fingerprints and case evidence. The engine checks complete assigned coverage before replay and then confirms the scenarios against the current runtime. Old, edited, partial or unreviewed cache entries cannot skip authoring. Review-policy changes make affected artifacts eligible for regeneration without rewriting historical run results.
+
+Invalid reviewer citations are corrected inside the same review session, with exact invalid references and eligible assertion steps. Cached evidence is checked against the current typed scenario before reuse. Annotation errors and an unavailable reviewer leave work incomplete without counting as semantic test rejection. Genuine missing assertions still require a revised scenario and independent review.
+
+Matching assigns explicit case IDs to both plan rows and gaps. Supported cases remain assigned when a sibling needs a missing action, preparation or executor capability. These assignments are part of generation and worker cache identity. Catalog gaps name the affected cases and source location for targeted interface authoring; existing valid interfaces are retained.
+
+Blocked and retired explicit-case workers report `remaining` entries with milestone, case ID, reason category, evidence and current issue ID. The engine reconciles these with its latest observations and requires changed executable submissions for actionable cases after requesting repair. Rewording blockers or resubmitting unchanged behavior cannot permit retirement. Refusals consume the original session budget; accepted cases stay saved if that budget is exhausted. Malformed worker terminal objects receive at most two schema corrections before failure, within that same budget. A cancellation check must arrange a fully valid unsaved form, observe the open dialog, cancel, verify closure and prove that the draft was not saved.
+
+Recipes can declare named `preparations` with `baseline: "empty" | "seeded"`, `scope: "instance"`, environment bindings and repository-owned Node scripts for `seed`, `verify` and optional `cleanup`. A scenario selects one with `setup.preparation`. The runner allocates a fresh private world for each execution, including confirmation and cache replay; restarts within that execution keep the same world. Profile-owned environment values take precedence across API, browser and request steps, and conflicting scenario overrides are rejected. Private fixtures and credentials come only from that profile.
+
+Each profile also declares `baselineChecks`, unfiltered JSON collection reads that the runner executes against both prepared applications before the verifier and against the primary afterward. For example, `[{ "path": "/api/expenses", "counts": { "totalCount": 0 }, "totals": { "totalSpentCents": 0 } }]`. Checks can select a recipe `server` and a profile-provided `credential`. Counts use JSON paths to global record counts, not page lengths. Empty profiles require zero business records and zero totals; seeded profiles declare independently known counts and totals. These expected values are included in the authoring briefing. Profiles without checks require refreshed Setup and cannot establish current proof.
+
+The verifier receives two independently seeded allocations and must demonstrate isolation through the application, mutating the peer and proving the primary remains unchanged. Its verification manifest cannot override the runner's baseline checks. The engine cleans up its allocations after execution. Shared infrastructure lifecycle ownership is unchanged. New cases requiring pristine data use an empty profile; exact global totals, counts and page boundaries require controlled private data. Missing or invalid preparation blocks those cases instead of certifying application drift. Apps without a supported unfiltered JSON baseline observation need an explicit preparation gap.
+
+Use `truecourse guard setup --only-preparations` to draft private profiles, adding `--refresh` to force re-authoring while preserving the existing main seed and interfaces. Profile definitions and all referenced script contents participate in fingerprints and setup bundles. Changes invalidate affected generation caches; historical DB records do not need deletion. Deploy the updated runner and refresh preparations before rerunning generation for cases that need isolation.
+
+Browser expectations support these additional checks:
+
+```yaml
+# Assert closure after a dialog was observed and Cancel was clicked.
+expect:
+  hidden: { role: dialog, name: Add expense, exact: true }
+```
+
+```yaml
+# Count visible matches, including zero. Hidden elements do not count.
+expect:
+  count:
+    target: { role: row, within: { role: table, name: Expenses, exact: true } }
+    equals: 3
+```
+
+```yaml
+# Read the current DOM value, independently comparing a date to the browser clock.
+expect:
+  inputValue:
+    target: { role: textbox, name: Expense date, exact: true }
+    expected: { browserDate: today }
+```
+
+These expectations retry until the step deadline. `hidden` accepts one locator or a list and succeeds when no matching target is visible, including detached targets. Both `hidden` and `count` reject `pick: first`; a missing or ambiguous `within` container remains an error. `inputValue` supports inputs, textareas and selects and accepts ordinary stream matchers such as `{ equals: transport }`. Select values are option values, not displayed labels. `browserDate: today` uses the browser context's local calendar date at assertion time, including its timezone.
+
+Generated ordering checks must distinguish primary date ordering from same-date tie-breaking. Empty-state checks require a controlled starting state and an assertion that it is empty. Totals use known records and exact expected amounts. A post-save case must establish and assert every promised transition, including closure, announcements, pagination and retained filters.
+
+Scenario review hashing is server-only: import `scenarioReviewFingerprint` from `@truecourse/shared/guard-proof-node`. Proof schemas and validation helpers remain in the shared root for the dashboard. The Node hashing module must not be re-exported from that root.
+
+The Tests table uses compact status labels and a status filter. Flow details keep execution counts, verified coverage and generation state in a collapsed "Execution and coverage details" disclosure. A passing subset does not mark an incompletely verified flow Succeeded. Runner capabilities are explicit: CLI supports process/filesystem observations, API supports HTTP/process observations, and Web supports browser/HTTP interactions. Datastore inspection, controlled concurrency, implementation inspection and request interception are not implemented observation capabilities; installing a dependency does not add them. Recipe configuration gaps identify the preparation to configure instead.
+
+Browser authors receive mapped setup actions and their visible places alongside the matched flow, so edit/delete tests can create their own records through the UI. A full-page refresh uses navigation to the same known URL and needs no application Refresh control. Diagnostic `run_scenario` probes may omit coverage tags; `submit_scenario` still requires assertions for the selected cases. Matcher corrections and final errors identify unknown or conflicting references. Changes to the browser setup catalog invalidate affected authoring context.
+
+The revised prompts invalidate their caches on the next generation. Existing generated artifacts are not rewritten automatically; regenerate them to produce the new claim/case evidence.
 
 **4. Guard run** (`truecourse guard run`) — Fully deterministic: builds the repo via the recipe, executes every committed scenario — including the ones that were already failing at birth — and writes the run to `.truecourse/guard/` (per-run snapshots, `LATEST.json`, per-failure evidence transcripts). A test that was red at birth simply comes back green once the code catches up. Exits non-zero on any drift, so it drops straight into CI. No LLM, no API key, no `claude` binary.
 
@@ -238,7 +302,7 @@ The section ↔ scenario binding is **bidirectional**: code changed → its scen
 
 ## What it catches
 
-Any documented behavior a scenario can drive and assert (today through your project's CLI or its HTTP API; web/tui drivers are planned): wrong responses and exit codes, missing or mistyped output fields, illegal state transitions, bypassed validation and auth rules, silently-dropped side effects, formulas producing wrong results — plus the reverse direction: spec sections whose scenarios went stale because the docs changed out from under them.
+Any documented behavior a scenario can drive and assert through your project's CLI, HTTP API, or browser UI: wrong responses and exit codes, missing or mistyped output fields, illegal state transitions, bypassed validation and auth rules, silently-dropped side effects, formulas producing wrong results — plus the reverse direction: spec sections whose scenarios went stale because the docs changed out from under them.
 
 ## Setup
 
@@ -851,7 +915,22 @@ busywork: the *declaration* is what enters the recipe fingerprint, while values 
 gitignored overlay are excluded from it. Getting every declaration in before the first generate
 means handing guard a real key afterwards touches only `externals.local.json` and re-authors
 nothing. A service detection saw no base-URL variable for is reported as undeclarable rather than
-declared with a fabricated variable name, and a service you already declared is left untouched.
+declared with a fabricated variable name. Existing service configuration and saved credential sources are preserved; setup adds only newly detected credential requirements.
+
+Credential detection follows JavaScript/TypeScript `process.env` reads into authentication
+headers on native `fetch` requests, resolving local aliases and the request's origin. For example,
+`CURRENCYBEACON_API_KEY` sent in the Authorization header to CurrencyBeacon is recorded with its
+variable name, file, line and header name. No credential value is read or stored by this pass.
+Setup declares the variable as a required secret in the external recipe and supplied dependency
+registration, including existing registrations when the catalog session is already settled.
+The Dependencies form then requests the key and the runner injects it through the existing local
+secret overlay. A URL alone leaves a credential-dependent service incomplete.
+
+This detection currently covers native `fetch`, local aliases and object-literal headers in
+JS/TS. It leaves shadowed globals, ambiguous/reassigned expressions, arbitrary helper calls,
+SDK-internal authentication and imported credential aliases unresolved. It does not infer
+credentials from variable names or `.env` files. Rerun analysis and guard setup to discover and
+register new inputs, then regenerate the previously blocked scenarios after supplying them.
 
 **"Needs setup" in the dashboard.** A `blocked-on` flow whose missing capability is a service you
 can provide is not the same as one that can never be tested, so Coverage paints it differently: an

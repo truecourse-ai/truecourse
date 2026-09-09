@@ -1,3 +1,4 @@
+import { stepChecks } from './step-parts.js'
 /**
  * The CLI driver's verb vocabulary — the per-driver closed sub-schema the driver
  * registry (`drivers.ts`) describes, in its own module because a driver's verbs are
@@ -325,6 +326,7 @@ export const GuardStepObjectSchema = z
     note,
     /** The flow milestone(s) this step realizes. See {@link GuardStepMilestoneSchema}. */
     milestone,
+    checks: stepChecks,
   })
   .strict()
 
@@ -379,6 +381,7 @@ export const GuardGitStepSchema = z
     capture,
     note,
     milestone,
+    checks: stepChecks,
   })
   .strict()
 
@@ -397,6 +400,7 @@ export const GuardWriteStepSchema = z
     cwd,
     note,
     milestone,
+    checks: stepChecks,
   })
   .strict()
 
@@ -409,6 +413,7 @@ export const GuardDeleteStepSchema = z
     cwd,
     note,
     milestone,
+    checks: stepChecks,
   })
   .strict()
 
@@ -592,6 +597,7 @@ export const GuardPatchStepSchema = z
     cwd,
     note,
     milestone,
+    checks: stepChecks,
   })
   .strict()
   .superRefine((step, ctx) => {

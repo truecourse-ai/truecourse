@@ -93,6 +93,11 @@ export interface SessionDef<TOutcome = unknown> {
   tools: readonly SessionTool[];
   /** A session cannot end without an outcome this schema accepts. */
   outcomeSchema: z.ZodType<TOutcome>;
+  /** Opt-in bounded repair of malformed terminal objects, under the same budget. */
+  outcomeSchemaRepairs?: number;
+  /** Validate live task state before accepting a schema-valid terminal outcome.
+   * A rejection resumes the same transcript under the existing cumulative budget. */
+  validateOutcome?(outcome: TOutcome): string | undefined | Promise<string | undefined>;
   budget: SessionBudget;
   /** May wait on user input. Non-interactive runs never block. */
   interactive?: boolean;

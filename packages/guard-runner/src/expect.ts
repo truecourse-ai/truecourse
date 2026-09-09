@@ -37,6 +37,9 @@ export interface ExpectMismatch {
     // (or showed more than once), the page's visible text, the address — and the
     // three channels for what a page keeps OUTSIDE its text: an element's ARIA
     // state, one attribute, and a class token.
+    | 'hidden'
+    | 'count'
+    | 'inputValue'
     | 'target'
     | 'text'
     | 'url'

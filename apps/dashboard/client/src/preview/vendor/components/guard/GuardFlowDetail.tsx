@@ -1,3 +1,4 @@
+import { GuardProgressSummary } from '@/components/guard/GuardProgressSummary';
 /**
  * THE guard entity, whole, a flow AND the test that realizes it, on one page.
  *
@@ -549,6 +550,7 @@ export function GuardFlowDetail({
         className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden"
       >
       <div className="min-w-0 shrink-0 border-b border-border bg-card px-6 py-4">
+
         <div className="flex flex-wrap items-center gap-2">
           {/* The SAME word the flow wears in the list, in the SAME first position
               every guard row and header puts it, one vocabulary, one table. */}
@@ -615,6 +617,12 @@ export function GuardFlowDetail({
               {GUARD_UNDERIVED_SENTENCE}
             </p>
           )
+        )}
+        {detail.progress && (
+          <details className="mt-3 text-xs text-muted-foreground">
+            <summary className="cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">Execution and coverage details</summary>
+            <div className="pt-2"><GuardProgressSummary progress={detail.progress} /></div>
+          </details>
         )}
       </div>
 

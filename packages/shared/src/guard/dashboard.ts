@@ -1,3 +1,4 @@
+import { GuardBlockerSchema, GuardObligationRefSchema } from './verification.js'
 /**
  * Derived guard read-surface DTOs the dashboard renders — the per-section
  * coverage join, the flow inventory and its detail, the interface catalog, the
@@ -329,8 +330,11 @@ export interface GuardSectionScenario {
 export const GuardFlowGapSchema = z
   .object({
     kind: GuardCoverageGapKindSchema,
+    obligations: z.array(GuardObligationRefSchema).min(1).optional(),
+    milestones: z.array(z.number().int().positive()).min(1).optional(),
     /** The generator's one-line explanation. */
     reason: z.string(),
+    blocker: GuardBlockerSchema.optional(),
     /** Present iff `kind === 'awaiting-driver'` — the non-runnable driver awaited. */
     driver: GuardDriverIdSchema.optional(),
     /** One-line display label (`awaiting web driver`, `no interface`). */
@@ -776,9 +780,24 @@ export const GuardFlowBucketSchema = z.enum(['guarded', 'partial', 'blocked', 'u
 export type GuardFlowBucket = z.infer<typeof GuardFlowBucketSchema>
 
 /** One row of the Flows-tab list — a flow joined to the manifest, run, and report. */
+/** Execution and verified coverage answer separate questions. */
+export const GuardFlowProgressSchema = z.object({
+  execution: z.enum(['passed', 'failed', 'error', 'blocked', 'not-run', 'not-generated']),
+  scenarios: z.number().int().nonnegative(),
+  passed: z.number().int().nonnegative(),
+  coverage: z.enum(['complete', 'partial', 'unverified', 'unknown']),
+  verified: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative(),
+  unit: z.enum(['cases', 'milestones']),
+  category: z.enum(['behavior', 'system', 'mixed']),
+  generation: z.enum(['ready', 'incomplete', 'error', 'unsupported', 'needs-setup']),
+}).strict()
+export type GuardFlowProgress = z.infer<typeof GuardFlowProgressSchema>
+
 export const GuardFlowListItemSchema = z
   .object({
     flowId: z.string(),
+    progress: GuardFlowProgressSchema.optional(),
     title: z.string(),
     /** One-line user goal; empty for a Manual pseudo-flow (a scenario has no goal). */
     goal: z.string(),
@@ -1015,6 +1034,7 @@ export type GuardFlowSurfaceGap = z.infer<typeof GuardFlowSurfaceGapSchema>
 export const GuardFlowDetailSchema = z
   .object({
     flowId: z.string(),
+    progress: GuardFlowProgressSchema.optional(),
     title: z.string(),
     goal: z.string(),
     status: GuardSectionCoverageStatusSchema,

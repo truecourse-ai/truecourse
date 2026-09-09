@@ -79,3 +79,5 @@ export {
   type AuthProofOutcome,
   type BuildAuthProofOptions,
 } from './auth-proof.js';
+
+export { buildPreparationSession, verifyPreparationDraft, PreparationDraftSchema, PREPARATION_SESSION_KIND, PREPARATION_SESSION_BUDGET, PREPARATION_PROMPT } from './preparation-session.js';

@@ -1,3 +1,5 @@
+import type { preparationCatalog } from '@truecourse/guard-runner'
+import type { GuardVerification } from '@truecourse/shared'
 /**
  * The guard-generator prompt doctrine — scenario authoring (reused verbatim as
  * the flow-worker session prompts' base), fidelity review (the worker's child
@@ -156,16 +158,17 @@ is seeded to, and the matcher form. When the prose also quotes the example's OUT
 the assertion states that output exactly as quoted. A block nothing runs (a pure
 illustration) constrains nothing.
 
-# The path is the point: one scenario, every milestone
+# Preserve the path within each verified portion
 The flow's milestones are ORDERED, and the state one leaves behind is what the next
-acts on: create a thing, list it, complete it, filter for it. Author ONE scenario that
-walks them in order in a single sandbox.
-- Every milestone MUST be realized by at least one step, and each such step carries
+acts on: create a thing, list it, complete it, filter for it. A scenario may verify
+a nonempty subset. Establish its prerequisites and walk the selected path in order
+in a single sandbox. Uncovered milestones remain obligations for other scenarios.
+- Every selected milestone MUST be verified by an assertion, and each such step carries
   \`milestone: <that milestone's number>\`. A step that only prepares the world (seeding,
   a command whose output nothing asserts) carries NO \`milestone\` — it paints neutral.
 - A milestone may take several steps (do it, then observe it): annotate each of them
   with that milestone's number.
-- Never renumber, merge, split, skip, or invent a milestone — the numbers are given.
+- Never renumber, merge, split, or invent a milestone. A subset retains the given numbers.
 - When a milestone needs world-state the milestones before it do not produce, declare it
   in \`setup\` — never drop the milestone.
 
@@ -314,16 +317,17 @@ values that documented response shows. You choose only the mechanics: which step
 sends it and the matcher form. A block nothing sends (a pure illustration)
 constrains nothing.
 
-# The path is the point: one scenario, every milestone
+# Preserve the path within each verified portion
 The flow's milestones are ORDERED, and the state one leaves behind is what the next
-acts on: create a resource, list it, update it, filter for it. Author ONE scenario that
-walks them in order against one freshly booted server.
-- Every milestone MUST be realized by at least one step, and each such step carries
+acts on: create a resource, list it, update it, filter for it. A scenario may verify
+a nonempty subset. Establish its prerequisites and walk the selected path in order
+against one freshly booted server. Uncovered milestones remain obligations.
+- Every selected milestone MUST be verified by an assertion, and each such step carries
   \`milestone: <that milestone's number>\`. A step that only prepares the world (an
   authenticating call, a seeding request nothing asserts) carries NO \`milestone\`.
 - A milestone may take several steps (do it, then observe it): annotate each of them
   with that milestone's number.
-- Never renumber, merge, split, skip, or invent a milestone — the numbers are given.
+- Never renumber, merge, split, or invent a milestone. A subset retains the given numbers.
 - Chain the path with \`capture\` + \`\${var}\` rather than guessing ids between steps.
 
 # Two-sided promises get two-sided tests
@@ -626,16 +630,17 @@ paraphrase and never a reformat; a deliberately-broken example must stay broken.
 the prose also quotes the example's OUTCOME, the assertion states that outcome exactly
 as quoted. A block nothing runs (a pure illustration) constrains nothing.
 
-# The path is the point: one scenario, every milestone
+# Preserve the path within each verified portion
 The flow's milestones are ORDERED, and the state one leaves behind is what the next
-acts on: create a thing, see it listed, open it, change it. Author ONE scenario that
-walks them in order in a single sandbox world.
-- Every milestone MUST be realized by at least one step, and each such step carries
+acts on: create a thing, see it listed, open it, change it. A scenario may verify
+a nonempty subset. Establish its prerequisites and walk the selected path in order
+in a single sandbox world. Uncovered milestones remain obligations.
+- Every selected milestone MUST be verified by an assertion, and each such step carries
   \`milestone: <that milestone's number>\`. A step that only prepares the world (a
   login, a seeding action nothing asserts) carries NO \`milestone\`.
 - A milestone may take several steps (act, then observe): annotate each of them
   with that milestone's number.
-- Never renumber, merge, split, skip, or invent a milestone — the numbers are given.
+- Never renumber, merge, split, or invent a milestone. A subset retains the given numbers.
 - When a milestone needs world-state the milestones before it do not produce, declare
   it in \`setup\` or seed it with a plumbing step — never drop the milestone.
 
@@ -702,6 +707,11 @@ A \`navigate\` path starts with \`/\` and never carries an origin — the sandbo
 allocates the port, so \`navigate: "/analyses/42"\`, never a host. \`expect.url\`
 matches \`pathname + search\` with the origin stripped: \`/notes?title=x\` is what a
 scenario writes and what a failure quotes.
+
+# Full-page refresh
+Navigating to the same known path again performs a full-page load. To check that
+an edit survives refresh, navigate to its detail URL again and assert its visible
+values. No application Refresh button or separate reload interface is needed.
 
 # What an expectation may assert
 A web \`expect\` waits on, then asserts, one or more of:
@@ -843,6 +853,7 @@ export interface BirthRetryContext extends OutputExcerpts {
  * verbs by the adapter table).
  */
 export interface AuthorMilestone {
+  verification?: GuardVerification
   /** 1-based position in the flow's path — the `milestone` value steps carry. */
   order: number
   /** The extracted claim's text — assertions come from HERE. */
@@ -986,6 +997,7 @@ export interface AuthorUserContext {
    * repo's prompt stays byte-identical. Ignored on cli batches.
    */
   fixtures?: { name: string; fields: string[] }[]
+  preparations?: ReturnType<typeof preparationCatalog>
   /**
    * api batches: the third parties THIS repo imports, canonical names,
    * detected from the working tree. Not a capability the sandbox offers — the
@@ -1022,6 +1034,8 @@ export interface AuthorUserContext {
    * keeps the prompt byte-identical. USER-prompt only.
    */
   otherOperations?: InterfaceContractHint[]
+  /** Other mapped browser actions, for arranging prerequisites without inventing controls. */
+  webSetupInterfaces?: InterfaceDigest[]
   /** How many other operations the cap dropped, so the block can say so. */
   otherOperationsOverflow?: number
   /**
@@ -1272,6 +1286,15 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       '"blockedOn": ["credentials"].',
     )
   }
+  if (ctx.preparations?.length) {
+    lines.push('', 'PRIVATE PREPARATIONS — select one with setup.preparation:',
+      ...ctx.preparations.map(p => JSON.stringify(p)),
+      'Each run gets a fresh private allocation, provisioned and checked before the app starts. Runtime paths and values are never authored.',
+      'An empty case requires baseline empty. Exact global totals/counts and pagination boundaries require controlled private state.',
+      'baselineChecks lists independently known counts and totals that the runner has checked through the real app. Use these expected values when calculating totals after your own writes; never derive the expected baseline from the aggregate response under test.',
+      'Only the selected profile’s fixture/credential catalog is available inside that world. The global catalogs below apply only without setup.preparation.',
+      'Never override profile-owned environment variables or invent a private database path. Create scenario records through the application.')
+  }
   // Seed fixture catalog (Phase 2): the ids/handles the seed created before the run,
   // usable via `{{fixture:<name>.<field>}}` ANYWHERE in a request (path, query, header,
   // body) — broader than credentials because fixtures are not secrets. Gated on a seed
@@ -1515,6 +1538,18 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       'nothing FAILS its step, so capture only what these places really show.',
     )
   }
+  if (ctx.driver === 'web' && ctx.webSetupInterfaces?.length) {
+    lines.push('', 'BROWSER ACTIONS AVAILABLE FOR SETUP',
+      'Use these mapped actions to create the records this flow needs before its assertions.',
+      'Create your own records with ${unique} for edit/delete flows. A missing seed row',
+      'does not block a record the app can create. Keep arrange steps untagged; the',
+      'selected milestones still need browser assertions. Do not edit shared fixtures.',
+      'These actions supply setup, not proof of otherwise omitted cases.');
+    for (const j of ctx.webSetupInterfaces) {
+      lines.push('', `--- id: ${j.id}`, `title: ${j.title}`, `entry: ${j.entry}`,
+        ...(j.context ?? []), ...j.steps);
+    }
+  }
   // The flow's own operations as the repo's ROUTE REGISTRATIONS declare
   // them — the exact paths, and what each handler reads off the request. api-only and
   // gated on non-empty, so a cli batch or a degraded mapping is byte-identical.
@@ -1625,13 +1660,14 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
     '',
     'MILESTONES — the path, in order. Each block gives the CLAIM (what to assert), its',
     "section's text (what the claim is read against), and the realization matching chose",
-    '(how to reach it). Every milestone number below must appear on at least one step:',
+    '(how to reach it). Every selected milestone needs an assertion; preserve its number:',
   )
   for (const m of ctx.milestones) {
     lines.push(
       '',
       `--- milestone ${m.order}`,
       `claim: ${m.claim}`,
+      ...(m.verification ? [`verification: ${m.verification.method} — ${m.verification.observable}`, `scope: ${m.verification.scope ?? "legacy"}`, `cases: ${JSON.stringify(m.verification.cases ?? [])}`] : []),
       `section: ${m.sectionHeading}  (${m.doc})`,
     )
     if (m.note) lines.push(`note: ${m.note}`)
@@ -1687,7 +1723,7 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       '  4. `drop_scenario` ONLY when the obligation a prior scenario asserted is GONE',
       '     from the current text; the reason must name that obligation. Never drop a',
       '     scenario you merely chose to rewrite — replace it.',
-      '  5. Every scenario you submit must still realize every milestone.',
+      '  5. Each submitted scenario must verify its selected milestones completely and establish their prerequisites.',
     )
     for (const p of ctx.priorScenarios) lines.push('', `--- prior scenario ${p.id}`, p.yaml)
   }
@@ -2381,6 +2417,29 @@ scenario that does not assert that exact message/value is flagged (weak), no mat
 how much else it checks. Judge only what the milestones claim — a scenario is not
 flagged for failing to test something no milestone states.
 
+# Scope and verification evidence
+The listed milestones are the scenario's selected obligations. Section text is
+context, not permission to add unselected guarantees. Judge every selected claim
+strictly, including its stated verification method. Returned integer values do not
+prove an internal arithmetic mechanism; quiet reads do not prove concurrent snapshot
+consistency. Do not require those internal guarantees for a behavior-only claim.
+A partial scenario must establish its prerequisites through supported actions and
+must not claim in its title or assertions to verify omitted obligations.
+
+# Complete selected cases
+A selected case must prove every guarantee within that case. For date-descending
+ordering with an ID tie-breaker, require distinct-date records AND equal-date records.
+Equal dates alone cannot establish date ordering. Cancel requires a previously
+visible dialog to become hidden and a subsequent read proving no record was saved;
+reopening the dialog does not prove it closed. Post-save page reset requires starting
+on a later page, and preserved filters require applying them before saving. Exact
+ledger totals need controlled known records; an increase alone is not an exact sum.
+Defaults must be checked before filling, against independently established expected
+values. Never compare an input's value to a capture of that same input as proof.
+For an expected failure, review whether the assertions faithfully encode the selected
+claims; the failure is evidence of disagreement, not permission to weaken assertions.
+Assertions after the first failure are authored coverage, never passing execution.
+
 # Two-sided claims — both halves must be asserted
 When a claim asserts BOTH what the program DOES and what it does NOT do — a set of
 inputs accepted/matched/included AND a set rejected/excluded/left out ("accepts A
@@ -2415,6 +2474,7 @@ export const FIDELITY_PROMPT_FINGERPRINT = fingerprint(FIDELITY_SYSTEM_PROMPT)
 
 /** One milestone as the fidelity reviewer sees it — the claim and its section text. */
 export interface FidelityMilestone {
+  verification?: GuardVerification
   order: number
   claim: string
   doc: string
@@ -2446,6 +2506,7 @@ export function buildFidelityUserPrompt(ctx: FidelityUserContext): string {
       '',
       `--- milestone ${m.order}`,
       `claim: ${m.claim}`,
+      ...(m.verification ? [`verification: ${m.verification.method} — ${m.verification.observable}`, `scope: ${m.verification.scope ?? "legacy"}`, `cases: ${JSON.stringify(m.verification.cases ?? [])}`] : []),
       `section: ${m.sectionHeading}  (${m.doc})`,
       'section text:',
       '"""',
@@ -2601,14 +2662,17 @@ ${OUTPUT_ONLY_GUARDRAIL}
 - A MILESTONE is something the product should do for a user, stated by the spec.
 - A INTERFACE is something the code actually offers: a command a user can run, an
   endpoint they can call, a screen they can reach. It is derived from the code, so
-  the catalog is the complete list of what this surface can do.
+  the catalog lists what has been mapped; omissions do not prove absent application behavior.
 - A PLAN pairs them: for each milestone, the interface (or interfaces) a test would use
   to reach it, in the order a user would walk them.
 
 # The rules
 - Use ONLY interfaces from the catalog below, addressed by their \`id\` copied VERBATIM.
   An id that is not in the catalog invalidates your whole answer.
-- Every milestone must appear in the plan at least once. A milestone may take two
+- Account for every explicit verification case with a grounded plan or an explicit gap.
+  Put nonempty checks: ["case-id"] on each plan/gap row, copied from that milestone.
+  A milestone may have planned cases and different blocked cases; never classify the whole
+  milestone because one sibling lacks an action or capability. A milestone may take two
   interfaces (do it, then observe it); an interface may serve two milestones.
 - Keep the plan in milestone order — it is a path, and each step acts on the state
   the previous one left.
@@ -2619,6 +2683,14 @@ ${OUTPUT_ONLY_GUARDRAIL}
 A browser interaction can prove user-visible milestones without a separate API test.
 It cannot prove HTTP status codes, malformed requests, headers or raw response bodies.
 Never substitute a visible UI result for a protocol-specific promise.
+
+# The web surface owns browser navigation
+A web test can navigate to a known surface-relative URL, including the SAME detail
+URL again for a full-page refresh. It can assert the visible state after that load.
+Plan refresh/persistence against the mapped detail or edit interface and explain
+this native navigation in the note. Do not require a Refresh button or a separate
+reload interface. This does not add request interception, database inspection or
+server lifecycle controls to the browser driver.
 
 # The api surface also owns the SERVER PROCESS
 The api surface does not only send requests: a test on it starts the service (with
@@ -2641,31 +2713,36 @@ EXIST, and the claim is precisely about what happens off that list. Plan it agai
 the interface it sits nearest (the operation whose path or family the claim names) and
 say so in the \`note\`. Do not call it unrealizable.
 
-# When the surface cannot do it — say so, and say why
-If any milestone has NO interface that could plausibly serve it, do NOT stretch an
-unrelated interface to cover it and do NOT return a partial plan. Return
-\`unrealizable\` with ONE sentence naming the milestone(s) nothing serves and what is
-missing (e.g. "no interface creates a project — the catalog only reads them"). That
-verdict is a first-class, useful answer: it is how a spec promise with no code
-surface behind it becomes visible. A wrong plan, by contrast, produces a test that
-checks the wrong thing.
+# Missing actions and unsupported verification
+Return grounded partial plans; never stretch an interface to cover a missing action.
+For each uncovered case return a gap: kind "mapping" when a needed executable
+control/operation is absent from this catalog, or "capability" when the specified
+verification needs observations or fixtures this driver cannot provide. State the
+missing action or capability precisely. A catalog omission never establishes that
+the application lacks the behavior. Supporting control interfaces (cancel branches,
+pagination, navigation) are executable and can be composed with user tasks.
+Do not turn readable-only locators into invented executable actions.
 
 # Output schema (CANONICAL)
-This JSON Schema is generated from the engine's Zod definition; your reply must
-validate against it exactly. Output EXACTLY ONE JSON object, no prose, no fences:
 ${MATCH_JSON_SCHEMA}
-Concretely:
-  { "plan": [ { "interfaceId": "<copied verbatim from the catalog>",
-                "milestone": <the milestone's number>,
-                "note": "<optional: how it serves that milestone>" } ] }
-or:
-  { "unrealizable": "<one sentence: which milestone nothing realizes, and why>" }
-Exactly one of the two.`
+Return one object with a plan, gaps, or both:
+{ "plan": [{ "interfaceId": "web/add-expense", "milestone": 1, "checks": ["save"] }],
+  "gaps": [{ "milestone": 2, "checks": ["cancel"], "kind": "mapping", "reason": "No cancel action has been mapped for the add dialog." }] }
+Every case must be accounted for as planned or uncovered. A milestone may appear
+in both plan and gaps with DISJOINT checks. Two interfaces may support the same planned
+case, but no case may be both planned and gapped. Legacy milestones without cases omit
+checks and remain milestone-level. Plan only grounded behavior.
+For example: plan [{interfaceId:"web/list",milestone:1,checks:["columns","descending-order"]}]
+and gaps [{milestone:1,checks:["description-link"],kind:"mapping",reason:"Description link action is unmapped"}].
+Do not let a missing link hide supported column/order assertions. UI save feedback and
+HTTP POST status are separate cases; browser appearance cannot prove protocol metadata.
+`
 
 export const MATCH_PROMPT_FINGERPRINT = fingerprint(MATCH_SYSTEM_PROMPT)
 
 /** One milestone as the matcher sees it — its number and its claim, never code. */
 export interface MatchMilestoneLine {
+  verification?: GuardVerification
   order: number
   claim: string
   /** Synthesis' note on why this step sits here, when it wrote one. */
@@ -2678,6 +2755,7 @@ export interface MatchMilestoneLine {
  * reads what a USER can reach, exactly like the interface fingerprint.
  */
 export interface InterfaceDigest {
+  context?: string[]
   id: string
   title: string
   /** The entry descriptor as the surface declares it (a command path, a route). */
@@ -2694,6 +2772,8 @@ export interface MatchIssues {
   uncoveredMilestones: number[]
   /** `milestone` values that match no milestone of this flow. */
   unknownMilestones: number[]
+  /** Invalid, repeated, or contradictory gap references. */
+  gapErrors?: string[]
 }
 
 export interface MatchUserContext {
@@ -2721,15 +2801,16 @@ export function buildMatchUserPrompt(ctx: MatchUserContext): string {
     'MILESTONES — the path to walk, in order:',
   ]
   for (const m of ctx.milestones) {
-    lines.push(`  ${m.order}. ${m.claim}${m.note ? `  (${m.note})` : ''}`)
+    lines.push(`  ${m.order}. ${m.claim}${m.note ? `  (${m.note})` : ''}${m.verification ? `  [${m.verification.method}: ${m.verification.observable}; cases: ${JSON.stringify(m.verification.cases ?? [])}]` : ''}`)
   }
   lines.push(
     '',
-    `INTERFACE CATALOG for ${ctx.surface} — everything this surface offers. Copy an \`id\``,
+    `INTERFACE CATALOG for ${ctx.surface} — the executable actions currently mapped. Copy an \`id\``,
     'verbatim into every plan entry:',
   )
   for (const j of ctx.interfaces) {
     lines.push('', `--- id: ${j.id}`, `title: ${j.title}`, `entry: ${j.entry}`)
+    if (j.context?.length) lines.push(...j.context)
     if (j.steps.length > 0) {
       lines.push('steps:')
       for (const s of j.steps) lines.push(`  ${s}`)
@@ -2756,10 +2837,11 @@ export function buildMatchUserPrompt(ctx: MatchUserContext): string {
       lines.push(
         '',
         'CORRECTION — your plan covered no interface for these milestones. Either give each',
-        'one an interface from the catalog, or answer `unrealizable` naming what is missing:',
+        'one a grounded interface or an explicit mapping/capability gap naming what is missing:',
         `  ${ctx.issues.uncoveredMilestones.join(', ')}`,
       )
     }
+    if (ctx.issues.gapErrors?.length) lines.push('', 'CORRECTION — fix these gap references:', ...ctx.issues.gapErrors.map((issue) => `- ${issue}`))
     lines.push('Return the COMPLETE answer again as one JSON object matching the schema.')
   }
   if (ctx.correction) {
@@ -2768,8 +2850,7 @@ export function buildMatchUserPrompt(ctx: MatchUserContext): string {
       'CORRECTION — your previous response was NOT valid. You returned:',
       ctx.correction.invalidOutput,
       'Return exactly ONE JSON object: { "plan": [ { "interfaceId", "milestone" }, … ] }',
-      'with interface ids copied verbatim from the catalog, or { "unrealizable": "<one',
-      'sentence>" }. Nothing else.',
+      'with interface ids copied verbatim from the catalog, and/or "gaps": [{ "milestone", "kind": "mapping" | "capability", "reason" }].',
     )
   }
   return lines.join('\n')
