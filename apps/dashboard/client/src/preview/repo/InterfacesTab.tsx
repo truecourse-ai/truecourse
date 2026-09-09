@@ -92,7 +92,7 @@ export function InterfacesTab({ repo }: { repo: Repo }) {
           onChange={(e) => setQuery(e.target.value)}
           aria-label="Search interfaces"
           placeholder="Search interfaces"
-          className="w-64 rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          className="w-64 max-w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
         />
         <div className="flex flex-wrap items-center gap-x-4 [&>div]:border-0 [&>div]:px-0 [&>div]:py-0">
           <FilterBar
@@ -122,7 +122,15 @@ export function InterfacesTab({ repo }: { repo: Repo }) {
         </div>
       )}
       <div className="min-h-0 flex-1 overflow-auto">
-        <table className="w-full border-collapse text-[13px]" aria-label="Interfaces">
+        <table className="w-full min-w-[48rem] table-fixed border-collapse text-[13px]" aria-label="Interfaces">
+          <colgroup>
+            <col />
+            <col className="w-20" />
+            <col className="w-24" />
+            <col className="w-28" />
+            <col className="w-28" />
+            <col className="w-28" />
+          </colgroup>
           <thead className="sticky top-0 z-10 bg-card">
             <tr className="border-b border-border text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               <th className="px-6 py-2 text-left font-semibold">Interface</th>
@@ -142,9 +150,9 @@ export function InterfacesTab({ repo }: { repo: Repo }) {
                   <Link to={rowUrl(row.id)} className="block rounded-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
                     <span className="flex items-baseline gap-2">
                       {row.method && <GuardMethodLabel method={row.method} fixed size="md" />}
-                      <span className={row.kind === 'operation' || row.kind === 'command' ? 'font-mono' : ''}>{row.title}</span>
+                      <span title={row.title} className={`min-w-0 truncate ${row.kind === 'operation' || row.kind === 'command' ? 'font-mono' : ''}`}>{row.title}</span>
                     </span>
-                    <span className="mt-0.5 block text-[11px] text-muted-foreground">{row.hint}</span>
+                    <span title={row.hint} className="mt-0.5 block truncate text-[11px] text-muted-foreground">{row.hint}</span>
                   </Link>
                 </td>
                 <td className="px-3 py-2.5"><span className={CHIP_CLASS}>{guardDriver(row.surface)?.label ?? row.surface}</span></td>
