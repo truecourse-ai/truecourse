@@ -34,6 +34,7 @@ import type {
   GuardSetupCatalogSession,
   GuardSetupCatalogSessionInput,
 } from '@truecourse/guard-generator';
+import { detectedCredentialVars, extendCredentialRegistrations } from '@truecourse/guard-generator';
 import {
   createWorkingSandbox,
   loadDependenciesLocal,
@@ -212,7 +213,7 @@ export function validateCatalogDraft(
 /** A detected service worth FORCING into the catalog: an SDK-registry match or
  *  a base-URL env var. The rest stays visible in the briefing as information. */
 function substantiatedService(service: GuardSetupCatalogSessionInput['detected'][number]): boolean {
-  return service.category !== undefined || service.baseUrlEnv !== undefined || (service.baseUrlEnvs?.length ?? 0) > 0;
+  return service.category !== undefined || service.baseUrlEnv !== undefined || (service.baseUrlEnvs?.length ?? 0) > 0 || (service.credentialEnvs?.length ?? 0) > 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -240,9 +241,9 @@ export function foldCatalogDraft(
   input: GuardSetupCatalogSessionInput,
   draft: CatalogDraft,
 ): CatalogFoldResult {
-  const catalog: GuardDependenciesFile = {
-    dependencies: [...loadDependencyCatalog(input.repoRoot).dependencies],
-  };
+  const originalCatalog = loadDependencyCatalog(input.repoRoot);
+  const extendedCatalog = extendCredentialRegistrations(originalCatalog, input.detected);
+  const catalog: GuardDependenciesFile = { dependencies: [...extendedCatalog.dependencies] };
   const local: GuardDependenciesLocal = { ...loadDependenciesLocal(input.repoRoot) };
   const existingNames = new Set(catalog.dependencies.map((d) => d.name));
   const detectedByName = new Map(input.detected.map((d) => [d.service, d]));
@@ -288,7 +289,7 @@ export function foldCatalogDraft(
     }
   }
 
-  if (added.length > 0) {
+  if (added.length > 0 || extendedCatalog !== originalCatalog) {
     catalog.dependencies.sort((a, b) => a.name.localeCompare(b.name));
     const validated = GuardDependenciesFileSchema.safeParse(catalog);
     if (!validated.success) {
@@ -321,12 +322,14 @@ function suppliedRegistration(
     });
   }
   if (detected?.baseUrlEnv && !seen.has(detected.baseUrlEnv)) {
+    seen.add(detected.baseUrlEnv);
     vars.push({
       name: detected.baseUrlEnv,
       description: `the base URL the program reads ${draftEntry.name} from`,
       secret: false,
     });
   }
+  vars.push(...detectedCredentialVars(detected ? [detected] : []).filter(v => !seen.has(v.name)));
   if (vars.length > 0) return { kind: 'env', vars };
   // No detected variables to register through: the honest default for a
   // real-world input is a path on this machine (a project, a corpus, a config
@@ -406,6 +409,9 @@ export function dependencyCatalogBriefing(
     lines.push(
       `- ${service.service}${service.category ? ` (${service.category})` : ''} · via ${service.source ?? 'sdk'} · base-URL vars: ${vars} · seen in: ${evidence}`,
     );
+    for (const credential of service.credentialEnvs ?? []) {
+      lines.push(`  credential: ${credential.envVar} — ${credential.evidence.map(e => `${e.filePath}:${e.line} (${e.header})`).join(', ')}`);
+    }
   }
   if (informational.length > 0) {
     lines.push(

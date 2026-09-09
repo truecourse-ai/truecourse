@@ -274,6 +274,7 @@ export {
 } from './endpoint-probe.js'
 
 export { deriveExternalsSkeleton, type ExternalsSkeleton } from './externals-skeleton.js'
+export { detectedCredentialVars, extendCredentialRegistrations } from './credential-registrations.js'
 
 export {
   birthValidate,

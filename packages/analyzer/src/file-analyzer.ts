@@ -10,6 +10,7 @@ import { extractWebRoutes } from './extractors/web-routes.js'
 import { extractWebRedirects } from './extractors/web-redirects.js'
 import { extractCliCommands } from './extractors/cli-commands.js'
 import { extractExternalHttp } from './extractors/external-http.js'
+import { extractExternalCredentials } from './extractors/external-credentials.js'
 import { extractOutboundRequests } from './extractors/outbound-requests.js'
 import { extractRequestContracts } from './extractors/request-contracts.js'
 import {
@@ -134,6 +135,7 @@ function buildFileAnalysis(
   const webRedirects = extractWebRedirects(tree, filePath, language)
   const cliCommands = extractCliCommands(tree, filePath, language)
   const externalHttp = extractExternalHttp(tree, filePath, language)
+  const externalCredentialRefs = extractExternalCredentials(tree, filePath, language)
   const outboundRequests = extractOutboundRequests(tree, filePath, language)
   // The request contract is harvested in its own pass and merged onto the
   // routes by call SITE — the route extractor stays language-dispatched and
@@ -168,6 +170,7 @@ function buildFileAnalysis(
     ...(webRedirects.redirectsUnconditionally ? { redirectsUnconditionally: true } : {}),
     ...(cliCommands.length > 0 ? { cliCommands } : {}),
     ...(externalHttp.refs.length > 0 ? { externalHttpRefs: externalHttp.refs } : {}),
+    ...(externalCredentialRefs.length > 0 ? { externalCredentialRefs } : {}),
     ...(externalHttp.urlEnvReads.length > 0 ? { urlEnvReads: externalHttp.urlEnvReads } : {}),
     ...(externalHttp.datastoreRefs.length > 0 ? { datastoreUrlRefs: externalHttp.datastoreRefs } : {}),
     ...(outboundRequests.length > 0 ? { outboundRequests } : {}),

@@ -167,6 +167,16 @@ export const ExternalHttpRefSchema = z.object({
 
 export type ExternalHttpRef = z.infer<typeof ExternalHttpRefSchema>
 
+/** An env read reaching one outbound authentication header, with a resolved destination. */
+export const ExternalCredentialRefSchema = z.object({
+  envVar: z.string().min(1),
+  host: z.string().optional(),
+  baseUrlEnv: z.string().optional(),
+  header: z.string().min(1),
+  location: SourceLocationSchema,
+}).strict()
+export type ExternalCredentialRef = z.infer<typeof ExternalCredentialRefSchema>
+
 // ---------------------------------------------------------------------------
 // Datastore connection URL
 // ---------------------------------------------------------------------------
@@ -606,6 +616,7 @@ export const FileAnalysisSchema = z.object({
   cliCommands: z.array(CliCommandSchema).optional(),
   /** http(s) URL literals naming a third-party host; absent when none. */
   externalHttpRefs: z.array(ExternalHttpRefSchema).optional(),
+  externalCredentialRefs: z.array(ExternalCredentialRefSchema).optional(),
   /**
    * Env vars this file READS whose NAME reads like a base-URL override
    * (`…_BASE_URL`, `…_HOST`, `…_ENDPOINT`) but which no URL literal is bound to.

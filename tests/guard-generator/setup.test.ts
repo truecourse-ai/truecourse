@@ -1163,3 +1163,34 @@ describe('runGuardSetup — the catalog settle record', () => {
     expect(fs.readFileSync(settlePath(r), 'utf-8')).not.toBe(settled)
   })
 })
+
+describe('runGuardSetup — discovered credential upgrades', () => {
+  it('enriches an already-settled recipe and catalog, preserving saved values and configuration', async () => {
+    const r = fixtureRepo()
+    const prior = {baseUrlEnv: 'CUSTOM_BASE', baseUrl: 'https://private.test', description: 'User account'}
+    writeRecipe(r, {externals: {stripe: prior}})
+    fs.writeFileSync(dependenciesPath(r), JSON.stringify({dependencies: [{
+      name: 'payments', class: 'supplied', services: ['stripe'], summary: 'User payment account', needs: [],
+      registration: {kind: 'env', vars: [{name: 'CUSTOM_BASE', description: 'Private endpoint', secret: false}]},
+    }]}))
+    const localFile = path.join(path.dirname(dependenciesPath(r)), 'dependencies.local.json')
+    const local = JSON.stringify({payments: {env: {CUSTOM_BASE: 'https://private.test', STRIPE_API_KEY: 'keep-me'}}})
+    fs.writeFileSync(localFile, local)
+    const service = {service: 'stripe', evidence: [], baseUrlEnv: 'STRIPE_BASE_URL'}
+    await runGuardSetup(baseOpts(r, {interfaces: interfaces({externalServices: [service]})}))
+    const richer = {...service, credentialEnvs: [{envVar: 'STRIPE_API_KEY', evidence: [{filePath: '/repo/pay.ts', line: 3, header: 'authorization'}]}]}
+    const opts = baseOpts(r, {interfaces: interfaces({externalServices: [richer]})})
+    await runGuardSetup(opts)
+    const recipe = JSON.parse(fs.readFileSync(recipePath(r), 'utf8'))
+    expect(recipe.api.externals.stripe).toEqual({...prior, env: {STRIPE_API_KEY: {}}})
+    const catalog = JSON.parse(fs.readFileSync(dependenciesPath(r), 'utf8'))
+    expect(catalog.dependencies[0]).toMatchObject({name: 'payments', summary: 'User payment account', registration: {vars: [
+      {name: 'CUSTOM_BASE', secret: false}, {name: 'STRIPE_API_KEY', secret: true},
+    ]}})
+    expect(fs.readFileSync(localFile, 'utf8')).toBe(local)
+    const before = fs.readFileSync(recipePath(r), 'utf8')
+    await runGuardSetup(opts)
+    expect(fs.readFileSync(recipePath(r), 'utf8')).toBe(before)
+    expect(fs.readFileSync(localFile, 'utf8')).toBe(local)
+  })
+})

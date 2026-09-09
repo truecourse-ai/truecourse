@@ -59,6 +59,8 @@ import {
   loadResolvedExternals,
   computeRecipeFingerprint,
   dependenciesPath,
+  loadDependencyCatalog,
+  atomicWriteJson,
   guardAuthoredInterfacesPath,
   hashableRecipeText,
   readGuardSetup,
@@ -90,6 +92,7 @@ import { discoverRecipe, type RecipeDiscoveryPhase, type RecipeRepairFn } from '
 import { detectEcosystems, routesFromInterfaces, type ApiRouteRef } from './recipe-propose.js'
 import { probeApiServers } from './endpoint-probe.js'
 import { deriveExternalsSkeleton } from './externals-skeleton.js'
+import { extendCredentialRegistrations } from './credential-registrations.js'
 import {
   detectRoleColumns,
   readExistingSeedScript,
@@ -641,6 +644,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         baseUrlEnvs: [
           ...new Set([...(s.baseUrlEnvs ?? []).map((e) => e.envVar), ...(s.baseUrlEnv ? [s.baseUrlEnv] : [])]),
         ].sort(),
+        credentialEnvs: (s.credentialEnvs ?? []).map(e => e.envVar).sort(),
       }))
       .sort((a, b) => a.service.localeCompare(b.service)),
     database: database ? { type: database.type, driver: database.driver } : null,
@@ -682,9 +686,11 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       // detection and an unchanged recipe it derives nothing and writes nothing —
       // but no session is spent.
       externalsStep = applyExternalsSkeleton(repoRoot, recipe, detectedExternals)
-      if (settledSession !== catalogSessionFp) writeCatalogSettle(repoRoot, catalogSessionFp)
-      steps.push({ key: 'catalog', status: 'skipped', reason: 'unchanged', inputFingerprint: catalogFpPre })
-      opts.onStepDone?.('catalog', 'unchanged')
+      const catalogFpPost = catalogFpOf()
+      const enriched = catalogFpPost !== catalogFpPre
+      if (settledSession !== catalogSessionFp || enriched) writeCatalogSettle(repoRoot, catalogSessionFpOf())
+      steps.push({ key: 'catalog', status: enriched ? 'ok' : 'skipped', ...(!enriched ? { reason: 'unchanged' } : {}), inputFingerprint: catalogFpPost })
+      opts.onStepDone?.('catalog', enriched ? 'credential requirements updated' : 'unchanged')
     } else {
       externalsStep = applyExternalsSkeleton(repoRoot, recipe, detectedExternals)
       if (opts.catalogSession) {
@@ -1176,6 +1182,15 @@ function applyExternalsSkeleton(
   detected: readonly DetectedExternalService[],
 ): GuardSetupExternalsStep {
   const base = { declared: [] as string[], alreadyDeclared: [] as string[], undeclarable: [] as string[] }
+  // This deterministic enrichment also runs when the classification session is
+  // already settled. Existing registrations and local secret overlays survive.
+  try {
+    const catalog = loadDependencyCatalog(repoRoot)
+    const extended = extendCredentialRegistrations(catalog, detected)
+    if (extended !== catalog) atomicWriteJson(dependenciesPath(repoRoot), extended)
+  } catch (error) {
+    return { ...base, status: 'failed', reason: `credential requirements could not be added: ${(error as Error).message}`, unprovided: [] }
+  }
   if (!recipe.api) {
     return {
       ...base,
@@ -1186,8 +1201,8 @@ function applyExternalsSkeleton(
   }
   const skeleton = deriveExternalsSkeleton(recipe, detected)
   const added = Object.keys(skeleton.declare).sort()
-  if (added.length > 0) {
-    const written = writeExternals(repoRoot, skeleton.declare)
+  if (added.length > 0 || Object.keys(skeleton.update).length > 0) {
+    const written = writeExternals(repoRoot, { ...skeleton.declare, ...skeleton.update })
     if (written !== null) {
       return {
         status: 'failed',
@@ -1233,7 +1248,7 @@ function writeExternals(repoRoot: string, declare: Record<string, RecipeApiExter
       .map((i) => `${i.path.join('.')} ${i.message}`)
       .join('; ')}`
   }
-  fs.writeFileSync(file, JSON.stringify(doc, null, 2) + (raw.endsWith('\n') ? '\n' : ''))
+  atomicWriteJson(file, doc)
   return null
 }
 
