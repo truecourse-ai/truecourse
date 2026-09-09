@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defaultClientConditions, defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -8,7 +8,7 @@ const eeClientEntry = path.resolve(repoRoot, 'ee/packages/client/src/index.tsx')
 // The enterprise overlay is optional: a community checkout has no `ee/`.
 const eePresent = fs.existsSync(eeClientEntry);
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ mode, command }) => {
   // Whether the enterprise client code is included in this build. Requires
   // the ee overlay to be present, and is on in dev or an explicit enterprise
   // build; a plain production (community) build leaves it off so the ee chunk
@@ -21,6 +21,9 @@ export default defineConfig(({ mode }) => {
       'import.meta.env.VITE_TC_EE': JSON.stringify(includeEe),
     },
     resolve: {
+      conditions: command === 'serve'
+        ? ['truecourse-source', ...defaultClientConditions]
+        : [...defaultClientConditions],
       alias: {
         '@': path.resolve(__dirname, './src'),
         // Resolve the enterprise client to its source (not the node_modules

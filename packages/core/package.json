@@ -5,314 +5,380 @@
   "type": "module",
   "exports": {
     "./commands/analyze-in-process": {
+      "truecourse-source": "./src/commands/analyze-in-process.ts",
       "types": "./dist/commands/analyze-in-process.d.ts",
       "import": "./dist/commands/analyze-in-process.js"
     },
     "./commands/analyze-core": {
+      "truecourse-source": "./src/commands/analyze-core.ts",
       "types": "./dist/commands/analyze-core.d.ts",
       "import": "./dist/commands/analyze-core.js"
     },
     "./commands/analyze-persist": {
+      "truecourse-source": "./src/commands/analyze-persist.ts",
       "types": "./dist/commands/analyze-persist.d.ts",
       "import": "./dist/commands/analyze-persist.js"
     },
     "./commands/diff-in-process": {
+      "truecourse-source": "./src/commands/diff-in-process.ts",
       "types": "./dist/commands/diff-in-process.d.ts",
       "import": "./dist/commands/diff-in-process.js"
     },
     "./commands/spec-in-process": {
+      "truecourse-source": "./src/commands/spec-in-process.ts",
       "types": "./dist/commands/spec-in-process.d.ts",
       "import": "./dist/commands/spec-in-process.js"
     },
     "./commands/spec-sources": {
+      "truecourse-source": "./src/commands/spec-sources.ts",
       "types": "./dist/commands/spec-sources.d.ts",
       "import": "./dist/commands/spec-sources.js"
     },
     "./commands/guard-in-process": {
+      "truecourse-source": "./src/commands/guard-in-process.ts",
       "types": "./dist/commands/guard-in-process.d.ts",
       "import": "./dist/commands/guard-in-process.js"
     },
-    "./commands/guard-summary": {
-      "types": "./dist/commands/guard-summary.d.ts",
-      "import": "./dist/commands/guard-summary.js"
-    },
     "./commands/guard-setup": {
+      "truecourse-source": "./src/commands/guard-setup.ts",
       "types": "./dist/commands/guard-setup.d.ts",
       "import": "./dist/commands/guard-setup.js"
     },
     "./commands/guard-seed": {
+      "truecourse-source": "./src/commands/guard-seed.ts",
       "types": "./dist/commands/guard-seed.d.ts",
       "import": "./dist/commands/guard-seed.js"
     },
     "./commands/guard-interfaces": {
+      "truecourse-source": "./src/commands/guard-interfaces.ts",
       "types": "./dist/commands/guard-interfaces.d.ts",
       "import": "./dist/commands/guard-interfaces.js"
     },
     "./commands/guard-dependencies": {
+      "truecourse-source": "./src/commands/guard-dependencies.ts",
       "types": "./dist/commands/guard-dependencies.d.ts",
       "import": "./dist/commands/guard-dependencies.js"
     },
     "./commands/guard-adjudicate": {
+      "truecourse-source": "./src/commands/guard-adjudicate.ts",
       "types": "./dist/commands/guard-adjudicate.d.ts",
       "import": "./dist/commands/guard-adjudicate.js"
     },
     "./commands/guard-externals": {
+      "truecourse-source": "./src/commands/guard-externals.ts",
       "types": "./dist/commands/guard-externals.d.ts",
       "import": "./dist/commands/guard-externals.js"
     },
     "./commands/guard-read": {
+      "truecourse-source": "./src/commands/guard-read.ts",
       "types": "./dist/commands/guard-read.d.ts",
       "import": "./dist/commands/guard-read.js"
     },
     "./commands/repo-events": {
+      "truecourse-source": "./src/commands/repo-events.ts",
       "types": "./dist/commands/repo-events.d.ts",
       "import": "./dist/commands/repo-events.js"
     },
     "./progress": {
+      "truecourse-source": "./src/progress.ts",
       "types": "./dist/progress.d.ts",
       "import": "./dist/progress.js"
     },
     "./config": {
+      "truecourse-source": "./src/config/index.ts",
       "types": "./dist/config/index.d.ts",
       "import": "./dist/config/index.js"
     },
     "./config/paths": {
+      "truecourse-source": "./src/config/paths.ts",
       "types": "./dist/config/paths.d.ts",
       "import": "./dist/config/paths.js"
     },
     "./config/registry": {
+      "truecourse-source": "./src/config/registry.ts",
       "types": "./dist/config/registry.d.ts",
       "import": "./dist/config/registry.js"
     },
     "./config/project-config": {
+      "truecourse-source": "./src/config/project-config.ts",
       "types": "./dist/config/project-config.d.ts",
       "import": "./dist/config/project-config.js"
     },
     "./config/current-project": {
+      "truecourse-source": "./src/config/current-project.ts",
       "types": "./dist/config/current-project.d.ts",
       "import": "./dist/config/current-project.js"
     },
     "./config/ui-state": {
+      "truecourse-source": "./src/config/ui-state.ts",
       "types": "./dist/config/ui-state.d.ts",
       "import": "./dist/config/ui-state.js"
     },
     "./config/env": {
+      "truecourse-source": "./src/config/env.ts",
       "types": "./dist/config/env.d.ts",
       "import": "./dist/config/env.js"
     },
     "./config/llm-models": {
+      "truecourse-source": "./src/config/llm-models.ts",
       "types": "./dist/config/llm-models.d.ts",
       "import": "./dist/config/llm-models.js"
     },
     "./config/global-config": {
+      "truecourse-source": "./src/config/global-config.ts",
       "types": "./dist/config/global-config.d.ts",
       "import": "./dist/config/global-config.js"
     },
     "./lib/logger": {
+      "truecourse-source": "./src/lib/logger.ts",
       "types": "./dist/lib/logger.d.ts",
       "import": "./dist/lib/logger.js"
     },
     "./lib/analysis-store": {
+      "truecourse-source": "./src/lib/analysis-store.ts",
       "types": "./dist/lib/analysis-store.d.ts",
       "import": "./dist/lib/analysis-store.js"
     },
     "./lib/sessions-store": {
+      "truecourse-source": "./src/lib/sessions-store.ts",
       "types": "./dist/lib/sessions-store.d.ts",
       "import": "./dist/lib/sessions-store.js"
     },
     "./lib/contract-store": {
+      "truecourse-source": "./src/lib/contract-store.ts",
       "types": "./dist/lib/contract-store.d.ts",
       "import": "./dist/lib/contract-store.js"
     },
     "./lib/spec-store": {
+      "truecourse-source": "./src/lib/spec-store.ts",
       "types": "./dist/lib/spec-store.d.ts",
       "import": "./dist/lib/spec-store.js"
     },
     "./lib/safe-path": {
+      "truecourse-source": "./src/lib/safe-path.ts",
       "types": "./dist/lib/safe-path.d.ts",
       "import": "./dist/lib/safe-path.js"
     },
     "./lib/guard-store": {
+      "truecourse-source": "./src/lib/guard-store.ts",
       "types": "./dist/lib/guard-store.d.ts",
       "import": "./dist/lib/guard-store.js"
     },
     "./lib/guard-overlays": {
+      "truecourse-source": "./src/lib/guard-overlays.ts",
       "types": "./dist/lib/guard-overlays.d.ts",
       "import": "./dist/lib/guard-overlays.js"
     },
     "./lib/spec-sources": {
+      "truecourse-source": "./src/lib/spec-sources.ts",
       "types": "./dist/lib/spec-sources.d.ts",
       "import": "./dist/lib/spec-sources.js"
     },
     "./lib/guard-read-tree": {
+      "truecourse-source": "./src/lib/guard-read-tree.ts",
       "types": "./dist/lib/guard-read-tree.d.ts",
       "import": "./dist/lib/guard-read-tree.js"
     },
     "./lib/guard-executor": {
+      "truecourse-source": "./src/lib/guard-executor.ts",
       "types": "./dist/lib/guard-executor.d.ts",
       "import": "./dist/lib/guard-executor.js"
     },
     "./lib/guard-gate-pending": {
+      "truecourse-source": "./src/lib/guard-gate-pending.ts",
       "types": "./dist/lib/guard-gate-pending.d.ts",
       "import": "./dist/lib/guard-gate-pending.js"
     },
     "./lib/guard-generate-enqueue": {
+      "truecourse-source": "./src/lib/guard-generate-enqueue.ts",
       "types": "./dist/lib/guard-generate-enqueue.d.ts",
       "import": "./dist/lib/guard-generate-enqueue.js"
     },
     "./lib/guard-pr-regen-enqueue": {
+      "truecourse-source": "./src/lib/guard-pr-regen-enqueue.ts",
       "types": "./dist/lib/guard-pr-regen-enqueue.d.ts",
       "import": "./dist/lib/guard-pr-regen-enqueue.js"
     },
     "./lib/repo-lifecycle": {
+      "truecourse-source": "./src/lib/repo-lifecycle.ts",
       "types": "./dist/lib/repo-lifecycle.d.ts",
       "import": "./dist/lib/repo-lifecycle.js"
     },
     "./lib/spec-inheritance-hook": {
+      "truecourse-source": "./src/lib/spec-inheritance-hook.ts",
       "types": "./dist/lib/spec-inheritance-hook.d.ts",
       "import": "./dist/lib/spec-inheritance-hook.js"
     },
     "./lib/knowledge-ledger-reader": {
+      "truecourse-source": "./src/lib/knowledge-ledger-reader.ts",
       "types": "./dist/lib/knowledge-ledger-reader.d.ts",
       "import": "./dist/lib/knowledge-ledger-reader.js"
     },
     "./lib/inferred-action-store": {
+      "truecourse-source": "./src/lib/inferred-action-store.ts",
       "types": "./dist/lib/inferred-action-store.d.ts",
       "import": "./dist/lib/inferred-action-store.js"
     },
     "./lib/inferred-decisions": {
+      "truecourse-source": "./src/lib/inferred-decisions.ts",
       "types": "./dist/lib/inferred-decisions.d.ts",
       "import": "./dist/lib/inferred-decisions.js"
     },
     "./lib/artifact-diff": {
+      "truecourse-source": "./src/lib/artifact-diff.ts",
       "types": "./dist/lib/artifact-diff.d.ts",
       "import": "./dist/lib/artifact-diff.js"
     },
-    "./lib/spec-origin-resolver": {
-      "types": "./dist/lib/spec-origin-resolver.d.ts",
-      "import": "./dist/lib/spec-origin-resolver.js"
-    },
     "./lib/workspace-doc-links": {
+      "truecourse-source": "./src/lib/workspace-doc-links.ts",
       "types": "./dist/lib/workspace-doc-links.d.ts",
       "import": "./dist/lib/workspace-doc-links.js"
     },
     "./lib/repo-doc-reader": {
+      "truecourse-source": "./src/lib/repo-doc-reader.ts",
       "types": "./dist/lib/repo-doc-reader.d.ts",
       "import": "./dist/lib/repo-doc-reader.js"
     },
     "./lib/background-tasks": {
+      "truecourse-source": "./src/lib/background-tasks.ts",
       "types": "./dist/lib/background-tasks.d.ts",
       "import": "./dist/lib/background-tasks.js"
     },
     "./lib/repo-ref": {
+      "truecourse-source": "./src/lib/repo-ref.ts",
       "types": "./dist/lib/repo-ref.d.ts",
       "import": "./dist/lib/repo-ref.js"
     },
     "./lib/analyze-lock": {
+      "truecourse-source": "./src/lib/analyze-lock.ts",
       "types": "./dist/lib/analyze-lock.d.ts",
       "import": "./dist/lib/analyze-lock.js"
     },
     "./lib/git": {
+      "truecourse-source": "./src/lib/git.ts",
       "types": "./dist/lib/git.d.ts",
       "import": "./dist/lib/git.js"
     },
     "./lib/errors": {
+      "truecourse-source": "./src/lib/errors.ts",
       "types": "./dist/lib/errors.d.ts",
       "import": "./dist/lib/errors.js"
     },
     "./lib/cli-binary": {
+      "truecourse-source": "./src/lib/cli-binary.ts",
       "types": "./dist/lib/cli-binary.d.ts",
       "import": "./dist/lib/cli-binary.js"
     },
     "./services/guard-setup/bundle": {
+      "truecourse-source": "./src/services/guard-setup/bundle.ts",
       "types": "./dist/services/guard-setup/bundle.d.ts",
       "import": "./dist/services/guard-setup/bundle.js"
     },
     "./services/analyzer": {
+      "truecourse-source": "./src/services/analyzer.service.ts",
       "types": "./dist/services/analyzer.service.d.ts",
       "import": "./dist/services/analyzer.service.js"
     },
     "./services/graph": {
+      "truecourse-source": "./src/services/graph.service.ts",
       "types": "./dist/services/graph.service.d.ts",
       "import": "./dist/services/graph.service.js"
     },
     "./services/flow": {
+      "truecourse-source": "./src/services/flow.service.ts",
       "types": "./dist/services/flow.service.d.ts",
       "import": "./dist/services/flow.service.js"
     },
     "./services/interface": {
+      "truecourse-source": "./src/services/interface.service.ts",
       "types": "./dist/services/interface.service.d.ts",
       "import": "./dist/services/interface.service.js"
     },
     "./services/interface-author": {
+      "truecourse-source": "./src/services/interface-author/index.ts",
       "types": "./dist/services/interface-author/index.d.ts",
       "import": "./dist/services/interface-author/index.js"
     },
     "./services/violation-query": {
+      "truecourse-source": "./src/services/violation-query.service.ts",
       "types": "./dist/services/violation-query.service.d.ts",
       "import": "./dist/services/violation-query.service.js"
     },
     "./services/violation": {
+      "truecourse-source": "./src/services/violation.service.ts",
       "types": "./dist/services/violation.service.d.ts",
       "import": "./dist/services/violation.service.js"
     },
     "./services/analysis-registry": {
+      "truecourse-source": "./src/services/analysis-registry.ts",
       "types": "./dist/services/analysis-registry.d.ts",
       "import": "./dist/services/analysis-registry.js"
     },
     "./services/rules": {
+      "truecourse-source": "./src/services/rules.service.ts",
       "types": "./dist/services/rules.service.d.ts",
       "import": "./dist/services/rules.service.js"
     },
     "./services/stable-keys": {
+      "truecourse-source": "./src/services/stable-keys.ts",
       "types": "./dist/services/stable-keys.d.ts",
       "import": "./dist/services/stable-keys.js"
     },
     "./services/llm/provider": {
+      "truecourse-source": "./src/services/llm/provider.ts",
       "types": "./dist/services/llm/provider.d.ts",
       "import": "./dist/services/llm/provider.js"
     },
     "./services/llm/spec-estimate": {
+      "truecourse-source": "./src/services/llm/spec-estimate.ts",
       "types": "./dist/services/llm/spec-estimate.d.ts",
       "import": "./dist/services/llm/spec-estimate.js"
     },
     "./services/llm/model-prices": {
+      "truecourse-source": "./src/services/llm/model-prices.ts",
       "types": "./dist/services/llm/model-prices.d.ts",
       "import": "./dist/services/llm/model-prices.js"
     },
     "./services/llm/session-driver": {
+      "truecourse-source": "./src/services/llm/session-driver.ts",
       "types": "./dist/services/llm/session-driver.d.ts",
       "import": "./dist/services/llm/session-driver.js"
     },
     "./services/llm/install-transport": {
+      "truecourse-source": "./src/services/llm/install-transport.ts",
       "types": "./dist/services/llm/install-transport.d.ts",
       "import": "./dist/services/llm/install-transport.js"
     },
     "./services/llm/probe": {
+      "truecourse-source": "./src/services/llm/probe.ts",
       "types": "./dist/services/llm/probe.d.ts",
       "import": "./dist/services/llm/probe.js"
     },
     "./services/llm/guard-visual-judge": {
+      "truecourse-source": "./src/services/llm/guard-visual-judge.ts",
       "types": "./dist/services/llm/guard-visual-judge.d.ts",
       "import": "./dist/services/llm/guard-visual-judge.js"
     },
     "./services/telemetry": {
+      "truecourse-source": "./src/services/telemetry.service.ts",
       "types": "./dist/services/telemetry.service.d.ts",
       "import": "./dist/services/telemetry.service.js"
     },
     "./types/snapshot": {
+      "truecourse-source": "./src/types/snapshot.ts",
       "types": "./dist/types/snapshot.d.ts",
       "import": "./dist/types/snapshot.js"
     },
     "./lib/activity-journal": {
+      "truecourse-source": "./src/lib/activity-journal.ts",
       "types": "./dist/lib/activity-journal.d.ts",
       "import": "./dist/lib/activity-journal.js"
     }
   },
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@truecourse/agent-loop": "workspace:*",

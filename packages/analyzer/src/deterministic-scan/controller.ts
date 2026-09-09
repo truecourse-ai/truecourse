@@ -52,14 +52,17 @@ export type IsolatedScanInput = Omit<DeterministicScanInput, 'startIndex'>
 
 /**
  * Locate the worker entry for the current packaging layout:
- *  - unbundled (tsc output, dev/tests): `worker.js` sits next to this module.
+ *  - source (tsx): `worker-source.mjs` registers tsx inside the worker thread.
+ *  - unbundled (tsc output): `worker.js` sits next to this module.
  *  - bundled (esbuild `cli.mjs`/`server.mjs`): this module is inlined into the
  *    entry bundle, and scripts/build.ts emits the worker as a sibling
  *    `det-scan-worker.mjs`. `import.meta.url` then points at the bundle dir.
  * Returns null when neither exists (the caller falls back to in-thread).
  */
 function resolveWorkerPath(): string | null {
-  const here = path.dirname(fileURLToPath(import.meta.url))
+  const currentFile = fileURLToPath(import.meta.url)
+  const here = path.dirname(currentFile)
+  if (currentFile.endsWith('.ts')) return path.join(here, 'worker-source.mjs')
   const candidates = [path.join(here, 'worker.js'), path.join(here, 'det-scan-worker.mjs')]
   for (const candidate of candidates) {
     if (fs.existsSync(candidate)) return candidate

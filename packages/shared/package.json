@@ -7,34 +7,40 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "truecourse-source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
     "./llm": {
+      "truecourse-source": "./src/llm/transport.ts",
       "types": "./dist/llm/transport.d.ts",
       "import": "./dist/llm/transport.js"
     },
     "./openapi": {
+      "truecourse-source": "./src/openapi/index.ts",
       "types": "./dist/openapi/index.d.ts",
       "import": "./dist/openapi/index.js"
     },
     "./openapi-node": {
+      "truecourse-source": "./src/openapi/node-ref-context.ts",
       "types": "./dist/openapi/node-ref-context.d.ts",
       "import": "./dist/openapi/node-ref-context.js"
     },
     "./activity-stream": {
+      "truecourse-source": "./src/activity-stream.ts",
       "types": "./dist/activity-stream.d.ts",
       "import": "./dist/activity-stream.js"
     },
     "./next-routing-node": {
+      "truecourse-source": "./src/next-routing-node.ts",
       "types": "./dist/next-routing-node.d.ts",
       "import": "./dist/next-routing-node.js"
     }
   },
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "ignore": "^7.0.5",

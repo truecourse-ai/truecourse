@@ -12,7 +12,8 @@
   "scripts": {
     "build": "tsc",
     "dev": "echo 'CLI is not used in dev mode'",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@clack/prompts": "^1.2.0",
