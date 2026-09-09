@@ -30,6 +30,7 @@ import {
   guardSetupPath,
   recipePath,
   resolveSeedScript,
+  resolvePreparationScripts,
   scenariosDir,
 } from '@truecourse/guard-runner';
 import { assertSafeRel, safeJoin } from '../../lib/safe-path.js';
@@ -81,6 +82,10 @@ export function collectGuardSetupBundle(repoRoot: string): Record<string, string
   // null when it is absent or escapes the repo.
   const rawRecipe = files[relOf(repoRoot, recipePath(repoRoot))];
   if (rawRecipe !== undefined) {
+    for (const script of resolvePreparationScripts(repoRoot, rawRecipe)) {
+      const body = readIfFile(script);
+      if (body !== null) files[relOf(repoRoot, script)] = body;
+    }
     const seed = resolveSeedScript(repoRoot, rawRecipe);
     const body = seed === null ? null : readIfFile(seed);
     if (seed !== null && body !== null) files[relOf(repoRoot, seed)] = body;

@@ -111,7 +111,7 @@ function matchOnlyTransport(): LlmTransport {
     transportCalls.push({ stage: req.stage, model: req.model })
     if (req.stage === 'guard.match') {
       const interfaceId = /^--- id: (.+)$/m.exec(req.user)?.[1] ?? ''
-      return JSON.stringify({ plan: [{ interfaceId, milestone: 1 }] })
+      return JSON.stringify({ plan: [{ interfaceId, milestone: 1, checks: ['command-result'] }] })
     }
     return '{}'
   }
@@ -122,8 +122,13 @@ const CLAIMS = {
   boom: 'boom completes and exits 0',
 }
 
+const verification = (claim: string) => ({
+  scope: 'configuration', method: 'behavior', observable: 'The command exit code and stdout',
+  cases: [{ id: 'command-result', claim, method: 'behavior', requires: ['process'], conditions: [] }],
+})
+
 const scenarioYaml = (title: string, argv: string[]): string =>
-  [`title: ${title}`, 'steps:', `  - run: ${JSON.stringify(argv)}`, '    expect: { exit: 0 }', '    milestone: 1'].join('\n')
+  [`title: ${title}`, 'steps:', `  - run: ${JSON.stringify(argv)}`, argv[0] === '--version' ? '    expect: { exit: 0, stdout: { contains: "2.4.1" } }' : '    expect: { exit: 0 }', '    milestone: 1', '    checks: [command-result]'].join('\n')
 
 /** Which flow a worker session is for, read off its briefing. */
 const flowOf = (call: StubCall): string => (call.briefing.includes(RED_FLOW) ? RED_FLOW : GREEN_FLOW)
@@ -138,8 +143,8 @@ describe('guardGenerateInProcess — adjudication on the session path', () => {
       if (call.def.kind === 'guard-generate.extract') {
         const draft = {
           claims: [
-            { claim: CLAIMS.version, driver: 'cli', sectionAnchor: 'version', reason: 'exit code is observable', needs: [] },
-            { claim: CLAIMS.boom, driver: 'cli', sectionAnchor: 'boom', reason: 'exit code is observable', needs: [] },
+            { claim: CLAIMS.version, driver: 'cli', sectionAnchor: 'version', reason: 'exit code is observable', verification: verification(CLAIMS.version), needs: [] },
+            { claim: CLAIMS.boom, driver: 'cli', sectionAnchor: 'boom', reason: 'exit code is observable', verification: verification(CLAIMS.boom), needs: [] },
           ],
           untestable: [],
         }
@@ -171,7 +176,7 @@ describe('guardGenerateInProcess — adjudication on the session path', () => {
         return outcome(draft)
       }
       if (call.def.kind === 'guard-generate.fidelity') {
-        return outcome({ verdict: 'faithful' })
+        return outcome({ verdict: 'faithful', evidence: [{ milestone: 1, caseId: 'command-result', steps: [1], reason: 'Step 1 asserts the specified exit code, and the version scenario also checks its stdout.' }] })
       }
       // The flow worker. `run_scenario` first — the outcome precondition
       // refuses a verdict from a session that never executed anything.
@@ -209,10 +214,10 @@ describe('guardGenerateInProcess — adjudication on the session path', () => {
 
     expect(guard.status).toBe('ok')
 
-    // Every content stage ran as a SESSION — including a real depth-1 fidelity
-    // child for the green (and only for the green: a red never reaches a judge).
+    // Every content stage ran as a SESSION — including real depth-1 fidelity
+    // children for both the green result and the declared red assertion contract.
     expect(kinds.filter((k) => k === 'guard-generate.flow-worker')).toHaveLength(2)
-    expect(kinds.filter((k) => k === 'guard-generate.fidelity')).toHaveLength(1)
+    expect(kinds.filter((k) => k === 'guard-generate.fidelity')).toHaveLength(2)
 
     // The ONE surviving one-shot reached the model on the tier the driver
     // resolved for it; no retired stage made a call at all.
@@ -227,7 +232,9 @@ describe('guardGenerateInProcess — adjudication on the session path', () => {
     const flows = readManifest(r)!.flows
     const red = flows.find((f) => f.flowId === 'runs-boom')!
     expect(red.scenarios[0].status).toBe('failing')
-    expect(red.scenarios[0].diagnosis).toMatchObject({ title: RED_SCENARIO })
+    expect(red.scenarios[0].caseEvidence).toMatchObject([{ milestone: 1, caseId: 'command-result', steps: [1] }])
+    expect(red.generationInputsHash).not.toBeNull()
+    expect(red.scenarios[0].diagnosis).toMatchObject({ title: CLAIMS.boom })
     expect(red.scenarios[0].diagnosis!.triage).toBeUndefined()
     expect(red.scenarios[0].diagnosis!.expectedRed).toMatchObject({ step: 1, verdict: 'code-drift' })
     const finding = guard.birthFindings.find((f) => f.scenarioId === red.scenarios[0].id)!
@@ -238,6 +245,8 @@ describe('guardGenerateInProcess — adjudication on the session path', () => {
     // reports nothing unadjudicated.
     const green = flows.find((f) => f.flowId === 'prints-the-version')!
     expect(green.scenarios[0].status).toBe('passing')
+    expect(green.scenarios[0].caseEvidence).toMatchObject([{ milestone: 1, caseId: 'command-result', steps: [1] }])
+    expect(green.generationInputsHash).not.toBeNull()
     expect(guard.unadjudicated).toEqual([])
   }, 120_000)
 })

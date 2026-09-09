@@ -100,6 +100,8 @@ export const GuardCoverageGapSchema = z
     doc: z.string(),
     anchor: z.string(),
     kind: GuardCoverageGapKindSchema,
+    milestones: z.array(z.number().int().positive()).min(1).optional(),
+    obligations: z.array(z.object({ milestone: z.number().int().positive(), caseId: z.string().min(1).optional() }).strict()).min(1).optional(),
     reason: z.string(),
     /** Present iff `kind === 'awaiting-driver'`, the non-runnable driver awaited. */
     driver: GuardDriverIdSchema.optional(),

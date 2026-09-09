@@ -40,6 +40,7 @@ export const GuardSetupTaxonomyKeySchema = z.enum([
   'catalog',
   'interfaces',
   'seed',
+  'preparations',
   'auth',
 ])
 export type GuardSetupTaxonomyKey = z.infer<typeof GuardSetupTaxonomyKeySchema>
@@ -159,7 +160,7 @@ export const GuardSetupExternalsStepSchema = z
     reason: z.string().optional(),
     /** Services whose declaration this run ADDED to `api.externals`. */
     declared: z.array(z.string()),
-    /** Services already declared before this run — left byte-identical. */
+    /** Services already declared before this run; missing credential requirements may be added. */
     alreadyDeclared: z.array(z.string()),
     /**
      * Detected services that could NOT be declared: detection saw no base-URL

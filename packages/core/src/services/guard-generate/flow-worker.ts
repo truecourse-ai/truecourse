@@ -27,6 +27,8 @@
 import { z } from 'zod'
 import { defineSessionTool, type SessionBudget, type SessionDef, type SessionTool, type ToolContext } from '@truecourse/agent-loop'
 import {
+  GuardCaseEvidenceSchema,
+  GUARD_REVIEW_POLICY_VERSION,
   GuardExpectedRedSchema,
   GuardFlowWorkerOutcomeSchema,
   type GuardDriverId,
@@ -91,6 +93,42 @@ NOT answer with one JSON object. You work a LOOP against the real program:
      fix it instead of declaring it.
 4. On acceptance the engine stashes your yaml under a sha and tells you so.
 
+# Case evidence
+For milestones with explicit cases, put checks: ["case-id"] on each step whose
+expectation actually asserts that case. Select any independently verifiable subset;
+never tag a setup step or claim all cases just because a request passed. The engine
+and a separate reviewer validate the exact case-to-assertion mapping. Untested
+cases remain uncovered. Give this candidate a title describing only its selected
+cases; its promise is derived by the engine from those cases.
+When a failure needs request-control that is unavailable, name that capability.
+Do not demand a real database failure to prove a browser's error rendering.
+
+# Independently verified portions
+You may submit multiple scenarios for distinct, independently verifiable portions
+of this flow. Tag only the milestones each scenario actually asserts; leave setup
+steps untagged. Every tagged milestone needs an assertion with an accepted driver.
+Keep each scenario a meaningful path and title it for its actual scope. Reproduce
+all prerequisite state through supported setup/actions; never sever a dependent
+chain or claim an omitted milestone was proven. The fidelity judge reviews the
+selected obligations and their prerequisites. Submit useful portions before
+attempting requirements needing unavailable inspection or failure fixtures.
+Accepted portions remain saved even if you later finish blocked or retired. Report
+remaining blockers by milestone and case ID. One passing portion does not complete the flow. After every acceptance the engine
+returns the exact outstanding cases. Continue until all assigned cases are accounted
+for. Removing a rejected case from a candidate does not remove that obligation.
+A settled outcome with outstanding cases is refused under the same session budget.
+
+# Repair assertions without losing requirements
+A locator failure is not an unavailable capability. Use the mapped target and the
+runner's actual-state diagnostics. A status element's visible text is not necessarily
+its accessible name. Quote YAML strings containing colons, template tokens or regex
+syntax; never drop an obligation to avoid a YAML parsing error.
+Use hidden after a previously visible dialog to prove closure, inputValue before
+filling to prove defaults, and count to prove cardinality. These expectations retry
+inside the runner; do not add sleeps. An empty-ledger case needs isolated declared
+fresh-state setup and an assertion proving that starting state. Minting two records
+in a populated ledger does not establish the overall sum of all records.
+
 # Editing committed scenarios
 When the briefing carries a PRIOR SCENARIOS block, this flow is already covered
 and you EDIT that coverage: \`submit_scenario\` with \`replaces: "<prior id>"\`
@@ -102,11 +140,29 @@ At least one scenario must be accepted for a \`settled\` outcome; if none can
 be, end \`blocked\` or \`retired\` and the committed scenarios stay as they are.
 Without that block there is nothing to edit: never pass \`replaces\`.
 
+# Current remaining work
+For explicit-case tasks, blocked and retired outcomes must include remaining: an array
+with exactly one row per outstanding assigned case:
+{ "milestone": 1, "caseId": "cancel-without-saving", "reasonKind": "assertion",
+  "evidence": "the current observed defect", "issueId": "engine-provided issue ID" }.
+Use reasonKind assertion, annotation, preparation, unsupported-capability,
+review-unavailable, or not-attempted. Copy the current engine issueId when provided;
+do not reclassify an assertion defect as unavailable preparation. A stale aggregate
+failure does not explain a later Cancel rejection. Before retiring actionable work,
+submit a changed executable candidate for every case the engine asks you to repair,
+within the SAME budget. Rewording remaining rows or resubmitting identical behavior
+does not count. Submit independently valid portions and preserve accepted work.
+For Cancel, arrange a fully valid unsaved form including ALL required inputs, verify
+the dialog is visible, cancel, verify closure and that this draft was not saved.
+A required Amount left blank cannot prove Cancel prevented a save.
+Select setup.preparation when the case requires empty/controlled private state.
+Only that profile's fixtures and credentials exist in the private world.
+
 # The outcome — how the session MUST end
 Produce exactly one of these objects (nothing else ends the session):
 - { "kind": "settled", "scenarioYamlSha": "<the sha the acceptance named, verbatim>",
     "expectedReds": [ ...exactly what you submitted, [] on a green ],
-    "additionalScenarios": [ { "scenarioYamlSha", "expectedReds" } … ]   — ONLY when you had several accepted (edit mode); omit otherwise,
+    "additionalScenarios": [ { "scenarioYamlSha", "expectedReds" } … ]   — ONLY when you had several accepted; omit otherwise,
     "droppedScenarios": [ { "id", "reason" } … ]   — ONLY the drop_scenario calls the engine accepted; omit otherwise }
 - { "kind": "blocked", "perMilestone": [ { "order": <milestone>, "capability": "<what the sandbox cannot provide>" } ] }
   — when the flow needs world-state or a third party the sandbox cannot offer.
@@ -186,6 +242,12 @@ export function flowWorkerCacheKey(task: FlowWorkerTask): string {
 export const CachedWorkerEntrySchema = z
   .object({
     outcome: GuardFlowWorkerOutcomeSchema,
+    version: z.literal(GUARD_REVIEW_POLICY_VERSION).optional(),
+    reviews: z.array(z.object({
+      policyVersion: z.literal(GUARD_REVIEW_POLICY_VERSION),
+      scenarioFingerprint: z.string().min(1),
+      caseEvidence: z.array(GuardCaseEvidenceSchema),
+    }).strict()).optional(),
     /** The single accepted yaml — the legacy one-scenario entry. */
     scenarioYaml: z.string().min(1).optional(),
     /** Every accepted yaml, index-aligned with `settledScenariosOf(outcome)` —
@@ -288,6 +350,8 @@ export function flowWorkerSessionDef(input: FlowWorkerSessionInput): SessionDef<
     systemPrompt: flowWorkerSystemPrompt(task.surface),
     tools: [runScenarioTool(task), submitScenarioTool(task, input.judgeWith), dropScenarioTool(task)],
     outcomeSchema: GuardFlowWorkerOutcomeSchema,
+    validateOutcome: outcome => task.validateOutcome(outcome),
+    outcomeSchemaRepairs: 2,
     budget: FLOW_WORKER_BUDGET,
     // The structural half of "run before you conclude" (01 step 2k): an
     // outcome from a worker that never executed anything is refused once —

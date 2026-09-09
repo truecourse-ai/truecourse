@@ -99,7 +99,7 @@ async function callTool(call: StubCall, name: string, args: unknown): Promise<vo
 }
 
 const EXTRACT_DRAFT = {
-  claims: [{ claim: CLAIM, driver: 'cli' as const, sectionAnchor: ANCHOR, reason: 'stdout carries the new id', needs: [] }],
+  claims: [{ claim: CLAIM, driver: 'cli' as const, sectionAnchor: ANCHOR, reason: 'stdout carries the new id', verification: { scope: 'configuration', method: 'behavior', observable: 'Task id on stdout', cases: [{ id: 'created-id', claim: 'Prints the created task id', method: 'behavior', requires: ['process'], conditions: [] }] }, needs: [] }],
   untestable: [],
 }
 

@@ -29,7 +29,7 @@ export const GuardStepWebCheckSchema = z
     // observation channels landed (2026-08-11). Additive: a bundle written before
     // them carries none, and one written with them reads in any reader that only
     // renders `expected` / `actual` / `ok` — which is every renderer there is.
-    subject: z.enum(['url', 'text', 'visible', 'state', 'attribute', 'class']),
+    subject: z.enum(['url', 'text', 'visible', 'hidden', 'count', 'inputValue', 'state', 'attribute', 'class']),
     /** The assertion in full — `the page text contains "Filtered by"`. */
     expected: z.string(),
     /** What the page had for THAT assertion. */

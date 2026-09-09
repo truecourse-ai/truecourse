@@ -24,7 +24,7 @@ import {
   recipePath,
   readManifest,
 } from '@truecourse/guard-runner'
-import { guardManifestSections, type GuardManifestSectionView } from '@truecourse/shared'
+import { GUARD_REVIEW_POLICY_VERSION, guardManifestSections, type GuardManifestSectionView } from '@truecourse/shared'
 import {
   parseOpenApiSpec,
   isOpenApiDoc,
@@ -214,7 +214,7 @@ export function flowGenerationInputsHash(input: {
   flowFingerprint: string
   /** Every bound section's {@link sectionInputsKey}, in any order (sorted here). */
   sectionKeys: readonly string[]
-  /** The fingerprints of exactly the interfaces the flow's plans ground on. */
+  /** Fingerprints of the planned interfaces and any browser setup catalog offered. */
   interfaceFingerprints: readonly string[]
   recipeFingerprint: string
 }): string {
@@ -232,6 +232,7 @@ export function flowGenerationInputsHash(input: {
     GENERATE_PROMPT_FINGERPRINT,
     GENERATE_API_PROMPT_FINGERPRINT,
     FIDELITY_PROMPT_FINGERPRINT,
+    String(GUARD_REVIEW_POLICY_VERSION),
   ]
   return 'sha256:' + createHash('sha256').update(parts.join('\0')).digest('hex')
 }

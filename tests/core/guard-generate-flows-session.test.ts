@@ -737,3 +737,26 @@ describe('the flow-synthesis wipeout', () => {
     expect(fs.readFileSync(flowsFile, 'utf-8')).toBe(committed)
   })
 })
+
+
+describe('flow obligation boundaries', () => {
+  it('rejects a flow mixing browser behavior with internal storage guarantees', () => {
+    const claims = CLAIMS.map((c, i) => ({ ...c, verification: i === 0
+      ? { scope: 'web' as const, method: 'behavior' as const, observable: 'Visible task' }
+      : { scope: 'implementation' as const, method: 'datastore' as const, observable: 'Stored representation' } }))
+    const check = checkFlowSet(LIFECYCLE, { area: { ...AREA, claims }, sectionKeys: SECTION_KEYS, catalogNames: new Set() })
+    expect(isFlowSetClean(check)).toBe(false)
+    expect(check.unknownReferences.join(' ')).toContain('verification')
+  })
+})
+
+it('briefs the composer with complete case, source, condition and preparation metadata', () => {
+  const verification: NonNullable<FlowClaimInput['verification']> = { scope: 'web', method: 'behavior', observable: 'Empty ledger', cases: [
+    { id: 'empty-ledger', claim: 'Empty ledger total is zero', method: 'behavior', requires: ['browser'], conditions: ['fresh-state'], preparation: 'empty' },
+  ] }
+  const briefing = flowsSessionBriefing({ ...AREA, claims: [{ ...CLAIMS[0], driver: 'web', verification }] }, undefined)
+  expect(briefing).toContain(`verification: ${JSON.stringify(verification)}`)
+  expect(briefing).toContain(`doc: ${DOC}`)
+  expect(briefing).toContain(`anchor: ${CLAIMS[0].anchor}`)
+  expect(FLOWS_SESSION_SYSTEM_PROMPT).toContain('upstream defects')
+})

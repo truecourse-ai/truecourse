@@ -1,3 +1,5 @@
+import { WRAP_UP_TURNS } from '../../packages/agent-loop/src/index.js';
+import { PREPARATION_SESSION_BUDGET } from '../../packages/core/src/services/guard-setup/preparation-session.js';
 /**
  * The `guard setup` core adapter — the half the engine deliberately does NOT
  * own: step 0 (is a provider configured — a CONFIG question), the pre-flight
@@ -236,6 +238,7 @@ const neverCalled = async (): Promise<never> => {
 const inertSeams = {
   authorInterfaces: async () => ({ status: 'skipped' as const, reason: 'stubbed in this test' }),
   seedSession: (async () => ({ status: 'skipped', reason: 'stubbed in this test' })) as GuardSetupSeedSession,
+  preparationSession: async () => ({ status: 'skipped' as const, reason: 'stubbed in this test' }),
   verifyAuth: async () => ({ status: 'skipped' as const, reason: 'stubbed in this test' }),
 };
 
@@ -380,6 +383,20 @@ describe('estimateGuardSetupCost', () => {
     expect(stages['guard-interfaces.web-tasks'].calls).toBeGreaterThan(0);
   });
 
+  it('includes private preparation authoring and its hard budget in a targeted estimate', async () => {
+    const r = fixtureRepo();
+    const estimate = await estimateGuardSetupCost(r, { only: 'preparations' });
+    expect(estimate.stages?.map(s => s.stage)).toEqual(['guard-setup.preparations']);
+    const stage = estimate.stages![0];
+    expect(stage.calls).toBeGreaterThan(0);
+    expect(stage.estimatedTokens).toBeGreaterThan(0);
+    expect(stage.label).toBe('Preparing private test data');
+    expect(stage.callsRange?.high).toBe(PREPARATION_SESSION_BUDGET.turns * (PREPARATION_SESSION_BUDGET.maxResumes + 1) + WRAP_UP_TURNS);
+    const settled = settledRepo();
+    expect((await estimateGuardSetupCost(settled, { only: 'preparations' })).stages).toEqual([]);
+    expect((await estimateGuardSetupCost(settled, { only: 'preparations', refresh: true })).stages?.[0].stage).toBe('guard-setup.preparations');
+  });
+
   it('prices every session again under --refresh', async () => {
     const r = settledRepo();
 
@@ -479,6 +496,7 @@ function settledRepo(): string {
       { key: 'catalog', status: 'ok', inputFingerprint: 'settled-catalog' },
       { key: 'interfaces', status: 'ok', inputFingerprint: interfacesFingerprint(r) },
       { key: 'seed', status: 'ok', inputFingerprint: computeSeedStepFingerprint(r) },
+      { key: 'preparations', status: 'ok', inputFingerprint: computeRecipeFingerprint(r) },
       { key: 'auth', status: 'ok', inputFingerprint: authFingerprint(r) },
     ],
   };
@@ -517,6 +535,7 @@ describe('guardSetupInProcess', () => {
       'catalog',
       'interfaces',
       'seed',
+      'preparations',
       'auth',
     ]);
   }, 120_000);
@@ -861,6 +880,7 @@ describe('guardSetupInProcess — hosted injection', () => {
       'catalog',
       'interfaces',
       'seed',
+      'preparations',
       'auth',
     ]);
     expect(checklistOf(run)[0].status).toBe('error');
@@ -873,6 +893,7 @@ describe('guardSetupInProcess — hosted injection', () => {
       ['catalog', ['guard-setup.dependency-catalog']],
       ['interfaces', ['guard-setup.reconcile-interfaces']],
       ['seed', ['guard-setup.seed']],
+      ['preparations', ['guard-setup.preparations']],
       ['auth', ['guard-setup.auth-proof']],
     ]);
   }, 60_000);

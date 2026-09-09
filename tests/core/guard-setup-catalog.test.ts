@@ -621,3 +621,37 @@ function keyFor(systemPrompt: string, stepFingerprint: string): string {
     .update(`${promptFingerprint(systemPrompt)}::${stepFingerprint}`)
     .digest('hex');
 }
+
+describe('credential registration enrichment', () => {
+  const detected = {
+    ...STRIPE,
+    credentialEnvs: [{envVar: 'STRIPE_API_KEY', evidence: [{filePath: '/repo/pay.ts', line: 3, header: 'authorization'}]}],
+  }
+
+  it('new supplied entries expose a secret key field and empty registration slot', () => {
+    const r = repo()
+    foldCatalogDraft(input(r, {detected: [detected]}), draft([{name: 'stripe', class: 'supplied', evidence: 'API account'}]))
+    expect(loadDependencyCatalog(r).dependencies[0].registration).toMatchObject({kind: 'env', vars: [
+      {name: 'STRIPE_BASE_URL', secret: false}, {name: 'STRIPE_API_KEY', secret: true},
+    ]})
+    expect(JSON.parse(fs.readFileSync(dependenciesLocalPath(r), 'utf8')).stripe.env).toEqual({STRIPE_BASE_URL: '', STRIPE_API_KEY: ''})
+  })
+
+  it('adds a newly detected key to a curated entry without touching its saved instance', () => {
+    const r = repo()
+    const first = draft([{name: 'stripe', class: 'supplied', evidence: 'Curated payment account'}])
+    foldCatalogDraft(input(r, {detected: [STRIPE]}), first)
+    const saved = JSON.stringify({stripe: {env: {STRIPE_BASE_URL: 'https://private.test', STRIPE_API_KEY: 'preserve-local-key'}}})
+    fs.writeFileSync(dependenciesLocalPath(r), saved)
+    foldCatalogDraft(input(r, {detected: [detected]}), first)
+    const entry = loadDependencyCatalog(r).dependencies[0]
+    expect(entry.summary).toBe('Curated payment account')
+    expect(entry.registration).toMatchObject({kind: 'env', vars: [
+      {name: 'STRIPE_BASE_URL', secret: false}, {name: 'STRIPE_API_KEY', secret: true},
+    ]})
+    expect(fs.readFileSync(dependenciesLocalPath(r), 'utf8')).toBe(saved)
+    const before = fs.readFileSync(dependenciesPath(r), 'utf8')
+    foldCatalogDraft(input(r, {detected: [detected]}), first)
+    expect(fs.readFileSync(dependenciesPath(r), 'utf8')).toBe(before)
+  })
+})

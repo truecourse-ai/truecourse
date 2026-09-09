@@ -88,3 +88,35 @@ describe.runIf(await isBrowserInstalled())('native selection and dialog-scoped a
     expect(await browser.page.getByRole('combobox').inputValue()).toBe('Food')
   })
 })
+
+// Supporting controls use the same real browser execution path as user tasks.
+describe.runIf(await isBrowserInstalled())('cancel branches and pagination', () => {
+  let browser: WebBrowserHandle
+  let evidenceDir: string
+  beforeAll(async () => {
+    evidenceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-web-controls-'))
+    const launched = await launchWebBrowser({ videoDir: evidenceDir })
+    if (!launched.ok) throw new Error(launched.reason)
+    browser = launched.browser
+  })
+  afterAll(async () => { await browser?.close(); fs.rmSync(evidenceDir, { recursive: true, force: true }) })
+  const execute = (step: GuardWebStep) => executeWebStep({ page: browser.page, baseUrl: 'http://localhost', step, stepIndex: 1, evidenceDir, timeoutMs: 500 })
+  it.each(['Add expense', 'Edit expense', 'Delete expense'])('cancels %s without changing the record', async (name) => {
+    await browser.page.setContent(`<p id="record">Expense: $12.00</p><button>Cancel</button>
+      <section role="dialog" aria-label="${name}"><button onclick="this.parentElement.remove()">Cancel</button></section>`)
+    const result = await execute({ driver: 'web', click: { role: 'button', name: 'Cancel', exact: true, within: { role: 'dialog', name, exact: true } }, expect: { text: { contains: 'Expense: $12.00' } } })
+    expect(result.mismatch).toBeUndefined()
+    expect(await browser.page.getByRole('dialog', { name, exact: true }).count()).toBe(0)
+    expect(await browser.page.locator('#record').textContent()).toBe('Expense: $12.00')
+  })
+  it('navigates next and previous pages through their handlers', async () => {
+    await browser.page.setContent(`<p id="page">Page 1 of 2</p>
+      <button onclick="document.getElementById('page').textContent='Page 1 of 2'">Previous</button>
+      <button onclick="document.getElementById('page').textContent='Page 2 of 2'">Next</button>`)
+    for (const [name, expected] of [['Next', 'Page 2 of 2'], ['Previous', 'Page 1 of 2']]) {
+      const result = await execute({ driver: 'web', click: { role: 'button', name, exact: true }, expect: { text: { contains: expected } } })
+      expect(result.mismatch).toBeUndefined()
+      expect(result.checks.every((c) => c.ok)).toBe(true)
+    }
+  })
+})

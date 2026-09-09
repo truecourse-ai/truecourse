@@ -95,6 +95,8 @@ export const GuardManifestGapSchema = z
     /** The surface the gap is about. */
     surface: GuardDriverIdSchema,
     kind: GuardCoverageGapKindSchema,
+    obligations: z.array(z.object({ milestone: z.number().int().positive(), caseId: z.string().min(1).optional() }).strict()).min(1).optional(),
+    milestones: z.array(z.number().int().positive()).min(1).optional(),
     reason: z.string(),
     /** Present iff `kind === 'awaiting-driver'`, the non-runnable driver awaited. */
     driver: GuardDriverIdSchema.optional(),

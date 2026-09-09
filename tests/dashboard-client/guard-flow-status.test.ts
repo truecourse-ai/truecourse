@@ -62,3 +62,16 @@ describe('guardGapNeed — blocked-on capabilities', () => {
     expect(guardGapNeed(blockedOn(['network']))).toBe('needs network access');
   });
 });
+
+
+describe('blocked observations versus setup', () => {
+  it('preserves a milestone-prefixed diagnostic instead of inventing setup', () => {
+    const gap = { ...blockedOn([]), reason: 'Milestone 4: cannot inspect the SQLite representation' };
+    expect(guardGapNeed(gap)).toBe(gap.reason);
+  });
+  it('uses typed blockers ahead of legacy capability nouns', () => {
+    const gap: GuardFlowGap = { ...blockedOn(['database']), blocker: { kind: 'unsupported-capability', capabilities: ['datastore'] } };
+    expect(guardGapNeed(gap)).toBe(gap.reason);
+    expect(guardGapNeed({ ...gap, blocker: { kind: 'configuration', action: 'Configure the API launch command in recipe.json.' } })).toBe('Configure the API launch command in recipe.json.');
+  });
+});

@@ -1,3 +1,4 @@
+import type { GuardSetupPreparationSession } from '@truecourse/guard-generator';
 /**
  * In-process driver for `truecourse guard setup` — the cheap preparation
  * stage between `spec scan` and `guard generate`.
@@ -73,11 +74,13 @@ import {
   buildInterfacesStep,
   buildRecipeRepair,
   buildSeedSession,
+  buildPreparationSession,
   createGuardSetupSessionContext,
   DEPENDENCY_CATALOG_SESSION_KIND,
   RECIPE_REPAIR_SESSION_KIND,
   RECONCILE_INTERFACES_SESSION_KIND,
   SEED_SESSION_KIND,
+  PREPARATION_SESSION_KIND,
 } from '../services/guard-setup/index.js';
 import { runGuardInterfaceAuthoring } from './guard-interfaces.js';
 import type { LlmEstimate } from './analyze-core.js';
@@ -181,6 +184,7 @@ export interface GuardSetupInProcessOptions {
   authorInterfaces?: GuardSetupInterfacesStep;
   /** Test seam for the seed session. */
   seedSession?: GuardSetupSeedSession;
+  preparationSession?: GuardSetupPreparationSession;
   /** Test seam for the auth-proof step. */
   verifyAuth?: GuardSetupAuthStep;
 }
@@ -318,6 +322,7 @@ const GUARD_SETUP_STEP_SESSION_KINDS: Record<string, readonly string[]> = {
   catalog: [DEPENDENCY_CATALOG_SESSION_KIND],
   interfaces: [RECONCILE_INTERFACES_SESSION_KIND],
   seed: [SEED_SESSION_KIND],
+  preparations: [PREPARATION_SESSION_KIND],
   auth: [AUTH_PROOF_SESSION_KIND],
 };
 
@@ -446,6 +451,7 @@ export async function guardSetupInProcess(
           ...(options.signal ? { signal: options.signal } : {}),
         })
       : undefined);
+  const preparationSession = options.preparationSession ?? (sessionContext ? buildPreparationSession(sessionContext, { ...(options.signal ? { signal: options.signal } : {}) }) : undefined);
   const verifyAuth =
     options.verifyAuth ??
     (sessionContext
@@ -508,6 +514,7 @@ export async function guardSetupInProcess(
       ...(catalogSession ? { catalogSession } : {}),
       ...(authorInterfaces ? { authorInterfaces } : {}),
       ...(seedSession ? { seedSession } : {}),
+      ...(preparationSession ? { preparationSession } : {}),
       ...(verifyAuth ? { verifyAuth } : {}),
       ...(options.refresh ? { refresh: true } : {}),
       ...(options.replace ? { replace: true } : {}),

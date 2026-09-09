@@ -125,7 +125,7 @@ const VOCAB = {
   ) as Record<(typeof awaitingDriverIds)[number], GuardStatusVocab>),
   // No label: this state IS "Blocked". What it needs is a SENTENCE, and the
   // capability nouns the gap names decide it (`guardGapNeed`).
-  'blocked-on': { plain: 'blocked', sentence: 'needs setup' },
+  'blocked-on': { plain: 'blocked', sentence: 'verification is blocked' },
   // The one blocked state that is a TO-DO: the missing capability is an
   // external service the user can hand guard an account for. It gets its own word
   // (the comment above forbids a second name for `blocked-on`; this is a DIFFERENT
@@ -155,7 +155,7 @@ const VOCAB = {
     plain: 'blocked',
     label: 'No code path mapped',
     sentence: 'no code path mapped',
-    hint: 'Nothing was mapped for this surface — the flow may be realizable, but no interface was found to realize it with.',
+    hint: 'A required action has no executable interface in the catalog. Update the mapping, then regenerate the tests.',
   },
   unrealizable: {
     plain: 'blocked',
@@ -539,10 +539,13 @@ export function guardGapNeed(gap: GuardFlowGap): string {
   if (gap.kind === 'awaiting-driver') return gap.driver ? awaitingSentence(gap.driver) : gap.label;
   // A gap promoted to needs-setup names the SERVICE, never a generic
   // noun — "needs setup: open-meteo" is the whole triage in three words.
+  if (gap.blocker?.kind === 'unsupported-capability') return gap.reason;
+  if (gap.blocker?.kind === 'configuration') return gap.blocker.action ?? gap.reason;
+  if (gap.blocker?.kind === 'generation') return gap.reason;
   if (gap.needsSetup) return guardNeedsSetupNeed(gap.needsSetup);
   if (gap.kind === 'blocked-on') {
     const caps = parseBlockedOnCapabilities(gap.reason);
-    if (caps.length === 0) return vocab('blocked-on').sentence!;
+    if (caps.length === 0) return gap.reason || vocab('blocked-on').sentence!;
     return joinNeeds([...new Set(caps.map(capabilityNeed))]);
   }
   return vocab(gap.kind).sentence ?? gap.label;

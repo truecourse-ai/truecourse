@@ -234,7 +234,33 @@ export function detectExternalServices(
 ): DetectedExternalService[] {
   const sdk = detectSdkServices(fileAnalyses)
   const http = detectHttpServices(fileAnalyses, options.ownHosts ?? [])
-  return mergeDetections(sdk, http)
+  const services = mergeDetections(sdk, http)
+  for (const file of fileAnalyses) {
+    for (const ref of file.externalCredentialRefs ?? []) {
+      if (ref.host && options.ownHosts?.some(own => ref.host === own.toLowerCase() || ref.host!.endsWith(`.${own.toLowerCase()}`))) continue
+      // A resolved host wins over an env association. In particular, a request
+      // to an owned host must not borrow a vendor's similarly named variable.
+      const domain = ref.host ? registrableDomain(ref.host) : null
+      const name = domain ? serviceNameFromDomain(domain) : null
+      const candidates = ref.host
+        ? services.filter(s => s.service === name && http.some(h => h.service === s.service))
+        : services.filter(s => ref.baseUrlEnv && (s.baseUrlEnv === ref.baseUrlEnv || s.baseUrlEnvs?.some(v => v.envVar === ref.baseUrlEnv)))
+      if (candidates.length !== 1) continue
+      const service = candidates[0]!
+      const credentials = service.credentialEnvs ??= []
+      let credential = credentials.find(c => c.envVar === ref.envVar)
+      if (!credential) credentials.push(credential = { envVar: ref.envVar, evidence: [] })
+      const evidence = { filePath: ref.location.filePath, line: ref.location.startLine, header: ref.header }
+      if (!credential.evidence.some(e => e.filePath === evidence.filePath && e.line === evidence.line && e.header === evidence.header)) credential.evidence.push(evidence)
+    }
+  }
+  for (const service of services) {
+    service.credentialEnvs?.sort((a, b) => a.envVar.localeCompare(b.envVar))
+    for (const credential of service.credentialEnvs ?? []) {
+      credential.evidence.sort((a, b) => a.filePath.localeCompare(b.filePath) || a.line - b.line || a.header.localeCompare(b.header))
+    }
+  }
+  return services
 }
 
 /** The import-registry half — the original SDK detector, plus its new fields. */

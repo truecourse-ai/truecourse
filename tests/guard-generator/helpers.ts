@@ -311,7 +311,7 @@ export const WORKER_KIND = 'guard-generate.flow-worker'
 
 /** How a section's claims are described in an {@link extractSessionBy} spec. */
 export type ClaimSpec =
-  | Array<{ claim?: string; driver?: 'cli' | 'api' | 'web' | 'tui' | 'library'; reason?: string; alternativeDrivers?: ExtractedClaimWithNeeds['alternativeDrivers']; needs?: ExtractedClaimWithNeeds['needs'] }>
+  | Array<{ claim?: string; driver?: 'cli' | 'api' | 'web' | 'tui' | 'library'; reason?: string; alternativeDrivers?: ExtractedClaimWithNeeds['alternativeDrivers']; needs?: ExtractedClaimWithNeeds['needs']; verification?: ExtractedClaimWithNeeds['verification'] }>
   | { untestable: string }
 
 /**
@@ -344,6 +344,7 @@ export function extractSessionBy(
               reason: c.reason ?? 'exit code is observable',
               ...(c.alternativeDrivers ? { alternativeDrivers: c.alternativeDrivers } : {}),
               ...(c.needs ? { needs: c.needs } : {}),
+              ...(c.verification ? { verification: c.verification } : {}),
             })
           }
         } else {
@@ -656,7 +657,7 @@ export function submitWorkerSessions(
 export function matchAll(onCall?: (flowId: string, surface: string) => void): MatchRunner {
   return async ({ flow, milestones, interfaces, surface }) => {
     onCall?.(flow.id, surface)
-    return { plan: milestones.map((m) => ({ interfaceId: interfaces[0].id, milestone: m.order })) }
+    return { plan: milestones.map((m) => ({ interfaceId: interfaces[0].id, milestone: m.order, ...(m.verification?.cases?.length ? { checks: m.verification.cases.map(c => c.id) } : {}) })) }
   }
 }
 
@@ -666,7 +667,7 @@ export function matchBy(unrealizable: Record<string, string>, onCall?: (flowId: 
     onCall?.(ctx.flow.id)
     const reason = unrealizable[ctx.flow.id]
     if (reason) return { unrealizable: reason }
-    return { plan: ctx.milestones.map((m) => ({ interfaceId: ctx.interfaces[0].id, milestone: m.order })) }
+    return { plan: ctx.milestones.map((m) => ({ interfaceId: ctx.interfaces[0].id, milestone: m.order, ...(m.verification?.cases?.length ? { checks: m.verification.cases.map(c => c.id) } : {}) })) }
   }
 }
 

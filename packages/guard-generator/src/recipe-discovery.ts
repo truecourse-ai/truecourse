@@ -1,3 +1,4 @@
+import { prepareScenario } from '@truecourse/guard-runner'
 /**
  * Recipe discovery — a DETERMINISTIC proposer first, an LLM proposer as the
  * fallback, and the same engine verification over both. `recipe-propose.ts` reads
@@ -406,6 +407,7 @@ export async function discoverRecipe(
       ...(repaired.proposal.env ? { env: repaired.proposal.env } : {}),
       ...(repaired.proposal.api ? { api: repaired.proposal.api } : {}),
       ...(repaired.proposal.web ? { web: repaired.proposal.web } : {}),
+      ...(repaired.proposal.preparations ? { preparations: repaired.proposal.preparations } : {}),
       ...(repaired.proposal.ownHosts ? { ownHosts: repaired.proposal.ownHosts } : {}),
     }
     return {
@@ -480,6 +482,7 @@ export async function discoverRecipe(
     // model-proposed.
     ...(proposal.api ? { api: proposal.api } : {}),
     ...(proposal.web ? { web: proposal.web } : {}),
+    ...(proposal.preparations ? { preparations: proposal.preparations } : {}),
     ...(proposal.ownHosts ? { ownHosts: proposal.ownHosts } : {}),
   }
   return {
@@ -542,6 +545,7 @@ export type ProposalVerdict =
  * exact same path.
  */
 export type VerifiableProposal = {
+  preparations?: Recipe['preparations']
   install?: string
   build: string
   entry?: readonly string[]
@@ -858,6 +862,14 @@ export async function verifyProposal(
       // serve dies without the datastore the api half brought up.
       const webFailure = await verifyWebBoot()
       if (webFailure) return webFailure
+      for (const profile of Object.keys(proposal.preparations ?? {})) {
+        try {
+          const world = await prepareScenario({ repoRoot, recipe: proposal as Recipe, profile })
+          await world.close()
+        } catch (error) {
+          return { ok: false, stage: 'server boot', reason: `preparation "${profile}" failed verification: ${error instanceof Error ? error.message : String(error)}` }
+        }
+      }
     } finally {
       // Teardown is best-effort and NEVER a verdict — a datastore that will not
       // stop is a warning, not a reason to reject a recipe that booted.
@@ -876,6 +888,10 @@ export async function verifyProposal(
   if (!proposal.api) {
     const webFailure = await verifyWebBoot()
     if (webFailure) return webFailure
+    for (const profile of Object.keys(proposal.preparations ?? {})) {
+      try { const world = await prepareScenario({ repoRoot, recipe: proposal as Recipe, profile }); await world.close() }
+      catch (error) { return { ok: false, stage: 'web boot', reason: `preparation "${profile}" failed verification: ${error instanceof Error ? error.message : String(error)}` } }
+    }
   }
   const warnings = proposalWarnings(proposal)
   return warnings.length > 0 ? { ok: true, warnings } : { ok: true }

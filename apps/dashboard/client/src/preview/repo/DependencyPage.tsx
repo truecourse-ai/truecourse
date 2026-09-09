@@ -34,7 +34,7 @@ export function DependencyPage({ repo, name }: { repo: Repo; name: string }) {
             Dependencies
           </Link>
           <ChevronRight aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <h1 className="min-w-0 truncate font-semibold text-foreground">{dependency?.name ?? name}</h1>
+          <h1 className="min-w-0 truncate font-semibold text-foreground">{dependency?.name ?? 'Dependency'}</h1>
         </nav>
       </header>
       <div className="relative min-h-0 flex-1 overflow-hidden">
@@ -52,7 +52,7 @@ export function DependencyPage({ repo, name }: { repo: Repo; name: string }) {
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         ) : (
-          <EmptyState icon={Plug} title="No such dependency" body="Nothing is declared under that name." />
+          <EmptyState icon={Plug} title="No such dependency" body="No configurable dependency is available at this address." />
         )}
       </div>
     </div>

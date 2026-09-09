@@ -58,7 +58,10 @@ import {
   buildRouteManifest,
   loadResolvedExternals,
   computeRecipeFingerprint,
+  preparationCatalog,
   dependenciesPath,
+  loadDependencyCatalog,
+  atomicWriteJson,
   guardAuthoredInterfacesPath,
   hashableRecipeText,
   readGuardSetup,
@@ -90,6 +93,7 @@ import { discoverRecipe, type RecipeDiscoveryPhase, type RecipeRepairFn } from '
 import { detectEcosystems, routesFromInterfaces, type ApiRouteRef } from './recipe-propose.js'
 import { probeApiServers } from './endpoint-probe.js'
 import { deriveExternalsSkeleton } from './externals-skeleton.js'
+import { extendCredentialRegistrations } from './credential-registrations.js'
 import {
   detectRoleColumns,
   readExistingSeedScript,
@@ -127,7 +131,7 @@ const SPEC_EXCERPT_CHARS = 1500
  * deterministic `mapInterfaces` pass whose in-memory output every later step
  * reads, so it always runs and the detection snapshot is always this run's.
  */
-export const GUARD_SETUP_ONLY_STEPS = ['recipe', 'catalog', 'interfaces', 'seed', 'auth'] as const
+export const GUARD_SETUP_ONLY_STEPS = ['recipe', 'catalog', 'interfaces', 'seed', 'preparations', 'auth'] as const
 export type GuardSetupOnlyStep = (typeof GUARD_SETUP_ONLY_STEPS)[number]
 
 /**
@@ -221,6 +225,7 @@ export interface GuardSetupOptions {
    * (the gate and the replace-confirmation still run first, here).
    */
   seedSession?: GuardSetupSeedSession
+  preparationSession?: GuardSetupPreparationSession
   /**
    * The auth-proof session over the catalog's supplied entries (plan 03 step
    * 14). Absent ⇒ the step reports a `skipped` placeholder row. Its result may
@@ -241,6 +246,7 @@ export const GUARD_SETUP_STEPS = [
   { key: 'catalog', label: 'Cataloguing dependencies' },
   { key: 'interfaces', label: 'Authoring the interface catalog' },
   { key: 'seed', label: 'Preparing data + principals' },
+  { key: 'preparations', label: 'Verifying private starting states' },
   { key: 'auth', label: 'Verifying supplied auth' },
 ] as const
 
@@ -372,6 +378,16 @@ export type GuardSetupSeedSessionResult =
       salvaged?: boolean
     }
   | { status: 'failed' | 'skipped'; reason: string; sessionRunId?: string }
+export interface GuardSetupPreparationSessionInput {
+  repoRoot: string
+  recipe: Recipe
+  specExcerpts: { doc: string; text: string }[]
+  fingerprint: string
+}
+export type GuardSetupPreparationSession = (input: GuardSetupPreparationSessionInput) => Promise<{
+  status: 'ok' | 'skipped' | 'failed'; reason?: string; sessionRunId?: string
+}>
+
 export type GuardSetupSeedSession = (
   input: GuardSetupSeedSessionInput,
 ) => Promise<GuardSetupSeedSessionResult>
@@ -641,6 +657,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         baseUrlEnvs: [
           ...new Set([...(s.baseUrlEnvs ?? []).map((e) => e.envVar), ...(s.baseUrlEnv ? [s.baseUrlEnv] : [])]),
         ].sort(),
+        credentialEnvs: (s.credentialEnvs ?? []).map(e => e.envVar).sort(),
       }))
       .sort((a, b) => a.service.localeCompare(b.service)),
     database: database ? { type: database.type, driver: database.driver } : null,
@@ -682,9 +699,11 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       // detection and an unchanged recipe it derives nothing and writes nothing —
       // but no session is spent.
       externalsStep = applyExternalsSkeleton(repoRoot, recipe, detectedExternals)
-      if (settledSession !== catalogSessionFp) writeCatalogSettle(repoRoot, catalogSessionFp)
-      steps.push({ key: 'catalog', status: 'skipped', reason: 'unchanged', inputFingerprint: catalogFpPre })
-      opts.onStepDone?.('catalog', 'unchanged')
+      const catalogFpPost = catalogFpOf()
+      const enriched = catalogFpPost !== catalogFpPre
+      if (settledSession !== catalogSessionFp || enriched) writeCatalogSettle(repoRoot, catalogSessionFpOf())
+      steps.push({ key: 'catalog', status: enriched ? 'ok' : 'skipped', ...(!enriched ? { reason: 'unchanged' } : {}), inputFingerprint: catalogFpPost })
+      opts.onStepDone?.('catalog', enriched ? 'credential requirements updated' : 'unchanged')
     } else {
       externalsStep = applyExternalsSkeleton(repoRoot, recipe, detectedExternals)
       if (opts.catalogSession) {
@@ -857,6 +876,27 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         ...(seedRun.sessionRunId ? { sessionRunId: seedRun.sessionRunId } : {}),
       })
       opts.onStepDone?.('seed', seedSummary(seedStep))
+    }
+  }
+
+  // Private state is its own targeted setup step; it never replaces the main seed.
+  if (enter('preparations')) {
+    const preparationFp = computeRecipeFingerprint(repoRoot)
+    const preparationRecipe = reloadRecipe(repoRoot) ?? current
+    if (replayed('preparations')) {
+      opts.onStepDone?.('preparations', 'existing private preparation profiles preserved')
+    } else if (settled('preparations') === preparationFp &&
+      preparationCatalog(preparationRecipe).length === Object.keys(preparationRecipe.preparations ?? {}).length) {
+      steps.push({ key: 'preparations', status: 'skipped', reason: 'unchanged', inputFingerprint: preparationFp })
+      opts.onStepDone?.('preparations', 'unchanged')
+    } else {
+      const result = opts.preparationSession
+        ? await opts.preparationSession({ repoRoot, recipe: preparationRecipe,
+            specExcerpts: readSpecExcerpts(repoRoot), fingerprint: preparationFp })
+        : { status: 'skipped' as const, reason: 'private preparation authoring is unavailable; only profiles with runner-verified baseline checks are usable' }
+      steps.push({ key: 'preparations', status: result.status, ...(result.reason ? { reason: result.reason } : {}),
+        inputFingerprint: computeRecipeFingerprint(repoRoot), ...('sessionRunId' in result && result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}) })
+      opts.onStepDone?.('preparations', result.reason ?? result.status)
     }
   }
 
@@ -1104,6 +1144,7 @@ function firstReasonLine(reason: string): string {
 
 /** The recipe blocks discovery never proposes — the user's and setup's own work. */
 interface AuthoredBlocks {
+  preparations?: unknown
   seed?: unknown
   externals?: unknown
   credentials?: unknown
@@ -1115,6 +1156,7 @@ function authoredBlocks(recipe: Recipe | null): AuthoredBlocks | null {
   if (!recipe) return null
   const api = recipe.api
   const blocks: AuthoredBlocks = {
+    ...(recipe.preparations !== undefined ? { preparations: recipe.preparations } : {}),
     ...(api?.seed !== undefined ? { seed: api.seed } : {}),
     ...(api?.externals !== undefined ? { externals: api.externals } : {}),
     ...(api?.credentials !== undefined ? { credentials: api.credentials } : {}),
@@ -1143,6 +1185,7 @@ function restoreAuthoredBlocks(repoRoot: string, blocks: AuthoredBlocks): Recipe
   } catch {
     return null
   }
+  if (blocks.preparations !== undefined) doc.preparations = blocks.preparations
   if (blocks.ownHosts !== undefined) doc.ownHosts = blocks.ownHosts
   const api = doc.api as Record<string, unknown> | undefined
   if (api && typeof api === 'object') {
@@ -1176,6 +1219,15 @@ function applyExternalsSkeleton(
   detected: readonly DetectedExternalService[],
 ): GuardSetupExternalsStep {
   const base = { declared: [] as string[], alreadyDeclared: [] as string[], undeclarable: [] as string[] }
+  // This deterministic enrichment also runs when the classification session is
+  // already settled. Existing registrations and local secret overlays survive.
+  try {
+    const catalog = loadDependencyCatalog(repoRoot)
+    const extended = extendCredentialRegistrations(catalog, detected)
+    if (extended !== catalog) atomicWriteJson(dependenciesPath(repoRoot), extended)
+  } catch (error) {
+    return { ...base, status: 'failed', reason: `credential requirements could not be added: ${(error as Error).message}`, unprovided: [] }
+  }
   if (!recipe.api) {
     return {
       ...base,
@@ -1186,8 +1238,8 @@ function applyExternalsSkeleton(
   }
   const skeleton = deriveExternalsSkeleton(recipe, detected)
   const added = Object.keys(skeleton.declare).sort()
-  if (added.length > 0) {
-    const written = writeExternals(repoRoot, skeleton.declare)
+  if (added.length > 0 || Object.keys(skeleton.update).length > 0) {
+    const written = writeExternals(repoRoot, { ...skeleton.declare, ...skeleton.update })
     if (written !== null) {
       return {
         status: 'failed',
@@ -1233,7 +1285,7 @@ function writeExternals(repoRoot: string, declare: Record<string, RecipeApiExter
       .map((i) => `${i.path.join('.')} ${i.message}`)
       .join('; ')}`
   }
-  fs.writeFileSync(file, JSON.stringify(doc, null, 2) + (raw.endsWith('\n') ? '\n' : ''))
+  atomicWriteJson(file, doc)
   return null
 }
 

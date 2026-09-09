@@ -255,3 +255,38 @@ describe('the skeleton never changes a verdict', () => {
     })
   }
 })
+
+describe('source-proven credential requirements', () => {
+  const currencybeacon = detected({
+    service: 'currencybeacon', baseUrlEnv: 'CURRENCYBEACON_BASE_URL',
+    credentialEnvs: [{ envVar: 'CURRENCYBEACON_API_KEY', evidence: [{filePath: '/repo/client.ts', line: 5, header: 'authorization'}] }],
+  })
+
+  it('declares the key without a value and requires it before marking the service provided', () => {
+    const { declare } = deriveExternalsSkeleton(apiRecipe(), [currencybeacon])
+    expect(declare.currencybeacon.env).toEqual({ CURRENCYBEACON_API_KEY: {} })
+    expect(resolveExternals(declare, {}, {})[0].state).toBe('unprovided')
+    const withUrl = {currencybeacon: {baseUrl: 'https://api.currencybeacon.com'}}
+    expect(resolveExternals(declare, withUrl, {})[0].state).toBe('incomplete')
+    expect(resolveExternals(declare, {currencybeacon: {...withUrl.currencybeacon, env: {CURRENCYBEACON_API_KEY: 'test-key'}}}, {})[0]).toMatchObject({
+      state: 'provided', inject: { CURRENCYBEACON_API_KEY: 'test-key' },
+    })
+  })
+
+  it('extends an existing declaration without overwriting custom configuration or credential sources', () => {
+    const prior = {baseUrlEnv: 'CUSTOM_URL', baseUrl: 'https://sandbox.test', mode: 'sandbox', env: {OTHER_KEY: {valueFromEnv: 'USER_KEY'}}}
+    const original = apiRecipe({currencybeacon: prior})
+    const patch = deriveExternalsSkeleton(original, [currencybeacon])
+    expect(patch.declare).toEqual({})
+    expect(patch.update.currencybeacon).toEqual({...prior, env: {...prior.env, CURRENCYBEACON_API_KEY: {}}})
+    expect(original.api!.externals!.currencybeacon).toEqual(prior)
+    expect(deriveExternalsSkeleton(apiRecipe(patch.update), [currencybeacon]).update).toEqual({})
+  })
+
+  it('preserves a supplied source and never takes an env variable from another owner', () => {
+    const original = apiRecipe({currencybeacon: {baseUrlEnv: 'BASE', env: {CURRENCYBEACON_API_KEY: {valueFromEnv: 'SAVED_KEY'}}}})
+    expect(deriveExternalsSkeleton(original, [currencybeacon]).update).toEqual({})
+    const owned = apiRecipe({another: {baseUrlEnv: 'ANOTHER_URL', env: {CURRENCYBEACON_API_KEY: {}}}})
+    expect(deriveExternalsSkeleton(owned, [currencybeacon]).declare.currencybeacon.env).toBeUndefined()
+  })
+})

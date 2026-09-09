@@ -1,3 +1,4 @@
+import { GuardFlowProgressSchema, GuardBlockerSchema } from '@truecourse/shared'
 /**
  * Derived guard read-surface DTOs the dashboard renders, the per-section
  * coverage join, the flow inventory and its detail, the interface catalog, the
@@ -328,8 +329,11 @@ export interface GuardSectionScenario {
 export const GuardFlowGapSchema = z
   .object({
     kind: GuardCoverageGapKindSchema,
+    obligations: z.array(z.object({ milestone: z.number().int().positive(), caseId: z.string().min(1).optional() }).strict()).min(1).optional(),
+    milestones: z.array(z.number().int().positive()).min(1).optional(),
     /** The generator's one-line explanation. */
     reason: z.string(),
+    blocker: GuardBlockerSchema.optional(),
     /** Present iff `kind === 'awaiting-driver'`, the non-runnable driver awaited. */
     driver: GuardDriverIdSchema.optional(),
     /** One-line display label (`awaiting web driver`, `no interface`). */
@@ -774,6 +778,7 @@ export type GuardFlowBucket = z.infer<typeof GuardFlowBucketSchema>
 export const GuardFlowListItemSchema = z
   .object({
     flowId: z.string(),
+    progress: GuardFlowProgressSchema.optional(),
     title: z.string(),
     /** One-line user goal; empty for a Manual pseudo-flow (a scenario has no goal). */
     goal: z.string(),
@@ -1006,6 +1011,7 @@ export type GuardFlowSurfaceGap = z.infer<typeof GuardFlowSurfaceGapSchema>
 export const GuardFlowDetailSchema = z
   .object({
     flowId: z.string(),
+    progress: GuardFlowProgressSchema.optional(),
     title: z.string(),
     goal: z.string(),
     status: GuardSectionCoverageStatusSchema,

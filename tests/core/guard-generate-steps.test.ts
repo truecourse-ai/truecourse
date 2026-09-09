@@ -213,6 +213,7 @@ const EXTRACT_DRAFT = {
       driver: 'cli' as const,
       sectionAnchor: 'version',
       reason: 'stdout carries the version',
+      verification: { scope: 'configuration', method: 'behavior', observable: 'Version on stdout', cases: [{ id: 'version-text', claim: 'Prints the version', method: 'behavior', requires: ['process'], conditions: [] }] },
       needs: [],
     },
   ],

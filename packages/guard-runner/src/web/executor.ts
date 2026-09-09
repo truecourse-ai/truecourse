@@ -76,7 +76,7 @@ export function webScreenshotFile(stepIndex: number): string {
  * whether it held or not.
  */
 export interface WebCheck {
-  subject: 'url' | 'text' | 'visible' | 'state' | 'attribute' | 'class'
+  subject: 'url' | 'text' | 'visible' | 'hidden' | 'count' | 'inputValue' | 'state' | 'attribute' | 'class'
   /** The assertion in full, in the words a mismatch uses. */
   expected: string
   /** What the page had FOR THIS MEMBER — never another member's value. */
@@ -175,14 +175,14 @@ async function readVisibleText(page: Page): Promise<string> {
  * An authored `pick: first` narrows to the first match, so downstream counting sees
  * 0 or 1 and the strict must-be-unambiguous check never fires for declared grids.
  */
-export function webLocator(page: Page, target: GuardWebLocator): Locator {
+export function webLocator(page: Page, target: GuardWebLocator, includeHidden = false): Locator {
   const root = target.within
     ? page.getByRole(target.within.role, { name: target.within.name, exact: target.within.exact ?? false })
     : page
   const exact = target.exact ?? false
   const base =
     'role' in target
-      ? root.getByRole(target.role, { name: target.name, exact })
+      ? root.getByRole(target.role, { name: target.name, exact, includeHidden })
       : 'placeholder' in target
         ? root.getByPlaceholder(target.placeholder, { exact })
         : 'label' in target
@@ -289,6 +289,26 @@ async function awaitTarget(
     }
     if (Date.now() >= deadline) return { mismatch: await targetMismatch(page, target, found, what) }
     await tick()
+  }
+}
+
+/** Read visible cardinality without treating missing targets as a lookup error. */
+async function visibleMatchCount(
+  page: Page,
+  target: GuardWebLocator,
+): Promise<{ count: number } | { mismatch: ExpectMismatch }> {
+  if (target.within) {
+    const scope = await resolveOne(page, target.within, 'within')
+    if ('mismatch' in scope) return scope
+  }
+  try {
+    // Include hidden role matches before applying visibility so a visible element
+    // with aria-hidden cannot make an absence assertion pass.
+    return { count: await webLocator(page, target, true).filter({ visible: true }).count() }
+  } catch {
+    const expected = `to count visible matches of ${describeWebLocator(target)}`
+    const actual = 'the browser could not read the matching elements'
+    return { mismatch: { subject: 'target', expected, actual, detail: [expected, actual] } }
   }
 }
 
@@ -519,6 +539,66 @@ async function evaluateWebExpect(page: Page, expect: GuardWebExpect): Promise<We
         },
         miss,
       )
+    }
+  }
+  // Absence and cardinality must query all matches. Positive resolution would
+  // reject the zero-match state these assertions explicitly need to establish.
+  for (const target of webVisibleTargets(expect.hidden)) {
+    const expected = `${describeWebLocator(target)} is hidden or absent`
+    const read = await visibleMatchCount(page, target)
+    if ('mismatch' in read) {
+      record({ subject: 'hidden', expected, actual: read.mismatch.actual }, read.mismatch)
+    } else {
+      const actual = `${describeWebLocator(target)} has ${read.count} visible matches`
+      record({ subject: 'hidden', expected, actual }, read.count === 0 ? null : {
+        subject: 'hidden', expected, actual, detail: [`expected ${expected}`, actual],
+      })
+    }
+  }
+  if (expect.count) {
+    const { target, equals } = expect.count
+    const expected = `${describeWebLocator(target)} has ${equals} visible matches`
+    const read = await visibleMatchCount(page, target)
+    if ('mismatch' in read) {
+      record({ subject: 'count', expected, actual: read.mismatch.actual }, read.mismatch)
+    } else {
+      const actual = `${describeWebLocator(target)} has ${read.count} visible matches`
+      record({ subject: 'count', expected, actual }, read.count === equals ? null : {
+        subject: 'count', expected, actual, detail: [`expected ${expected}`, actual],
+      })
+    }
+  }
+  if (expect.inputValue) {
+    const { target, expected: wanted } = expect.inputValue
+    const subject = `${describeWebLocator(target)} value`
+    let expected = `${subject} ${'browserDate' in wanted ? "is today's date in the browser timezone" : describeTextMatcher('', wanted).trim()}`
+    const resolved = await resolveOne(page, target, 'to read the value of')
+    if ('mismatch' in resolved) {
+      record({ subject: 'inputValue', expected, actual: resolved.mismatch.actual }, resolved.mismatch)
+    } else {
+      // Read value and date in the same browser observation. A date default is
+      // compared with the browser clock, never with itself or the runner's date.
+      const reading = await resolved.locator.evaluateAll((nodes) => {
+        if (nodes.length !== 1) return null
+        const node = nodes[0]
+        const element = node as unknown as { tagName: string; value: string }
+        if (!['INPUT', 'TEXTAREA', 'SELECT'].includes(element.tagName)) return null
+        const value = element.value
+        const date = new Date()
+        const today = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+        return { value, today }
+      }).catch(() => null)
+      if (reading === null) {
+        const actual = `${describeWebLocator(target)} has no readable input, textarea or select value`
+        record({ subject: 'inputValue', expected, actual }, {
+          subject: 'inputValue', expected, actual, detail: [`expected ${expected}`, actual],
+        })
+      } else {
+        const matcher = 'browserDate' in wanted ? { equals: reading.today } : wanted
+        if ('browserDate' in wanted) expected = `${subject} is ${JSON.stringify(reading.today)} (today in the browser timezone)`
+        const actual = `${subject} was ${JSON.stringify(truncate(reading.value, WEB_TEXT_LIMIT))}`
+        record({ subject: 'inputValue', expected, actual }, matchTextMatcher('inputValue', subject, matcher, reading.value))
+      }
     }
   }
   if (expect.state) {

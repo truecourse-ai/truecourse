@@ -18,6 +18,7 @@
 
 import { z } from 'zod'
 import {
+  GuardVerificationSchema,
   GuardSetupSchema,
   GuardStepObjectSchema,
   promptKeysNeedATerminal,
@@ -32,7 +33,7 @@ import {
   type GuardDriverId,
   type GuardWebStep,
 } from '@truecourse/shared'
-import { isNoOpEntry, NO_OP_ENTRY_MESSAGE, RecipeWebSchema } from '@truecourse/guard-runner'
+import { isNoOpEntry, NO_OP_ENTRY_MESSAGE, RecipeWebSchema, RecipePreparationSchema } from '@truecourse/guard-runner'
 
 /** The per-section classification summary recorded in the manifest, derived from
  *  extraction (kept shape — the dashboard renders it as a coverage verdict). */
@@ -160,6 +161,7 @@ export const RecipeProposalSchema = z
       .optional(),
     env: z.record(z.string(), z.string()).optional(),
     api: RecipeApiProposalSchema.optional(),
+    preparations: z.record(z.string().regex(/^[a-z0-9][a-z0-9._-]*$/), RecipePreparationSchema).optional(),
     /**
      * The BROWSER surface — the runner's own `web` block, verbatim (serve argv,
      * healthPath, env, `app` naming the served workspace app in a monorepo).
@@ -264,6 +266,7 @@ export const ExtractedClaimSchema = z.object({
   claim: z.string().min(1),
   driver: z.enum(CLAIM_DRIVERS),
   alternativeDrivers: z.array(z.enum(CLAIM_DRIVERS)).optional(),
+  verification: GuardVerificationSchema.optional(),
   sectionAnchor: z.string().min(1),
   reason: z.string().min(1),
 })
@@ -627,6 +630,8 @@ export const RealizationStepSchema = z.object({
   interfaceId: z.string().min(1),
   /** The flow milestone (`order`) this interface realizes. */
   milestone: z.number().int().positive(),
+  /** Explicit source case ids this action serves; required for case-bearing milestones. */
+  checks: z.array(z.string().min(1)).min(1).optional(),
   /** Optional one-liner on how the interface serves the milestone. */
   note: z.string().optional(),
 })
@@ -669,13 +674,25 @@ export const ClaimDiffSchema = z
   .strict()
 export type ClaimDiff = z.infer<typeof ClaimDiffSchema>
 
+export const RealizationGapSchema = z.object({
+  milestone: z.number().int().positive(),
+  checks: z.array(z.string().min(1)).min(1).optional(),
+  kind: z.enum(['mapping', 'capability']),
+  reason: z.string().min(1),
+}).strict()
+export type RealizationGap = z.infer<typeof RealizationGapSchema>
+
 export const RealizationMatchSchema = z
   .object({
     plan: z.array(RealizationStepSchema).optional(),
+    gaps: z.array(RealizationGapSchema).optional(),
+    // Read old replies conservatively: a catalog-only refusal is a mapping gap.
     unrealizable: z.string().min(1).optional(),
   })
-  .refine((m) => ((m.plan?.length ?? 0) > 0) !== (m.unrealizable !== undefined), {
-    message: 'expected a non-empty "plan" array OR an "unrealizable" reason, not both',
+  .refine((m) => m.unrealizable !== undefined
+    ? !m.plan?.length && !m.gaps?.length
+    : (m.plan?.length ?? 0) + (m.gaps?.length ?? 0) > 0, {
+    message: 'expected a non-empty plan and/or milestone gaps, or a legacy unrealizable reason',
   })
-  .transform((m) => ({ plan: m.plan ?? [], unrealizable: m.unrealizable }))
+  .transform((m) => ({ plan: m.plan ?? [], gaps: m.gaps ?? [], unrealizable: m.unrealizable }))
 export type RealizationMatch = z.infer<typeof RealizationMatchSchema>

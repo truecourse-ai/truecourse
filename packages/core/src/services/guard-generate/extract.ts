@@ -22,7 +22,7 @@
 
 import { createHash } from 'node:crypto'
 import { defineSessionTool, type SessionBudget, type SessionDef, type SessionTool } from '@truecourse/agent-loop'
-import { ExtractOutcomeSchema, type ExtractOutcome } from '@truecourse/shared'
+import { verificationBoundaryProblems, ExtractOutcomeSchema, type ExtractOutcome } from '@truecourse/shared'
 import { snapExtraction, suppressionKey, type GuardDoc } from '@truecourse/guard-generator'
 import { promptFingerprint } from '../agent/session-cache.js'
 import {
@@ -63,12 +63,54 @@ export const EXTRACT_SESSION_SYSTEM_PROMPT = `You read ONE specification documen
 # What a claim is
 A claim is ONE concrete, observable behavior a program guarantees: an exit code, text written to stdout/stderr, a file created or changed, an HTTP response, a datastore change, a rendered UI element. Write each claim as a single declarative sentence, in the document's own terms.
 
+# Obligation boundaries and cases
+For EVERY claim supply verification.scope (web, api, configuration, implementation)
+and verification.cases. Each case has a stable kebab-case id, its source-grounded
+claim, method, requires (observation capabilities), and conditions (an array).
+Capabilities: browser, http, process, filesystem, datastore, concurrency,
+implementation, request-control. Conditions: fresh-state, request-failure,
+request-pending. Use [] when no special condition is required.
+A case is an independently falsifiable acceptance or boundary case, not an example
+input. Enumerate named search semantics, boundary conditions and error classes;
+never hide literal wildcard escaping or case handling inside "filters work".
+For sorting by date then ID, enumerate primary-date ordering and equal-date ID
+ordering as separate cases. Same-date examples cannot prove the primary ordering.
+An empty ledger or pristine installation requires conditions: ["fresh-state"].
+Separate that branch from behavior using populated state; never omit the condition
+merely to combine both cases into one claim. Default dates must be compared with
+the browser's local calendar date, not with a value captured from the field itself.
+Mark cases that require a pristine ledger with preparation: "empty" and conditions:
+["fresh-state"]. Mark exact global totals, global counts, and deterministic page
+boundaries with preparation: "controlled". This declares isolated, known data;
+it is not datastore observation. Do not require controlled preparation merely to
+read one uniquely identified record or a filter scoped to this scenario's records.
+A filtered list with no matching rows is a different condition from an empty ledger:
+extract separate source-grounded cases when the specification promises both.
+Split a UI save sentence from an HTTP POST method contract: dialog closure,
+confirmation text, refreshed totals, preserved filters and pagination are web cases;
+method/status/body behavior belongs to API cases. Likewise, preserve prefilled edit
+fields, Cancel behavior and persistence after reload as UI cases independently of
+an API guarantee that createdAt or identity remains unchanged. A field not exposed
+by the UI cannot become browser proof merely because the rest of the sentence is UI.
+Keep each case's required transition and starting state explicit after splitting.
+All cases of one claim must share scope, method and conditions. Split a mixed
+sentence BEFORE submitting: ordinary reads vs retry after failure; returned cents
+vs SQLite column types; normal startup vs exact file placement.
+Web claims require browser observations only (and request-control for controlled
+UI failure or loading). A fresh instance is preparation, not datastore observation.
+An unchanged record after rejection is observed by subsequent API/UI reads. Preserve
+an explicit guarantee about ALL internal tables as a separate implementation claim.
+A UI error state may use a controlled response; it need not damage a real database.
+Configuration and implementation guarantees stay separate and remain accounted for.
+The boundary checker runs on both check_claims and the final outcome; repair its
+reported problems rather than dropping the underlying specification requirements.
+
 # Be selective — extract behaviors, not sentences
-Return the SMALLEST set of claims that captures what a section actually guarantees. This is the most important rule after faithfulness:
-- A well-covered section yields a HANDFUL of claims (roughly 1–8), not dozens. More than ~8 for one section means you are over-splitting — consolidate.
+Group related cases into claims only within the verification boundaries above. Preserve every explicit guarantee and named boundary case:
+- Prefer a handful of coherent claims with explicit cases. A claim-count target never justifies omitting a requirement or merging incompatible verification scopes.
 - ONE claim per distinct behavior, not one per sentence, per listed flag, or per example. A command documented with several options is usually ONE claim about its primary observable outcome; a flag earns its own claim only when the section states a SEPARATE, distinct observable behavior for it.
 - Do not extract a claim for every item merely because a section lists it (a command map, an options table, an enumeration). Extract the behaviors the section explicitly specifies an outcome for.
-- Skip trivial, obvious, or restated behaviors. Prefer fewer, higher-value claims; when unsure whether something is a distinct testable behavior, leave it out.
+- Deduplicate restatements. Do not drop a specified outcome merely because it seems obvious; represent its independently falsifiable conditions as cases.
 
 # Drivers — which kind of test could assert the claim
 - cli — a command-line program's behavior when invoked with arguments (and optional stdin): its exit code, what it writes to stdout/stderr, or the files it creates or changes.
@@ -88,8 +130,25 @@ ENTIRE same claim. These are alternatives, not extra mandatory variants. Omit it
 when there is no genuine alternative. Do not list api just because a UI uses HTTP,
 or web for an API contract whose protocol details are not visible in the UI.
 
+# Verification requirements
+For every claim supply \`verification: { scope, method, observable, cases }\`:
+- behavior: visible UI, HTTP values/status/headers, process output or lifecycle.
+- filesystem: directly inspect the claimed file path, contents or existence.
+- datastore: directly inspect database schema, indexes or stored representation.
+- concurrency: controlled concurrent operations that can expose inconsistent reads.
+- implementation: inspect an internal mechanism, such as never multiplying floats
+  or using a particular transaction primitive. HTTP examples cannot prove this.
+The observable must state the evidence needed, not merely repeat the claim.
+Split independently provable guarantees into separate claims even within one
+sentence: exact returned cents is behavior; no floating-point multiplication is
+implementation. Correct response totals is behavior; snapshot consistency under
+concurrent writes is concurrency; use of a specific transaction is implementation.
+Likewise split successful mutation from failure/retry behavior requiring injection.
+Do not weaken, omit or recast internal guarantees as response checks. Preserve them
+with their verification method so missing capabilities remain visible.
+
 # Faithfulness — the prime directive
-Extract ONLY what the text states. Never infer a behavior the words do not state. A claim that overreaches the prose is worse than a missing one. When a section is background, rationale, definitions, naming, design history, a pure cross-reference, or needs a capability no driver has, record an untestable note instead of forcing a weak claim.
+Extract ONLY what the text states. Never infer a behavior the words do not state. A claim that overreaches the prose is worse than a missing one. When a section is background, rationale, definitions, naming, design history, or a pure cross-reference, record an untestable note. Preserve concrete guarantees with their required verification method even when the current drivers cannot verify them; matching records the missing capability.
 
 # Sandbox limits — commands that need an LLM provider are not cli-testable
 Guard runs each command in a sealed sandbox with NO credentials and NO network. A command whose documented behavior requires an authenticated LLM provider or an external AI CLI cannot run there. Do NOT extract such a command's behavior as a cli claim — record an untestable note whose reason states it needs an authenticated LLM provider (llm-provider). Judge this by the DOCUMENTED behavior, never a fixed command list.
@@ -119,7 +178,7 @@ When the briefing carries a RESOLVED — STALE block, those verbatim sentences l
 - \`check_claims\` — REQUIRED before you finish: call it with your complete draft. It snaps every anchor against the live section index exactly as the engine will, so a wrong anchor costs one turn here instead of a dropped claim at the fold. Fix what it reports, then produce the outcome.
 
 # The outcome
-One object: { "claims": [ { "claim", "driver", "alternativeDrivers"?, "sectionAnchor", "reason", "needs": [ { "kind", "name", "detail"? } ] } ], "untestable": [ { "sectionAnchor", "reason" } ] }. "reason" on a claim states the observable a test would assert.`
+One object: { "claims": [ { "claim", "driver", "alternativeDrivers"?, "verification": { "scope", "method", "observable", "cases": [{ "id", "claim", "method", "requires", "conditions", "preparation"? }] }, "sectionAnchor", "reason", "needs": [ { "kind", "name", "detail"? } ] } ], "untestable": [ { "sectionAnchor", "reason" } ] }. "reason" on a claim states the observable a test would assert.`
 
 /** The prompt half of every extract-session cache key — exported for the
  *  step-20 estimate rework, which must probe the REAL keys. */
@@ -167,6 +226,7 @@ export function validateExtractDraft(draft: ExtractOutcome, doc: GuardDoc): stri
   const keptNotes = new Set(snapped.untestable.map((n) => n.sectionAnchor))
   const problems: string[] = []
   for (const c of draft.claims) {
+    problems.push(...verificationBoundaryProblems(c.verification, false, [c.driver, ...(c.alternativeDrivers ?? [])]).map(p => `claim "${c.claim}": ${p}`))
     if (!keptClaims.has(`${c.driver}\0${normalize(c.claim)}`)) {
       problems.push(
         `claim "${c.claim}" — its anchor \`${c.sectionAnchor}\` snaps onto no section (or the claim duplicates another). Copy an anchor from the outline verbatim.`,
@@ -188,6 +248,15 @@ export function validateExtractDraft(draft: ExtractOutcome, doc: GuardDoc): stri
   return problems
 }
 
+/** Rechecked on the final outcome, even when the model changes a checked draft. */
+function checkedExtractionSchema(doc: GuardDoc) {
+  return ExtractOutcomeSchema.superRefine((draft, ctx) => {
+    const problems = validateExtractDraft(draft, doc)
+    for (const c of draft.claims) problems.push(...verificationBoundaryProblems(c.verification, true, [c.driver, ...(c.alternativeDrivers ?? [])]).map(p => `claim "${c.claim}": ${p}`))
+    for (const message of new Set(problems)) ctx.addIssue({ code: 'custom', message })
+  })
+}
+
 function checkClaimsTool(doc: GuardDoc): SessionTool {
   return defineSessionTool({
     name: 'check_claims',
@@ -199,6 +268,7 @@ function checkClaimsTool(doc: GuardDoc): SessionTool {
     inputSchema: ExtractOutcomeSchema,
     async execute(args) {
       const problems = validateExtractDraft(args, doc)
+      for (const c of args.claims) problems.push(...verificationBoundaryProblems(c.verification, true, [c.driver, ...(c.alternativeDrivers ?? [])]).map(p => `claim "${c.claim}": ${p}`))
       if (problems.length === 0) {
         return {
           content: `The draft is valid: ${args.claims.length} claim(s), ${args.untestable.length} untestable note(s), every anchor snapped. Produce it as the outcome.`,
@@ -224,7 +294,7 @@ export function extractSessionDef(input: ExtractSessionInput): SessionDef<Extrac
       readReferencedDocTool(input.universe),
       checkClaimsTool(input.doc),
     ],
-    outcomeSchema: ExtractOutcomeSchema,
+    outcomeSchema: checkedExtractionSchema(input.doc),
     budget: EXTRACT_SESSION_BUDGET,
     // The structural half of "run check_claims before you finish" (01 step 2k):
     // the shell refuses the first outcome of a session that never snapped its

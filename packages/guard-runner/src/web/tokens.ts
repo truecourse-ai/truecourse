@@ -84,6 +84,15 @@ function resolveExpect(expect: GuardWebExpect, tok: Tok): GuardWebExpect {
             : resolveLocator(expect.visible, tok),
         }
       : {}),
+    ...(expect.hidden ? { hidden: Array.isArray(expect.hidden)
+      ? expect.hidden.map((target) => resolveLocator(target, tok))
+      : resolveLocator(expect.hidden, tok) } : {}),
+    ...(expect.count ? { count: { ...expect.count, target: resolveLocator(expect.count.target, tok) } } : {}),
+    ...(expect.inputValue ? { inputValue: {
+      target: resolveLocator(expect.inputValue.target, tok),
+      expected: 'browserDate' in expect.inputValue.expected ? expect.inputValue.expected
+        : resolveMatcher(expect.inputValue.expected, tok),
+    } } : {}),
     // A state assertion is a locator with booleans on it: only its handle interpolates.
     ...(expect.state ? { state: resolveLocator(expect.state, tok) } : {}),
     ...(expect.attribute

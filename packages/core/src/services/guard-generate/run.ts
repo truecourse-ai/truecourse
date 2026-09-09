@@ -38,6 +38,7 @@ import type {
 } from '@truecourse/agent-loop'
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import {
+  GUARD_REVIEW_POLICY_VERSION,
   ExtractOutcomeSchema,
   settledScenariosOf,
   type ExtractOutcome,
@@ -629,6 +630,8 @@ export function createGuardGenerateSessionSeams(
             const yamls = cachedScenarioYamls(parsed.data)
             const aligned =
               outcome.kind === 'settled' &&
+              parsed.data.version === GUARD_REVIEW_POLICY_VERSION &&
+              parsed.data.reviews?.length === accepted.length &&
               accepted.length > 0 &&
               yamls.length === accepted.length &&
               accepted.every((s, i) => sha256Hex(yamls[i]!) === s.scenarioYamlSha)
@@ -638,7 +641,8 @@ export function createGuardGenerateSessionSeams(
               // scenario before the hit stands — it catches world drift the
               // key cannot see. Drift on any means the entry is a MISS and the
               // session runs.
-              if (await task.confirmCached(accepted.map((s, i) => ({ yaml: yamls[i]!, expectedReds: s.expectedReds })))) {
+              if (await task.confirmCached(accepted.map((s, i) => ({ yaml: yamls[i]!, expectedReds: s.expectedReds, review: parsed.data.reviews![i] })))) {
+                if (task.validateOutcome(outcome)) { misses.push(task); continue }
                 summary.fromCache++
                 byTask.set(task.workItem, { kind: 'outcome', outcome, fromCache: true })
                 tick('settled')
@@ -712,7 +716,7 @@ export function createGuardGenerateSessionSeams(
           if (
             settled.status === 'completed' &&
             settled.output.kind === 'settled' &&
-            settledScenariosOf(settled.output).some((s) => !task.hasStash(s.scenarioYamlSha))
+            (settledScenariosOf(settled.output).some((s) => !task.hasStash(s.scenarioYamlSha)) || task.validateOutcome(settled.output))
           ) {
             settled = {
               status: 'failed',
@@ -743,10 +747,15 @@ export function createGuardGenerateSessionSeams(
               // lost-review rule, kept). `scenarioYaml` stays the primary for
               // readers that predate edit mode; `scenarioYamls` is the full,
               // index-aligned list.
-              const yamls = settledScenariosOf(settled.output).map((s) => task.stashedYaml(s.scenarioYamlSha))
-              if (yamls.length > 0 && yamls.every((y): y is string => y !== undefined)) {
+              const accepted = settledScenariosOf(settled.output)
+              const yamls = accepted.map((s) => task.stashedYaml(s.scenarioYamlSha))
+              const reviews = accepted.map((s) => task.stashedReview(s.scenarioYamlSha))
+              if (yamls.length > 0 && yamls.every((y): y is string => y !== undefined) &&
+                reviews.every((r): r is NonNullable<typeof r> => r !== undefined)) {
                 const entry: CachedWorkerEntry = {
                   outcome: settled.output,
+                  version: GUARD_REVIEW_POLICY_VERSION,
+                  reviews,
                   scenarioYaml: yamls[0]!,
                   ...(yamls.length > 1 ? { scenarioYamls: yamls } : {}),
                 }

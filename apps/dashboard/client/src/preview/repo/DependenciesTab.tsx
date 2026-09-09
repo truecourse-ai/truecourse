@@ -1,14 +1,11 @@
 /**
- * Dependencies: a flat table of the repository's dependency catalog (the three
- * classes: step-creatable, seedable, supplied), the way Repositories lists
- * repositories. A row opens the dependency as its own page
- * (`/dependencies/:name`, see ./DependencyPage.tsx). Search by name; Class and
- * State are the filters.
+ * Dependencies: supplied resources users can configure. Internal test resources
+ * are excluded by useGuardDependencies. A row opens its own detail page.
  */
 
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { CHIP_CLASS, PageHeader } from '@/preview/ui/bits';
+import { PageHeader } from '@/preview/ui/bits';
 import { FilterBar } from '@/preview/ui/filter-bar';
 import { useGuardDependencies } from '@/preview/vendor/hooks/useGuardDependencies';
 import { GUARD_DEPENDENCY_STATE, guardDependencyMatches, guardDependencyType } from '@/preview/vendor/lib/guard-dependencies';
@@ -16,12 +13,6 @@ import type { GuardDependencyRow, GuardDependencyState } from '@/preview/vendor/
 import type { Repo } from '@/preview/data/types';
 import { useGuardTabJump } from './tab-jump';
 import { useGuardRefresh } from './use-guard-refresh';
-
-const CLASS_LABEL: Record<GuardDependencyRow['class'], string> = {
-  'step-creatable': 'step-creatable',
-  seedable: 'seedable',
-  supplied: 'supplied',
-};
 
 export function DependenciesTab({ repo }: { repo: Repo }) {
   useGuardTabJump();
@@ -37,18 +28,10 @@ export function DependenciesTab({ repo }: { repo: Repo }) {
   const reloadKey = useGuardRefresh(repo, ['guard-setup', 'guard-externals']);
   const { view, loading, error } = useGuardDependencies(repo.id, true, reloadKey);
   const [query, setQuery] = useState('');
-  const [classFilter, setClassFilter] = useState<string[]>([]);
   const [stateFilter, setStateFilter] = useState<string[]>([]);
 
   const all: GuardDependencyRow[] = useMemo(() => view?.dependencies ?? [], [view]);
 
-  const classOptions = useMemo(
-    () =>
-      (Object.keys(CLASS_LABEL) as GuardDependencyRow['class'][])
-        .map((key) => ({ key, label: CLASS_LABEL[key], count: all.filter((d) => d.class === key).length }))
-        .filter((o) => o.count > 0),
-    [all],
-  );
   const stateOptions = useMemo(
     () =>
       (Object.keys(GUARD_DEPENDENCY_STATE) as GuardDependencyState[])
@@ -62,10 +45,9 @@ export function DependenciesTab({ repo }: { repo: Repo }) {
     return all.filter(
       (d) =>
         (!q || guardDependencyMatches(d, q)) &&
-        (classFilter.length === 0 || classFilter.includes(d.class)) &&
         (stateFilter.length === 0 || (d.state != null && stateFilter.includes(d.state))),
     );
-  }, [all, query, classFilter, stateFilter]);
+  }, [all, query, stateFilter]);
 
   const openDependency = (name: string) =>
     navigate(`/preview/repos/${repo.id}/dependencies/${encodeURIComponent(name)}`);
@@ -85,14 +67,6 @@ export function DependenciesTab({ repo }: { repo: Repo }) {
           className="w-64 max-w-full shrink-0 rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
         />
         <FilterBar
-          label="Class"
-          ariaLabel="Filter dependencies by class"
-          options={classOptions}
-          selected={classFilter}
-          onChange={setClassFilter}
-          multi
-        />
-        <FilterBar
           label="State"
           ariaLabel="Filter dependencies by state"
           options={stateOptions}
@@ -107,14 +81,12 @@ export function DependenciesTab({ repo }: { repo: Repo }) {
           <colgroup>
             <col />
             <col className="w-36" />
-            <col className="w-36" />
             <col className="w-40" />
             <col className="w-28" />
           </colgroup>
           <thead className="sticky top-0 z-10 bg-card">
             <tr className="whitespace-nowrap border-b border-border text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               <th className="px-6 py-2 text-left font-semibold">Dependency</th>
-              <th className="px-3 py-2 text-left font-semibold">Class</th>
               <th className="px-3 py-2 text-left font-semibold">Type</th>
               <th className="px-3 py-2 text-left font-semibold">State</th>
               <th className="px-6 py-2 text-right font-semibold">Used by</th>
@@ -138,9 +110,6 @@ export function DependenciesTab({ repo }: { repo: Repo }) {
                     <span className="block truncate text-foreground" title={d.name}>{d.name}</span>
                     <span className="block truncate text-[11px] text-muted-foreground" title={d.summary}>{d.summary}</span>
                   </td>
-                  <td className="px-3 py-2.5">
-                    <span className={`${CHIP_CLASS} whitespace-nowrap`}>{CLASS_LABEL[d.class]}</span>
-                  </td>
                   <td className="whitespace-nowrap px-3 py-2.5 text-muted-foreground">{type?.label ?? ''}</td>
                   <td className="px-3 py-2.5">
                     {state && (
@@ -156,8 +125,12 @@ export function DependenciesTab({ repo }: { repo: Repo }) {
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-6 py-8 text-center text-muted-foreground">
-                  {loading ? 'Loading dependencies.' : error ? error : 'No dependency matches.'}
+                <td colSpan={4} className="px-6 py-8 text-center text-muted-foreground">
+                  {loading ? 'Loading dependencies.' : error ? error : all.length > 0
+                    ? 'No dependency matches.'
+                    : view?.detectionAvailable
+                      ? 'No dependencies to configure.'
+                      : 'Run setup to discover dependencies.'}
                 </td>
               </tr>
             )}

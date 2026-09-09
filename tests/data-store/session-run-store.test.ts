@@ -48,6 +48,50 @@ async function create(command: 'spec-scan' | 'guard-setup' | 'guard-generate' | 
 }
 
 describe('Postgres activity storage', () => {
+  const arbitraryText = 'before\u0000after \\u0000 lone \ud800 emoji 🎉';
+
+  it.each([false, true])('imports transcripts losslessly, with activity journal=%s', async activityStream => {
+    const old = createSessionRun(REPO, { command: 'guard-generate', gitRef: 'abc', activityStream });
+    const transcript = { ...event(), content: arbitraryText };
+    old.persistence.appendEvent('s', transcript);
+    old.finish('completed');
+    const originalFile = fs.readFileSync(path.join(old.dir, 's.jsonl'), 'utf8');
+    const journal = readActivityEvents(old.dir);
+    const imported = await store.open(REPO, 'guard-generate', old.runId);
+    expect(await readStoredTranscript(imported, 's')).toEqual([transcript]);
+    const replay = await imported.readActivity!(-1);
+    expect(replay.find(e => e.kind === 'session-event')).toMatchObject({ event: transcript });
+    if (activityStream) expect(replay.slice(0, journal.length)).toEqual(journal);
+    expect(await imported.readActivity!(replay[0].cursor)).toEqual(replay.slice(1));
+    expect(fs.readFileSync(path.join(old.dir, 's.jsonl'), 'utf8')).toBe(originalFile);
+    const reopened = await new PgSessionRunStore(db).open(REPO, 'guard-generate', old.runId);
+    expect(await reopened.readActivity!(-1)).toEqual(replay);
+  });
+
+  it('round-trips arbitrary transcript text alongside existing inline events', async () => {
+    const run = await create();
+    const inline = { ...event(), content: 'existing inline event' };
+    await db.insert(activityEvents).values({ runId: run.runId, cursor: 1, body: { kind: 'session-event', sessionId: 's', event: inline } });
+    await db.update(activityRuns).set({ nextCursor: 2 }).where(eq(activityRuns.runId, run.runId));
+    const transcript = { ...event(1), content: arbitraryText };
+    run.persistence.appendEvent('s', transcript);
+    run.finish('completed');
+    await run.flush!();
+    const reopened = await new PgSessionRunStore(db).open(REPO, 'spec-scan', run.runId);
+    expect(await readStoredTranscript(reopened, 's')).toEqual([inline, transcript]);
+    expect(await readStoredTranscript(reopened, 's', 0)).toEqual([transcript]);
+    expect(await readStoredTranscript(reopened, 'other')).toEqual([]);
+    const reader = createActivityStream(reopened, -1, new AbortController().signal).getReader();
+    const events = [];
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) break;
+      if (next.value.type === 'data-activity') events.push(next.value.data);
+    }
+    expect(events).toContainEqual(expect.objectContaining({ kind: 'session-event', event: transcript }));
+    expect((await db.select().from(activityEvents).where(eq(activityEvents.cursor, 1)))[0].body).toEqual({ kind: 'session-event', sessionId: 's', event: inline });
+  });
+
   it.each([false, true])('opens metadata without history and scopes replay/transcripts, completed=%s', async completed => {
     const run = await create();
     run.persistence.appendEvent('other', event(0));

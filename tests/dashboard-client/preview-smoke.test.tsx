@@ -148,10 +148,22 @@ describe('one-product preview', () => {
 
   it('renders /preview/repos/orders-api/dependencies', async () => {
     renderAt('/preview/repos/orders-api/dependencies');
-    // GuardDependenciesPane: one row per class of starting state, supplied ones
-    // last, each named by its catalog entry rather than by its service.
     expect((await screen.findAllByText('Postmark sandbox')).length).toBeGreaterThan(0);
-    expect((await screen.findAllByText('A product in the catalog')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('A product in the catalog')).not.toBeInTheDocument();
+    expect(screen.queryByText('A customer account')).not.toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Class' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Filter dependencies by class' })).not.toBeInTheDocument();
+  });
+
+  it('does not expose an internal resource through a dependency detail link', async () => {
+    renderAt('/preview/repos/orders-api/dependencies/A%20product%20in%20the%20catalog');
+    expect(await screen.findByText('No configurable dependency is available at this address.')).toBeInTheDocument();
+    expect(screen.queryByText('A product in the catalog')).not.toBeInTheDocument();
+  });
+
+  it('still opens a supplied dependency through its service link', async () => {
+    renderAt('/preview/repos/orders-api/dependencies?dependency=postmark');
+    expect((await screen.findAllByRole('heading', { name: 'Postmark sandbox' })).length).toBeGreaterThan(0);
   });
 
   it('opens a flow from ?flow= on the tests tab', async () => {

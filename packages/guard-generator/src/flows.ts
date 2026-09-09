@@ -1,3 +1,4 @@
+import { verificationGroup, verificationBoundaryProblems } from '@truecourse/shared'
 /**
  * Flow SYNTHESIS — the spec-side generation unit, run as `guard-generate.flows`
  * agent sessions (plan 04 step 16; the per-area one-shots + their corrective
@@ -28,6 +29,7 @@
  * for exactly that (and for the pre-flight estimate, which probes the same keys).
  */
 
+import type { GuardVerification } from '@truecourse/shared'
 import { createHash } from 'node:crypto'
 import {
   atomicWriteJson,
@@ -81,6 +83,7 @@ export interface FlowClaimInput {
   /** The surface hint extraction assigned; runnable surfaces must be accounted for. */
   driver: GuardDriverId
   alternativeDrivers?: GuardDriverId[]
+  verification?: GuardVerification
   /**
    * The extraction session's structured needs for this claim (plan 04 step 15),
    * read by flow synthesis (and its `check_flows` needs-vs-catalog binding).
@@ -234,7 +237,8 @@ function normalizeText(text: string): string {
 export function flowAreaClaimsMaterial(area: FlowSynthesisArea): string {
   return area.claims
     .map((c) => {
-      const base = `${c.doc}\0${normalizeText(c.anchor)}\0${normalizeText(c.title)}\0${c.driver}${c.alternativeDrivers?.length ? `\0alternatives:${[...new Set(c.alternativeDrivers)].sort().join(',')}` : ''}`
+      const verification = c.verification ? `\0verification:${JSON.stringify(c.verification)}` : ''
+      const base = verification + `${c.doc}\0${normalizeText(c.anchor)}\0${normalizeText(c.title)}\0${c.driver}${c.alternativeDrivers?.length ? `\0alternatives:${[...new Set(c.alternativeDrivers)].sort().join(',')}` : ''}`
       const needs = (c.needs ?? [])
         .map((n) => `${n.kind}\0${normalizeText(n.name)}${n.detail ? `\0${normalizeText(n.detail)}` : ''}`)
         .sort()
@@ -379,6 +383,7 @@ function orderMilestones(raw: { milestone: SynthesizedMilestone; claim: FlowClai
       anchor: e.claim.anchor,
       claimTitle: e.claim.title,
       proofDrivers: [...new Set([e.claim.driver, ...(e.claim.alternativeDrivers ?? [])])].sort(),
+      ...(e.claim.verification ? { verification: e.claim.verification } : {}),
       ...(e.milestone.note ? { note: e.milestone.note } : {}),
     })
   }
@@ -445,6 +450,11 @@ function validateAreaSynthesis(
     .filter((c) => [c.driver, ...(c.alternativeDrivers ?? [])].some(isRunnableDriver) && !covered.has(claimKey(c.doc, c.anchor, c.title)))
     .map(describeClaim)
 
+  for (const flow of flows) {
+    const groups = new Set(flow.milestones.map(m => verificationGroup(m.verification)).filter(Boolean))
+    if (groups.size > 1) unknownReferences.push(`"${flow.title}": split independent verification scopes, methods or failure conditions into separate flows`)
+    for (const m of flow.milestones) unknownReferences.push(...verificationBoundaryProblems(m.verification, false, m.proofDrivers).map(p => `"${flow.title}" milestone ${m.order}: ${p}`))
+  }
   return { flows, noFlowClaims, unknownReferences, uncoveredClaims }
 }
 
@@ -556,14 +566,18 @@ export function checkEpicSet(
       for (const m of byRef.get(r)!.milestones) allowed.add(claimKey(m.doc, m.anchor, m.claimTitle))
     }
     let snapped = 0
+    const groups = new Set<string>()
     for (const milestone of epic.milestones) {
       const claim = snapClaim(milestone, index)
       if (!claim || !allowed.has(claimKey(claim.doc, claim.anchor, claim.title))) {
         unknownReferences.push(describeRef(milestone))
         continue
       }
+      const group = verificationGroup(claim.verification)
+      if (group) groups.add(group)
       snapped++
     }
+    if (groups.size > 1) unknownReferences.push(`"${normalizeText(epic.title)}": an epic cannot combine independent verification scopes or failure conditions`)
     if (snapped < 2) notes.push(`"${normalizeText(epic.title)}" keeps fewer than two snapped milestones — it will be dropped`)
   }
   return { unknownReferences, notes }
@@ -647,6 +661,12 @@ function buildEpicDrafts(
       composedRefs: refs,
       synthesisInputsHash: inputsKey,
     })
+  }
+  for (const flow of epics) {
+    for (const m of flow.milestones) unknownReferences.push(...verificationBoundaryProblems(m.verification, false, m.proofDrivers).map(p => `"${flow.title}" milestone ${m.order}: ${p}`))
+    if (new Set(flow.milestones.map(m => verificationGroup(m.verification)).filter(Boolean)).size > 1) {
+      unknownReferences.push(`"${flow.title}": an epic cannot combine independent verification scopes or failure conditions`)
+    }
   }
   return { epics, unknownReferences }
 }

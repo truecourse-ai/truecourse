@@ -13,6 +13,7 @@ import path from 'node:path'
 import yaml from 'js-yaml'
 import {
   GuardScenarioSchema,
+  scenarioCoverageClaims,
   isRunnableDriver,
   interfaceFingerprint,
   type GuardDriverId,
@@ -90,11 +91,12 @@ export function buildFlowScenario(opts: {
   }
   const candidate: unknown = {
     id,
-    title: raw.title,
+    title: flow.milestones.some(m => m.verification?.cases)
+      ? scenarioCoverageClaims(flow.milestones, raw.steps).join('; ') || raw.title : raw.title,
     // The promise in plain words, denormalized off the flow: a reader of the file
     // alone (a reviewer in a diff) knows what it is FOR without
     // resolving `flow.id` against a `flows.json` that re-synthesis may have moved.
-    promise: flow.goal,
+    promise: scenarioCoverageClaims(flow.milestones, raw.steps).join(' ') || flow.goal,
     flow: { id: flow.id, fingerprint: flow.fingerprint },
     interface: {
       path: interfaces.map((j) => j.id),

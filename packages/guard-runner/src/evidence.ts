@@ -68,7 +68,7 @@ export function isFileStepKind(kind: EvidenceStep['kind']): boolean {
  * shape this is: the evidence carries it verbatim.
  */
 export interface EvidenceWebCheck {
-  subject: 'url' | 'text' | 'visible' | 'state' | 'attribute' | 'class'
+  subject: 'url' | 'text' | 'visible' | 'hidden' | 'count' | 'inputValue' | 'state' | 'attribute' | 'class'
   expected: string
   actual: string
   ok: boolean

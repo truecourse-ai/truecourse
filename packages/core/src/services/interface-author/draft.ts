@@ -89,6 +89,7 @@ export const AuthoredTaskSchema = z
     type: z.literal(AUTHORED_SURFACE),
     /** What the user accomplishes, in their words — one line. */
     title: z.string().min(1),
+    purpose: z.enum(['task', 'control']).optional(),
     /** The family this task sits in (the screen's area: `repos`, `home`). */
     group: z.string().min(1).optional(),
     /** The address the task is performed at — `{method: "GET", path}`. */

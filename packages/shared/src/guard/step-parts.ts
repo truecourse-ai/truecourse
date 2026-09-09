@@ -96,6 +96,9 @@ export type GuardStepMilestone = z.infer<typeof GuardStepMilestoneSchema>
 /** The `milestone` field as every step declares it — optional, any driver. */
 export const stepMilestone = GuardStepMilestoneSchema.optional()
 
+/** Source case ids actually asserted by this step. Not coverage until reviewed. */
+export const stepChecks = z.array(z.string().min(1)).min(1).optional()
+
 /** Every milestone reference a step carries, as a list (empty when it carries none). */
 export function milestoneRefs(value: GuardStepMilestone | undefined): GuardMilestoneRef[] {
   if (value === undefined) return []

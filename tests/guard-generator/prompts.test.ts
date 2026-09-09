@@ -198,25 +198,25 @@ describe('guard-generator prompts', () => {
     expect(GENERATE_API_SYSTEM_PROMPT).toContain('must never claim more than the prose does')
   })
 
-  // The milestone contract — every milestone realized, plumbing steps unannotated.
-  it('GENERATE_SYSTEM_PROMPT requires every milestone to carry a step, plumbing steps none', () => {
-    expect(GENERATE_SYSTEM_PROMPT).toContain('# The path is the point: one scenario, every milestone')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('Every milestone MUST be realized by at least one step')
+  // Each selected obligation is complete; prerequisites remain untagged.
+  it('GENERATE_SYSTEM_PROMPT requires assertions for selected milestones and leaves setup untagged', () => {
+    expect(GENERATE_SYSTEM_PROMPT).toContain('# Preserve the path within each verified portion')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('Every selected milestone MUST be verified by an assertion')
     expect(GENERATE_SYSTEM_PROMPT).toContain("milestone: <that milestone's number>")
     // A seeding / unasserted step paints neutral.
     expect(GENERATE_SYSTEM_PROMPT).toContain('only prepares the world')
     expect(GENERATE_SYSTEM_PROMPT).toContain('carries NO `milestone`')
     // The numbers are given, not the model's to reshape.
-    expect(GENERATE_SYSTEM_PROMPT).toContain('Never renumber, merge, split, skip, or invent a milestone')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('Never renumber, merge, split, or invent a milestone')
     // Missing world-state is declared in `setup`, never an excuse to drop a milestone.
     expect(GENERATE_SYSTEM_PROMPT).toContain('never drop the milestone')
   })
 
   it('GENERATE_API_SYSTEM_PROMPT states the same milestone contract for the api surface', () => {
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('# The path is the point: one scenario, every milestone')
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('Every milestone MUST be realized by at least one step')
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('# Preserve the path within each verified portion')
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('Every selected milestone MUST be verified by an assertion')
     expect(GENERATE_API_SYSTEM_PROMPT).toContain('carries NO `milestone`')
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('Never renumber, merge, split, skip, or invent a milestone')
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('Never renumber, merge, split, or invent a milestone')
     // One server, one path — chained with capture rather than guessed ids.
     expect(GENERATE_API_SYSTEM_PROMPT).toContain('one freshly booted server')
     expect(GENERATE_API_SYSTEM_PROMPT).toContain('`capture`')
@@ -348,7 +348,7 @@ describe('guard-generator prompts', () => {
       }),
     )
     expect(p).toContain('MILESTONES — the path, in order.')
-    expect(p).toContain('Every milestone number below must appear on at least one step:')
+    expect(p).toContain('Every selected milestone needs an assertion; preserve its number:')
     // Milestone 1 — its own claim, heading, and section text.
     expect(p).toContain('--- milestone 1')
     expect(p).toContain('claim: `add <title>` creates a task')
@@ -461,8 +461,8 @@ describe('guard-generator prompts', () => {
     // `weak` on the same two-sided criterion the authoring prompts teach — a claim
     // stating a positive AND a negative half is verified only when the exclusion
     // half is asserted observably too.
-    expect(FIDELITY_PROMPT_FINGERPRINT).toBe('a4c250b19c101083')
-    expect(fingerprint(FIDELITY_SYSTEM_PROMPT)).toBe('a4c250b19c101083')
+    expect(FIDELITY_PROMPT_FINGERPRINT).toBe('1902e4eea5007a45')
+    expect(fingerprint(FIDELITY_SYSTEM_PROMPT)).toBe('1902e4eea5007a45')
   })
 
   it('buildFidelityUserPrompt carries the flow, every milestone with its section text, and the YAML', () => {
@@ -658,9 +658,10 @@ describe('guard-generator prompts', () => {
     // both drivers' prompts move together — and re-authoring is the point: a claim
     // about a CHANGE could previously only be written as an absolute number, which
     // tests the fixture rather than the promise.
-    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('0fb6f80b67e16d03')
+    // Re-pinned for verified preparation profiles in the executable schema.
+    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('151e2bf42a06ec7f')
     // Moved once with the blast-radius cut: the canonical schema gained `world`.
-    expect(GENERATE_PROMPT_FINGERPRINT).toBe('0fb6f80b67e16d03')
+    expect(GENERATE_PROMPT_FINGERPRINT).toBe('151e2bf42a06ec7f')
   })
 
   it('the authored cli step vocabulary is the `run` step — a runner-only kind never leaks in', () => {
@@ -672,6 +673,7 @@ describe('guard-generator prompts', () => {
     const steps = JSON.parse(schema).properties.steps
     expect(Object.keys(steps.items.properties).sort()).toEqual([
       'capture',
+      'checks',
       'cwd',
       'env',
       'expect',
@@ -899,10 +901,11 @@ describe('guard-generator prompts', () => {
     // of the comparison. Every text and json matcher's `compare` can now shift its
     // comparand, which is what makes "one fewer seat than before" a verdict instead
     // of an absolute number that only tests the fixture.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('c023641899c98f89')
+    // Re-pinned for verified preparation profiles in the executable schema.
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('d0f187590d1eb6ad')
     // Moved once with the blast-radius cut: `world` in the schema + the
     // shared-world/self-mint doctrine block.
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('c023641899c98f89')
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('d0f187590d1eb6ad')
   })
 
   it('the api authoring prompt teaches the cookie jar and captureHeaders', () => {
@@ -1151,20 +1154,21 @@ describe('guard-generator prompts', () => {
     expect(MATCH_SYSTEM_PROMPT).toContain('Use ONLY interfaces from the catalog below')
     expect(MATCH_SYSTEM_PROMPT).toContain('copied VERBATIM')
     expect(MATCH_SYSTEM_PROMPT).toContain('An id that is not in the catalog invalidates your whole answer')
-    // Every milestone is covered, in path order, matched on behavior not wording.
-    expect(MATCH_SYSTEM_PROMPT).toContain('Every milestone must appear in the plan at least once')
+    // Every selected case is covered in path order, independently of siblings.
+    expect(MATCH_SYSTEM_PROMPT).toContain('Account for every explicit verification case with a grounded plan or an explicit gap')
+    expect(MATCH_SYSTEM_PROMPT).toContain('no case may be both planned and gapped')
+    expect(MATCH_SYSTEM_PROMPT).toContain('A milestone may have planned cases and different blocked cases')
     expect(MATCH_SYSTEM_PROMPT).toContain('Keep the plan in milestone order')
     expect(MATCH_SYSTEM_PROMPT).toContain('Match on BEHAVIOR, not on wording')
   })
 
-  it('MATCH_SYSTEM_PROMPT makes `unrealizable` a first-class answer, never a partial plan', () => {
-    expect(MATCH_SYSTEM_PROMPT).toContain('# When the surface cannot do it — say so, and say why')
-    expect(MATCH_SYSTEM_PROMPT).toContain('do NOT return a partial plan')
-    expect(MATCH_SYSTEM_PROMPT).toContain('do NOT stretch an')
-    expect(MATCH_SYSTEM_PROMPT).toContain('first-class, useful answer')
-    // The two answers, and only the two.
-    expect(MATCH_SYSTEM_PROMPT).toContain('{ "unrealizable": "<one sentence: which milestone nothing realizes, and why>" }')
-    expect(MATCH_SYSTEM_PROMPT).toContain('Exactly one of the two')
+  it('MATCH_SYSTEM_PROMPT preserves grounded portions and distinguishes mapping from capability gaps', () => {
+    expect(MATCH_SYSTEM_PROMPT).toContain('Return grounded partial plans')
+    expect(MATCH_SYSTEM_PROMPT).toContain('kind "mapping"')
+    expect(MATCH_SYSTEM_PROMPT).toContain('"capability"')
+    expect(MATCH_SYSTEM_PROMPT).toContain('A catalog omission never establishes that')
+    expect(MATCH_SYSTEM_PROMPT).toContain('Return one object with a plan, gaps, or both')
+    expect(MATCH_SYSTEM_PROMPT).toContain('Do not turn readable-only locators into invented executable actions')
   })
 
   it('MATCH_SYSTEM_PROMPT keeps an off-catalog claim realizable on the api surface', () => {
@@ -1187,10 +1191,11 @@ describe('guard-generator prompts', () => {
     // "journey" retired in favour of "interface" across stores, schemas and copy,
     // and this prompt renders that vocabulary, so its text moved without a single
     // rule moving with it. A rename, not vocabulary growth.
-    // Re-pinned 2026-09-08: proof requirements distinguish browser-visible
-    // milestones from HTTP protocol promises, so cached matches must rerun.
-    expect(MATCH_PROMPT_FINGERPRINT).toBe('39aa6af02fb9d42b')
-    expect(fingerprint(MATCH_SYSTEM_PROMPT)).toBe('39aa6af02fb9d42b')
+    // Re-pinned 2026-09-09: browser navigation covers full-page refresh,
+    // and plans/gaps must use mutually exclusive case references within milestones.
+    // Preparation profiles and typed selected-case obligations intentionally replan existing tests.
+    expect(MATCH_PROMPT_FINGERPRINT).toBe('b70d2602af6a1143')
+    expect(fingerprint(MATCH_SYSTEM_PROMPT)).toBe('b70d2602af6a1143')
   })
 
   it('buildMatchUserPrompt renders the milestones and the catalog digest (ids, entries, steps)', () => {
@@ -1242,7 +1247,7 @@ describe('guard-generator prompts', () => {
     expect(p).toContain('  9')
     // The uncovered milestone, and the honest way out.
     expect(p).toContain('CORRECTION — your plan covered no interface for these milestones.')
-    expect(p).toContain('answer `unrealizable` naming what is missing')
+    expect(p).toContain('explicit mapping/capability gap naming what is missing')
     expect(p).toContain('  2')
     expect(p).toContain('Return the COMPLETE answer again as one JSON object matching the schema.')
   })
@@ -1252,7 +1257,7 @@ describe('guard-generator prompts', () => {
     expect(p).toContain('CORRECTION — your previous response was NOT valid. You returned:')
     expect(p).toContain('here is my plan: …')
     expect(p).toContain('{ "plan": [ { "interfaceId", "milestone" }, … ] }')
-    expect(p).toContain('or { "unrealizable": "<one')
+    expect(p).toContain('and/or "gaps"')
   })
 
   // The flow-synthesis one-shot prompts (FLOWS / FLOWS_EPIC, their fingerprints
@@ -1313,7 +1318,8 @@ describe('GENERATE_WEB_SYSTEM_PROMPT — the third authoring arm', () => {
     // …and once more when the `credential` step became the sign-in channel
     // (the login form is for flows ABOUT signing in).
     // Native selection and named-container scopes change the authored vocabulary.
-    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('4c877b39de6e603a')
+    // Verified preparation profiles also change the browser authoring schema.
+    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('c70ec2210e25c4d1')
   })
 
   it('a web batch advertises the world credentials as the sign-in channel, and the fixture block defers to it', () => {
