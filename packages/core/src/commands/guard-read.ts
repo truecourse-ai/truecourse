@@ -1,3 +1,5 @@
+import { GUARD_REVIEW_POLICY_VERSION, caseEvidenceDefect, type GuardFlowProgress } from '@truecourse/shared'
+import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
 /**
  * Read-surface drivers for the guard dashboard — the guard analogue of the verify
  * read routes. All route logic lives here so the Express adapter stays thin (the
@@ -595,10 +597,10 @@ function gapStatus(
 
 /** The needs-setup derivation of a gap, or undefined when it is not a promotable one. */
 function gapNeedsSetup(
-  gap: { kind: GuardCoverageGapKind; reason: string },
+  gap: { kind: GuardCoverageGapKind; reason: string; blocker?: GuardFlowGap['blocker'] },
   externals: GuardExternalSetupIndex | null,
 ): GuardNeedsSetup | undefined {
-  if (gap.kind !== 'blocked-on') return undefined
+  if (gap.kind !== 'blocked-on' || (gap.blocker && gap.blocker.kind !== 'configuration')) return undefined
   return deriveNeedsSetup(gap.reason, externals) ?? undefined
 }
 
@@ -608,6 +610,9 @@ function toFlowGap(
     kind: GuardCoverageGapKind
     reason: string
     driver?: GuardDriverId
+    blocker?: GuardFlowGap['blocker']
+    obligations?: GuardFlowGap['obligations']
+    milestones?: number[]
   },
   externals: GuardExternalSetupIndex | null = null,
 ): GuardFlowGap {
@@ -615,6 +620,9 @@ function toFlowGap(
   return {
     kind: gap.kind,
     reason: gap.reason,
+    ...(gap.obligations ? { obligations: gap.obligations } : {}),
+    ...(gap.milestones ? { milestones: gap.milestones } : {}),
+    ...(gap.blocker ? { blocker: gap.blocker } : {}),
     ...(gap.driver ? { driver: gap.driver } : {}),
     label: guardGapLabel(gap.kind, gap.driver),
     ...(needsSetup ? { needsSetup } : {}),
@@ -663,28 +671,50 @@ function flowSurfaces(flowId: string, join: FlowJoin): GuardFlowSurface[] {
   const flow = join.corpus.get(flowId)
   const milestones = flow?.milestones ?? entry?.milestones ?? []
   const fingerprint = flow?.fingerprint ?? entry?.flowFingerprint
+  const passingProof: ReturnType<typeof scenarioMilestoneProof> = []
   for (const row of surfaces) {
     const scenario = row.scenarioId ? join.scenarioById.get(row.scenarioId) : undefined
     const recorded = entry?.scenarios.find((s) => s.id === row.scenarioId)
-    // A scenario for an older composition cannot settle this flow's new promises.
-    const current = scenario ? scenario.flow?.fingerprint === fingerprint : entry?.flowFingerprint === fingerprint
-    const proof = current ? (scenario ? scenarioMilestoneProof(scenario.steps) : recorded?.milestoneCoverage ?? []) : []
+    const bindings = flow?.bindings ?? entry?.bindings ?? []
+    const current = scenario
+      ? scenario.flow?.fingerprint === fingerprint && bindings.every((binding) => scenario.binds.some((bind) =>
+        bind.doc === binding.doc && bind.section === binding.anchor && bind.fingerprint === binding.fingerprint))
+      : entry?.flowFingerprint === fingerprint
+    // Retained stale scenarios and unreviewed candidates remain visible, but
+    // cannot discharge new or unaudited obligations.
+    const casesReviewed = !milestones.some(m => m.verification?.cases) || !!(scenario && recorded?.reviewPolicyVersion === GUARD_REVIEW_POLICY_VERSION && recorded?.caseEvidence && recorded.reviewedScenarioFingerprint === scenarioReviewFingerprint(scenario) && !caseEvidenceDefect(milestones, scenario.steps, recorded.caseEvidence))
+    const proof = current && recorded?.reviewed !== false && casesReviewed
+      ? (scenario ? scenarioMilestoneProof(scenario.steps) : recorded?.milestoneCoverage ?? []) : []
     const complete = coversFlowMilestones(milestones, proof)
     if (complete !== undefined) {
       row.coverageComplete = complete
       if (row.status === 'guarded' && !join.birthStatusByScenario.has(row.scenarioId!)) row.status = 'never-run'
     }
+    if (row.status === 'pass' || row.status === 'guarded') passingProof.push(...proof)
   }
-  const proven = surfaces.some((s) => s.coverageComplete === true && (s.status === 'pass' || s.status === 'guarded'))
+  const proven = coversFlowMilestones(milestones, passingProof) === true
+  // Coverage is the union of independently reviewed scenarios. No individual
+  // scenario is claimed to replay the whole flow; failures still win the rollup.
+  if (proven) for (const row of surfaces) {
+    if (row.status === 'pass' || row.status === 'guarded') row.coverageComplete = true
+  }
   const gaps = entry ? entry.gaps : (join.reportGapsByFlow.get(flowId) ?? [])
   for (const gap of gaps) {
+    const refs: GuardFlowGap['obligations'] = gap.obligations ?? ('milestones' in gap ? gap.milestones?.map(milestone => ({ milestone })) : undefined)
+    const gapProven = refs?.length ? refs.every(ref => {
+      const milestone = milestones.find(m => m.order === ref.milestone)
+      if (!milestone) return false
+      if (ref.caseId) return !!milestone.verification?.cases?.some(c => c.id === ref.caseId) &&
+        passingProof.some(p => p.milestone === ref.milestone && milestone.proofDrivers?.includes(p.driver) && p.checks?.includes(ref.caseId!))
+      return coversFlowMilestones([milestone], passingProof) === true
+    }) : proven
     const flowGap = toFlowGap(gap, join.externals)
     surfaces.push({
       ...(gap.surface ? { surface: gap.surface } : {}),
       status: gapStatus(gap, flowGap.needsSetup),
       // Only unsuccessful realization attempts can be alternatives. Failures,
       // authoring errors, dismissals and unrelated/legacy gaps never disappear.
-      ...(proven && gap.surface && milestones.some((m) => m.proofDrivers?.includes(gap.surface!)) &&
+      ...(gapProven && gap.surface && milestones.some((m) => m.proofDrivers?.includes(gap.surface!)) &&
         ['no-interface', 'unrealizable', 'blocked-on', 'awaiting-driver'].includes(gap.kind)
         ? { coveredByAlternative: true } : {}),
       gap: flowGap,
@@ -730,7 +760,7 @@ function rollUpFlow(surfaces: readonly GuardFlowSurface[]): {
   const winner = surfaces.find((s) => s.status === status && s.gap)
   return {
     status,
-    ...(winner?.gap ? { reason: winner.gap.reason } : incomplete && status === 'unguarded' ? { reason: 'No successful scenario verifies every milestone with an appropriate driver.' } : {}),
+    ...(winner?.gap ? { reason: winner.gap.reason } : incomplete && status === 'unguarded' ? { reason: 'The successful scenarios do not yet verify every milestone with an appropriate driver.' } : {}),
     ...(winner?.gap?.needsSetup ? { needsSetup: winner.gap.needsSetup } : {}),
   }
 }
@@ -1359,6 +1389,49 @@ function flowOrphaned(flowId: string, join: FlowJoin): boolean {
   return join.manifestFlows.get(flowId)?.orphaned === true && !join.corpus.has(flowId)
 }
 
+function flowProgress(flowId: string, view: FlowViewSources, surfaces: GuardFlowSurface[]): GuardFlowProgress {
+  const { join, result } = view
+  const flow = join.corpus.get(flowId)
+  const entry = join.manifestFlows.get(flowId)
+  const milestones = flow?.milestones ?? entry?.milestones ?? []
+  const rows = surfaces.filter(s => s.scenarioId)
+  const proof: ReturnType<typeof scenarioMilestoneProof> = []
+  for (const row of rows) {
+    if (row.status !== 'pass' && row.status !== 'guarded') continue
+    const record = entry?.scenarios.find(s => s.id === row.scenarioId)
+    const scenario = join.scenarioById.get(row.scenarioId!)
+    if (record?.reviewed === false || !scenario || scenario.flow?.fingerprint !== (flow?.fingerprint ?? entry?.flowFingerprint)) continue
+    if (!(flow?.bindings ?? entry?.bindings ?? []).every(b => scenario.binds.some(s => s.doc === b.doc && s.section === b.anchor && s.fingerprint === b.fingerprint))) continue
+    if (milestones.some(m => m.verification?.cases) && (record?.reviewPolicyVersion !== GUARD_REVIEW_POLICY_VERSION || !record?.caseEvidence || record.reviewedScenarioFingerprint !== scenarioReviewFingerprint(scenario) || caseEvidenceDefect(milestones, scenario.steps, record.caseEvidence))) continue
+    proof.push(...scenarioMilestoneProof(scenario.steps))
+  }
+  const cases = milestones.length > 0 && milestones.every(m => m.verification?.cases?.length)
+  let total = 0, verified = 0
+  for (const m of milestones) {
+    if (cases) for (const c of m.verification!.cases!) {
+      total++
+      if (proof.some(p => p.milestone === m.order && m.proofDrivers?.includes(p.driver) && p.checks?.includes(c.id))) verified++
+    } else {
+      total++
+      if (coversFlowMilestones([m], proof) === true) verified++
+    }
+  }
+  const systemCount = milestones.filter(m => m.verification?.scope === 'configuration' || m.verification?.scope === 'implementation' ||
+    (!m.verification?.scope && m.verification && m.verification.method !== 'behavior')).length
+  const passed = rows.filter(r => r.status === 'pass' || r.status === 'guarded').length
+  const execution = !rows.length ? 'not-generated' : rows.some(r => r.status === 'fail') ? 'failed'
+    : rows.some(r => r.status === 'error') ? 'error' : rows.some(r => r.status === 'blocked') ? 'blocked'
+    : passed === rows.length ? 'passed' : 'not-run'
+  const gaps = surfaces.flatMap(s => s.gap && !s.coveredByAlternative ? [s.gap] : [])
+  const generation = flowErrors(flowId, join, result).length || flowFindings(flowId, result).some(f => guardFindingClass(f) === 'defect') ? 'error'
+    : gaps.some(g => g.blocker?.kind === 'unsupported-capability' || g.kind === 'awaiting-driver') ? 'unsupported'
+    : gaps.some(g => g.needsSetup || g.blocker?.kind === 'configuration') ? 'needs-setup'
+    : verified === total && total > 0 ? 'ready' : 'incomplete'
+  return { execution, scenarios: rows.length, passed, verified, total, unit: cases ? 'cases' : 'milestones',
+    coverage: !total || milestones.some(m => !m.proofDrivers) ? 'unknown' : verified === total ? 'complete' : verified ? 'partial' : 'unverified',
+    category: !systemCount ? 'behavior' : systemCount === milestones.length ? 'system' : 'mixed', generation }
+}
+
 function flowListItem(
   flowId: string,
   view: FlowViewSources,
@@ -1369,6 +1442,7 @@ function flowListItem(
   const sections = flowSections(flowId, join)
   return {
     flowId,
+    progress: flowProgress(flowId, view, surfaces),
     title: flowTitle(flowId, join),
     goal: flow?.goal ?? '',
     status: rollUpFlow(surfaces).status,
@@ -1580,6 +1654,7 @@ export async function readGuardFlowDetail(
 
   return {
     flowId,
+    progress: flowProgress(flowId, view, surfaces),
     title: flowTitle(flowId, join),
     goal: flow?.goal ?? '',
     status: rollUpFlow(surfaces).status,
