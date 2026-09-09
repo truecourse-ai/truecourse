@@ -7,14 +7,15 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "truecourse-source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     }
   },
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1059.0",

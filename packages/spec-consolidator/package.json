@@ -7,18 +7,20 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "truecourse-source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
     "./types": {
+      "truecourse-source": "./src/types.ts",
       "types": "./dist/types.d.ts",
       "import": "./dist/types.js"
     }
   },
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@truecourse/llm": "workspace:*",

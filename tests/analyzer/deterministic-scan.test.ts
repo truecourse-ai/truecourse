@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import path from 'node:path'
 import os from 'node:os'
 import fs from 'node:fs'
@@ -94,11 +94,8 @@ describe('runDeterministicScanIsolated (controller)', () => {
     await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
   }, 15_000)
 
-  it('falls back to in-thread when no worker can be resolved', async () => {
-    // A bogus workerPath is ignored (falsey check is on resolve, not existence),
-    // so force the fallback by pointing resolution at a non-existent bundled
-    // layout: pass an empty override and rely on resolveWorkerPath returning null
-    // under vitest (source layout has no sibling worker.js / det-scan-worker.mjs).
+  it('runs the real source worker without falling back to the main thread', async () => {
+    const onFallback = vi.fn()
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'det-scan-'))
     const filePath = path.join(dir, 'empty-catch.ts')
     fs.writeFileSync(filePath, 'try { doSomething(); } catch (e) {}\n')
@@ -111,11 +108,12 @@ describe('runDeterministicScanIsolated (controller)', () => {
         tsFiles: [],
         databaseResult: undefined,
       },
-      { fileTimeoutMs: 5_000 }, // no workerPath → resolveWorkerPath() returns null under source layout → in-thread
+      { fileTimeoutMs: 5_000, onFallback },
     )
 
     fs.rmSync(dir, { recursive: true, force: true })
     expect(result.skipped).toEqual([])
+    expect(onFallback).not.toHaveBeenCalled()
     expect(result.violations.some((v: any) => v.ruleKey === 'bugs/deterministic/empty-catch')).toBe(true)
   })
 })

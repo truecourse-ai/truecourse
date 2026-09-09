@@ -7,22 +7,25 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "truecourse-source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
     "./parser": {
+      "truecourse-source": "./src/parser/index.ts",
       "types": "./dist/parser/index.d.ts",
       "import": "./dist/parser/index.js"
     },
     "./resolver": {
+      "truecourse-source": "./src/resolver/index.ts",
       "types": "./dist/resolver/index.d.ts",
       "import": "./dist/resolver/index.js"
     }
   },
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@truecourse/analyzer": "workspace:*",

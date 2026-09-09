@@ -55,6 +55,6 @@ export function createWorkspaceSpecSource(): SpecSource {
       postJson<SpecConflictAck>(`${BASE}/conflict-resolution`, payload),
     deleteConflictResolution: (payload: DeleteConflictPayload) =>
       delJson<SpecConflictAck>(`${BASE}/conflict-resolution`, payload),
-    scan: async () => null,
+    scan: async () => undefined,
   };
 }
