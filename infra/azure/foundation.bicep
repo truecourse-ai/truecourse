@@ -30,9 +30,7 @@ param postgresSku string = 'Standard_B1ms'
 
 param tags object = {}
 
-@description('For a new foundation only. Never enable on an existing legacy environment; deploy environment.bicep with a new name instead.')
-param workloadProfilesEnabled bool = false
-
+@description('Name for a new workload-profiles environment. Do not target an existing legacy environment.')
 param environmentName string = '${namePrefix}-cae'
 
 var acrName = toLower('${namePrefix}acr${uniqueString(resourceGroup().id)}')
@@ -56,7 +54,6 @@ module env './environment.bicep' = {
     location: location
     tags: tags
     logAnalyticsWorkspaceName: law.name
-    workloadProfilesEnabled: workloadProfilesEnabled
   }
 }
 

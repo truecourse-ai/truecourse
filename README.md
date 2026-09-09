@@ -1273,16 +1273,11 @@ The full test suite requires the C# Roslyn host to be built (same requirement as
 
 ## Hosted Azure deployment
 
-The enterprise dev deployment uses checked-in Azure infrastructure and opt-in
-GitHub Actions. The replacement configuration targets `truecourse-dev-v2` in a
-workload-profiles environment, with 4 vCPU, 8 GiB and one replica. Production
-resource defaults are unchanged.
-
-The replacement is implemented; the Azure migration is **not yet performed**.
-Follow the [Azure setup and migration runbook](infra/azure/README.md) for the
-explicit preparation, job drain, legacy shutdown and URL cutover. The existing
-database and identity are reused, so the old and new workers must not run at the
-same time. [PLAN.md](PLAN.md) tracks implementation and deployment separately.
+The shared Azure templates use 4 vCPU, 8 GiB and the Consumption workload profile
+for both dev and future production. Dev deployments target `truecourse-dev-v2`
+in `truecourse-dev-cae-v2`. See the [Azure setup and manual migration guide](infra/azure/README.md)
+for provisioning and the one-time local migration. The migration has not been
+performed; routine deployments remain opt-in through GitHub Actions.
 
 ## Community
 

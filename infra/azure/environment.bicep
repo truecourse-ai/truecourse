@@ -5,9 +5,6 @@ param location string = resourceGroup().location
 param logAnalyticsWorkspaceName string
 param tags object = {}
 
-@description('Use only when creating a new environment. Existing legacy environments cannot be converted in place.')
-param workloadProfilesEnabled bool = true
-
 resource law 'Microsoft.OperationalInsights/workspaces@2023-09-01' existing = {
   name: logAnalyticsWorkspaceName
 }
@@ -24,14 +21,12 @@ resource environment 'Microsoft.App/managedEnvironments@2024-03-01' = {
         sharedKey: law.listKeys().primarySharedKey
       }
     }
-    ...(workloadProfilesEnabled ? {
-      workloadProfiles: [
-        {
-          name: 'Consumption'
-          workloadProfileType: 'Consumption'
-        }
-      ]
-    } : {})
+    workloadProfiles: [
+      {
+        name: 'Consumption'
+        workloadProfileType: 'Consumption'
+      }
+    ]
   }
 }
 
