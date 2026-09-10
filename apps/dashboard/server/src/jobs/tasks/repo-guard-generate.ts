@@ -118,10 +118,12 @@ export function createRepoGuardGenerateTask(
 
           let guard;
           try {
+            const driver = llm.driver();
             ({ guard } = await runGenerate(tree.dir, {
+              driver,
               transport: llm.transport(),
               transportMode: llm.mode,
-              attribution: llm.driver().attribution,
+              attribution: driver.attribution,
               sessionsKey: repoFullName,
               sessionRun: activityRun,
               tracker: activityTracker,

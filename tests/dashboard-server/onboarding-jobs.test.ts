@@ -591,6 +591,7 @@ describe('the guard setup job', () => {
 
 describe('the guard generate job', () => {
   let clone: string;
+  let generateLlm: WorkspaceLlm;
   type GenerateEngine = NonNullable<RepoGuardGenerateTaskDeps['runGenerate']>;
   let generateImpl: GenerateEngine;
   /** What the engine found in its clone — the materialization, seen from inside. */
@@ -706,6 +707,7 @@ describe('the guard generate job', () => {
 
   beforeEach(async () => {
     seen = [];
+    generateLlm = testLlm;
     generateImpl = authoring;
     installWorkTree();
     await saveSpec({ repoKey: REPO, commitSha: 'scan-commit' }, 'corpus', {
@@ -724,7 +726,7 @@ describe('the guard generate job', () => {
       hub,
       startWorker: fakeWorker(['repo.guard-generate']),
       guardGenerate: {
-        startLlm: async () => testLlm,
+        startLlm: async () => generateLlm,
         runGenerate: (repoRoot, options) => generateImpl(repoRoot, options),
       },
     });
@@ -737,6 +739,36 @@ describe('the guard generate job', () => {
       { repoKey: REPO, commitSha: 'setup-commit' },
       { '.truecourse/scenarios/recipe.json': JSON.stringify(RECIPE, null, 2) + '\n' },
     );
+
+  it.each(['api', 'claude-code'] as const)('passes the selected %s driver and transport into generation', async mode => {
+    const driver = forbiddenDriver('generation is stubbed in this test');
+    const transport: LlmTransport = async () => '{}';
+    let driverConstructions = 0;
+    generateLlm = {
+      mode,
+      driver: () => {
+        driverConstructions++;
+        return driver;
+      },
+      transport: () => transport,
+    };
+    let called = false;
+    generateImpl = async (repoRoot, options) => {
+      called = true;
+      expect(options?.driver).toBe(driver);
+      expect(options?.transport).toBe(transport);
+      expect(options?.transportMode).toBe(mode);
+      expect(options?.attribution).toBe(driver.attribution);
+      return authoring(repoRoot, options);
+    };
+    await saveSetupBundle();
+    await jobs.enqueueGuardGenerate(request);
+    await Promise.all(running);
+
+    expect(called).toBe(true);
+    expect(driverConstructions).toBe(1);
+    expect((await jobsOfType('repo.guard-generate'))[0]).toMatchObject({ status: 'succeeded' });
+  });
 
   it('refuses a repository that was never set up, and stores nothing', async () => {
     await jobs.enqueueGuardGenerate(request);
