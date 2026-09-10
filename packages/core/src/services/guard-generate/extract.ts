@@ -67,8 +67,18 @@ A claim is ONE concrete, observable behavior a program guarantees: an exit code,
 For EVERY claim supply verification.scope (web, api, configuration, implementation)
 and verification.cases. Each case has a stable kebab-case id, its source-grounded
 claim, method, requires (observation capabilities), and conditions (an array).
+Preserve per-case prerequisites as [{dependency,mode:"provided"|"absent",evidence,originalNames?}].
+Use the exact known service or catalog identifier when grounded; retain an unresolved name otherwise.
+A case needs mode provided ONLY when its contract requires a real authenticated service interaction, including earlier setup that must actually use that service. Evidence must identify that source requirement.
+Controlled responses, synthetic invalid keys, timeout/quota/error injection, rounding with chosen rates, response validation, and redaction checks do not require a real provider account. Use prerequisites: [] for those cases and requires: [the observation driver, "request-control"] when response control is needed. A fixture key used with an isolated controlled provider is test input, not a supplied account. Do not require registration before fault control. If a case also genuinely requires live authenticated setup, split the independently provable controlled and live contracts where the source permits; otherwise preserve both requirements.
+Successful application behavior alone does not imply live-provider verification. Distinguish an application response contract proved with controlled provider data from a contract explicitly requiring the real service. Never turn unavailable request control into a credentials requirement.
+A missing-key error branch uses mode absent, never provided. Account-free cases explicitly carry prerequisites: [].
+Declare prerequisites on every case; claim-level needs are context, not requirements inherited by every case. Only external accounts belong in prerequisites. Build outputs, ordinary environment settings, local databases and seeded rows belong in invocation, preparation or needs, not account registration.
+Keep credential environment identifiers in need.detail as source evidence so existing extraction names can be resolved without guessing.
+Cross-browser-timezone invariance requires browser-timezone-control, currently unsupported. Server TZ does not establish browser timezone.
+Only for a documented server-startup/configuration guarantee verified through web or HTTP, add invocation: {command,address?}. Preserve the exact server startup command and fixed address; production readiness does not prove development startup. Ordinary CLI behavior (for example relkit --version) is proved by its CLI steps and must not receive server invocation metadata.
 Capabilities: browser, http, process, filesystem, datastore, concurrency,
-implementation, request-control. Conditions: fresh-state, request-failure,
+implementation, request-control, browser-timezone-control. Conditions: fresh-state, request-failure,
 request-pending. Use [] when no special condition is required.
 A case is an independently falsifiable acceptance or boundary case, not an example
 input. Enumerate named search semantics, boundary conditions and error classes;
@@ -178,7 +188,7 @@ When the briefing carries a RESOLVED — STALE block, those verbatim sentences l
 - \`check_claims\` — REQUIRED before you finish: call it with your complete draft. It snaps every anchor against the live section index exactly as the engine will, so a wrong anchor costs one turn here instead of a dropped claim at the fold. Fix what it reports, then produce the outcome.
 
 # The outcome
-One object: { "claims": [ { "claim", "driver", "alternativeDrivers"?, "verification": { "scope", "method", "observable", "cases": [{ "id", "claim", "method", "requires", "conditions", "preparation"? }] }, "sectionAnchor", "reason", "needs": [ { "kind", "name", "detail"? } ] } ], "untestable": [ { "sectionAnchor", "reason" } ] }. "reason" on a claim states the observable a test would assert.`
+One object: { "claims": [ { "claim", "driver", "alternativeDrivers"?, "verification": { "scope", "method", "observable", "cases": [{ "id", "claim", "method", "requires", "conditions", "prerequisites": [], "preparation"? }] }, "sectionAnchor", "reason", "needs": [ { "kind", "name", "detail"? } ] } ], "untestable": [ { "sectionAnchor", "reason" } ] }. Populate prerequisites only for a source-grounded live account or deliberate account absence. "reason" on a claim states the observable a test would assert.`
 
 /** The prompt half of every extract-session cache key — exported for the
  *  step-20 estimate rework, which must probe the REAL keys. */
@@ -227,6 +237,11 @@ export function validateExtractDraft(draft: ExtractOutcome, doc: GuardDoc): stri
   const problems: string[] = []
   for (const c of draft.claims) {
     problems.push(...verificationBoundaryProblems(c.verification, false, [c.driver, ...(c.alternativeDrivers ?? [])]).map(p => `claim "${c.claim}": ${p}`))
+    if (c.needs.some((n) => n.kind === 'credential' || n.kind === 'external')) {
+      for (const item of c.verification?.cases ?? []) {
+        if (item.prerequisites === undefined) problems.push(`claim "${c.claim}", case "${item.id}": Declare case-specific prerequisites. Use [] for account-free or controlled-response cases; claim-level needs must not be inherited by every case.`)
+      }
+    }
     if (!keptClaims.has(`${c.driver}\0${normalize(c.claim)}`)) {
       problems.push(
         `claim "${c.claim}" — its anchor \`${c.sectionAnchor}\` snaps onto no section (or the claim duplicates another). Copy an anchor from the outline verbatim.`,

@@ -387,7 +387,7 @@ export function scenarioDependencyNames(scenario: GuardScenario): string[] {
   // DECLARED order first, then the token-discovered rest: the author's ordering is
   // the meaningful one when a scenario binds several (it decides which dependency a
   // blocked result names), and only deduplication is imposed on top of it.
-  const names = new Set<string>(scenario.needs ?? [])
+  const names = new Set<string>([...(scenario.needs ?? []), ...(scenario.prerequisites ?? []).filter(p => p.mode === 'provided').map(p => p.dependency)])
   const { needs: _needs, ...rest } = scenario as GuardScenario & { needs?: string[] }
   for (const name of suppliedNamesIn(rest)) names.add(name)
   return [...names]
@@ -463,6 +463,11 @@ export const SUPPLIED_DIR = '.tc-supplied'
 
 /** A name a child process can actually carry as an environment variable. */
 const ENV_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/
+
+/** Registration fields that can also be exported as child environment variables. */
+export function registeredEnvironment(values: Readonly<Record<string, string>>): Record<string, string> {
+  return Object.fromEntries(Object.entries(values).filter(([name]) => ENV_IDENTIFIER.test(name)))
+}
 
 /** One provided instance, in the shape the sandbox materializes. */
 export interface SuppliedInstance {
@@ -573,9 +578,7 @@ export function materializeSupplied(
       // A name that is not one (`api-key`) is a registration FIELD, reachable only
       // through `${supplied:…}`, so the scenario places it where the program reads
       // it. Nothing the scenario did not ask for ever lands in its env.
-      for (const [name, value] of Object.entries(instance.env ?? {})) {
-        if (ENV_IDENTIFIER.test(name)) env[name] = value
-      }
+      Object.assign(env, registeredEnvironment(instance.env ?? {}))
       continue
     }
     const dest =

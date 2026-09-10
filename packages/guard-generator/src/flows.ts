@@ -265,7 +265,7 @@ export function flowAreaOutlinesMaterial(area: FlowSynthesisArea): string {
  *  pre-flight estimate, so the two can never drift. */
 export function flowEpicDigestsMaterial(digests: readonly FlowDigest[]): string {
   return digests
-    .map((d) => [d.areaId, d.title, d.goal, ...d.milestones.map((m) => `${m.doc}\0${m.anchor}\0${normalizeText(m.claimTitle)}`)].join('\n'))
+    .map((d) => [d.areaId, d.title, d.goal, ...d.milestones.map((m) => flowMilestoneKey(m))].join('\n'))
     .join('\n--\n')
 }
 
@@ -358,6 +358,8 @@ interface DraftFlow {
   areaId: string
   title: string
   goal: string
+  notes?: string
+  startingState?: GuardFlow['startingState']
   milestones: GuardFlowMilestone[]
   /** Digest refs of the chained flows (epics only) — rewritten to ids at the end. */
   composedRefs: string[]
@@ -374,7 +376,7 @@ function orderMilestones(raw: { milestone: SynthesizedMilestone; claim: FlowClai
   const seen = new Set<string>()
   const milestones: GuardFlowMilestone[] = []
   for (const e of indexed) {
-    const key = flowMilestoneKey({ anchor: e.claim.anchor, claimTitle: e.claim.title })
+    const key = flowMilestoneKey({ doc: e.claim.doc, anchor: e.claim.anchor, claimTitle: e.claim.title, caseIds: e.milestone.caseIds })
     if (seen.has(key)) continue
     seen.add(key)
     milestones.push({
@@ -382,12 +384,26 @@ function orderMilestones(raw: { milestone: SynthesizedMilestone; claim: FlowClai
       doc: e.claim.doc,
       anchor: e.claim.anchor,
       claimTitle: e.claim.title,
+      ...(e.milestone.caseIds ? { caseIds: [...e.milestone.caseIds].sort() } : {}),
       proofDrivers: [...new Set([e.claim.driver, ...(e.claim.alternativeDrivers ?? [])])].sort(),
-      ...(e.claim.verification ? { verification: e.claim.verification } : {}),
+      ...(e.claim.verification ? { verification: { ...e.claim.verification, ...(e.claim.verification.cases ? { cases: e.claim.verification.cases.filter(c => !e.milestone.caseIds || e.milestone.caseIds.includes(c.id)).sort((a, b) => a.id.localeCompare(b.id)) } : {}) } } : {}),
       ...(e.milestone.note ? { note: e.milestone.note } : {}),
     })
   }
   return milestones
+}
+
+function selectionProblem(ref: { caseIds?: string[] }, claim: FlowClaimInput): string | undefined {
+  const cases = claim.verification?.cases
+  if (!cases?.length) return ref.caseIds !== undefined ? 'a claim without cases is indivisible' : undefined
+  if (!ref.caseIds?.length) return 'explicit-case claims require a nonempty caseIds selection'
+  if (new Set(ref.caseIds).size !== ref.caseIds.length) return 'duplicate selected case IDs'
+  if (ref.caseIds.some(id => !cases.some(c => c.id === id))) return 'unknown selected case ID'
+  return undefined
+}
+function obligationKeys(claim: { doc: string; anchor: string; title: string; verification?: FlowClaimInput['verification'] }, caseIds?: string[]): string[] {
+  const key = claimKey(claim.doc, claim.anchor, claim.title)
+  return claim.verification?.cases?.length ? (caseIds ?? claim.verification.cases.map(c => c.id)).map(id => `${key}\0${id}`) : [key]
 }
 
 interface AreaValidation {
@@ -416,21 +432,26 @@ function validateAreaSynthesis(
         unknownReferences.push(describeRef(milestone))
         continue
       }
+      const problem = selectionProblem(milestone, claim)
+      if (problem) { unknownReferences.push(`${describeRef(milestone)}: ${problem}`); continue }
       snapped.push({ milestone, claim })
     }
     const milestones = orderMilestones(snapped)
     if (milestones.length === 0) continue
-    for (const m of milestones) covered.add(claimKey(m.doc, m.anchor, m.claimTitle))
+    for (const m of milestones) for (const key of obligationKeys({ ...m, title: m.claimTitle }, m.caseIds)) covered.add(key)
     flows.push({
       areaId: area.areaId,
       title: normalizeText(flow.title),
       goal: normalizeText(flow.goal),
+      ...(flow.notes ? { notes: flow.notes } : {}),
+      ...(flow.startingState ? { startingState: flow.startingState } : {}),
       milestones,
       composedRefs: [],
       synthesisInputsHash,
     })
   }
 
+  const assigned = new Set(covered)
   const noFlowClaims: GuardNoFlowClaim[] = []
   const seenNoFlow = new Set<string>()
   for (const entry of data.noFlowClaims) {
@@ -439,16 +460,20 @@ function validateAreaSynthesis(
       unknownReferences.push(describeRef(entry))
       continue
     }
-    const key = claimKey(claim.doc, claim.anchor, claim.title)
-    covered.add(key)
+    const problem = selectionProblem(entry, claim)
+    if (problem) { unknownReferences.push(`${describeRef(entry)}: ${problem}`); continue }
+    const keys = obligationKeys(claim, entry.caseIds)
+    if (keys.some(key => assigned.has(key))) unknownReferences.push(`${describeRef(entry)}: a selected obligation is both assigned and marked no-flow`)
+    for (const key of keys) covered.add(key)
+    const key = keys.join("\n")
     if (seenNoFlow.has(key)) continue
     seenNoFlow.add(key)
-    noFlowClaims.push({ doc: claim.doc, anchor: claim.anchor, claimTitle: claim.title, reason: normalizeText(entry.reason) })
+    noFlowClaims.push({ doc: claim.doc, anchor: claim.anchor, claimTitle: claim.title, ...(entry.caseIds ? { caseIds: [...entry.caseIds].sort() } : {}), reason: normalizeText(entry.reason) })
   }
 
   const uncoveredClaims = index.all
-    .filter((c) => [c.driver, ...(c.alternativeDrivers ?? [])].some(isRunnableDriver) && !covered.has(claimKey(c.doc, c.anchor, c.title)))
-    .map(describeClaim)
+    .filter(c => [c.driver, ...(c.alternativeDrivers ?? [])].some(isRunnableDriver))
+    .flatMap(c => obligationKeys(c).filter(key => !covered.has(key)).map(key => `${describeClaim(c)}${c.verification?.cases?.length ? ` / case ${key.split('\0').at(-1)}` : ''}`))
 
   for (const flow of flows) {
     const groups = new Set(flow.milestones.map(m => verificationGroup(m.verification)).filter(Boolean))
@@ -486,7 +511,7 @@ export interface FlowSetCheckReport {
   unknownReferences: string[]
   /** `account: required` claims in no flow and no noFlowClaims entry. REFUSAL. */
   uncoveredClaims: string[]
-  /** Contiguous near-duplicates the det fold will drop (report, don't delete). */
+  /** Exact behavior duplicates the fold will drop (report, don't delete). */
   subsumed: SubsumedFlow[]
   /** Milestones whose section is outside the live index — no flow can bind them. */
   unbindable: string[]
@@ -563,17 +588,22 @@ export function checkEpicSet(
     }
     const allowed = new Set<string>()
     for (const r of refs) {
-      for (const m of byRef.get(r)!.milestones) allowed.add(claimKey(m.doc, m.anchor, m.claimTitle))
+      for (const m of byRef.get(r)!.milestones) {
+        const source = snapClaim(m, index)
+        if (source) for (const key of obligationKeys(source, m.caseIds)) allowed.add(key)
+      }
     }
     let snapped = 0
     const groups = new Set<string>()
     for (const milestone of epic.milestones) {
       const claim = snapClaim(milestone, index)
-      if (!claim || !allowed.has(claimKey(claim.doc, claim.anchor, claim.title))) {
+      if (!claim || selectionProblem(milestone, claim) || obligationKeys(claim, milestone.caseIds).some(key => !allowed.has(key))) {
         unknownReferences.push(describeRef(milestone))
         continue
       }
-      const group = verificationGroup(claim.verification)
+      const projected = orderMilestones([{ milestone, claim }])[0]
+      const group = verificationGroup(projected.verification)
+      unknownReferences.push(...verificationBoundaryProblems(projected.verification, false, projected.proofDrivers))
       if (group) groups.add(group)
       snapped++
     }
@@ -602,7 +632,7 @@ function digestsOf(flows: readonly DraftFlow[]): FlowDigest[] {
     areaId: f.areaId,
     title: f.title,
     goal: f.goal,
-    milestones: f.milestones.map((m) => ({ doc: m.doc, anchor: m.anchor, claimTitle: m.claimTitle })),
+    milestones: f.milestones.map((m) => ({ doc: m.doc, anchor: m.anchor, claimTitle: m.claimTitle, ...(m.caseIds ? { caseIds: m.caseIds } : {}) })),
   }))
 }
 
@@ -614,7 +644,7 @@ function digestsOf(flows: readonly DraftFlow[]): FlowDigest[] {
  * validation of an epic value, whichever session (or cache entry) produced it.
  */
 function buildEpicDrafts(
-  data: { epics: { title: string; goal: string; composedOf: string[]; milestones: SynthesizedMilestone[] }[] },
+  data: { epics: { title: string; goal: string; notes?: string; startingState?: GuardFlow['startingState']; composedOf: string[]; milestones: SynthesizedMilestone[] }[] },
   flows: readonly DraftFlow[],
   index: ClaimIndex,
   inputsKey: string,
@@ -640,15 +670,17 @@ function buildEpicDrafts(
     // The milestone vocabulary of an epic is exactly its composed flows' milestones.
     const allowed = new Set<string>()
     for (const r of refs) {
-      for (const m of flows[byRef.get(r)!].milestones) allowed.add(claimKey(m.doc, m.anchor, m.claimTitle))
+      for (const m of flows[byRef.get(r)!].milestones) for (const key of obligationKeys({ ...m, title: m.claimTitle }, m.caseIds)) allowed.add(key)
     }
     const snapped: { milestone: SynthesizedMilestone; claim: FlowClaimInput }[] = []
     for (const milestone of epic.milestones) {
       const claim = snapClaim(milestone, index)
-      if (!claim || !allowed.has(claimKey(claim.doc, claim.anchor, claim.title))) {
+      if (!claim || selectionProblem(milestone, claim) || obligationKeys(claim, milestone.caseIds).some(key => !allowed.has(key))) {
         unknownReferences.push(describeRef(milestone))
         continue
       }
+      const problem = selectionProblem(milestone, claim)
+      if (problem) { unknownReferences.push(`${describeRef(milestone)}: ${problem}`); continue }
       snapped.push({ milestone, claim })
     }
     const milestones = orderMilestones(snapped)
@@ -657,6 +689,8 @@ function buildEpicDrafts(
       areaId: '(epic)',
       title: normalizeText(epic.title),
       goal: normalizeText(epic.goal),
+      ...(epic.notes ? { notes: epic.notes } : {}),
+      ...(epic.startingState ? { startingState: epic.startingState } : {}),
       milestones,
       composedRefs: refs,
       synthesisInputsHash: inputsKey,
@@ -681,64 +715,18 @@ export interface SubsumedFlow {
   supersededBy: string
 }
 
-function milestoneSequence(flow: DraftFlow): string[] {
-  return flow.milestones.map((m) => flowMilestoneKey({ anchor: m.anchor, claimTitle: m.claimTitle }))
-}
-
-/** Whether `inner` appears in `outer` as a CONTIGUOUS run (order preserved). */
-function containsContiguous(outer: readonly string[], inner: readonly string[]): boolean {
-  if (inner.length > outer.length) return false
-  for (let start = 0; start + inner.length <= outer.length; start++) {
-    let hit = true
-    for (let k = 0; k < inner.length; k++) {
-      if (outer[start + k] !== inner[k]) {
-        hit = false
-        break
-      }
-    }
-    if (hit) return true
-  }
-  return false
-}
-
-/**
- * Drop near-duplicates deterministically: a flow whose milestone sequence is a
- * CONTIGUOUS subsequence of a sibling's is redundant — the longer path already
- * walks it. Two exceptions keep the pass safe:
- *  - identical sequences: the FIRST one survives (never drop both);
- *  - a flow is kept when dropping it would leave one of its bound sections with no
- *    flow at all — coverage is never traded for tidiness.
- * Candidates are examined shortest-first, so the survivor is always the longest
- * path of a chain. The caller runs this per TIER (area flows, then epics): an epic
- * is a superset of the flows it composes by construction, and must never delete them.
- */
+/** Remove exact duplicates only. A contained path may be an independent behavior. */
 function applySubsumption(flows: readonly DraftFlow[]): { kept: DraftFlow[]; dropped: SubsumedFlow[] } {
-  const sequences = flows.map(milestoneSequence)
-  const dropped = new Map<number, SubsumedFlow>()
-  const order = flows.map((_, i) => i).sort((a, b) => sequences[a].length - sequences[b].length || a - b)
-
-  const sectionsOf = (i: number) => new Set(flows[i].milestones.map((m) => flowSectionKey(m.doc, m.anchor)))
-
-  for (const i of order) {
-    if (dropped.has(i)) continue
-    for (let j = 0; j < flows.length; j++) {
-      if (j === i || dropped.has(j)) continue
-      if (sequences[j].length < sequences[i].length) continue
-      // Equal-length pairs are duplicates: only the EARLIER one may subsume.
-      if (sequences[j].length === sequences[i].length && j > i) continue
-      if (!containsContiguous(sequences[j], sequences[i])) continue
-      // Coverage gate: every section this flow binds must survive without it.
-      const sections = sectionsOf(i)
-      const stillCovered = [...sections].every((section) =>
-        flows.some((_, k) => k !== i && !dropped.has(k) && sectionsOf(k).has(section)),
-      )
-      if (!stillCovered) continue
-      dropped.set(i, { title: flows[i].title, supersededBy: flows[j].title })
-      break
-    }
+  const seen = new Map<string, DraftFlow>()
+  const kept: DraftFlow[] = []
+  const dropped: SubsumedFlow[] = []
+  for (const flow of flows) {
+    const key = JSON.stringify({ proof: flowFingerprint(flow.milestones), startingState: flow.startingState ?? null })
+    const prior = seen.get(key)
+    if (prior) dropped.push({ title: flow.title, supersededBy: prior.title })
+    else { seen.set(key, flow); kept.push(flow) }
   }
-
-  return { kept: flows.filter((_, i) => !dropped.has(i)), dropped: [...dropped.values()] }
+  return { kept, dropped }
 }
 
 // ---------------------------------------------------------------------------
@@ -871,7 +859,7 @@ function dedupeNoFlowClaims(claims: readonly GuardNoFlowClaim[]): GuardNoFlowCla
   const seen = new Set<string>()
   const out: GuardNoFlowClaim[] = []
   for (const c of claims) {
-    const key = claimKey(c.doc, c.anchor, c.claimTitle)
+    const key = flowMilestoneKey(c)
     if (seen.has(key)) continue
     seen.add(key)
     out.push(c)
@@ -890,7 +878,7 @@ export interface FlowSynthesisResult {
   noFlowClaims: GuardNoFlowClaim[]
   /** Committed flows no re-synthesized flow claimed — their scenarios go stale. */
   orphaned: GuardFlow[]
-  /** Near-duplicates the subsumption pass dropped. */
+  /** Exact behavior duplicates removed. */
   subsumed: SubsumedFlow[]
   /** Areas (and the epic pass, as `(epic)`) that failed to settle. */
   unsettled: UnsettledArea[]
@@ -1028,6 +1016,8 @@ export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<Flo
       id,
       title: draft.title,
       goal: draft.goal,
+      ...(draft.notes ? { notes: draft.notes } : {}),
+      ...(draft.startingState ? { startingState: draft.startingState } : {}),
       fingerprint: flowFingerprint(draft.milestones),
       milestones: draft.milestones,
       bindings,
@@ -1038,7 +1028,7 @@ export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<Flo
 
   const previous = opts.previous ?? readFlowsFile(repoRoot)?.flows ?? []
   const { verdicts, orphaned } = resolveFlowIdentity(previous, next)
-  const taken = new Set<string>()
+  const taken = new Set<string>(orphaned.map(flow => flow.id))
   // Inherited ids (remap/stale) claim first: a flow that keeps its identity keeps
   // its handle, and a NEW flow whose slug collides moves to `-N` instead.
   verdicts.forEach((v, i) => {

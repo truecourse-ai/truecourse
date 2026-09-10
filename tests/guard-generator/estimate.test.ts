@@ -12,6 +12,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { runnableDriverIds } from '@truecourse/shared'
 import { WRAP_UP_TURNS } from '../../packages/agent-loop/src/index'
 import { setCacheEntry } from '@truecourse/llm'
@@ -37,9 +38,15 @@ import {
   makeTempRepo,
   rmrf,
   writeRecipe,
+  writeApiRecipe,
   writeDoc,
   writeCorpus,
   raw,
+  rawApi,
+  apiInterface,
+  interfacesOf,
+  FIXTURE_API_SERVER,
+  FIXTURE_API_SERVER_V2,
   runGenerate,
   flowStageSeams,
   extractSessionBy,
@@ -95,10 +102,10 @@ const stagesOf = async (r: string) =>
  * would compare the estimate against a different corpus than the run sees, which
  * is the one thing these key-parity cases exist to rule out.
  */
-async function warmExtractCache(r: string): Promise<void> {
+async function warmExtractCache(r: string, extractor = extract): Promise<void> {
   const plan = planGuardWork(r)
   const docs = collectWorkDocs(r, { ...plan, work: plan.sections })
-  const { byDoc } = await extract({ docs })
+  const { byDoc } = await extractor({ docs })
   for (const doc of docs) {
     const result = byDoc.get(doc.doc)
     if (!result?.ok) continue
@@ -106,9 +113,11 @@ async function warmExtractCache(r: string): Promise<void> {
       claims: result.data.claims.map((c) => ({
         claim: c.claim,
         driver: c.driver,
+        ...(c.alternativeDrivers ? { alternativeDrivers: c.alternativeDrivers } : {}),
         sectionAnchor: c.sectionAnchor,
         reason: c.reason,
         needs: c.needs ?? [],
+        ...(c.verification ? { verification: c.verification } : {}),
       })),
       untestable: result.data.untestable,
     })
@@ -117,20 +126,21 @@ async function warmExtractCache(r: string): Promise<void> {
 
 /** Run the full stub-seam pipeline and warm BOTH session caches the way the real
  *  seams would — the "unchanged repo" state a re-run must walk for free. */
-async function generateAndWarm(r: string) {
+async function generateAndWarm(r: string, extractor = extract, author = worker, interfaces?: Parameters<typeof runGenerate>[0]['interfaces']) {
   const areas: FlowSynthesisArea[] = []
   const seams = flowStageSeams(r)
   const result = await runGenerate({
     repoRoot: r,
     ...seams,
-    extractSession: extract,
+    ...(interfaces ? { interfaces } : {}),
+    extractSession: extractor,
     flowsAreaSession: async (input) => {
       areas.push(...input.areas)
       return seams.flowsAreaSession(input)
     },
-    flowWorkerSession: worker,
+    flowWorkerSession: author,
   })
-  await warmExtractCache(r)
+  await warmExtractCache(r, extractor)
   for (const area of areas) {
     await setCacheEntry(r, FLOWS_SESSION_CACHE_NAME, flowsSessionCacheKey(area), {
       flows: [],
@@ -174,7 +184,7 @@ describe('estimateGuardTokens — the session stages', () => {
     const ceiling = (FLOW_WORKER_BUDGET.maxResumes + 1) * FLOW_WORKER_BUDGET.turns + WRAP_UP_TURNS
     expect(ceiling).toBe(53)
     expect(workerStage.callsRange).toEqual({ low: boundFlows, high: boundFlows * 1 * ceiling })
-    expect(workerStage.bound).toContain('flows ≤ runnable claims')
+    expect(workerStage.bound).toContain('flow count estimated from source obligations')
     // The fidelity CHILD is 0..one per worker, at ITS budget's ceiling (5 turns).
     const fidelity = stages.get(FIDELITY_SESSION_KIND)!
     expect(fidelity.callsRange).toEqual({ low: 0, high: boundFlows * (5 + WRAP_UP_TURNS) })
@@ -222,10 +232,38 @@ describe('estimateGuardTokens — the session stages', () => {
 // ---------------------------------------------------------------------------
 
 describe('estimateGuardTokens — cache awareness', () => {
+  it.each([true, false])('agrees with secondary-server invocation eligibility after matching (valid: %s)', async (valid) => {
+    const r = repo()
+    fs.cpSync(fileURLToPath(new URL('../fixtures/route-manifest-monorepo', import.meta.url)), r, { recursive: true })
+    const servers = {
+      web: { serve: ['node', FIXTURE_API_SERVER], healthPath: '/health', app: 'apps/web' },
+      'api-v2': { serve: ['node', FIXTURE_API_SERVER_V2], healthPath: '/v2/health', app: 'apps/api/v2' },
+    }
+    writeApiRecipe(r, { entry: null, servers, defaultServer: 'web' })
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, '## bookings\nGET /v2/bookings answers after starting the API.\n')
+    writeInterfaceSnapshot(r, [apiInterface('GET', '/v2/bookings')])
+    const extractor = extractSessionBy({ bookings: [{
+      driver: 'api', claim: 'Start the API', reason: 'Startup and HTTP response',
+      verification: { scope: 'api', method: 'behavior', observable: 'HTTP response', cases: [{
+        id: 'startup', claim: 'Start the API', method: 'behavior', requires: ['http'], conditions: [],
+        invocation: { command: (valid ? servers['api-v2'] : servers.web).serve.join(' ') },
+      }] },
+    }] })
+    const author = submitWorkerSessions(() => rawApi('Start the API', [{
+      request: { method: 'GET', path: '/v2/ping' }, checks: ['startup'], expect: { status: 200 },
+    }]), { judge: async () => ({ kind: 'faithful', evidence: [{ milestone: 1, caseId: 'startup', steps: [1], reason: 'The command serves the HTTP assertion.' }] }) })
+    const result = await generateAndWarm(r, extractor, author, interfacesOf(r, apiInterface('GET', '/v2/bookings')))
+    expect(result.written).toHaveLength(valid ? 1 : 0)
+    const stages = await stagesOf(r)
+    expect(stages.has('guardMatch')).toBe(false)
+    expect(stages.has(FLOW_WORKER_SESSION_KIND)).toBe(false)
+  }, 60_000)
+
   it('a warm extract-session cache drops extraction and makes the flows count exact', async () => {
     const r = coldRepo()
     expect((await stagesOf(r)).get(FLOWS_SESSION_KIND)!.bound).toBe(
-      'flows ≤ runnable claims — flow count is a synthesis output',
+      'flow count estimated from source obligations — flow count is a synthesis output',
     )
 
     await warmExtractCache(r)
@@ -428,4 +466,57 @@ describe('estimateGuardTokens — the surfaces a missing recipe is priced on', (
 
     expect(await pricedSurfaces(r)).toBe(runnableDriverIds.length)
   })
+})
+
+
+it('quotes account-bound cases with the same normalized eligibility and cache keys as generation', async () => {
+  const r = coldRepo()
+  writeRecipe(r, { api: { serve: ['node', 'unused.js'], externals: {
+    currencybeacon: { baseUrlEnv: 'CURRENCYBEACON_BASE_URL', baseUrl: 'http://127.0.0.1:1', env: { CURRENCYBEACON_API_KEY: {} } },
+  } } })
+  const extractor = extractSessionBy({ background: { untestable: 'bg' }, version: [{
+    needs: [{ kind: 'credential', name: 'currencybeacon-api-key', detail: 'Uses CURRENCYBEACON_API_KEY' }],
+    verification: { method: 'behavior', scope: 'configuration', observable: 'Version prints with a supplied account',
+      cases: [{ id: 'version', claim: 'Version prints', method: 'behavior', requires: ['process'], conditions: [], prerequisites: [{ dependency: 'currencybeacon-api-key', mode: 'provided' }] }] },
+  }] })
+  const author = submitWorkerSessions(() => raw('v', PASSING_STEPS.map(step => ({ ...step, milestone: 1, checks: ['version'] }))), {
+    judge: async () => ({ kind: 'faithful', evidence: [{ milestone: 1, caseId: 'version', steps: [1], reason: 'Observes the documented CLI version output.' }] }),
+  })
+  const missing = await generateAndWarm(r, extractor, author)
+  expect(missing.written).toEqual([])
+  expect((await estimateGuardTokens(r)).stages).toEqual([])
+
+  const overlay = path.join(r, '.truecourse/scenarios/externals.local.json')
+  fs.writeFileSync(overlay, JSON.stringify({ currencybeacon: { env: { CURRENCYBEACON_API_KEY: 'first-fixture-key' } } }))
+  const provided = await stagesOf(r)
+  expect(provided.get('guardMatch')?.calls).toBe(1)
+  expect(provided.has(FLOW_WORKER_SESSION_KIND)).toBe(true)
+  expect(provided.has(FLOWS_SESSION_KIND)).toBe(false)
+  const generated = await generateAndWarm(r, extractor, author)
+  expect(generated.written, JSON.stringify(generated)).toHaveLength(1)
+  expect((await estimateGuardTokens(r)).stages).toEqual([])
+
+  fs.writeFileSync(overlay, JSON.stringify({ currencybeacon: { env: { CURRENCYBEACON_API_KEY: 'rotated-fixture-key' } } }))
+  expect((await estimateGuardTokens(r)).stages).toEqual([])
+})
+
+it('estimates one complete alternative realization and keeps its valid prior choice on a no-op run', async () => {
+  const h = await import('./helpers.js')
+  const r = coldRepo()
+  writeRecipe(r, { web: { serve: ['node', 'unused-browser-fixture.js'], healthPath: '/' } })
+  const extractor = extractSessionBy({ version: [{ claim: 'The release version is observable', driver: 'cli', alternativeDrivers: ['web'] }], background: { untestable: 'bg' } })
+  const areas: FlowSynthesisArea[] = []
+  const seams = flowStageSeams(r)
+  const calls: string[] = []
+  const options = { repoRoot: r, ...seams, interfaces: h.interfacesOf(r, cliInterface(['relkit']), { id: 'web/main', title: 'Main screen', type: 'web', entry: { command: ['/'] }, steps: [{ kind: 'navigate', route: '/' }], fingerprint: 'sha256:web' }), extractSession: extractor,
+    flowsAreaSession: async (input: Parameters<typeof seams.flowsAreaSession>[0]) => { areas.push(...input.areas); return seams.flowsAreaSession(input) },
+    flowWorkerSession: submitWorkerSessions(task => { calls.push(task.surface); return raw('Version is visible', PASSING_STEPS) }) }
+  expect((await runGenerate(options)).written).toHaveLength(1)
+  expect(calls).toEqual(['cli'])
+  await warmExtractCache(r, extractor)
+  for (const area of areas) await setCacheEntry(r, FLOWS_SESSION_CACHE_NAME, flowsSessionCacheKey(area), { flows: [], noFlowClaims: [] })
+  expect((await estimateGuardTokens(r)).stages).toEqual([])
+  const second = await runGenerate(options)
+  expect(second.written).toEqual([])
+  expect(calls).toEqual(['cli'])
 })

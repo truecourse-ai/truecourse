@@ -1,3 +1,4 @@
+import { resolvePrerequisites, loadRecipe } from '@truecourse/guard-runner';
 /**
  * THE DEPENDENCIES surface — every class of starting state the program under test
  * needs, joined with what THIS machine provides for it.
@@ -187,7 +188,7 @@ export interface GuardDependencyRowView {
    * quiet sentence explaining that, absent when the shapes agree.
    */
   staleInstance?: string;
-  /** What this dependency holds back right now. */
+  /** Missing-instance tests, plus generation gaps that remain until generation retries. */
   blocks: GuardDependencyBlockedFlow[];
   /**
    * How many flows RELY on it: the ones that contributed a need, plus the ones whose
@@ -256,6 +257,8 @@ export function readGuardDependenciesView(
     resolved = resolveDependencies(repoRoot, {
       dismissedFlows: new Set(readGuardDecisions(repoRoot).dismissedFlows.map((f) => f.flowId)),
     });
+    const recipe = loadRecipe(repoRoot, recipePath(repoRoot));
+    resolved = resolvePrerequisites(repoRoot, recipe?.recipe.api?.externals, resolved, opts.env ?? process.env).dependencies;
     overlay = loadDependenciesLocal(repoRoot);
   } catch (e) {
     // A catalog that exists but does not parse blanks the CATALOG half only: the
@@ -339,7 +342,9 @@ function catalogRow(
     })),
     ...(dependency.hostPath ? { hostPath: dependency.hostPath } : {}),
     ...(dependency.staleInstance ? { staleInstance: dependency.staleInstance } : {}),
-    blocks: dependency.state === 'provided' ? [] : blocksFor(keys, blocked),
+    // Supplying an instance makes existing tests runnable, but cannot create
+    // the tests the last generation left unwritten. Keep those gaps retryable.
+    blocks: blocksFor(keys, blocked).filter((row) => dependency.state !== 'provided' || row.kind === 'not-authored'),
     usedBy: usedByFlows(keys, dependency.needs, blocked),
     ...(covered.length > 0 ? { service: serviceHalf(covered) } : {}),
     inCatalog: true,
@@ -372,7 +377,7 @@ function serviceRow(
       secret: r.secret,
       ...serviceValue(r, service),
     })),
-    blocks: service.state === 'provided' ? [] : blocksFor([service.service], blocked),
+    blocks: blocksFor([service.service], blocked).filter((row) => service.state !== 'provided' || row.kind === 'not-authored'),
     usedBy: usedByFlows([service.service], service.catalog?.needs ?? [], blocked),
     service: serviceHalf([service]),
     inCatalog: false,
@@ -480,17 +485,16 @@ function blocksFor(
   keys: readonly string[],
   blocked: ReadonlyMap<string, GuardDependencyBlockedFlow[]>,
 ): GuardDependencyBlockedFlow[] {
-  const out: GuardDependencyBlockedFlow[] = [];
-  const seen = new Set<string>();
+  const out = new Map<string, GuardDependencyBlockedFlow>();
   for (const key of new Set(keys)) {
     for (const row of blocked.get(key) ?? []) {
       const id = row.flowId ?? `\0${row.title}`;
-      if (seen.has(id)) continue;
-      seen.add(id);
-      out.push(row);
+      // A retained older test does not resolve an unwritten replacement. Keep
+      // generation gaps ahead of instance-only blockers for the same flow.
+      if (!out.has(id) || row.kind === 'not-authored') out.set(id, row);
     }
   }
-  return out;
+  return [...out.values()];
 }
 
 /**
@@ -537,7 +541,9 @@ function blockedIndex(
   const out = new Map<string, GuardDependencyBlockedFlow[]>();
   const push = (key: string, row: GuardDependencyBlockedFlow): void => {
     const rows = out.get(key) ?? [];
-    if (rows.some((r) => (r.flowId ?? r.title) === (row.flowId ?? row.title))) return;
+    // Keep both sources here: generation gaps control retry eligibility, while
+    // bound scenarios still contribute to the dependency's usage count.
+    if (rows.some((r) => (r.flowId ?? r.title) === (row.flowId ?? row.title) && r.kind === row.kind)) return;
     rows.push(row);
     out.set(key, rows);
   };
@@ -558,7 +564,7 @@ function blockedIndex(
     const title = gap.flowId
       ? flowTitles.get(gap.flowId) ?? gap.flowId
       : `${gap.doc} § ${gap.anchor}`;
-    for (const capability of parseBlockedOnCapabilities(gap.reason)) {
+    for (const capability of gap.blocker?.dependencies ?? parseBlockedOnCapabilities(gap.reason)) {
       push(capability, { ...(gap.flowId ? { flowId: gap.flowId } : {}), title, kind: 'not-authored' });
     }
   }

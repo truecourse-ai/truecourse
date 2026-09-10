@@ -91,12 +91,13 @@ describe('web step schema', () => {
     expect(() => GuardWebStepSchema.parse({ driver: 'web', navigate: 'notes' })).toThrow()
   })
 
-  it('the locator is closed to role + accessible name — no CSS, no unknown role', () => {
+  it('the locator supports role-only selection but rejects CSS and unknown roles', () => {
     expect(GuardWebLocatorSchema.parse({ role: 'link', name: 'Notes', exact: true }).exact).toBe(true)
     expect(() => GuardWebLocatorSchema.parse({ css: '#save' })).toThrow()
     expect(() => GuardWebLocatorSchema.parse({ role: 'button', name: 'Save', selector: '#save' })).toThrow()
     expect(() => GuardWebLocatorSchema.parse({ role: 'widget', name: 'Save' })).toThrow()
-    expect(() => GuardWebLocatorSchema.parse({ role: 'button' })).toThrow()
+    expect(GuardWebLocatorSchema.parse({ role: 'button' })).toEqual({ role: 'button' })
+    expect(() => GuardWebLocatorSchema.parse({ role: 'button', name: '' })).toThrow()
   })
 
   it('`pick: first` is the one declared-ambiguity escape — and only `first`', () => {

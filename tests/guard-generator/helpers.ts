@@ -408,7 +408,7 @@ export function flowPerClaimSession(onArea?: (areaId: string) => void): FlowsAre
       flows: area.claims.map((c) => ({
         title: c.anchor,
         goal: `verify ${c.title}`,
-        milestones: [{ order: 1, doc: c.doc, anchor: c.anchor, claimTitle: c.title }],
+        milestones: [{ order: 1, doc: c.doc, anchor: c.anchor, claimTitle: c.title, ...(c.verification?.cases ? { caseIds: c.verification.cases.map(v => v.id) } : {}) }],
       })),
       noFlowClaims: [],
     }
@@ -426,7 +426,7 @@ export function flowOfAllSession(title: string, onArea?: (areaId: string) => voi
         {
           title,
           goal: `walk ${area.claims.length} milestone(s)`,
-          milestones: area.claims.map((c, i) => ({ order: i + 1, doc: c.doc, anchor: c.anchor, claimTitle: c.title })),
+          milestones: area.claims.map((c, i) => ({ order: i + 1, doc: c.doc, anchor: c.anchor, claimTitle: c.title, ...(c.verification?.cases ? { caseIds: c.verification.cases.map(v => v.id) } : {}) })),
         },
       ],
       noFlowClaims: [],
@@ -604,7 +604,7 @@ export function submitWorkerSessions(
         if (report.isError) return refused(`the drop of ${d.id} was refused: ${report.content}`)
         dropped.push(d)
       }
-      const [primary, ...rest] = accepted
+      const primary = accepted.at(-1)
       if (!primary) return refused('an edit spec must accept at least one scenario')
       return {
         kind: 'outcome',
@@ -612,7 +612,6 @@ export function submitWorkerSessions(
           kind: 'settled',
           scenarioYamlSha: primary.scenarioYamlSha,
           expectedReds: primary.expectedReds,
-          ...(rest.length > 0 ? { additionalScenarios: rest } : {}),
           ...(dropped.length > 0 ? { droppedScenarios: dropped } : {}),
         },
       }

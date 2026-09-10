@@ -1,8 +1,9 @@
+import { GuardPrerequisiteSchema } from './prerequisites.js'
 import { z } from 'zod'
 import type { GuardDriverId } from './drivers.js'
 
 export const GuardVerificationCapabilitySchema = z.enum([
-  'browser', 'http', 'process', 'filesystem', 'datastore', 'concurrency', 'implementation', 'request-control',
+  'browser', 'http', 'process', 'filesystem', 'datastore', 'concurrency', 'implementation', 'request-control', 'browser-timezone-control',
 ])
 export type GuardVerificationCapability = z.infer<typeof GuardVerificationCapabilitySchema>
 export const GuardVerificationCaseSchema = z.object({
@@ -10,6 +11,9 @@ export const GuardVerificationCaseSchema = z.object({
   claim: z.string().min(1),
   method: z.enum(['behavior', 'filesystem', 'datastore', 'concurrency', 'implementation']),
   requires: z.array(GuardVerificationCapabilitySchema).min(1),
+  prerequisites: z.array(GuardPrerequisiteSchema).optional(),
+  /** Exact server-startup contract for a web/HTTP proof; ordinary CLI steps carry their own commands. */
+  invocation: z.object({ command: z.string().min(1), address: z.string().url().optional() }).strict().optional(),
   /** Required scenario baseline, independent of observation capabilities. */
   preparation: z.enum(['empty', 'controlled']).optional(),
   /** Conditions to arrange, not evidence that must be read from a database. */
@@ -56,7 +60,7 @@ export function verificationBoundaryProblems(v: GuardVerification | undefined, r
   if (v.cases.some(c => c.method !== v.method)) problems.push('Split behavior and internal observations into separate claims; all cases must share the obligation method.')
   const conditions = new Set(v.cases.map(c => [...c.conditions].sort().join(',')))
   if (conditions.size > 1) problems.push('Split independent branches with different starting or failure conditions into separate claims.')
-  if (v.scope === 'web' && (v.method !== 'behavior' || v.cases.some(c => c.requires.some(r => !['browser', 'request-control'].includes(r))))) {
+  if (v.scope === 'web' && (v.method !== 'behavior' || v.cases.some(c => c.requires.some(r => !['browser', 'request-control', 'browser-timezone-control'].includes(r))))) {
     problems.push('A web obligation observes the UI. Move protocol, filesystem and database assertions to separate obligations; test persistence through reload or a fresh browser context.')
   }
   if (v.scope === 'api' && v.cases.some(c => c.requires.includes('browser'))) problems.push('API obligations cannot prove browser presentation or interaction; preserve those as separate web obligations.')
@@ -77,6 +81,7 @@ export const GuardBlockerSchema = z.object({
   kind: z.enum(['unsupported-capability', 'configuration', 'generation']),
   capabilities: z.array(GuardVerificationCapabilitySchema).optional(),
   action: z.string().min(1).optional(),
+  dependencies: z.array(z.string().min(1)).optional(),
 }).strict()
 
 /** Stable identity of a required case; caseId is absent only for legacy milestones. */

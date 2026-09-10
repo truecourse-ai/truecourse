@@ -59,20 +59,22 @@ export const FLOWS_SESSION_BUDGET: SessionBudget = {
   tokenCeiling: 150_000,
 }
 
-export const FLOWS_SESSION_SYSTEM_PROMPT = `You compose FLOWS out of a specification area's already-extracted CLAIMS. A flow is one user-goal path: a title, a goal, and an ordered list of MILESTONES, where every milestone IS one of the claims you were given.
+export const FLOWS_SESSION_SYSTEM_PROMPT = `Keep all case prerequisites, including required earlier setup, intact. Unresolved credential/external needs are case-specific configuration work, never optional notes. Do not attach a live-account requirement to an explicit absent-key or account-free case.
+You compose FLOWS out of a specification area's already-extracted CLAIMS. A flow is one user-goal path: a title, a goal, and an ordered list of MILESTONES, where every milestone IS one of the claims you were given.
 
 # Your input, and the only thing you may do with it
 The briefing carries the claims of ONE area — each with the document and section anchor it was extracted from — plus each document's heading outline, and GROUNDING (the app's own interfaces, and its dependency catalog). You ORDER and GROUP the claims into paths. That is the entire job.
-- Never invent, reword, translate, shorten, merge, or split a claim. Each milestone COPIES one given claim's \`doc\`, \`anchor\`, and claim text VERBATIM, character for character. A milestone the engine cannot match back to a given claim is discarded.
+- Never invent or rewrite a claim. For a claim with explicit verification cases, select a nonempty caseIds list of exact existing IDs; otherwise the claim is indivisible. Each milestone COPIES one given claim's \`doc\`, \`anchor\`, and claim text VERBATIM, character for character. A milestone the engine cannot match back to a given claim is discarded.
 - A flow states WHAT the product should do for a user, never HOW a test would drive it. Do not name a command, endpoint, URL, selector, file, or function that does not already appear in the text you were given.
 - GROUNDING is orientation, not vocabulary: the interface digests show which paths the app can actually walk (favor compositions a surface can realize; a claim no interface serves still gets accounted for), and the dependency catalog shows which starting-state classes exist (a path whose claims' needs are all catalogued is realizable sooner). Milestones still come ONLY from the claims.
 
 # What makes a good flow
 A flow is what a USER is trying to achieve, in the order they would do it.
-- COMPOSE when claims chain into one goal. "Create a task → the list shows it → complete it → the completed filter shows it" is ONE flow with four milestones, not four flows. The state one milestone leaves behind is what the next one acts on.
-- A ONE-MILESTONE flow is correct and expected when a claim stands alone (an error case, a validation rule, a single flag's behavior). Never pad a flow with unrelated claims — a padded path tests nothing coherently.
-- At most ~8 milestones. A longer chain is two flows.
-- No near-duplicates: having emitted "create → list → complete", do NOT also emit "create → list" or "create → complete". Emit the longest path you believe in, once — \`check_flows\` reports contained paths, and the engine drops them.
+- One flow has ONE coherent goal and compatible starting conditions. Separate details, cancel edit, and save/reload, even when they share an expense fixture. Shared nouns, endpoints, sections or setup do not establish dependence.
+- Compose only source-required transitions: successful conversion followed by changing the amount and clearing its old result stays together. State the source-grounded reason for nontrivial composition in notes.
+- Independent missing-key, live conversion, controlled timeout/quota and loading behavior belong in separate flows. Never attach a real-account need to account-free or controlled-response behavior.
+- A short independently meaningful flow is not redundant because a longer journey contains its steps. Only exactly identical ordered obligations, starting contract and proof scope are duplicates. Do not split based on milestone counts.
+- Preserve source-promised end-to-end journeys; do not split a required transition to get a runnable prefix. Each flow must be proved by one complete supported realization.
 - \`title\`: the user goal in the document's own words. \`goal\`: one sentence stating what the user gets when the whole path works.
 - Group by GOAL, not by document or section: claims from different documents of the area belong in one flow when the user experiences them as one path.
 
@@ -85,13 +87,13 @@ Retain every required guarantee, including ones whose verification is unavailabl
 Respect the full verification scope, cases, conditions and preparation metadata below.
 Never merge UI post-save behavior with a protocol POST contract, UI edit/reload with
 unexposed creation timestamps, or a pristine empty ledger with a filtered-empty list.
-Preserve their independent case IDs and source references. Source claims that still
+Preserve their independent case IDs and source references. Select separate source case IDs for incompatible branches. Claims without cases that still
 mix these boundaries are upstream defects: report them precisely in check_flows;
 do not silently drop clauses, invent case IDs, or broaden proof drivers. A case
 requiring a common transition must keep that transition in its composed path.
 
 # Coverage honesty — the rule you are graded on
-Every claim marked \`account: required\` MUST appear either as a milestone of at least one flow, or in \`noFlowClaims\` with a one-sentence reason. Never silently drop one. A claim MAY appear in more than one flow when it genuinely belongs to both. Claims marked \`account: optional\` sit on surfaces with no test runner today: use one as a milestone when it truly belongs to the path, but you never have to account for it.
+Every case of a claim marked \`account: required\` MUST appear in a milestone selection or a scoped \`noFlowClaims\` selection. Claims without cases are indivisible. No source obligation may be both assigned and marked no-flow. Never silently drop one. A claim MAY appear in more than one flow when it genuinely belongs to both. Claims marked \`account: optional\` sit on surfaces with no test runner today: use one as a milestone when it truly belongs to the path, but you never have to account for it.
 Legitimate \`noFlowClaims\` reasons: the claim is an edge/error condition no user path reaches, it restates another claim, or it describes a static property rather than something a user does. "It didn't fit" is not a reason.
 
 # Tools
@@ -100,8 +102,8 @@ Legitimate \`noFlowClaims\` reasons: the claim is an edge/error condition no use
 
 # The outcome
 One object with BOTH arrays, either possibly empty:
-  { "flows": [ { "title", "goal", "milestones": [ { "order", "doc", "anchor", "claimTitle", "note"? } ] } ],
-    "noFlowClaims": [ { "doc", "anchor", "claimTitle", "reason" } ] }`
+  { "flows": [ { "title", "goal", "notes"?, "startingState"?, "milestones": [ { "order", "doc", "anchor", "claimTitle", "caseIds"?, "note"? } ] } ],
+    "noFlowClaims": [ { "doc", "anchor", "claimTitle", "caseIds"?, "reason" } ] }`
 
 /** Exported for the step-20 estimate rework (probe the REAL keys). */
 export const FLOWS_SESSION_PROMPT_FINGERPRINT = promptFingerprint(FLOWS_SESSION_SYSTEM_PROMPT)
@@ -113,8 +115,8 @@ Most products have zero or one epic. An epic is justified only when a user genui
 
 # Rules for an epic you do emit
 - \`composedOf\`: the refs (\`F1\`, \`F2\`, …) of the flows it chains — at least TWO, from DIFFERENT areas. Copy the refs exactly as listed.
-- \`milestones\`: the path, in the order the user walks it. EVERY milestone must be a milestone of one of the flows in \`composedOf\`, copied VERBATIM (\`doc\`, \`anchor\`, \`claimTitle\`). You may drop a composed flow's milestones the interface doesn't need; you may never introduce one from elsewhere or write new text.
-- Keep the chain to at most ~12 milestones, in a single coherent order.
+- \`milestones\`: the path, in the order the user walks it. EVERY milestone must be a milestone of one of the flows in \`composedOf\`, copied VERBATIM (\`doc\`, \`anchor\`, \`claimTitle\`, \`caseIds\`). Select only cases already present in the composed flows. You may drop a composed flow's milestones the interface doesn't need; you may never introduce one from elsewhere or write new text.
+- Preserve one source-promised dependent transition. Do not recreate an umbrella combining save, cancel, live conversion, missing credentials and controlled failures. Shared setup is not dependence; describe the source reason in notes. Never split based on milestone count.
 - \`title\`: the interface in user terms. \`goal\`: one sentence for what the user achieves.
 - Never emit an epic that is just one flow restated, and never two epics with the same chain.
 
@@ -122,7 +124,7 @@ Most products have zero or one epic. An epic is justified only when a user genui
 - \`check_flows\` — REQUIRED before you finish: call it with your complete draft (even { "epics": [] }). It verifies every ref and milestone against the composed flows, so a wrong reference costs one turn here instead of a refused outcome at the fold.
 
 # The outcome
-One object: { "epics": [ { "title", "goal", "composedOf": ["F1","F4"], "milestones": [ { "order", "doc", "anchor", "claimTitle" } ] } ] } — or { "epics": [] } when nothing chains.`
+One object: { "epics": [ { "title", "goal", "notes"?, "startingState"?, "composedOf": ["F1","F4"], "milestones": [ { "order", "doc", "anchor", "claimTitle", "caseIds"? } ] } ] } — or { "epics": [] } when nothing chains.`
 
 export const FLOWS_EPIC_SESSION_PROMPT_FINGERPRINT = promptFingerprint(FLOWS_EPIC_SESSION_SYSTEM_PROMPT)
 
@@ -365,7 +367,7 @@ export function flowsEpicSessionBriefing(digests: readonly FlowDigest[]): string
   ]
   for (const d of digests) {
     lines.push('', `--- ${d.ref}  (area: ${d.areaId})`, `title: ${d.title}`, `goal: ${d.goal}`, 'milestones:')
-    d.milestones.forEach((m, i) => lines.push(`  ${i + 1}. ${m.doc}#${m.anchor} — ${m.claimTitle}`))
+    d.milestones.forEach((m, i) => lines.push(`  ${i + 1}. ${m.doc}#${m.anchor} — ${m.claimTitle}${m.caseIds ? ` [caseIds: ${m.caseIds.join(", ")}]` : ""}`))
   }
   lines.push('', 'Check the draft with `check_flows` (an empty epic set is a valid draft), then produce the outcome.')
   return lines.join('\n')

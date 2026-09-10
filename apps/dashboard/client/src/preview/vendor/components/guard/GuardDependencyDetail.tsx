@@ -8,12 +8,9 @@
  *   WHAT IT BLOCKS    the flows held back right now: committed tests that cannot
  *                     run, and the ones the last generate never wrote for want of
  *                     an instance.
- *   REGISTERING IT    the form, rendered BY the registration's own shape, one
- *                     masked field per declared variable, a path, or a config
- *                     directory; and for a SERVICE, the account itself: its base
- *                     URL, its authorization token, and whatever headers this
- *                     machine reaches it with. The form IS the instruction: no page
- *                     ever tells a reader which file to edit by hand.
+ *   REGISTERING IT    the form, one input per declared variable, a path, or a config
+ *                     directory. A service URL uses its variable name as the label;
+ *                     credentials come from the variables the application reads.
  *
  * Detection evidence closes the page for a service (collapsed, it answers "why
  * do you think I depend on this", which is asked once).
@@ -24,7 +21,7 @@
  * the placeholder, never in the input: an input holds what a user typed, and nothing
  * that was never typed may be saved back. That is also why a blank secret field
  * means UNCHANGED and never "clear it", clearing is what blanking a value the page
- * can actually show (a host path, a readable header) looks like.
+ * can actually show (a host path or URL) looks like.
  *
  * The header carries the same two-mode switch every artifact-backed entity has:
  * this page, or the catalog's own committed entry. The gitignored overlay has no
@@ -32,8 +29,7 @@
  */
 
 import { useState } from 'react';
-import { ArrowUpRight, ChevronDown, ChevronRight, Loader2, Plus, FlaskConical, X } from 'lucide-react';
-import { isSecretHeaderName } from '@/preview/vendor/shared';
+import { ArrowUpRight, ChevronDown, ChevronRight, Loader2, FlaskConical } from 'lucide-react';
 import { ArtifactModeSwitch, ArtifactRaw, useArtifactMode } from '@/preview/ui/artifact-view';
 import { Button } from '@/components/ui/button';
 import { HoverPopover } from '@/preview/ui/hover-popover';
@@ -44,7 +40,6 @@ import type {
   GuardDependencyField,
   GuardDependencyPatch,
   GuardDependencyRow,
-  GuardDependencyService,
 } from '@/preview/vendor/types/guard-dependencies';
 
 const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
@@ -67,8 +62,8 @@ function sampleFor(name: string): string {
   const n = name.toLowerCase();
   if (n.includes('provider')) return 'anthropic';
   if (n.includes('model')) return 'claude-opus-5';
-  if (n.includes('key') || n.includes('token') || n.includes('secret')) return 'sk-…';
-  if (n.includes('url') || n.includes('base')) return 'https://api.anthropic.com';
+  if (n.includes('key') || n.includes('token') || n.includes('secret')) return '';
+  if (n.includes('url') || n.includes('base')) return '';
   if (n.includes('host') || n.includes('path') || n.includes('dir')) return '/usr/local/bin/tool';
   return '';
 }
@@ -223,6 +218,7 @@ export function GuardDependencyDetail({
                 <button
                   type="button"
                   className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+                  aria-expanded={showEvidence}
                   onClick={() => setShowEvidence((v) => !v)}
                 >
                   {showEvidence ? (
@@ -230,14 +226,14 @@ export function GuardDependencyDetail({
                   ) : (
                     <ChevronRight className="h-3 w-3" />
                   )}
-                  Detection evidence ({evidence.length})
+                  Detected in code ({evidence.length})
                 </button>
                 {showEvidence && (
                   <ul className="mt-1 space-y-0.5">
                     {evidence.map((e) => (
                       <li
                         key={`${e.service}:${e.filePath}:${e.importSource ?? e.url ?? ''}`}
-                        className="text-[11px] text-muted-foreground"
+                        className="break-words text-[11px] text-muted-foreground"
                       >
                         {/* Which third party the hit is for, said only when this row
                             stands for more than one, where the file alone is
@@ -246,7 +242,7 @@ export function GuardDependencyDetail({
                           <span className="mr-1 font-medium text-foreground">{e.service}</span>
                         )}
                         <code className="font-mono">{e.filePath}</code>{' '}
-                        {e.importSource ? 'imports' : 'requests'}{' '}
+                        {e.importSource ? 'imports' : '→'}{' '}
                         <code className="font-mono">{e.importSource ?? e.url}</code>
                       </li>
                     ))}
@@ -257,127 +253,6 @@ export function GuardDependencyDetail({
           </>
         )}
       </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Custom request headers, the one part of a service's account the user NAMES.
-// ---------------------------------------------------------------------------
-
-/**
- * One header as the form holds it. `withheld` marks a row the server would not
- * echo (its name reads as a credential), which is why such a row's name is fixed:
- * the page cannot carry the value across a rename, and silently dropping a stored
- * secret is not an acceptable way to find that out. Remove the row and add it back
- * to rename one.
- */
-interface HeaderRow {
-  name: string;
-  value: string;
-  withheld: boolean;
-}
-
-/** The registered headers as editable rows, a withheld value starts blank. */
-function headerRows(service: GuardDependencyService | undefined): HeaderRow[] {
-  return (service?.headers ?? []).map((h) => ({
-    name: h.name,
-    value: h.value ?? '',
-    withheld: h.value === undefined,
-  }));
-}
-
-/**
- * What the rows CHANGED, as the patch says it: a name the service carried and the
- * rows no longer do is `null` (dropped), and every named row with a value is sent.
- * An untouched withheld row sends nothing at all, blank means "unchanged" for a
- * value the page was never shown.
- */
-function headerChanges(
-  rows: readonly HeaderRow[],
-  service: GuardDependencyService,
-): Record<string, string | null> {
-  const patch: Record<string, string | null> = {};
-  const present = new Set(rows.map((r) => r.name.trim()).filter((n) => n !== ''));
-  for (const stored of service.headers) {
-    if (!present.has(stored.name)) patch[stored.name] = null;
-  }
-  for (const row of rows) {
-    const name = row.name.trim();
-    if (name === '') continue;
-    if (row.withheld && row.value === '') continue;
-    const stored = service.headers.find((h) => h.name === name);
-    if (stored && !stored.secret && stored.value === row.value) continue;
-    patch[name] = row.value;
-  }
-  return patch;
-}
-
-/** The name/value rows themselves: addable, removable, secrets masked as typed. */
-function HeaderRows({
-  rows,
-  onChange,
-}: {
-  rows: HeaderRow[];
-  onChange: (rows: HeaderRow[]) => void;
-}) {
-  const set = (i: number, patch: Partial<HeaderRow>) =>
-    onChange(rows.map((row, at) => (at === i ? { ...row, ...patch } : row)));
-
-  return (
-    <div>
-      <span className={FIELD_LABEL}>Custom headers</span>
-      {rows.length > 0 && (
-        <div className="space-y-1">
-          {rows.map((row, i) => {
-            // The masking follows the NAME as it is typed, so a header that becomes
-            // a credential stops being readable the moment it is called one.
-            const secret = row.withheld || isSecretHeaderName(row.name);
-            return (
-              <div key={i} className="flex min-w-0 items-center gap-1">
-                <Input
-                  aria-label={`Header ${i + 1} name`}
-                  value={row.name}
-                  readOnly={row.withheld}
-                  placeholder="X-Tenant"
-                  className="min-w-0 flex-1"
-                  {...(row.withheld
-                    ? { title: 'Remove this header and add it again to rename it, its value is not readable here.' }
-                    : {})}
-                  onChange={(e) => set(i, { name: e.target.value })}
-                />
-                <Input
-                  aria-label={`Header ${i + 1} value`}
-                  type={secret ? 'password' : 'text'}
-                  value={row.value}
-                  placeholder={row.withheld ? STORED_SECRET : 'value'}
-                  className="min-w-0 flex-1"
-                  onChange={(e) => set(i, { value: e.target.value })}
-                />
-                <button
-                  type="button"
-                  aria-label={`Remove header ${i + 1}`}
-                  onClick={() => onChange(rows.filter((_, at) => at !== i))}
-                  className="shrink-0 rounded border border-border p-1 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
-      <button
-        type="button"
-        onClick={() => onChange([...rows, { name: '', value: '', withheld: false }])}
-        className={`${rows.length > 0 ? 'mt-1 ' : ''}inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground`}
-      >
-        <Plus className="h-3 w-3" />
-        Add header
-      </button>
-      <p className="mt-1 text-[10px] text-muted-foreground">
-        A tenant id, a second key, stored on this machine only.
-      </p>
     </div>
   );
 }
@@ -399,10 +274,12 @@ function RegistrationForm({
   const service = dependency.service;
   const [env, setEnv] = useState<Record<string, string>>({});
   const [pathValue, setPathValue] = useState(registeredPath(dependency));
-  const [baseUrlEnv, setBaseUrlEnv] = useState(service?.baseUrlEnv ?? '');
-  const [baseUrl, setBaseUrl] = useState(service?.baseUrl ?? '');
-  const [token, setToken] = useState('');
-  const [headers, setHeaders] = useState<HeaderRow[]>(() => headerRows(service));
+  const baseUrlEnv = service?.baseUrlEnv ?? '';
+  const [baseUrl, setBaseUrl] = useState<string>();
+  const registeredUrl = registration?.kind === 'env' &&
+    registration.vars.some((variable) => variable.name === baseUrlEnv);
+  const showServiceUrl = service && baseUrlEnv && !registeredUrl &&
+    (!registration || service.declaredInRecipe);
   const [error, setError] = useState<string | null>(null);
 
   // Nothing to register: the scenario creates this state, or the runner seeds it.
@@ -420,6 +297,14 @@ function RegistrationForm({
     );
   }
 
+  if (!registration && !baseUrlEnv) {
+    return (
+      <p className="text-[12px] leading-relaxed text-muted-foreground">
+        No base URL variable was detected for this service. Configure one in the application and run setup again.
+      </p>
+    );
+  }
+
   const fieldOf = (name: string): GuardDependencyField | undefined =>
     dependency.fields.find((f) => f.field === name);
 
@@ -434,12 +319,7 @@ function RegistrationForm({
     } else {
       // A service the catalog does not declare: its own declaration fields, plus
       // whatever variables the recipe already names for it.
-      if (!baseUrlEnv.trim()) {
-        setError('Name the variable the program reads this service’s base URL from.');
-        return;
-      }
-      patch.baseUrlEnv = baseUrlEnv.trim();
-      patch.baseUrl = baseUrl.trim();
+      patch.baseUrlEnv = baseUrlEnv;
       const values: Record<string, string | null> = {};
       for (const [name, value] of Object.entries(env)) {
         if (value.trim() === '') continue;
@@ -447,18 +327,7 @@ function RegistrationForm({
       }
       if (Object.keys(values).length > 0) patch.env = values;
     }
-    if (service && (!registration || service.declaredInRecipe)) {
-      if (registration && baseUrl.trim() !== (service.baseUrl ?? '')) patch.baseUrl = baseUrl.trim();
-      // A blank token means "unchanged", never "clear it": a stored token is never
-      // echoed, so an empty field is the state every reload starts in. Clearing one
-      // is what removing the value the page CAN show, a header, looks like.
-      if (token.trim() !== '') patch.token = token;
-      const headerPatch = headerChanges(headers, service);
-      if (Object.keys(headerPatch).length > 0) patch.headers = headerPatch;
-    }
-    // Checked HERE, over the whole patch, rather than per shape: an entry that is
-    // both an env registration and a service is saved by filling in EITHER half,
-    // and asking for a variable when the reader came to set a token is a wall.
+    if (showServiceUrl && baseUrl !== undefined) patch.baseUrl = baseUrl.trim();
     if (Object.keys(patch).length === 0) {
       setError('Nothing to save, fill in a field first.');
       return;
@@ -469,7 +338,7 @@ function RegistrationForm({
     // A saved write leaves nothing typed behind: the fresh view is what the fields
     // read from now, and a secret must not sit in the DOM after it is stored.
     if (registration?.kind === 'env' || !registration) setEnv({});
-    setToken('');
+    setBaseUrl(undefined);
   };
 
   return (
@@ -541,77 +410,37 @@ function RegistrationForm({
           </div>
         )}
 
-        {/* A service keeps the two fields only its declaration can hold. */}
-        {service && (!registration || service.declaredInRecipe) && (
-          <>
-            {!registration && (
-              <div>
-                <label className={FIELD_LABEL} htmlFor={`tc-dep-${dependency.name}-urlenv`}>
-                  Base URL variable
+        {showServiceUrl && (
+          <div>
+            <label className={FIELD_LABEL} htmlFor={`tc-dep-${dependency.name}-url`}>
+              {baseUrlEnv}
+            </label>
+            <Input
+              id={`tc-dep-${dependency.name}-url`}
+              aria-label={baseUrlEnv}
+              value={baseUrl ?? service.baseUrl ?? ''}
+              onChange={(e) => setBaseUrl(e.target.value)}
+            />
+          </div>
+        )}
+        {service && !registration &&
+          dependency.fields
+            .filter((field) => field.field !== baseUrlEnv)
+            .map((field) => (
+              <div key={field.field}>
+                <label className={FIELD_LABEL} htmlFor={`tc-dep-${dependency.name}-${field.field}`}>
+                  {field.field}
                 </label>
                 <Input
-                  id={`tc-dep-${dependency.name}-urlenv`}
-                  aria-label="Base URL variable"
-                  value={baseUrlEnv}
-                  placeholder="STRIPE_BASE_URL"
-                  onChange={(e) => setBaseUrlEnv(e.target.value)}
+                  id={`tc-dep-${dependency.name}-${field.field}`}
+                  type={field.secret ? 'password' : 'text'}
+                  aria-label={field.field}
+                  value={env[field.field] ?? shownValue(field)}
+                  placeholder={placeholderFor(field, field.field)}
+                  onChange={(e) => setEnv((v) => ({ ...v, [field.field]: e.target.value }))}
                 />
-                {service.baseUrlEnvSource === 'detected' && (
-                  <p className="mt-1 text-[10px] text-muted-foreground">
-                    Seen in the source, a suggestion, not a promise the app honors it.
-                  </p>
-                )}
               </div>
-            )}
-            <div>
-              <label className={FIELD_LABEL} htmlFor={`tc-dep-${dependency.name}-url`}>
-                Base URL
-              </label>
-              <Input
-                id={`tc-dep-${dependency.name}-url`}
-                aria-label="Base URL"
-                value={baseUrl}
-                placeholder="https://api.sandbox.example.com"
-                onChange={(e) => setBaseUrl(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className={FIELD_LABEL} htmlFor={`tc-dep-${dependency.name}-token`}>
-                Authorization token
-              </label>
-              <Input
-                id={`tc-dep-${dependency.name}-token`}
-                type="password"
-                aria-label="Authorization token"
-                value={token}
-                placeholder={service.tokenSet ? STORED_SECRET : 'sk-…'}
-                onChange={(e) => setToken(e.target.value)}
-              />
-              <p className="mt-1 text-[10px] text-muted-foreground">
-                Stored on this machine only, it never reaches git.
-              </p>
-            </div>
-            <HeaderRows rows={headers} onChange={setHeaders} />
-            {!registration &&
-              dependency.fields
-                .filter((f) => f.field !== (baseUrlEnv || service.baseUrlEnv))
-                .map((field) => (
-                  <div key={field.field}>
-                    <label className={FIELD_LABEL} htmlFor={`tc-dep-${dependency.name}-${field.field}`}>
-                      {field.field}
-                    </label>
-                    <Input
-                      id={`tc-dep-${dependency.name}-${field.field}`}
-                      type={field.secret ? 'password' : 'text'}
-                      aria-label={field.field}
-                      value={env[field.field] ?? shownValue(field)}
-                      placeholder={placeholderFor(field, field.field)}
-                      onChange={(e) => setEnv((v) => ({ ...v, [field.field]: e.target.value }))}
-                    />
-                  </div>
-                ))}
-          </>
-        )}
+            ))}
 
         {error && (
           <div className="rounded border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">

@@ -153,6 +153,40 @@ function writeScenario(r: string, id: string, flowId: string, needs: string[]): 
 }
 
 describe('readGuardDependenciesView', () => {
+  it.each([true, false])('retains generation gaps after account registration until regeneration clears them (catalog: %s)', (inCatalog) => {
+    const r = repo();
+    if (inCatalog) writeCatalog(r, [LLM_ACCOUNT]);
+    writeJson(scenarios(r, 'recipe.json'), {
+      build: 'true',
+      api: { serve: ['node', 'server.mjs'], externals: {
+        anthropic: { baseUrlEnv: 'ANTHROPIC_BASE_URL', baseUrl: 'https://api.anthropic.com', env: { ANTHROPIC_API_KEY: {} } },
+      } },
+    });
+    writeFlows(r, [{ id: 'run-llm-rules', title: 'Run LLM rules' }]);
+    // A previously authored test may be retained while its replacement is blocked.
+    writeScenario(r, 'older-test', 'run-llm-rules', ['anthropic']);
+    writeResult(r, [{
+      doc: 'docs/spec.md', anchor: 'llm', kind: 'blocked-on', flowId: 'run-llm-rules',
+      reason: 'blocked on anthropic: requires an account',
+      blocker: { kind: 'configuration', dependencies: ['anthropic'] },
+    }]);
+    const gap = { flowId: 'run-llm-rules', title: 'Run LLM rules', kind: 'not-authored' };
+    expect(readGuardDependenciesView(r).dependencies[0].blocks).toEqual([gap]);
+
+    const saved = writeGuardDependency(r, 'anthropic', { baseUrl: 'https://api.anthropic.com', env: {
+      ...(inCatalog ? { ANTHROPIC_BASE_URL: 'https://api.anthropic.com' } : {}),
+      ANTHROPIC_API_KEY: 'test-only-account',
+    } });
+    expect(saved.dependencies[0].state, JSON.stringify(saved.dependencies[0].fields)).toBe('provided');
+    expect(saved.dependencies[0].blocks).toEqual([gap]);
+    expect(saved.dependencies[0].usedBy).toBe(1);
+    // Reloading the page must offer the same retry as the save response.
+    expect(readGuardDependenciesView(r).dependencies[0]).toMatchObject({ state: 'provided', blocks: [gap] });
+
+    writeResult(r, []);
+    expect(readGuardDependenciesView(r).dependencies[0]).toMatchObject({ state: 'provided', blocks: [] });
+  });
+
   it('is an honest empty view on a repo with nothing declared', () => {
     const view = readGuardDependenciesView(repo());
     expect(view.dependencies).toEqual([]);

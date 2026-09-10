@@ -86,6 +86,62 @@ const rows = (count: number) =>
   }));
 
 describe('runner-owned preparation profiles', () => {
+  it.each(['external', 'catalog'] as const)('injects the same provided %s account into private seed, baseline checks, and scenario execution', async (source) => {
+    const { root, recipe } = fixture();
+    if (source === 'external') recipe.api!.externals = { currencybeacon: { baseUrlEnv: 'CURRENCYBEACON_BASE_URL', baseUrl: 'http://provider.test', env: { CURRENCYBEACON_API_KEY: {} } } };
+    for (const name of ['seed.mjs', 'server.mjs', 'verify.mjs', 'cleanup.mjs']) {
+      const file = path.join(root, 'scripts', name);
+      fs.writeFileSync(file, `if (process.env.CURRENCYBEACON_API_KEY !== 'private-fixture-key') throw new Error('Required fixture account was not injected');\n` + fs.readFileSync(file, 'utf8'));
+    }
+    writeSpecDoc(root);
+    fs.mkdirSync(path.join(root, '.truecourse/scenarios'), { recursive: true });
+    if (source === 'external') {
+      fs.writeFileSync(path.join(root, '.truecourse/scenarios/externals.local.json'), JSON.stringify({ currencybeacon: { env: { CURRENCYBEACON_API_KEY: 'private-fixture-key' } } }));
+    } else {
+      fs.writeFileSync(path.join(root, '.truecourse/scenarios/dependencies.json'), JSON.stringify({ dependencies: [{
+        name: 'currencybeacon', class: 'supplied', summary: 'Account', needs: [],
+        registration: { kind: 'env', vars: [
+          { name: 'CURRENCYBEACON_API_KEY', description: 'Key', secret: true },
+          { name: 'CURRENCYBEACON_BASE_URL', description: 'URL', secret: false },
+        ] },
+      }] }));
+      fs.writeFileSync(path.join(root, '.truecourse/scenarios/dependencies.local.json'), JSON.stringify({ currencybeacon: { env: {
+        CURRENCYBEACON_API_KEY: 'private-fixture-key', CURRENCYBEACON_BASE_URL: 'http://provider.test',
+      } } }));
+    }
+    writeScenario(root, 'private-account.yaml', GuardScenarioSchema.parse({
+      id: 'private-account', title: 'Private account injection', binds: specBinds('spec/section'),
+      prerequisites: [{ dependency: 'currencybeacon', mode: 'provided' }], setup: { preparation: 'ledger' },
+      steps: [{ request: { method: 'GET', path: '/rows', headers: { 'x-world-token': '{{cred:owner}}' } }, expect: { status: 200, json: { count: { equals: 8 } } } }],
+    }));
+    const result = await runGuard({ repoRoot: root, recipe, skipBuild: true });
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok') throw Error(JSON.stringify(result));
+    expect(result.latest.summary).toMatchObject({ pass: 1, blocked: 0, error: 0 });
+    expect(JSON.stringify(result)).not.toContain('private-fixture-key');
+    const serverFile = path.join(root, 'scripts/server.mjs');
+    fs.writeFileSync(serverFile, "throw new Error('Startup echoed ' + process.env.CURRENCYBEACON_API_KEY);\n" + fs.readFileSync(serverFile, 'utf8'));
+    const startupFailure = await runGuard({ repoRoot: root, recipe, skipBuild: true });
+    expect(startupFailure.status).toBe('ok');
+    if (startupFailure.status === 'ok') {
+      expect(startupFailure.latest.scenarios[0]).toMatchObject({ outcome: 'error', preparationFailure: { stage: 'prepare' } });
+      expect(startupFailure.latest.scenarios[0].failure?.actual).toContain('baseline server');
+      expect(JSON.stringify(startupFailure)).not.toContain('private-fixture-key');
+    }
+    fs.writeFileSync(path.join(root, 'scripts/seed.mjs'), "throw new Error('Seed echoed ' + process.env.CURRENCYBEACON_API_KEY);");
+    const seedFailure = await runGuard({ repoRoot: root, recipe, skipBuild: true });
+    expect(seedFailure.status).toBe('ok');
+    if (seedFailure.status === 'ok') {
+      expect(seedFailure.latest.scenarios[0].failure?.actual).toContain('Seed echoed');
+      expect(seedFailure.latest.scenarios[0].failure?.actual).toContain('«external:currencybeacon.CURRENCYBEACON_API_KEY»');
+      expect(JSON.stringify(seedFailure)).not.toContain('private-fixture-key');
+    }
+    recipe.preparations!.ledger.env.CURRENCYBEACON_BASE_URL = 'http://unapproved.test';
+    const blocked = await runGuard({ repoRoot: root, recipe, skipBuild: true });
+    expect(blocked.status).toBe('ok');
+    if (blocked.status === 'ok') expect(blocked.latest.summary).toMatchObject({ pass: 0, blocked: 1 });
+  });
+
   it('rejects a seeded empty world even when its generated verifier claims empty', async () => {
     const { root, recipe } = fixture();
     const seed = path.join(root, 'scripts/seed.mjs');

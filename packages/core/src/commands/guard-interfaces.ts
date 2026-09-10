@@ -10,9 +10,9 @@
  * package everything it needs, exactly as `guard-externals.ts` adapts the
  * externals engine.
  *
- * The sessions store is the standard one: `sessions/guard-interfaces/
- * <runId>/`, a `run.json` index plus one transcript per session, reconciled on
- * boot like every other command's. A run that dies leaves a record that says so.
+ * Standalone authoring uses `sessions/guard-interfaces/<runId>/`, with a
+ * run record and one transcript per session. Setup supplies its own run so
+ * authoring remains part of the setup activity and lifecycle.
  *
  * One stage here is NOT a session: the state reconciliation that closes a run
  * is a single schema-bearing completion, so it resolves the ordinary
@@ -40,7 +40,7 @@ import {
 } from '@truecourse/shared/llm';
 import type { SessionDriver, SessionEvent } from '@truecourse/agent-loop';
 import path from 'node:path';
-import { createStoredSessionRun, type SessionRunStartedInfo } from '../lib/sessions-store.js';
+import { createStoredSessionRun, type SessionRunStartedInfo, type SessionRunStore } from '../lib/sessions-store.js';
 import { resolveCommitSha } from '../lib/repo-ref.js';
 import {
   createConfiguredApiTransport,
@@ -132,6 +132,8 @@ export interface RunGuardInterfaceAuthorOptions {
    * `repoRoot`.
    */
   sessionsKey?: string;
+  /** Reuse the caller's run and persistence; the caller owns its lifecycle. */
+  sessionRun?: Pick<SessionRunStore, 'runId' | 'dir' | 'persistence'>;
   signal?: AbortSignal;
   onProgress?: (event: AuthorProgress) => void;
   onSessionEvent?: (placeId: string, event: SessionEvent) => void;
@@ -144,7 +146,7 @@ export interface RunGuardInterfaceAuthorOptions {
 
 export interface GuardInterfaceAuthorRun extends AuthorRunResult {
   runId: string;
-  /** `<repo>/.truecourse/sessions/guard-interfaces/<runId>` — the transcripts. */
+  /** Directory containing the run's transcripts, including when owned by setup. */
   runDir: string;
   /** Which backend ran the sessions, and on whose model — the same record the
    *  run.json carries and every transcript's `session-start` stamps. */
@@ -167,7 +169,7 @@ export interface GuardInterfaceAuthorRun extends AuthorRunResult {
 
 /**
  * Run the authoring. Every session's transcript lands in the run directory
- * whatever the outcome, and the run record is closed with the honest status:
+ * whatever the outcome. Standalone authoring closes its own run record:
  * `completed` when every session reached an outcome, `failed` when none did,
  * `interrupted` when the caller aborted.
  */
@@ -175,10 +177,15 @@ export async function runGuardInterfaceAuthoring(
   opts: RunGuardInterfaceAuthorOptions,
 ): Promise<GuardInterfaceAuthorRun> {
   const { repoRoot } = opts;
-  const gitRef = await resolveCommitSha(repoRoot);
-  const run = await createStoredSessionRun(opts.sessionsKey ?? repoRoot, { command: 'guard-interfaces', gitRef, activityStream: !!opts.sessionsKey });
+  const ownedRun = opts.sessionRun ? undefined : await createStoredSessionRun(opts.sessionsKey ?? repoRoot, {
+    command: 'guard-interfaces',
+    gitRef: await resolveCommitSha(repoRoot),
+    activityStream: !!opts.sessionsKey,
+  });
+  // Exactly one exists: the caller's run or the standalone run created above.
+  const run = opts.sessionRun ?? ownedRun!;
   try {
-    opts.onRunStarted?.({ command: 'guard-interfaces', runId: run.runId, dir: run.dir });
+    if (ownedRun) opts.onRunStarted?.({ command: 'guard-interfaces', runId: run.runId, dir: run.dir });
     // A hosted caller hands over the workspace's own driver; a checkout resolves
     // one from the saved config.
     const { driver, mode, attribution } = opts.driver
@@ -201,7 +208,7 @@ export async function runGuardInterfaceAuthoring(
       model: attribution.model,
       ...(attribution.fallbackModel ? { fallbackModel: attribution.fallbackModel } : {}),
     };
-    run.setLlm(llm);
+    ownedRun?.setLlm(llm);
 
     // The GROUNDING, once per run and amortised over every place in it:
     // the route module of each place, the modules it renders, and the api effects
@@ -251,7 +258,7 @@ export async function runGuardInterfaceAuthoring(
       });
     }
 
-    run.finish(runStatus(result.places, opts.signal));
+    ownedRun?.finish(runStatus(result.places, opts.signal));
     return {
       ...result,
       runId: run.runId,
@@ -262,9 +269,9 @@ export async function runGuardInterfaceAuthoring(
       ...(reconcile ? { reconcile } : {}),
     };
   } catch (error) {
-    run.finish(opts.signal?.aborted ? 'interrupted' : 'failed', { error: { message: error instanceof Error ? error.message : String(error) } });
+    ownedRun?.finish(opts.signal?.aborted ? 'interrupted' : 'failed', { error: { message: error instanceof Error ? error.message : String(error) } });
     throw error;
-  } finally { await run.flush?.(); }
+  } finally { await ownedRun?.flush?.(); }
 }
 
 export interface RunGuardInterfaceReconcileOptions {

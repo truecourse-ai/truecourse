@@ -200,8 +200,8 @@ describe('guard-generator prompts', () => {
 
   // Each selected obligation is complete; prerequisites remain untagged.
   it('GENERATE_SYSTEM_PROMPT requires assertions for selected milestones and leaves setup untagged', () => {
-    expect(GENERATE_SYSTEM_PROMPT).toContain('# Preserve the path within each verified portion')
-    expect(GENERATE_SYSTEM_PROMPT).toContain('Every selected milestone MUST be verified by an assertion')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('# Prove the complete flow in one test')
+    expect(GENERATE_SYSTEM_PROMPT).toContain('Every flow milestone MUST be verified by an assertion')
     expect(GENERATE_SYSTEM_PROMPT).toContain("milestone: <that milestone's number>")
     // A seeding / unasserted step paints neutral.
     expect(GENERATE_SYSTEM_PROMPT).toContain('only prepares the world')
@@ -213,12 +213,12 @@ describe('guard-generator prompts', () => {
   })
 
   it('GENERATE_API_SYSTEM_PROMPT states the same milestone contract for the api surface', () => {
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('# Preserve the path within each verified portion')
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('Every selected milestone MUST be verified by an assertion')
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('# Prove the complete flow in one test')
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('Every flow milestone MUST be verified by an assertion')
     expect(GENERATE_API_SYSTEM_PROMPT).toContain('carries NO `milestone`')
     expect(GENERATE_API_SYSTEM_PROMPT).toContain('Never renumber, merge, split, or invent a milestone')
     // One server, one path — chained with capture rather than guessed ids.
-    expect(GENERATE_API_SYSTEM_PROMPT).toContain('one freshly booted server')
+    expect(GENERATE_API_SYSTEM_PROMPT).toContain('in one sandbox')
     expect(GENERATE_API_SYSTEM_PROMPT).toContain('`capture`')
   })
 
@@ -461,8 +461,9 @@ describe('guard-generator prompts', () => {
     // `weak` on the same two-sided criterion the authoring prompts teach — a claim
     // stating a positive AND a negative half is verified only when the exclusion
     // half is asserted observably too.
-    expect(FIDELITY_PROMPT_FINGERPRINT).toBe('1902e4eea5007a45')
-    expect(fingerprint(FIDELITY_SYSTEM_PROMPT)).toBe('1902e4eea5007a45')
+    // Re-pinned for prerequisite eligibility and setup-aware expected-red review.
+    expect(FIDELITY_PROMPT_FINGERPRINT).toBe('758e3b00be5da7ee')
+    expect(fingerprint(FIDELITY_SYSTEM_PROMPT)).toBe('758e3b00be5da7ee')
   })
 
   it('buildFidelityUserPrompt carries the flow, every milestone with its section text, and the YAML', () => {
@@ -658,10 +659,10 @@ describe('guard-generator prompts', () => {
     // both drivers' prompts move together — and re-authoring is the point: a claim
     // about a CHANGE could previously only be written as an absolute number, which
     // tests the fixture rather than the promise.
-    // Re-pinned for verified preparation profiles in the executable schema.
-    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('151e2bf42a06ec7f')
+    // Re-pinned for case prerequisites, proof grounding, and setup-aware fidelity review.
+    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('d5822b3680a3c3cb')
     // Moved once with the blast-radius cut: the canonical schema gained `world`.
-    expect(GENERATE_PROMPT_FINGERPRINT).toBe('151e2bf42a06ec7f')
+    expect(GENERATE_PROMPT_FINGERPRINT).toBe('d5822b3680a3c3cb')
   })
 
   it('the authored cli step vocabulary is the `run` step — a runner-only kind never leaks in', () => {
@@ -901,11 +902,11 @@ describe('guard-generator prompts', () => {
     // of the comparison. Every text and json matcher's `compare` can now shift its
     // comparand, which is what makes "one fewer seat than before" a verdict instead
     // of an absolute number that only tests the fixture.
-    // Re-pinned for verified preparation profiles in the executable schema.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('d0f187590d1eb6ad')
+    // Re-pinned for case prerequisites, proof grounding, and setup-aware fidelity review.
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('e8bf9c06710955c6')
     // Moved once with the blast-radius cut: `world` in the schema + the
     // shared-world/self-mint doctrine block.
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('d0f187590d1eb6ad')
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('e8bf9c06710955c6')
   })
 
   it('the api authoring prompt teaches the cookie jar and captureHeaders', () => {
@@ -1194,8 +1195,9 @@ describe('guard-generator prompts', () => {
     // Re-pinned 2026-09-09: browser navigation covers full-page refresh,
     // and plans/gaps must use mutually exclusive case references within milestones.
     // Preparation profiles and typed selected-case obligations intentionally replan existing tests.
-    expect(MATCH_PROMPT_FINGERPRINT).toBe('b70d2602af6a1143')
-    expect(fingerprint(MATCH_SYSTEM_PROMPT)).toBe('b70d2602af6a1143')
+    // Re-pinned for independent case preservation and bounded schema correction.
+    expect(MATCH_PROMPT_FINGERPRINT).toBe('e7eccb281ba2644c')
+    expect(fingerprint(MATCH_SYSTEM_PROMPT)).toBe('e7eccb281ba2644c')
   })
 
   it('buildMatchUserPrompt renders the milestones and the catalog digest (ids, entries, steps)', () => {
@@ -1319,7 +1321,7 @@ describe('GENERATE_WEB_SYSTEM_PROMPT — the third authoring arm', () => {
     // (the login form is for flows ABOUT signing in).
     // Native selection and named-container scopes change the authored vocabulary.
     // Verified preparation profiles also change the browser authoring schema.
-    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('c70ec2210e25c4d1')
+    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('21b978d4d87444c0')
   })
 
   it('a web batch advertises the world credentials as the sign-in channel, and the fixture block defers to it', () => {

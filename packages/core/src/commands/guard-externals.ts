@@ -1,3 +1,5 @@
+import { relativeExternalServicePaths } from '../lib/external-service-paths.js';
+import { resolvePrerequisites } from '@truecourse/guard-runner';
 /**
  * EXTERNAL API ACCOUNTS — the read/write surface every UI drives.
  *
@@ -240,7 +242,10 @@ export function readGuardExternalsView(
   // knows what it could not write.
   const report = readGuardResult(repoRoot);
   const setup = readGuardSetup(repoRoot);
-  const detected = setup?.detection?.externalServices ?? report?.externalServices ?? [];
+  const detected = relativeExternalServicePaths(
+    setup?.detection?.externalServices ?? report?.externalServices ?? [],
+    repoRoot,
+  );
   const detectionAvailable = setup?.detection !== undefined || report !== null;
   const blockedFlows = tallyBlockedFlows(report);
 
@@ -273,9 +278,12 @@ export function readGuardExternalsView(
 
   const declared = recipe.recipe?.api?.externals;
   const merged = mergeExternals(declared, local);
+  let normalized: ReturnType<typeof resolvePrerequisites> | undefined;
+  try { normalized = resolvePrerequisites(repoRoot, declared, undefined, opts.env ?? process.env); }
+  catch { /* The existing invalid-file diagnostics remain visible below. */ }
   const detectedByName = new Map(detected.map((d) => [d.service, d]));
   const services: GuardExternalServiceView[] = merged.map((m) => {
-    const resolved = resolveExternal(m, opts.env ?? process.env);
+    const resolved = normalized?.externals.find(e => e.service === m.service) ?? resolveExternal(m, opts.env ?? process.env);
     const hit = detectedByName.get(m.service);
     return {
       service: m.service,
@@ -460,10 +468,17 @@ export function externalSetupIndex(view: GuardExternalsView): GuardExternalSetup
  * APIs page, and there is no row there for a seed — a repo with no seed keeps its
  * plain `blocked-on` gap and is pointed at `truecourse guard setup` instead.
  */
-export function readGuardExternalSetupIndex(repoRoot: string): GuardExternalSetupIndex {
+export function readGuardExternalSetupIndex(repoRoot: string, opts: GuardExternalsReadOptions = {}): GuardExternalSetupIndex {
   const index: Record<string, GuardExternalSetupState> = {
-    ...externalSetupIndex(readGuardExternalsView(repoRoot)),
+    ...externalSetupIndex(readGuardExternalsView(repoRoot, opts)),
   };
+  try {
+    const recipe = readRecipeForView(recipePath(repoRoot));
+    if (!('reason' in recipe)) for (const target of resolvePrerequisites(repoRoot, recipe.recipe?.api?.externals, undefined, opts.env ?? process.env).targets) {
+      index[target.name] = target.state;
+      for (const alias of target.aliases) index[alias] = target.state;
+    }
+  } catch { /* Invalid setup remains represented by the existing read view. */ }
   if (seedDeclared(repoRoot)) {
     index[MISSING_DATA_NOUN] = seedFedLastGenerate(repoRoot) ? 'incomplete' : 'provided';
   }
@@ -562,7 +577,7 @@ function tallyBlockedFlows(
     // A claim-level gap carries no flowId — key on the section it pivots on so
     // each distinct blocked unit still counts exactly once.
     const unit = gap.flowId ?? `${gap.doc}\0${gap.anchor}`;
-    for (const capability of parseBlockedOnCapabilities(gap.reason)) {
+    for (const capability of gap.blocker?.dependencies ?? parseBlockedOnCapabilities(gap.reason)) {
       let flows = seen.get(capability);
       if (!flows) seen.set(capability, (flows = new Set()));
       flows.add(unit);

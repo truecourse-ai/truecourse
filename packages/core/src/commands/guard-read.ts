@@ -1,4 +1,5 @@
-import { GUARD_REVIEW_POLICY_VERSION, caseEvidenceDefect, type GuardFlowProgress } from '@truecourse/shared'
+import { withGuardReadTree } from '../lib/guard-read-tree.js'
+import { GUARD_REVIEW_POLICY_VERSION, scenarioFullFlowDefect, type GuardFlowProgress } from '@truecourse/shared'
 import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
 /**
  * Read-surface drivers for the guard dashboard — the guard analogue of the verify
@@ -233,16 +234,12 @@ async function resolveGuardScope(repoKey: string, ref?: string): Promise<GuardRe
   return commit ? { kind: 'commit', commit } : { kind: 'empty' }
 }
 
-/**
- * The providable-externals index a read surface joins gaps against, or
- * `null` where it cannot exist. Externals live in the WORKING TREE (`recipe.json`
- * + the gitignored overlay + the host env), exactly like the routes that write
- * them, so a hosted store answers `null` and its `blocked-on` gaps stay plain —
- * a hosted view has no External APIs page to send anyone to.
+/** Resolve named setup actions against the same account state as execution.
+ * Hosted reads materialize their stored overlay and never borrow the server env.
  */
-export function guardExternalSetupIndexForView(repoKey: string): GuardExternalSetupIndex | null {
-  if (!guardsMaterializeInPlace()) return null
-  return readGuardExternalSetupIndex(repoKey)
+export async function guardExternalSetupIndexForView(repoKey: string, ref?: string): Promise<GuardExternalSetupIndex> {
+  if (guardsMaterializeInPlace()) return readGuardExternalSetupIndex(repoKey)
+  return withGuardReadTree(repoKey, ref, tree => readGuardExternalSetupIndex(tree, { env: {} }))
 }
 
 // ---------------------------------------------------------------------------
@@ -399,7 +396,7 @@ export async function readGuardSectionTotals(
     result: await readGuardReport(repoKey, ref),
     flows: await readGuardFlowsForView(repoKey, ref),
     claims: await readGuardClaimsForView(repoKey, ref),
-    externals: guardExternalSetupIndexForView(repoKey),
+    externals: await guardExternalSetupIndexForView(repoKey, ref),
   }
 
   const corpusDocs = (await readCorpusForView(repoKey, ref))?.docs.map((d) => d.ref)
@@ -601,7 +598,7 @@ function gapNeedsSetup(
   externals: GuardExternalSetupIndex | null,
 ): GuardNeedsSetup | undefined {
   if (gap.kind !== 'blocked-on' || (gap.blocker && gap.blocker.kind !== 'configuration')) return undefined
-  return deriveNeedsSetup(gap.reason, externals) ?? undefined
+  return deriveNeedsSetup(gap.reason, externals, gap.blocker?.dependencies) ?? undefined
 }
 
 /** A gap as the UI renders it — kind + reason + the shared one-line label. */
@@ -682,7 +679,7 @@ function flowSurfaces(flowId: string, join: FlowJoin): GuardFlowSurface[] {
       : entry?.flowFingerprint === fingerprint
     // Retained stale scenarios and unreviewed candidates remain visible, but
     // cannot discharge new or unaudited obligations.
-    const casesReviewed = !milestones.some(m => m.verification?.cases) || !!(scenario && recorded?.reviewPolicyVersion === GUARD_REVIEW_POLICY_VERSION && recorded?.caseEvidence && recorded.reviewedScenarioFingerprint === scenarioReviewFingerprint(scenario) && !caseEvidenceDefect(milestones, scenario.steps, recorded.caseEvidence))
+    const casesReviewed = !milestones.some(m => m.verification?.cases) || !!(scenario && recorded?.reviewPolicyVersion === GUARD_REVIEW_POLICY_VERSION && recorded?.caseEvidence && recorded.reviewedScenarioFingerprint === scenarioReviewFingerprint(scenario) && !scenarioFullFlowDefect(milestones, scenario.steps, recorded.caseEvidence))
     const proof = current && recorded?.reviewed !== false && casesReviewed
       ? (scenario ? scenarioMilestoneProof(scenario.steps) : recorded?.milestoneCoverage ?? []) : []
     const complete = coversFlowMilestones(milestones, proof)
@@ -690,14 +687,9 @@ function flowSurfaces(flowId: string, join: FlowJoin): GuardFlowSurface[] {
       row.coverageComplete = complete
       if (row.status === 'guarded' && !join.birthStatusByScenario.has(row.scenarioId!)) row.status = 'never-run'
     }
-    if (row.status === 'pass' || row.status === 'guarded') passingProof.push(...proof)
+    if (complete === true && (row.status === 'pass' || row.status === 'guarded')) passingProof.push(...proof)
   }
   const proven = coversFlowMilestones(milestones, passingProof) === true
-  // Coverage is the union of independently reviewed scenarios. No individual
-  // scenario is claimed to replay the whole flow; failures still win the rollup.
-  if (proven) for (const row of surfaces) {
-    if (row.status === 'pass' || row.status === 'guarded') row.coverageComplete = true
-  }
   const gaps = entry ? entry.gaps : (join.reportGapsByFlow.get(flowId) ?? [])
   for (const gap of gaps) {
     const refs: GuardFlowGap['obligations'] = gap.obligations ?? ('milestones' in gap ? gap.milestones?.map(milestone => ({ milestone })) : undefined)
@@ -935,7 +927,7 @@ function sectionClaimGaps(
     const claim = claimByIdentity.get(claimIdentityKey(doc, anchor, c.claimTitle))
     return {
       ...(claim ? { claimId: claim.id } : {}),
-      title: c.claimTitle,
+      title: c.caseIds && claim?.verification?.cases ? claim.verification.cases.filter(v => c.caseIds!.includes(v.id)).map(v => v.claim).join('; ') : c.claimTitle,
       reason: c.reason,
     }
   })
@@ -1204,7 +1196,7 @@ async function loadFlowView(repoKey: string, ref?: string): Promise<FlowViewSour
       result,
       flows: flowsFile,
       scenarios: corpus.scenarios,
-      externals: guardExternalSetupIndexForView(repoKey),
+      externals: await guardExternalSetupIndexForView(repoKey, ref),
     }),
     flowsFile,
     latest,
@@ -1402,8 +1394,8 @@ function flowProgress(flowId: string, view: FlowViewSources, surfaces: GuardFlow
     const scenario = join.scenarioById.get(row.scenarioId!)
     if (record?.reviewed === false || !scenario || scenario.flow?.fingerprint !== (flow?.fingerprint ?? entry?.flowFingerprint)) continue
     if (!(flow?.bindings ?? entry?.bindings ?? []).every(b => scenario.binds.some(s => s.doc === b.doc && s.section === b.anchor && s.fingerprint === b.fingerprint))) continue
-    if (milestones.some(m => m.verification?.cases) && (record?.reviewPolicyVersion !== GUARD_REVIEW_POLICY_VERSION || !record?.caseEvidence || record.reviewedScenarioFingerprint !== scenarioReviewFingerprint(scenario) || caseEvidenceDefect(milestones, scenario.steps, record.caseEvidence))) continue
-    proof.push(...scenarioMilestoneProof(scenario.steps))
+    if (milestones.some(m => m.verification?.cases) && (record?.reviewPolicyVersion !== GUARD_REVIEW_POLICY_VERSION || !record?.caseEvidence || record.reviewedScenarioFingerprint !== scenarioReviewFingerprint(scenario) || scenarioFullFlowDefect(milestones, scenario.steps, record.caseEvidence))) continue
+    if (!scenarioFullFlowDefect(milestones, scenario.steps)) proof.push(...scenarioMilestoneProof(scenario.steps))
   }
   const cases = milestones.length > 0 && milestones.every(m => m.verification?.cases?.length)
   let total = 0, verified = 0
@@ -1424,8 +1416,8 @@ function flowProgress(flowId: string, view: FlowViewSources, surfaces: GuardFlow
     : passed === rows.length ? 'passed' : 'not-run'
   const gaps = surfaces.flatMap(s => s.gap && !s.coveredByAlternative ? [s.gap] : [])
   const generation = flowErrors(flowId, join, result).length || flowFindings(flowId, result).some(f => guardFindingClass(f) === 'defect') ? 'error'
-    : gaps.some(g => g.blocker?.kind === 'unsupported-capability' || g.kind === 'awaiting-driver') ? 'unsupported'
     : gaps.some(g => g.needsSetup || g.blocker?.kind === 'configuration') ? 'needs-setup'
+    : gaps.some(g => g.blocker?.kind === 'unsupported-capability' || g.kind === 'awaiting-driver') ? 'unsupported'
     : verified === total && total > 0 ? 'ready' : 'incomplete'
   return { execution, scenarios: rows.length, passed, verified, total, unit: cases ? 'cases' : 'milestones',
     coverage: !total || milestones.some(m => !m.proofDrivers) ? 'unknown' : verified === total ? 'complete' : verified ? 'partial' : 'unverified',
@@ -1556,7 +1548,7 @@ export async function readGuardFlowDetail(
         order: m.order,
         doc: m.doc,
         anchor: m.anchor,
-        claimTitle: m.claimTitle,
+        claimTitle: m.caseIds && m.verification?.cases ? m.verification.cases.map(c => c.claim).join('; ') : m.claimTitle,
         ...(m.note ? { note: m.note } : {}),
         ...(live ? { headingText: live.headingText } : {}),
         live: live != null,

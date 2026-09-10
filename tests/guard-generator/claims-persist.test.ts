@@ -130,3 +130,12 @@ describe('mergeExtractedClaims', () => {
     ).toBe(true)
   })
 })
+
+it('updates prerequisite metadata without replacing the claim id or adding a claim', () => {
+  const first=mergeExtractedClaims(null,[extractedCartLocale],NOW)
+  const id=first.file.claims[0].id
+  const changed={...extractedCartLocale,outcome:{claims:[{...extractedCartLocale.outcome.claims[0],needs:[{kind:'external' as const,name:'currencybeacon'}],verification:{method:'behavior' as const,observable:'Conversion',cases:[{id:'live',claim:'Conversion',method:'behavior' as const,requires:['http' as const],conditions:[],prerequisites:[{dependency:'currencybeacon',mode:'provided' as const}]}]}}]}}
+  const second=mergeExtractedClaims(first.file,[changed],'2026-09-10T00:00:00Z')
+  expect(second.added).toBe(0);expect(second.updated).toBe(1);expect(second.file.claims[0].id).toBe(id)
+  expect(second.file.claims[0].verification?.cases?.[0].prerequisites?.[0].dependency).toBe('currencybeacon')
+})

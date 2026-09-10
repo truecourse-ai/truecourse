@@ -5,7 +5,8 @@ import { GuardProgressSummary } from '@/components/guard/GuardProgressSummary';
  *   a flow either has a test or it doesn't. Has one → show the test and its
  *   status. Doesn't → say what state it is in, then why, as two separate reads.
  *
- * So the "Tests" block renders exactly ONE row per surface: the TEST (clickable —
+ * Current generation provides one complete test per flow. Legacy tests remain readable until successful regeneration; manual tests
+ * remain visible afterward too. The "Tests" block renders the TEST (clickable —
  * it opens on the Tests tab, the one place a test lives) with its status word, or
  * a WHY-NO-TEST row — the surface, its status chip, and the explanation on its own
  * line ("Needs credentials and network access.", "Awaiting web driver.",

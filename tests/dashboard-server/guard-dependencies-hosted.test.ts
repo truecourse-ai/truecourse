@@ -1,3 +1,6 @@
+import { guardExternalSetupIndexForView } from '@truecourse/core/commands/guard-read';
+import { withGuardReadTree } from '@truecourse/core/lib/guard-read-tree';
+import { loadRecipe, recipePath, resolvePrerequisites, externalsInjectEnv } from '@truecourse/guard-runner';
 /**
  * The dependencies routes of a HOSTED repository — no working tree, the catalog
  * in the setup bundle, the registered instances in an encrypted row. Driven over
@@ -151,6 +154,14 @@ describe('Guard dependencies routes — hosted', () => {
     }
   });
 
+  it('projects hosted setup state from encrypted overlays without borrowing server credentials', async () => {
+    await bundle({ '.truecourse/scenarios/dependencies.json': { dependencies: [ACCOUNT] } });
+    process.env.ANTHROPIC_API_KEY = 'server-secret';
+    expect(await guardExternalSetupIndexForView(repoKey)).toMatchObject({ anthropic: 'unprovided' });
+    await writeGuardOverlays(repoKey, { dependencies: { anthropic: { env: { ANTHROPIC_BASE_URL: 'https://provider.test', ANTHROPIC_API_KEY: 'registered-secret' } } }, externals: {} });
+    expect(await guardExternalSetupIndexForView(repoKey)).toMatchObject({ anthropic: 'provided' });
+  });
+
   it('GET reads a host-path registration as unregistrable here, with the reason', async () => {
     await bundle({ '.truecourse/scenarios/dependencies.json': { dependencies: [PROJECT_DIR] } });
     const res = await request(app).get(url()).expect(200);
@@ -185,6 +196,28 @@ describe('Guard dependencies routes — hosted', () => {
     expect((await readGuardOverlays(repoKey))?.dependencies.anthropic?.env).toEqual({
       ANTHROPIC_API_KEY: 'sk-rotated',
       ANTHROPIC_BASE_URL: 'https://llm.internal',
+    });
+  });
+
+  it('uses a hosted URL override when the associated catalog registers only credentials', async () => {
+    await bundle({
+      '.truecourse/scenarios/dependencies.json': { dependencies: [{
+        ...ACCOUNT, registration: { kind: 'env', vars: [ACCOUNT.registration.vars[1]] },
+      }] },
+      '.truecourse/scenarios/recipe.json': { build: 'true', api: { serve: ['node', 'server.mjs'], externals: {
+        anthropic: { baseUrlEnv: 'ANTHROPIC_BASE_URL', baseUrl: 'https://production.test', env: { ANTHROPIC_API_KEY: {} } },
+      } } },
+    });
+    const res = await request(app).put(url()).send({
+      name: 'anthropic', baseUrl: 'https://sandbox.test', env: { ANTHROPIC_API_KEY: 'registered-key' },
+    }).expect(200);
+    expect(res.body.dependencies[0].service.baseUrl).toBe('https://sandbox.test');
+    expect((await readGuardOverlays(repoKey))?.externals.anthropic?.baseUrl).toBe('https://sandbox.test');
+    await withGuardReadTree(repoKey, undefined, tree => {
+      const recipe = loadRecipe(tree, recipePath(tree))!.recipe;
+      expect(externalsInjectEnv(resolvePrerequisites(tree, recipe.api?.externals, undefined, {}).externals)).toEqual({
+        ANTHROPIC_BASE_URL: 'https://sandbox.test', ANTHROPIC_API_KEY: 'registered-key',
+      });
     });
   });
 

@@ -223,9 +223,9 @@ router.get('/:id/guard/coverage', async (req: Request, res: Response, next: Next
         // detail can link to the claim it is about.
         claims: await readGuardClaimsForView(repo.path, commit),
         // Which third parties the user could PROVIDE right now — the join
-        // that promotes a providable `blocked-on` section to `needs-setup`. Null on
-        // a hosted store (no working tree, no externals page to send anyone to).
-        externals: guardExternalSetupIndexForView(repo.path),
+        // that promotes a providable `blocked-on` section to `needs-setup`,
+        // using the stored overlay for hosted repositories.
+        externals: await guardExternalSetupIndexForView(repo.path, refOf(req)),
       }),
     );
   } catch (e) {

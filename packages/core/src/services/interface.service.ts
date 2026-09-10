@@ -1,3 +1,4 @@
+import { relativeExternalServicePaths } from '../lib/external-service-paths.js';
 /**
  * Interface mapping — the free, deterministic half of guard: analyze the working
  * tree, derive the interface catalog from it, and snapshot the result to
@@ -417,9 +418,9 @@ async function deriveInterfaces(
     interfaces,
     webPlaces,
     source,
-    externalServices: detectExternalServices(fileAnalyses, {
+    externalServices: relativeExternalServicePaths(detectExternalServices(fileAnalyses, {
       ownHosts: repoOwnHosts(repoPath, fileAnalyses),
-    }),
+    }), repoPath),
     database: detectDatabaseContext(repoPath, fileAnalyses),
     datastoreUrls: collectDatastoreUrls(fileAnalyses),
     // Degrades like every other derivation here: a collector that throws costs

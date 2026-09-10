@@ -95,6 +95,7 @@ export type GuardNeedsSetup = z.infer<typeof GuardNeedsSetupSchema>
 export function deriveNeedsSetup(
   reason: string,
   externals: GuardExternalSetupIndex | null | undefined,
+  dependencies?: readonly string[],
 ): GuardNeedsSetup | null {
   if (!externals) return null
   const byLower = new Map(
@@ -102,7 +103,7 @@ export function deriveNeedsSetup(
   )
   const services: string[] = []
   const provided: string[] = []
-  for (const noun of parseBlockedOnCapabilities(reason)) {
+  for (const noun of dependencies ?? parseBlockedOnCapabilities(reason)) {
     const hit = byLower.get(noun.trim().toLowerCase())
     if (!hit) continue
     const list = hit.state === 'provided' ? provided : services

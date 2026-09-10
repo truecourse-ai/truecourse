@@ -541,6 +541,7 @@ export const SynthesizedMilestoneSchema = z.object({
   doc: z.string().min(1),
   anchor: z.string().min(1),
   claimTitle: z.string().min(1),
+  caseIds: z.array(z.string().min(1)).min(1).optional(),
   order: z.number().int().positive().optional(),
   note: z.string().optional(),
 })
@@ -550,6 +551,8 @@ export type SynthesizedMilestone = z.infer<typeof SynthesizedMilestoneSchema>
 export const SynthesizedFlowSchema = z.object({
   title: z.string().min(1),
   goal: z.string().min(1),
+  notes: z.string().min(1).optional(),
+  startingState: z.object({ stepCreatable: z.array(z.string()), seedable: z.array(z.string()), supplied: z.array(z.string()) }).optional(),
   milestones: z.array(SynthesizedMilestoneSchema).min(1),
 })
 export type SynthesizedFlow = z.infer<typeof SynthesizedFlowSchema>
@@ -560,6 +563,7 @@ export const SynthesizedNoFlowClaimSchema = z.object({
   doc: z.string().min(1),
   anchor: z.string().min(1),
   claimTitle: z.string().min(1),
+  caseIds: z.array(z.string().min(1)).min(1).optional(),
   reason: z.string().min(1),
 })
 export type SynthesizedNoFlowClaim = z.infer<typeof SynthesizedNoFlowClaimSchema>
@@ -607,6 +611,8 @@ export type FlowSet = z.infer<typeof FlowSetSchema>
 export const SynthesizedEpicFlowSchema = z.object({
   title: z.string().min(1),
   goal: z.string().min(1),
+  notes: z.string().min(1).optional(),
+  startingState: z.object({ stepCreatable: z.array(z.string()), seedable: z.array(z.string()), supplied: z.array(z.string()) }).optional(),
   composedOf: z.array(z.string().min(1)).min(2),
   milestones: z.array(SynthesizedMilestoneSchema).min(2),
 })
@@ -689,10 +695,13 @@ export const RealizationMatchSchema = z
     // Read old replies conservatively: a catalog-only refusal is a mapping gap.
     unrealizable: z.string().min(1).optional(),
   })
-  .refine((m) => m.unrealizable !== undefined
-    ? !m.plan?.length && !m.gaps?.length
-    : (m.plan?.length ?? 0) + (m.gaps?.length ?? 0) > 0, {
-    message: 'expected a non-empty plan and/or milestone gaps, or a legacy unrealizable reason',
+  .superRefine((m, ctx) => {
+    const message = 'plan/gaps and legacy unrealizable are mutually exclusive. Return {plan:[{interfaceId,milestone,checks?}],gaps:[{milestone,checks?,kind,reason}]} with at least one entry, or {unrealizable:reason} alone'
+    if (m.unrealizable !== undefined && (m.plan !== undefined || m.gaps !== undefined)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['unrealizable'], message })
+    } else if (m.unrealizable === undefined && !(m.plan?.length || m.gaps?.length)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['plan'], message })
+    }
   })
   .transform((m) => ({ plan: m.plan ?? [], gaps: m.gaps ?? [], unrealizable: m.unrealizable }))
 export type RealizationMatch = z.infer<typeof RealizationMatchSchema>

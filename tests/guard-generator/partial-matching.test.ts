@@ -142,7 +142,7 @@ describe('case-level realization assignments', () => {
     expect(await matchFlow(repo(), caseFlow(), catalog, async () => ({
       plan: [{ interfaceId: control.id, milestone: 1, checks: ['date-order', 'tie-order'] }],
       gaps: [1, 2].map(() => ({ milestone: 1, checks: ['description-link'], kind: 'mapping', reason: 'missing' })),
-    }))).toMatchObject({ kind: 'error', reason: expect.stringContaining('check description-link has duplicate gaps') })
+    }))).toMatchObject({ kind: 'plan', plan: { steps: [{ checks: ['date-order', 'tie-order'] }] }, gaps: [{ checks: ['description-link'], reason: expect.stringContaining('check description-link has duplicate gaps') }] })
   })
   it('gives omitted checks one correction, then preserves exact missing cases with source references', async () => {
     const runner = vi.fn(async () => ({ plan: [{ interfaceId: control.id, milestone: 1, checks: ['date-order'] }] }))
@@ -191,4 +191,80 @@ it('uses case assignments and preparation filtering consistently for runtime and
   expect(realizationAssignmentFingerprint(none.plan!)).not.toBe(realizationAssignmentFingerprint(result.plan))
   const reorderedChecks = { ...result.plan, steps: result.plan.steps.map(s => ({ ...s, checks: [...s.checks!].reverse() })) }
   expect(realizationAssignmentFingerprint(reorderedChecks)).toBe(realizationAssignmentFingerprint(result.plan))
+})
+
+describe('bounded matcher schema correction', () => {
+  it.each([
+    { gaps: [{ milestone: 1, kind: 'mapping', reason: 'Missing action' }], unrealizable: 'No flow' },
+    { plan: [{ interfaceId: control.id, milestone: 1 }], unrealizable: 'No flow' },
+    {},
+  ])('explains malformed schema fields before the single re-ask', async reply => {
+    const runner = vi.fn().mockResolvedValueOnce(reply).mockImplementationOnce(async ctx => {
+      expect(ctx.correction.invalidOutput).toContain('mutually exclusive')
+      expect(ctx.correction.invalidOutput).toContain('plan')
+      return { plan: [1, 2].map(milestone => ({ milestone, interfaceId: control.id })) }
+    })
+    expect(await matchFlow(repo(), flow(), catalog, runner)).toMatchObject({ kind: 'plan', calls: 2 })
+    expect(runner).toHaveBeenCalledTimes(2)
+  })
+  it('retains a validated partial plan when correction is malformed', async () => {
+    const runner = vi.fn().mockResolvedValueOnce({ plan: [{ milestone: 1, interfaceId: control.id }] }).mockResolvedValueOnce({ gaps: [{ milestone: 2, kind: 'mapping', reason: 'Missing' }], unrealizable: 'bad' })
+    const result = await matchFlow(repo(), flow(), catalog, runner)
+    expect(result).toMatchObject({ kind: 'plan', calls: 2, plan: { steps: [{ milestone: 1 }] } })
+  })
+  it('never sends a cross-timezone-only case to the matcher', async () => {
+    const f = flow(); f.milestones = [{ ...f.milestones[0], verification: { scope: 'web', method: 'behavior', observable: 'Date invariant across browser timezones', cases: [{ id: 'zones', claim: 'Invariant', method: 'behavior', requires: ['browser', 'browser-timezone-control'], conditions: [] }] } }]
+    const runner = vi.fn()
+    expect(await matchFlow(repo(), f, catalog, runner)).toMatchObject({ kind: 'gap', calls: 0, gaps: [{ kind: 'capability' }] })
+    expect(runner).not.toHaveBeenCalled()
+  })
+})
+
+
+it('retains only independent valid cases when an unknown action survives a failed correction', async () => {
+  const runner = vi.fn().mockResolvedValueOnce({ plan: [
+    { interfaceId: control.id, milestone: 1, checks: ['date-order'] },
+    { interfaceId: 'web/unknown', milestone: 1, checks: ['tie-order'] },
+    { interfaceId: control.id, milestone: 1, checks: ['tie-order'] },
+  ] }).mockResolvedValueOnce({})
+  const result = await matchFlow(repo(), caseFlow(), catalog, runner)
+  expect(result).toMatchObject({ kind: 'plan', calls: 2,
+    plan: { steps: [{ checks: ['date-order'] }] },
+    gaps: [{ checks: ['tie-order', 'description-link'], reason: expect.stringContaining('Matcher correction failed') }] })
+  if (result.kind === 'plan') expect(result.plan.steps).toHaveLength(1)
+})
+
+it('never salvages a conflicted case alongside an independent valid case', async () => {
+  const runner = vi.fn().mockResolvedValueOnce({ plan: [
+    { interfaceId: control.id, milestone: 1, checks: ['date-order'] },
+    { interfaceId: control.id, milestone: 1, checks: ['tie-order'] },
+  ], gaps: [{ milestone: 1, checks: ['tie-order'], kind: 'mapping', reason: 'Conflicting assignment' }] })
+    .mockResolvedValueOnce({})
+  const result = await matchFlow(repo(), caseFlow(), catalog, runner)
+  expect(result).toMatchObject({ kind: 'plan', calls: 2,
+    plan: { steps: [{ checks: ['date-order'] }] }, gaps: [{ checks: ['tie-order', 'description-link'] }] })
+  if (result.kind === 'plan') expect(result.plan.steps).toHaveLength(1)
+})
+
+
+it('excludes every case coupled to an unsafe shared setup action', async () => {
+  const runner = vi.fn().mockResolvedValueOnce({ plan: [
+    { interfaceId: control.id, milestone: 1, checks: ['date-order', 'tie-order'], note: 'shared setup' },
+    { interfaceId: control.id, milestone: 1, checks: ['date-order'], note: 'dependent observation' },
+    { interfaceId: control.id, milestone: 1, checks: ['description-link'], note: 'independent' },
+  ], gaps: [{ milestone: 1, checks: ['tie-order'], kind: 'mapping', reason: 'Conflicting assignment' }] })
+    .mockResolvedValueOnce({})
+  const result = await matchFlow(repo(), caseFlow(), catalog, runner)
+  expect(result).toMatchObject({ kind: 'plan', calls: 2,
+    plan: { steps: [{ checks: ['description-link'], note: 'independent' }] },
+    gaps: [{ checks: ['date-order', 'tie-order'] }] })
+  if (result.kind === 'plan') expect(result.plan.steps).toHaveLength(1)
+})
+
+
+it('retains independent work when the corrective matcher call throws', async () => {
+  const runner = vi.fn().mockResolvedValueOnce({ plan: [{ milestone: 1, interfaceId: control.id }] })
+    .mockRejectedValueOnce(new Error('transport unavailable'))
+  expect(await matchFlow(repo(), flow(), catalog, runner)).toMatchObject({ kind: 'plan', calls: 2,
+    plan: { steps: [{ milestone: 1 }] }, gaps: [{ reason: expect.stringContaining('transport unavailable') }] })
 })

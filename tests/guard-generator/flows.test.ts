@@ -594,13 +594,11 @@ describe('synthesizeFlows — subsumption post-pass', () => {
     }
     const report = checkFlowSet(draft, { area: tasksArea })
     // Reported, not refused — the session may still produce it.
-    expect(report.subsumed).toEqual([
-      { title: 'Create and list a task', supersededBy: 'Create, list and complete a task' },
-    ])
+    expect(report.subsumed).toEqual([])
     expect(isFlowSetClean(report)).toBe(true)
 
     const res = await synth(repo(), [tasksArea], areaSessions({ tasks: draft }))
-    expect(res.flows.map((f) => f.title)).not.toContain('Create and list a task')
+    expect(res.flows.map((f) => f.title)).toContain('Create and list a task')
     expect(res.subsumed).toEqual(report.subsumed)
   })
 
@@ -627,10 +625,9 @@ describe('synthesizeFlows — subsumption post-pass', () => {
     expect(res.flows.map((f) => f.title)).toEqual([
       'Create, list and complete a task',
       'Adding a task without a title is rejected',
+      'Create and list a task',
     ])
-    expect(res.subsumed).toEqual([
-      { title: 'Create and list a task', supersededBy: 'Create, list and complete a task' },
-    ])
+    expect(res.subsumed).toEqual([])
   })
 
   it('keeps a flow whose path is not CONTIGUOUS inside the sibling', async () => {
@@ -812,9 +809,9 @@ describe('synthesizeFlows — identity across re-synthesis', () => {
     }
     const res = await synth(r, [tasksArea], areaSessions({ tasks: shortened }), { previous })
 
-    expect(res.flows[0].id).toBe('create-list-and-complete-a-task')
+    expect(res.flows[0].id).not.toBe(previous[0].id)
     expect(res.flows[0].fingerprint).not.toBe(previous[0].fingerprint)
-    expect(res.orphaned).toEqual([])
+    expect(res.orphaned).toEqual([previous[0]])
     expect(res.noFlowClaims.map((c) => c.claimTitle)).toEqual([LIST_DONE])
   })
 
@@ -1088,5 +1085,41 @@ describe('flows.json', () => {
   it('lands next to the manifest in the committable scenarios store', () => {
     const r = repo()
     expect(flowsPath(r)).toBe(path.join(r, '.truecourse', 'scenarios', 'flows.json'))
+  })
+})
+
+describe('source case selection', () => {
+  const source: FlowClaimInput = { ...TASK_CLAIMS[0], verification: { method: 'behavior', scope: 'configuration', observable: 'expense state', cases: [
+    { id: 'details', claim: 'Open the expense details', method: 'behavior', requires: ['process'], conditions: [] },
+    { id: 'cancel', claim: 'Cancel the edit without changing stored values', method: 'behavior', requires: ['process'], conditions: [] },
+    { id: 'save', claim: 'Save the edit and observe it after reload', method: 'behavior', requires: ['process'], conditions: [] },
+  ] } }
+  const area = { ...tasksArea, claims: [source] }
+  const ref = (caseIds?: string[]) => ({ doc: source.doc, anchor: source.anchor, claimTitle: source.title, ...(caseIds !== undefined ? { caseIds } : {}) })
+  const draft = (selections: string[][]) => ({ flows: selections.map(ids => ({ title: ids.join(' and '), goal: ids.join(' and '), milestones: [ref(ids)] })), noFlowClaims: [] })
+  it('preserves each source case when independent details/cancel/save flows share one claim', async () => {
+    const res = await synth(repo(), [area], areaSessions({ tasks: draft([['details'], ['cancel'], ['save']]) }))
+    expect(res.unsettled).toEqual([])
+    expect(res.flows).toHaveLength(3)
+    expect(new Set(res.flows.map(f => f.id)).size).toBe(3)
+    expect(res.flows.map(f => f.milestones[0].verification!.cases![0].claim)).toEqual(source.verification!.cases!.map(c => c.claim))
+    expect(res.flows.every(f => f.milestones[0].claimTitle === source.title)).toBe(true)
+  })
+  it('requires all sibling cases to be assigned or explicitly no-flow', () => {
+    expect(checkFlowSet(draft([['details']]), { area }).uncoveredClaims).toHaveLength(2)
+    const data = draft([['details']]) as FlowSet
+    data.noFlowClaims = [{ ...ref(['cancel','save']), reason: 'Needs a supported fixture' }]
+    expect(isFlowSetClean(checkFlowSet(data, { area }))).toBe(true)
+    data.noFlowClaims.push({ ...ref(['details']), reason: 'Contradictory' })
+    expect(checkFlowSet(data, { area }).unknownReferences.join(' ')).toContain('both assigned')
+  })
+  it.each([undefined, [], ['unknown'], ['save','save']])('rejects invalid selection %j', caseIds => {
+    const report = checkFlowSet({ flows: [{ title: 'x', goal: 'x', milestones: [ref(caseIds)] }], noFlowClaims: [] }, { area })
+    expect(report.unknownReferences.length).toBeGreaterThan(0)
+  })
+  it('retains independent smaller flow alongside a real dependent journey', async () => {
+    const res = await synth(repo(), [area], areaSessions({ tasks: draft([['details'], ['details','cancel','save']]) }))
+    expect(res.flows).toHaveLength(2)
+    expect(res.subsumed).toEqual([])
   })
 })

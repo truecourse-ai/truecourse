@@ -41,6 +41,7 @@ import {
 } from '@truecourse/guard-runner'
 import { parseOperationSection } from './openapi-enrich.js'
 import type { SectionInput } from './section-plan.js'
+import type { RealizationPlan } from './match.js'
 
 /** The blocked-on noun for a path whose app has no declared server (R4: no new gap kind). */
 export const MISSING_SERVER_NOUN = 'missing-server'
@@ -149,6 +150,11 @@ export function bindFlowServer(paths: readonly string[], index: ServerRouteIndex
     return { kind: 'bound', server: boundServers[0], ...(app ? { app } : {}) }
   }
   return { kind: 'unbound' }
+}
+
+/** The matched entry paths determine the server used by generation and estimation. */
+export function bindRealizationServer(plan: RealizationPlan, index: ServerRouteIndex): ServerBinding {
+  return bindFlowServer(plan.interfaces.flatMap(iface => 'path' in iface.entry ? [iface.entry.path] : []), index)
 }
 
 /**

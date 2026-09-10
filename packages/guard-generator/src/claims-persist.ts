@@ -26,6 +26,7 @@ import {
   guardClaimKey,
   type ClaimNeed,
   type GuardClaim,
+  type GuardVerification,
   type GuardClaimsFile,
 } from '@truecourse/shared'
 import { readGuardClaimsCorpus, slugifyHeading, writeGuardClaims } from '@truecourse/guard-runner'
@@ -35,7 +36,7 @@ import { readGuardClaimsCorpus, slugifyHeading, writeGuardClaims } from '@trueco
 export interface ExtractedDocOutcome {
   doc: string
   outcome: {
-    claims: readonly { claim: string; sectionAnchor: string; reason: string; needs?: readonly ClaimNeed[] }[]
+    claims: readonly { claim: string; sectionAnchor: string; reason: string; verification?: GuardVerification; needs?: readonly ClaimNeed[] }[]
   }
 }
 
@@ -47,8 +48,10 @@ export function mergeExtractedClaims(
   existing: GuardClaimsFile | null,
   extracted: readonly ExtractedDocOutcome[],
   generatedAt: string,
-): { file: GuardClaimsFile; added: number } {
+): { file: GuardClaimsFile; added: number; updated: number } {
   const base = existing ?? EMPTY_GUARD_CLAIMS
+  const claims = base.claims.map(c => ({ ...c }))
+  let updated = 0
   const identities = new Set(base.claims.map(guardClaimKey))
   const usedIds = new Set(base.claims.map((c) => c.id))
   const additions: GuardClaim[] = []
@@ -59,25 +62,34 @@ export function mergeExtractedClaims(
       // identity the milestone resolves through to exist.
       const candidate = { doc, anchor: c.sectionAnchor, title: c.claim, claim: c.claim }
       const key = guardClaimKey(candidate)
-      if (identities.has(key)) continue
+      if (identities.has(key)) {
+        const prior = claims.find(row => guardClaimKey(row) === key)
+        if (prior && (JSON.stringify(prior.needs ?? []) !== JSON.stringify(c.needs ?? []) || JSON.stringify(prior.verification) !== JSON.stringify(c.verification))) {
+          prior.needs = [...(c.needs ?? [])]
+          prior.verification = c.verification
+          updated++
+        }
+        continue
+      }
       identities.add(key)
       additions.push({
         id: mintClaimId(c.claim, usedIds),
         ...candidate,
         contentHash: claimContentHash(candidate),
         verifyVia: c.reason,
+        ...(c.verification ? { verification: c.verification } : {}),
         ...(c.needs && c.needs.length > 0 ? { needs: [...c.needs] } : {}),
       })
     }
   }
-  if (additions.length === 0) return { file: base, added: 0 }
-  return { file: { ...base, generatedAt, claims: [...base.claims, ...additions] }, added: additions.length }
+  if (additions.length === 0 && updated === 0) return { file: base, added: 0, updated: 0 }
+  return { file: { ...base, generatedAt, claims: [...claims, ...additions] }, added: additions.length, updated }
 }
 
 /** Read → merge → write (only when the union grew). Returns how many were added. */
 export function persistExtractedClaims(repoRoot: string, extracted: readonly ExtractedDocOutcome[]): number {
-  const { file, added } = mergeExtractedClaims(readGuardClaimsCorpus(repoRoot), extracted, new Date().toISOString())
-  if (added > 0) writeGuardClaims(repoRoot, file)
+  const { file, added, updated } = mergeExtractedClaims(readGuardClaimsCorpus(repoRoot), extracted, new Date().toISOString())
+  if (added > 0 || updated > 0) writeGuardClaims(repoRoot, file)
   return added
 }
 

@@ -117,7 +117,7 @@ import {
   GUARD_SETUP_STEPS,
 } from '../../packages/core/src/commands/guard-setup.js';
 import { StepTracker } from '../../packages/core/src/progress.js';
-import { listSessionRuns } from '../../packages/core/src/lib/sessions-store.js';
+import { createSessionRun, listSessionRuns } from '../../packages/core/src/lib/sessions-store.js';
 import { forbiddenDriver, outcome, stubDriver, toolResult } from './spec-scan-session-stub.js';
 
 /** One assistant turn, priced — what the loop counts `spent.turns`/tokens off. */
@@ -847,6 +847,51 @@ describe('guardSetupInProcess — hosted injection', () => {
     expect(runs[0].status).toBe('completed');
   }, 120_000);
 
+  it.each([false, true])('keeps interface sessions inside setup, injected run=%s', async (injected) => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+    const key = sessionsHome();
+    const parent = injected ? createSessionRun(key, { command: 'guard-setup', gitRef: 'abc', activityStream: true }) : undefined;
+    fs.mkdirSync(path.dirname(guardInterfacesPath(r)), { recursive: true });
+    fs.writeFileSync(guardInterfacesPath(r), JSON.stringify({
+      version: 2, generatedAt: '2026-09-10T00:00:00Z',
+      recipeFingerprint: computeRecipeFingerprint(r), interfaces: [],
+      resources: { web: [{ id: 'root', kind: 'screen', title: 'Home', address: '/' }] },
+    }));
+    const { tracker } = detailRecorder();
+    const onRunStarted = vi.fn();
+    const { driver } = stubDriver(async (call) => {
+      expect(call.kind).toBe('guard-interfaces.web-tasks');
+      await call.emit(toolResult('check_draft'));
+      return outcome({ interfaces: [], unresolved: ['No actions on this screen'] });
+    });
+    const { report, sessionsRunDirs } = await guardSetupInProcess(r, {
+      ...inertSeams, authorInterfaces: undefined,
+      catalogSession: async () => ({ status: 'ok', added: [], findings: [] }),
+      driver, transport: neverCalled, transportMode: 'api', sessionsKey: key,
+      sessionRun: parent, tracker, onRunStarted, interfaces: interfaces(),
+      seedSession: async () => {
+        // Interfaces must not close the run before setup's later steps execute.
+        expect(listSessionRuns(key)[0].status).toBe('running');
+        return { status: 'skipped', reason: 'stubbed in this test' };
+      },
+    });
+    const runs = listSessionRuns(key);
+    expect(runs).toHaveLength(1);
+    const [run] = runs;
+    expect(run.command).toBe('guard-setup');
+    expect(run.status).toBe(injected ? 'running' : 'completed');
+    expect(run.sessions).toHaveLength(1);
+    expect(run.sessions[0].kind).toBe('guard-interfaces.web-tasks');
+    expect(checklistOf(run).find(row => row.key === 'interfaces')?.sessionKinds).toContain(run.sessions[0].kind);
+    expect(report.steps.find(step => step.key === 'interfaces')?.sessionRunId).toBe(run.runId);
+    expect(report.usage?.sessions?.count).toBe(1);
+    expect(sessionsRunDirs).toEqual([path.join(key, '.truecourse/sessions/guard-setup', run.runId)]);
+    expect(onRunStarted).toHaveBeenCalledTimes(1);
+    expect(onRunStarted.mock.calls[0][0].command).toBe('guard-setup');
+    expect(listSessionRuns(r)).toEqual([]);
+  }, 120_000);
+
   // An eager run is VISIBLE from the moment it starts — including one that dies
   // before any session exists, which the lazy CLI shape leaves unrecorded.
   it('opens the run eagerly with the step checklist, and closes it failed with the reason', async () => {
@@ -891,7 +936,7 @@ describe('guardSetupInProcess — hosted injection', () => {
       ['recipe', ['guard-setup.recipe-repair']],
       ['detect', []],
       ['catalog', ['guard-setup.dependency-catalog']],
-      ['interfaces', ['guard-setup.reconcile-interfaces']],
+      ['interfaces', ['guard-setup.reconcile-interfaces', 'guard-interfaces.web-tasks']],
       ['seed', ['guard-setup.seed']],
       ['preparations', ['guard-setup.preparations']],
       ['auth', ['guard-setup.auth-proof']],
