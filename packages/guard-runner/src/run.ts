@@ -1,7 +1,7 @@
 import { buildCredentialRedactor } from './api/redact.js'
 import { readGuardFlowsCorpus } from './store.js'
 import { scenarioMilestoneProof } from '@truecourse/shared'
-import { resolvePrerequisites, scenarioPrerequisiteBlock } from './prerequisites.js'
+import { resolvePrerequisites, scenarioAccountEnvironment, scenarioPrerequisiteBlock } from './prerequisites.js'
 import { prepareScenario, validateScenarioPreparation, type PreparedScenarioWorld } from './preparation.js'
 /**
  * `guard run` orchestration: load the recipe, load scenarios, build once, run the
@@ -578,7 +578,6 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   let resolvedPrerequisites: ReturnType<typeof resolvePrerequisites>
   try { resolvedPrerequisites = resolvePrerequisites(repoRoot, loaded.recipe.api?.externals, resolvedDependencies) }
   catch (e) { if (e instanceof ExternalsError || e instanceof DependencyCatalogError) return { status: 'invalid-recipe', message: e.message }; throw e }
-  const accountEnv = externalsInjectEnv(resolvedPrerequisites.externals)
   const dependencyBlocked: {
     scenario: GuardScenario
     verdict: ScenarioBindingVerdict
@@ -1219,16 +1218,14 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       let privateWorld: PreparedScenarioWorld | undefined
       let outcome: GuardScenarioResult
       const startedAt = Date.now()
+      const account = scenarioAccountEnvironment(scenario, resolvedPrerequisites)
       try {
       const preparationError = validateScenarioPreparation(loaded.recipe, scenario)
       if (preparationError) throw new Error(preparationError)
       if (scenario.setup?.preparation) privateWorld = await prepareScenario({
         repoRoot, recipe: loaded.recipe, profile: scenario.setup.preparation,
-        externalSecrets: externalsSecrets(resolvedPrerequisites.externals),
-        accountEnv: { ...accountEnv, ...Object.fromEntries((scenario.prerequisites ?? []).filter(p => p.mode === 'absent').flatMap(p => {
-          const target = resolvedPrerequisites.targets.find(t => t.name === p.dependency || t.aliases.includes(p.dependency))
-          return (target?.credentialEnv ?? []).filter(key => scenario.setup?.env?.[key] === '').map(key => [key, ''])
-        })) },
+        externalSecrets: account.secrets,
+        accountEnv: account.env,
         signal: cancel.signal, timeoutMs: opts.buildTimeoutMs,
       })
       const privateCredentials = privateWorld && new Map([...privateWorld.credentials].map(([name, c]) => [name, c.value]))
@@ -1256,11 +1253,11 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               runId,
               unique: scenarioUnique(runNonce, scenario.id),
               server: boundServer(scenario.id),
-              recipeEnv: { ...serverBoot.get(boundServerById.get(scenario.id)!.name)!.env, ...(privateWorld?.env ?? {}) },
+              recipeEnv: { ...serverBoot.get(boundServerById.get(scenario.id)!.name)!.env, ...account.env, ...(privateWorld?.env ?? {}) },
               credentials: scenarioCredentialsFor(boundServerById.get(scenario.id)!.name).credentials,
               foreignCredentials: scenarioCredentialsFor(boundServerById.get(scenario.id)!.name).foreign,
               servesPath: servesPathFor(boundServerById.get(scenario.id)!),
-              externalSecrets,
+              externalSecrets: account.secrets,
               externalTargets,
               fixtures: privateWorld?.fixtures ?? apiFixtures,
               responseSchemas: resolveScenarioResponseSchemas(
@@ -1278,12 +1275,12 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               runId,
               unique: scenarioUnique(runNonce, scenario.id),
               resolvedEntry: resolvedEntry!,
-              externalSecrets: externalsSecrets(resolvedPrerequisites.externals),
-              recipeEnv: { ...loaded.recipe.env, ...accountEnv, ...(privateWorld?.env ?? {}) },
+              externalSecrets: account.secrets,
+              recipeEnv: { ...loaded.recipe.env, ...account.env, ...(privateWorld?.env ?? {}) },
               ...(loaded.recipe.expose ? { expose: loaded.recipe.expose } : {}),
               // Every binding is `provided` by construction — the gate above kept the
               // rest out of `runnable` — so this only ever materializes real instances.
-              supplied: suppliedInstancesFor(scenario, resolvedDependencies),
+              supplied: suppliedInstancesFor(scenario, resolvedPrerequisites.dependencies),
               // The seed's fixtures reach a SANDBOX scenario too (the api call site
               // above passes the same map): the canonical document a seeded world
               // published is the one a web step uploads and an api step posts, and
@@ -1292,7 +1289,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               // from a fixture that simply does not exist.
               ...((privateWorld?.fixtures ?? apiFixtures) ? { fixtures: privateWorld?.fixtures ?? apiFixtures } : {}),
               ...(api?.seed ? { seedDeclared: true } : {}),
-              ...(webSurface ? { web: { ...webSurface, env: { ...webSurface.env, ...accountEnv, ...(privateWorld?.env ?? {}) } } } : {}),
+              ...(webSurface ? { web: { ...webSurface, env: { ...webSurface.env, ...account.env, ...(privateWorld?.env ?? {}) } } } : {}),
               ...(privateWorld ? { credentials: privateWebCredentials! } : apiCredentials && apiCredentials.size > 0 ? { credentials: worldCredentials() } : {}),
               stepTimeoutMs,
               capturePassEvidence,
@@ -1308,7 +1305,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
           preparationFailure: { profile: scenario.setup!.preparation!, stage: 'prepare' },
           durationMs: Date.now() - startedAt,
           failure: { step: 0, expected: 'the selected preparation to provide a verified private baseline',
-            actual: buildCredentialRedactor(new Map(), externalsSecrets(resolvedPrerequisites.externals))(error instanceof Error ? error.message : String(error)) } }
+            actual: buildCredentialRedactor(new Map(), account.secrets)(error instanceof Error ? error.message : String(error)) } }
       } finally {
         // Driver routines close browsers and servers before returning; data cleanup runs last.
         try { await privateWorld?.close() } catch {

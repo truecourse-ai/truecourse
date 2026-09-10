@@ -1,12 +1,13 @@
-import { prerequisiteProblems, type GuardPrerequisiteTarget, type GuardScenario } from '@truecourse/shared'
+import { resolveGuardPrerequisite, scenarioPrerequisiteProblems, type GuardPrerequisiteTarget, type GuardScenario } from '@truecourse/shared'
 import {
   resolveDependencies,
   scenarioDependencyNames,
   dependencyBlockFor,
+  registeredEnvironment,
   type ResolvedDependencies,
   type DependencyBlock,
 } from './dependencies.js'
-import { loadResolvedExternals, resolveExternals, type ResolvedExternal } from './externals.js'
+import { loadExternalsLocal, resolveExternals, externalsInjectEnv, externalsSecrets, type ResolvedExternal } from './externals.js'
 import type { RecipeApiExternal } from './recipe.js'
 import { externalsLocalPath } from './store.js'
 
@@ -21,7 +22,8 @@ export function resolvePrerequisites(
     ...input,
     dependencies: input.dependencies.map((d) => ({ ...d, requirements: [...d.requirements] })),
   }
-  const externals = loadResolvedExternals(repoRoot, declared, env)
+  const local = loadExternalsLocal(repoRoot)
+  const externals = resolveExternals(declared, local, env)
   const targets: GuardPrerequisiteTarget[] = dependencies.dependencies
     .filter((d) => d.state !== null)
     .map((d) => ({
@@ -57,10 +59,22 @@ export function resolvePrerequisites(
       const target = targets.find((t) => t.name === dependency.name)
       if (!target) continue
       const declaration = declared![external.service]
+      const registered = new Set(dependency.entry.registration?.kind === 'env'
+        ? dependency.entry.registration.vars.map(variable => variable.name) : [])
+      const serviceLocal = local[external.service]
       const value = resolveExternals(
         { [external.service]: declaration },
         {
-          [external.service]: { baseUrl: dependency.env[declaration.baseUrlEnv], env: dependency.env },
+          [external.service]: {
+            // Catalog fields belong to the registration. Service-only URLs
+            // retain the overlay written by hosted dependency registration.
+            baseUrl: registered.has(declaration.baseUrlEnv)
+              ? dependency.env[declaration.baseUrlEnv] : serviceLocal?.baseUrl,
+            env: dependency.env,
+            endpoints: Object.fromEntries(Object.keys(declaration.endpoints ?? {})
+              .map((key) => [key, registered.has(key) ? dependency.env[key] : serviceLocal?.endpoints?.[key]] as const)
+              .filter((entry): entry is readonly [string, string] => entry[1] !== undefined)),
+          },
         },
         {},
       )[0]
@@ -109,6 +123,33 @@ export function resolvePrerequisites(
 }
 export type ResolvedPrerequisites = ReturnType<typeof resolvePrerequisites>
 
+/** The same selected accounts feed preparation, execution, and evidence redaction. */
+export function scenarioAccountEnvironment(scenario: GuardScenario, resolved: ResolvedPrerequisites) {
+  const env = externalsInjectEnv(resolved.externals)
+  const secrets = externalsSecrets(resolved.externals)
+  const names = new Set(scenarioDependencyNames(scenario).map(name => {
+    const match = resolveGuardPrerequisite(name, resolved.targets)
+    return match.kind === 'resolved' ? match.target.name : name
+  }))
+  for (const dependency of resolved.dependencies.dependencies) {
+    if (!names.has(dependency.name) || dependency.state !== 'provided' || dependency.entry.registration?.kind !== 'env') continue
+    Object.assign(env, registeredEnvironment(dependency.env))
+    for (const requirement of dependency.requirements) {
+      const value = dependency.env[requirement.field]
+      if (requirement.secret && value) secrets.set(`${dependency.name}.${requirement.field}`, value)
+    }
+  }
+  for (const prerequisite of scenario.prerequisites ?? []) {
+    if (prerequisite.mode !== 'absent') continue
+    const match = resolveGuardPrerequisite(prerequisite.dependency, resolved.targets)
+    if (match.kind !== 'resolved') continue
+    for (const key of match.target.credentialEnv) {
+      if (scenario.setup?.env?.[key] === '') env[key] = ''
+    }
+  }
+  return { env, secrets }
+}
+
 export function scenarioPrerequisiteBlock(
   scenario: GuardScenario,
   resolved: ResolvedPrerequisites,
@@ -120,12 +161,7 @@ export function scenarioPrerequisiteBlock(
     if (resolved.dependencies.dependencies.some((d) => d.name === name && d.state === null)) continue
     if (!requirements.some((r) => r.dependency === name)) requirements.push({ dependency: name, mode: 'provided' })
   }
-  const environment = { ...preparationEnv, ...scenario.setup?.env }
-  for (const step of scenario.steps) {
-    if ('env' in step) Object.assign(environment, step.env)
-    if ('boot' in step && typeof step.boot === 'object') Object.assign(environment, step.boot.env)
-  }
-  const problem = prerequisiteProblems(requirements, resolved.targets, environment)[0]
+  const problem = scenarioPrerequisiteProblems(requirements, resolved.targets, scenario, preparationEnv)[0]
   if (problem) {
     const catalogBlock = dependencyBlockFor(
       { ...scenario, needs: [problem.dependency], prerequisites: undefined, steps: [] },

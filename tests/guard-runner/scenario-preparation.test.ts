@@ -86,16 +86,29 @@ const rows = (count: number) =>
   }));
 
 describe('runner-owned preparation profiles', () => {
-  it('injects the same provided account into private seed, baseline checks, and scenario execution', async () => {
+  it.each(['external', 'catalog'] as const)('injects the same provided %s account into private seed, baseline checks, and scenario execution', async (source) => {
     const { root, recipe } = fixture();
-    recipe.api!.externals = { currencybeacon: { baseUrlEnv: 'CURRENCYBEACON_BASE_URL', baseUrl: 'http://provider.test', env: { CURRENCYBEACON_API_KEY: {} } } };
-    for (const name of ['seed.mjs', 'server.mjs']) {
+    if (source === 'external') recipe.api!.externals = { currencybeacon: { baseUrlEnv: 'CURRENCYBEACON_BASE_URL', baseUrl: 'http://provider.test', env: { CURRENCYBEACON_API_KEY: {} } } };
+    for (const name of ['seed.mjs', 'server.mjs', 'verify.mjs', 'cleanup.mjs']) {
       const file = path.join(root, 'scripts', name);
       fs.writeFileSync(file, `if (process.env.CURRENCYBEACON_API_KEY !== 'private-fixture-key') throw new Error('Required fixture account was not injected');\n` + fs.readFileSync(file, 'utf8'));
     }
     writeSpecDoc(root);
     fs.mkdirSync(path.join(root, '.truecourse/scenarios'), { recursive: true });
-    fs.writeFileSync(path.join(root, '.truecourse/scenarios/externals.local.json'), JSON.stringify({ currencybeacon: { env: { CURRENCYBEACON_API_KEY: 'private-fixture-key' } } }));
+    if (source === 'external') {
+      fs.writeFileSync(path.join(root, '.truecourse/scenarios/externals.local.json'), JSON.stringify({ currencybeacon: { env: { CURRENCYBEACON_API_KEY: 'private-fixture-key' } } }));
+    } else {
+      fs.writeFileSync(path.join(root, '.truecourse/scenarios/dependencies.json'), JSON.stringify({ dependencies: [{
+        name: 'currencybeacon', class: 'supplied', summary: 'Account', needs: [],
+        registration: { kind: 'env', vars: [
+          { name: 'CURRENCYBEACON_API_KEY', description: 'Key', secret: true },
+          { name: 'CURRENCYBEACON_BASE_URL', description: 'URL', secret: false },
+        ] },
+      }] }));
+      fs.writeFileSync(path.join(root, '.truecourse/scenarios/dependencies.local.json'), JSON.stringify({ currencybeacon: { env: {
+        CURRENCYBEACON_API_KEY: 'private-fixture-key', CURRENCYBEACON_BASE_URL: 'http://provider.test',
+      } } }));
+    }
     writeScenario(root, 'private-account.yaml', GuardScenarioSchema.parse({
       id: 'private-account', title: 'Private account injection', binds: specBinds('spec/section'),
       prerequisites: [{ dependency: 'currencybeacon', mode: 'provided' }], setup: { preparation: 'ledger' },
@@ -114,6 +127,14 @@ describe('runner-owned preparation profiles', () => {
       expect(startupFailure.latest.scenarios[0]).toMatchObject({ outcome: 'error', preparationFailure: { stage: 'prepare' } });
       expect(startupFailure.latest.scenarios[0].failure?.actual).toContain('baseline server');
       expect(JSON.stringify(startupFailure)).not.toContain('private-fixture-key');
+    }
+    fs.writeFileSync(path.join(root, 'scripts/seed.mjs'), "throw new Error('Seed echoed ' + process.env.CURRENCYBEACON_API_KEY);");
+    const seedFailure = await runGuard({ repoRoot: root, recipe, skipBuild: true });
+    expect(seedFailure.status).toBe('ok');
+    if (seedFailure.status === 'ok') {
+      expect(seedFailure.latest.scenarios[0].failure?.actual).toContain('Seed echoed');
+      expect(seedFailure.latest.scenarios[0].failure?.actual).toContain('«external:currencybeacon.CURRENCYBEACON_API_KEY»');
+      expect(JSON.stringify(seedFailure)).not.toContain('private-fixture-key');
     }
     recipe.preparations!.ledger.env.CURRENCYBEACON_BASE_URL = 'http://unapproved.test';
     const blocked = await runGuard({ repoRoot: root, recipe, skipBuild: true });

@@ -1,10 +1,11 @@
 import { z } from 'zod'
+import type { GuardScenario } from './scenario.js'
 
 /** Account requirements belong to individual cases, including their setup steps. */
 export const GuardPrerequisiteSchema = z
   .object({
     dependency: z.string().min(1),
-    mode: z.enum(['provided', 'absent']),
+    mode: z.enum(['provided', 'absent']).describe('provided requires a real authenticated external account; absent deliberately clears that account. Controlled responses and synthetic test keys are not supplied accounts.'),
     evidence: z.string().min(1).optional(),
     originalNames: z.array(z.string().min(1)).optional(),
   })
@@ -87,4 +88,29 @@ export function prerequisiteProblems(
     }
   }
   return problems
+}
+
+/** Absence must hold for the whole scenario; a step override cannot establish it. */
+export function scenarioPrerequisiteProblems(
+  requirements: readonly GuardPrerequisite[],
+  targets: readonly GuardPrerequisiteTarget[],
+  scenario: Pick<GuardScenario, 'setup' | 'steps'>,
+  preparationEnv: Readonly<Record<string, string>> = {},
+): ReturnType<typeof prerequisiteProblems> {
+  const environment = { ...preparationEnv, ...scenario.setup?.env }
+  const problems = prerequisiteProblems(requirements, targets, environment)
+  if (problems.length) return problems
+  for (const step of scenario.steps) {
+    // Overrides belong only to this command or boot. Check each independently
+    // so a later clearing cannot hide a command that restored the account.
+    const overrides = [
+      ...('env' in step && step.env ? [step.env] : []),
+      ...('boot' in step && step.boot.env ? [step.boot.env] : []),
+    ]
+    for (const env of overrides) {
+      const stepProblems = prerequisiteProblems(requirements, targets, { ...environment, ...env })
+      if (stepProblems.length) return stepProblems
+    }
+  }
+  return []
 }
