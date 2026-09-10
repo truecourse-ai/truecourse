@@ -1,7 +1,8 @@
 /**
- * The conversation as a page: the transcript itself, verbatim, under the run's
- * steps, with the outline on the left and the history behind it read by page
- * off the activity route.
+ * The conversation as a page: the run's work as a list on the left (steps as
+ * headings, one row per piece of work with its status dot and title), and the
+ * selected work's transcript on the right, verbatim, with the history behind
+ * it read by page off the activity route.
  *
  * The run under test is the real guard setup of `spiderhands/expense-tracker`,
  * served from the fixture journal exactly as the route would page it. What is
@@ -87,14 +88,19 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** The row of a piece of work, by its title. */
+const row = (name: RegExp | string) => screen.getByRole('button', { name, pressed: false });
+const pane = () => screen.getByRole('complementary', { name: 'Work' });
+const rx = (text: string) => new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
+
 describe('one conversation, as a page', () => {
-  it('is the run’s steps in order, each holding the work that happened under it', async () => {
+  it('lists the run’s steps in order, each with the work that happened under it as rows', async () => {
     serve(SETUP_JOURNAL);
     renderPage(SETUP_RUN);
 
     await screen.findByRole('heading', { level: 2, name: /Deriving the recipe/ });
     const headings = screen.getAllByRole('heading', { level: 2 });
-    expect(headings.map((h) => h.children[1].textContent)).toEqual([
+    expect(headings.map((h) => h.textContent)).toEqual([
       'Preparing repository',
       'Deriving the recipe',
       'Detecting dependencies',
@@ -108,68 +114,78 @@ describe('one conversation, as a page', () => {
       screen.getByText('wrote .truecourse/scenarios/recipe.json (llm) · default /api/expenses → 200'),
     ).toBeInTheDocument();
 
-    // One paragraph per piece of work, with no header of its own: no kind id,
-    // no work item, no status word once it is finished, no tokens or cost.
-    const paragraphs = [...document.querySelectorAll('section[id]')];
-    expect(paragraphs.map((p) => p.id)).toEqual(SETUP_RUN.sessions.map((s) => s.sessionId));
-    const recipe = within(paragraphs[0] as HTMLElement);
-    expect(recipe.queryByText('guard-setup.recipe-repair')).toBeNull();
-    expect(recipe.queryByText('completed')).toBeNull();
-    expect(recipe.queryByText(/tokens/)).toBeNull();
+    // One row per piece of work, titled by its own briefing's first line; no
+    // kind id, no status word, no tokens or cost; no transcript until opened.
+    const rows = screen.getAllByRole('button', { pressed: false });
+    expect(rows).toHaveLength(SETUP_RUN.sessions.length);
+    const briefing = recipeEvents[1] as Extract<SessionEvent, { type: 'user-message' }>;
+    expect(rows[0]).toHaveTextContent(briefing.content.split('\n')[0].trim());
+    expect(screen.queryByText('guard-setup.recipe-repair')).toBeNull();
+    expect(screen.queryByText('completed')).toBeNull();
+    expect(screen.queryByText(/tokens/)).toBeNull();
+    expect(screen.queryByRole('complementary', { name: 'Work' })).toBeNull();
     expect(document.querySelectorAll('[title]')).toHaveLength(0);
   });
 
-  it('shows the system prompt, the briefing and every turn as they were recorded', async () => {
+  it('opens a piece of work beside the list, with the system prompt, the briefing and every turn as they were recorded', async () => {
     serve(SETUP_JOURNAL);
     renderPage(SETUP_RUN);
     await screen.findByRole('heading', { level: 2, name: /Deriving the recipe/ });
-    const el = document.getElementById(RECIPE)!;
-    const recipe = within(el);
-    const rx = (text: string) => new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
-    // Every character of a text is on the page, set as paragraphs.
+
+    const briefing = recipeEvents[1] as Extract<SessionEvent, { type: 'user-message' }>;
+    await userEvent.click(row(rx(briefing.content.split('\n')[0].trim().slice(0, 30))));
+    const el = pane();
+    const work = within(el);
+    // The row is the pressed one, and the address remembers it.
+    expect(screen.getByRole('button', { pressed: true })).toHaveTextContent(briefing.content.split('\n')[0].trim());
     const asParagraphs = (text: string) =>
       [...el.querySelectorAll('div')].some((d) => [...d.children].every((c) => c.tagName === 'P') && d.textContent === text.replace(/\n{2,}/g, ''));
 
     // The system prompt starts folded to its first line; opened, it is whole.
     const start = recipeEvents[0] as Extract<SessionEvent, { type: 'session-start' }>;
     expect(asParagraphs(start.systemPrompt)).toBe(false);
-    await userEvent.click(recipe.getByRole('button', { name: rx(start.systemPrompt.split('\n')[0].slice(0, 40)) }));
+    await userEvent.click(work.getByRole('button', { name: rx(start.systemPrompt.split('\n')[0].slice(0, 40)) }));
     expect(asParagraphs(start.systemPrompt)).toBe(true);
     // No role labels, no model, no cost, no icons.
-    expect(recipe.queryByText('system')).toBeNull();
-    expect(recipe.queryByText('user')).toBeNull();
-    expect(recipe.queryByText('assistant')).toBeNull();
-    expect(recipe.queryByText(start.llm!.model)).toBeNull();
-    expect(el.querySelectorAll('svg')).toHaveLength(0);
+    expect(work.queryByText('system')).toBeNull();
+    expect(work.queryByText('user')).toBeNull();
+    expect(work.queryByText('assistant')).toBeNull();
+    expect(work.queryByText(start.llm!.model)).toBeNull();
+    expect(el.querySelectorAll('svg')).toHaveLength(1); // the close
+    // No hardcoded narration: the engine's opening line, its phrases, its notes.
+    expect(work.queryByText(/^I'm repairing/)).toBeNull();
 
-    // The briefing: its first line and the rest on a click, like every long text.
-    const briefing = recipeEvents[1] as Extract<SessionEvent, { type: 'user-message' }>;
+    // The briefing: its first line and the rest on a click.
     expect(asParagraphs(briefing.content)).toBe(false);
-    await userEvent.click(recipe.getByRole('button', { name: rx(briefing.content.split('\n')[0].slice(0, 30)) }));
+    await userEvent.click(work.getByRole('button', { name: rx(briefing.content.split('\n')[0].slice(0, 30)) }));
     expect(asParagraphs(briefing.content)).toBe(true);
 
     // A call and its result are one mono line: the name, the arguments and
     // the result's first line; opened in place, the arguments as JSON and the result whole.
     const call = recipeEvents[2] as Extract<SessionEvent, { type: 'assistant-turn' }>;
     const result = recipeEvents[3] as Extract<SessionEvent, { type: 'tool-result' }>;
-    const [exchange] = recipe.getAllByRole('button', { name: `${call.toolCall!.name} call` });
+    const [exchange] = work.getAllByRole('button', { name: `${call.toolCall!.name} call` });
     expect(verbatim(el, JSON.stringify(call.toolCall!.args, null, 2))).toBe(false);
     expect(verbatim(el, result.content)).toBe(false);
     await userEvent.click(exchange);
     expect(verbatim(el, JSON.stringify(call.toolCall!.args, null, 2))).toBe(true);
     expect(verbatim(el, result.content)).toBe(true);
 
-    // The outcome value: one compact line, the pretty JSON on a click.
+    // The outcome value: one compact line, the pretty JSON on a click. The
+    // reserved outcome tool call carries the same value, so it is not a row.
     const outcome = recipeEvents.at(-1) as Extract<SessionEvent, { type: 'outcome' }>;
     const prettyOutcome = JSON.stringify(outcome.value, null, 2);
     expect(verbatim(el, prettyOutcome)).toBe(false);
-    await userEvent.click(recipe.getByRole('button', { name: 'outcome' }));
+    await userEvent.click(work.getByRole('button', { name: 'outcome' }));
     expect(verbatim(el, prettyOutcome)).toBe(true);
-    // The reserved outcome tool call carries the same value, so it is not a row of its own.
-    expect(recipe.getAllByRole('button', { name: 'outcome' })).toHaveLength(1);
+    expect(work.getAllByRole('button', { name: 'outcome' })).toHaveLength(1);
+
+    // Close returns to the list alone.
+    await userEvent.click(work.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('complementary', { name: 'Work' })).toBeNull();
   });
 
-  it('shows a loop intervention as a user message of its own', async () => {
+  it('shows a loop intervention as a message of its own', async () => {
     const events: ActivityEvent[] = [
       {
         cursor: 0,
@@ -177,26 +193,27 @@ describe('one conversation, as a page', () => {
         sessionId: 'ses-a',
         event: {
           type: 'session-start',
-          kind: 'guard-setup.seed',
-          workItem: 'seed',
-          systemPrompt: 'You author the ONE preparation script.',
-          toolNames: ['read_file'],
           seq: 0,
           ts: '2026-09-09T10:00:00.000Z',
+          kind: 'guard-setup.preparations',
+          workItem: 'preparations',
+          systemPrompt: 'You verify.',
+          toolNames: [],
         },
       },
       {
         cursor: 1,
         kind: 'session-event',
         sessionId: 'ses-a',
-        event: {
-          type: 'user-message',
-          content: '[budget] 2 turns left before I stop you.',
-          seq: 1,
-          ts: '2026-09-09T10:00:01.000Z',
-        },
+        event: { type: 'user-message', seq: 1, ts: '2026-09-09T10:00:01.000Z', content: 'You author the ONE preparation script.' },
       },
-    ] as ActivityEvent[];
+      {
+        cursor: 2,
+        kind: 'session-event',
+        sessionId: 'ses-a',
+        event: { type: 'user-message', seq: 2, ts: '2026-09-09T10:00:02.000Z', content: '[budget] 2 turns left before I stop you.' },
+      },
+    ];
     serve(events);
     renderPage({
       command: 'guard-setup',
@@ -208,16 +225,19 @@ describe('one conversation, as a page', () => {
       sessions: [
         {
           sessionId: 'ses-a',
-          kind: 'guard-setup.seed',
-          workItem: 'seed',
+          kind: 'guard-setup.preparations',
+          workItem: 'preparations',
           status: 'running',
           spent: { turns: 1, tokens: 10, costUsd: 0 },
         },
       ],
     } as PublicSessionRun);
 
-    expect(await screen.findByText('[budget] 2 turns left before I stop you.')).toBeInTheDocument();
-    expect(screen.getByText('You author the ONE preparation script.')).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole('button', { name: /You author the ONE preparation script/ }));
+    const work = within(pane());
+    expect(work.getByText('[budget] 2 turns left before I stop you.')).toBeInTheDocument();
+    // Once as the pane's title, once as the message it was.
+    expect(work.getAllByText('You author the ONE preparation script.')).toHaveLength(2);
   });
 
   it('is the error and nothing else when a gate stopped the work', async () => {
@@ -237,30 +257,20 @@ describe('one conversation, as a page', () => {
       await screen.findByText('56 open spec conflicts must be resolved before guard generate'),
     ).toBeInTheDocument();
     expect(screen.queryAllByRole('heading', { level: 2 })).toHaveLength(0);
-    expect(screen.queryByRole('navigation', { name: 'Outline' })).toBeNull();
   });
 
-  it('waits for the whole history, then paints it at its end', async () => {
+  it('waits for the whole history, then paints it', async () => {
     serve(SETUP_JOURNAL, 20);
-    const jump = vi.fn();
-    Element.prototype.scrollIntoView = jump as unknown as Element['scrollIntoView'];
-    const scrollTo = vi.spyOn(Element.prototype, 'scrollTo');
     renderPage(SETUP_RUN);
 
-    // Nothing half-read is painted: the outline appears with the whole of it.
-    expect(screen.queryByRole('navigation', { name: 'Outline' })).toBeNull();
+    // Nothing half-read is painted: the list appears with the whole of it.
+    expect(screen.queryAllByRole('heading', { level: 2 })).toHaveLength(0);
     expect(screen.getByRole('status')).toHaveTextContent('Reading the conversation…');
-
-    const outline = await screen.findByRole('navigation', { name: 'Outline' });
-    expect(within(outline).getAllByRole('button')).toHaveLength(8);
-    await waitFor(() => expect(scrollTo).toHaveBeenCalled());
-
-    // And the outline jumps to any step.
-    await userEvent.click(within(outline).getByRole('button', { name: /Preparing data \+ principals/ }));
-    expect(jump).toHaveBeenCalled();
+    await screen.findByRole('heading', { level: 2, name: /Deriving the recipe/ });
+    expect(screen.getAllByRole('heading', { level: 2 })).toHaveLength(8);
   });
 
-  it('reads the history in pages, then tails what is still happening', async () => {
+  it('reads the history in pages, then tails what is still happening into the open work', async () => {
     const live: PublicSessionRun = {
       ...SETUP_RUN,
       status: 'running',
@@ -293,6 +303,12 @@ describe('one conversation, as a page', () => {
     );
     expect(paged).toHaveBeenCalledTimes(Math.ceil(history.length / 20));
 
+    // The running piece of work wears the pulsing dot in the list.
+    const [running] = screen.getAllByRole('button', { pressed: false });
+    expect(running.querySelector('.animate-pulse')).not.toBeNull();
+    await userEvent.click(running);
+    const work = within(pane());
+
     sink.enqueue({ type: 'start', messageId: live.runId });
     // A partial turn stands as the live line until its finished form lands.
     sink.enqueue({
@@ -300,7 +316,7 @@ describe('one conversation, as a page', () => {
       transient: true,
       data: { [RECIPE]: { kind: 'text', turnId: 'm1', text: 'Reading the recipe live' } },
     });
-    await screen.findByText('Reading the recipe live');
+    await work.findByText('Reading the recipe live');
 
     sink.enqueue({
       type: 'data-activity',
@@ -325,16 +341,16 @@ describe('one conversation, as a page', () => {
         },
       },
     });
-    expect(await screen.findByText('The recipe boots cleanly now.')).toBeInTheDocument();
-    expect(screen.getAllByText('The recipe boots cleanly now.')).toHaveLength(1);
-    expect(screen.queryByText('Reading the recipe live')).toBeNull();
+    expect(await work.findByText('The recipe boots cleanly now.')).toBeInTheDocument();
+    expect(work.getAllByText('The recipe boots cleanly now.')).toHaveLength(1);
+    expect(work.queryByText('Reading the recipe live')).toBeNull();
 
     sink.enqueue({ type: 'finish', finishReason: 'stop' });
     sink.close();
     view.unmount();
   });
 
-  it('says the connection dropped at the bottom, never as a strip on top', async () => {
+  it('says the connection dropped at the bottom of the list, never as a strip on top', async () => {
     const live = { ...SETUP_RUN, status: 'running', finishedAt: undefined } as PublicSessionRun;
     serve(SETUP_JOURNAL);
     const paged = window.fetch;
