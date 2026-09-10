@@ -132,16 +132,16 @@ describe('incremental authoring — editing committed scenarios', () => {
     expect(bytes).toContain('semver')
   }, 90_000)
 
-  it('an added scenario takes the next id beside the kept one, and both commit', async () => {
+  it('a later complete revision replaces the earlier candidate under one identity', async () => {
     const r = seed()
     const prior = await committed(r)
     writeDoc(r, DOC, EDITED)
 
     const res = await generate(r, (ids) => ({ edit: [{ replaces: ids[0]!, scenario: ORIGINAL }], add: [EXTRA] }))
     expect(res.status).toBe('ok')
-    expect(res.written.map((w) => w.id).sort()).toEqual([prior.id, `${prior.id}.2`])
+    expect(res.written.map((w) => w.id).sort()).toEqual([prior.id])
     const flow = readManifest(r)!.flows[0]!
-    expect(flow.scenarios.map((s) => s.id)).toEqual([prior.id, `${prior.id}.2`])
+    expect(flow.scenarios.map((s) => s.id)).toEqual([prior.id])
     expect(flow.generationInputsHash).toMatch(/^sha256:/)
     expect(fs.existsSync(prior.file)).toBe(true)
   }, 90_000)

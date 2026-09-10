@@ -4,7 +4,11 @@ import { invocationProofGap } from './proof-grounding.js'
 import {
   resolveGuardPrerequisite,
   prerequisiteProblems,
+  scenarioPrerequisiteProblems,
   scenarioMilestoneProof,
+  verificationCapabilityGap,
+  verificationRequirements,
+  GUARD_OBSERVATION_CAPABILITIES,
   type GuardFlow,
   type GuardDriverId,
   type GuardManifestGap,
@@ -15,7 +19,7 @@ import {
   type GuardVerification,
 } from '@truecourse/shared'
 
-/** Preserve legacy extracted requirements until a case explicitly refines them. */
+/** Resolve case requirements; claim-wide needs supply identifiers, never case scope. */
 export function bindClaimPrerequisites(
   verification: GuardVerification | undefined,
   needs: readonly ClaimNeed[],
@@ -43,13 +47,14 @@ export function bindClaimPrerequisites(
     ...verification,
     cases: verification.cases.map((c) => ({
       ...c,
-      prerequisites: (c.prerequisites ?? requirements).map((p) => {
+      prerequisites: (c.prerequisites ?? []).map((p) => {
         const exact = resolveGuardPrerequisite(p.dependency, targets)
         const evidenced = targets.filter((t) =>
           t.credentialEnv.some((key) => p.evidence?.split(/[^A-Za-z0-9_]+/).includes(key)),
         )
+        const declared = requirements.find((r) => r.originalNames.includes(p.dependency))
         const name =
-          exact.kind === 'resolved' ? exact.target.name : evidenced.length === 1 ? evidenced[0].name : p.dependency
+          exact.kind === 'resolved' ? exact.target.name : evidenced.length === 1 ? evidenced[0].name : declared?.dependency ?? p.dependency
         return {
           ...p,
           dependency: name,
@@ -99,12 +104,7 @@ export function scenarioCasePrerequisiteProblems(
   targets: readonly GuardPrerequisiteTarget[],
   preparationEnv: Record<string, string> = {},
 ) {
-  const environment = { ...preparationEnv, ...scenario.setup?.env }
-  for (const step of scenario.steps) {
-    if ('env' in step) Object.assign(environment, step.env)
-    if ('boot' in step && typeof step.boot === 'object') Object.assign(environment, step.boot.env)
-  }
-  return prerequisiteProblems(scenarioCasePrerequisites(flow, scenario), targets, environment)
+  return scenarioPrerequisiteProblems(scenarioCasePrerequisites(flow, scenario), targets, scenario, preparationEnv)
 }
 
 /** Shared runtime/estimate partition: eligibility changes the matcher input and key. */
@@ -115,36 +115,33 @@ export function partitionFlowPrerequisites(
   recipe: Recipe,
 ): { flow: GuardFlow; gaps: GuardManifestGap[] } {
   const gaps: GuardManifestGap[] = []
-  const servers = resolveApiServers(recipe)
-  const serve =
-    surface === 'web'
-      ? (resolveWebSurface(recipe)?.serve ?? [])
-      : (servers.servers.get(servers.defaultServer)?.serve ?? [])
+  // API commands are checked after matching binds the actual server.
+  const invocationGaps = surface === 'web' ? flowInvocationGaps(flow, surface, recipe) : []
   const milestones = flow.milestones.flatMap((m) => {
     if (!m.verification?.cases) return [m]
     const cases = m.verification.cases.filter((c) => {
-      if (c.invocation && (surface === 'web' || surface === 'api')) {
-        const reason = invocationProofGap(c.invocation, serve)
-        if (reason) {
-          gaps.push({
-            surface,
-            kind: 'blocked-on',
-            milestones: [m.order],
-            obligations: [{ milestone: m.order, caseId: c.id }],
-            reason,
-            blocker: {
-              kind: 'generation',
-              action: 'Map an executor invocation that proves the documented command and address.',
-            },
-          })
-          return false
-        }
+      const capabilityReason = verificationCapabilityGap(m.verification, surface, [c.id])
+      if (capabilityReason) {
+        const supported = GUARD_OBSERVATION_CAPABILITIES[surface] ?? []
+        gaps.push({
+          surface,
+          kind: 'blocked-on',
+          milestones: [m.order],
+          obligations: [{ milestone: m.order, caseId: c.id }],
+          reason: capabilityReason,
+          blocker: {
+            kind: 'unsupported-capability',
+            capabilities: verificationRequirements(m.verification, [c.id]).filter((r) => !supported.includes(r)),
+          },
+        })
       }
+      const invocationGap = invocationGaps.find(gap => gap.obligations?.some(o => o.milestone === m.order && o.caseId === c.id))
+      if (invocationGap) { gaps.push(invocationGap); return false }
       const problems = prerequisiteProblems(
         (c.prerequisites ?? []).filter((p) => p.mode === 'provided'),
         targets,
       )
-      if (!problems.length) return true
+      if (!problems.length) return !capabilityReason
       gaps.push({
         surface,
         kind: 'blocked-on',
@@ -170,6 +167,27 @@ export function partitionFlowPrerequisites(
           .update(JSON.stringify([flow.fingerprint, milestones]))
           .digest('hex')
   return { flow: { ...flow, milestones, fingerprint }, gaps }
+}
+
+/** Validate the command the selected server will execute, including default binding. */
+export function flowInvocationGaps(
+  flow: GuardFlow,
+  surface: GuardDriverId,
+  recipe: Recipe,
+  server?: string,
+): GuardManifestGap[] {
+  if (surface !== 'api' && surface !== 'web') return []
+  const servers = resolveApiServers(recipe)
+  const serve = surface === 'web' ? resolveWebSurface(recipe)?.serve ?? []
+    : servers.servers.get(server ?? servers.defaultServer)?.serve ?? []
+  return flow.milestones.flatMap(m => m.verification?.cases?.flatMap(c => {
+    const reason = c.invocation && invocationProofGap(c.invocation, serve)
+    return reason ? [{
+      surface, kind: 'blocked-on' as const, milestones: [m.order],
+      obligations: [{ milestone: m.order, caseId: c.id }], reason,
+      blocker: { kind: 'generation' as const, action: 'Map an executor invocation that proves the documented command and address.' },
+    }] : []
+  }) ?? [])
 }
 
 /** Account availability affects work selection; secret rotation never affects its hash. */

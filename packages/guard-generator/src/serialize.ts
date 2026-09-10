@@ -96,7 +96,7 @@ export function buildFlowScenario(opts: {
     // The promise in plain words, denormalized off the flow: a reader of the file
     // alone (a reviewer in a diff) knows what it is FOR without
     // resolving `flow.id` against a `flows.json` that re-synthesis may have moved.
-    promise: scenarioCoverageClaims(flow.milestones, raw.steps).join(' ') || flow.goal,
+    promise: flow.milestones.flatMap(m => m.verification?.cases?.map(c => c.claim) ?? [m.claimTitle]).join(' ') || flow.goal,
     flow: { id: flow.id, fingerprint: flow.fingerprint },
     interface: {
       path: interfaces.map((j) => j.id),

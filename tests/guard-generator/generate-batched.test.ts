@@ -116,7 +116,7 @@ describe('generateGuards — multi-flow attribution', () => {
     })
     expect(loadScenarios(r).scenarios.map((s) => s.id).sort()).toEqual(['alpha', 'beta'])
     const flows = new Map(readManifest(r)!.flows.map((f) => [f.flowId, f]))
-    expect(flows.get('alpha')!.scenarios).toEqual([{
+    expect(flows.get('alpha')!.scenarios).toMatchObject([{
       id: 'alpha', drivers: ['cli'], status: 'passing',
       milestoneCoverage: [{ milestone: 1, driver: 'cli' }],
     }])

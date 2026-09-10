@@ -90,6 +90,24 @@ export function scenarioMilestoneScopeDefect(
   return undefined
 }
 
+/** A published candidate must independently prove the immutable entire flow. */
+export function scenarioFullFlowDefect(
+  milestones: readonly GuardFlowMilestone[],
+  steps: readonly GuardProofStep[],
+  evidence?: readonly GuardCaseEvidence[],
+): string | undefined {
+  const scope = scenarioMilestoneScopeDefect(milestones, steps)
+  if (scope) return scope
+  const proof = scenarioMilestoneProof(steps)
+  for (const milestone of milestones) {
+    const accepted = proof.filter(p => p.milestone === milestone.order && (!milestone.proofDrivers || milestone.proofDrivers.includes(p.driver)))
+    if (!accepted.length) return `One complete test must assert every milestone; milestone ${milestone.order} is missing.`
+    const missing = milestone.verification?.cases?.filter(c => !accepted.some(p => p.checks?.includes(c.id))) ?? []
+    if (missing.length) return `One complete test must assert every selected case; milestone ${milestone.order} is missing: ${missing.map(c => c.id).join(', ')}.`
+  }
+  return evidence === undefined ? undefined : caseEvidenceDefect(milestones, steps, evidence)
+}
+
 /** Evidence supplied by the independent fidelity reviewer for selected cases. */
 export const GuardCaseEvidenceSchema = z.object({
   milestone: z.number().int().positive(),

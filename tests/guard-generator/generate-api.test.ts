@@ -85,7 +85,7 @@ describe('generateGuards — api surface authoring + birth', () => {
 
     const section = guardManifestSections(readManifest(r)).find((s) => s.anchor === 'list')!
     expect(section.scenarioIds).toEqual(['list'])
-    expect(readManifest(r)!.flows.find((f) => f.flowId === 'list')!.scenarios).toEqual([
+    expect(readManifest(r)!.flows.find((f) => f.flowId === 'list')!.scenarios).toMatchObject([
       { id: 'list', drivers: ['api'], status: 'passing', milestoneCoverage: [{ milestone: 1, driver: 'api' }] },
     ])
   }, 60_000)
@@ -184,7 +184,7 @@ describe('generateGuards — api surface authoring + birth', () => {
     expect(res.flows).toMatchObject({ settled: 1, unsettled: 0 })
   }, 60_000)
 
-  it('authors a flow’s declared cli and api alternatives in separate single-driver calls', async () => {
+  it('selects one complete driver for a flow with alternative realizations', async () => {
     // One scenario per (flow, surface): a surface never rides another's authoring
     // call, so each call carries exactly one driver's framing and system prompt.
     const r = repo()
@@ -209,26 +209,12 @@ describe('generateGuards — api surface authoring + birth', () => {
 
     expect(res.status).toBe('ok')
     expect(res.errors).toEqual([])
-    // Two WORKERS for the ONE flow — one per surface, never mixed.
-    expect(calls).toHaveLength(2)
-    expect(calls.every((c) => c.flowId === 'list')).toBe(true)
-    expect(calls.map((c) => c.surface).sort()).toEqual(['api', 'cli'])
-    // Each worker is briefed only on its own surface's preparation.
-    const api = calls.find((c) => c.surface === 'api')!
-    const cli = calls.find((c) => c.surface === 'cli')!
-    expect(api.briefing).toContain('Service serve command:')
-    expect(api.briefing).not.toContain('Program entrypoint:')
-    expect(cli.briefing).toContain('Program entrypoint:')
-    expect(cli.briefing).not.toContain('Service serve command:')
-
-    // Both surfaces persist as their own scenario under the one flow.
-    expect(res.written.map((w) => w.surface).sort()).toEqual(['api', 'cli'])
-    expect(res.written.map((w) => w.id).sort()).toEqual(['list', 'list.2'])
-    const persisted = readManifest(r)!
-      .flows.find((f) => f.flowId === 'list')!
-      .scenarios.map((s) => ({ id: s.id, drivers: s.drivers }))
-    expect(persisted.map((s) => s.id).sort()).toEqual(['list', 'list.2'])
-    expect(persisted.map((s) => s.drivers).sort()).toEqual([['api'], ['cli']])
+    expect(calls).toHaveLength(1)
+    expect(calls[0].surface).toBe('api')
+    expect(calls[0].briefing).toContain('Service serve command:')
+    expect(calls[0].briefing).not.toContain('Program entrypoint:')
+    expect(res.written.map(w => w.surface)).toEqual(['api'])
+    expect(readManifest(r)!.flows.find(f => f.flowId === 'list')!.scenarios).toHaveLength(1)
   }, 60_000)
 
   it('a runnable surface with an EMPTY interface catalog settles as a no-interface gap', async () => {

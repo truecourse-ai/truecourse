@@ -1,3 +1,5 @@
+import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node';
+import { completeRealization } from '@truecourse/guard-generator';
 /**
  * Pre-flight TOKEN estimates for `spec scan` (curate) and `guard generate` /
  * `guard setup`. Lives in core (the leaf packages would be circular). All feed
@@ -85,6 +87,9 @@ import {
   planGuardWork,
   bindClaimPrerequisites,
   partitionFlowPrerequisites,
+  flowInvocationGaps,
+  buildServerRouteIndex,
+  bindRealizationServer,
   flowPrerequisiteStateMaterial,
   proposeRecipe,
   recipeCacheKey,
@@ -146,6 +151,7 @@ import {
   driverRecipeKey,
   isRunnableDriver,
   flowDriversToMatch,
+  GUARD_REVIEW_POLICY_VERSION, scenarioFullFlowDefect,
   runnableDriverIds,
   violatesSettleInvariant,
   dismissedClaimKey,
@@ -156,8 +162,10 @@ import {
 import {
   computeRecipeFingerprint,
   resolvePrerequisites,
+  buildRouteManifest,
   loadDependencyCatalog,
   loadRecipe,
+  loadScenarios,
   preparationCatalog,
   readGuardDecisions,
   readAuthoredInterfaceCatalog,
@@ -617,7 +625,7 @@ interface GuardSessionWorkPlan {
   epicCalls: number;
   /** Average briefing chars one area session carries. */
   areaChars: number;
-  /** Runnable claims — the honest upper bound on synthesized flows (0 when unknown). */
+  /** Source-obligation count for the pre-synthesis estimate (0 when unknown); not a guaranteed flow ceiling. */
   maxFlows: number;
   /** True when the claim inventory was knowable offline (every extract-session
    *  entry cached) and the REAL flows keys were probed. */
@@ -723,7 +731,7 @@ async function planGuardSessionStages(repoRoot: string, plan: GuardWorkPlan): Pr
       // offline — so the epic session is always quoted as its 0..1 ceiling.
       epicCalls: areasWithClaims > 1 ? 1 : 0,
       areaChars: chars.length ? Math.round(chars.reduce((n, c) => n + c, 0) / chars.length) : 0,
-      maxFlows: areas.reduce((n, a) => n + a.claims.length, 0),
+      maxFlows: areas.reduce((n, a) => n + a.claims.reduce((count, claim) => count + Math.max(claim.verification?.cases?.length ?? 1, 1), 0), 0),
       exact: true,
     };
   }
@@ -771,7 +779,7 @@ interface GuardRealizationPlan {
  * count probes the SAME `guard/generate` worker-cache keys (the kept
  * `workerCacheKey` recipe under the session prompt fingerprints) for the flows
  * whose composition moved since the manifest. Otherwise both fall back to the
- * honest ceiling — flows ≤ runnable claims, one worker per (flow, surface).
+ * honest ceiling — flow count estimated from source obligations, one worker per (flow, surface).
  *
  * The ceiling is what the COST is priced at either way (`maxCalls`), so a prompt
  * change (which re-works every flow) can never exceed the quoted bill. A
@@ -814,11 +822,13 @@ async function planGuardRealizationStages(
   const committed = readFlowsFile(repoRoot);
   const settled = flowStage.exact && flowStage.areaCalls === 0 && committed !== null;
   if (settled && catalogs) {
+    const serverIndex = recipe ? buildServerRouteIndex(buildRouteManifest(repoRoot), recipe) : undefined;
     const flows: GuardFlow[] = committed.flows;
     const sectionKeyOf = new Map(
       plan.sections.map((s) => [`${s.doc} ${s.anchor}`, sectionInputsKey(s)]),
     );
     const priorByFlow = new Map((readGuardManifest(repoRoot)?.flows ?? []).map((f) => [f.flowId, f]));
+    const committedScenarios = new Map(loadScenarios(repoRoot).scenarios.map(s => [s.id, s]));
     let matchCalls = 0;
     let workerItems = 0;
     for (const flow of flows) {
@@ -840,16 +850,25 @@ async function planGuardRealizationStages(
           continue;
         }
         if (!cached.plan) continue; // an `unrealizable` surface starts no worker
+        if (recipe && serverIndex && catalog.surface === 'api') {
+          const bound = bindRealizationServer(cached.plan, serverIndex);
+          if (bound.kind === 'missing-server' || bound.kind === 'spans') continue;
+          if (flowInvocationGaps(flow, catalog.surface, recipe, bound.kind === 'bound' ? bound.server : undefined).length) continue;
+        }
         const preparedPlan = partitionPlanPreparations(flow, cached.plan, availablePreparations).plan;
-        if (!preparedPlan) continue;
+        if (!preparedPlan || !completeRealization(flow, preparedPlan)) continue;
         const fingerprints = [
           realizationAssignmentFingerprint(preparedPlan),
           ...preparedPlan.interfaces.map((j) => j.fingerprint),
           ...(catalog.surface === 'web' ? [catalog.fingerprint] : []),
         ];
         plannedPairs.push({ surface: catalog.surface, fingerprints });
-        interfaceFingerprints.push(...fingerprints);
+
       }
+      const previousDrivers = priorByFlow.get(flow.id)?.scenarios.flatMap(s => s.drivers ?? []) ?? [];
+      plannedPairs.sort((a, b) => Number(previousDrivers.includes(b.surface)) - Number(previousDrivers.includes(a.surface)) || a.surface.localeCompare(b.surface));
+      plannedPairs.splice(1);
+      interfaceFingerprints.push(...plannedPairs.flatMap(p => p.fingerprints));
       interfaceFingerprints.push(flowPrerequisiteStateMaterial(flow, prerequisites.targets));
       const sectionKeys = flow.bindings.map((b) => sectionKeyOf.get(`${b.doc} ${b.anchor}`) ?? b.fingerprint);
       const inputsHash = flowGenerationInputsHash({
@@ -862,10 +881,15 @@ async function planGuardRealizationStages(
       // Same work selection the run makes: a settled entry that leaves a planned
       // surface unaccounted for is WORK, whatever its hash says.
       const changed =
-        unknown || !prior || prior.generationInputsHash !== inputsHash || violatesSettleInvariant(prior);
+        unknown || !prior || prior.generationInputsHash !== inputsHash || violatesSettleInvariant(prior) ||
+        prior.scenarios.length > 1 || prior.scenarios.some(s => {
+          const scenario = committedScenarios.get(s.id);
+          return s.reviewed === false || !scenario || s.reviewPolicyVersion !== GUARD_REVIEW_POLICY_VERSION || s.reviewedScenarioFingerprint !== scenarioReviewFingerprint(scenario) ||
+            !!scenarioFullFlowDefect(flow.milestones, scenario.steps, s.caseEvidence ?? []);
+        });
       if (!changed) continue;
       if (unknown) {
-        workerItems += Math.max(matchable.length, 1);
+        workerItems += 1;
         continue;
       }
       // Cache-aware per (flow, surface): a `settled`/`blocked` worker entry is a
@@ -900,9 +924,9 @@ async function planGuardRealizationStages(
     };
   }
 
-  // Cold: the flow count is a synthesis output. Bound it by the runnable claims
-  // (milestones partition claims in the worst case) — exact when the extract cache
-  // gave us the inventory, else the per-section heuristic over the whole corpus.
+  // Cold: flow count is still a synthesis output. Source obligations inform this
+  // estimate; overlapping source-promised journeys may yield additional flows.
+  // Once synthesis is cached, use its actual flow count above.
   const boundFlows =
     flowStage.maxFlows > 0
       ? flowStage.maxFlows
@@ -910,7 +934,7 @@ async function planGuardRealizationStages(
   const perFlow = Math.max(surfaces.length, 1);
   return {
     matchCalls: boundFlows * perFlow,
-    workerItems: boundFlows * perFlow,
+    workerItems: boundFlows,
     maxPairs: boundFlows * perFlow,
     flows: boundFlows,
     surfaces: perFlow,
@@ -1241,7 +1265,7 @@ export async function estimateGuardTokens(
 
   const pairBound = realization.exact
     ? `≤ ${realization.flows} flows × ${realization.surfaces} surface${realization.surfaces === 1 ? '' : 's'}`
-    : `≤ flows × ${realization.surfaces} surface${realization.surfaces === 1 ? '' : 's'}, flows ≤ runnable claims`;
+    : `≤ flows × ${realization.surfaces} surface${realization.surfaces === 1 ? '' : 's'}, flow count estimated from source obligations`;
 
   const stages: StageCallEstimate[] = [
     {
@@ -1276,8 +1300,8 @@ export async function estimateGuardTokens(
       systemPromptChars: FLOWS_SESSION_SYSTEM_PROMPT.length,
       briefingChars: sessions.areaChars || (sessions.areaCalls + sessions.epicCalls > 0 ? GUARD_FLOWS_AREA_CHARS : 0),
       bound: sessions.exact
-        ? `flows ≤ runnable claims (${sessions.maxFlows} today) — flow count is a synthesis output`
-        : 'flows ≤ runnable claims — flow count is a synthesis output',
+        ? `flow count estimated from source obligations (${sessions.maxFlows} today) — flow count is a synthesis output`
+        : 'flow count estimated from source obligations — flow count is a synthesis output',
     }),
     {
       // Matching (still a one-shot): one call per (flow, surface with

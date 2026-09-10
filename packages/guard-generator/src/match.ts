@@ -606,3 +606,11 @@ export function partitionPlanPreparations(
   return { plan: steps.length ? { ...plan, steps, interfaces: plan.interfaces.filter(i => steps.some(s => s.interface.id === i.id)) } : null,
     missing: [...missing.values()] }
 }
+
+/** One realization must cover the entire immutable flow before authoring. */
+export function completeRealization(flow: GuardFlow, plan: RealizationPlan): boolean {
+  return flow.milestones.every(m => (!m.proofDrivers || m.proofDrivers.includes(plan.surface)) &&
+    (m.verification?.cases?.length
+      ? m.verification.cases.every(c => plan.steps.some(s => s.milestone === m.order && s.checks?.includes(c.id)))
+      : plan.steps.some(s => s.milestone === m.order)))
+}

@@ -9,7 +9,7 @@
  * product should do, derived from the spec corpus alone.
  *
  * Identity is deliberately NOT the title (model-authored, unstable across
- * re-synthesis): a flow keeps its `id` through re-synthesis by MILESTONE OVERLAP —
+ * re-synthesis): a flow keeps its `id` through re-synthesis by its complete source obligations —
  * see {@link resolveFlowIdentity}. {@link flowFingerprint} hashes the ordered
  * milestone composition, mirroring the section fingerprint's normalize-then-sha256
  * rule so re-wrapped prose never moves it.
@@ -36,6 +36,8 @@ export const GuardFlowMilestoneSchema = z
     anchor: z.string().min(1),
     /** The extracted claim's stable text. */
     claimTitle: z.string().min(1),
+    /** Selected authoritative cases; omission reads the whole legacy claim. */
+    caseIds: z.array(z.string().min(1)).min(1).optional(),
     /** Each listed driver can prove this entire milestone independently. Absent on legacy flows. */
     proofDrivers: z.array(GuardDriverIdSchema).min(1).optional(),
     verification: GuardVerificationSchema.optional(),
@@ -146,6 +148,8 @@ export const GuardNoFlowClaimSchema = z
     doc: z.string().min(1),
     anchor: z.string().min(1),
     claimTitle: z.string().min(1),
+    /** Selected authoritative cases; omission reads the whole legacy claim. */
+    caseIds: z.array(z.string().min(1)).min(1).optional(),
     reason: z.string().min(1),
   })
   .strict()
@@ -388,13 +392,13 @@ function normalizeMilestoneText(text: string): string {
 }
 
 /**
- * A milestone's identity: its section anchor plus its claim text, normalized. The
+ * A milestone's identity: document, source claim and canonical selected cases. The
  * ONE key {@link flowFingerprint} hashes and {@link resolveFlowIdentity} compares,
  * so the fingerprint and the identity resolution can never disagree about what
  * makes two milestones "the same".
  */
-export function flowMilestoneKey(milestone: Pick<GuardFlowMilestone, 'anchor' | 'claimTitle'>): string {
-  return `${normalizeMilestoneText(milestone.anchor)}\u0000${normalizeMilestoneText(milestone.claimTitle)}`
+export function flowMilestoneKey(milestone: Pick<GuardFlowMilestone, 'anchor' | 'claimTitle'> & Partial<Pick<GuardFlowMilestone, 'doc' | 'caseIds' | 'verification'>>): string {
+  return `${milestone.doc ?? ''}\0${normalizeMilestoneText(milestone.anchor)}\0${normalizeMilestoneText(milestone.claimTitle)}\0${[...(milestone.caseIds ?? milestone.verification?.cases?.map(c => c.id) ?? [])].sort().join('\0')}`
 }
 
 /**
@@ -403,29 +407,29 @@ export function flowMilestoneKey(milestone: Pick<GuardFlowMilestone, 'anchor' | 
  * incidental order never matters but re-sequencing the path does — a flow's
  * fingerprint answers "did the composition of what this flow tests change?".
  */
+function canonicalProofValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalProofValue)
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => [key, canonicalProofValue(child)]))
+  return value
+}
+
 export function flowFingerprint(milestones: readonly GuardFlowMilestone[]): string {
   const ordered = [...milestones].sort((a, b) => a.order - b.order)
   const digest = crypto
     .createHash('sha256')
-    .update(ordered.map((m) => flowMilestoneKey(m) + (m.proofDrivers ? `\0${[...new Set(m.proofDrivers)].sort().join(',')}` : '') + (m.verification ? `\0verification:${JSON.stringify(m.verification)}` : '')).join('\n'), 'utf-8')
+    .update(ordered.map((m) => flowMilestoneKey(m) + (m.proofDrivers ? `\0${[...new Set(m.proofDrivers)].sort().join(',')}` : '') + (m.verification ? `\0verification:${JSON.stringify(canonicalProofValue({ ...m.verification, ...(m.verification.cases ? { cases: [...m.verification.cases].sort((a, b) => a.id.localeCompare(b.id)) } : {}) }))}` : '')).join('\n'), 'utf-8')
     .digest('hex')
   return `sha256:${digest}`
 }
 
-/**
- * The milestone-overlap share above which a re-synthesized flow inherits a prior
- * flow's id (STALE in place). Measured against the LARGER of the two milestone
- * sets, so a one-milestone flow can never claim a ten-milestone predecessor.
- */
+/** @deprecated Compatibility export; current identity never inherits by partial overlap. */
 export const FLOW_IDENTITY_OVERLAP_THRESHOLD = 0.5
 
 /**
  * What happens to one re-synthesized flow's identity:
  *  - `remap` — its milestone multiset is identical to a prior flow's; it keeps that
  *    flow's `id` (and takes the new title).
- *  - `stale` — it overlaps a prior flow past {@link FLOW_IDENTITY_OVERLAP_THRESHOLD}
- *    with no equally-good rival; it keeps that flow's `id` and its scenarios
- *    re-author.
+ *  - `stale` — legacy serialized verdict, retained for reader compatibility.
  *  - `new` — nothing prior claims it; it keeps the id it came in with.
  */
 export interface GuardFlowIdentityVerdict {
@@ -442,84 +446,21 @@ export interface GuardFlowIdentityResolution {
   orphaned: GuardFlow[]
 }
 
-/** Milestone key → how many times the flow contains it. */
-function milestoneCounts(flow: Pick<GuardFlow, 'milestones'>): Map<string, number> {
-  const counts = new Map<string, number>()
-  for (const m of flow.milestones) counts.set(flowMilestoneKey(m), (counts.get(flowMilestoneKey(m)) ?? 0) + 1)
-  return counts
-}
-
-function multisetSize(counts: ReadonlyMap<string, number>): number {
-  let n = 0
-  for (const c of counts.values()) n += c
-  return n
-}
-
-/** Shared milestones between two multisets (min count per key). */
-function sharedMilestones(a: ReadonlyMap<string, number>, b: ReadonlyMap<string, number>): number {
-  let shared = 0
-  for (const [key, count] of a) shared += Math.min(count, b.get(key) ?? 0)
-  return shared
-}
-
-/**
- * Resolve re-synthesized flows against the committed ones BY MILESTONE OVERLAP,
- * never by title — titles are model-authored and reword on every re-synthesis, so
- * title identity would churn scenarios and orphan dismissals for free.
- *
- * Two passes, each claiming a prior flow at most once: an identical milestone
- * multiset remaps first (exact identity wins over any partial match); the rest take
- * their best remaining candidate when it clears
- * {@link FLOW_IDENTITY_OVERLAP_THRESHOLD} and is strictly better than the
- * runner-up (an ambiguous tie is a NEW flow, never a coin flip). Prior flows left
- * unclaimed come back as `orphaned`.
- */
+/** Preserve only one unambiguous identical complete behavior. Splits get new IDs. */
 export function resolveFlowIdentity(
   prev: readonly GuardFlow[],
   next: readonly GuardFlow[],
 ): GuardFlowIdentityResolution {
-  const prevCounts = prev.map(milestoneCounts)
-  const nextCounts = next.map(milestoneCounts)
   const claimedPrev = new Set<number>()
-  const verdicts: GuardFlowIdentityVerdict[] = next.map((flow) => ({ kind: 'new', id: flow.id }))
-
-  // Pass 1 — exact milestone multisets remap, in `next` order.
+  const verdicts: GuardFlowIdentityVerdict[] = next.map(flow => ({ kind: 'new', id: flow.id }))
+  const contract = (flow: GuardFlow) => JSON.stringify(canonicalProofValue({ fingerprint: flowFingerprint(flow.milestones), startingState: flow.startingState ?? null }))
   for (let n = 0; n < next.length; n++) {
-    const counts = nextCounts[n]
-    const size = multisetSize(counts)
-    for (let p = 0; p < prev.length; p++) {
-      if (claimedPrev.has(p)) continue
-      if (multisetSize(prevCounts[p]) !== size) continue
-      if (sharedMilestones(counts, prevCounts[p]) !== size) continue
-      claimedPrev.add(p)
-      verdicts[n] = { kind: 'remap', id: prev[p].id }
-      break
-    }
-  }
-
-  // Pass 2 — majority overlap with a UNIQUE best candidate goes stale in place.
-  for (let n = 0; n < next.length; n++) {
-    if (verdicts[n].kind !== 'new') continue
-    const counts = nextCounts[n]
-    let best = -1
-    let bestScore = 0
-    let runnerUpScore = 0
-    for (let p = 0; p < prev.length; p++) {
-      if (claimedPrev.has(p)) continue
-      const shared = sharedMilestones(counts, prevCounts[p])
-      if (shared === 0) continue
-      const score = shared / Math.max(multisetSize(counts), multisetSize(prevCounts[p]))
-      if (score > bestScore) {
-        runnerUpScore = bestScore
-        bestScore = score
-        best = p
-      } else if (score > runnerUpScore) {
-        runnerUpScore = score
-      }
-    }
-    if (best === -1 || bestScore <= FLOW_IDENTITY_OVERLAP_THRESHOLD || bestScore === runnerUpScore) continue
-    claimedPrev.add(best)
-    verdicts[n] = { kind: 'stale', id: prev[best].id }
+    const key = contract(next[n])
+    const matches = prev.flatMap((flow, p) => !claimedPrev.has(p) && contract(flow) === key ? [p] : [])
+    // Ambiguous old identities stay orphaned; a split never inherits a parent by overlap.
+    if (matches.length !== 1 || next.filter(flow => contract(flow) === key).length !== 1) continue
+    claimedPrev.add(matches[0])
+    verdicts[n] = { kind: 'remap', id: prev[matches[0]].id }
   }
 
   return { verdicts, orphaned: prev.filter((_, p) => !claimedPrev.has(p)) }

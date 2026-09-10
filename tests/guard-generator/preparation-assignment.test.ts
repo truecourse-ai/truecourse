@@ -1,9 +1,8 @@
-import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
 import fs from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { readManifest, loadScenarios, manifestPath } from '@truecourse/guard-runner'
-import { GuardGenerateReportSchema, type GuardVerification } from '@truecourse/shared'
+import { readManifest, loadScenarios } from '@truecourse/guard-runner'
+import { type GuardVerification } from '@truecourse/shared'
 import type { WorkerFidelityJudge } from '@truecourse/guard-generator'
 import { acceptedSha, extractSessionBy, flowOfAllSession, flowWorkerSessionOf, makeTempRepo, raw, rmrf,
   runGenerate, scenarioYaml, writeCorpus, writeDoc, writeRecipe } from './helpers'
@@ -38,32 +37,21 @@ function seed(withProfile = false) {
 const options = (repoRoot: string) => ({ repoRoot, extractSession: extractSessionBy({ version: [{ claim: 'Print the selected record and the total of all known records.', verification }] }), flowsAreaSession: flowOfAllSession('Inspect ledger') })
 
 describe('case preparation assignment at generation', () => {
-  it('blocks only the aggregate sibling, permits ordinary proof, and keeps the full flow incomplete', async () => {
+  it('blocks the entire dependent flow when the aggregate preparation is unavailable', async () => {
     const root = seed(); let calls = 0
-    const result = await runGenerate({ ...options(root), flowWorkerSession: flowWorkerSessionOf(async task => {
-      calls++
-      const invalid = await task.submitScenario(selected(['record', 'total']), [], judge)
-      expect(invalid.isError).toBe(true)
-      expect(invalid.content).toContain('outside this worker assignment')
-      const accepted = await task.submitScenario(selected(['record']), [], judge)
-      const sha = acceptedSha(accepted)!
-      expect(sha, accepted.content).toBeTruthy()
-      expect(task.validateOutcome({ kind: 'settled', scenarioYamlSha: sha, expectedReds: [] })).toBeUndefined()
-      return { kind: 'outcome', outcome: { kind: 'settled', scenarioYamlSha: sha, expectedReds: [] } }
+    const result = await runGenerate({ ...options(root), flowWorkerSession: flowWorkerSessionOf(async () => {
+      calls++; return { kind: 'failed', reason: 'Must never author a prefix' }
     }) })
-    expect(calls).toBe(1)
-    expect(result.written).toHaveLength(1)
+    expect(calls).toBe(0)
+    expect(result.written).toHaveLength(0)
     const entry = readManifest(root)!.flows[0]
-    expect(entry.scenarios[0].caseEvidence?.map(e => e.caseId)).toEqual(['record'])
-    expect(entry.generationInputsHash).toBeNull()
+    expect(entry.scenarios).toHaveLength(0)
     expect(entry.gaps.some(g => g.obligations?.some(o => o.caseId === 'total') && g.blocker?.kind === 'configuration')).toBe(true)
-    const report = GuardGenerateReportSchema.parse({ ...result, generatedAt: '2026-09-09T00:00:00Z' })
-    expect(report.coverageGaps.some(g => g.milestones?.includes(1) && g.obligations?.some(o => o.caseId === 'total'))).toBe(true)
   })
   it('requires the assigned preparation profile before executing or reviewing aggregate proof', async () => {
     const root = seed(true); const review = vi.fn(judge)
     await runGenerate({ ...options(root), flowWorkerSession: flowWorkerSessionOf(async task => {
-      const invalid = await task.submitScenario(selected(['total']), [], review)
+      const invalid = await task.submitScenario(selected(['record','total']), [], review)
       expect(invalid.isError).toBe(true)
       expect(invalid.content).toContain('requires setup.preparation')
       expect(review).not.toHaveBeenCalled()
@@ -74,39 +62,59 @@ describe('case preparation assignment at generation', () => {
 })
 
 
-it('retains prior YAML but revokes proof when its selected private profile disappears', async () => {
+it('retains a legacy partial file when setup disappears but never restores its proof', async () => {
   const root = seed(true)
-  await runGenerate({ ...options(root), flowWorkerSession: flowWorkerSessionOf(async task => {
-    const accepted = await task.submitScenario(selected(['record']), [], judge)
-    expect(acceptedSha(accepted), accepted.content).toBeTruthy()
-    return { kind: 'failed', reason: 'Stopped after preserving ordinary proof' }
+  const initial = { ...options(root), extractSession: extractSessionBy({ version: [{ claim: 'Print the selected record and the total of all known records.', verification: { ...verification, cases: [verification.cases![0]] } }] }) }
+  await runGenerate({ ...initial, flowWorkerSession: flowWorkerSessionOf(async task => {
+    const report = await task.submitScenario(selected(['record']), [], judge)
+    return { kind: 'outcome', outcome: { kind: 'settled', scenarioYamlSha: acceptedSha(report)!, expectedReds: [] } }
   }) })
-  // Model a previously reviewed aggregate scenario. Its flow, source binding and
-  // exact review fingerprint remain current; only its preparation disappears.
-  const scenario = loadScenarios(root).scenarios[0]
-  scenario.setup = { preparation: 'known' }
-  scenario.steps[0].checks = ['total']
-  if ('run' in scenario.steps[0]) scenario.steps[0].expect = { stdout: { contains: 'total' } }
-  const manifest = readManifest(root)!
-  const record = manifest.flows[0].scenarios[0]
-  record.caseEvidence = [{ milestone: 1, caseId: 'total', steps: [1], reason: 'Independent aggregate assertion' }]
-  record.milestoneCoverage = [{ milestone: 1, driver: 'cli', checks: ['total'] }]
-  record.reviewedScenarioFingerprint = scenarioReviewFingerprint(scenario)
-  const directory = path.join(root, '.truecourse/scenarios')
-  const file = fs.readdirSync(directory, { recursive: true }).find(f => String(f).endsWith(`${scenario.id}.yaml`))!
-  fs.writeFileSync(path.join(directory, String(file)), JSON.stringify(scenario))
-  fs.writeFileSync(manifestPath(root), JSON.stringify(manifest))
-  const recipeFile = path.join(directory, 'recipe.json')
+  const before = loadScenarios(root).scenarios[0]
+  const recipeFile = path.join(root, '.truecourse/scenarios/recipe.json')
+  const recipe = JSON.parse(fs.readFileSync(recipeFile, 'utf8')); delete recipe.preparations
+  fs.writeFileSync(recipeFile, JSON.stringify(recipe))
+  await runGenerate({ ...options(root), flowWorkerSession: flowWorkerSessionOf(async () => { throw Error('Incomplete flow must not author') }) })
+  expect(loadScenarios(root).scenarios.find(s => s.id === before.id)).toEqual(before)
+  const current = readManifest(root)!.flows.find(f => !f.orphaned)!
+  expect(current.scenarios).toHaveLength(0)
+  expect(current.gaps.some(g => g.blocker?.kind === 'configuration')).toBe(true)
+})
+
+it('retains the same complete scenario but revokes its proof when only its preparation profile disappears', async () => {
+  const root = seed(true)
+  fs.cpSync(path.resolve('tests/fixtures/guard-preparation'), path.join(root, 'scripts'), { recursive: true })
+  const recipeFile = path.join(root, '.truecourse/scenarios/recipe.json')
   const recipe = JSON.parse(fs.readFileSync(recipeFile, 'utf8'))
+  recipe.api = { serve: ['node', 'scripts/server.mjs'], healthPath: '/health' }
+  recipe.preparations.known = {
+    baseline: 'seeded', scope: 'instance', env: { DATA_FILE: '${directory}/ledger.json' },
+    baselineChecks: [{ path: '/rows', credential: 'owner', counts: { count: 8 }, totals: { total: 36 } }],
+    seed: { script: 'scripts/seed.mjs', provides: { credentials: { owner: { header: 'x-world-token' } }, fixtures: { inputs: ['count', 'total', 'rows'] } } },
+    verify: { script: 'scripts/verify.mjs' }, cleanup: { script: 'scripts/cleanup.mjs' },
+  }
+  fs.writeFileSync(recipeFile, JSON.stringify(recipe))
+  const complete = scenarioYaml(raw('Inspect the ledger', ['record', 'total'].map(id => ({
+    run: ['--version'], milestone: 1, checks: [id], expect: { stdout: { contains: id } },
+  })), { setup: { preparation: 'known' } }))
+  await runGenerate({ ...options(root), flowWorkerSession: flowWorkerSessionOf(async task => {
+    const report = await task.submitScenario(complete, [], judge)
+    expect(report.isError, report.content).not.toBe(true)
+    return { kind: 'outcome', outcome: { kind: 'settled', scenarioYamlSha: acceptedSha(report)!, expectedReds: [] } }
+  }) })
+  const before = readManifest(root)!.flows[0]
+  expect(before.scenarios[0].caseEvidence).toHaveLength(2)
+  const scenario = loadScenarios(root).scenarios[0]
   delete recipe.preparations
   fs.writeFileSync(recipeFile, JSON.stringify(recipe))
-  await runGenerate({ ...options(root), flowWorkerSession: flowWorkerSessionOf(async task => {
-    expect(task.prior?.scenarios).toHaveLength(1)
-    return { kind: 'failed', reason: 'Missing profile must be repaired by setup' }
+  await runGenerate({ ...options(root), flowWorkerSession: flowWorkerSessionOf(async () => {
+    throw Error('A flow without its required preparation must not author')
   }) })
-  const retained = readManifest(root)!.flows[0]
+  const retained = readManifest(root)!.flows.find(f => f.flowId === before.flowId)!
+  expect(retained.orphaned).not.toBe(true)
   expect(retained.scenarios).toHaveLength(1)
   expect(retained.scenarios[0].milestoneCoverage).toBeUndefined()
+  expect(retained.scenarios[0].caseEvidence).toBeUndefined()
   expect(retained.generationInputsHash).toBeNull()
-  expect(loadScenarios(root).scenarios[0].setup?.preparation).toBe('known')
+  expect(retained.gaps.some(g => g.blocker?.kind === 'configuration')).toBe(true)
+  expect(loadScenarios(root).scenarios.find(s => s.id === scenario.id)).toEqual(scenario)
 })

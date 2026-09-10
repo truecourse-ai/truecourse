@@ -1,5 +1,5 @@
 import { withGuardReadTree } from '../lib/guard-read-tree.js'
-import { GUARD_REVIEW_POLICY_VERSION, caseEvidenceDefect, type GuardFlowProgress } from '@truecourse/shared'
+import { GUARD_REVIEW_POLICY_VERSION, scenarioFullFlowDefect, type GuardFlowProgress } from '@truecourse/shared'
 import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
 /**
  * Read-surface drivers for the guard dashboard — the guard analogue of the verify
@@ -679,7 +679,7 @@ function flowSurfaces(flowId: string, join: FlowJoin): GuardFlowSurface[] {
       : entry?.flowFingerprint === fingerprint
     // Retained stale scenarios and unreviewed candidates remain visible, but
     // cannot discharge new or unaudited obligations.
-    const casesReviewed = !milestones.some(m => m.verification?.cases) || !!(scenario && recorded?.reviewPolicyVersion === GUARD_REVIEW_POLICY_VERSION && recorded?.caseEvidence && recorded.reviewedScenarioFingerprint === scenarioReviewFingerprint(scenario) && !caseEvidenceDefect(milestones, scenario.steps, recorded.caseEvidence))
+    const casesReviewed = !milestones.some(m => m.verification?.cases) || !!(scenario && recorded?.reviewPolicyVersion === GUARD_REVIEW_POLICY_VERSION && recorded?.caseEvidence && recorded.reviewedScenarioFingerprint === scenarioReviewFingerprint(scenario) && !scenarioFullFlowDefect(milestones, scenario.steps, recorded.caseEvidence))
     const proof = current && recorded?.reviewed !== false && casesReviewed
       ? (scenario ? scenarioMilestoneProof(scenario.steps) : recorded?.milestoneCoverage ?? []) : []
     const complete = coversFlowMilestones(milestones, proof)
@@ -687,14 +687,9 @@ function flowSurfaces(flowId: string, join: FlowJoin): GuardFlowSurface[] {
       row.coverageComplete = complete
       if (row.status === 'guarded' && !join.birthStatusByScenario.has(row.scenarioId!)) row.status = 'never-run'
     }
-    if (row.status === 'pass' || row.status === 'guarded') passingProof.push(...proof)
+    if (complete === true && (row.status === 'pass' || row.status === 'guarded')) passingProof.push(...proof)
   }
   const proven = coversFlowMilestones(milestones, passingProof) === true
-  // Coverage is the union of independently reviewed scenarios. No individual
-  // scenario is claimed to replay the whole flow; failures still win the rollup.
-  if (proven) for (const row of surfaces) {
-    if (row.status === 'pass' || row.status === 'guarded') row.coverageComplete = true
-  }
   const gaps = entry ? entry.gaps : (join.reportGapsByFlow.get(flowId) ?? [])
   for (const gap of gaps) {
     const refs: GuardFlowGap['obligations'] = gap.obligations ?? ('milestones' in gap ? gap.milestones?.map(milestone => ({ milestone })) : undefined)
@@ -932,7 +927,7 @@ function sectionClaimGaps(
     const claim = claimByIdentity.get(claimIdentityKey(doc, anchor, c.claimTitle))
     return {
       ...(claim ? { claimId: claim.id } : {}),
-      title: c.claimTitle,
+      title: c.caseIds && claim?.verification?.cases ? claim.verification.cases.filter(v => c.caseIds!.includes(v.id)).map(v => v.claim).join('; ') : c.claimTitle,
       reason: c.reason,
     }
   })
@@ -1399,8 +1394,8 @@ function flowProgress(flowId: string, view: FlowViewSources, surfaces: GuardFlow
     const scenario = join.scenarioById.get(row.scenarioId!)
     if (record?.reviewed === false || !scenario || scenario.flow?.fingerprint !== (flow?.fingerprint ?? entry?.flowFingerprint)) continue
     if (!(flow?.bindings ?? entry?.bindings ?? []).every(b => scenario.binds.some(s => s.doc === b.doc && s.section === b.anchor && s.fingerprint === b.fingerprint))) continue
-    if (milestones.some(m => m.verification?.cases) && (record?.reviewPolicyVersion !== GUARD_REVIEW_POLICY_VERSION || !record?.caseEvidence || record.reviewedScenarioFingerprint !== scenarioReviewFingerprint(scenario) || caseEvidenceDefect(milestones, scenario.steps, record.caseEvidence))) continue
-    proof.push(...scenarioMilestoneProof(scenario.steps))
+    if (milestones.some(m => m.verification?.cases) && (record?.reviewPolicyVersion !== GUARD_REVIEW_POLICY_VERSION || !record?.caseEvidence || record.reviewedScenarioFingerprint !== scenarioReviewFingerprint(scenario) || scenarioFullFlowDefect(milestones, scenario.steps, record.caseEvidence))) continue
+    if (!scenarioFullFlowDefect(milestones, scenario.steps)) proof.push(...scenarioMilestoneProof(scenario.steps))
   }
   const cases = milestones.length > 0 && milestones.every(m => m.verification?.cases?.length)
   let total = 0, verified = 0
@@ -1553,7 +1548,7 @@ export async function readGuardFlowDetail(
         order: m.order,
         doc: m.doc,
         anchor: m.anchor,
-        claimTitle: m.claimTitle,
+        claimTitle: m.caseIds && m.verification?.cases ? m.verification.cases.map(c => c.claim).join('; ') : m.claimTitle,
         ...(m.note ? { note: m.note } : {}),
         ...(live ? { headingText: live.headingText } : {}),
         live: live != null,

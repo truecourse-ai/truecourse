@@ -429,6 +429,7 @@ export {
 export {
   buildServerRouteIndex,
   bindFlowServer,
+  bindRealizationServer,
   documentedApiPaths,
   missingServerBlockedOn,
   multiServerBlockedOn,
@@ -454,4 +455,6 @@ export type { ApiAuthEvidence, RequiredResource } from './seed-evidence.js'
 
 export type { GuardSetupPreparationSession, GuardSetupPreparationSessionInput } from './setup.js'
 
-export { bindClaimPrerequisites, partitionFlowPrerequisites, flowPrerequisiteStateMaterial } from './prerequisites.js'
+export { bindClaimPrerequisites, partitionFlowPrerequisites, flowPrerequisiteStateMaterial, flowInvocationGaps } from './prerequisites.js'
+
+export { completeRealization } from './match.js'

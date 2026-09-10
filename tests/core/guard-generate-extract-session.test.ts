@@ -113,11 +113,29 @@ function claim(sectionAnchor: string, over: Partial<ExtractOutcome['claims'][num
     driver: 'cli',
     sectionAnchor,
     reason: 'stdout carries the new id',
-    verification: { method: 'behavior', scope: 'configuration', observable: 'stdout carries the new id', cases: [{ id: 'created-id', claim: 'Print the created task id', method: 'behavior', requires: ['process'], conditions: [] }] },
+    verification: { method: 'behavior', scope: 'configuration', observable: 'stdout carries the new id', cases: [{ id: 'created-id', claim: 'Print the created task id', method: 'behavior', requires: ['process'], conditions: [], prerequisites: [] }] },
     needs: [],
     ...over,
   }
 }
+
+it('requires case-level account scope in both draft checks and the final extraction outcome', () => {
+  const doc = docsOf(docRepo())[0]
+  const draft = { claims: [claim(CREATING, { needs: [{ kind: 'credential' as const, name: 'provider-key' }] })], untestable: [] }
+  delete draft.claims[0].verification!.cases![0].prerequisites
+  expect(validateExtractDraft(draft, doc)).toEqual(expect.arrayContaining([expect.stringContaining('Declare case-specific prerequisites')]))
+  const def = extractSessionDef({ doc, universe: buildGuardDocUniverse([doc]) })
+  expect(def.outcomeSchema.safeParse(draft).success).toBe(false)
+  draft.claims[0].verification!.cases![0].prerequisites = []
+  expect(validateExtractDraft(draft, doc)).toEqual([])
+  expect(def.outcomeSchema.safeParse(draft).success).toBe(true)
+})
+
+it('separates real-provider contracts from controlled response and synthetic-key tests in extraction', () => {
+  expect(EXTRACT_SESSION_SYSTEM_PROMPT).toContain('Do not require registration before fault control')
+  expect(EXTRACT_SESSION_SYSTEM_PROMPT).toContain('A fixture key used with an isolated controlled provider is test input, not a supplied account')
+  expect(EXTRACT_SESSION_SYSTEM_PROMPT).toContain('Only external accounts belong in prerequisites')
+})
 
 /** Call a session tool the way a driver does — the tool-result event is what
  *  the shell's outcome precondition reads off the transcript. */
@@ -581,7 +599,7 @@ describe('generateGuards — what extraction feeds downstream', () => {
       ),
       flowsAreaSession: flowsAreaSessionOf((area) => {
         seen.push(...area.claims)
-        return { flows: [], noFlowClaims: area.claims.map((c) => ({ doc: c.doc, anchor: c.anchor, claimTitle: c.title, reason: 'not composed here' })) }
+        return { flows: [], noFlowClaims: area.claims.map((c) => ({ doc: c.doc, anchor: c.anchor, claimTitle: c.title, ...(c.verification?.cases ? { caseIds: c.verification.cases.map(v => v.id) } : {}), reason: 'not composed here' })) }
       }),
       flowsEpicSession: noEpicSessions,
       flowWorkerSession: noWorkerSessions,

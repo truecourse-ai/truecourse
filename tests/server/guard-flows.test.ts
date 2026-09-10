@@ -381,12 +381,12 @@ describe('Guard flow read surfaces', () => {
     const manifest = { flows: [{ flowId: 'case-flow', flowFingerprint: 'sha256:cases', milestones, bindings, scenarios: [{ id: 'case-test', drivers: ['web'], status: 'passing', reviewed: true, caseEvidence: evidence, reviewPolicyVersion: GUARD_REVIEW_POLICY_VERSION, reviewedScenarioFingerprint: scenarioReviewFingerprint(GuardScenarioSchema.parse(scenario)), milestoneCoverage: [{ milestone: 1, driver: 'web', checks: ['create'] }] }], gaps: [{ surface: 'web', kind: 'blocked-on', milestones: [1], obligations: [{ milestone: 1, caseId: 'reload' }], reason: 'Milestone 1: reload is not verified', blocker: { kind: 'generation' } }, { surface: 'web', kind: 'no-interface', milestones: [1], obligations: [{ milestone: 1, caseId: 'create' }], reason: 'Historical missing create action', blocker: { kind: 'generation' } }] }] };
     writeJson('.truecourse/scenarios/manifest.json', manifest);
     const response = await request(app).get(url('flows')).expect(200);
-    expect(response.body.flows.find((f: any) => f.flowId === 'case-flow').progress).toEqual({ execution: 'passed', scenarios: 1, passed: 1, coverage: 'partial', verified: 1, total: 2, unit: 'cases', category: 'behavior', generation: 'incomplete' });
+    expect(response.body.flows.find((f: any) => f.flowId === 'case-flow').progress).toEqual({ execution: 'passed', scenarios: 1, passed: 1, coverage: 'unverified', verified: 0, total: 2, unit: 'cases', category: 'behavior', generation: 'incomplete' });
     const detail = await request(app).get(url('flows/case-flow')).expect(200);
     expect(detail.body.progress).toEqual(response.body.flows[0].progress);
     const gapSurfaces = response.body.flows[0].surfaces.filter((s: any) => s.gap);
     expect(gapSurfaces.find((s: any) => s.gap.obligations[0].caseId === 'reload').coveredByAlternative).toBeUndefined();
-    expect(gapSurfaces.find((s: any) => s.gap.obligations[0].caseId === 'create').coveredByAlternative).toBe(true);
+    expect(gapSurfaces.find((s: any) => s.gap.obligations[0].caseId === 'create').coveredByAlternative).toBeUndefined();
     expect(detail.body.gaps.find((g: any) => g.obligations[0].caseId === 'reload')).toMatchObject({ milestones: [1], obligations: [{ milestone: 1, caseId: 'reload' }] });
     manifest.flows[0].scenarios[0].reviewPolicyVersion = GUARD_REVIEW_POLICY_VERSION - 1;
     writeJson('.truecourse/scenarios/manifest.json', manifest);

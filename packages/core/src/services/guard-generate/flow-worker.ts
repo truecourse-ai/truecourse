@@ -93,30 +93,18 @@ NOT answer with one JSON object. You work a LOOP against the real program:
      fix it instead of declaring it.
 4. On acceptance the engine stashes your yaml under a sha and tells you so.
 
-# Case evidence
-For milestones with explicit cases, put checks: ["case-id"] on each step whose
-expectation actually asserts that case. Select any independently verifiable subset;
-never tag a setup step or claim all cases just because a request passed. The engine
-and a separate reviewer validate the exact case-to-assertion mapping. Untested
-cases remain uncovered. Give this candidate a title describing only its selected
-cases; its promise is derived by the engine from those cases.
-When a failure needs request-control that is unavailable, name that capability.
-Do not demand a real database failure to prove a browser's error rendering.
-
-# Independently verified portions
-You may submit multiple scenarios for distinct, independently verifiable portions
-of this flow. Tag only the milestones each scenario actually asserts; leave setup
-steps untagged. Every tagged milestone needs an assertion with an accepted driver.
-Keep each scenario a meaningful path and title it for its actual scope. Reproduce
-all prerequisite state through supported setup/actions; never sever a dependent
-chain or claim an omitted milestone was proven. The fidelity judge reviews the
-selected obligations and their prerequisites. Submit useful portions before
-attempting requirements needing unavailable inspection or failure fixtures.
-Accepted portions remain saved even if you later finish blocked or retired. Report
-remaining blockers by milestone and case ID. One passing portion does not complete the flow. After every acceptance the engine
-returns the exact outstanding cases. Continue until all assigned cases are accounted
-for. Removing a rejected case from a candidate does not remove that obligation.
-A settled outcome with outstanding cases is refused under the same session budget.
+# One complete test per flow
+Submit one candidate that proves EVERY flow milestone and EVERY selected source case.
+Put checks: ["case-id"] only on the assertion steps that prove that case; preparation
+steps may remain untagged. Reproduce all required starting state in this test.
+Never sever a dependent transition or narrow the promise to make a prefix pass.
+Partial probes are observations only. A later submission revises the same complete
+test; it does not add another test beneath this flow. Independent behaviors belong
+in separately synthesized flows. If any obligation cannot be proved, report its
+concrete blocker. A separate reviewer validates the whole immutable flow contract.
+Unavailable request control is a capability gap, not a demand for live credentials.
+A complete reviewed candidate survives a later transport failure; partial candidates
+are never accepted or published, even when their union would cover every case.
 
 # Repair assertions without losing requirements
 A locator failure is not an unavailable capability. Use the mapped target and the
@@ -151,7 +139,7 @@ do not reclassify an assertion defect as unavailable preparation. A stale aggreg
 failure does not explain a later Cancel rejection. Before retiring actionable work,
 submit a changed executable candidate for every case the engine asks you to repair,
 within the SAME budget. Rewording remaining rows or resubmitting identical behavior
-does not count. Submit independently valid portions and preserve accepted work.
+does not count. Submit one complete revised candidate and preserve every flow obligation.
 For Cancel, arrange a fully valid unsaved form including ALL required inputs, verify
 the dialog is visible, cancel, verify closure and that this draft was not saved.
 A required Amount left blank cannot prove Cancel prevented a save.
@@ -162,7 +150,6 @@ Only that profile's fixtures and credentials exist in the private world.
 Produce exactly one of these objects (nothing else ends the session):
 - { "kind": "settled", "scenarioYamlSha": "<the sha the acceptance named, verbatim>",
     "expectedReds": [ ...exactly what you submitted, [] on a green ],
-    "additionalScenarios": [ { "scenarioYamlSha", "expectedReds" } … ]   — ONLY when you had several accepted; omit otherwise,
     "droppedScenarios": [ { "id", "reason" } … ]   — ONLY the drop_scenario calls the engine accepted; omit otherwise }
 - { "kind": "blocked", "perMilestone": [ { "order": <milestone>, "capability": "<what the sandbox cannot provide>" } ] }
   — when the flow needs world-state or a third party the sandbox cannot offer.

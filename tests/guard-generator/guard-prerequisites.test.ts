@@ -3,6 +3,7 @@ import {
   bindClaimPrerequisites,
   bindScenarioPrerequisites,
   scenarioCasePrerequisiteProblems,
+  partitionFlowPrerequisites,
 } from '../../packages/guard-generator/src/prerequisites.js'
 import type { GuardFlow, GuardScenario, GuardVerification } from '@truecourse/shared'
 const targets = [
@@ -19,7 +20,11 @@ const verification: GuardVerification = {
   scope: 'web',
   observable: 'converts and clears',
   cases: [
-    { id: 'success', claim: 'conversion succeeds', method: 'behavior', requires: ['browser'], conditions: [] },
+    { id: 'success', claim: 'conversion succeeds', method: 'behavior', requires: ['browser'], conditions: [],
+      prerequisites: [
+        { dependency: 'currencybeacon-api-key', mode: 'provided' },
+        { dependency: 'currencybeacon-service', mode: 'provided' },
+      ] },
     {
       id: 'missing-key',
       claim: 'key missing',
@@ -76,6 +81,36 @@ function scenario(check: string): GuardScenario {
   }
 }
 describe('generation prerequisite retention', () => {
+  it('does not spread a claim-wide account need to cases that did not declare it', () => {
+    const mixed = structuredClone(verification)
+    mixed.cases!.push({ id: 'legacy-independent', claim: 'Read the expense', method: 'behavior', requires: ['browser'], conditions: [] })
+    const bound = bindClaimPrerequisites(mixed, needs, targets)!
+    expect(bound.cases!.find(c => c.id === 'legacy-independent')!.prerequisites).toEqual([])
+    expect(bound.cases!.find(c => c.id === 'success')!.prerequisites).toHaveLength(2)
+  })
+  it('reports controlled-response capability gaps without inventing an account requirement', () => {
+    const mixed = flow()
+    mixed.milestones[0].verification!.cases!.push({
+      id: 'controlled-error', claim: 'A controlled provider error is displayed', method: 'behavior',
+      requires: ['browser', 'request-control'], conditions: ['request-failure'], prerequisites: [],
+    })
+    const partition = partitionFlowPrerequisites(mixed, 'web', targets, { build: 'true', entry: ['node'] })
+    expect(partition.flow.milestones[0].verification!.cases!.map(c => c.id)).toEqual(['missing-key', 'crud'])
+    const controlled = partition.gaps.filter(g => g.obligations?.some(o => o.caseId === 'controlled-error'))
+    expect(controlled).toHaveLength(1)
+    expect(controlled[0].blocker).toEqual({ kind: 'unsupported-capability', capabilities: ['request-control'] })
+    expect(partition.gaps.find(g => g.obligations?.some(o => o.caseId === 'success'))!.blocker?.dependencies).toEqual(['currencybeacon'])
+  })
+  it('keeps a missing capability visible even when the same case requires a live account', () => {
+    const mixed = flow()
+    mixed.milestones[0].verification!.cases![0].requires.push('request-control')
+    const partition = partitionFlowPrerequisites(mixed, 'web', targets, { build: 'true', entry: ['node'] })
+    const blocked = partition.gaps.filter(g => g.obligations?.some(o => o.caseId === 'success'))
+    expect(blocked.map(g => g.blocker?.kind)).toEqual(['unsupported-capability', 'configuration'])
+    const registered = partitionFlowPrerequisites(mixed, 'web', [{ ...targets[0], state: 'provided' }], { build: 'true', entry: ['node'] })
+    expect(registered.gaps.filter(g => g.obligations?.some(o => o.caseId === 'success')).map(g => g.blocker?.kind)).toEqual(['unsupported-capability'])
+    expect(registered.flow.milestones[0].verification!.cases!.map(c => c.id)).not.toContain('success')
+  })
   it('retains both incident aliases through case binding even if YAML needs is omitted', () => {
     const bound = bindScenarioPrerequisites(flow(), scenario('success'), targets)
     expect(bound.needs).toEqual(['currencybeacon'])
@@ -105,6 +140,19 @@ describe('generation prerequisite retention', () => {
       'currencybeacon-api-key',
       'currencybeacon-service',
     ])
+  })
+  it.each(['command', 'boot'] as const)('does not accept a %s environment as scenario-wide credential absence', (kind) => {
+    const step = (value: string): GuardScenario['steps'][number] => kind === 'command'
+      ? { run: ['--version'], env: { CURRENCYBEACON_API_KEY: value } }
+      : { boot: { env: { CURRENCYBEACON_API_KEY: value } } }
+    const absent = scenario('missing-key')
+    absent.steps.unshift(step(''))
+    const provided = [{ ...targets[0], state: 'provided' as const }]
+    expect(scenarioCasePrerequisiteProblems(flow(), absent, provided)[0]?.reason).toContain('setup.env')
+    absent.setup = { env: { CURRENCYBEACON_API_KEY: '' } }
+    expect(scenarioCasePrerequisiteProblems(flow(), absent, provided)).toEqual([])
+    absent.steps.unshift(step('restored'))
+    expect(scenarioCasePrerequisiteProblems(flow(), absent, provided)[0]?.reason).toContain('setup.env')
   })
 })
 
@@ -141,7 +189,8 @@ describe('regeneration after account setup', () => {
           method: 'behavior' as const,
           scope: 'configuration' as const,
           observable: 'The version prints',
-          cases: [{ id, claim: id, method: 'behavior' as const, requires: ['process' as const], conditions: [] }],
+          cases: [{ id, claim: id, method: 'behavior' as const, requires: ['process' as const], conditions: [],
+            prerequisites: prerequisites?.map((n) => ({ dependency: n.name, mode: 'provided' as const })) ?? [] }],
         },
         ...(prerequisites ? { needs: prerequisites } : {}),
       })

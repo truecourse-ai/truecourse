@@ -541,6 +541,7 @@ export const SynthesizedMilestoneSchema = z.object({
   doc: z.string().min(1),
   anchor: z.string().min(1),
   claimTitle: z.string().min(1),
+  caseIds: z.array(z.string().min(1)).min(1).optional(),
   order: z.number().int().positive().optional(),
   note: z.string().optional(),
 })
@@ -550,6 +551,8 @@ export type SynthesizedMilestone = z.infer<typeof SynthesizedMilestoneSchema>
 export const SynthesizedFlowSchema = z.object({
   title: z.string().min(1),
   goal: z.string().min(1),
+  notes: z.string().min(1).optional(),
+  startingState: z.object({ stepCreatable: z.array(z.string()), seedable: z.array(z.string()), supplied: z.array(z.string()) }).optional(),
   milestones: z.array(SynthesizedMilestoneSchema).min(1),
 })
 export type SynthesizedFlow = z.infer<typeof SynthesizedFlowSchema>
@@ -560,6 +563,7 @@ export const SynthesizedNoFlowClaimSchema = z.object({
   doc: z.string().min(1),
   anchor: z.string().min(1),
   claimTitle: z.string().min(1),
+  caseIds: z.array(z.string().min(1)).min(1).optional(),
   reason: z.string().min(1),
 })
 export type SynthesizedNoFlowClaim = z.infer<typeof SynthesizedNoFlowClaimSchema>
@@ -607,6 +611,8 @@ export type FlowSet = z.infer<typeof FlowSetSchema>
 export const SynthesizedEpicFlowSchema = z.object({
   title: z.string().min(1),
   goal: z.string().min(1),
+  notes: z.string().min(1).optional(),
+  startingState: z.object({ stepCreatable: z.array(z.string()), seedable: z.array(z.string()), supplied: z.array(z.string()) }).optional(),
   composedOf: z.array(z.string().min(1)).min(2),
   milestones: z.array(SynthesizedMilestoneSchema).min(2),
 })

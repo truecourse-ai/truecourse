@@ -162,12 +162,12 @@ describe('guardGenerateInProcess — adjudication on the session path', () => {
             {
               title: GREEN_FLOW,
               goal: 'read the version off the CLI',
-              milestones: [{ order: 1, doc: DOC, anchor: 'version', claimTitle: CLAIMS.version }],
+              milestones: [{ order: 1, doc: DOC, anchor: 'version', claimTitle: CLAIMS.version, caseIds: ['command-result'] }],
             },
             {
               title: RED_FLOW,
               goal: 'run the boom command to completion',
-              milestones: [{ order: 1, doc: DOC, anchor: 'boom', claimTitle: CLAIMS.boom }],
+              milestones: [{ order: 1, doc: DOC, anchor: 'boom', claimTitle: CLAIMS.boom, caseIds: ['command-result'] }],
             },
           ],
           noFlowClaims: [],

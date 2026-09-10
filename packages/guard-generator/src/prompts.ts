@@ -159,17 +159,17 @@ is seeded to, and the matcher form. When the prose also quotes the example's OUT
 the assertion states that output exactly as quoted. A block nothing runs (a pure
 illustration) constrains nothing.
 
-# Preserve the path within each verified portion
-The flow's milestones are ORDERED, and the state one leaves behind is what the next
-acts on: create a thing, list it, complete it, filter for it. A scenario may verify
-a nonempty subset. Establish its prerequisites and walk the selected path in order
-in a single sandbox. Uncovered milestones remain obligations for other scenarios.
-- Every selected milestone MUST be verified by an assertion, and each such step carries
+# Prove the complete flow in one test
+The flow's milestones are ORDERED and every selected source case is required.
+Establish the starting state and walk the entire dependent path in one sandbox.
+A partial candidate is a probe only; it can never become this flow's test.
+Verify every milestone and every case in this single candidate.
+- Every flow milestone MUST be verified by an assertion, and each such step carries
   \`milestone: <that milestone's number>\`. A step that only prepares the world (seeding,
   a command whose output nothing asserts) carries NO \`milestone\` — it paints neutral.
 - A milestone may take several steps (do it, then observe it): annotate each of them
   with that milestone's number.
-- Never renumber, merge, split, or invent a milestone. A subset retains the given numbers.
+- Never renumber, merge, split, or invent a milestone. Keep the given numbers.
 - When a milestone needs world-state the milestones before it do not produce, declare it
   in \`setup\` — never drop the milestone.
 
@@ -319,17 +319,15 @@ values that documented response shows. You choose only the mechanics: which step
 sends it and the matcher form. A block nothing sends (a pure illustration)
 constrains nothing.
 
-# Preserve the path within each verified portion
-The flow's milestones are ORDERED, and the state one leaves behind is what the next
-acts on: create a resource, list it, update it, filter for it. A scenario may verify
-a nonempty subset. Establish its prerequisites and walk the selected path in order
-against one freshly booted server. Uncovered milestones remain obligations.
-- Every selected milestone MUST be verified by an assertion, and each such step carries
+# Prove the complete flow in one test
+Establish every prerequisite and assert every flow milestone and selected source case
+in one sandbox. Partial probes never become published tests.
+- Every flow milestone MUST be verified by an assertion, and each such step carries
   \`milestone: <that milestone's number>\`. A step that only prepares the world (an
   authenticating call, a seeding request nothing asserts) carries NO \`milestone\`.
 - A milestone may take several steps (do it, then observe it): annotate each of them
   with that milestone's number.
-- Never renumber, merge, split, or invent a milestone. A subset retains the given numbers.
+- Never renumber, merge, split, or invent a milestone. Keep the given numbers.
 - Chain the path with \`capture\` + \`\${var}\` rather than guessing ids between steps.
 
 # Two-sided promises get two-sided tests
@@ -633,17 +631,15 @@ paraphrase and never a reformat; a deliberately-broken example must stay broken.
 the prose also quotes the example's OUTCOME, the assertion states that outcome exactly
 as quoted. A block nothing runs (a pure illustration) constrains nothing.
 
-# Preserve the path within each verified portion
-The flow's milestones are ORDERED, and the state one leaves behind is what the next
-acts on: create a thing, see it listed, open it, change it. A scenario may verify
-a nonempty subset. Establish its prerequisites and walk the selected path in order
-in a single sandbox world. Uncovered milestones remain obligations.
-- Every selected milestone MUST be verified by an assertion, and each such step carries
+# Prove the complete flow in one test
+Establish every prerequisite and assert every flow milestone and selected source case
+in one sandbox. Partial probes never become published tests.
+- Every flow milestone MUST be verified by an assertion, and each such step carries
   \`milestone: <that milestone's number>\`. A step that only prepares the world (a
   login, a seeding action nothing asserts) carries NO \`milestone\`.
 - A milestone may take several steps (act, then observe): annotate each of them
   with that milestone's number.
-- Never renumber, merge, split, or invent a milestone. A subset retains the given numbers.
+- Never renumber, merge, split, or invent a milestone. Keep the given numbers.
 - When a milestone needs world-state the milestones before it do not produce, declare
   it in \`setup\` or seed it with a plumbing step — never drop the milestone.
 
@@ -1726,7 +1722,7 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       '  4. `drop_scenario` ONLY when the obligation a prior scenario asserted is GONE',
       '     from the current text; the reason must name that obligation. Never drop a',
       '     scenario you merely chose to rewrite — replace it.',
-      '  5. Each submitted scenario must verify its selected milestones completely and establish their prerequisites.',
+      '  5. The submitted scenario must verify all flow milestones and selected cases completely and establish their prerequisites.',
     )
     for (const p of ctx.priorScenarios) lines.push('', `--- prior scenario ${p.id}`, p.yaml)
   }
@@ -2422,12 +2418,12 @@ how much else it checks. Judge only what the milestones claim — a scenario is 
 flagged for failing to test something no milestone states.
 
 # Scope and verification evidence
-The listed milestones are the scenario's selected obligations. Section text is
+The listed milestones are the flow's immutable complete obligations. Require this one candidate to prove every milestone and case; do not accept a subset or a union of tests. Section text is
 context, not permission to add unselected guarantees. Judge every selected claim
 strictly, including its stated verification method. Returned integer values do not
 prove an internal arithmetic mechanism; quiet reads do not prove concurrent snapshot
 consistency. Do not require those internal guarantees for a behavior-only claim.
-A partial scenario must establish its prerequisites through supported actions and
+The complete scenario must establish its prerequisites through supported actions and
 must not claim in its title or assertions to verify omitted obligations.
 
 # Complete selected cases
@@ -2550,7 +2546,7 @@ export interface FlowDigest {
   areaId: string
   title: string
   goal: string
-  milestones: { doc: string; anchor: string; claimTitle: string }[]
+  milestones: { doc: string; anchor: string; claimTitle: string; caseIds?: string[] }[]
 }
 
 /** The epic pass's engine feedback for its ONE corrective re-ask. */

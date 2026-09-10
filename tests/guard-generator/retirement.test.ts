@@ -90,7 +90,7 @@ describe('flowGenerationInputsHash — the frozen retirement salt', () => {
    */
   // Intentionally rolled for case-granular matching, reviewed preparation profiles,
   // prerequisite eligibility, grounded proof, and the explicit review-policy version.
-  const GOLDEN = 'sha256:a3048a4963c07993440b1c887cda31cc1a0ec4c22b64eb59a307af996badd764'
+  const GOLDEN = 'sha256:b79568ca52628636431e274f2545c4f714163307bfdbd671f4abbd478eb5ce80'
 
   it('retains the retirement salt with the current matching doctrine', () => {
     expect(
