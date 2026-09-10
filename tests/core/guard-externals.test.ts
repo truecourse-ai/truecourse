@@ -86,6 +86,31 @@ describe('readGuardExternalsView', () => {
     expect(view.localPath).toBe(localFile(r));
   });
 
+  it.each(['detected', 'recipe', 'catalog'] as const)('normalizes legacy source locations in %s service rows', (kind) => {
+    const r = repo();
+    if (kind === 'recipe') writeJson(recipeFile(r), baseRecipe({ currencybeacon: { baseUrlEnv: 'CURRENCYBEACON_BASE_URL' } }));
+    if (kind === 'catalog') writeJson(catalogFile(r), { dependencies: [{
+      name: 'currency-account', class: 'supplied', summary: 'Currency account', services: ['currencybeacon'],
+      registration: { kind: 'env', vars: [{ name: 'CURRENCYBEACON_API_KEY', description: 'API key', secret: true }] }, needs: [],
+    }] });
+    const locations = [
+      path.join(r, 'lib/currencybeacon.ts'),
+      '/Users/smat/.truecourse/run-clones/org_test/tc-run-Ay3H9h/lib/currencybeacon.ts',
+      'C:\\Users\\runner\\.truecourse\\run-clones\\org_test\\tc-run-AbCdEf\\lib\\currencybeacon.ts',
+      'lib/currencybeacon.ts',
+    ];
+    writeReport(r, { externalServices: [{
+      service: 'currencybeacon', source: 'http',
+      evidence: locations.map((filePath) => ({ filePath, url: 'https://api.currencybeacon.com' })),
+    }] });
+    const before = fs.readFileSync(path.join(r, '.truecourse/guard/result.json'), 'utf8');
+    const view = readGuardExternalsView(r);
+    expect(view.services[0].evidence).toEqual(locations.map(() => ({
+      filePath: 'lib/currencybeacon.ts', url: 'https://api.currencybeacon.com',
+    })));
+    expect(fs.readFileSync(path.join(r, '.truecourse/guard/result.json'), 'utf8')).toBe(before);
+  });
+
   it('joins detected + declared + resolved + blocked-flow counts', () => {
     const r = repo();
     writeJson(

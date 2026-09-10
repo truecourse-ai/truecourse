@@ -1,3 +1,4 @@
+import { relativeExternalServicePaths } from '../lib/external-service-paths.js';
 import { resolvePrerequisites } from '@truecourse/guard-runner';
 /**
  * EXTERNAL API ACCOUNTS — the read/write surface every UI drives.
@@ -241,7 +242,10 @@ export function readGuardExternalsView(
   // knows what it could not write.
   const report = readGuardResult(repoRoot);
   const setup = readGuardSetup(repoRoot);
-  const detected = setup?.detection?.externalServices ?? report?.externalServices ?? [];
+  const detected = relativeExternalServicePaths(
+    setup?.detection?.externalServices ?? report?.externalServices ?? [],
+    repoRoot,
+  );
   const detectionAvailable = setup?.detection !== undefined || report !== null;
   const blockedFlows = tallyBlockedFlows(report);
 

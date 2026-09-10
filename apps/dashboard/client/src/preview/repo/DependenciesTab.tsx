@@ -25,7 +25,7 @@ export function DependenciesTab({ repo }: { repo: Repo }) {
     if (jumpTo) navigate(`/preview/repos/${repo.id}/dependencies/${encodeURIComponent(jumpTo)}`, { replace: true });
   }, [jumpTo, navigate, repo.id]);
 
-  const reloadKey = useGuardRefresh(repo, ['guard-setup', 'guard-externals']);
+  const reloadKey = useGuardRefresh(repo, ['guard-setup', 'guard-externals', 'guard-generate', 'guard-run']);
   const { view, loading, error } = useGuardDependencies(repo.id, true, reloadKey);
   const [query, setQuery] = useState('');
   const [stateFilter, setStateFilter] = useState<string[]>([]);

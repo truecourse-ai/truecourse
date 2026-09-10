@@ -133,6 +133,7 @@ function serve(options: { flows?: unknown; history?: unknown } = {}) {
     if (url.pathname === '/api/repos') return json([REAL]);
     if (url.pathname === '/api/llm/config') return json({ config: { provider: 'anthropic' }, providers: ['anthropic'] });
     if (rest === 'sessions/runs') return json({ runs: [] });
+    if (rest === 'guard/generate' && method === 'POST') return json({ jobId: 'generation-retry' }, 202);
     if (rest === 'guard/flows') return json(options.flows ?? FLOWS);
     if (rest === 'guard/flows/write-then-read') return json({ error: 'not here' }, 404);
     if (rest === 'guard/decisions') return json({ version: 1, dismissedClaims: [], dismissedFlows: [] });
@@ -168,6 +169,17 @@ afterEach(() => {
 });
 
 describe('the Tests tab of a connected repository', () => {
+  it.each([FLOWS, { recipe: null, flows: [] }])('always offers manual generation regardless of the existing test inventory', async (flows) => {
+    const calls = serve({ flows });
+    renderAt(`/preview/repos/${REAL.id}/tests`);
+    const generate = await screen.findByRole('button', { name: 'Generate tests' });
+    await waitFor(() => expect(generate).toBeEnabled());
+    await userEvent.click(generate);
+    await waitFor(() => expect(calls).toContain(`POST /api/repos/${REAL.id}/guard/generate`));
+    expect(calls.some((call) => call.includes('/api/ee/'))).toBe(false);
+    expect(screen.getByRole('link', { name: 'View activity' })).toHaveAttribute('href', `/preview/repos/${REAL.id}/activity`);
+  });
+
   it('lists the stored flows and opens one as its own page', async () => {
     const calls = serve();
     renderAt(`/preview/repos/${REAL.id}/tests`);
