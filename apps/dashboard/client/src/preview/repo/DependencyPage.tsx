@@ -16,7 +16,7 @@ import { useGuardRefresh } from './use-guard-refresh';
 
 export function DependencyPage({ repo, name }: { repo: Repo; name: string }) {
   useGuardTabJump();
-  const reloadKey = useGuardRefresh(repo, ['guard-setup']);
+  const reloadKey = useGuardRefresh(repo, ['guard-setup', 'guard-externals', 'guard-generate', 'guard-run']);
   const { view, loading, save, saving } = useGuardDependencies(repo.id, true, reloadKey);
   const { openGuardFlow } = useGuardView();
   // A CTA elsewhere names a SERVICE; the entry it resolves to may be keyed by its

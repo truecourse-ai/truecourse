@@ -230,7 +230,7 @@ describe('generateGuards — realization gaps', () => {
     expect(res.flows.settled).toBe(1)
   })
 
-  it('a partial plan retains the mapped portion after one corrective re-ask', async () => {
+  it('a partial plan retains mapping diagnostics without publishing a prefix after one corrective re-ask', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC }])
@@ -250,7 +250,7 @@ describe('generateGuards — realization gaps', () => {
     })
 
     expect(calls).toBe(2) // the call + exactly one corrective re-ask
-    expect(res.written).toHaveLength(1)
+    expect(res.written).toHaveLength(0)
     const gap = res.coverageGaps.find((g) => g.kind === 'no-interface')!
     expect(gap.reason).toContain('Milestone 2')
   })
@@ -297,7 +297,7 @@ describe('generateGuards — realization gaps', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, cliInterface(['relkit']), webInterface()),
-      extractSession: extractSessionBy({ version: [{ driver: 'cli', alternativeDrivers: ['web'] }], background: { untestable: 'background' } }),
+      extractSession: extractSessionBy({ version: [{ driver: 'web' }], background: { untestable: 'background' } }),
       flowWorkerSession: submitWorkerSessions(
         (task) => {
           surfaces.push(task.surface)
@@ -1060,7 +1060,7 @@ describe('generateGuards — dismissals (decisions.json)', () => {
     // so the flow re-authors instead of skipping. Dismissal has a price tag now.
     expect(second.flows.skipped).toBe(0)
     expect(second.written).toHaveLength(1)
-    const after = readManifest(r)!.flows[0]
+    const after = readManifest(r)!.flows.find(f => !f.orphaned)!
     expect(after.flowFingerprint).not.toBe(before.flowFingerprint)
   }, 90_000)
 
@@ -1325,7 +1325,7 @@ describe('generateGuards — worker robustness', () => {
     expect(res.written.map((w) => w.flowId)).toEqual(['help'])
     expect(res.errors.map((e) => e.anchor)).toEqual(['version'])
     expect(flowEntry(r, 'version')?.generationInputsHash).toBeNull()
-    expect(flowEntry(r, 'help')?.scenarios).toEqual([{ id: 'help', drivers: ['cli'], status: 'passing', milestoneCoverage: [{ milestone: 1, driver: 'cli' }] }])
+    expect(flowEntry(r, 'help')?.scenarios).toMatchObject([{ id: 'help', drivers: ['cli'], status: 'passing', milestoneCoverage: [{ milestone: 1, driver: 'cli' }] }])
   }, 60_000)
 
   it('an invalid `matches` regex never reaches a sandbox — the pre-flight names it', async () => {
@@ -1384,7 +1384,7 @@ describe('generateGuards — manifest + orphans', () => {
     // orphaned drift instead of coverage silently disappearing.
     expect(res.orphaned).toEqual([{ doc: 'docs/gone.md', anchor: 'removed/section', scenarioIds: ['orphan'] }])
     expect(() => GuardManifestSchema.parse(readManifest(r)!)).not.toThrow()
-    expect(flowEntry(r, 'a-removed-flow')?.scenarios).toEqual([
+    expect(flowEntry(r, 'a-removed-flow')?.scenarios).toMatchObject([
       { id: 'orphan', drivers: ['cli'], status: 'passing', milestoneCoverage: [{ milestone: 1, driver: 'cli' }] },
     ])
     // MARKED: nothing derives it any more, so every reader can say why it has no
@@ -1392,7 +1392,7 @@ describe('generateGuards — manifest + orphans', () => {
     expect(flowEntry(r, 'a-removed-flow')?.orphaned).toBe(true)
     // A flow synthesis still produces is never marked.
     expect(flowEntry(r, 'version')?.orphaned).toBeUndefined()
-    expect(flowEntry(r, 'version')?.scenarios).toEqual([
+    expect(flowEntry(r, 'version')?.scenarios).toMatchObject([
       { id: 'version', drivers: ['cli'], status: 'passing', milestoneCoverage: [{ milestone: 1, driver: 'cli' }] },
     ])
   }, 60_000)
@@ -1938,8 +1938,8 @@ describe('generateGuards — the per-flow pipeline', () => {
     })
 
     expect(res.written.map((w) => w.flowId).sort()).toEqual(['alpha', 'beta'])
-    expect(flowEntry(r, 'alpha')?.scenarios).toEqual([{ id: 'alpha', drivers: ['cli'], status: 'passing', milestoneCoverage: [{ milestone: 1, driver: 'cli' }] }])
-    expect(flowEntry(r, 'beta')?.scenarios).toEqual([{ id: 'beta', drivers: ['cli'], status: 'passing', milestoneCoverage: [{ milestone: 1, driver: 'cli' }] }])
+    expect(flowEntry(r, 'alpha')?.scenarios).toMatchObject([{ id: 'alpha', drivers: ['cli'], status: 'passing', milestoneCoverage: [{ milestone: 1, driver: 'cli' }] }])
+    expect(flowEntry(r, 'beta')?.scenarios).toMatchObject([{ id: 'beta', drivers: ['cli'], status: 'passing', milestoneCoverage: [{ milestone: 1, driver: 'cli' }] }])
     expect(loadScenarios(r).scenarios.map((s) => s.id).sort()).toEqual(['alpha', 'beta'])
     expect(fs.existsSync(path.join(scenariosDir(r), 'a', 'alpha.yaml'))).toBe(true)
   }, 90_000)

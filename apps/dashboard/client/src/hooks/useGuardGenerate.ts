@@ -27,7 +27,7 @@ export function useGuardGenerate(repoId: string | undefined): GuardGenerateState
     try {
       await api.triggerGuardGenerate(repoId);
       toast.success('Scenario generation started', {
-        description: 'Follow it in Activity; the scenarios appear here when it lands.',
+        description: 'Follow progress and results in Activity.',
       });
     } catch (e) {
       if (e instanceof api.ApiError && e.status === 409) {

@@ -19,60 +19,47 @@ const yamlFor = (id: string) => scenarioYaml(raw('All version behavior', [{ run:
 const evidenceFor = (caseId: string) => ({ kind: 'faithful' as const, evidence: [{ milestone: 1, caseId, steps: [1], reason: 'The assertion observes the selected command output.' }] })
 
 describe('case coverage through generation and persistence', () => {
-  it('keeps a reviewed case when a later case blocks, without promising the whole milestone', async () => {
+  const complete = () => scenarioYaml(raw('All version behavior', [
+    { run: ['--version'], milestone: 1, checks: ['exit-zero'], expect: { exit: 0 } },
+    { run: ['--version'], milestone: 1, checks: ['version-text'], expect: { stdout: { contains: '2.4.1' } } },
+  ]))
+  const fullEvidence = () => ({ kind: 'faithful' as const, evidence: cases!.map((c, i) => ({ milestone: 1, caseId: c.id, steps: [i + 1], reason: 'Asserts the complete command contract' })) })
+  it('never publishes one reviewed case as a partial test beneath its flow', async () => {
     const repoRoot = seed()
     const result = await runGenerate({ repoRoot, extractSession: extracted(), flowsAreaSession: flowOfAllSession('All version behavior'),
       flowWorkerSession: flowWorkerSessionOf(async task => {
-        const report = await task.submitScenario(yamlFor('exit-zero'), [], async request => {
-          expect(request.briefing).toContain('SELECTED CASES')
-          return evidenceFor('exit-zero')
-        })
-        expect(acceptedSha(report), report.content).not.toBeNull()
-        return { kind: 'outcome', outcome: { kind: 'blocked', perMilestone: [{ order: 1, capability: 'Version text not yet verified' }] } }
-      }),
-    })
-    expect(result.written).toHaveLength(1)
-    const entry = readManifest(repoRoot)!.flows[0]
-    expect(entry.scenarios[0].caseEvidence).toEqual(evidenceFor('exit-zero').evidence)
-    expect(entry.scenarios[0].milestoneCoverage).toEqual([{ milestone: 1, driver: 'cli', checks: ['exit-zero'] }])
-    expect(entry.generationInputsHash).toBeNull()
-    const scenario = loadScenarios(repoRoot).scenarios[0]
-    expect(scenario.title).toBe('Version exits successfully')
-    expect(scenario.promise).toBe('Version exits successfully')
-    expect(entry.gaps.length).toBeGreaterThan(0)
-  })
-
-  it('refuses a green candidate whose reviewer omits or misattributes case evidence', async () => {
-    const repoRoot = seed()
-    const result = await runGenerate({ repoRoot, extractSession: extracted(), flowsAreaSession: flowOfAllSession('All version behavior'),
-      flowWorkerSession: flowWorkerSessionOf(async task => {
-        const missing = await task.submitScenario(yamlFor('exit-zero'), [], async () => ({ kind: 'faithful' }))
-        expect(missing.isError).toBe(true)
-        expect(missing.content).toContain('independent review')
-        const invalid = await task.submitScenario(yamlFor('exit-zero'), [], async () => evidenceFor('version-text'))
-        expect(invalid.isError).toBe(true)
-        return { kind: 'outcome', outcome: { kind: 'retired', attempts: 2, lastEvidence: 'The reviewer did not establish the selected case.' } }
-      }),
-    })
+        const report = await task.submitScenario(yamlFor('exit-zero'), [], async () => evidenceFor('exit-zero'))
+        expect(report.isError).toBe(true)
+        expect(acceptedSha(report)).toBeNull()
+        return { kind: 'outcome', outcome: { kind: 'blocked', perMilestone: [{ order: 1, capability: 'Version text not verified' }] } }
+      }) })
     expect(result.written).toEqual([])
     expect(loadScenarios(repoRoot).scenarios).toEqual([])
   })
-
-  it('combines two independently reviewed cases of the same milestone', async () => {
+  it('refuses complete green candidates with missing or misattributed independent evidence', async () => {
+    const repoRoot = seed()
+    await runGenerate({ repoRoot, extractSession: extracted(), flowsAreaSession: flowOfAllSession('All version behavior'),
+      flowWorkerSession: flowWorkerSessionOf(async task => {
+        const missing = await task.submitScenario(complete(), [], async () => ({ kind: 'faithful' }))
+        expect(missing.isError).toBe(true)
+        expect(missing.content).toContain('independent review')
+        const invalid = await task.submitScenario(complete(), [], async () => ({ ...fullEvidence(), evidence: fullEvidence().evidence.map(e => ({ ...e, steps: [99] })) }))
+        expect(invalid.isError).toBe(true)
+        return { kind: 'failed', reason: 'Review does not establish evidence' }
+      }) })
+    expect(loadScenarios(repoRoot).scenarios).toEqual([])
+  })
+  it('refuses two partials then publishes all cases in one reviewed scenario with the complete promise', async () => {
     const repoRoot = seed()
     const result = await runGenerate({ repoRoot, extractSession: extracted(), flowsAreaSession: flowOfAllSession('All version behavior'),
       flowWorkerSession: flowWorkerSessionOf(async task => {
-        const first = acceptedSha(await task.submitScenario(yamlFor('exit-zero'), [], async () => evidenceFor('exit-zero')))!
-        const secondReport = await task.submitScenario(yamlFor('version-text'), [], async () => evidenceFor('version-text'))
-        const second = acceptedSha(secondReport)!
-        expect(second, secondReport.content).not.toBeNull()
-        return { kind: 'outcome', outcome: { kind: 'settled', scenarioYamlSha: second, expectedReds: [], additionalScenarios: [{ scenarioYamlSha: first, expectedReds: [] }] } }
-      }),
-    })
-    expect(result.written).toHaveLength(2)
-    const entry = readManifest(repoRoot)!.flows[0]
-    expect(entry.generationInputsHash).not.toBeNull()
-    expect(entry.gaps).toEqual([])
-    expect(entry.scenarios.flatMap(s => s.caseEvidence!.map(e => e.caseId)).sort()).toEqual(['exit-zero', 'version-text'])
+        for (const id of ['exit-zero','version-text']) expect(acceptedSha(await task.submitScenario(yamlFor(id), [], async () => evidenceFor(id)))).toBeNull()
+        const sha = acceptedSha(await task.submitScenario(complete(), [], async () => fullEvidence()))!
+        return { kind: 'outcome', outcome: { kind: 'settled', scenarioYamlSha: sha, expectedReds: [] } }
+      }) })
+    expect(result.written).toHaveLength(1)
+    expect(readManifest(repoRoot)!.flows[0].scenarios[0].caseEvidence).toHaveLength(2)
+    expect(loadScenarios(repoRoot).scenarios[0].promise).toContain('Version exits successfully')
+    expect(loadScenarios(repoRoot).scenarios[0].promise).toContain('Version prints the release number')
   })
 })

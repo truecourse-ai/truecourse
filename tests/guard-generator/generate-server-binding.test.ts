@@ -105,6 +105,42 @@ const matchEachInterface: MatchRunner = async ({ milestones, interfaces }) => ({
 })
 
 describe('generateGuards — the route gate', () => {
+  it.each(['bound-command', 'default-command', 'fixed-address'] as const)('checks invocation against the matched secondary server (%s)', async (contract) => {
+    const r = monorepo()
+    writeApiRecipe(r, { entry: null, servers: TWO_SERVERS, defaultServer: 'web' })
+    writeCorpus(r, [{ ref: DOC }])
+    writeDoc(r, DOC, V2_DOC)
+    const command = (contract === 'default-command' ? TWO_SERVERS.web : TWO_SERVERS['api-v2']).serve.join(' ')
+    const extractSession = extractSessionBy({ bookings: [{
+      driver: 'api', claim: 'The API starts and serves requests', reason: 'Startup command and HTTP response',
+      verification: { scope: 'api', method: 'behavior', observable: 'The server responds', cases: [{
+        id: 'startup', claim: 'The API starts and serves requests', method: 'behavior', requires: ['http'], conditions: [],
+        invocation: { command, ...(contract === 'fixed-address' ? { address: 'http://127.0.0.1:3000' } : {}) },
+      }] },
+    }] })
+    let authorCalls = 0
+    const res = await runGenerate({
+      repoRoot: r, interfaces: interfacesOf(r, apiInterface('GET', '/v2/bookings')), extractSession,
+      flowWorkerSession: submitWorkerSessions(() => rawApi('The API starts', [{
+        request: { method: 'GET', path: '/v2/ping' }, checks: ['startup'], expect: { status: 200 },
+      }]), {
+        onBriefing: () => authorCalls++,
+        judge: async () => ({ kind: 'faithful', evidence: [{ milestone: 1, caseId: 'startup', steps: [1], reason: 'The configured command serves the HTTP assertion.' }] }),
+      }),
+    })
+    expect(res.errors).toEqual([])
+    if (contract === 'bound-command') {
+      expect(authorCalls).toBe(1)
+      expect(res.written).toHaveLength(1)
+      const committed = GuardScenarioSchema.parse(yaml.load(fs.readFileSync(path.join(r, res.written[0].file), 'utf8')))
+      expect(committed.server).toBe('api-v2')
+    } else {
+      expect(authorCalls).toBe(0)
+      expect(res.written).toEqual([])
+      expect(res.coverageGaps.some(gap => gap.reason.includes(contract === 'fixed-address' ? 'isolated port' : 'required invocation'))).toBe(true)
+    }
+  }, 60_000)
+
   it('blocks a flow whose documented paths belong to an app with no declared server, before any call', async () => {
     const r = monorepo()
     // Only the web app has a server; `/v2/*` is `apps/api/v2`, which has none.

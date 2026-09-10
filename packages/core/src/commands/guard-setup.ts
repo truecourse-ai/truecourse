@@ -82,6 +82,7 @@ import {
   SEED_SESSION_KIND,
   PREPARATION_SESSION_KIND,
 } from '../services/guard-setup/index.js';
+import { INTERFACE_AUTHOR_SESSION_KIND } from '../services/interface-author/index.js';
 import { runGuardInterfaceAuthoring } from './guard-interfaces.js';
 import type { LlmEstimate } from './analyze-core.js';
 import { EstimateDeclined } from './spec-in-process.js';
@@ -152,8 +153,8 @@ export interface GuardSetupInProcessOptions {
   replace?: boolean;
   /**
    * A sessions-store run record just came into being — setup's own (on its first
-   * session, or at once under `eagerRun`) and the nested interfaces step's alike,
-   * so the CLI can print a "watch live" deep link for each. A lazy run spending
+   * session, or at once under `eagerRun`), so the CLI can print its
+   * "watch live" deep link. A lazy run spending
    * no session never fires it.
    */
   onRunStarted?: (info: SessionRunStartedInfo) => void;
@@ -194,10 +195,8 @@ export interface GuardSetupInProcessResult {
   /** Absolute path of the persisted `guard/setup.json`. */
   reportPath: string;
   /**
-   * The sessions-store run dirs this run opened — `sessions/guard-setup/<runId>/`
-   * and, when the interfaces step authored, the `sessions/guard-interfaces/<runId>/`
-   * its own engine opened. Empty when nothing spent a session. Named for
-   * stepwise runs, whose point is reading the transcripts afterwards.
+   * Setup's transcript directory, including interface authoring sessions.
+   * Empty when no run was opened.
    */
   sessionsRunDirs: string[];
 }
@@ -312,15 +311,13 @@ const SETUP_USAGE_STAGES = ['guard.recipe'] as const;
 /**
  * Which session kinds do each setup step's work — stamped onto the run
  * record's checklist so a surface reading run.json can file every session
- * under its step. `detect` is deterministic and owns no session; the
- * interfaces step's authoring sessions live under `guard interfaces author`'s
- * own run, so only its reconcile session is setup's.
+ * under its step. `detect` is deterministic and owns no session.
  */
 const GUARD_SETUP_STEP_SESSION_KINDS: Record<string, readonly string[]> = {
   recipe: [RECIPE_REPAIR_SESSION_KIND],
   detect: [],
   catalog: [DEPENDENCY_CATALOG_SESSION_KIND],
-  interfaces: [RECONCILE_INTERFACES_SESSION_KIND],
+  interfaces: [RECONCILE_INTERFACES_SESSION_KIND, INTERFACE_AUTHOR_SESSION_KIND],
   seed: [SEED_SESSION_KIND],
   preparations: [PREPARATION_SESSION_KIND],
   auth: [AUTH_PROOF_SESSION_KIND],
@@ -395,10 +392,6 @@ export async function guardSetupInProcess(
         })
       : createGuardSetupSessionContext(sessionContextOptions);
   const transportFlag = options.llm === 'cli' || options.llm === 'api' ? options.llm : undefined;
-  // The interfaces step's authoring half runs under `guard interfaces author`'s
-  // OWN sessions-store run, so its transcripts live somewhere else than setup's;
-  // a stepwise run has to be told where.
-  let interfacesRunId: string | undefined;
   const repair =
     options.repair ??
     (sessionContext
@@ -417,26 +410,28 @@ export async function guardSetupInProcess(
     options.authorInterfaces ??
     (sessionContext
       ? buildInterfacesStep(sessionContext, {
-          // The authoring engine of `guard interfaces author`, verbatim — its
-          // own sessions-store run (`sessions/guard-interfaces/…`), its context
-          // pass, its findings ledger and closing reconciliation.
+          // Reuse setup's driver and persistence for the entire authoring step.
           author: async (authorOpts) => {
+            const acquired = await sessionContext.acquire();
             const run = await runGuardInterfaceAuthoring({
               repoRoot: authorOpts.repoRoot,
               replace: authorOpts.replace,
-              ...(options.sessionsKey ? { sessionsKey: options.sessionsKey } : {}),
-              ...(options.driver ? { driver: options.driver, transportMode: mode } : {}),
+              sessionRun: {
+                runId: acquired.runId,
+                dir: options.sessionRun?.dir ?? sessionRunDir(options.sessionsKey ?? repoRoot, 'guard-setup', acquired.runId),
+                persistence: acquired.persistence,
+              },
+              driver: acquired.driver,
+              transportMode: mode,
               ...(transportFlag ? { transport: transportFlag } : {}),
               ...(options.signal ? { signal: options.signal } : {}),
-              ...(options.onRunStarted ? { onRunStarted: options.onRunStarted } : {}),
               onStatus: (message) => tracker?.detail('interfaces', message),
             });
-            interfacesRunId = run.runId;
             return {
               runId: run.runId,
               authored: run.authored,
               skipped: run.skipped,
-              places: run.places.map((place) => ({ status: place.status })),
+              places: run.places,
               diagnostics: run.diagnostics,
               spent: run.spent,
             };
@@ -460,14 +455,12 @@ export async function guardSetupInProcess(
         })
       : undefined);
 
-  /** Where this run's transcripts landed — setup's own run, then the interfaces
-   *  step's, in the order they open. */
+  /** All setup sessions share one transcript directory. */
   const sessionsRunDirs = (): string[] => {
     const key = options.sessionsKey ?? repoRoot;
     const setupRunId = sessionContext?.runId();
     return [
       ...(setupRunId ? [sessionRunDir(key, 'guard-setup', setupRunId)] : []),
-      ...(interfacesRunId ? [sessionRunDir(key, 'guard-interfaces', interfacesRunId)] : []),
     ];
   };
 

@@ -13,16 +13,10 @@
  * - a session that fails costs exactly its own place. Failures are DATA here,
  *   the way `runAgentLoop` hands them back — the run reports them and continues.
  *
- * THE POOL, and the one thing it costs. Sessions are network-bound: a place is
- * ~20 turns of provider latency and almost no local work, so running them one at
- * a time makes the wall clock the sum of a hundred round-trip stacks. They run
- * `concurrency` at a time instead — but the FOLD stays strictly serial, because
- * a fragment is validated against the catalog it is about to join and then
- * written to it, and two of those interleaved would each validate against a
- * catalog the other is in the middle of changing. The pool MECHANICS (the
- * permit limit, the serial fold gate, the event tee, the abort discipline) are
- * the generic `runSessionPool` in `services/agent/session-pool.ts`; what stays
- * here is the planning and the fold — the parts that know what an interface is.
+ * Sessions run concurrently. The outcome validator checks and writes each
+ * fragment synchronously before the session completes. Conflicts return to
+ * that same session for correction under its existing budget. The pool's fold
+ * then records the final result and spend.
  *
  * WHAT THE POOL CONSUMES IS CLUSTERS, NOT PLACES. A cluster is the
  * places whose sessions read the same modules ({@link clusterPlaces}), and its
@@ -57,7 +51,6 @@
 import type {
   SessionDriver,
   SessionEvent,
-  SessionOutcome,
   SessionPersistence,
   SharedPromptPrefix,
 } from '@truecourse/agent-loop'
@@ -274,6 +267,7 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   const work = opts.limit != null ? selected.slice(0, opts.limit) : selected
 
   const results: PlaceResult[] = []
+  const prepared = new Map<string, PreparedPlace['place']>()
   const spent = { turns: 0, tokens: 0, costUsd: 0 }
   let authoredCount = 0
   let path: string | undefined
@@ -313,11 +307,10 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
 
   // Per-session captures, keyed by place: the catalog each session was BRIEFED
   // with (taken when its def is built — the pool builds def and briefing in one
-  // tick) and the ids it may replace. The fold below re-reads the live catalog —
+  // tick). Outcome validation reads the live catalog —
   // between the two lies everything its peers landed while it was thinking. For
   // a peer of the same cluster there is nothing there: it already folded.
   const briefed = new Map<string, InterfacesFile | null>()
-  const replaceableOf = new Map<string, Set<string>>()
   const placeOf = new Map(work.map((item) => [placeWorkItem(item.place.id), item.place.id]))
 
   await runSessionPool<AuthorWorkItem, AuthoredFragment>({
@@ -329,15 +322,41 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
       // An explicit `--replace` re-author may replace THIS place's own tasks and
       // nothing else: every other authored entry is somebody else's work.
       const replaceable = new Set(opts.replace ? item.existing : [])
-      replaceableOf.set(item.place.id, replaceable)
       briefed.set(item.place.id, authored)
-      return interfaceAuthorSessionDef({
-        repoRoot: opts.repoRoot,
-        derived,
-        authored,
-        replaceable,
-        scope: scopeOf(item),
-      })
+      return {
+        ...interfaceAuthorSessionDef({
+          repoRoot: opts.repoRoot,
+          derived,
+          // Tools must see peers' accepted work, even on a resumed session.
+          get authored() { return authored },
+          replaceable,
+          scope: scopeOf(item),
+        }),
+        validateOutcome(fragment) {
+          const result = preparePlace({
+            item, fragment, derived, authored,
+            briefedWith: briefed.get(item.place.id) ?? null,
+            replaceable,
+          })
+          prepared.set(item.place.id, result.place)
+          if (result.place.status === 'rejected') {
+            return `The catalog cannot accept this outcome. Correct these problems, run check_draft, and return the complete corrected outcome:\n- ${result.place.problems.join('\n- ')}`
+          }
+          // Validate and write synchronously before the loop marks the session
+          // completed. No peer can change the catalog between these operations.
+          if (result.candidate) {
+            const written = writeAuthoredCatalog({
+              repoRoot: opts.repoRoot,
+              candidate: result.candidate,
+              derived,
+              now: opts.now,
+            })
+            authored = written.file
+            path = written.path
+            authoredCount += result.place.taskIds.length
+          }
+        },
+      }
     },
     briefing: (item) => {
       // The catalog as it stood when this session started: every place already
@@ -374,36 +393,25 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
       })
     },
     onSessionEvent: (workItem, event) => opts.onSessionEvent?.(placeOf.get(workItem)!, event),
-    // THE FOLD, one place at a time however many sessions are running: the
-    // fragment is validated against the catalog it is about to join, and that
-    // catalog cannot be moving while it is checked.
+    // Persistence happens in validateOutcome; the fold records final spend
+    // and failures after any corrections have finished.
     fold: (item, outcome, sessionId) => {
-      const result = foldOnePlace({
-        item,
-        sessionId,
-        outcome,
-        derived,
-        authored,
-        briefedWith: briefed.get(item.place.id) ?? null,
-        replaceable: replaceableOf.get(item.place.id) ?? new Set(),
-      })
-      results.push(result.place)
-      spent.turns += result.place.spent.turns
-      spent.tokens += result.place.spent.tokens
-      spent.costUsd += result.place.spent.costUsd
-
-      if (result.candidate) {
-        const written = writeAuthoredCatalog({
-          repoRoot: opts.repoRoot,
-          candidate: result.candidate,
-          derived,
-          now: opts.now,
-        })
-        authored = written.file
-        path = written.path
-        authoredCount += result.place.taskIds.length
-      }
-      opts.onProgress?.({ kind: 'place-done', place: result.place })
+      const last = prepared.get(item.place.id)
+      const place: PlaceResult = outcome.status === 'completed'
+        ? { ...last!, sessionId, spent: outcome.spent }
+        : {
+            placeId: item.place.id, sessionId, spent: outcome.spent,
+            status: 'failed', taskIds: [],
+            unresolved: last?.unresolved ?? [],
+            findings: last?.findings ?? [],
+            problems: [...(last?.problems ?? []), describeFailure(outcome.failure)],
+            resumable: outcome.resumable,
+          }
+      results.push(place)
+      spent.turns += place.spent.turns
+      spent.tokens += place.spent.tokens
+      spent.costUsd += place.spent.costUsd
+      opts.onProgress?.({ kind: 'place-done', place })
     },
   })
 
@@ -432,11 +440,9 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
  */
 export { defaultPoolConcurrency as defaultAuthorConcurrency }
 
-interface FoldInput {
+interface PrepareInput {
   item: AuthorWorkItem
-  sessionId: string
-  /** The loop's own outcome for this place's session. */
-  outcome: SessionOutcome<AuthoredFragment>
+  fragment: AuthoredFragment
   derived: InterfacesFile | null
   /** The catalog as it stands NOW — what the fragment is validated against. */
   authored: InterfacesFile | null
@@ -445,34 +451,19 @@ interface FoldInput {
   replaceable: Set<string>
 }
 
-/**
- * THE FOLD — the part that runs one at a time. It reads the catalog as it now
- * stands, not as the session was briefed, because the answer to "is this id
- * taken" changed while the session was thinking.
- */
-function foldOnePlace(input: FoldInput): { place: PlaceResult; candidate?: InterfacesFile } {
-  const { item, sessionId, outcome, derived, authored, briefedWith, replaceable } = input
-  const base = { placeId: item.place.id, sessionId, spent: outcome.spent }
+interface PreparedPlace {
+  place: Omit<PlaceResult, 'sessionId' | 'spent'>
+  candidate?: InterfacesFile
+}
 
-  if (outcome.status === 'failed') {
-    // A session that never reached an outcome reported nothing: what it read on
-    // the way is in its transcript, and this ledger takes stated findings only.
-    return {
-      place: {
-        ...base,
-        status: 'failed',
-        taskIds: [],
-        unresolved: [],
-        findings: [],
-        problems: [describeFailure(outcome.failure)],
-        resumable: outcome.resumable,
-      },
-    }
-  }
+/** Validate the proposed output against all work accepted so far. */
+function preparePlace(input: PrepareInput): PreparedPlace {
+  const { item, derived, authored, briefedWith, replaceable } = input
+  const base = { placeId: item.place.id }
 
-  const unresolved = [...(outcome.output.unresolved ?? [])]
-  const findings = [...(outcome.output.findings ?? [])]
-  const { fragment, raced } = pruneRacedTasks(outcome.output, briefedWith, authored, replaceable)
+  const unresolved = [...(input.fragment.unresolved ?? [])]
+  const findings = [...(input.fragment.findings ?? [])]
+  const { fragment, raced } = pruneRacedTasks(input.fragment, briefedWith, authored, replaceable)
   const racedField = raced.length > 0 ? { raced } : {}
   if (fragment.interfaces.length === 0 && (fragment.resources?.length ?? 0) === 0) {
     // Either the session honestly found nothing, or everything it found was
@@ -490,8 +481,7 @@ function foldOnePlace(input: FoldInput): { place: PlaceResult; candidate?: Inter
     scope: scopeOf(item),
   })
   if (!validation.ok) {
-    // The session had `check_draft` and either never called it or ignored it.
-    // The fragment is dropped whole: half a place's tasks is not a place.
+    // The loop returns these errors to the session before accepting its output.
     return {
       place: {
         ...base,

@@ -591,6 +591,7 @@ describe('the guard setup job', () => {
 
 describe('the guard generate job', () => {
   let clone: string;
+  let generateLlm: WorkspaceLlm;
   type GenerateEngine = NonNullable<RepoGuardGenerateTaskDeps['runGenerate']>;
   let generateImpl: GenerateEngine;
   /** What the engine found in its clone — the materialization, seen from inside. */
@@ -706,6 +707,7 @@ describe('the guard generate job', () => {
 
   beforeEach(async () => {
     seen = [];
+    generateLlm = testLlm;
     generateImpl = authoring;
     installWorkTree();
     await saveSpec({ repoKey: REPO, commitSha: 'scan-commit' }, 'corpus', {
@@ -724,7 +726,7 @@ describe('the guard generate job', () => {
       hub,
       startWorker: fakeWorker(['repo.guard-generate']),
       guardGenerate: {
-        startLlm: async () => testLlm,
+        startLlm: async () => generateLlm,
         runGenerate: (repoRoot, options) => generateImpl(repoRoot, options),
       },
     });
@@ -737,6 +739,36 @@ describe('the guard generate job', () => {
       { repoKey: REPO, commitSha: 'setup-commit' },
       { '.truecourse/scenarios/recipe.json': JSON.stringify(RECIPE, null, 2) + '\n' },
     );
+
+  it.each(['api', 'claude-code'] as const)('passes the selected %s driver and transport into generation', async mode => {
+    const driver = forbiddenDriver('generation is stubbed in this test');
+    const transport: LlmTransport = async () => '{}';
+    let driverConstructions = 0;
+    generateLlm = {
+      mode,
+      driver: () => {
+        driverConstructions++;
+        return driver;
+      },
+      transport: () => transport,
+    };
+    let called = false;
+    generateImpl = async (repoRoot, options) => {
+      called = true;
+      expect(options?.driver).toBe(driver);
+      expect(options?.transport).toBe(transport);
+      expect(options?.transportMode).toBe(mode);
+      expect(options?.attribution).toBe(driver.attribution);
+      return authoring(repoRoot, options);
+    };
+    await saveSetupBundle();
+    await jobs.enqueueGuardGenerate(request);
+    await Promise.all(running);
+
+    expect(called).toBe(true);
+    expect(driverConstructions).toBe(1);
+    expect((await jobsOfType('repo.guard-generate'))[0]).toMatchObject({ status: 'succeeded' });
+  });
 
   it('refuses a repository that was never set up, and stores nothing', async () => {
     await jobs.enqueueGuardGenerate(request);
@@ -792,6 +824,44 @@ describe('the guard generate job', () => {
     expect(enqueued).toEqual(['repo.guard-generate', 'repo.guard-run']);
     expect(enqueuedPayloads[1]).toMatchObject({ repoFullName: REPO, workspaceOrgId: ORG, source: 'chain' });
   });
+
+  it.each(['file', 'postgres'])('saves partial extraction results but fails the job and %s activity without chaining', async storage => {
+    if (storage === 'postgres') setSessionRunBackend(new PgSessionRunStore(db));
+    await saveSetupBundle();
+    const extractionFailures = [{ doc: 'docs/app.md', reason: 'outcome failed schema: invalid web verification method' }];
+    generateImpl = async (repoRoot, options) => {
+      const result = await authoring(repoRoot, options);
+      writeCloneGuardResult(repoRoot, {
+        ...okReport(['a1']), generatedAt: '2026-02-02T00:00:00Z', extractionFailures,
+      });
+      return result;
+    };
+
+    await jobs.enqueueGuardGenerate(request);
+    await Promise.all(running);
+
+    const [job] = await jobsOfType('repo.guard-generate');
+    expect(job).toMatchObject({ status: 'failed', error: expect.stringContaining('Claim extraction failed for docs/app.md') });
+    expect(job.error).toContain('Partial results were saved');
+    const baseline = await readGuardBaselineCommit(REPO);
+    expect(baseline).toMatch(/^[0-9a-f]{40}$/);
+    expect(await readGuardResult(REPO, baseline!)).toMatchObject({ extractionFailures });
+    expect((await loadScenarios({ repoKey: REPO, commitSha: baseline! })).scenarios.map(s => s.id)).toEqual(['a1']);
+    const [run] = await listStoredSessionRuns(REPO, 'guard-generate');
+    expect(run).toMatchObject({
+      status: 'failed', error: { message: job.error },
+      display: { blocks: expect.arrayContaining([expect.objectContaining({
+        kind: 'checklist', items: expect.arrayContaining([expect.objectContaining({ key: 'extract', status: 'error' })]),
+      })]) },
+    });
+    const opened = await openStoredSessionRun(REPO, 'guard-generate', run.runId);
+    expect(opened?.record()).toMatchObject({ status: 'failed', error: { message: job.error } });
+    const notes = await new NotificationStore(db).listForOrg(ORG);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatchObject({ level: 'error', title: 'Scenario generation failed', body: expect.stringContaining('docs/app.md') });
+    expect(enqueued).toEqual(['repo.guard-generate']);
+    expect(disposed).toEqual([clone]);
+  }, 60_000);
 
   it('chains nothing when the corpus was blocked, and says why', async () => {
     await saveSetupBundle();

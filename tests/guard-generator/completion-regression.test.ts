@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { load } from 'js-yaml'
 import { afterEach, describe, expect, it } from 'vitest'
 import { runAgentLoop } from '../../packages/agent-loop/src/index'
 import { flowWorkerSessionDef } from '../../packages/core/src/services/guard-generate/flow-worker'
@@ -36,34 +37,33 @@ async function tool(call: StubCall, name: string, args: unknown) {
 }
 
 describe('generation cannot finish by shrinking selected coverage', () => {
-  it('repairs blocked/additionalScenarios schema errors without losing accepted portions', async () => {
-    const repoRoot = seed();
-    const { persistence } = memoryPersistence();
-    let first = '';
+  it('repairs an invalid outcome without accepting partial candidates', async () => {
+    const repoRoot = seed()
+    const { persistence } = memoryPersistence()
     const result = await runGenerate({ repoRoot, extractSession: extractSession(), flowsAreaSession: flowOfAllSession('Schema repair'),
       flowWorkerSession: flowWorkerSessionOf(async task => {
         const { driver } = stubDriver(async call => {
           if (!call.input.resume) {
-            await tool(call, 'run_scenario', { yaml: yamlFor([0, 1, 2, 3, 4]) });
-            first = acceptedSha(await tool(call, 'submit_scenario', { yaml: yamlFor([0, 1, 2, 3, 4]), expectedReds: [] }))!;
-            return outcome({ kind: 'blocked', perMilestone: [{ order: 1, capability: 'remaining validation' }],
-              additionalScenarios: [{ scenarioYamlSha: first, expectedReds: [] }] });
+            await tool(call, 'run_scenario', { yaml: yamlFor([0,1,2,3,4]) })
+            const partial = await tool(call, 'submit_scenario', { yaml: yamlFor([0,1,2,3,4]), expectedReds: [] })
+            expect(partial.isError).toBe(true)
+            expect(acceptedSha(partial)).toBeNull()
+            return outcome({ kind: 'blocked', perMilestone: [{ order: 1, capability: 'remaining validation' }], additionalScenarios: [{ scenarioYamlSha: 'fake', expectedReds: [] }] })
           }
-          expect(call.briefing).toContain('additionalScenarios');
-          expect(call.briefing).toContain('must not carry');
-          expect(task.hasStash(first)).toBe(true);
-          const second = acceptedSha(await tool(call, 'submit_scenario', { yaml: yamlFor([5, 6, 7, 8, 9]), expectedReds: [] }))!;
-          return outcome({ kind: 'settled', scenarioYamlSha: second, expectedReds: [], additionalScenarios: [{ scenarioYamlSha: first, expectedReds: [] }] });
-        });
+          expect(call.briefing).toContain('additionalScenarios')
+          const sha = acceptedSha(await tool(call, 'submit_scenario', { yaml: yamlFor([0,1,2,3,4,5,6,7,8,9]), expectedReds: [] }))!
+          return outcome({ kind: 'settled', scenarioYamlSha: sha, expectedReds: [] })
+        })
         const completion = await runAgentLoop({ def: flowWorkerSessionDef({ task, judgeWith: () => judge }), driver, persistence,
-          sessionId: 'schema-incident', workItem: task.workItem, initialMessages: [await task.prepare()] }).outcome;
-        expect(completion.status, JSON.stringify(completion)).toBe('completed');
-        if (completion.status !== 'completed') throw Error(JSON.stringify(completion));
-        return { kind: 'outcome', outcome: completion.output };
-      }) });
-    expect(result.written).toHaveLength(2);
-    expect(readManifest(repoRoot)!.flows[0].gaps).toEqual([]);
-  });
+          sessionId: 'schema-incident', workItem: task.workItem, initialMessages: [await task.prepare()] }).outcome
+        expect(completion.status, JSON.stringify(completion)).toBe('completed')
+        if (completion.status !== 'completed') throw Error(JSON.stringify(completion))
+        return { kind: 'outcome', outcome: completion.output }
+      }) })
+    expect(result.written).toHaveLength(1)
+    expect(readManifest(repoRoot)!.flows[0].gaps).toEqual([])
+  })
+
   it('exhausts the existing budget when a worker only rewords retirement', async () => {
     const repoRoot = seed();
     const { persistence } = memoryPersistence();
@@ -82,73 +82,46 @@ describe('generation cannot finish by shrinking selected coverage', () => {
       }) });
     expect(readManifest(repoRoot)!.flows[0].generationInputsHash).toBeNull();
   });
-  it('keeps the accepted half, refuses settled, and finishes with the other half in the same session', async () => {
-    const repoRoot = seed(); let first = ''; let resumed = 0
-    const { persistence } = memoryPersistence()
+  it('refuses both partial halves and accepts one complete replacement', async () => {
+    const repoRoot = seed()
     const result = await runGenerate({ repoRoot, extractSession: extractSession(), flowsAreaSession: flowOfAllSession('Complete version'),
       flowWorkerSession: flowWorkerSessionOf(async task => {
-        const { driver } = stubDriver(async call => {
-          if (!call.input.resume) {
-            const wrong = await tool(call, 'run_scenario', { yaml: yamlFor([0]).replace('contains: case-0', 'contains: missing-announcement') })
-            expect(wrong.isError).toBe(true)
-            const rejected = await task.submitScenario(yamlFor([0, 1, 2, 3, 4, 5]), [], async () => ({ kind: 'flagged', confidence: 'high', mismatch: 'Case 5 lacks its required assertion.' }))
-            expect(rejected.isError).toBe(true)
-            const partial = await tool(call, 'submit_scenario', { yaml: yamlFor([0, 1, 2, 3, 4]), expectedReds: [] })
-            first = acceptedSha(partial)!
-            expect(partial.content).toContain('5/10')
-            expect(partial.content).toContain('case-5')
-            expect(partial.content).toContain('Case 5 lacks its required assertion.')
-            expect(partial.content).not.toContain('Finish with:')
-            return outcome({ kind: 'settled', scenarioYamlSha: first, expectedReds: [] })
-          }
-          resumed++
-          expect(call.briefing).toContain('case-5')
-          expect(call.briefing).toContain('case-9')
-          const second = acceptedSha(await tool(call, 'submit_scenario', { yaml: yamlFor([5, 6, 7, 8, 9]), expectedReds: [] }))!
-          return outcome({ kind: 'settled', scenarioYamlSha: second, expectedReds: [], additionalScenarios: [{ scenarioYamlSha: first, expectedReds: [] }] })
-        })
-        const completion = await runAgentLoop({ def: flowWorkerSessionDef({ task, judgeWith: () => judge }), driver, persistence,
-          sessionId: 'incident-replay', workItem: task.workItem, initialMessages: [await task.prepare()] }).outcome
-        expect(completion.status).toBe('completed')
-        if (completion.status !== 'completed') throw new Error(JSON.stringify(completion))
-        return { kind: 'outcome', outcome: completion.output }
-      }),
-    })
-    expect(resumed).toBe(1)
-    expect(result.written).toHaveLength(2)
-    const entry = readManifest(repoRoot)!.flows[0]
-    expect(entry.gaps).toEqual([])
-    expect(entry.scenarios.flatMap(s => s.caseEvidence ?? [])).toHaveLength(10)
-    expect(entry.generationInputsHash).not.toBeNull()
-    expect(persistence.readEvents('incident-replay').filter(e => e.type === 'outcome')).toHaveLength(1)
+        for (const ids of [[0,1,2,3,4], [5,6,7,8,9]]) {
+          const partial = await task.submitScenario(yamlFor(ids), [], judge)
+          expect(partial.isError).toBe(true)
+          expect(partial.content).toContain('One complete test')
+          expect(acceptedSha(partial)).toBeNull()
+        }
+        const sha = acceptedSha(await task.submitScenario(yamlFor([0,1,2,3,4,5,6,7,8,9]), [], judge))!
+        expect(task.validateOutcome({ kind: 'settled', scenarioYamlSha: sha, expectedReds: [], additionalScenarios: [{ scenarioYamlSha: sha, expectedReds: [] }] })).toContain('one complete test')
+        return { kind: 'outcome', outcome: { kind: 'settled', scenarioYamlSha: sha, expectedReds: [] } }
+      }) })
+    expect(result.written).toHaveLength(1)
+    expect(readManifest(repoRoot)!.flows[0].scenarios[0].caseEvidence).toHaveLength(10)
   })
 
-  it('rejects a cached partial green without losing its current reviewed full cache counterpart', async () => {
+  it('rejects a cached partial or collection and replays only one complete reviewed candidate', async () => {
     const repoRoot = seed()
-    let partial: { yaml: string; expectedReds: []; review: FlowWorkerReview } | undefined
-    let full: typeof partial
-    await runGenerate({ repoRoot, extractSession: extractSession(), flowsAreaSession: flowOfAllSession('Complete version'),
-      flowWorkerSession: flowWorkerSessionOf(async task => {
-        const sha = acceptedSha(await task.submitScenario(yamlFor([0, 1, 2, 3, 4]), [], judge))!
-        partial = { yaml: task.stashedYaml(sha)!, expectedReds: [], review: task.stashedReview(sha)! }
-        const second = acceptedSha(await task.submitScenario(yamlFor([5, 6, 7, 8, 9]), [], judge))!
-        full = { yaml: task.stashedYaml(second)!, expectedReds: [], review: task.stashedReview(second)! }
-        return { kind: 'outcome', outcome: { kind: 'settled', scenarioYamlSha: second, expectedReds: [], additionalScenarios: [{ scenarioYamlSha: sha, expectedReds: [] }] } }
-      }) })
+    let full!: { yaml: string; expectedReds: []; review: FlowWorkerReview }
+    const options = { repoRoot, extractSession: extractSession(), flowsAreaSession: flowOfAllSession('Complete version') }
+    await runGenerate({ ...options, flowWorkerSession: flowWorkerSessionOf(async task => {
+      const sha = acceptedSha(await task.submitScenario(yamlFor([0,1,2,3,4,5,6,7,8,9]), [], judge))!
+      full = { yaml: task.stashedYaml(sha)!, expectedReds: [], review: task.stashedReview(sha)! }
+      return { kind: 'outcome', outcome: { kind: 'settled', scenarioYamlSha: sha, expectedReds: [] } }
+    }) })
     fs.rmSync(path.join(repoRoot, '.truecourse/scenarios/manifest.json'))
-    await runGenerate({ repoRoot, extractSession: extractSession(), flowsAreaSession: flowOfAllSession('Complete version'),
-      flowWorkerSession: flowWorkerSessionOf(async task => {
-        expect(await task.confirmCached([{ ...partial!, review: undefined }])).toBe(false)
-        expect(await task.confirmCached([partial!])).toBe(false)
-        expect(await task.confirmCached([{ ...partial!, yaml: partial!.yaml.replace('case-0', 'different') }, full!])).toBe(false)
-        expect(await task.confirmCached([partial!, full!])).toBe(true)
-        return { kind: 'outcome', outcome: { kind: 'settled', scenarioYamlSha: yamlSha(full!.yaml), expectedReds: [],
-          additionalScenarios: [{ scenarioYamlSha: yamlSha(partial!.yaml), expectedReds: [] }] } }
-      }) })
-    const entry = readManifest(repoRoot)!.flows[0]
-    expect(entry.scenarios.flatMap(s => s.caseEvidence ?? [])).toHaveLength(10)
+    await runGenerate({ ...options, flowWorkerSession: flowWorkerSessionOf(async task => {
+      expect(await task.confirmCached([{ ...full, review: undefined }])).toBe(false)
+      expect(await task.confirmCached([{ ...full, review: { ...full.review, policyVersion: 3 } }])).toBe(false)
+      expect(await task.confirmCached([{ ...full, yaml: yamlFor([0]) }])).toBe(false)
+      expect(await task.confirmCached([full, full])).toBe(false)
+      expect(await task.confirmCached([full])).toBe(true)
+      return { kind: 'outcome', outcome: { kind: 'settled', scenarioYamlSha: yamlSha(full.yaml), expectedReds: [] } }
+    }) })
+    expect(readManifest(repoRoot)!.flows[0].scenarios).toHaveLength(1)
   })
-  it('preserves the accepted half when the session exhausts its completion budget', async () => {
+
+  it('publishes no partial test when the session exhausts its completion budget', async () => {
     const repoRoot = seed()
     const { persistence } = memoryPersistence()
     await runGenerate({ repoRoot, extractSession: extractSession(), flowsAreaSession: flowOfAllSession('Complete version'),
@@ -156,7 +129,7 @@ describe('generation cannot finish by shrinking selected coverage', () => {
         const first = acceptedSha(await task.submitScenario(yamlFor([0, 1, 2, 3, 4]), [], judge))!
         const { driver } = stubDriver(async call => {
           await tool(call, 'run_scenario', { yaml: yamlFor([0]) })
-          return outcome({ kind: 'settled', scenarioYamlSha: first, expectedReds: [] })
+          return outcome({ kind: 'settled', scenarioYamlSha: first || 'unaccepted-candidate', expectedReds: [] })
         })
         const completion = await runAgentLoop({ def: { ...flowWorkerSessionDef({ task, judgeWith: () => judge }),
           budget: { turns: 1, maxResumes: 0, tokenCeiling: 1000 } }, driver, persistence,
@@ -165,10 +138,9 @@ describe('generation cannot finish by shrinking selected coverage', () => {
         return { kind: 'failed', reason: 'budget-exhausted' }
       }) })
     const entry = readManifest(repoRoot)!.flows[0]
-    expect(entry.scenarios).toHaveLength(1)
-    expect(entry.scenarios[0].caseEvidence).toHaveLength(5)
+    expect(entry.scenarios).toHaveLength(0)
     expect(entry.generationInputsHash).toBeNull()
-    expect(entry.gaps[0].reason).toContain('case-5')
+    expect(entry.gaps.some(g => g.reason.includes('case-5'))).toBe(true)
     expect(persistence.readEvents('incomplete-budget').some(e => e.type === 'outcome')).toBe(false)
   })
 
@@ -195,16 +167,16 @@ describe('generation cannot finish by shrinking selected coverage', () => {
         const expectedReds = [{ step: 1, predictedActual, verdict: 'code-drift' as const, brief: 'Required output is missing' }]
         const accepted = await task.submitScenario(broken, expectedReds, reviewed ? judge : async () => ({ kind: 'unavailable', reason: 'Review transport lost' }))
         const sha = acceptedSha(accepted)!
-        expect(sha, accepted.content).not.toBeNull()
+        expect(!!sha).toBe(reviewed)
         expect(task.validateOutcome({ kind: 'settled', scenarioYamlSha: sha, expectedReds }) === undefined).toBe(reviewed)
         return { kind: 'outcome', outcome: reviewed ? { kind: 'settled', scenarioYamlSha: sha, expectedReds } :
           { kind: 'blocked', perMilestone: [{ order: 1, capability: 'Independent review unavailable' }] } }
       }) })
     const entry = readManifest(repoRoot)!.flows[0]
-    expect(entry.scenarios[0].status).toBe('failing')
-    expect(entry.scenarios[0].reviewed === false).toBe(!reviewed)
+    expect(entry.scenarios).toHaveLength(reviewed ? 1 : 0)
+    if (reviewed) expect(entry.scenarios[0].status).toBe('failing')
     expect(entry.generationInputsHash !== null).toBe(reviewed)
-    expect(entry.scenarios[0].caseEvidence?.length ?? 0).toBe(reviewed ? 1 : 0)
+    expect(entry.scenarios[0]?.caseEvidence?.length ?? 0).toBe(reviewed ? 1 : 0)
   })
 
   it.each(['evidence', 'binding'])('does not restore invalid retained prior proof at persistence (%s)', async defect => {
@@ -257,42 +229,56 @@ describe('generation cannot finish by shrinking selected coverage', () => {
     expect(loadScenarios(repoRoot).scenarios[0].steps).toHaveLength(10)
   })
 
-  it('requires changed submissions after correction and preserves independent accepted cases', async () => {
+  it('refuses missing first-review evidence and never reuses old evidence for a same-ID revision', async () => {
     const repoRoot = seed()
-    const single = extractSessionBy({ version: [{ claim: 'Two independent required fields.', verification: { ...verification, cases: cases.slice(0, 2) } }] })
-    await runGenerate({ repoRoot, extractSession: single, flowsAreaSession: flowOfAllSession('Current remainder'),
+    const original = yamlFor([0,1,2,3,4,5,6,7,8,9])
+    const revised = original.replace('contains: case-0', 'matches: case-0')
+    await runGenerate({ repoRoot, extractSession: extractSession(), flowsAreaSession: flowOfAllSession('Complete version'),
       flowWorkerSession: flowWorkerSessionOf(async task => {
-        const refusal = await task.submitScenario(yamlFor([0]), [], async () => ({ kind: 'flagged', confidence: 'low',
-          mismatch: 'Cancel leaves Amount blank, so the form cannot save even with a broken Cancel handler.' }))
-        expect(refusal.isError).toBe(true)
-        const stale = { kind: 'retired' as const, attempts: 2, lastEvidence: 'An old total changed.' }
-        const feedback = task.validateOutcome(stale)!
-        expect(feedback).toContain('Cancel leaves Amount blank')
-        expect(feedback).toContain('case-1')
-        expect(task.validateOutcome(stale)).toContain('repair submission')
-        await task.submitScenario(yamlFor([0]), [], async () => ({ kind: 'flagged', confidence: 'low', mismatch: 'Same invalid cancellation, reviewer wording changed.' }))
-        expect(task.validateOutcome(stale)).toContain('repair submission')
-        // A changed state earns a new correction, but already accepted cases cannot reappear.
-        const sha = acceptedSha(await task.submitScenario(yamlFor([1]), [], judge))!
-        expect(sha).toBeTruthy()
-        const changed = task.validateOutcome(stale)!
-        const rows = JSON.parse(changed.split('CURRENT REMAINING: ')[1])
-        expect(rows).toHaveLength(1)
-        expect(rows[0]).toMatchObject({ caseId: 'case-0', reasonKind: 'assertion' })
-        // Merely fixing the terminal prose cannot replace a repair submission.
-        expect(task.validateOutcome({ ...stale, remaining: rows })).toContain('repair submission')
-        const repaired = yamlFor([0]).replace('contains: case-0', 'matches: case-0')
-        const repairedResult = await task.submitScenario(repaired, [], judge)
-        const repairedSha = acceptedSha(repairedResult)!
-        expect(repairedSha, repairedResult.content).toBeTruthy()
-        const settled = { kind: 'settled' as const, scenarioYamlSha: repairedSha, expectedReds: [] }
-        expect(task.validateOutcome(settled)).toBeUndefined()
-        return { kind: 'outcome', outcome: settled }
+        const missing = await task.submitScenario(original, [], async () => ({ kind: 'faithful' }))
+        expect(missing.isError).toBe(true)
+        expect(missing.content).toContain('not a semantic fidelity rejection')
+        expect(acceptedSha(missing)).toBeNull()
+        const sha = acceptedSha(await task.submitScenario(original, [], judge))!
+        const acceptedYaml = task.stashedYaml(sha)!
+        const id = (load(acceptedYaml) as { id: string }).id
+        const rejected = await task.submitScenario(revised, [], async input => {
+          expect(input.briefing).toContain(`id: ${id}`)
+          expect(input.briefing).toContain('matches: case-0')
+          return { kind: 'faithful' }
+        })
+        expect(rejected.isError).toBe(true)
+        expect(rejected.content).toContain('not a semantic fidelity rejection')
+        expect(acceptedSha(rejected)).toBeNull()
+        expect(task.hasStash(sha)).toBe(true)
+        expect(task.stashedYaml(sha)).toBe(acceptedYaml)
+        return { kind: 'outcome', outcome: { kind: 'settled', scenarioYamlSha: sha, expectedReds: [] } }
       }) })
     const entry = readManifest(repoRoot)!.flows[0]
-    expect(entry.scenarios).toHaveLength(2)
-    expect(entry.generationInputsHash).not.toBeNull()
-    expect(entry.gaps).toEqual([])
+    expect(entry.scenarios).toHaveLength(1)
+    expect(entry.scenarios[0].caseEvidence).toHaveLength(10)
+    expect(loadScenarios(repoRoot).scenarios[0].steps[0]).toMatchObject({ expect: { stdout: { contains: 'case-0' } } })
+  })
+
+  it('requires changed complete submissions after review correction', async () => {
+    const repoRoot = seed()
+    const single = extractSessionBy({ version: [{ claim: 'Two required fields.', verification: { ...verification, cases: cases.slice(0, 2) } }] })
+    await runGenerate({ repoRoot, extractSession: single, flowsAreaSession: flowOfAllSession('Current remainder'),
+      flowWorkerSession: flowWorkerSessionOf(async task => {
+        const refusal = await task.submitScenario(yamlFor([0,1]), [], async () => ({ kind: 'flagged', confidence: 'low', mismatch: 'Required baseline is not established.' }))
+        expect(refusal.isError).toBe(true)
+        const stale = { kind: 'retired' as const, attempts: 2, lastEvidence: 'Old explanation.' }
+        expect(task.validateOutcome(stale)).toContain('Required baseline')
+        await task.submitScenario(yamlFor([0,1]), [], async () => ({ kind: 'flagged', confidence: 'low', mismatch: 'Required baseline is not established.' }))
+        expect(task.validateOutcome(stale)).toContain('repair submission')
+        const partial = await task.submitScenario(yamlFor([1]), [], judge)
+        expect(acceptedSha(partial)).toBeNull()
+        const repaired = yamlFor([0,1]).replace('contains: case-0', 'matches: case-0')
+        const sha = acceptedSha(await task.submitScenario(repaired, [], judge))!
+        expect(task.validateOutcome({ kind: 'settled', scenarioYamlSha: sha, expectedReds: [] })).toBeUndefined()
+        return { kind: 'outcome', outcome: { kind: 'settled', scenarioYamlSha: sha, expectedReds: [] } }
+      }) })
+    expect(readManifest(repoRoot)!.flows[0].scenarios).toHaveLength(1)
   })
 
   it('repairs invalid review annotations without producing a semantic fidelity finding', async () => {
@@ -328,7 +314,7 @@ describe('generation cannot finish by shrinking selected coverage', () => {
     const entry = readManifest(repoRoot)!.flows[0]
     expect(entry.generationInputsHash).toBeNull()
     expect(entry.gaps[0].reason).toContain(reason)
-    if (reason === 'review-unavailable') expect(entry.scenarios[0].reviewed).toBe(false)
+    if (reason === 'review-unavailable') expect(entry.scenarios).toHaveLength(0)
   })
 
   it('drops an obsolete execution failure after a corrected passing probe without counting it as reviewed proof', async () => {

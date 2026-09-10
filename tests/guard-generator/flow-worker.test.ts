@@ -934,7 +934,7 @@ describe('the fidelity judge’s engine half', () => {
     expect(readGuardAutoResolutions(r).entries[KEY]).toMatchObject({ count: 2 })
   }, 60_000)
 
-  it('an UNAVAILABLE judge accepts the green unreviewed — persisted, unsettled, unadjudicated', async () => {
+  it('an UNAVAILABLE judge withholds the unreviewed green from publication', async () => {
     const r = seed()
     let accepted!: { content: string; isError?: boolean }
     const res = await runGenerate({
@@ -955,11 +955,10 @@ describe('the fidelity judge’s engine half', () => {
       }),
     })
 
-    expect(accepted.isError).toBeUndefined()
+    expect(accepted.isError).toBe(true)
     expect(accepted.content).toContain('UNREVIEWED')
     // The green is committed, but its flow does not settle and the run says so.
-    expect(res.written).toHaveLength(1)
-    expect(res.written[0].status).toBe('passing')
+    expect(res.written).toHaveLength(0)
     expect(readManifest(r)!.flows.find((f) => f.flowId === 'version')!.generationInputsHash).toBeNull()
     expect(res.unadjudicated).toEqual([{ stage: 'guard.fidelity', affected: 1 }])
   }, 60_000)
@@ -983,7 +982,7 @@ describe('the fidelity judge’s engine half', () => {
       }),
     })
 
-    expect(hasStash).toBe(true) // the fold still persists it
+    expect(hasStash).toBe(false) // the fold still persists it
     expect(yamlBack).toBeUndefined() // …but core writes NO cache entry
   }, 60_000)
 

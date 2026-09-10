@@ -346,6 +346,25 @@ describe('Guard flow read surfaces', () => {
     await teardownTestFixture(fixture.project.slug);
   });
 
+  it('keeps named setup and unsupported gaps visible in the same flow', async () => {
+    seed();
+    writeJson('.truecourse/scenarios/recipe.json', { build: 'true', api: { serve: ['node', 'fixture.js'], externals: { currencybeacon: { baseUrlEnv: 'CURRENCYBEACON_BASE_URL', env: { CURRENCYBEACON_API_KEY: {} } } } } });
+    writeJson('.truecourse/guard/result.json', { ...RESULT, errors: [], findings: [] });
+    const manifest = JSON.parse(JSON.stringify(MANIFEST));
+    const flowId = manifest.flows[0].flowId;
+    manifest.flows[0].gaps = [
+      { surface: 'web', kind: 'blocked-on', reason: 'A required account is missing.', blocker: { kind: 'configuration', dependencies: ['currencybeacon'] } },
+      { surface: 'web', kind: 'blocked-on', reason: 'Cannot observe outbound requests.', blocker: { kind: 'unsupported-capability', capabilities: ['request-control'] } },
+    ];
+    writeJson('.truecourse/scenarios/manifest.json', manifest);
+    const detail = await request(app).get(url(`flows/${flowId}`)).expect(200);
+    expect(detail.body.gaps).toEqual(expect.arrayContaining([
+      expect.objectContaining({ needsSetup: { services: ['currencybeacon'], provided: [] } }),
+      expect.objectContaining({ blocker: expect.objectContaining({ kind: 'unsupported-capability' }) }),
+    ]));
+    expect(detail.body.progress.generation).toBe('needs-setup');
+  });
+
   it('reports passing scenarios separately from independently reviewed case coverage', async () => {
     const verification = { scope: 'web', method: 'behavior', observable: 'Visible items', cases: [
       { id: 'create', claim: 'Created item appears', method: 'behavior', requires: ['browser'], conditions: [] },
@@ -362,12 +381,12 @@ describe('Guard flow read surfaces', () => {
     const manifest = { flows: [{ flowId: 'case-flow', flowFingerprint: 'sha256:cases', milestones, bindings, scenarios: [{ id: 'case-test', drivers: ['web'], status: 'passing', reviewed: true, caseEvidence: evidence, reviewPolicyVersion: GUARD_REVIEW_POLICY_VERSION, reviewedScenarioFingerprint: scenarioReviewFingerprint(GuardScenarioSchema.parse(scenario)), milestoneCoverage: [{ milestone: 1, driver: 'web', checks: ['create'] }] }], gaps: [{ surface: 'web', kind: 'blocked-on', milestones: [1], obligations: [{ milestone: 1, caseId: 'reload' }], reason: 'Milestone 1: reload is not verified', blocker: { kind: 'generation' } }, { surface: 'web', kind: 'no-interface', milestones: [1], obligations: [{ milestone: 1, caseId: 'create' }], reason: 'Historical missing create action', blocker: { kind: 'generation' } }] }] };
     writeJson('.truecourse/scenarios/manifest.json', manifest);
     const response = await request(app).get(url('flows')).expect(200);
-    expect(response.body.flows.find((f: any) => f.flowId === 'case-flow').progress).toEqual({ execution: 'passed', scenarios: 1, passed: 1, coverage: 'partial', verified: 1, total: 2, unit: 'cases', category: 'behavior', generation: 'incomplete' });
+    expect(response.body.flows.find((f: any) => f.flowId === 'case-flow').progress).toEqual({ execution: 'passed', scenarios: 1, passed: 1, coverage: 'unverified', verified: 0, total: 2, unit: 'cases', category: 'behavior', generation: 'incomplete' });
     const detail = await request(app).get(url('flows/case-flow')).expect(200);
     expect(detail.body.progress).toEqual(response.body.flows[0].progress);
     const gapSurfaces = response.body.flows[0].surfaces.filter((s: any) => s.gap);
     expect(gapSurfaces.find((s: any) => s.gap.obligations[0].caseId === 'reload').coveredByAlternative).toBeUndefined();
-    expect(gapSurfaces.find((s: any) => s.gap.obligations[0].caseId === 'create').coveredByAlternative).toBe(true);
+    expect(gapSurfaces.find((s: any) => s.gap.obligations[0].caseId === 'create').coveredByAlternative).toBeUndefined();
     expect(detail.body.gaps.find((g: any) => g.obligations[0].caseId === 'reload')).toMatchObject({ milestones: [1], obligations: [{ milestone: 1, caseId: 'reload' }] });
     manifest.flows[0].scenarios[0].reviewPolicyVersion = GUARD_REVIEW_POLICY_VERSION - 1;
     writeJson('.truecourse/scenarios/manifest.json', manifest);

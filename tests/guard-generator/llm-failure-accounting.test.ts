@@ -327,7 +327,7 @@ describe('fidelity ships unadjudicated on a systemic loss, never aborts', () => 
     })
 
     expect(res.status).toBe('ok')
-    expect(res.written.map((w) => w.flowId)).toEqual(['version'])
+    expect(res.written.map((w) => w.flowId)).toEqual([])
     expect(fs.existsSync(manifestPath(r))).toBe(true)
     // Loud, not silent: the run says which stage never adjudicated and how much
     // of the corpus shipped without it.

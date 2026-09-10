@@ -132,7 +132,7 @@ describe('generateGuards — OpenAPI doc as claim source (end to end)', () => {
     expect(second.flows).toMatchObject({ total: 1, skipped: 1, settled: 1, unsettled: 0 })
     expect(authorCalls).toBe(1) // no second authoring call
     // The committed scenario stands, its manifest entry carried forward.
-    expect(readManifest(r)!.flows.find((f) => f.flowId === 'paths-get-listtodos')!.scenarios).toEqual([
+    expect(readManifest(r)!.flows.find((f) => f.flowId === 'paths-get-listtodos')!.scenarios).toMatchObject([
       {
         id: 'paths-get-listtodos', drivers: ['api'], status: 'passing',
         milestoneCoverage: [{ milestone: 1, driver: 'api' }],

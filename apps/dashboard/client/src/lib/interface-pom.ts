@@ -797,7 +797,8 @@ export interface PomShowRow {
 
 /** `“Violations”` — a locator's own NAME, for the column that carries the thing. */
 function locatorName(locator: GuardWebLocator): string {
-  return `“${webLocatorHandle(locator).value}”`;
+  const { value } = webLocatorHandle(locator);
+  return value === undefined ? describeWebLocator(locator) : `“${value}”`;
 }
 
 /**

@@ -415,8 +415,8 @@ describe('checkFlowSet — the tool and the fold agree', () => {
     }
     const noted = await tool.execute(dup, ctx)
     expect(noted.isError).toBeUndefined()
-    expect(noted.content).toContain('near-duplicate')
-    expect(noted.content).toContain('the engine will drop it')
+    expect(noted.content).toContain('The draft is valid')
+    expect(noted.content).not.toContain('the engine will drop it')
 
     const bad = await tool.execute(
       { flows: [{ title: 'x', goal: 'g', milestones: [ms(CREATE, 'nothing like a claim here', 1)] }], noFlowClaims: [] },
@@ -617,7 +617,7 @@ describe('the session cache keys', () => {
 describe('the flows system prompts', () => {
   it('keeps the binding rule: a milestone COPIES a given claim', () => {
     expect(FLOWS_SESSION_SYSTEM_PROMPT).toContain('COPIES one given claim')
-    expect(FLOWS_SESSION_SYSTEM_PROMPT).toContain('Never invent, reword, translate, shorten, merge, or split a claim')
+    expect(FLOWS_SESSION_SYSTEM_PROMPT).toContain('Never invent or rewrite a claim')
     expect(FLOWS_SESSION_SYSTEM_PROMPT).toContain('Milestones still come ONLY from the claims')
   })
 
@@ -625,7 +625,7 @@ describe('the flows system prompts', () => {
     expect(FLOWS_SESSION_SYSTEM_PROMPT).toContain('# Coverage honesty')
     expect(FLOWS_SESSION_SYSTEM_PROMPT).toContain('account: required')
     expect(FLOWS_SESSION_SYSTEM_PROMPT).toContain('noFlowClaims')
-    expect(FLOWS_SESSION_SYSTEM_PROMPT).toContain('A ONE-MILESTONE flow is correct')
+    expect(FLOWS_SESSION_SYSTEM_PROMPT).toContain('One flow has ONE coherent goal')
   })
 
   it('the epic prompt defaults to none and only chains listed flows', () => {

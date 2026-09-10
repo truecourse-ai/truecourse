@@ -88,6 +88,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
   }
   properties: {
     managedEnvironmentId: environmentId
+    workloadProfileName: 'Consumption'
     configuration: {
       activeRevisionsMode: 'Single'
       ingress: {
@@ -110,8 +111,8 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
           name: 'truecourse'
           image: image
           resources: {
-            cpu: json('0.5')
-            memory: '1Gi'
+            cpu: 4
+            memory: '8Gi'
           }
           env: concat(plainEnvVars, secretEnvVars)
           probes: [

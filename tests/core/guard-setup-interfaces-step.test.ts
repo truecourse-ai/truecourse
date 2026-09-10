@@ -17,7 +17,7 @@
  * every case here briefs the step with an empty diagnostics list.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -98,7 +98,7 @@ function stepInput(r: string, over: Partial<GuardSetupInterfacesStepInput> = {})
   };
 }
 
-/** A context whose driver must never be needed: authoring runs under its OWN run. */
+/** The injected authoring thunk handles persistence; these tests exercise the step. */
 function stubContext(): { context: GuardSetupSessionContext; spend: { sessions: number; turns: number } } {
   const spend = { sessions: 0, turns: 0 };
   return {
@@ -173,12 +173,16 @@ describe('buildInterfacesStep — the authoring half', () => {
     expect(second.calls).toHaveLength(1);
   });
 
-  it('does not report wholly rejected authoring as successful setup', async () => {
+  it.each(['rejected', 'failed', 'authored', 'empty'])('accounts for %s authoring in setup status', async (status) => {
     const r = repo();
     writeHalves(r);
-    const { author } = authoring({ places: [{ status: 'rejected' }] });
-    const result = await buildInterfacesStep(stubContext().context, { author })(stepInput(r));
-    expect(result.status).toBe('failed');
+    const { author } = authoring({ places: [{ status }] });
+    const { context } = stubContext();
+    context.note = vi.fn();
+    const result = await buildInterfacesStep(context, { author })(stepInput(r));
+    const failed = status === 'rejected' || status === 'failed';
+    expect(result.status).toBe(failed ? 'failed' : 'ok');
+    expect(context.note).toHaveBeenCalledExactlyOnceWith(failed ? 'failed' : 'completed');
   });
 
   it('runs the authoring when a screen has no tasks, and records its run id', async () => {
@@ -229,14 +233,16 @@ describe('buildInterfacesStep — the authoring half', () => {
       throw new Error('the context pack could not be built');
     };
 
-    const result = await buildInterfacesStep(stubContext().context, { author })(stepInput(r));
+    const { context } = stubContext();
+    context.note = vi.fn();
+    const result = await buildInterfacesStep(context, { author })(stepInput(r));
 
     expect(result.status).toBe('failed');
     expect(result.reason).toBe('authoring failed: the context pack could not be built');
+    expect(context.note).toHaveBeenCalledExactlyOnceWith('failed');
   });
 
-  // Every session failing is a failed step; one surviving place is not.
-  it('fails the step only when EVERY place failed', async () => {
+  it('reports partial failure with the rejected screen and validation reason', async () => {
     const r = repo();
     writeHalves(r);
 
@@ -247,9 +253,11 @@ describe('buildInterfacesStep — the authoring half', () => {
     expect(allFailed.reason).toMatch(/every authoring session failed \(2 place\(s\)\)/);
 
     const partial = await buildInterfacesStep(stubContext().context, {
-      author: authoring({ places: [{ status: 'failed' }, { status: 'ok' }], authored: 1 }).author,
+      author: authoring({ places: [{ status: 'failed', placeId: 'expenses-id', problems: ['expense-exists already names a different state'] }, { status: 'authored', placeId: 'root' }], authored: 1 }).author,
     })(stepInput(r));
-    expect(partial.status).toBe('ok');
+    expect(partial.status).toBe('failed');
+    expect(partial.reason).toContain('authored 1 task(s) across 1 place(s)');
+    expect(partial.reason).toContain('expenses-id: expense-exists already names a different state');
   });
 
   // Run reporting lands on the step ROW — never in the catalog.

@@ -519,6 +519,24 @@ describe('mapInterfaces — own hosts (the cal.com false positive)', () => {
   });
 });
 
+describe('external service source locations', () => {
+  it('returns repository-relative service and credential evidence', async () => {
+    writeRepo({
+      'package.json': JSON.stringify({ name: 'expense-tracker' }),
+      'lib/currencybeacon.ts': `fetch('https://api.currencybeacon.com/v1/latest', {
+        headers: { Authorization: process.env.CURRENCYBEACON_API_KEY }
+      });`,
+    });
+    const mapped = await mapInterfaces(repo, { probeExec: null });
+    const service = mapped.externalServices.find((entry) => entry.service === 'currencybeacon')!;
+    expect(service.evidence).toEqual([
+      expect.objectContaining({ filePath: 'lib/currencybeacon.ts', url: 'https://api.currencybeacon.com/v1/latest' }),
+    ]);
+    expect(service.credentialEnvs?.[0].evidence[0].filePath).toBe('lib/currencybeacon.ts');
+    expect(JSON.stringify(service)).not.toContain(repo);
+  });
+});
+
 describe('mapInterfaces — guard-fixture-api acceptance', () => {
   it('derives the api catalog from the fixture OpenAPI doc alone, nothing marked specOnly', async () => {
     // The fixture server is framework-free node:http — the route extractors see

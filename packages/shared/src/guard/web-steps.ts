@@ -169,7 +169,7 @@ const locatorEscapes = {
 const roleShape = {
   role: z.enum(GUARD_WEB_ROLES),
   /** The element's accessible name (its label, its text, its `aria-label`). */
-  name: z.string().min(1),
+  name: z.string().min(1).optional(),
   ...locatorEscapes,
 } as const
 /** The prompt text INSIDE an empty input — what a user reads before typing. */
@@ -1003,7 +1003,7 @@ export function webLocatorValueKey(locator: object): GuardWebLocatorValueKey {
 export function webLocatorHandle(locator: GuardWebLocator): {
   key: GuardWebLocatorValueKey
   kind: string
-  value: string
+  value: string | undefined
 } {
   const key = webLocatorValueKey(locator)
   const value = (locator as unknown as Record<GuardWebLocatorValueKey, string>)[key]
@@ -1017,7 +1017,7 @@ export function webLocatorHandle(locator: GuardWebLocator): {
 /** `button “Save”` / `first placeholder “Search”` — one locator, in a reader's words. */
 export function describeWebLocator(locator: GuardWebLocator): string {
   const { kind, value } = webLocatorHandle(locator)
-  return `${locator.pick === 'first' ? 'first ' : ''}${kind} “${value}”${locator.exact ? ' (exact)' : ''}${locator.within ? ` within ${describeWebLocator(locator.within)}` : ''}`
+  return `${locator.pick === 'first' ? 'first ' : ''}${kind}${value === undefined ? '' : ` “${value}”`}${locator.exact ? ' (exact)' : ''}${locator.within ? ` within ${describeWebLocator(locator.within)}` : ''}`
 }
 
 /**

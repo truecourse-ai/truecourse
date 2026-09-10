@@ -129,10 +129,12 @@ export function createRepoGuardGenerateTask(
 
           let guard;
           try {
+            const driver = llm.driver();
             ({ guard } = await runGenerate(tree.dir, {
+              driver,
               transport: llm.transport(),
               transportMode: llm.mode,
-              attribution: llm.driver().attribution,
+              attribution: driver.attribution,
               sessionsKey: repoFullName,
               sessionRun: activityRun,
               tracker: activityTracker,
@@ -177,6 +179,16 @@ export function createRepoGuardGenerateTask(
           // row's counts come from it too — never from a result it could differ from.
           const report = readGeneratedReport(tree.dir) ?? buildGuardReport(guard, new Date().toISOString());
           await persistGeneratedGuard(ref, tree.dir, report);
+
+          // Keep successful documents and the failure report, but do not present
+          // an incomplete extraction as success or chain its baseline run.
+          if (report.extractionFailures.length > 0) {
+            const docs = report.extractionFailures.map(failure => failure.doc).join(', ');
+            activityTracker.error('extract', `Claim extraction failed for ${docs}`);
+            throw new Error(
+              `Claim extraction failed for ${docs}. Partial results were saved. Retry generation to complete coverage.`,
+            );
+          }
 
           const written = report.written.length;
           const findings = report.birthFindings.length;

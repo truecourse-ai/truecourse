@@ -23,6 +23,7 @@ import type { Repo } from '@/preview/data/types';
 import { activityHref } from '@/preview/shell/real-runs';
 import { useGuardTabJump } from './tab-jump';
 import { useGuardRefresh } from './use-guard-refresh';
+import { GenerateTestsAction } from './GenerateTestsAction';
 
 export function TestsTab({ repo }: { repo: Repo }) {
   useGuardTabJump();
@@ -72,7 +73,11 @@ export function TestsTab({ repo }: { repo: Repo }) {
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <PageHeader title="Tests" subtitle={rows.length === all.length ? `${all.length}` : `${rows.length} of ${all.length}`} />
+      <PageHeader
+        title="Tests"
+        subtitle={rows.length === all.length ? `${all.length}` : `${rows.length} of ${all.length}`}
+        right={repo.real ? <GenerateTestsAction repo={repo} /> : undefined}
+      />
       <div className="flex shrink-0 flex-wrap items-center gap-x-6 gap-y-1 border-b border-border px-6 py-2">
         <input
           value={query}

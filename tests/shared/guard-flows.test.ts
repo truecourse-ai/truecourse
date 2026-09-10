@@ -106,8 +106,8 @@ describe('flowFingerprint', () => {
   })
 
   it('the milestone key is the anchor + the claim text, normalized', () => {
-    expect(flowMilestoneKey(CREATE)).toBe(`${CREATE.anchor}\0${CREATE.claimTitle}`)
-    expect(flowMilestoneKey({ anchor: ' a  b ', claimTitle: 'x\ny' })).toBe('a b\0x y')
+    expect(flowMilestoneKey(CREATE)).toBe(`${DOC}\0${CREATE.anchor}\0${CREATE.claimTitle}\0`)
+    expect(flowMilestoneKey({ anchor: ' a  b ', claimTitle: 'x\ny' })).toBe('\0a b\0x y\0')
   })
 
   it('a note never moves the fingerprint', () => {
@@ -130,12 +130,12 @@ describe('resolveFlowIdentity', () => {
     expect(resolveFlowIdentity(prev, next).verdicts[0]).toEqual({ kind: 'remap', id: 'task-lifecycle' })
   })
 
-  it('goes stale in place on a majority overlap with a unique best candidate', () => {
+  it('does not inherit a parent identity from a majority subset', () => {
     const prev = [flow('task-lifecycle', [CREATE, LIST, COMPLETE, FILTER])]
     const next = [flow('provisional', [CREATE, LIST, COMPLETE])]
     const { verdicts, orphaned } = resolveFlowIdentity(prev, next)
-    expect(verdicts).toEqual([{ kind: 'stale', id: 'task-lifecycle' }])
-    expect(orphaned).toEqual([])
+    expect(verdicts).toEqual([{ kind: 'new', id: 'provisional' }])
+    expect(orphaned).toEqual(prev)
   })
 
   it('a minority overlap is a new flow, and the prior flow orphans', () => {
@@ -402,5 +402,24 @@ describe('GuardFlowWorkerOutcomeSchema payload pairing', () => {
       GuardFlowWorkerOutcomeSchema.safeParse({ kind: 'retired', attempts: 2, lastEvidence: 'no faithful scenario' })
         .success,
     ).toBe(true)
+  })
+})
+
+describe('scoped flow identities', () => {
+  const cases = ['cancel', 'save'].map(id => ({ id, claim: id, method: 'behavior' as const, requires: ['process' as const], conditions: [] }))
+  const source: GuardFlowMilestone = { ...CREATE, proofDrivers: ['cli'], verification: { method: 'behavior', observable: 'result', cases } }
+  it('canonicalizes case selections and parsed object order, including legacy whole claims', () => {
+    const explicit = { ...source, caseIds: ['save', 'cancel'], verification: { ...source.verification!, cases: [...cases].reverse() } }
+    expect(flowFingerprint([explicit])).toBe(flowFingerprint([source]))
+    expect(flowFingerprint([GuardFlowMilestoneSchema.parse(explicit)])).toBe(flowFingerprint([source]))
+  })
+  it('gives disjoint children new identities and orphans the parent, including whole-milestone splits', () => {
+    const prev = [flow('parent', [source])]
+    const children = cases.map(c => flow(c.id, [{ ...source, caseIds: [c.id], verification: { ...source.verification!, cases: [c] } }]))
+    expect(resolveFlowIdentity(prev, children)).toMatchObject({ verdicts: [{ kind: 'new', id: 'cancel' }, { kind: 'new', id: 'save' }], orphaned: prev })
+    expect(resolveFlowIdentity([flow('parent', [CREATE, LIST, COMPLETE])], [flow('first', [CREATE, LIST]), flow('second', [COMPLETE])]).verdicts.every(v => v.kind === 'new')).toBe(true)
+  })
+  it('does not merge equivalent-looking claims from different source documents', () => {
+    expect(flowFingerprint([CREATE])).not.toBe(flowFingerprint([{ ...CREATE, doc: 'another.md' }]))
   })
 })

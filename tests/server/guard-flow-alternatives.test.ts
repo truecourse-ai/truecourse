@@ -32,13 +32,13 @@ function read(s: GuardCoverageSources) {
 }
 
 describe('coverage across alternative flow proofs', () => {
-  it('combines independently verified scenarios without losing a remaining obligation', () => {
+  it('never combines partial tests into current complete coverage', () => {
     const s = sources()
     const entry = s.manifest!.flows[0]
     entry.scenarios[0].milestoneCoverage = [{ milestone: 1, driver: 'web' }]
     expect(read(s).flow.status).toBe('no-interface')
     entry.scenarios.push({ id: 'expenses.second', drivers: ['web'], status: 'passing', reviewed: true, milestoneCoverage: [{ milestone: 2, driver: 'web' }] })
-    expect(read(s).flow.status).toBe('guarded')
+    expect(read(s).flow.status).toBe('no-interface')
     entry.scenarios[1].reviewed = false
     expect(read(s).flow.status).toBe('no-interface')
     entry.scenarios[1].reviewed = true
@@ -160,4 +160,26 @@ describe('coverage across alternative flow proofs', () => {
     expect(proof).toEqual([{ milestone: 2, driver: 'web' }])
     expect(coversFlowMilestones(milestones, proof)).toBe(false)
   })
+})
+
+it('never promotes two independently reviewed partial case tests through their union', async () => {
+  const { GUARD_REVIEW_POLICY_VERSION } = await import('@truecourse/shared')
+  const { scenarioReviewFingerprint } = await import('@truecourse/shared/guard-proof-node')
+  const ms: GuardFlowMilestone[] = [{ ...milestones[0], verification: { method: 'behavior', scope: 'web', observable: 'expense', cases: [
+    { id: 'created', claim: 'The expense appears', method: 'behavior', requires: ['browser'], conditions: [] },
+    { id: 'reload', claim: 'The expense survives reload', method: 'behavior', requires: ['browser'], conditions: [] },
+  ] }, proofDrivers: ['web'] }]
+  const s = sources(ms)
+  const fingerprint = s.flows!.flows[0].fingerprint
+  s.scenarios = ['created','reload'].map(id => GuardScenarioSchema.parse({ id, title: id,
+    binds: [{ doc, section: 'expenses', fingerprint: 'sha256:section' }], flow: { id: 'expenses', fingerprint },
+    steps: [{ driver: 'web', navigate: '/', milestone: 1, checks: [id], expect: { text: { contains: id } } }],
+  }))
+  s.manifest!.flows[0].scenarios = s.scenarios.map(scenario => ({ id: scenario.id, drivers: ['web'], status: 'passing', reviewed: true,
+    reviewPolicyVersion: GUARD_REVIEW_POLICY_VERSION, reviewedScenarioFingerprint: scenarioReviewFingerprint(scenario),
+    caseEvidence: [{ milestone: 1, caseId: scenario.id, steps: [1], reason: 'Independent observed assertion' }], milestoneCoverage: scenarioMilestoneProof(scenario.steps) }))
+  const view = read(s)
+  expect(view.flow.status).not.toBe('guarded')
+  expect(view.flow.surfaces.filter(row => row.scenarioId).every(row => row.coverageComplete === false)).toBe(true)
+  expect(view.flow.surfaces.find(row => row.gap)?.coveredByAlternative).toBeUndefined()
 })
