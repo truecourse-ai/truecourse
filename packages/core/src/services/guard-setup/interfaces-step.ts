@@ -67,7 +67,7 @@ export interface InterfacesAuthorRun {
   runId: string;
   authored: number;
   skipped: string[];
-  places: { status: string }[];
+  places: { status: string; placeId?: string; problems?: string[] }[];
   diagnostics: MapperDiagnostic[];
   spent: { turns: number; tokens: number; costUsd: number };
 }
@@ -142,26 +142,33 @@ export function buildInterfacesStep(
     try {
       const run = await opts.author({ repoRoot: input.repoRoot, replace: input.replace });
       context.addSpend(run.places.length, run.spent);
+      for (const place of run.places) {
+        context.note(place.status === 'failed' || place.status === 'rejected' ? 'failed' : 'completed');
+      }
       // The stale-place reports ride the SAME step row as the cli disputes —
       // one diagnostics stream, and the setup report row is where it lands.
       if (run.diagnostics.length > 0) {
         recorded.diagnostics = [...(recorded.diagnostics ?? []), ...run.diagnostics];
       }
-      const allFailed =
-        run.places.length > 0 && run.places.every((place) => place.status === 'failed' || place.status === 'rejected');
+      const failed = run.places.filter((place) => place.status === 'failed' || place.status === 'rejected');
+      const allFailed = run.places.length > 0 && failed.length === run.places.length;
+      for (const place of failed) {
+        notes.push(`${place.placeId ?? 'authoring session'}: ${place.problems?.join('; ') || place.status}`);
+      }
       return {
-        status: allFailed ? 'failed' : 'ok',
+        status: failed.length > 0 ? 'failed' : 'ok',
         reason: joinNotes(
           allFailed
             ? `every authoring session failed (${run.places.length} place(s))`
-            : `authored ${run.authored} task(s) across ${run.places.length} place(s)`,
+            : `authored ${run.authored} task(s) across ${run.places.length - failed.length} place(s)`,
           notes,
         ),
         sessionRunId: run.runId,
         ...recorded,
       };
     } catch (error) {
-      // An authoring failure fails the STEP, never setup (the engine's rule).
+      context.note('failed');
+      // Return the failure on the step so setup can continue its remaining work.
       return {
         status: 'failed',
         reason: joinNotes(`authoring failed: ${message(error)}`, notes),

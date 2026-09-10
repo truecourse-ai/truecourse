@@ -2,7 +2,7 @@
  * THE SESSION'S TOOLS — every one of them READ-ONLY, and every one of them
  * bounded. An authoring session reads the app's own source (the JSX that
  * declares a screen's controls), reads the catalog it is extending, and checks
- * its own draft; it writes nothing. The write happens once, after the outcome,
+ * its own draft; it writes nothing. The write happens when accepting an outcome,
  * in {@link ../write.ts} — a tool that wrote would put half a fragment on disk
  * every time a session ran out of budget mid-draft.
  *
@@ -20,7 +20,8 @@
  * structural facts (an id that resolves, a role that exists, an entry that
  * agrees with its place), and a model that can ASK is a model that converges on
  * them instead of being re-prompted about them. It is the same function the
- * write path runs, so a draft that checks clean cannot be refused afterwards.
+ * write path runs. A peer can change the catalog after a check, so outcome
+ * acceptance validates again and returns any new conflicts for correction.
  *
  * What it is asked for is an EARLY call, not only a closing one: the
  * fragment is dropped whole when it breaks a rule, so a session that first
@@ -111,7 +112,7 @@ function checkDraftTool(input: AuthorToolsInput): SessionTool {
   return defineSessionTool({
     name: 'check_draft',
     description:
-      'Check a draft against every rule the write path enforces — id uniqueness, fingerprint uniqueness, the `<role> "<name>"` locator policy, reachability, and the catalog schema. Call it EARLY, on your first task or two, and again on the complete draft before you produce the outcome; a draft that checks clean is a draft that lands, and a misreading caught on the first task costs one turn instead of the place.',
+      'Check a draft against every rule the write path enforces — id uniqueness, fingerprint uniqueness, the `<role> "<name>"` locator policy, reachability, and the catalog schema. Call it EARLY, on your first task or two, and again on the complete draft before you produce the outcome; outcome acceptance checks the current catalog again, and returns any new conflicts for correction.',
     kind: 'check-draft',
     readOnly: true,
     destructive: false,

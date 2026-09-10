@@ -359,15 +359,100 @@ describe('a session that authors', () => {
     })
 
     const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence, concurrency: 1 })
-    expect(result.places.map((p) => p.status)).toEqual(['authored', 'rejected'])
+    expect(result.places.map((p) => p.status)).toEqual(['authored', 'failed'])
     expect(result.places[1].problems.join('\n')).toContain('is the same task as')
     // The rejection changed nothing on disk.
     expect(readAuthoredFile().interfaces).toHaveLength(1)
   })
 })
 
+describe('concurrent state definitions', () => {
+  it.each([false, true])('repairs a conflicting screen in the same session, check after peer save=%s', async (checkAfterSave) => {
+    const { persistence, events, index } = memoryPersistence()
+    let draftChecked!: () => void
+    const checked = new Promise<void>(resolve => { draftChecked = resolve })
+    let rootSaved!: () => void
+    const saved = new Promise<void>(resolve => { rootSaved = resolve })
+    const home: AuthoredFragment = {
+      ...HOME_FRAGMENT,
+      resources: [{ id: 'root', kind: 'screen', title: '/', address: '/' }],
+    }
+    const detail: AuthoredFragment = {
+      ...REPORT_FRAGMENT,
+      interfaces: REPORT_FRAGMENT.interfaces.map(task => ({ ...task, startingState: 'repository-registered' })),
+      states: [{ id: 'repository-registered', description: 'The requested repository is registered.' }],
+      resources: [
+        ...REPORT_FRAGMENT.resources!,
+        { id: 'repos-repoid', kind: 'screen', title: '/repos/{repoId}', address: '/repos/{repoId}' },
+      ],
+    }
+    const repaired: AuthoredFragment = {
+      ...detail,
+      interfaces: detail.interfaces.map(task => ({ ...task, startingState: 'requested-repository-registered' })),
+      states: [{ id: 'requested-repository-registered', description: 'The requested repository is registered.' }],
+    }
+    const { driver, seen } = scriptedDriver(async (place, input) => {
+      if (place === 'root') {
+        if (input.resume) {
+          expect(input.initialMessages.join('\n')).toContain('already names')
+          return { kind: 'outcome', value: {
+            ...home,
+            interfaces: home.interfaces.map(task => ({ ...task, endState: 'listed-repository-registered' })),
+            states: [{ ...home.states![0], id: 'listed-repository-registered' }],
+          } }
+        }
+        await checked
+        return { kind: 'outcome', value: home }
+      }
+      if (input.resume) {
+        expect(input.initialMessages.join('\n')).toContain('already names')
+        expect(await callTool(input, 'check_draft', repaired)).toContain('The draft is valid')
+        return { kind: 'outcome', value: repaired }
+      }
+      expect(await callTool(input, 'check_draft', detail)).toContain('The draft is valid')
+      draftChecked()
+      if (checkAfterSave) {
+        await saved
+        expect(await callTool(input, 'check_draft', detail)).toContain('already names')
+        expect(await callTool(input, 'list_interfaces', { surface: 'web' })).toContain(HOME_TASK.id)
+      }
+      // Return the previously checked draft, including when both peers finish together.
+      return { kind: 'outcome', value: detail }
+    })
+    const result = await authorWebInterfaces({
+      repoRoot: repo, driver, persistence, concurrency: 2,
+      onProgress: event => {
+        if (event.kind === 'place-done' && event.place.placeId === 'root') rootSaved()
+      },
+      onSessionEvent: (place, event) => {
+        if (event.type === 'outcome') {
+          // A completed transcript must describe output already on disk.
+          const taskId = place === 'root' ? HOME_TASK.id : REPORT_FRAGMENT.interfaces[0].id
+          expect(readAuthoredFile().interfaces.some(task => task.id === taskId)).toBe(true)
+        }
+      },
+    })
+    expect(result.places.map(place => place.status)).toEqual(['authored', 'authored'])
+    expect(result.authored).toBe(2)
+    expect(seen).toHaveLength(3)
+    expect(index.size).toBe(2)
+    expect([...index.values()].every(session => session.status === 'completed')).toBe(true)
+    const file = readAuthoredFile()
+    expect(file.resources?.web.filter(place => place.kind === 'screen')).toHaveLength(2)
+    expect(file.states?.web).toHaveLength(2)
+    const homeState = file.interfaces.find(task => task.id === HOME_TASK.id)?.endState
+    const detailState = file.interfaces.find(task => task.id === REPORT_FRAGMENT.interfaces[0].id)?.startingState
+    expect(homeState).not.toBe(detailState)
+    expect(file.states?.web.find(state => state.id === homeState)?.description).toBe(home.states![0].description)
+    expect(file.states?.web.find(state => state.id === detailState)?.description).toBe(detail.states![0].description)
+    for (const transcript of events.values()) {
+      expect(transcript.filter(event => event.type === 'outcome')).toHaveLength(1)
+    }
+  })
+})
+
 describe('an outcome that breaks a rule', () => {
-  it('is dropped whole, with the reasons, and nothing is written', async () => {
+  it('fails after exhausting corrections, with the reasons and nothing written', async () => {
     const { persistence } = memoryPersistence()
     const { driver } = scriptedDriver(async (place) =>
       place === 'root'
@@ -381,7 +466,7 @@ describe('an outcome that breaks a rule', () => {
     )
 
     const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['root'] })
-    expect(result.places[0].status).toBe('rejected')
+    expect(result.places[0].status).toBe('failed')
     expect(result.places[0].problems.join('\n')).toContain('is not `<role> "<accessible name>"`')
     expect(result.authored).toBe(0)
     expect(fs.existsSync(guardAuthoredInterfacesPath(repo))).toBe(false)
@@ -449,7 +534,7 @@ describe('the findings a session reports', () => {
       } satisfies AuthoredFragment,
     }))
     const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['root'] })
-    expect(result.places[0].status).toBe('rejected')
+    expect(result.places[0].status).toBe('failed')
     expect(result.places[0].findings).toEqual([
       'docs/setup.mdx names a "Import" button src/Home.tsx does not render',
     ])
@@ -1032,7 +1117,7 @@ describe('sessions run in a pool, the fold does not', () => {
       concurrency: 1,
     })
     const settings = result.places.find((p) => p.placeId === 'settings')!
-    expect(settings.status).toBe('rejected')
+    expect(settings.status).toBe('failed')
     expect(settings.raced).toBeUndefined()
     expect(settings.problems.join('\n')).toContain('is already authored')
   })
