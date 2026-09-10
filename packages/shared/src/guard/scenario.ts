@@ -1,3 +1,4 @@
+import { GuardPrerequisiteSchema } from './prerequisites.js'
 import { GuardPreparationNameSchema } from './preparation.js'
 /**
  * The guard scenario — the committed, declarative test that realizes ONE
@@ -530,6 +531,7 @@ const envelope = {
    * Additive and optional.
    */
   needs: z.array(z.string().min(1)).optional(),
+  prerequisites: z.array(GuardPrerequisiteSchema).optional(),
   /**
    * The recipe server this scenario runs against (an `api.servers` key) — an
    * api-server scenario's binding. ENGINE-ASSIGNED at authoring from the app that

@@ -229,9 +229,9 @@ describe('flowWorkerSessionDef', () => {
     // contract (`replaces`, `drop_scenario`, multi-scenario settled). Only a
     // flow that is WORK consults the worker cache, so the roll costs one miss
     // per re-authoring flow, never a corpus-wide re-author.
-    // Rolled to require executable repair attempts rather than corrected retirement prose.
-    expect(FLOW_WORKER_CLI_PROMPT_FINGERPRINT).toBe('62717249036b9947')
-    expect(FLOW_WORKER_API_PROMPT_FINGERPRINT).toBe('9642326fd5bf06a7')
+    // Rolled for prerequisite eligibility, proof grounding, and setup-aware fidelity.
+    expect(FLOW_WORKER_CLI_PROMPT_FINGERPRINT).toBe('aa7174eb220b6012')
+    expect(FLOW_WORKER_API_PROMPT_FINGERPRINT).toBe('9d5bf8c124637253')
   })
 
   it('routes both tools to the task’s engine closures', async () => {

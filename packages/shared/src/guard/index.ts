@@ -32,3 +32,5 @@ export * from './verification.js'
 export * from './coverage-progress.js'
 
 export * from './preparation.js'
+
+export * from './prerequisites.js'

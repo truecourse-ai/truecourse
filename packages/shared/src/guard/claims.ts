@@ -1,3 +1,4 @@
+import { GuardVerificationSchema } from './verification.js'
 /**
  * Guard CLAIMS — the unit of meaning and of coverage, stored in
  * `.truecourse/scenarios/claims.json` (committable, next to `flows.json`).
@@ -57,6 +58,7 @@ export const GuardClaimSchema = z
      * a re-extraction that only refines needs never re-authors the claim's flows.
      */
     needs: z.array(ClaimNeedSchema).optional(),
+    verification: GuardVerificationSchema.optional(),
   })
   .strict()
 export type GuardClaim = z.infer<typeof GuardClaimSchema>

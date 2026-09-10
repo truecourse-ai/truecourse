@@ -453,3 +453,5 @@ export { apiAuthEvidence, probeCandidatesFromInterfaces, requiredResources } fro
 export type { ApiAuthEvidence, RequiredResource } from './seed-evidence.js'
 
 export type { GuardSetupPreparationSession, GuardSetupPreparationSessionInput } from './setup.js'
+
+export { bindClaimPrerequisites, partitionFlowPrerequisites, flowPrerequisiteStateMaterial } from './prerequisites.js'

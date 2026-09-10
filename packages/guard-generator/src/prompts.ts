@@ -103,6 +103,7 @@ export interface OutlineEntry {
 // did not move when the prompts left.
 
 export const GENERATE_SYSTEM_PROMPT = `\
+Keep per-case prerequisites and successful setup evidence intact. Missing account/setup cannot establish product drift. Accessible names differ from visible text: an unnamed status is selected by {role: status}, then its text asserted with expect.within and expect.text.contains. Never derive a status accessible name from its message. Query parameters must come from documented or mapped triggers. Production readiness cannot prove a development command or fixed address.
 You author ONE guard SCENARIO — a declarative, executable test that walks a spec
 FLOW through a command-line program. A flow is a user-goal path: an ordered list of
 MILESTONES, each one a spec claim. You are given the flow, each milestone's claim
@@ -273,6 +274,7 @@ export const GENERATE_PROMPT_FINGERPRINT = fingerprint(GENERATE_SYSTEM_PROMPT)
 // ---------------------------------------------------------------------------
 
 export const GENERATE_API_SYSTEM_PROMPT = `\
+Keep per-case prerequisites and successful setup evidence intact. Missing account/setup cannot establish product drift. Accessible names differ from visible text: an unnamed status is selected by {role: status}, then its text asserted with expect.within and expect.text.contains. Never derive a status accessible name from its message. Query parameters must come from documented or mapped triggers. Production readiness cannot prove a development command or fixed address.
 You author ONE guard SCENARIO — a declarative, executable test that walks a spec
 FLOW through an HTTP service. A flow is a user-goal path: an ordered list of
 MILESTONES, each one a spec claim. You are given the flow, each milestone's claim
@@ -588,6 +590,7 @@ export const GENERATE_API_PROMPT_FINGERPRINT = fingerprint(GENERATE_API_SYSTEM_P
 // ---------------------------------------------------------------------------
 
 export const GENERATE_WEB_SYSTEM_PROMPT = `\
+Keep per-case prerequisites and successful setup evidence intact. Missing account/setup cannot establish product drift. Accessible names differ from visible text: an unnamed status is selected by {role: status}, then its text asserted with expect.within and expect.text.contains. Never derive a status accessible name from its message. Query parameters must come from documented or mapped triggers. Production readiness cannot prove a development command or fixed address.
 You author ONE guard SCENARIO — a declarative, executable test that walks a spec
 FLOW through an application's WEB SURFACE, in a real browser. A flow is a
 user-goal path: an ordered list of MILESTONES, each one a spec claim. You are
@@ -2378,6 +2381,7 @@ export function buildSeedUserPrompt(input: SeedDraftInput): string {
 // ---------------------------------------------------------------------------
 
 export const FIDELITY_SYSTEM_PROMPT = `\
+Keep per-case prerequisites and successful setup evidence intact. Missing account/setup cannot establish product drift. Accessible names differ from visible text: an unnamed status is selected by {role: status}, then its text asserted with expect.within and expect.text.contains. Never derive a status accessible name from its message. Query parameters must come from documented or mapped triggers. Production readiness cannot prove a development command or fixed address.
 You are a strict reviewer. You are given ONE test scenario that already PASSES
 against the current code, and the FLOW it was authored from: an ordered list of
 MILESTONES, each a spec CLAIM with the section text it was read against. Your ONE
@@ -2649,6 +2653,7 @@ export function buildClaimDiffUserPrompt(input: ClaimDiffSectionInput): string {
 }
 
 export const MATCH_SYSTEM_PROMPT = `\
+Use structured plan/gaps for new responses. Never combine unrealizable with plan or gaps. Retain independently testable HTTP status cases when outbound request observation is unavailable. A query trigger needs a documented or mapped action; generic navigation does not imply arbitrary query contracts.
 You decide HOW a spec FLOW could be walked on ONE of an application's surfaces. You
 are given the flow — a user goal and an ordered list of MILESTONES — and that
 surface's INTERFACE CATALOG: every entry point the surface actually offers, with the

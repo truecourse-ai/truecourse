@@ -346,6 +346,25 @@ describe('Guard flow read surfaces', () => {
     await teardownTestFixture(fixture.project.slug);
   });
 
+  it('keeps named setup and unsupported gaps visible in the same flow', async () => {
+    seed();
+    writeJson('.truecourse/scenarios/recipe.json', { build: 'true', api: { serve: ['node', 'fixture.js'], externals: { currencybeacon: { baseUrlEnv: 'CURRENCYBEACON_BASE_URL', env: { CURRENCYBEACON_API_KEY: {} } } } } });
+    writeJson('.truecourse/guard/result.json', { ...RESULT, errors: [], findings: [] });
+    const manifest = JSON.parse(JSON.stringify(MANIFEST));
+    const flowId = manifest.flows[0].flowId;
+    manifest.flows[0].gaps = [
+      { surface: 'web', kind: 'blocked-on', reason: 'A required account is missing.', blocker: { kind: 'configuration', dependencies: ['currencybeacon'] } },
+      { surface: 'web', kind: 'blocked-on', reason: 'Cannot observe outbound requests.', blocker: { kind: 'unsupported-capability', capabilities: ['request-control'] } },
+    ];
+    writeJson('.truecourse/scenarios/manifest.json', manifest);
+    const detail = await request(app).get(url(`flows/${flowId}`)).expect(200);
+    expect(detail.body.gaps).toEqual(expect.arrayContaining([
+      expect.objectContaining({ needsSetup: { services: ['currencybeacon'], provided: [] } }),
+      expect.objectContaining({ blocker: expect.objectContaining({ kind: 'unsupported-capability' }) }),
+    ]));
+    expect(detail.body.progress.generation).toBe('needs-setup');
+  });
+
   it('reports passing scenarios separately from independently reviewed case coverage', async () => {
     const verification = { scope: 'web', method: 'behavior', observable: 'Visible items', cases: [
       { id: 'create', claim: 'Created item appears', method: 'behavior', requires: ['browser'], conditions: [] },

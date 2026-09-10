@@ -387,7 +387,7 @@ export function scenarioDependencyNames(scenario: GuardScenario): string[] {
   // DECLARED order first, then the token-discovered rest: the author's ordering is
   // the meaningful one when a scenario binds several (it decides which dependency a
   // blocked result names), and only deduplication is imposed on top of it.
-  const names = new Set<string>(scenario.needs ?? [])
+  const names = new Set<string>([...(scenario.needs ?? []), ...(scenario.prerequisites ?? []).filter(p => p.mode === 'provided').map(p => p.dependency)])
   const { needs: _needs, ...rest } = scenario as GuardScenario & { needs?: string[] }
   for (const name of suppliedNamesIn(rest)) names.add(name)
   return [...names]

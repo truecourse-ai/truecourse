@@ -418,6 +418,50 @@ function matchReferenceIssues(flow: GuardFlow, catalog: SurfaceCatalog, data: Re
   return { ...issues, uncoveredMilestones: missing.filter(m => !m.checks).map(m => m.milestone), gapErrors }
 }
 
+/** Preserve independent assignments only after every action for their case validates.
+ * An invalid action can be setup for a later valid action, so remove the entire
+ * affected case instead of silently shortening its realization.
+ */
+function independentMatchPortions(flow: GuardFlow, catalog: SurfaceCatalog, data: RealizationMatch): RealizationMatch {
+  const unsafe = new Set<string>()
+  const planned = new Set(data.plan.flatMap(entry => obligationKeys(entry.milestone, entry.checks)))
+  const gapsSeen = new Set<string>()
+  for (const gap of data.gaps) {
+    for (const key of obligationKeys(gap.milestone, gap.checks)) {
+      if (planned.has(key) || gapsSeen.has(key)) unsafe.add(key)
+      gapsSeen.add(key)
+    }
+  }
+  for (const [kind, entries] of [['plan', data.plan], ['gap', data.gaps]] as const) {
+    for (const entry of entries) {
+      const isolated = kind === 'plan' ? { plan: [entry as RealizationStep], gaps: [] }
+        : { plan: [], gaps: [entry as RealizationGap] }
+      const issues = matchReferenceIssues(flow, catalog, { ...isolated, unrealizable: undefined })
+      const invalid = issues.unknownInterfaces.length || issues.unknownMilestones.length ||
+        issues.gapErrors?.some(error => !error.includes('has unaccounted checks:'))
+      if (!invalid) continue
+      const milestone = flow.milestones.find(m => m.order === entry.milestone)
+      // A missing checks list is ambiguous across every case of that milestone.
+      const checks = entry.checks ?? milestone?.verification?.cases?.map(c => c.id)
+      for (const key of obligationKeys(entry.milestone, checks)) unsafe.add(key)
+    }
+  }
+  // Shared actions couple their checks: removing setup for one also invalidates
+  // every sibling that depended on that action, including indirect chains.
+  let expanded = true
+  while (expanded) {
+    expanded = false
+    for (const entry of data.plan) {
+      const keys = obligationKeys(entry.milestone, entry.checks)
+      if (!keys.some(key => unsafe.has(key))) continue
+      for (const key of keys) if (!unsafe.has(key)) { unsafe.add(key); expanded = true }
+    }
+  }
+  const safe = (entry: RealizationStep | RealizationGap) =>
+    !obligationKeys(entry.milestone, entry.checks).some(key => unsafe.has(key))
+  return { plan: data.plan.filter(safe), gaps: data.gaps.filter(safe), unrealizable: undefined }
+}
+
 /** Remove only cases whose observations the selected driver cannot provide. */
 function capabilityPartition(flow: GuardFlow, surface: GuardDriverId): { flow: GuardFlow; gaps: RealizationGap[] } {
   const gaps: RealizationGap[] = []
@@ -498,15 +542,17 @@ export async function matchFlow(
   }
 
   let calls = 0
+  let retained: Extract<MatchOutcome, { kind: 'plan' }> | undefined
+  const retainedWithError = (reason: string): MatchOutcome | undefined => retained && ({ ...retained, calls, gaps: retained.gaps.map(g => ({ ...g, reason: `${g.reason} Matcher correction failed: ${reason}` })) })
   let ctx: MatchUserContext = base
   for (let attempt = 0; attempt < 2; attempt++) {
     let raw: unknown
     try { calls++; raw = await runner(ctx) }
-    catch (e) { return { kind: 'error', reason: `match call failed: ${(e as Error).message}`, calls } }
+    catch (e) { return retainedWithError((e as Error).message) ?? { kind: 'error', reason: `match call failed: ${(e as Error).message}`, calls } }
     const parsed = RealizationMatchSchema.safeParse(raw)
     if (!parsed.success) {
-      if (attempt > 0) return { kind: 'error', reason: `match output invalid after re-ask: ${flattenZodError(parsed.error)}; output: ${quoteInvalidOutput(raw)}`, calls }
-      ctx = { ...base, correction: { invalidOutput: quoteInvalidOutput(raw) } }
+      if (attempt > 0) return retainedWithError(flattenZodError(parsed.error)) ?? { kind: 'error', reason: `match output invalid after re-ask: ${flattenZodError(parsed.error)}; output: ${quoteInvalidOutput(raw)}`, calls }
+      ctx = { ...base, correction: { invalidOutput: `${flattenZodError(parsed.error)}\n${quoteInvalidOutput(raw)}\nPreserve valid portions for the eligible milestone/check IDs listed above. Use plan and gaps only; never combine them with unrealizable.` } }
       continue
     }
     // A refusal gets one bounded re-ask: preserve whatever can be verified and
@@ -523,8 +569,10 @@ export async function matchFlow(
       if (data) await setCacheEntry(repoRoot, MATCH_CACHE_NAME, cacheKey, data)
       return settled
     }
+    const partial = settle(independentMatchPortions(matchableFlow, catalog, parsed.data), calls, true)
+    if (partial?.kind === 'plan') retained = partial
     const issues = matchReferenceIssues(matchableFlow, catalog, parsed.data)
-    if (attempt > 0) return { kind: 'error', reason: `match references invalid after re-ask: ${describeMatchIssues(issues)}; output: ${quoteInvalidOutput(raw)}`, calls }
+    if (attempt > 0) return retainedWithError(describeMatchIssues(issues)) ?? { kind: 'error', reason: `match references invalid after re-ask: ${describeMatchIssues(issues)}; output: ${quoteInvalidOutput(raw)}`, calls }
     ctx = { ...base, issues,
       correction: { invalidOutput: quoteInvalidOutput(raw) } }
   }

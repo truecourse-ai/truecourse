@@ -59,7 +59,8 @@ export const FLOWS_SESSION_BUDGET: SessionBudget = {
   tokenCeiling: 150_000,
 }
 
-export const FLOWS_SESSION_SYSTEM_PROMPT = `You compose FLOWS out of a specification area's already-extracted CLAIMS. A flow is one user-goal path: a title, a goal, and an ordered list of MILESTONES, where every milestone IS one of the claims you were given.
+export const FLOWS_SESSION_SYSTEM_PROMPT = `Keep all case prerequisites, including required earlier setup, intact. Unresolved credential/external needs are case-specific configuration work, never optional notes. Do not attach a live-account requirement to an explicit absent-key or account-free case.
+You compose FLOWS out of a specification area's already-extracted CLAIMS. A flow is one user-goal path: a title, a goal, and an ordered list of MILESTONES, where every milestone IS one of the claims you were given.
 
 # Your input, and the only thing you may do with it
 The briefing carries the claims of ONE area — each with the document and section anchor it was extracted from — plus each document's heading outline, and GROUNDING (the app's own interfaces, and its dependency catalog). You ORDER and GROUP the claims into paths. That is the entire job.

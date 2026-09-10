@@ -458,3 +458,5 @@ export { RecipePreparationSchema, RecipePreparationScriptSchema, resolvePreparat
 export type { RecipePreparation } from './recipe.js'
 export { prepareScenario, validateScenarioPreparation, preparationCatalog } from './preparation.js'
 export type { PreparedScenarioWorld } from './preparation.js'
+
+export * from './prerequisites.js'

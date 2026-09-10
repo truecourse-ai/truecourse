@@ -1,3 +1,4 @@
+import { resolvePrerequisites, loadRecipe } from '@truecourse/guard-runner';
 /**
  * THE DEPENDENCIES surface — every class of starting state the program under test
  * needs, joined with what THIS machine provides for it.
@@ -256,6 +257,8 @@ export function readGuardDependenciesView(
     resolved = resolveDependencies(repoRoot, {
       dismissedFlows: new Set(readGuardDecisions(repoRoot).dismissedFlows.map((f) => f.flowId)),
     });
+    const recipe = loadRecipe(repoRoot, recipePath(repoRoot));
+    resolved = resolvePrerequisites(repoRoot, recipe?.recipe.api?.externals, resolved, opts.env ?? process.env).dependencies;
     overlay = loadDependenciesLocal(repoRoot);
   } catch (e) {
     // A catalog that exists but does not parse blanks the CATALOG half only: the
@@ -558,7 +561,7 @@ function blockedIndex(
     const title = gap.flowId
       ? flowTitles.get(gap.flowId) ?? gap.flowId
       : `${gap.doc} § ${gap.anchor}`;
-    for (const capability of parseBlockedOnCapabilities(gap.reason)) {
+    for (const capability of gap.blocker?.dependencies ?? parseBlockedOnCapabilities(gap.reason)) {
       push(capability, { ...(gap.flowId ? { flowId: gap.flowId } : {}), title, kind: 'not-authored' });
     }
   }

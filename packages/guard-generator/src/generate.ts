@@ -1,3 +1,6 @@
+import { navigationGroundingProblem } from './proof-grounding.js'
+import { resolvePrerequisites } from '@truecourse/guard-runner'
+import { bindClaimPrerequisites, bindScenarioPrerequisites, scenarioCasePrerequisiteProblems, partitionFlowPrerequisites, flowPrerequisiteStateMaterial } from './prerequisites.js'
 import { reconcileRemaining, type RepairIssue } from './worker-repair.js'
 import { verificationRequirements, caseEvidenceDefect, type GuardEvidenceProofContext, type GuardCaseEvidence, type GuardRemainingObligation } from '@truecourse/shared'
 import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
@@ -1371,6 +1374,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // a flow referencing a claim `scenarios/claims.json` does not hold is a load
   // error on every `guard run` (see claims-persist.ts). Additive-only, and a
   // warm re-run adds nothing, so nothing is written on a no-op.
+  const prerequisiteResolution = resolvePrerequisites(repoRoot, recipe.api?.externals)
+  for (const extraction of extracted) if (extraction.result.ok) {
+    for (const claim of extraction.result.data.claims) claim.verification = bindClaimPrerequisites(claim.verification, claim.needs ?? [], prerequisiteResolution.targets)
+  }
   persistExtractedClaims(
     repoRoot,
     extracted.flatMap(({ doc, result }) => (result.ok ? [{ doc: doc.doc, outcome: result.data }] : [])),
@@ -1390,7 +1397,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // detector never saw is still advertised when PROVIDED — the user knows about an
   // integration import scanning cannot see, and an account they supplied is a real
   // capability regardless of how the dependency is reached.
-  const providedExternals = resolveProvidedExternals(repoRoot, recipe)
+  const providedExternals = prerequisiteResolution.externals.filter(e => e.state === 'provided')
   const externalServiceHints = buildExternalServiceHints(externalServices, providedExternals)
   // The code-truth grounding. The inbound half needs no plumbing at all: what a
   // handler reads off the request lives ON its operation in the catalog (plan
@@ -1421,6 +1428,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // already exclude procedure-bearing api interfaces (item 12,
   // `buildSurfaceCatalogs`), so no tRPC-derived operation ever enters a
   // synthesis briefing.
+  for (const input of areaInputs) for (const claim of input.claims) {
+    claim.verification = bindClaimPrerequisites(claim.verification, claim.needs ?? [], prerequisiteResolution.targets)
+  }
   const areas = buildFlowAreas(areaInputs)
   const flowsGrounding: FlowsSessionGrounding = {
     interfaces: [...catalogs].map(([surface, c]) => ({
@@ -1523,8 +1533,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const committedScenariosById = new Map(loadScenarios(repoRoot).scenarios.map(s => [s.id, s]))
   const priorProofCurrent = (work: FlowWork, prior: GuardManifestScenario): boolean => {
     const scenario = committedScenariosById.get(prior.id)
+    if (scenario && scenarioReviewFingerprint(bindScenarioPrerequisites(work.flow, scenario, prerequisiteResolution.targets)) !== scenarioReviewFingerprint(scenario)) return false
     if (!scenario || prior.reviewed === false || work.prior?.flowFingerprint !== work.flow.fingerprint ||
-      scenario.flow?.fingerprint !== work.flow.fingerprint || scenarioPreparationDefect(work.flow, recipe, scenario)) return false
+      scenario.flow?.fingerprint !== work.flow.fingerprint || scenarioPreparationDefect(work.flow, recipe, scenario) || scenarioCasePrerequisiteProblems(work.flow, scenario, prerequisiteResolution.targets, scenario.setup?.preparation ? recipe.preparations?.[scenario.setup.preparation]?.env : undefined).length) return false
     if (!work.flow.bindings.every(b => scenario.binds.some(s =>
       s.doc === b.doc && s.section === b.anchor && s.fingerprint === b.fingerprint))) return false
     return !work.flow.milestones.some(m => m.verification?.cases) ||
@@ -1703,8 +1714,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           continue
         }
       }
+      const partition = partitionFlowPrerequisites(flow, surface, prerequisiteResolution.targets, recipe)
+      const eligibleFlow = partition.flow
+      gaps.push(...partition.gaps)
+      if (!eligibleFlow.milestones.length) { options.onMatchProgress?.(++matchDone, matchPairs); continue }
       localMatchCalls++
-      const outcome = await limit(() => matchFlow(repoRoot, flow, surfaceCatalog, matchRunner))
+      const outcome = await limit(() => matchFlow(repoRoot, eligibleFlow, surfaceCatalog, matchRunner))
       options.onMatchProgress?.(++matchDone, matchPairs)
       if (outcome.kind === 'plan' || outcome.kind === 'gap') {
         for (const gap of outcome.gaps) gaps.push({ surface,
@@ -1760,6 +1775,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       ...p.interfaces.map((j) => j.fingerprint),
       ...(p.surface === 'web' ? [catalogs.get('web')!.fingerprint] : []),
     ])
+    interfaceFingerprints.push(flowPrerequisiteStateMaterial(flow, prerequisiteResolution.targets))
     const inputsHash = flowGenerationInputsHash({
       flowFingerprint: flow.fingerprint,
       sectionKeys,
@@ -1773,6 +1789,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     const invalidCaseReview = !!prior && flow.milestones.some(m => m.verification?.cases) && prior.scenarios.some(s =>
       s.reviewed !== false && (s.reviewPolicyVersion !== GUARD_REVIEW_POLICY_VERSION || !committedScenariosById.has(s.id) || s.reviewedScenarioFingerprint !== scenarioReviewFingerprint(committedScenariosById.get(s.id)) ||
         scenarioPreparationDefect(flow, recipe, committedScenariosById.get(s.id)!) ||
+        scenarioCasePrerequisiteProblems(flow, committedScenariosById.get(s.id)!, prerequisiteResolution.targets).length ||
         caseEvidenceDefect(flow.milestones, committedScenariosById.get(s.id)!.steps, s.caseEvidence)))
     let changed = !prior || prior.generationInputsHash !== inputsHash || violatesSettleInvariant(prior) || invalidCaseReview
     // THE PER-FLOW CLAIM-DIFF GATE: when the only inputs that moved are bound
@@ -2394,6 +2411,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           const gap = verificationCapabilityGap(m?.verification, p.driver, p.checks)
           if (gap) return gap
         }
+        for (const step of raw.steps) if ('navigate' in step) {
+          const problem = navigationGroundingProblem(step.navigate, task.plan.interfaces.flatMap(i => 'path' in i.entry ? [i.entry.path] : []), [...task.work.sections.values()].map(s => s.fullText || s.ownText).join('\n'))
+          if (problem) return problem
+        }
+        const prerequisiteDefect = scenarioCasePrerequisiteProblems(task.work.flow, raw, prerequisiteResolution.targets, raw.setup?.preparation ? recipe.preparations?.[raw.setup.preparation]?.env : undefined)[0]
+        if (prerequisiteDefect) return prerequisiteDefect.reason
         const preparationDefect = scenarioPreparationDefect(task.work.flow, recipe, raw)
         if (preparationDefect) return preparationDefect
         const composition = compositionDefectOf(raw, recipe)
@@ -2464,7 +2487,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       ): { candidate: BirthCandidate } | { error: string } => {
         const task = state.task
         try {
-          const scenario = buildFlowScenario({
+          const builtScenario = buildFlowScenario({
             flow: task.work.flow,
             interfaces: task.plan.interfaces,
             raw,
@@ -2473,6 +2496,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             ...(task.server ? { server: task.server } : {}),
             defaultServer: defaultApiServer,
           })
+          const scenario = bindScenarioPrerequisites(task.work.flow, builtScenario, prerequisiteResolution.targets)
           return {
             candidate: {
               flow: task.work.flow,
@@ -2674,9 +2698,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         return describeOutstandingObligations(remaining) + (notes.length ? '\nPrevious review findings for remaining obligations:\n' + notes.join('\n') : '')
       }
       const rememberRejection = (state: WorkerTaskState, candidate: BirthCandidate, reason: string,
-        reasonKind: RepairIssue['reasonKind'] = 'assertion', source: RepairIssue['source'] = 'review') => {
+        reasonKind: RepairIssue['reasonKind'] = 'assertion', source: RepairIssue['source'] = 'review', failedStep?: number) => {
         const issueId = scenarioReviewFingerprint({ setup: candidate.scenario.setup ?? null, steps: candidate.scenario.steps, normalize: candidate.scenario.normalize ?? [], reasonKind, source }).slice(7, 23)
-        for (const proof of scenarioMilestoneProof(candidate.scenario.steps)) {
+        const failed = failedStep ? candidate.scenario.steps[failedStep - 1] : undefined
+        const proofs = failed?.milestone ? scenarioMilestoneProof([failed]) : scenarioMilestoneProof(candidate.scenario.steps)
+        for (const proof of proofs) {
           for (const id of proof.checks ?? ['']) {
             state.rejectionByObligation.set(`${proof.milestone}:${id}`, reason)
             state.repairIssues.set(`${proof.milestone}:${id}`, { reasonKind, evidence: reason, issueId, source })
@@ -2791,8 +2817,14 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         judge: WorkerFidelityJudge,
       ): Promise<FlowWorkerToolReport> => {
         const task = state.task
+        const prerequisiteDefect = scenarioCasePrerequisiteProblems(task.work.flow, candidate.scenario, prerequisiteResolution.targets)[0]
+        if (prerequisiteDefect) return { content: `not accepted: ${prerequisiteDefect.reason}`, isError: true }
+        if (expectedReds.length && (result.preparationFailure || result.blockedPrecondition)) {
+          rememberRejection(state, candidate, 'Required setup did not succeed; this execution cannot establish product drift.', 'preparation', 'execution')
+          return { content: 'not accepted: establish the prerequisite state before attributing a failure to code or documentation drift.', isError: true }
+        }
         const condensed = renderCondensedResult(result)
-        if (result.outcome !== 'pass') rememberRejection(state, candidate, condensed, result.preparationFailure ? 'preparation' : 'assertion', 'execution')
+        if (result.outcome !== 'pass') rememberRejection(state, candidate, condensed, result.preparationFailure ? 'preparation' : 'assertion', 'execution', result.failure?.step)
         if (result.outcome !== 'pass' && result.outcome !== 'fail') {
           return {
             content: `not accepted — the confirmation run did not settle pass/fail:\n${condensed}`,
@@ -2873,7 +2905,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           return {
             content:
               `not accepted — the confirmation run is RED and you declared no expectedReds:\n${condensed}\n` +
-              `Either fix the scenario, or — when the doc and the code genuinely disagree — re-submit with expectedReds declaring step ${step}, the observed actual, a verdict (doc-drift | code-drift), and a brief.`,
+              `Repair assertion or setup defects. If a required account is missing, report its configuration blocker; if the observation is unsupported, report that capability gap. Only after required setup succeeds may you re-submit genuine product drift with expectedReds declaring step ${step}, the observed actual, a verdict (doc-drift | code-drift), and a brief.`,
             isError: true,
           }
         }
@@ -3157,6 +3189,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                 scenario.flow?.fingerprint !== task.work.flow.fingerprint ||
                 !task.work.flow.bindings.every(b => scenario.binds.some(s => s.doc === b.doc && s.section === b.anchor && s.fingerprint === b.fingerprint)) ||
                 caseEvidenceDefect(task.work.flow.milestones, scenario.steps, review.caseEvidence)) return false
+              if (scenarioReviewFingerprint(bindScenarioPrerequisites(task.work.flow, scenario, prerequisiteResolution.targets)) !== scenarioReviewFingerprint(scenario)) return false
               const authored = rawScenarioSchemaFor(task.surface).safeParse(scenario)
               if (!authored.success || preflightDefect(task, authored.data)) return false
               const candidate: BirthCandidate = { flow: task.work.flow, surface: task.surface,
@@ -3208,6 +3241,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                 }
                 return false
               }
+              if (expectedReds.length && (run.result.blockedPrecondition || run.result.preparationFailure)) return false
               if (!redPredictionHolds(run.result, expectedReds)) return false
               stashed.push({
                 sha: sha256Hex(scenarioYaml),
@@ -4674,6 +4708,7 @@ function workerFidelityBriefing(work: FlowWork, candidate: BirthCandidate, captu
     buildFidelityUserPrompt(ctx),
     '',
     'SELECTED CASES: ' + JSON.stringify(scenarioMilestoneProof(candidate.scenario.steps)),
+    'PREREQUISITE ELIGIBILITY: ' + JSON.stringify({ eligible: true, requirements: candidate.scenario.prerequisites ?? [] }),
     'FULL FLOW CONTEXT (not additional claimed coverage):',
     ...work.flow.milestones.map((m) => `${m.order}. ${m.claimTitle}`),
     'Review only the selected milestones, but require source-grounded setup for any earlier state they depend on. Reject a broken chain, fabricated state, or a title claiming omitted coverage.',
@@ -4722,6 +4757,7 @@ function buildAuthorCtx(
     ...(grounding.resources.length > 0 ? { resources: grounding.resources } : {}),
     areaTags: [...new Set(sections.flatMap((s) => s.areaTags))],
     driver: surface,
+    ...(externalServices.length ? { externalServices } : {}),
     ...(surface === 'api'
       ? {
           recipeServe: bound ? [...bound.serve] : defaultServerServe(recipe),
@@ -5142,6 +5178,8 @@ function scenarioBehavior(scenario: GuardScenario): string {
   return JSON.stringify({
     title: scenario.title,
     setup: scenario.setup ?? null,
+    prerequisites: scenario.prerequisites ?? [],
+    needs: scenario.needs ?? [],
     steps: scenario.steps,
     normalize: scenario.normalize ?? [],
   })

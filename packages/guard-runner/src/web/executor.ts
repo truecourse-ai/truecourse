@@ -225,7 +225,7 @@ async function targetMismatch(
   const text = await readVisibleText(page)
   const missing =
     'role' in target
-      ? `no ${target.role} named “${target.name}” is on the page`
+      ? `no ${target.role}${target.name === undefined ? '' : ` named “${target.name}”`} is on the page`
       : `nothing on the page matches ${describeWebLocator(target)}`
   const actual =
     found === 0
@@ -240,7 +240,7 @@ async function targetMismatch(
       ...('role' in target
         ? [
             inventory.length > 0
-              ? `the ${target.role} elements on the page are: ${inventory.map((t) => `“${t}”`).join(', ')}`
+              ? `visible text of ${target.role} elements (not their accessible names): ${inventory.map((t) => `“${t}”`).join(', ')}`
               : `the page has no ${target.role} elements at all`,
           ]
         : []),

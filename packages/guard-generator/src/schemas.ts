@@ -689,10 +689,13 @@ export const RealizationMatchSchema = z
     // Read old replies conservatively: a catalog-only refusal is a mapping gap.
     unrealizable: z.string().min(1).optional(),
   })
-  .refine((m) => m.unrealizable !== undefined
-    ? !m.plan?.length && !m.gaps?.length
-    : (m.plan?.length ?? 0) + (m.gaps?.length ?? 0) > 0, {
-    message: 'expected a non-empty plan and/or milestone gaps, or a legacy unrealizable reason',
+  .superRefine((m, ctx) => {
+    const message = 'plan/gaps and legacy unrealizable are mutually exclusive. Return {plan:[{interfaceId,milestone,checks?}],gaps:[{milestone,checks?,kind,reason}]} with at least one entry, or {unrealizable:reason} alone'
+    if (m.unrealizable !== undefined && (m.plan !== undefined || m.gaps !== undefined)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['unrealizable'], message })
+    } else if (m.unrealizable === undefined && !(m.plan?.length || m.gaps?.length)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['plan'], message })
+    }
   })
   .transform((m) => ({ plan: m.plan ?? [], gaps: m.gaps ?? [], unrealizable: m.unrealizable }))
 export type RealizationMatch = z.infer<typeof RealizationMatchSchema>

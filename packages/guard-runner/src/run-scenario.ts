@@ -1,3 +1,5 @@
+import { buildCredentialRedactor } from './api/redact.js'
+import { redactEvidence, redactScenarioResult } from './redact-evidence.js'
 /**
  * Run one scenario end-to-end in its own sandbox: seed → execute steps (stopping
  * at the first failing step) → map to a `GuardScenarioResult`. A spawn failure,
@@ -45,7 +47,7 @@ import { startExternalProxies } from './capabilities/external-proxy.js'
 import type { StepObservation } from './step-stats.js'
 import { normalize, type NormalizerContext } from './normalizers.js'
 import { applyUnique, applyUniqueEnv, applyUniqueSetup } from './unique.js'
-import { writeEvidence, type EvidenceStep } from './evidence.js'
+import { writeEvidence as writeEvidenceFile, type EvidenceStep } from './evidence.js'
 import type { ExpectMismatch } from './expect.js'
 import {
   buildStepDrivers,
@@ -63,6 +65,8 @@ const ENV_PINS = DETERMINISM_PINS
 
 
 export interface RunScenarioContext {
+  externalSecrets?: ReadonlyMap<string, string>
+
   repoRoot: string
   runId: string
   resolvedEntry: string[]
@@ -199,10 +203,17 @@ function applyCapturedExpect<E extends GuardExpect | GuardFileExpect>(
   return mapExpectStrings(expect, (text) => applyCaptured(text, values))
 }
 
-export async function runScenario(
+export async function runScenario(scenario: GuardSandboxScenario, ctx: RunScenarioContext): Promise<GuardScenarioResult> {
+  const redact = buildCredentialRedactor(new Map(), ctx.externalSecrets)
+  return redactScenarioResult(await runScenarioInternal(scenario, ctx), redact)
+}
+
+async function runScenarioInternal(
   scenario: GuardSandboxScenario,
   ctx: RunScenarioContext,
 ): Promise<GuardScenarioResult> {
+  const redact = buildCredentialRedactor(new Map(), ctx.externalSecrets)
+  const writeEvidence = (params: Parameters<typeof writeEvidenceFile>[0]) => writeEvidenceFile(redactEvidence(params, redact))
   const start = Date.now()
   // The result keys on the PRIMARY bind (the result schema carries one section);
   // evidence gets the full binding set. `flowId` groups the result under its flow.

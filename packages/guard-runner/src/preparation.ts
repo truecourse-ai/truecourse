@@ -108,6 +108,8 @@ export async function prepareScenario(opts: {
   repoRoot: string;
   recipe: Recipe;
   profile: string;
+  accountEnv?: Record<string, string>;
+  externalSecrets?: ReadonlyMap<string, string>;
   signal?: AbortSignal;
   timeoutMs?: number;
 }): Promise<PreparedScenarioWorld> {
@@ -164,6 +166,7 @@ export async function prepareScenario(opts: {
     const env = {
       ...(opts.recipe.env ?? {}),
       ...(opts.recipe.api?.env ?? {}),
+      ...opts.accountEnv,
       ...Object.fromEntries(
         Object.entries(profile.env).map(([key, value]) => [
           key,
@@ -189,6 +192,7 @@ export async function prepareScenario(opts: {
       signal: opts.signal,
       timeoutMs,
       knownCredentials: secrets,
+      externalSecrets: opts.externalSecrets,
     });
     for (const [name, credential] of result.credentials)
       secrets.set(`${allocation.namespace}.${name}`, credential.value);
@@ -212,7 +216,7 @@ export async function prepareScenario(opts: {
       const started = await startApiServer({
         resolvedServe: resolveEntry(opts.repoRoot, server.serve),
         cwd: server.cwd === 'repo' ? opts.repoRoot : allocation.directory,
-        env: constructChildEnv({ passthrough: BUILD_PASSTHROUGH, recipeEnv: { ...server.env,
+        env: constructChildEnv({ passthrough: BUILD_PASSTHROUGH, recipeEnv: { ...server.env, ...opts.accountEnv,
           ...Object.fromEntries(Object.entries(allocation.env).filter(([key]) => key in profile.env || key.startsWith('GUARD_'))) } }),
         healthPath: server.healthPath, readyTimeoutMs: server.readyTimeoutMs, signal: opts.signal,
       });
@@ -265,6 +269,7 @@ export async function prepareScenario(opts: {
       signal: opts.signal,
       timeoutMs,
       knownCredentials: secrets,
+      externalSecrets: opts.externalSecrets,
     });
     const proof = verification.fixtures.get('verification');
     if (proof?.baseline !== profile.baseline || proof?.isolated !== true) {

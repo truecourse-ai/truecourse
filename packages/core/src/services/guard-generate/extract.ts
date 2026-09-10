@@ -67,8 +67,15 @@ A claim is ONE concrete, observable behavior a program guarantees: an exit code,
 For EVERY claim supply verification.scope (web, api, configuration, implementation)
 and verification.cases. Each case has a stable kebab-case id, its source-grounded
 claim, method, requires (observation capabilities), and conditions (an array).
+Preserve per-case prerequisites as [{dependency,mode:"provided"|"absent",evidence,originalNames?}].
+Use the exact known service or catalog identifier when grounded; retain an unresolved name otherwise.
+A successful live conversion and any later assertion requiring that conversion need the supplied service account.
+A missing-key error branch uses mode absent, never provided. Account-free cases explicitly carry prerequisites: [].
+Keep credential environment identifiers in need.detail as source evidence so existing extraction names can be resolved without guessing.
+Cross-browser-timezone invariance requires browser-timezone-control, currently unsupported. Server TZ does not establish browser timezone.
+Only for a documented server-startup/configuration guarantee verified through web or HTTP, add invocation: {command,address?}. Preserve the exact server startup command and fixed address; production readiness does not prove development startup. Ordinary CLI behavior (for example relkit --version) is proved by its CLI steps and must not receive server invocation metadata.
 Capabilities: browser, http, process, filesystem, datastore, concurrency,
-implementation, request-control. Conditions: fresh-state, request-failure,
+implementation, request-control, browser-timezone-control. Conditions: fresh-state, request-failure,
 request-pending. Use [] when no special condition is required.
 A case is an independently falsifiable acceptance or boundary case, not an example
 input. Enumerate named search semantics, boundary conditions and error classes;

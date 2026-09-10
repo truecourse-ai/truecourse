@@ -140,6 +140,7 @@ describe('generation cannot finish by shrinking selected coverage', () => {
       flowWorkerSession: flowWorkerSessionOf(async task => {
         expect(await task.confirmCached([{ ...partial!, review: undefined }])).toBe(false)
         expect(await task.confirmCached([partial!])).toBe(false)
+        expect(await task.confirmCached([{ ...partial!, review: { ...partial!.review, policyVersion: 2 } }, full!])).toBe(false)
         expect(await task.confirmCached([{ ...partial!, yaml: partial!.yaml.replace('case-0', 'different') }, full!])).toBe(false)
         expect(await task.confirmCached([partial!, full!])).toBe(true)
         return { kind: 'outcome', outcome: { kind: 'settled', scenarioYamlSha: yamlSha(full!.yaml), expectedReds: [],

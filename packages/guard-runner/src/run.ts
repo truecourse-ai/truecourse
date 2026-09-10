@@ -1,3 +1,7 @@
+import { buildCredentialRedactor } from './api/redact.js'
+import { readGuardFlowsCorpus } from './store.js'
+import { scenarioMilestoneProof } from '@truecourse/shared'
+import { resolvePrerequisites, scenarioPrerequisiteBlock } from './prerequisites.js'
 import { prepareScenario, validateScenarioPreparation, type PreparedScenarioWorld } from './preparation.js'
 /**
  * `guard run` orchestration: load the recipe, load scenarios, build once, run the
@@ -571,13 +575,23 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     if (e instanceof DependencyCatalogError) return { status: 'invalid-recipe', message: e.message }
     throw e
   }
+  let resolvedPrerequisites: ReturnType<typeof resolvePrerequisites>
+  try { resolvedPrerequisites = resolvePrerequisites(repoRoot, loaded.recipe.api?.externals, resolvedDependencies) }
+  catch (e) { if (e instanceof ExternalsError || e instanceof DependencyCatalogError) return { status: 'invalid-recipe', message: e.message }; throw e }
+  const accountEnv = externalsInjectEnv(resolvedPrerequisites.externals)
   const dependencyBlocked: {
     scenario: GuardScenario
     verdict: ScenarioBindingVerdict
     block: DependencyBlock
   }[] = []
+  const currentFlows = readGuardFlowsCorpus(repoRoot)?.flows ?? []
   const runnable = prepared.filter((p) => {
-    const block = dependencyBlockFor(p.scenario, resolvedDependencies)
+    const flow = currentFlows.find(flow => flow.id === p.scenario.flow?.id)
+    if (flow) {
+      const prerequisites = scenarioMilestoneProof(p.scenario.steps).flatMap(proof => flow.milestones.find(m => m.order === proof.milestone)?.verification?.cases?.filter(c => !proof.checks || proof.checks.includes(c.id)).flatMap(c => c.prerequisites ?? []) ?? [])
+      if (prerequisites.length) p.scenario = { ...p.scenario, prerequisites: [...(p.scenario.prerequisites ?? []), ...prerequisites] }
+    }
+    const block = scenarioPrerequisiteBlock(p.scenario, resolvedPrerequisites, p.scenario.setup?.preparation ? loaded.recipe.preparations?.[p.scenario.setup.preparation]?.env : undefined)
     if (!block) return true
     dependencyBlocked.push({ ...p, block })
     return false
@@ -589,10 +603,10 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
    * will actually RUN needs it — not the size of the api pool. Gating on the pool is
    * what made `guard run --scenario <a web one>` start no services and seed nothing,
    * leaving every `{{fixture:…}}` in it settling as "the seed did not run for this
-   * selection". The api pool keeps its own disjunct so an api selection's preparation
-   * is byte-identical to what it always was, dependency-blocked scenarios included.
+   * selection". Only scenarios that passed the prerequisite gate prepare a world.
    */
-  const worldNeeded = apiRunnableExec.length > 0 || runnable.some((p) => needsPreparedWorld(p.scenario))
+  const prerequisiteRunnableApi = runnable.filter(p => isApiServerScenario(p.scenario))
+  const worldNeeded = runnable.some((p) => needsPreparedWorld(p.scenario))
 
   // B5: build the OpenAPI operation-schema index ONCE for the docs bound by api
   // scenarios that assert `schema: true`. Built only when at least one such scenario
@@ -721,7 +735,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     // logins, the per-server boot preflight — belongs to the api pool alone and is
     // gated on `apiPool` below. A web-only selection therefore gets the seeded
     // datastore its app reads and boots no api server for scenarios it will not run.
-    const apiPool = apiRunnableExec.some((p) => !p.scenario.setup?.preparation)
+    const apiPool = prerequisiteRunnableApi.some((p) => !p.scenario.setup?.preparation)
     const sharedDataNeeded = runnable.some((p) => !p.scenario.setup?.preparation)
     /** Per bound server: its absolutized serve argv and its boot env. */
     const serverBoot = new Map<string, { resolvedServe: string[]; env: Record<string, string> }>()
@@ -748,13 +762,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       // that stubs the service with `${HTTP_STUB:…}` still wins for that scenario).
       // A partly-configured external refuses the scenarios that DRIVE it (below); an
       // unprovided one injects nothing and its flows stay blocked exactly as before.
-      let resolvedExternals
-      try {
-        resolvedExternals = loadResolvedExternals(repoRoot, api.externals, process.env)
-      } catch (e) {
-        if (e instanceof ExternalsError) return { status: 'invalid-recipe', message: e.message }
-        throw e
-      }
+      const resolvedExternals = resolvedPrerequisites.externals
       // The half-configured-external refusal, SCOPED to the scenarios it is actually
       // about. An `incomplete` service contributes no `inject` and no `secrets`, so
       // booting the app with one declared is byte-identical to booting it with an
@@ -767,7 +775,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       // when there is nothing else left to run. Refusing run-wide is what turned one
       // half-configured service on the cal.diy bench (`hit-pay` — 1 of 18 declared, no
       // account, never mentioned by the user) into zero tests across all 93 flows.
-      for (const p of apiRunnableExec) {
+      for (const p of prerequisiteRunnableApi) {
         const blocking = boundIncompleteExternals(
           Object.keys(p.scenario.setup?.externals ?? {}),
           resolvedExternals,
@@ -812,7 +820,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
         // A scenario refused above never dispatches, so its server is not needed —
         // booting (and preflighting) one for it alone would resurrect the run-wide
         // failure the scoping just removed, as an `entry-preflight-failed` instead.
-        ...apiRunnableExec
+        ...prerequisiteRunnableApi
           .filter((p) => !externalBlockedIds.has(p.scenario.id))
           .map((p) => boundServerById.get(p.scenario.id)!.name),
         ...loginsByServer.keys(),
@@ -1216,6 +1224,11 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       if (preparationError) throw new Error(preparationError)
       if (scenario.setup?.preparation) privateWorld = await prepareScenario({
         repoRoot, recipe: loaded.recipe, profile: scenario.setup.preparation,
+        externalSecrets: externalsSecrets(resolvedPrerequisites.externals),
+        accountEnv: { ...accountEnv, ...Object.fromEntries((scenario.prerequisites ?? []).filter(p => p.mode === 'absent').flatMap(p => {
+          const target = resolvedPrerequisites.targets.find(t => t.name === p.dependency || t.aliases.includes(p.dependency))
+          return (target?.credentialEnv ?? []).filter(key => scenario.setup?.env?.[key] === '').map(key => [key, ''])
+        })) },
         signal: cancel.signal, timeoutMs: opts.buildTimeoutMs,
       })
       const privateCredentials = privateWorld && new Map([...privateWorld.credentials].map(([name, c]) => [name, c.value]))
@@ -1265,7 +1278,8 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               runId,
               unique: scenarioUnique(runNonce, scenario.id),
               resolvedEntry: resolvedEntry!,
-              recipeEnv: { ...loaded.recipe.env, ...(privateWorld?.env ?? {}) },
+              externalSecrets: externalsSecrets(resolvedPrerequisites.externals),
+              recipeEnv: { ...loaded.recipe.env, ...accountEnv, ...(privateWorld?.env ?? {}) },
               ...(loaded.recipe.expose ? { expose: loaded.recipe.expose } : {}),
               // Every binding is `provided` by construction — the gate above kept the
               // rest out of `runnable` — so this only ever materializes real instances.
@@ -1278,7 +1292,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               // from a fixture that simply does not exist.
               ...((privateWorld?.fixtures ?? apiFixtures) ? { fixtures: privateWorld?.fixtures ?? apiFixtures } : {}),
               ...(api?.seed ? { seedDeclared: true } : {}),
-              ...(webSurface ? { web: privateWorld ? { ...webSurface, env: { ...webSurface.env, ...privateWorld.env } } : webSurface } : {}),
+              ...(webSurface ? { web: { ...webSurface, env: { ...webSurface.env, ...accountEnv, ...(privateWorld?.env ?? {}) } } } : {}),
               ...(privateWorld ? { credentials: privateWebCredentials! } : apiCredentials && apiCredentials.size > 0 ? { credentials: worldCredentials() } : {}),
               stepTimeoutMs,
               capturePassEvidence,
@@ -1294,7 +1308,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
           preparationFailure: { profile: scenario.setup!.preparation!, stage: 'prepare' },
           durationMs: Date.now() - startedAt,
           failure: { step: 0, expected: 'the selected preparation to provide a verified private baseline',
-            actual: error instanceof Error ? error.message : String(error) } }
+            actual: buildCredentialRedactor(new Map(), externalsSecrets(resolvedPrerequisites.externals))(error instanceof Error ? error.message : String(error)) } }
       } finally {
         // Driver routines close browsers and servers before returning; data cleanup runs last.
         try { await privateWorld?.close() } catch {

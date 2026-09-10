@@ -1,3 +1,4 @@
+import { guardExternalSetupIndexForView } from '@truecourse/core/commands/guard-read';
 /**
  * The dependencies routes of a HOSTED repository — no working tree, the catalog
  * in the setup bundle, the registered instances in an encrypted row. Driven over
@@ -149,6 +150,14 @@ describe('Guard dependencies routes — hosted', () => {
     } finally {
       delete process.env.STRIPE_KEY;
     }
+  });
+
+  it('projects hosted setup state from encrypted overlays without borrowing server credentials', async () => {
+    await bundle({ '.truecourse/scenarios/dependencies.json': { dependencies: [ACCOUNT] } });
+    process.env.ANTHROPIC_API_KEY = 'server-secret';
+    expect(await guardExternalSetupIndexForView(repoKey)).toMatchObject({ anthropic: 'unprovided' });
+    await writeGuardOverlays(repoKey, { dependencies: { anthropic: { env: { ANTHROPIC_BASE_URL: 'https://provider.test', ANTHROPIC_API_KEY: 'registered-secret' } } }, externals: {} });
+    expect(await guardExternalSetupIndexForView(repoKey)).toMatchObject({ anthropic: 'provided' });
   });
 
   it('GET reads a host-path registration as unregistrable here, with the reason', async () => {

@@ -102,4 +102,17 @@ describe('expense obligations reject deliberately broken behavior', () => {
     await browser.page.setContent(expenseFixture('total', true))
     expect(await run(steps)).toBeDefined()
   })
+  it('keeps status text separate from its accessible name and rejects ambiguous or broken notices', async () => {
+    const step: GuardWebStep = { driver: 'web', expect: { within: { role: 'status' }, text: { contains: 'Expense updated.' } } }
+    await browser.page.setContent('<p role="status">Expense updated.</p>')
+    expect(await run([step])).toBeUndefined()
+    expect(await run([{ driver: 'web', expect: { visible: { role: 'status', name: 'Expense updated.' } } }])).toBeDefined()
+    await browser.page.setContent('<p role="status" aria-label="Notifications">Expense updated.</p>')
+    expect(await run([{ ...step, expect: { ...step.expect, within: { role: 'status', name: 'Notifications' } } }])).toBeUndefined()
+    for (const html of ['<p>Expense updated.</p>', '<p role="status">Wrong message</p>', '<p role="status">Expense updated.</p><p role="status">Other</p>']) {
+      await browser.page.setContent(html)
+      expect(await run([step])).toBeDefined()
+    }
+  })
+
 })

@@ -1,3 +1,4 @@
+import { withGuardReadTree } from '../lib/guard-read-tree.js'
 import { GUARD_REVIEW_POLICY_VERSION, caseEvidenceDefect, type GuardFlowProgress } from '@truecourse/shared'
 import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
 /**
@@ -233,16 +234,12 @@ async function resolveGuardScope(repoKey: string, ref?: string): Promise<GuardRe
   return commit ? { kind: 'commit', commit } : { kind: 'empty' }
 }
 
-/**
- * The providable-externals index a read surface joins gaps against, or
- * `null` where it cannot exist. Externals live in the WORKING TREE (`recipe.json`
- * + the gitignored overlay + the host env), exactly like the routes that write
- * them, so a hosted store answers `null` and its `blocked-on` gaps stay plain —
- * a hosted view has no External APIs page to send anyone to.
+/** Resolve named setup actions against the same account state as execution.
+ * Hosted reads materialize their stored overlay and never borrow the server env.
  */
-export function guardExternalSetupIndexForView(repoKey: string): GuardExternalSetupIndex | null {
-  if (!guardsMaterializeInPlace()) return null
-  return readGuardExternalSetupIndex(repoKey)
+export async function guardExternalSetupIndexForView(repoKey: string, ref?: string): Promise<GuardExternalSetupIndex> {
+  if (guardsMaterializeInPlace()) return readGuardExternalSetupIndex(repoKey)
+  return withGuardReadTree(repoKey, ref, tree => readGuardExternalSetupIndex(tree, { env: {} }))
 }
 
 // ---------------------------------------------------------------------------
@@ -399,7 +396,7 @@ export async function readGuardSectionTotals(
     result: await readGuardReport(repoKey, ref),
     flows: await readGuardFlowsForView(repoKey, ref),
     claims: await readGuardClaimsForView(repoKey, ref),
-    externals: guardExternalSetupIndexForView(repoKey),
+    externals: await guardExternalSetupIndexForView(repoKey, ref),
   }
 
   const corpusDocs = (await readCorpusForView(repoKey, ref))?.docs.map((d) => d.ref)
@@ -601,7 +598,7 @@ function gapNeedsSetup(
   externals: GuardExternalSetupIndex | null,
 ): GuardNeedsSetup | undefined {
   if (gap.kind !== 'blocked-on' || (gap.blocker && gap.blocker.kind !== 'configuration')) return undefined
-  return deriveNeedsSetup(gap.reason, externals) ?? undefined
+  return deriveNeedsSetup(gap.reason, externals, gap.blocker?.dependencies) ?? undefined
 }
 
 /** A gap as the UI renders it — kind + reason + the shared one-line label. */
@@ -1204,7 +1201,7 @@ async function loadFlowView(repoKey: string, ref?: string): Promise<FlowViewSour
       result,
       flows: flowsFile,
       scenarios: corpus.scenarios,
-      externals: guardExternalSetupIndexForView(repoKey),
+      externals: await guardExternalSetupIndexForView(repoKey, ref),
     }),
     flowsFile,
     latest,
@@ -1424,8 +1421,8 @@ function flowProgress(flowId: string, view: FlowViewSources, surfaces: GuardFlow
     : passed === rows.length ? 'passed' : 'not-run'
   const gaps = surfaces.flatMap(s => s.gap && !s.coveredByAlternative ? [s.gap] : [])
   const generation = flowErrors(flowId, join, result).length || flowFindings(flowId, result).some(f => guardFindingClass(f) === 'defect') ? 'error'
-    : gaps.some(g => g.blocker?.kind === 'unsupported-capability' || g.kind === 'awaiting-driver') ? 'unsupported'
     : gaps.some(g => g.needsSetup || g.blocker?.kind === 'configuration') ? 'needs-setup'
+    : gaps.some(g => g.blocker?.kind === 'unsupported-capability' || g.kind === 'awaiting-driver') ? 'unsupported'
     : verified === total && total > 0 ? 'ready' : 'incomplete'
   return { execution, scenarios: rows.length, passed, verified, total, unit: cases ? 'cases' : 'milestones',
     coverage: !total || milestones.some(m => !m.proofDrivers) ? 'unknown' : verified === total ? 'complete' : verified ? 'partial' : 'unverified',

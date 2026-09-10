@@ -83,6 +83,9 @@ import { SESSION_MODEL_CLAUDE_CODE } from './session-driver.js';
 import { apiModeModel } from '../../config/global-config.js';
 import {
   planGuardWork,
+  bindClaimPrerequisites,
+  partitionFlowPrerequisites,
+  flowPrerequisiteStateMaterial,
   proposeRecipe,
   recipeCacheKey,
   RECIPE_CACHE_NAME,
@@ -152,6 +155,7 @@ import {
 } from '@truecourse/shared';
 import {
   computeRecipeFingerprint,
+  resolvePrerequisites,
   loadDependencyCatalog,
   loadRecipe,
   preparationCatalog,
@@ -638,6 +642,8 @@ async function planGuardSessionStages(repoRoot: string, plan: GuardWorkPlan): Pr
     return { extractItems: 0, extractDocs: 0, extractBriefingChars: 0, areaCalls: 0, epicCalls: 0, areaChars: 0, maxFlows: 0, exact: true };
   }
   const areaTags = readCorpusAreaTags(repoRoot);
+  const recipe = loadRecipe(repoRoot, recipePath(repoRoot))?.recipe;
+  const prerequisites = resolvePrerequisites(repoRoot, recipe?.api?.externals);
   // An area's synthesis reads ALL its claims, so the estimate needs every document
   // of the universe — not only the ones with a changed section.
   const docs = collectWorkDocs(repoRoot, { ...plan, work: plan.sections });
@@ -678,6 +684,7 @@ async function planGuardSessionStages(repoRoot: string, plan: GuardWorkPlan): Pr
         doc: doc.doc,
         anchor: c.sectionAnchor,
         title: c.claim,
+        ...(c.verification ? { verification: bindClaimPrerequisites(c.verification, c.needs ?? [], prerequisites.targets) } : {}),
         driver: c.driver,
         ...(c.alternativeDrivers ? { alternativeDrivers: c.alternativeDrivers } : {}),
         ...(c.needs && c.needs.length > 0 ? { needs: c.needs } : {}),
@@ -779,10 +786,13 @@ async function planGuardRealizationStages(
 ): Promise<GuardRealizationPlan> {
   const surfaces = preparedSurfaces(repoRoot);
   let availablePreparations: ReturnType<typeof preparationCatalog> = [];
+  let recipe: Recipe | undefined;
   try {
-    const recipe = loadRecipe(repoRoot, recipePath(repoRoot))?.recipe;
+    recipe = loadRecipe(repoRoot, recipePath(repoRoot))?.recipe;
     if (recipe) availablePreparations = preparationCatalog(recipe);
   } catch { /* Invalid recipes are repaired before runtime matching. */ }
+
+  const prerequisites = resolvePrerequisites(repoRoot, recipe?.api?.externals);
 
   // The MERGED catalog — the matcher runs against both halves, so an estimate that
   // read the derived one alone would price no work at all for the hand-authored
@@ -821,7 +831,9 @@ async function planGuardRealizationStages(
       let unknown = false;
       for (const catalog of matchable) {
         if (!flowDriversToMatch(flow).includes(catalog.surface)) continue;
-        const cached = await readCachedMatch(repoRoot, flow, catalog);
+        const eligibleFlow = recipe ? partitionFlowPrerequisites(flow, catalog.surface, prerequisites.targets, recipe).flow : flow;
+        if (!eligibleFlow.milestones.length) continue;
+        const cached = await readCachedMatch(repoRoot, eligibleFlow, catalog);
         if (!cached) {
           matchCalls++;
           unknown = true;
@@ -838,6 +850,7 @@ async function planGuardRealizationStages(
         plannedPairs.push({ surface: catalog.surface, fingerprints });
         interfaceFingerprints.push(...fingerprints);
       }
+      interfaceFingerprints.push(flowPrerequisiteStateMaterial(flow, prerequisites.targets));
       const sectionKeys = flow.bindings.map((b) => sectionKeyOf.get(`${b.doc} ${b.anchor}`) ?? b.fingerprint);
       const inputsHash = flowGenerationInputsHash({
         flowFingerprint: flow.fingerprint,
