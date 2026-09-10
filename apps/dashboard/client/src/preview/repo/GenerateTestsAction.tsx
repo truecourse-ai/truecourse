@@ -24,7 +24,7 @@ export function GenerateTestsAction({ repo, disabled = false, label = 'Generate 
         {generate.busy ? 'Starting generation…' : activeJob ? 'Run in progress' : label}
       </Button>
       <Link to={activityHref(repo.id)} className="text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground">
-        View activity
+        Open Agent
       </Link>
       {activeJob && (
         <span role="status" className="text-xs text-muted-foreground">
