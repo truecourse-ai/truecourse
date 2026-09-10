@@ -3,7 +3,7 @@
 // via the user-assigned managed identity created by foundation.bicep.
 //
 //   az deployment group create -g rg-truecourse-dev -f infra/azure/containerapp.bicep \
-//     -p name=truecourse-dev-v2 image=<acr>.azurecr.io/truecourse:bootstrap \
+//     -p name=truecourse-dev image=<acr>.azurecr.io/truecourse:bootstrap \
 //        environmentId=<env> identityId=<id> acrLoginServer=<acr>.azurecr.io \
 //        keyVaultUri=https://<kv>.vault.azure.net/
 //

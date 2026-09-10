@@ -7,9 +7,10 @@ name: Deploy (dev)
 #      builds that branch's HEAD. Use this to roll merged main onto Dev.
 # Unlike prod, dev allows any branch and has no reviewer gate — it's the safe
 # place to try things.
-# Migrate dev manually before deploying this workflow. It targets the replacement
-# app/environment by name; it does not provision the environment or migrate jobs.
-# Other foundation resources are discovered within AZURE_RG.
+# The foundation resources (ACR, Container Apps env, identity, Key Vault) are
+# discovered from the resource group at runtime, so the only variables you set are
+# the OIDC identity + AZURE_RG + APP_NAME. GitHub touches nothing in the runtime
+# path: it builds in ACR and deploys via OIDC, no stored secret.
 on:
   pull_request:
     branches: [main]
@@ -72,7 +73,7 @@ jobs:
         run: |
           URL=$(az deployment group create -g "${{ vars.AZURE_RG }}" -n containerapp-dev \
             -f infra/azure/containerapp.bicep \
-            -p name=truecourse-dev-v2 \
+            -p name="${{ vars.APP_NAME }}" \
                image="${{ steps.build.outputs.image }}" \
                environmentId="${{ steps.infra.outputs.env_id }}" \
                identityId="${{ steps.infra.outputs.identity_id }}" \

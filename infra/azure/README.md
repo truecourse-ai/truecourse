@@ -18,8 +18,8 @@ rg-truecourse-dev                 rg-truecourse-prod
 
 Files:
 - `foundation.bicep` — one environment's foundation (deploy per RG)
-- `environment.bicep` — a Consumption workload-profiles environment using an existing Log Analytics workspace
-- `containerapp.bicep` — one Container App, fixed at 4 vCPU / 8 GiB on Consumption, with one replica by default
+- `environment.bicep` — workload-profiles environment using an existing Log Analytics workspace
+- `containerapp.bicep` — one Container App, 4 vCPU / 8 GiB on Consumption
 - `set-secrets.sh` — write that env's secrets into *its* Key Vault
 
 > **Region:** examples use `westus3` (open for our subscription, at the cheapest
@@ -44,21 +44,16 @@ Prereq: `az` CLI logged in (`az login`), Owner/Contributor on the subscription.
 None of this requires the deploy files to be merged — Bicep runs from your local
 checkout.
 
-These setup steps are for fresh resource groups. Both dev and future production
-use the same 4 vCPU / 8 GiB app size and Consumption profile, with no dedicated
-nodes. Existing legacy environments cannot be converted in place: for the current
-dev environment, follow [Manual dev migration](#manual-dev-migration) instead of
-redeploying the foundation.
+For fresh dev setup, pass `environmentName=truecourse-dev-cae-v2` to foundation.
+For existing dev, use the migration note below; do not redeploy the full foundation.
 
 ### 1. Resource groups + foundation (once per environment)
 
 ```bash
 for E in dev prod; do
-  ENVIRONMENT_NAME=truecourse-cae
-  if [ "$E" = dev ]; then ENVIRONMENT_NAME=truecourse-dev-cae-v2; fi
   az group create -n rg-truecourse-$E -l westus3
   az deployment group create -g rg-truecourse-$E -f infra/azure/foundation.bicep \
-    -p postgresAdminPassword='<a-distinct-password-per-env>' environmentName="$ENVIRONMENT_NAME"
+    -p postgresAdminPassword='<a-distinct-password-per-env>'
 done
 ```
 
@@ -117,7 +112,7 @@ az acr build --registry <prod acrName> --image truecourse:bootstrap --file Docke
 ```bash
 # dev
 az deployment group create -g rg-truecourse-dev -f infra/azure/containerapp.bicep \
-  -p name=truecourse-dev-v2 image=<dev acrLoginServer>/truecourse:bootstrap \
+  -p name=truecourse-dev image=<dev acrLoginServer>/truecourse:bootstrap \
      environmentId=<dev environmentId> identityId=<dev identityId> \
      acrLoginServer=<dev acrLoginServer> keyVaultUri=<dev keyVaultUri>
 
@@ -166,17 +161,15 @@ secret, they're IDs:
 | `AZURE_TENANT_ID` | `az account show --query tenantId -o tsv` |
 | `AZURE_SUBSCRIPTION_ID` | `az account show --query id -o tsv` |
 
-**Per-environment** variables:
+**Per-environment** — set the *same two variable names* under BOTH the `dev` and
+`prod` Environments, each with that env's values. The workflow **discovers** the
+ACR, identity, and Key Vault from the RG at runtime. Dev resolves its new
+environment by name, `truecourse-dev-cae-v2`; prod retains its existing discovery:
 
 | Variable | dev | prod |
 |---|---|---|
 | `AZURE_RG` | `rg-truecourse-dev` | `rg-truecourse-prod` |
-| `APP_NAME` | Not used; app name is `truecourse-dev-v2` | `truecourse-prod` |
-
-Dev resolves `truecourse-dev-cae-v2` by name, so keeping the legacy environment
-for rollback does not affect deployments. Other foundation resources are
-discovered from the resource group. Prod keeps its existing resource discovery;
-provision its workload-profiles environment before its first deployment.
+| `APP_NAME` | `truecourse-dev` | `truecourse-prod` |
 
 Create the `dev` and `prod` **Environments** (Settings → Environments) — the
 federated subjects above point at them. Add a required reviewer on `prod` for a
@@ -208,79 +201,27 @@ Neither environment deploys on open or merge. You opt in each time:
 
 ## Manual dev migration
 
-The templates are ready; **the migration has not been performed**. Run this once
-from your machine when ready. The deployment workflow only builds and deploys the
-app; it does not perform migration, change secrets or stop the old app.
+Migration is pending. Keep the app name `truecourse-dev`: after pausing producers
+and draining all queued/running jobs and follow-ups, delete the old app and wait
+for deletion to finish before recreating it in the new environment. Startup fails
+orphaned queued/running jobs, so the two workers must never run together.
 
-The old app is `truecourse-dev` in the legacy `truecourse-cae` environment. Its
-URL is `https://truecourse-dev.greenpond-69a51954.westus3.azurecontainerapps.io`.
-The replacement is `truecourse-dev-v2` in `truecourse-dev-cae-v2`, West US 3.
-It reuses `truecourse-logs`, the existing ACR, PostgreSQL, Key Vault and managed
-identity. Do not redeploy `foundation.bicep` for this migration.
-
-1. Record the old app's image, active revision, supported CPU/memory size, URL and
-   the version IDs of the two WorkOS URL secrets for rollback. Remove `deploy-dev`
-   labels and wait for any deployment runs to finish before starting maintenance.
-2. Create only the replacement environment:
-
-   ```bash
-   az deployment group create -g rg-truecourse-dev -n environment-dev-v2 \
-     -f infra/azure/environment.bicep \
-     -p name=truecourse-dev-cae-v2 location=westus3 logAnalyticsWorkspaceName=truecourse-logs \
-     --query properties.outputs -o json
-   ```
-
-   Use its `environmentId` output for the app deployment. The new origin is
-   `https://truecourse-dev-v2.<defaultDomain>` using the other output. Creating
-   the environment does not start an app or a worker.
-3. Add the new `/api/auth/callback` URL to the dev WorkOS application's allowed
-   redirect URIs. Update any configured homepage, allowed-origin and logout URL
-   settings as appropriate. Keep the old callback allowed during the rollback window.
-4. Pause webhook delivery, external automation and new user jobs. Let all queued,
-   running and chained jobs finish across every workspace, including pending
-   follow-ups. Server startup runs the worker automatically;
-   `packages/jobs/src/index.ts` calls `failOrphaned()`, which fails queued/running
-   rows. The old and new workers must not run against this database together.
-5. Deactivate every active revision of `truecourse-dev` using
-   `az containerapp revision deactivate`. Check `az containerapp revision list
-   --all` and `az containerapp replica list --revision <revision>` for every
-   revision; wait until there are no active revisions and no remaining replicas.
-6. In the existing dev Key Vault, set `workos-app-url` to the new origin and
-   `workos-redirect-uri` to `<new-origin>/api/auth/callback`. These are shared,
-   versionless references, so restarting the old app will also read these new
-   URLs. Keep credential values unchanged and suppress secret command output.
-7. Deploy `containerapp.bicep` locally using the command in step 4 of the fresh
-   setup above, with the replacement environment ID and the existing dev identity,
-   ACR and Key Vault outputs. Use the recorded image or another reviewed image
-   already in ACR. This starts the replacement at 4 vCPU / 8 GiB.
-8. Update the dev GitHub App webhook to `<new-origin>/api/github/webhook` and its
-   setup URL to `<new-origin>/api/github/setup`. Verify the new app before reopening
-   access and webhook delivery. Keep the old app stopped for the rollback window.
-   Subsequent GitHub Actions deployments target the replacement by name; use refs
-   containing this workflow change so an older workflow cannot restart the old app.
-
-Post-deployment checks are still pending: confirm the actual FQDN, Consumption
-profile, 4/8 size and one ready replica; verify worker startup and DB access in
-logs; test WorkOS login/callback/logout, authenticated SSE progress/reconnect and
-Socket.io where used; exercise guard setup, a baseline and a test PR webhook through
-to its GitHub Check. HTTP readiness alone does not prove the worker started.
-
-For rollback, pause producers and drain the replacement, deactivate all its
-revisions and verify zero replicas first. Restore the old WorkOS URL secrets and
-external WorkOS/GitHub App settings before reactivating the recorded old revision.
-Check database schema compatibility with the old image; an image rollback does
-not undo schema changes. Use the old app's recorded supported size because its
-legacy environment cannot run 4/8. Keep routine deployments paused during rollback.
-Single-revision app updates can overlap revisions during rollout, so schedule
-normal deployments during a quiet, drained window too.
-
-## Local validation
-
-Compile without deploying and lint the workflow changes:
+Create only the new environment from your machine, reusing the existing logs:
 
 ```bash
-bicep build infra/azure/environment.bicep --outfile /tmp/truecourse-environment.json
-bicep build infra/azure/foundation.bicep --outfile /tmp/truecourse-foundation.json
-bicep build infra/azure/containerapp.bicep --outfile /tmp/truecourse-containerapp.json
-actionlint .github/workflows/deploy-dev.yml .github/workflows/deploy-prod.yml
+az deployment group create -g rg-truecourse-dev -f infra/azure/environment.bicep \
+  -p name=truecourse-dev-cae-v2 location=westus3 logAnalyticsWorkspaceName=truecourse-logs
 ```
+
+Use its `environmentId` output to redeploy `containerapp.bicep` with the same app
+name, image, identity, ACR and Key Vault. The new URL is
+`https://truecourse-dev.<defaultDomain>`. After the old app is deleted and before
+recreation, update Key Vault's `workos-app-url` and `workos-redirect-uri`, plus the
+WorkOS allowed callback `/api/auth/callback`. Update the GitHub App webhook
+`/api/github/webhook` and setup URL `/api/github/setup` to the new origin.
+
+Keep deployments paused during migration. Save the old image/configuration and
+URLs first; rollback requires recreating the old app in the old environment and
+restoring those URLs after deleting the replacement. Keep the existing database,
+identity and other foundation resources. Verify login, worker startup, event
+streaming and guard setup before resuming traffic and routine Actions deployments.
