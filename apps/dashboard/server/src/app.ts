@@ -18,7 +18,7 @@ import specRouter from './routes/spec.js';
 import specSourcesRouter from './routes/spec-sources.js';
 import guardRouter from './routes/guard.js';
 import guardActionsRouter from './routes/guard-actions.js';
-import sessionsRouter from './routes/sessions.js';
+import sessionsRouter, { createWorkspaceSessionsRouter } from './routes/sessions.js';
 import capabilitiesRouter from './routes/capabilities.js';
 import llmRouter from './routes/llm.js';
 import { createAuthGate } from './middleware/auth.js';
@@ -160,6 +160,9 @@ export function createApp(opts: CreateAppOptions): express.Express {
 
   // Home page / registry routes run without a project.
   app.use('/api/repos', createReposRouter({ githubLinks }));
+  // The workspace's agent runs across every repository it connected, scoped by
+  // the same link store, so it needs no project resolver.
+  app.use('/api/sessions', createWorkspaceSessionsRouter({ githubLinks }));
   // Project-scoped routes. Each router's patterns declare their own `:id`
   // (e.g. `/:id/violations`), so we mount at `/api/repos` — the router
   // matches the `:id` segment itself. The resolver validates the slug, scopes

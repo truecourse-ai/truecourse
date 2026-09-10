@@ -81,8 +81,13 @@ export function relativeTime(iso: string | undefined, now: number = Date.now()):
   return `${days} day${days === 1 ? '' : 's'} ago`;
 }
 
-/** Where a real run is watched: the preview's own Activity address. */
-export const activityHref = (repoId: string): string => `${PREVIEW_BASE}/repos/${repoId}/activity`;
+/** Where a repository's work is watched: the Agent page, narrowed to it. */
+export const activityHref = (repoId: string): string =>
+  `${PREVIEW_BASE}/agent?repo=${encodeURIComponent(repoId)}`;
+
+/** One piece of work as its own conversation. */
+export const conversationHref = (runId: string): string =>
+  `${PREVIEW_BASE}/agent/${encodeURIComponent(runId)}`;
 
 /**
  * One running run as a job chain. The title says ONBOARDING for a repository's
@@ -125,7 +130,7 @@ export function toNotifications(
       id: `real-${repo.id}-${run.runId}-started`,
       level: 'neutral',
       title: `${noun} started on ${repo.fullName}`,
-      body: "Watch it in the repository's Activity.",
+      body: 'Follow it on the Agent page.',
       at: relativeTime(run.startedAt, now),
       read: false,
       href,
@@ -142,8 +147,8 @@ export function toNotifications(
       // the body is the only room the feed has to say why.
       body: failed
         ? (run.error?.message ??
-          `The run ended ${run.status}. Its sessions and their transcripts are in Activity.`)
-        : `${run.sessions.length} session${run.sessions.length === 1 ? '' : 's'} ran.`,
+          `It ended ${run.status}. The whole conversation is on the Agent page.`)
+        : `${run.sessions.length} piece${run.sessions.length === 1 ? '' : 's'} of work.`,
       at: relativeTime(run.finishedAt ?? run.startedAt, now),
       read: false,
       href,
@@ -155,7 +160,7 @@ export function toNotifications(
 
 /**
  * A run that ended badly, as the shell announces it: once, when it lands.
- * The address is the run itself — a failure is worth opening, not just
+ * The address is the conversation itself — a failure is worth opening, not just
  * hearing about.
  */
 export interface RunFailure {
@@ -171,8 +176,8 @@ export function toFailure(repo: RunRepoRef, run: PublicSessionRun): RunFailure |
   return {
     id: `real-${repo.id}-${run.runId}`,
     title: `${nounFor(run.command)} failed on ${repo.fullName}`,
-    body: run.error?.message ?? 'Its sessions and their transcripts are in Activity.',
-    href: `${activityHref(repo.id)}?run=${encodeURIComponent(run.runId)}`,
+    body: run.error?.message ?? 'The whole conversation is on the Agent page.',
+    href: conversationHref(run.runId),
   };
 }
 

@@ -1,6 +1,6 @@
 /**
  * The preview's root: the shell, the routes, and the job toasts that announce
- * a started job with a link to its Activity session.
+ * a started job with a link to the agent's page.
  *
  * ROUTING: this is a DESCENDANT route set, mounted at `/preview/*` by the real
  * app's router, so every path here is relative to `/preview` and this component
@@ -14,6 +14,7 @@
 
 import { Route, Routes, useParams } from 'react-router-dom';
 import AdminPage from './pages/AdminPage';
+import AgentPage from './pages/AgentPage';
 import HomePage from './pages/HomePage';
 import KnowledgePage from './pages/KnowledgePage';
 import NotificationsPage from './pages/NotificationsPage';
@@ -26,6 +27,11 @@ installPreviewFetch();
 import { PreviewShell } from './shell/PreviewShell';
 import { PreviewStateProvider } from './shell/preview-state';
 
+function AgentRunRoute() {
+  const { runId } = useParams<{ runId: string }>();
+  return <AgentPage runId={runId ? decodeURIComponent(runId) : undefined} />;
+}
+
 function KnowledgeItemRoute({ kind }: { kind: 'doc' | 'conflict' }) {
   const { docRef, conflictId } = useParams<{ docRef?: string; conflictId?: string }>();
   const id = kind === 'doc' ? docRef : conflictId;
@@ -36,6 +42,8 @@ export function PreviewRoutes() {
   return (
     <Routes>
       <Route index element={<HomePage />} />
+      <Route path="agent" element={<AgentPage />} />
+      <Route path="agent/:runId" element={<AgentRunRoute />} />
       <Route path="knowledge" element={<KnowledgePage />} />
       <Route path="knowledge/sources" element={<KnowledgePage tab="sources" />} />
       <Route path="knowledge/doc/:docRef" element={<KnowledgeItemRoute kind="doc" />} />
@@ -47,7 +55,6 @@ export function PreviewRoutes() {
       <Route path="repos/:slug/sources/:sourceId" element={<RepoConsole />} />
       <Route path="repos/:slug/interfaces/:interfaceId" element={<RepoConsole />} />
       <Route path="repos/:slug/dependencies/:dependencyName" element={<RepoConsole />} />
-      <Route path="repos/:slug/activity/:sessionId" element={<RepoConsole />} />
       <Route path="repos/:slug/corpus/doc/:docRef" element={<RepoConsole />} />
       <Route path="repos/:slug/corpus/conflict/:conflictId" element={<RepoConsole />} />
       <Route path="settings" element={<SettingsPage />} />

@@ -16,12 +16,15 @@
 import { HoverPopover } from '@/preview/ui/hover-popover';
 import type { CheckConclusion, RunOrigin, StepDriver, TestStatus } from '@/preview/data/types';
 
-export type StatusTone = 'success' | 'failure' | 'blocked' | 'neutral' | 'running';
+export type StatusTone = 'success' | 'failure' | 'blocked' | 'attention' | 'neutral' | 'running';
 
 const DOT: Record<StatusTone, string> = {
   success: 'bg-emerald-500',
   failure: 'bg-red-500',
   blocked: 'bg-amber-500',
+  // Amber for the states that want a reader rather than a fix: an interrupted
+  // conversation, one holding a question.
+  attention: 'bg-amber-500',
   neutral: 'bg-muted-foreground',
   running: 'bg-sky-500',
 };

@@ -107,7 +107,7 @@ describe('preview home stored summaries', () => {
     expect(await screen.findByText('no corpus yet')).toBeInTheDocument();
     expect(row().getAllByText('no baseline yet')).toHaveLength(1);
     expect(row().getByText('—')).toBeInTheDocument();
-    expect(row().getByRole('link')).toHaveAttribute('href', `/preview/repos/${repo.id}/activity`);
+    expect(row().getByRole('link')).toHaveAttribute('href', `/preview/agent?repo=${repo.id}`);
   });
 
   it('reports failed reads instead of claiming there is no corpus, and recovers on reconnect', async () => {

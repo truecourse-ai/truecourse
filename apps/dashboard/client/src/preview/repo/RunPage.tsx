@@ -8,9 +8,9 @@
 
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronRight, FlaskConical, Loader2 } from 'lucide-react';
+import { FlaskConical, Loader2 } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
-import { CHIP_CLASS } from '@/preview/ui/bits';
+import { CHIP_CLASS, PageHeader } from '@/preview/ui/bits';
 import { CollapsibleAside } from '@/preview/ui/collapsible-aside';
 import { GuardDriftDetail } from '@/preview/vendor/components/guard/GuardDriftDetail';
 import { GuardDriftList } from '@/preview/vendor/components/guard/GuardDriftList';
@@ -41,28 +41,29 @@ export function RunPage({ repo, runId }: { repo: Repo; runId: string }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-6 py-3">
-        <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-sm">
-          <Link to={`/preview/repos/${repo.id}/runs`} className="font-semibold text-foreground hover:underline">
-            Runs
-          </Link>
-          <ChevronRight aria-hidden className="h-3.5 w-3.5 text-muted-foreground" />
-          <h1 className="font-mono font-semibold text-foreground">{env?.commit ?? runId}</h1>
-        </nav>
-        {env && (
-          <>
-            <span className="font-mono text-[12px] text-muted-foreground">{guardRunRef(env)}</span>
-            {env.pullRequest != null && <span className={CHIP_CLASS}>#{env.pullRequest}</span>}
-            <span className={CHIP_CLASS}>{env.origin ?? 'hosted'}</span>
-            {version && (
-              <Link
-                to={`/preview/repos/${repo.id}/corpus?version=${encodeURIComponent(version.id)}`}
-                className="text-[11px] text-muted-foreground hover:text-foreground hover:underline"
-              >
-                coverage {version.label} · {version.sha}
-              </Link>
-            )}
-            <span className="ml-auto flex shrink-0 items-center gap-3 text-[11px] text-muted-foreground">
+      <PageHeader
+        crumbs={[{ label: 'Runs', to: `/preview/repos/${repo.id}/runs` }]}
+        title={<span className="font-mono">{env?.commit ?? runId}</span>}
+        subtitle={
+          env && (
+            <span className="flex items-center gap-3">
+              <span className="font-mono text-[12px]">{guardRunRef(env)}</span>
+              {env.pullRequest != null && <span className={CHIP_CLASS}>#{env.pullRequest}</span>}
+              <span className={CHIP_CLASS}>{env.origin ?? 'hosted'}</span>
+              {version && (
+                <Link
+                  to={`/preview/repos/${repo.id}/corpus?version=${encodeURIComponent(version.id)}`}
+                  className="text-[11px] hover:text-foreground hover:underline"
+                >
+                  coverage {version.label} · {version.sha}
+                </Link>
+              )}
+            </span>
+          )
+        }
+        right={
+          env && (
+            <span className="flex items-center gap-3 text-[11px] text-muted-foreground">
               <span>{formatGuardTime(env.ranAt)}</span>
               <span>{formatGuardDuration(totalMs)}</span>
               <span className="inline-flex items-center gap-1.5 text-[10px] font-medium text-foreground">
@@ -70,9 +71,9 @@ export function RunPage({ repo, runId }: { repo: Repo; runId: string }) {
                 {verdict === 'fail' ? 'Failed' : 'Passed'}
               </span>
             </span>
-          </>
-        )}
-      </header>
+          )
+        }
+      />
 
       {!shown ? (
         <div className="flex flex-1 items-center justify-center">

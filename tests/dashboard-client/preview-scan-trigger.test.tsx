@@ -7,10 +7,10 @@
  * status code, so the helper reads the body's own error CODE rather than the
  * number.
  *
- * Above it sit the two affordances: a connected repository with no runs is
- * offered its first scan, and a run that ended badly is offered another. A
- * command with no entry in the trigger map has no button, which is how guard's
- * steps stay quiet until they have one.
+ * Above it sit the two affordances: a connected repository with no corpus is
+ * offered its first scan on Corpus, and a conversation that ended badly is
+ * offered another go on the Agent page. A command with no entry in the trigger
+ * map has no button, which is how guard's steps stay quiet until they have one.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -35,6 +35,10 @@ vi.mock('@/lib/socket', () => {
     leaveRepoRoom: vi.fn(),
   };
 });
+
+vi.mock('@/components/sessions/RunConversationPage', () => ({
+  RunConversationPage: () => <div data-testid="conversation" />,
+}));
 
 import PreviewApp from '@/preview/PreviewApp';
 import { startGuardGenerate, startGuardSetup, startSpecScan } from '@/preview/data/scan';
@@ -93,6 +97,16 @@ function serve(options: {
       return json({ config: options.config ?? null, providers: ['anthropic'] });
     }
     if (url.pathname === `/api/repos/${REAL.id}/sessions/runs`) return json({ runs: options.runs ?? [] });
+    if (url.pathname === '/api/sessions/runs') {
+      return json({ runs: (options.runs ?? []).map((run) => ({ ...run, repo: { id: REAL.id, fullName: REAL.name } })) });
+    }
+    if (url.pathname.startsWith('/api/sessions/runs/')) {
+      const id = decodeURIComponent(url.pathname.slice('/api/sessions/runs/'.length));
+      const found = (options.runs ?? []).find((r) => r.runId === id);
+      return found
+        ? json({ run: { ...found, repo: { id: REAL.id, fullName: REAL.name } } })
+        : json({ error: 'run not found' }, 404);
+    }
     if (url.pathname === `/api/repos/${REAL.id}/spec/corpus/scan`) return scan();
     if (url.pathname === `/api/repos/${REAL.id}/guard/setup`) return setup();
     if (url.pathname === `/api/repos/${REAL.id}/guard/generate`) return generate();
@@ -113,7 +127,11 @@ function renderAt(path: string) {
   );
 }
 
-const ACTIVITY = `/preview/repos/${REAL.id}/activity`;
+/** Where the first scan is started from: the repository's Corpus. */
+const CORPUS = `/preview/repos/${REAL.id}/corpus`;
+
+/** One conversation, where another go at it is offered. */
+const conversation = (runId: string) => `/preview/agent/${encodeURIComponent(runId)}`;
 
 beforeEach(() => {
   window.history.replaceState({}, '', '/preview');
@@ -185,43 +203,36 @@ describe('starting a run', () => {
 // the affordances
 // ---------------------------------------------------------------------------
 
-describe('the Activity surface of a connected repository', () => {
-  it('offers the first scan when the store is empty, and starts it', async () => {
+describe('the surfaces of a connected repository', () => {
+  it('offers the first scan on Corpus, and starts it', async () => {
     const calls = serve({ runs: [], config: { provider: 'anthropic' } });
-    renderAt(ACTIVITY);
+    renderAt(CORPUS);
     const user = userEvent.setup();
 
-    await user.click(await screen.findByRole('button', { name: 'Start scan' }));
+    await user.click(await screen.findByRole('button', { name: 'Scan' }));
     await waitFor(() =>
       expect(calls).toContain(`POST /api/repos/${REAL.id}/spec/corpus/scan`),
     );
   });
 
-  it('offers another run on one that ended badly, and none on one that finished', async () => {
-    const calls = serve({
-      runs: [failedScan({ error: { message: 'The provider refused the key.', kind: 'llm-probe' } })],
-      config: { provider: 'anthropic' },
-    });
-    renderAt(ACTIVITY);
+  it('offers another go at a conversation that ended badly', async () => {
+    const failed = failedScan({ error: { message: 'The provider refused the key.', kind: 'llm-probe' } });
+    const calls = serve({ runs: [failed], config: { provider: 'anthropic' } });
+    renderAt(conversation(failed.runId));
     const user = userEvent.setup();
 
-    await user.click(await screen.findByRole('button', { name: /Open spec scan run/ }));
     await user.click(await screen.findByRole('button', { name: 'Run again' }));
     await waitFor(() =>
       expect(calls).toContain(`POST /api/repos/${REAL.id}/spec/corpus/scan`),
     );
   });
 
-  it('leaves a finished run alone', async () => {
-    serve({
-      runs: [failedScan({ status: 'completed', error: undefined })],
-      config: { provider: 'anthropic' },
-    });
-    renderAt(ACTIVITY);
-    const user = userEvent.setup();
+  it('leaves a finished one alone', async () => {
+    const done = failedScan({ status: 'completed', error: undefined });
+    serve({ runs: [done], config: { provider: 'anthropic' } });
+    renderAt(conversation(done.runId));
 
-    await user.click(await screen.findByRole('button', { name: /Open spec scan run/ }));
-    expect(await screen.findByText(/spec scan/)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'spec scan' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Run again' })).toBeNull();
   });
 
@@ -230,10 +241,10 @@ describe('the Activity surface of a connected repository', () => {
       runs: [],
       scan: () => json({ error: 'llm-not-configured', message: 'Set one in Settings.' }, 409),
     });
-    renderAt(ACTIVITY);
+    renderAt(CORPUS);
     const user = userEvent.setup();
 
-    await user.click(await screen.findByRole('button', { name: 'Start scan' }));
+    await user.click(await screen.findByRole('button', { name: 'Scan' }));
     expect(await screen.findByText('No LLM provider configured')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open Models' })).toBeInTheDocument();
   });
@@ -244,10 +255,10 @@ describe('the Activity surface of a connected repository', () => {
       config: { provider: 'anthropic' },
       scan: () => json({ error: 'llm-probe-failed', message: '401 invalid x-api-key' }, 502),
     });
-    renderAt(ACTIVITY);
+    renderAt(CORPUS);
     const user = userEvent.setup();
 
-    await user.click(await screen.findByRole('button', { name: 'Start scan' }));
+    await user.click(await screen.findByRole('button', { name: 'Scan' }));
     expect(
       await screen.findByText('Provider check failed: 401 invalid x-api-key'),
     ).toBeInTheDocument();
@@ -259,10 +270,10 @@ describe('the Activity surface of a connected repository', () => {
       config: { provider: 'anthropic' },
       scan: () => json({ error: 'A spec scan is already running for this repository.' }, 409),
     });
-    renderAt(ACTIVITY);
+    renderAt(CORPUS);
     const user = userEvent.setup();
 
-    await user.click(await screen.findByRole('button', { name: 'Start scan' }));
+    await user.click(await screen.findByRole('button', { name: 'Scan' }));
     expect(await screen.findByText('A run is already in progress')).toBeInTheDocument();
   });
 });
@@ -274,7 +285,7 @@ describe('the Activity surface of a connected repository', () => {
 describe('a workspace with no provider', () => {
   it('says so on a connected repository, with the way to set one', async () => {
     serve({ runs: [], config: null });
-    renderAt(ACTIVITY);
+    renderAt(CORPUS);
 
     expect(
       await screen.findByText(/No LLM provider configured\. Spec scans cannot run/),
@@ -287,9 +298,9 @@ describe('a workspace with no provider', () => {
 
   it('stays quiet once one is set', async () => {
     serve({ runs: [], config: { provider: 'anthropic' } });
-    renderAt(ACTIVITY);
+    renderAt(CORPUS);
 
-    await screen.findByRole('button', { name: 'Start scan' });
+    await screen.findByRole('button', { name: 'Scan' });
     expect(screen.queryByText(/No LLM provider configured\./)).toBeNull();
   });
 
@@ -299,11 +310,12 @@ describe('a workspace with no provider', () => {
       const { pathname } = new URL(href, window.location.origin);
       if (pathname === '/api/repos') return json([REAL]);
       if (pathname === `/api/repos/${REAL.id}/sessions/runs`) return json({ runs: [] });
+      if (pathname === '/api/sessions/runs') return json({ runs: [] });
       return json({ error: 'no session' }, 403);
     }) as unknown as typeof window.fetch;
-    renderAt(ACTIVITY);
+    renderAt(CORPUS);
 
-    await screen.findByRole('button', { name: 'Start scan' });
+    await screen.findByRole('button', { name: 'Scan' });
     expect(screen.queryByText(/No LLM provider configured\./)).toBeNull();
   });
 });

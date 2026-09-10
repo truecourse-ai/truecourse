@@ -20,7 +20,7 @@ import { useGuardDecisions } from '@/preview/vendor/hooks/useGuardDecisions';
 import { useGuardFlows } from '@/preview/vendor/hooks/useGuardFlows';
 import { GUARD_FLOW_STATUS_ORDER, GUARD_FLOW_STATUS_WORD, guardFlowPlainStatus } from '@/preview/vendor/lib/guard-flow-status';
 import type { Repo } from '@/preview/data/types';
-import { PREVIEW_BASE } from '@/preview/shell/base';
+import { activityHref } from '@/preview/shell/real-runs';
 import { useGuardTabJump } from './tab-jump';
 import { useGuardRefresh } from './use-guard-refresh';
 
@@ -155,9 +155,9 @@ export function TestsTab({ repo }: { repo: Repo }) {
                     flows.error
                   ) : all.length === 0 ? (
                     <>
-                      No tests generated yet. Generation runs in{' '}
-                      <Link to={`${PREVIEW_BASE}/repos/${repo.id}/activity`} className="text-primary hover:underline">
-                        Activity
+                      No tests generated yet. Generation shows up on{' '}
+                      <Link to={activityHref(repo.id)} className="text-primary hover:underline">
+                        Agent
                       </Link>
                       .
                     </>

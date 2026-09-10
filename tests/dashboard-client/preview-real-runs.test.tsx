@@ -148,7 +148,7 @@ describe('a run record as the shell reads it', () => {
   it('is an onboarding job whose steps are the run checklist', () => {
     const job = toJobChain(repo, runningScan(), true);
     expect(job.title).toBe('Onboarding linkwarden/linkwarden');
-    expect(job.href).toBe('/preview/repos/linkwarden/activity');
+    expect(job.href).toBe('/preview/agent?repo=linkwarden');
     expect(job.steps).toEqual([
       { key: 'discover', label: 'Discover documents', state: 'done', counter: '41 docs · 12 to curate' },
       { key: 'tag', label: 'Curate documents', state: 'active', counter: '3/12 docs' },
@@ -219,9 +219,9 @@ describe('a real run in the shell', () => {
     state.runs = [runningScan()];
     fireSocket('session:runs-changed', { repoId: 'linkwarden' });
 
-    // The toast: one announcement, pointing at the preview's own Activity.
+    // The toast: one announcement, pointing at the agent's own page.
     expect(await screen.findByText('Onboarding linkwarden/linkwarden')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Open Activity/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Open Agent/ })).toBeInTheDocument();
 
     // The row says onboarding while the first scan is up.
     await waitFor(() => expect(within(row).getByText('onboarding')).toBeInTheDocument());
@@ -242,7 +242,7 @@ describe('a real run in the shell', () => {
     // announce snapshot has to wait out.
     const row = (await screen.findByText('linkwarden/linkwarden')).closest('tr')!;
     await waitFor(() => expect(within(row).getByText('onboarding')).toBeInTheDocument());
-    expect(screen.queryByRole('button', { name: /Open Activity/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Open Agent/ })).toBeNull();
   });
 
   it('files a notification when the run starts and another when it settles', async () => {

@@ -7,8 +7,8 @@
  */
 
 import { useMemo } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { ChevronRight } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { PageHeader } from '@/preview/ui/bits';
 import { GuardFlowsPane } from '@/preview/vendor/components/guard/GuardFlowsPane';
 import { useGuardClaims } from '@/preview/vendor/hooks/useGuardClaims';
 import { useGuardDecisions } from '@/preview/vendor/hooks/useGuardDecisions';
@@ -68,15 +68,10 @@ export function TestPage({ repo, flowId }: { repo: Repo; flowId: string }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-6 py-3">
-        <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-sm">
-          <Link to={`/preview/repos/${repo.id}/tests`} className="shrink-0 font-semibold text-foreground hover:underline">
-            Tests
-          </Link>
-          <ChevronRight aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <h1 className="min-w-0 truncate font-semibold text-foreground">{flow?.title ?? flowId}</h1>
-        </nav>
-      </header>
+      <PageHeader
+        crumbs={[{ label: 'Tests', to: `/preview/repos/${repo.id}/tests` }]}
+        title={flow?.title ?? flowId}
+      />
       <div className="min-h-0 flex-1">
         <GuardFlowsPane
           repoId={repo.id}

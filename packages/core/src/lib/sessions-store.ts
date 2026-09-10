@@ -25,6 +25,7 @@ import {
   type SessionIndexEntry,
   type SessionPersistence,
 } from '@truecourse/agent-loop';
+import type { ActivityEvent } from '@truecourse/shared/activity-stream';
 import { getRepoTruecourseDir } from '../config/paths.js';
 import { atomicWriteJson } from './atomic-write.js';
 import { appendActivityEvent, publishActivityProgress, readActivityEvents, validateActivityCursor } from './activity-journal.js';
@@ -94,6 +95,9 @@ export interface SessionRunStore {
   flush?(): Promise<void>;
   subscribeActivity?(notify: () => void): () => void;
   readActivity?(after: number): Promise<import('@truecourse/shared/activity-stream').ActivityEvent[]>;
+  /** One bounded slice of the journal, so a reader pages a long run instead of
+   *  loading every event to show its first screen. */
+  readActivityPage?(after: number, limit: number): Promise<ActivityEvent[]>;
   validateActivityCursor?(after: number): Promise<void>;
   /** Dashboard reads load only this session; synchronous persistence reads belong to live writers. */
   readTranscript?(sessionId: string, since: number): Promise<SessionEvent[]>;
@@ -383,12 +387,51 @@ function defaultIsProcessAlive(pid: number): boolean {
   }
 }
 
+/** A run record carrying the repository it belongs to: what a listing that
+ *  spans a workspace's repositories returns. */
+export type RepoRunRecord = RunRecord & { repoKey: string };
+
+/**
+ * How a cross-repository listing narrows and pages. The order is newest first
+ * (`startedAt` descending, `runId` ascending as the tiebreak), and `before` is
+ * the cursor of the last run of the previous page.
+ */
+export interface SessionRunQuery {
+  command?: SessionCommand;
+  status?: RunStatus;
+  /** Narrow to one run, whichever repository holds it. */
+  runId?: string;
+  limit: number;
+  before?: string;
+}
+
+/** The paging key of a run in the newest-first order. */
+export function sessionRunCursor(run: { startedAt: string; runId: string }): string {
+  return `${run.startedAt}|${run.runId}`;
+}
+
+/** null for anything that is not a cursor this store minted. */
+export function parseSessionRunCursor(cursor: string): { startedAt: string; runId: string } | null {
+  const at = cursor.indexOf('|');
+  if (at <= 0 || at === cursor.length - 1) return null;
+  return { startedAt: cursor.slice(0, at), runId: cursor.slice(at + 1) };
+}
+
+/** One page of a run's journal. `nextCursor` is what resumes the read; `done`
+ *  means the page reached the end of the journal as it stands. */
+export interface ActivityPage {
+  events: ActivityEvent[];
+  nextCursor: number;
+  done: boolean;
+}
+
 /** Dashboard storage boundary. File-mode callers retain the synchronous store. */
 export interface SessionRunBackend {
   subscribeRepo(repoKey: string, notify: () => void): () => void;
   create(repoKey: string, opts: Parameters<typeof createSessionRun>[1]): Promise<SessionRunStore>;
   open(repoKey: string, command: SessionCommand, runId: string): Promise<SessionRunStore>;
   list(repoKey: string, command?: SessionCommand): Promise<RunRecord[]>;
+  listForRepos(repoKeys: string[], opts: SessionRunQuery): Promise<RepoRunRecord[]>;
 }
 export class SessionRunNotFoundError extends Error {
   constructor() { super('Session run not found'); }
@@ -409,9 +452,65 @@ export async function openStoredSessionRun(repoKey: string, command: SessionComm
 export async function listStoredSessionRuns(repoKey: string, command?: SessionCommand): Promise<RunRecord[]> {
   return backend && !path.isAbsolute(repoKey) ? backend.list(repoKey, command) : listSessionRuns(repoKey, command);
 }
+
+/**
+ * Every repository's runs as one newest-first page. A backend key (a repo
+ * identity, never a path) is answered by one backend query; a path is the file
+ * store's own listing, swept as it reads. The merged result is ordered and
+ * paged here, so a mixed workspace pages exactly like a homogeneous one.
+ */
+export async function listStoredSessionRunsForRepos(
+  repoKeys: string[],
+  opts: SessionRunQuery,
+): Promise<RepoRunRecord[]> {
+  const hosted = backend ? repoKeys.filter((key) => !path.isAbsolute(key)) : [];
+  const stored = new Set(hosted);
+  const runs: RepoRunRecord[] = hosted.length ? [...(await backend!.listForRepos(hosted, opts))] : [];
+  for (const key of repoKeys) {
+    if (stored.has(key)) continue;
+    for (const run of listSessionRuns(key, opts.command)) runs.push({ ...run, repoKey: key });
+  }
+  return pageSessionRuns(runs, opts);
+}
+
+/** The shared ordering and paging of a cross-repository listing. */
+function pageSessionRuns(runs: RepoRunRecord[], opts: SessionRunQuery): RepoRunRecord[] {
+  let before: { startedAt: string; runId: string } | undefined;
+  if (opts.before !== undefined) {
+    const parsed = parseSessionRunCursor(opts.before);
+    if (!parsed) throw new Error('Invalid session run cursor');
+    before = parsed;
+  }
+  return runs
+    .filter((run) => {
+      if (opts.command && run.command !== opts.command) return false;
+      if (opts.status && run.status !== opts.status) return false;
+      if (opts.runId && run.runId !== opts.runId) return false;
+      if (!before) return true;
+      return run.startedAt < before.startedAt
+        || (run.startedAt === before.startedAt && run.runId > before.runId);
+    })
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt) || a.runId.localeCompare(b.runId))
+    .slice(0, opts.limit);
+}
+
 export async function readStoredActivity(run: SessionRunStore, after = -1) {
   if (run.readActivity) return run.readActivity(after);
   return readActivityEvents(run.dir, after);
+}
+
+/** One page of the journal past `after`. A store with no bounded read answers
+ *  from the tail it already reads, which is the file journal's own slice. */
+export async function readStoredActivityPage(
+  run: SessionRunStore,
+  after: number,
+  limit: number,
+): Promise<ActivityPage> {
+  const events = run.readActivityPage
+    ? await run.readActivityPage(after, limit)
+    : (await readStoredActivity(run, after)).slice(0, limit);
+  const last = events[events.length - 1];
+  return { events, nextCursor: last ? last.cursor : after, done: events.length < limit };
 }
 
 export async function validateStoredActivityCursor(run: SessionRunStore, after: number): Promise<void> {

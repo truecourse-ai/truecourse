@@ -70,6 +70,7 @@ vi.mock('@truecourse/core/services/flow', async (importOriginal) => ({
 import { guardGenerateInProcess } from '@truecourse/core/commands/guard-in-process';
 import { curateInProcess } from '@truecourse/core/commands/spec-in-process';
 import { analyzeInProcess } from '@truecourse/core/commands/analyze-in-process';
+import { isAnalysisActive } from '@truecourse/core/services/analysis-registry';
 import { createLLMProvider } from '@truecourse/core/services/llm/provider';
 import { getFlowFromLatest, enrichFlowWithLLM } from '@truecourse/core/services/flow';
 import { createSessionRun, listSessionRuns } from '@truecourse/core/lib/sessions-store';
@@ -141,6 +142,9 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  // An analyze the route accepted with a 202 finishes after the test's last
+  // assertion; its log sink lives in the fixture, so the fixture outlives it.
+  await vi.waitFor(() => expect(isAnalysisActive(fixture.project.slug)).toBe(false), { timeout: 15_000 });
   await teardownTestFixture(fixture.project.slug);
   resetWorkspaceLlmBackend();
   resetWorkspaceLlmConfigStore();

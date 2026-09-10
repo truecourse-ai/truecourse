@@ -1,13 +1,13 @@
 /**
  * A job that starts while the page is open announces itself ONCE, as a toast
- * carrying a link to its session in the repository's Activity tab. Jobs already
+ * carrying a link to the agent's page, narrowed to the repository. Jobs already
  * in flight when the page loads never announce. Nothing in the toast moves: no
- * steps, no counter, no bar. Progress lives in one place, the Activity surface,
- * and the toast only says where to look. Renders nothing itself.
+ * steps, no counter, no bar. Progress lives in one place, the Agent page, and
+ * the toast only says where to look. Renders nothing itself.
  *
  * Both kinds of job pass through here. A REAL run (a repository connected by
- * URL, scanning) carries its own preview address and lands on the real Activity
- * view; a fixture job derives one from the repository it names.
+ * URL, scanning) carries its own preview address; a fixture job derives one
+ * from the repository it names.
  *
  * A real run that FAILS announces the same way, once, on the transition — with
  * the run's own reason and a link to the run itself. Both announcements are
@@ -62,9 +62,9 @@ export function JobToasts() {
     for (const job of jobs) {
       if (announced.current.has(job.id)) continue;
       announced.current.add(job.id);
-      // A real run carries its own Activity address (the registry slug is not
+      // A real run carries its own Agent address (the registry slug is not
       // always the repository's last path segment); a fixture derives one.
-      const to = job.href ?? `${PREVIEW_BASE}/repos/${slugOf(job.repoFullName)}/activity`;
+      const to = job.href ?? `${PREVIEW_BASE}/agent?repo=${encodeURIComponent(slugOf(job.repoFullName))}`;
       announceJob(job, () => navigate(to));
     }
   }, [jobs, jobsReady, navigate]);
@@ -74,7 +74,7 @@ export function JobToasts() {
 
 /**
  * A failed run, in the same one-line shape as a start: what broke, in the
- * run's own words, and the way to the run that broke.
+ * record's own words, and the way to the conversation that broke.
  */
 function announceFailure(failure: RunFailure, openRun: () => void) {
   toast.custom(
@@ -93,7 +93,7 @@ function announceFailure(failure: RunFailure, openRun: () => void) {
           }}
           className="inline-flex shrink-0 items-center gap-1 font-medium text-foreground hover:underline"
         >
-          Open run
+          Open conversation
           <ArrowUpRight className="h-3 w-3" />
         </button>
         <button
@@ -110,7 +110,7 @@ function announceFailure(failure: RunFailure, openRun: () => void) {
   );
 }
 
-function announceJob(job: JobChain, openActivity: () => void) {
+function announceJob(job: JobChain, openAgent: () => void) {
   toast.custom((id) => (
     <div className="flex w-full items-center gap-3 text-xs">
       <span className="h-2 w-2 shrink-0 rounded-full bg-sky-500" aria-hidden />
@@ -122,11 +122,11 @@ function announceJob(job: JobChain, openActivity: () => void) {
         type="button"
         onClick={() => {
           toast.dismiss(id);
-          openActivity();
+          openAgent();
         }}
         className="inline-flex shrink-0 items-center gap-1 font-medium text-foreground hover:underline"
       >
-        Open Activity
+        Open Agent
         <ArrowUpRight className="h-3 w-3" />
       </button>
       <button

@@ -1,9 +1,9 @@
 /** One catalog row as a full page. Older task links resolve to its screen and expanded action. */
 import { useMemo } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { ChevronRight } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { guardDriver, type GuardDriverId } from '@truecourse/shared';
 import { GuardInterfacesPane } from '@/components/guard/GuardInterfacesPane';
+import { PageHeader } from '@/preview/ui/bits';
 import { useGuardFlows } from '@/hooks/useGuardFlows';
 import { useGuardInterfaces } from '@/hooks/useGuardInterfaces';
 import type { GuardTabsState } from '@/hooks/useGuardTabs';
@@ -41,13 +41,7 @@ export function InterfacePage({ repo, interfaceId }: { repo: Repo; interfaceId: 
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-6 py-3">
-        <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-sm">
-          <Link to={base} className="shrink-0 font-semibold text-foreground hover:underline">Interfaces</Link>
-          <ChevronRight aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <h1 className="min-w-0 truncate font-semibold text-foreground">{title}</h1>
-        </nav>
-      </header>
+      <PageHeader crumbs={[{ label: 'Interfaces', to: base }]} title={title} />
       <div className="min-h-0 flex-1">
         <GuardInterfacesPane
           repoId={repo.id}
