@@ -116,9 +116,12 @@ export const writeGuardOverlays = (repoKey: string, overlays: GuardOverlays): Pr
 
 /**
  * Put a hosted repo's stored overlays into an ephemeral clone, where the engine
- * reads them as the two files. A repo with nothing registered writes nothing.
+ * reads them as the two files. A repo with nothing registered writes nothing,
+ * and the result says whether anything was written.
  */
-export async function materializeGuardOverlays(repoKey: string, treeDir: string): Promise<void> {
+export async function materializeGuardOverlays(repoKey: string, treeDir: string): Promise<boolean> {
   const overlays = await active.read(repoKey);
-  if (overlays) writeGuardOverlaysToTree(treeDir, overlays);
+  if (!overlays) return false;
+  writeGuardOverlaysToTree(treeDir, overlays);
+  return true;
 }

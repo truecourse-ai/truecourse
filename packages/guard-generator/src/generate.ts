@@ -1232,7 +1232,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     extractSummary.fromCache === 0 ? ', extracted' : extractSummary.fromCache >= docs.length ? ', from cache' : ''
   for (const { doc, result } of extracted) {
     if (!result.ok) {
-      fact('extract', `${doc.doc}: extraction failed, ${oneLine(result.reason)}`)
+      fact('extract', `${doc.doc}: extraction failed, ${asLine(result.reason)}`)
       continue
     }
     const claims = result.data.claims.length
@@ -1826,12 +1826,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           noteSurface(surface, `no match, every case needs a verified preparation profile${cacheTag}`)
         }
       } else if (outcome.kind === 'gap') {
-        noteSurface(surface, `no match${outcome.gaps[0] ? `, ${oneLine(outcome.gaps[0].reason)}` : ''}${outcome.calls === 0 ? ' (from cache)' : ''}`)
+        noteSurface(surface, `no match${outcome.gaps[0] ? `, ${asLine(outcome.gaps[0].reason)}` : ''}${outcome.calls === 0 ? ' (from cache)' : ''}`)
       } else if (outcome.kind === 'error') {
         localMatchCallErrors++
         localFirstMatchError ??= outcome.reason
         localErrors.push({ flowId: flow.id, doc: primary.doc, anchor: primary.anchor, message: `matching (${surface}) ${outcome.reason}` })
-        noteSurface(surface, `match failed, ${oneLine(outcome.reason)}`)
+        noteSurface(surface, `match failed, ${asLine(outcome.reason)}`)
       }
     }
 
@@ -2088,7 +2088,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           `${webTasks.length} web flow(s) skipped, left unsettled for the next generate`,
       })
       for (const t of webTasks) {
-        fact('author', `${t.work.flow.id} x web: skipped, the browser cannot be driven (${oneLine(browser.reason)})`)
+        fact('author', `${t.work.flow.id} x web: skipped, the browser cannot be driven (${asLine(browser.reason)})`)
       }
     }
   }
@@ -3514,7 +3514,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             // reason stays the message either way.
             const capture = lastExecutionErrorByRef.get(ref)
             const message = `flow worker (${surface}) ${result.reason}`
-            fact('author', `${work.flow.id} x ${surface}: failed, ${oneLine(result.reason)}`)
+            fact('author', `${work.flow.id} x ${surface}: failed, ${asLine(result.reason)}`)
             errors.push(
               capture
                 ? { ...errorFrom(capture), surface, message }
@@ -3555,7 +3555,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               task.errored = true
               errors.push({ doc: work.primary.doc, anchor: work.primary.anchor, kind: 'authoring',
                 flowId: work.flow.id, surface, message: incomplete })
-              fact('author', `${work.flow.id} x ${surface}: not settled, ${oneLine(incomplete)}`)
+              fact('author', `${work.flow.id} x ${surface}: not settled, ${asLine(incomplete)}`)
               continue
             }
             // Every accepted scenario, primary first — one for a from-scratch
@@ -3600,7 +3600,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               'author',
               `${work.flow.id} x ${surface}: settled, ${accepted.length} scenario${accepted.length === 1 ? '' : 's'} accepted${result.fromCache ? ', from cache' : ''}`,
             )
-            for (const d of drops) fact('author', `${work.flow.id} x ${surface}: dropped ${d.id}, ${oneLine(d.reason)}`)
+            for (const d of drops) fact('author', `${work.flow.id} x ${surface}: dropped ${d.id}, ${asLine(d.reason)}`)
             for (const { entry } of accepted) {
               if (entry!.result.outcome === 'pass') {
                 pushInto(persisted, ref, entry!.candidate)
@@ -3653,7 +3653,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               surface,
               message: `flow worker (${surface}) reported a journey defect on interface "${outcome.report!.interfaceId}": ${oneLine(outcome.report!.detail)} — the flow stays unsettled until the catalog (or its derivation) is fixed`,
             })
-            fact('author', `${work.flow.id} x ${surface}: journey defect on interface "${outcome.report!.interfaceId}", ${oneLine(outcome.report!.detail)}`)
+            fact('author', `${work.flow.id} x ${surface}: journey defect on interface "${outcome.report!.interfaceId}", ${asLine(outcome.report!.detail)}`)
             continue
           }
           // `retired` — the worker gave the flow up this run. A retirement the
@@ -3669,7 +3669,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             fact('author', `${work.flow.id} x ${surface}: retired with ${remainder.length} obligation(s) still open`)
             continue
           }
-          fact('author', `${work.flow.id} x ${surface}: retired after ${outcome.attempts} attempt(s), ${oneLine(outcome.lastEvidence!)}`)
+          fact('author', `${work.flow.id} x ${surface}: retired after ${outcome.attempts} attempt(s), ${asLine(outcome.lastEvidence!)}`)
           taintFlow(work.flow.id, surface, work.flow.title, oneLine(outcome.lastEvidence!))
           if (state.pendingFidelityFinding) {
             pushInto(fidelityRejections, ref, state.pendingFidelityFinding)
@@ -4017,7 +4017,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       fact('validate', `${work.flow.id}: settled, ${wroteHere} test${wroteHere === 1 ? '' : 's'} written`)
     }
     for (const gap of work.gaps) {
-      fact('validate', `${work.flow.id} x ${gap.surface}: ${gap.kind} gap, ${oneLine(gap.reason)}`)
+      fact('validate', `${work.flow.id} x ${gap.surface}: ${gap.kind} gap, ${asLine(gap.reason)}`)
     }
     options.onFlowSettled?.(++flowsSettled, settleTotal)
   }
@@ -4461,15 +4461,20 @@ function withResources(
 /** One fidelity child's verdict as a fact line, in the judge's own words. */
 function fidelityVerdictLine(scenarioId: string, verdict: WorkerFidelityVerdict): string {
   if (verdict.kind === 'flagged') {
-    return `${scenarioId}: fidelity flagged (${verdict.confidence}), ${oneLine(verdict.mismatch)}`
+    return `${scenarioId}: fidelity flagged (${verdict.confidence}), ${asLine(verdict.mismatch)}`
   }
-  if (verdict.kind === 'unavailable') return `${scenarioId}: fidelity unavailable, ${oneLine(verdict.reason)}`
+  if (verdict.kind === 'unavailable') return `${scenarioId}: fidelity unavailable, ${asLine(verdict.reason)}`
   return `${scenarioId}: fidelity faithful`
 }
 
 function oneLine(text: string): string {
-  const t = text.replace(/\s+/g, ' ').trim()
+  const t = asLine(text)
   return t.length > 120 ? `${t.slice(0, 120)}…` : t
+}
+
+/** The whole of a reason on one line: a fact keeps every word, and the page folds it. */
+function asLine(text: string): string {
+  return text.replace(/\s+/g, ' ').trim()
 }
 
 /** The first sentence of a runner failure message — its VERDICT, without the

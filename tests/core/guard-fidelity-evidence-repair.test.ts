@@ -6,7 +6,7 @@ import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import { GuardWebStepSchema, type GuardEvidenceProofContext } from '@truecourse/shared'
 import type { WorkerFidelityInput } from '@truecourse/guard-generator'
 import { runAgentLoop, type ToolContext } from '../../packages/agent-loop/src/index'
-import { emptyFidelityTally, fidelitySessionCacheKey, fidelitySessionDef, FIDELITY_SESSION_CACHE_NAME,
+import { emptyFidelityTally, FidelityVerdictSchema, fidelitySessionCacheKey, fidelitySessionDef, FIDELITY_SESSION_CACHE_NAME,
   judgeWorkerFidelity } from '../../packages/core/src/services/guard-generate/fidelity'
 import { buildGuardDocUniverse } from '../../packages/core/src/services/guard-generate/tools'
 import { memoryPersistence, outcome, stubDriver, type StubCall } from './spec-scan-session-stub'
@@ -35,6 +35,21 @@ function harness(script: (call: StubCall) => ReturnType<typeof outcome> | Promis
       sessionId: `review-${++dispatches}`, initialMessages, workItem: 'flow:empty:web' }).outcome }
   return { repoRoot, persistence, calls, ctx, tally: emptyFidelityTally() }
 }
+
+describe('the fidelity verdict schema', () => {
+  it('takes a faithful verdict with the confidence its JSON schema offers, and refuses a mismatch on it', () => {
+    // The outcome's JSON schema lists `confidence` on every verdict and cannot
+    // pair it with `flagged` alone, so a model that fills it in on a faithful
+    // verdict is following the schema it was handed.
+    expect(FidelityVerdictSchema.safeParse({ verdict: 'faithful', confidence: 'high' }).success).toBe(true)
+    expect(FidelityVerdictSchema.safeParse({ verdict: 'faithful' }).success).toBe(true)
+    const contradiction = FidelityVerdictSchema.safeParse({ verdict: 'faithful', mismatch: 'no assertion checks the output' })
+    expect(contradiction.success).toBe(false)
+    // Flagged still needs both halves.
+    expect(FidelityVerdictSchema.safeParse({ verdict: 'flagged', mismatch: 'x' }).success).toBe(false)
+    expect(FidelityVerdictSchema.safeParse({ verdict: 'flagged', mismatch: 'x', confidence: 'low' }).success).toBe(true)
+  })
+})
 
 describe('fidelity child repairs proof metadata within its original budget', () => {
   it('repairs the stored [6,7,10,11] incident inside one child and caches only [6,7]', async () => {

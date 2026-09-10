@@ -197,6 +197,18 @@ export function setShowResolvedStageModel(show: boolean): void {
 }
 
 /**
+ * Whether a step's progress detail carries its model, tokens and cost at all.
+ * The CLI's checklist wants them beside each step; the dashboard server turns
+ * them off at boot — the product shows a step's count only, and spend has its
+ * own place.
+ */
+let showStageUsage = true;
+
+export function setShowStageUsage(show: boolean): void {
+  showStageUsage = show;
+}
+
+/**
  * ` · <model> · <tok> tok · $<cost>` suffix for an explicit stage set — the core
  * of {@link stepUsageTag}, exported so other steppers (guard generate) render the
  * SAME live tag from their own stage mapping, sharing the EE model-name toggle.
@@ -209,7 +221,7 @@ export function stageUsageTag(
   repoRoot: string,
   mode?: LlmTransportMode,
 ): string {
-  if (stages.length === 0) return '';
+  if (stages.length === 0 || !showStageUsage) return '';
   const usage = getStageUsage();
   let tok = 0;
   let cost = 0;

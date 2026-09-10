@@ -257,6 +257,7 @@ export function buildPreparationSession(
       return {
         status: result.output.profiles.length ? 'ok' : 'skipped',
         reason: result.output.findings.join('; ') || undefined,
+        findings: result.output.findings,
         ...(context.runId() ? { sessionRunId: context.runId() } : {}),
       };
     } catch (error) {

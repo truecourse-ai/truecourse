@@ -19,6 +19,8 @@
  *   - as JOB CHAINS (the toast and the in-flight list), one per running run,
  *     whose steps are the run record's own phase checklist;
  *   - as NOTIFICATIONS, one when a run starts and one when it settles;
+ *   both open the run's own conversation, never a list it would have to be
+ *   found in;
  *   - as REPO STATE: the `onboarding` marker while a repository's first scan
  *     runs, and an honest "last check" once something has settled.
  *
@@ -34,7 +36,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { listSessionRuns, type PublicSessionRun } from '@/lib/api';
 import { connectSocket, joinRepoRoom, leaveRepoRoom } from '@/lib/socket';
-import { runChecklist } from '@/components/sessions/run-model';
+import { commandLabel, runChecklist } from '@/components/sessions/run-model';
 import type { JobChain, JobStep, PreviewNotification, Repo } from '@/preview/data/types';
 import { PREVIEW_BASE } from './base';
 
@@ -44,16 +46,8 @@ export interface RunRepoRef {
   fullName: string;
 }
 
-/** The commands whose runs the shell announces, in the words the product uses. */
-const COMMAND_NOUN: Record<string, string> = {
-  'spec-scan': 'Spec scan',
-  'guard-setup': 'Guard setup',
-  'guard-generate': 'Scenario generation',
-  'guard-interfaces': 'Interface authoring',
-  'guard-adjudicate': 'Run adjudication',
-};
-
-const nounFor = (command: string): string => COMMAND_NOUN[command] ?? command;
+/** A run's kind, in the words the Agent page uses for it. */
+const nounFor = commandLabel;
 
 const isSettled = (run: PublicSessionRun): boolean => run.status !== 'running';
 
@@ -108,7 +102,7 @@ export function toJobChain(repo: RunRepoRef, run: PublicSessionRun, first: boole
         ? `Onboarding ${repo.fullName}`
         : `${nounFor(run.command)} ${repo.fullName}`,
     repoFullName: repo.fullName,
-    href: activityHref(repo.id),
+    href: conversationHref(run.runId),
     // A run that has not published its checklist yet still has one honest step.
     steps: steps.length > 0 ? steps : [{ key: 'start', label: 'Starting', state: 'active' }],
   };
@@ -124,13 +118,13 @@ export function toNotifications(
   now: number,
 ): TimedNotification[] {
   const noun = nounFor(run.command);
-  const href = activityHref(repo.id);
+  const href = conversationHref(run.runId);
   const rows: TimedNotification[] = [
     {
       id: `real-${repo.id}-${run.runId}-started`,
       level: 'neutral',
       title: `${noun} started on ${repo.fullName}`,
-      body: 'Follow it on the Agent page.',
+      body: 'Open the conversation to follow it.',
       at: relativeTime(run.startedAt, now),
       read: false,
       href,
@@ -146,8 +140,7 @@ export function toNotifications(
       // The record's own reason when it has one: "it failed" is the title, and
       // the body is the only room the feed has to say why.
       body: failed
-        ? (run.error?.message ??
-          `It ended ${run.status}. The whole conversation is on the Agent page.`)
+        ? (run.error?.message ?? `It ended ${run.status}.`)
         : `${run.sessions.length} piece${run.sessions.length === 1 ? '' : 's'} of work.`,
       at: relativeTime(run.finishedAt ?? run.startedAt, now),
       read: false,
@@ -176,7 +169,7 @@ export function toFailure(repo: RunRepoRef, run: PublicSessionRun): RunFailure |
   return {
     id: `real-${repo.id}-${run.runId}`,
     title: `${nounFor(run.command)} failed on ${repo.fullName}`,
-    body: run.error?.message ?? 'The whole conversation is on the Agent page.',
+    body: run.error?.message ?? 'It ended failed.',
     href: conversationHref(run.runId),
   };
 }

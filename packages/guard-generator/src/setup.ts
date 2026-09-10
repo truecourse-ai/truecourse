@@ -396,7 +396,12 @@ export interface GuardSetupPreparationSessionInput {
   fingerprint: string
 }
 export type GuardSetupPreparationSession = (input: GuardSetupPreparationSessionInput) => Promise<{
-  status: 'ok' | 'skipped' | 'failed'; reason?: string; sessionRunId?: string
+  status: 'ok' | 'skipped' | 'failed'
+  /** The session's findings as one line, for the step record. */
+  reason?: string
+  /** The session's findings, which the step counts and the session's outcome carries. */
+  findings?: string[]
+  sessionRunId?: string
 }>
 
 export type GuardSetupSeedSession = (
@@ -1014,14 +1019,18 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         : { status: 'skipped' as const, reason: 'private preparation authoring is unavailable; only profiles with runner-verified baseline checks are usable' }
       steps.push({ key: 'preparations', status: result.status, ...(result.reason ? { reason: result.reason } : {}),
         inputFingerprint: computeRecipeFingerprint(repoRoot), ...('sessionRunId' in result && result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}) })
-      fact(
-        'preparations',
+      // The session's findings are its outcome, read in the session itself;
+      // the step only counts them.
+      const findings = result.findings ?? []
+      const summary =
         result.status === 'ok'
           ? 'the preparation session authored the private starting states'
-          : `no private starting state was authored: ${firstReasonLine(result.reason ?? result.status)}`,
-      )
+          : findings.length > 0
+            ? `no private starting state was authored, ${findings.length} finding${findings.length === 1 ? '' : 's'}`
+            : `no private starting state was authored: ${firstReasonLine(result.reason ?? result.status)}`
+      fact('preparations', summary)
       for (const line of preparationFacts(reloadRecipe(repoRoot) ?? preparationRecipe)) fact('preparations', line)
-      opts.onStepDone?.('preparations', result.reason ?? result.status)
+      opts.onStepDone?.('preparations', findings.length > 0 ? summary : (result.reason ?? result.status))
     }
   }
 

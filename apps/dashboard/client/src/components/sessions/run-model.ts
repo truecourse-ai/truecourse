@@ -47,8 +47,18 @@ export const STEP_DOT: Record<StepStatus, string> = {
   error: 'bg-red-500',
 };
 
-/** `spec-scan` → `spec scan`: the store id as a display phrase. */
-export const commandLabel = (command: string): string => command.replace(/-/g, ' ');
+/** What each kind of run is called, in the product's words rather than the store's ids. */
+const COMMAND_LABEL: Record<string, string> = {
+  'spec-scan': 'Document scan',
+  'guard-setup': 'Test setup',
+  'guard-generate': 'Test generation',
+  'guard-run': 'Test run',
+  'guard-interfaces': 'Interface authoring',
+  'guard-adjudicate': 'Failure adjudication',
+};
+
+/** `spec-scan` → `Document scan`; a command with no name of its own reads as its id, spaced. */
+export const commandLabel = (command: string): string => COMMAND_LABEL[command] ?? command.replace(/-/g, ' ');
 
 export const startedLabel = (iso: string): string =>
   new Date(iso).toLocaleString(undefined, {

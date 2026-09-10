@@ -95,14 +95,21 @@ export function createRepoGuardGenerateTask(
         try {
           const commitSha = await resolveCommitSha(tree.dir);
           activityRun.setGitRef?.(commitSha);
-          activityTracker.done('clone');
+          activityTracker.fact('clone', `cloned ${repoFullName} at ${commitSha.slice(0, 8)}`);
           const ref = { repoKey: repoFullName, commitSha };
           if (!(await materializeStoredSpec(ref, tree.dir))) {
             throw new Error(
               `${repoFullName} has no scanned spec yet — run the spec scan before generating scenarios.`,
             );
           }
-          await materializeStoredGuardState(repoFullName, tree.dir);
+          activityTracker.fact('clone', 'the stored spec corpus and decisions written into the clone');
+          const baseline = await materializeStoredGuardState(repoFullName, tree.dir);
+          activityTracker.fact(
+            'clone',
+            baseline
+              ? `the baseline scenario set and report from ${baseline.slice(0, 8)} written into the clone`
+              : 'no baseline scenario set: this generate starts from nothing',
+          );
           // Setup's bundle goes in LAST: its recipe and catalogs are the current
           // truth, whatever the scenario set was generated against.
           const bundle = await loadGuardSetupBundle(repoFullName);
@@ -112,9 +119,13 @@ export function createRepoGuardGenerateTask(
             );
           }
           materializeGuardSetupBundle(tree.dir, bundle);
+          activityTracker.fact('clone', `the newest setup bundle written into the clone: ${Object.keys(bundle).join(', ')}`);
           // The registered instances beside it: what a supplied dependency is
           // provided with decides which sections generate can author.
-          await materializeGuardOverlays(repoFullName, tree.dir);
+          if (await materializeGuardOverlays(repoFullName, tree.dir)) {
+            activityTracker.fact('clone', 'the registered instances written into the clone');
+          }
+          activityTracker.done('clone');
 
           let guard;
           try {
@@ -131,7 +142,7 @@ export function createRepoGuardGenerateTask(
           } catch (err) {
             if (ctx.signal?.aborted) throw err;
             if (err instanceof OpenConflictsError) {
-              activityRun.setError({ message: err.message, kind: 'open-conflicts' });
+              // The engine already stopped the run on the gate's reason.
               await writeGuardResult(ref, buildOpenConflictsReport(err, new Date().toISOString()), {
                 baseline: true,
               });

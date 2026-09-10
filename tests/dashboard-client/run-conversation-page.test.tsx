@@ -71,6 +71,18 @@ function verbatim(root: HTMLElement, text: string): boolean {
   return [...root.querySelectorAll('pre, p, span')].some((el) => el.textContent === text);
 }
 
+/**
+ * How many times a fact is on the page: a `label: value` fact is set as a
+ * term and its definition, a plain sentence as one definition.
+ */
+function factCount(text: string): number {
+  const sentences = [...document.querySelectorAll('dd')].filter((dd) => dd.textContent === text).length;
+  const pairs = [...document.querySelectorAll('dt')].filter(
+    (dt) => `${dt.textContent}: ${dt.nextElementSibling?.textContent}` === text,
+  ).length;
+  return sentences + pairs;
+}
+
 function renderPage(run: PublicSessionRun) {
   return render(
     <MemoryRouter>
@@ -114,12 +126,14 @@ describe('one conversation, as a page', () => {
       screen.getByText('wrote .truecourse/scenarios/recipe.json (llm) · default /api/expenses → 200'),
     ).toBeInTheDocument();
 
-    // One row per piece of work, titled by its own briefing's first line; no
-    // kind id, no status word, no tokens or cost; no transcript until opened.
+    // One row per piece of work, titled by the work item the run indexed it
+    // under; no kind id, no status word, no tokens or cost; no transcript
+    // until opened.
     const rows = screen.getAllByRole('button', { pressed: false });
     expect(rows).toHaveLength(SETUP_RUN.sessions.length);
-    const briefing = recipeEvents[1] as Extract<SessionEvent, { type: 'user-message' }>;
-    expect(rows[0]).toHaveTextContent(briefing.content.split('\n')[0].trim());
+    expect(rows.map((r) => r.textContent)).toEqual(
+      SETUP_RUN.sessions.map((session) => expect.stringContaining(session.workItem)),
+    );
     expect(screen.queryByText('guard-setup.recipe-repair')).toBeNull();
     expect(screen.queryByText('completed')).toBeNull();
     expect(screen.queryByText(/tokens/)).toBeNull();
@@ -133,11 +147,11 @@ describe('one conversation, as a page', () => {
     await screen.findByRole('heading', { level: 2, name: /Deriving the recipe/ });
 
     const briefing = recipeEvents[1] as Extract<SessionEvent, { type: 'user-message' }>;
-    await userEvent.click(row(rx(briefing.content.split('\n')[0].trim().slice(0, 30))));
+    await userEvent.click(row(rx(SETUP_RUN.sessions[0].workItem)));
     const el = pane();
     const work = within(el);
     // The row is the pressed one, and the address remembers it.
-    expect(screen.getByRole('button', { pressed: true })).toHaveTextContent(briefing.content.split('\n')[0].trim());
+    expect(screen.getByRole('button', { pressed: true })).toHaveTextContent(SETUP_RUN.sessions[0].workItem);
     const asParagraphs = (text: string) =>
       [...el.querySelectorAll('div')].some((d) => [...d.children].every((c) => c.tagName === 'P') && d.textContent === text.replace(/\n{2,}/g, ''));
 
@@ -233,11 +247,125 @@ describe('one conversation, as a page', () => {
       ],
     } as PublicSessionRun);
 
-    await userEvent.click(await screen.findByRole('button', { name: /You author the ONE preparation script/ }));
+    await userEvent.click(await screen.findByRole('button', { name: /^preparations/ }));
     const work = within(pane());
     expect(work.getByText('[budget] 2 turns left before I stop you.')).toBeInTheDocument();
-    // Once as the pane's title, once as the message it was.
-    expect(work.getAllByText('You author the ONE preparation script.')).toHaveLength(2);
+    expect(work.getByText('You author the ONE preparation script.')).toBeInTheDocument();
+  });
+
+  it('says a step’s detail once when one of its facts already restates it', async () => {
+    serve([]);
+    renderPage({
+      command: 'guard-setup',
+      runId: 'run-facts',
+      gitRef: 'abc1234',
+      startedAt: '2026-09-10T10:00:00.000Z',
+      status: 'completed',
+      activityStream: 'ai-sdk-v1',
+      display: {
+        blocks: [
+          {
+            kind: 'checklist',
+            items: [
+              {
+                key: 'seed',
+                label: 'Preparing data + principals',
+                status: 'done',
+                detail: 'the recipe has no `api` block',
+                facts: ['seed refused: the recipe has no `api` block'],
+              },
+              {
+                key: 'auth',
+                label: 'Verifying supplied auth',
+                status: 'done',
+                detail: 'nothing to verify',
+                facts: ['nothing to verify'],
+              },
+              {
+                key: 'detect',
+                label: 'Detecting dependencies',
+                status: 'done',
+                detail: '0 external services · no database',
+                facts: ['nothing detected: no external service, no database, no datastore url'],
+              },
+            ],
+          },
+        ],
+      },
+      sessions: [],
+    } as unknown as PublicSessionRun);
+
+    await screen.findByRole('heading', { level: 2, name: /Verifying supplied auth/ });
+    expect(screen.getAllByText(/the recipe has no `api` block/)).toHaveLength(1);
+    expect(factCount('seed refused: the recipe has no `api` block')).toBe(1);
+    expect(screen.getAllByText('nothing to verify')).toHaveLength(1);
+    expect(screen.getByText('0 external services · no database')).toBeInTheDocument();
+    expect(factCount('nothing detected: no external service, no database, no datastore url')).toBe(1);
+  });
+
+  it('puts the run’s reason under the step it stopped on, once', async () => {
+    serve([]);
+    const reason = '1 open spec conflict must be resolved before guard generate.';
+    renderPage({
+      command: 'guard-generate',
+      runId: 'run-stopped',
+      gitRef: 'abc1234',
+      startedAt: '2026-09-10T10:00:00.000Z',
+      status: 'failed',
+      activityStream: 'ai-sdk-v1',
+      error: { message: reason, kind: 'open-conflicts' },
+      display: {
+        blocks: [
+          {
+            kind: 'checklist',
+            items: [
+              { key: 'clone', label: 'Preparing repository', status: 'done', facts: ['cloned acme/app at abc1234'] },
+              { key: 'index', label: 'Indexing sections', status: 'error', detail: reason, facts: [`stopped: ${reason}`] },
+              { key: 'extract', label: 'Extracting claims', status: 'pending' },
+            ],
+          },
+        ],
+      },
+      sessions: [],
+    } as unknown as PublicSessionRun);
+
+    const heading = await screen.findByRole('heading', { level: 2, name: /Indexing sections/ });
+    // Said once, by the step's own fact: neither the detail nor the record's
+    // reason repeats it, and nothing sits above the first step.
+    expect(factCount(`stopped: ${reason}`)).toBe(1);
+    const line = screen.getByText(reason);
+    expect(screen.getAllByText(/1 open spec conflict must be resolved/)).toHaveLength(1);
+    expect(heading.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const next = screen.getByRole('heading', { level: 2, name: /Extracting claims/ });
+    expect(line.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('keeps the lines of a reason the step does not say itself', async () => {
+    serve([]);
+    const reason = 'the build failed\n  npm run build exited 1';
+    renderPage({
+      command: 'guard-generate',
+      runId: 'run-build',
+      gitRef: 'abc1234',
+      startedAt: '2026-09-10T10:00:00.000Z',
+      status: 'failed',
+      activityStream: 'ai-sdk-v1',
+      error: { message: reason },
+      display: {
+        blocks: [
+          {
+            kind: 'checklist',
+            items: [{ key: 'build', label: 'Building', status: 'error', detail: 'the build failed' }],
+          },
+        ],
+      },
+      sessions: [],
+    } as unknown as PublicSessionRun);
+
+    await screen.findByRole('heading', { level: 2, name: /Building/ });
+    expect(verbatim(document.body, reason)).toBe(true);
+    // The detail is the reason's first line: the reason says it.
+    expect(screen.queryByText('the build failed')).toBeNull();
   });
 
   it('is the error and nothing else when a gate stopped the work', async () => {

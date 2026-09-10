@@ -109,7 +109,9 @@ describe('the facts a header wears', () => {
   });
 
   it('says a command id in words', () => {
-    expect(commandLabel('spec-scan')).toBe('spec scan');
-    expect(commandLabel('guard-generate')).toBe('guard generate');
+    expect(commandLabel('spec-scan')).toBe('Document scan');
+    expect(commandLabel('guard-setup')).toBe('Test setup');
+    expect(commandLabel('guard-generate')).toBe('Test generation');
+    expect(commandLabel('some-new-command')).toBe('some new command');
   });
 });

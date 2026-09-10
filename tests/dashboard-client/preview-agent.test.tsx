@@ -181,11 +181,11 @@ describe('Agent, the index', () => {
     await waitFor(() => expect(rows()).toHaveLength(2));
 
     const [first, second] = rows();
-    expect(within(first!).getByText('guard setup')).toBeInTheDocument();
+    expect(within(first!).getByText('Test setup')).toBeInTheDocument();
     expect(within(first!).getByText('spiderhands/filecli')).toBeInTheDocument();
     expect(within(first!).getByText('Failed')).toBeInTheDocument();
     expect(within(first!).getByText('2m 30s')).toBeInTheDocument();
-    expect(within(second!).getByText('spec scan')).toBeInTheDocument();
+    expect(within(second!).getByText('Document scan')).toBeInTheDocument();
     expect(within(second!).getByText('Finished')).toBeInTheDocument();
   });
 
@@ -224,7 +224,7 @@ describe('Agent, the index', () => {
 
     await user.click(screen.getByRole('button', { name: 'Add filter' }));
     await user.click(await screen.findByRole('option', { name: /Kind/ }));
-    await user.click(await screen.findByRole('option', { name: /guard setup/ }));
+    await user.click(await screen.findByRole('option', { name: /Test setup/ }));
 
     await waitFor(() => expect(rows()).toHaveLength(1));
     expect(screen.getByTestId('address')).toHaveTextContent('/preview/agent?kind=guard-setup');
@@ -243,7 +243,7 @@ describe('Agent, the index', () => {
     await user.clear(search);
     await user.type(search, 'abc1234');
     await waitFor(() => expect(rows()).toHaveLength(1));
-    expect(within(rows()[0]!).getByText('spec scan')).toBeInTheDocument();
+    expect(within(rows()[0]!).getByText('Document scan')).toBeInTheDocument();
   });
 
   it('says what an empty workspace is waiting for, and what a filter excluded', async () => {
@@ -284,7 +284,7 @@ describe('one conversation', () => {
 
     await user.click(rows()[0]!);
 
-    expect(await screen.findByRole('heading', { name: 'guard setup' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Test setup' })).toBeInTheDocument();
     const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' });
     expect(within(crumbs).getByRole('link', { name: 'Agent' })).toHaveAttribute('href', '/preview/agent');
     expect(screen.getByText('spiderhands/filecli')).toBeInTheDocument();

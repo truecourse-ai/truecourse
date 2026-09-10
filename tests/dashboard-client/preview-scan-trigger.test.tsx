@@ -232,7 +232,7 @@ describe('the surfaces of a connected repository', () => {
     serve({ runs: [done], config: { provider: 'anthropic' } });
     renderAt(conversation(done.runId));
 
-    expect(await screen.findByRole('heading', { name: 'spec scan' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Document scan' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Run again' })).toBeNull();
   });
 

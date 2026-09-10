@@ -154,15 +154,17 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('what a failed run says about itself', () => {
-  it('opens the conversation with its own reason, above the steps it got through', async () => {
+  it('opens the conversation with its own reason under the step it died in', async () => {
     serve([failed()]);
     renderAt(`${AGENT}/${encodeURIComponent(failed().runId)}`);
 
     const reason = await screen.findByText(REASON);
-    // It leads: the steps it did get through come after it, and never instead
-    // of it.
-    const step = screen.getByRole('heading', { name: 'Curate documents' });
-    expect(reason.compareDocumentPosition(step) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The step that was open when the run died carries the reason; the one it
+    // got through stays as it was.
+    const done = screen.getByRole('heading', { name: 'Discover documents' });
+    const dying = screen.getByRole('heading', { name: 'Curate documents' });
+    expect(done.compareDocumentPosition(dying) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(dying.compareDocumentPosition(reason) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('says nothing of the sort when the run has no reason to give', async () => {
@@ -179,7 +181,7 @@ describe('what a failed run says about itself', () => {
     const repo = { id: REAL.id, fullName: REAL.name };
     expect(toFailure(repo, failed())).toEqual({
       id: `real-${REAL.id}-${failed().runId}`,
-      title: 'Spec scan failed on linkwarden/linkwarden',
+      title: 'Document scan failed on linkwarden/linkwarden',
       body: REASON,
       href: `/preview/agent/${encodeURIComponent(failed().runId)}`,
     });
@@ -224,7 +226,7 @@ describe('the failure toast', () => {
     state.runs = [failed()];
     fireSocket('session:runs-changed', { repoId: REAL.id });
 
-    expect(await screen.findByText('Spec scan failed on linkwarden/linkwarden')).toBeInTheDocument();
+    expect(await screen.findByText('Document scan failed on linkwarden/linkwarden')).toBeInTheDocument();
     expect(screen.getByText(REASON)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Open conversation/ })).toBeInTheDocument();
 
@@ -232,7 +234,7 @@ describe('the failure toast', () => {
     fireSocket('session:runs-changed', { repoId: REAL.id });
     fireSocket('session:runs-changed', { repoId: REAL.id });
     await waitFor(() =>
-      expect(screen.getAllByText('Spec scan failed on linkwarden/linkwarden')).toHaveLength(1),
+      expect(screen.getAllByText('Document scan failed on linkwarden/linkwarden')).toHaveLength(1),
     );
   });
 
@@ -243,14 +245,14 @@ describe('the failure toast', () => {
     await screen.findByText('linkwarden/linkwarden');
     // The row knows; the shell does not shout about it.
     await waitFor(() => expect(screen.queryByRole('button', { name: /Open conversation/ })).toBeNull());
-    expect(screen.queryByText('Spec scan failed on linkwarden/linkwarden')).toBeNull();
+    expect(screen.queryByText('Document scan failed on linkwarden/linkwarden')).toBeNull();
   });
 
   it('files the failure in the feed as well, still holding the reason', async () => {
     serve([failed()]);
     renderAt('/preview/notifications');
 
-    expect(await screen.findByText('Spec scan failed on linkwarden/linkwarden')).toBeInTheDocument();
+    expect(await screen.findByText('Document scan failed on linkwarden/linkwarden')).toBeInTheDocument();
     // The feed row shows the title only, so the reason is asserted on the
     // notification itself: it is what a reader searches and what the bell body
     // renders.

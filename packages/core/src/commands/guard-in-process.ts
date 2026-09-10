@@ -447,24 +447,28 @@ export async function guardGenerateInProcess(
 
     transport = resolveTransport(options);
   } catch (e) {
-    untap?.();
-    // The gates run before the first step opens, so their fact lands on `index`,
-    // the step a reader is looking at when the run stops there.
+    // The gates run before the first step opens, so they stop on `index`, the
+    // step a reader is looking at when the run ends there: a refusal takes the
+    // step the way a mid-run abort does (the reason as its error, "stopped:"
+    // as its fact), and a decline is a stop the user asked for, not a failure.
+    // The tap stays on until the step has said so, or the record never hears it.
     if (e instanceof EstimateDeclined) {
       tracker?.fact('index', 'stopped: the cost estimate was declined');
-    } else if (e instanceof OpenConflictsError) {
-      tracker?.fact('index', `stopped: ${e.conflicts.length} open spec conflict(s) must be resolved first`);
-    } else {
-      tracker?.fact('index', `stopped: the LLM provider is unusable (${(e as Error).message})`);
+      untap?.();
+      finishRun('interrupted');
+      throw e;
     }
-    // A stop the user asked for is not a failure; a gate that refused is, and
-    // the record carries its reason under the gate's own kind.
-    if (e instanceof EstimateDeclined) finishRun('interrupted');
-    else if (e instanceof OpenConflictsError) {
-      finishRun('failed', { error: { message: firstLine(e.message) ?? e.message, kind: 'open-conflicts' } });
-    } else {
-      finishRun('failed', { error: { message: (e as Error).message, kind: 'llm-config' } });
-    }
+    const reason =
+      e instanceof OpenConflictsError
+        ? (firstLine(e.message) ?? e.message)
+        : `the LLM provider is unusable (${(e as Error).message})`;
+    tracker?.fact('index', `stopped: ${reason}`);
+    tracker?.error('index', reason);
+    untap?.();
+    // The record carries the reason under the gate's own kind.
+    finishRun('failed', {
+      error: { message: reason, kind: e instanceof OpenConflictsError ? 'open-conflicts' : 'llm-config' },
+    });
     throw e;
   }
 

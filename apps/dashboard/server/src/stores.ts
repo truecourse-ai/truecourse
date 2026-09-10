@@ -44,7 +44,7 @@ import {
   PgAnalyzeLock,
   purgeRepoData,
 } from '@truecourse/data-store';
-import { setShowResolvedStageModel } from '@truecourse/core/commands/spec-in-process';
+import { setShowResolvedStageModel, setShowStageUsage } from '@truecourse/core/commands/spec-in-process';
 import { setWorkspaceLlmConfigStore } from './services/workspace-llm.service.js';
 import { repoDirName } from './services/run-clone.service.js';
 import { setRepoDataPurge } from './services/repo-removal.service.js';
@@ -98,6 +98,7 @@ export function installDbStores(
   // Each workspace names ONE model, and its transport ignores the per-stage
   // hint, so the per-stage tiers the OSS progress lines show would be a lie.
   setShowResolvedStageModel(false);
+  setShowStageUsage(false);
 
   // Cross-process analyze serialization → session-level `pg_advisory_lock` on a
   // DEDICATED pool (a lockfile on a throwaway clone can't serialize two runs of

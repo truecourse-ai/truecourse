@@ -1,13 +1,13 @@
 /**
  * A job that starts while the page is open announces itself ONCE, as a toast
- * carrying a link to the agent's page, narrowed to the repository. Jobs already
- * in flight when the page loads never announce. Nothing in the toast moves: no
- * steps, no counter, no bar. Progress lives in one place, the Agent page, and
- * the toast only says where to look. Renders nothing itself.
+ * carrying a link to the run's own conversation. Jobs already in flight when
+ * the page loads never announce. Nothing in the toast moves: no steps, no
+ * counter, no bar. Progress lives in one place, the conversation, and the
+ * toast only says where to look. Renders nothing itself.
  *
- * Both kinds of job pass through here. A REAL run (a repository connected by
- * URL, scanning) carries its own preview address; a fixture job derives one
- * from the repository it names.
+ * Both kinds of job pass through here. A REAL run carries its conversation's
+ * address; a fixture job has none and opens the Agent page narrowed to the
+ * repository it names.
  *
  * A real run that FAILS announces the same way, once, on the transition — with
  * the run's own reason and a link to the run itself. Both announcements are
@@ -62,8 +62,8 @@ export function JobToasts() {
     for (const job of jobs) {
       if (announced.current.has(job.id)) continue;
       announced.current.add(job.id);
-      // A real run carries its own Agent address (the registry slug is not
-      // always the repository's last path segment); a fixture derives one.
+      // A real run carries its conversation's address; a fixture derives a
+      // repository-narrowed one.
       const to = job.href ?? `${PREVIEW_BASE}/agent?repo=${encodeURIComponent(slugOf(job.repoFullName))}`;
       announceJob(job, () => navigate(to));
     }
@@ -126,7 +126,7 @@ function announceJob(job: JobChain, openAgent: () => void) {
         }}
         className="inline-flex shrink-0 items-center gap-1 font-medium text-foreground hover:underline"
       >
-        Open Agent
+        Open conversation
         <ArrowUpRight className="h-3 w-3" />
       </button>
       <button
