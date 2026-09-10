@@ -30,6 +30,9 @@ param postgresSku string = 'Standard_B1ms'
 
 param tags object = {}
 
+@description('Name for a new workload-profiles environment. Do not target an existing legacy environment.')
+param environmentName string = '${namePrefix}-cae'
+
 var acrName = toLower('${namePrefix}acr${uniqueString(resourceGroup().id)}')
 var kvName = take(toLower('${namePrefix}kv${uniqueString(resourceGroup().id)}'), 24)
 var pgName = toLower('${namePrefix}-pg-${uniqueString(resourceGroup().id)}')
@@ -44,18 +47,13 @@ resource law 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   }
 }
 
-resource env 'Microsoft.App/managedEnvironments@2024-03-01' = {
-  name: '${namePrefix}-cae'
-  location: location
-  tags: tags
-  properties: {
-    appLogsConfiguration: {
-      destination: 'log-analytics'
-      logAnalyticsConfiguration: {
-        customerId: law.properties.customerId
-        sharedKey: law.listKeys().primarySharedKey
-      }
-    }
+module env './environment.bicep' = {
+  name: 'container-apps-environment'
+  params: {
+    name: environmentName
+    location: location
+    tags: tags
+    logAnalyticsWorkspaceName: law.name
   }
 }
 
@@ -144,7 +142,7 @@ resource kvSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
 
 output acrLoginServer string = acr.properties.loginServer
 output acrName string = acr.name
-output environmentId string = env.id
+output environmentId string = env.outputs.environmentId
 output identityId string = identity.id
 output identityClientId string = identity.properties.clientId
 output keyVaultName string = kv.name

@@ -18,7 +18,8 @@ rg-truecourse-dev                 rg-truecourse-prod
 
 Files:
 - `foundation.bicep` — one environment's foundation (deploy per RG)
-- `containerapp.bicep` — one Container App (deploy per RG)
+- `environment.bicep` — workload-profiles environment using an existing Log Analytics workspace
+- `containerapp.bicep` — one Container App, 4 vCPU / 8 GiB on Consumption
 - `set-secrets.sh` — write that env's secrets into *its* Key Vault
 
 > **Region:** examples use `westus3` (open for our subscription, at the cheapest
@@ -42,6 +43,9 @@ Files:
 Prereq: `az` CLI logged in (`az login`), Owner/Contributor on the subscription.
 None of this requires the deploy files to be merged — Bicep runs from your local
 checkout.
+
+For fresh dev setup, pass `environmentName=truecourse-dev-cae-v2` to foundation.
+For existing dev, use the migration note below; do not redeploy the full foundation.
 
 ### 1. Resource groups + foundation (once per environment)
 
@@ -159,8 +163,8 @@ secret, they're IDs:
 
 **Per-environment** — set the *same two variable names* under BOTH the `dev` and
 `prod` Environments, each with that env's values. The workflow **discovers** the
-ACR, Container Apps env, identity, and Key Vault from the RG at runtime, so those
-are NOT variables:
+ACR, identity, and Key Vault from the RG at runtime. Dev resolves its new
+environment by name, `truecourse-dev-cae-v2`; prod retains its existing discovery:
 
 | Variable | dev | prod |
 |---|---|---|
@@ -194,3 +198,30 @@ Neither environment deploys on open or merge. You opt in each time:
 
 > If dev and prod live in **different subscriptions**, make `AZURE_SUBSCRIPTION_ID`
 > environment-scoped too.
+
+## Manual dev migration
+
+Migration is pending. Keep the app name `truecourse-dev`: after pausing producers
+and draining all queued/running jobs and follow-ups, delete the old app and wait
+for deletion to finish before recreating it in the new environment. Startup fails
+orphaned queued/running jobs, so the two workers must never run together.
+
+Create only the new environment from your machine, reusing the existing logs:
+
+```bash
+az deployment group create -g rg-truecourse-dev -f infra/azure/environment.bicep \
+  -p name=truecourse-dev-cae-v2 location=westus3 logAnalyticsWorkspaceName=truecourse-logs
+```
+
+Use its `environmentId` output to redeploy `containerapp.bicep` with the same app
+name, image, identity, ACR and Key Vault. The new URL is
+`https://truecourse-dev.<defaultDomain>`. After the old app is deleted and before
+recreation, update Key Vault's `workos-app-url` and `workos-redirect-uri`, plus the
+WorkOS allowed callback `/api/auth/callback`. Update the GitHub App webhook
+`/api/github/webhook` and setup URL `/api/github/setup` to the new origin.
+
+Keep deployments paused during migration. Save the old image/configuration and
+URLs first; rollback requires recreating the old app in the old environment and
+restoring those URLs after deleting the replacement. Keep the existing database,
+identity and other foundation resources. Verify login, worker startup, event
+streaming and guard setup before resuming traffic and routine Actions deployments.

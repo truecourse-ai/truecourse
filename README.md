@@ -1271,6 +1271,8 @@ pnpm test               # Run tests
 
 The full test suite requires the C# Roslyn host to be built (same requirement as [analyzing C#](#prerequisites)): the C# e2e test fails without it, and the Roslyn semantic-rule tests silently skip. It also needs Playwright's Chromium (`playwright-core install chromium` above): the guard web-driver suites fail rather than skip without it. CI installs both before running tests (`.github/actions/setup`); do the same locally, once per checkout/worktree.
 
+Azure hosting uses 4 vCPU / 8 GiB Consumption apps. See the [Azure setup and manual migration notes](infra/azure/README.md).
+
 ## Community
 
 Join the [TrueCourse Discord](https://discord.gg/TanxB63arz) to ask questions, share feedback, and follow what's shipping.

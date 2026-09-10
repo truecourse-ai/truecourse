@@ -50,7 +50,7 @@ jobs:
           {
             echo "acr_name=$(az acr list -g "$RG" --query '[0].name' -o tsv)"
             echo "acr_login=$(az acr list -g "$RG" --query '[0].loginServer' -o tsv)"
-            echo "env_id=$(az containerapp env list -g "$RG" --query '[0].id' -o tsv)"
+            echo "env_id=$(az containerapp env show -g "$RG" -n truecourse-dev-cae-v2 --query id -o tsv)"
             echo "identity_id=$(az identity list -g "$RG" --query '[0].id' -o tsv)"
             echo "kv_uri=$(az keyvault list -g "$RG" --query '[0].properties.vaultUri' -o tsv)"
           } >> "$GITHUB_OUTPUT"
