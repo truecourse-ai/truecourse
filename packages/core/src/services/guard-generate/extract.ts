@@ -295,6 +295,9 @@ export function extractSessionDef(input: ExtractSessionInput): SessionDef<Extrac
       checkClaimsTool(input.doc),
     ],
     outcomeSchema: checkedExtractionSchema(input.doc),
+    // A revised draft can still violate a verification boundary. Return the
+    // terminal validation errors to the session before losing the whole doc.
+    outcomeSchemaRepairs: 2,
     budget: EXTRACT_SESSION_BUDGET,
     // The structural half of "run check_claims before you finish" (01 step 2k):
     // the shell refuses the first outcome of a session that never snapped its

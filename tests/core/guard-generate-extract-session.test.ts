@@ -143,6 +143,78 @@ async function callTool(
 // ---------------------------------------------------------------------------
 
 describe('guard-generate.extract — the session def through the loop', () => {
+  function conversionDraft(method: 'behavior' | 'concurrency'): ExtractOutcome {
+    return {
+      claims: [claim(CREATING), claim(LISTING, {
+        claim: 'An in-flight conversion for a previous amount never replaces the current result.',
+        driver: 'web',
+        verification: {
+          scope: 'web', method,
+          observable: 'The visible conversion result after controlling response completion order.',
+          cases: [{
+            id: 'stale-conversion-response-ignored',
+            claim: 'A late conversion response does not replace the current conversion state.',
+            method, requires: ['browser', 'request-control'], conditions: ['request-pending'],
+          }],
+        },
+      })],
+      untestable: [],
+    }
+  }
+
+  it('repairs an invalid terminal web claim after check_claims without losing the other claims', async () => {
+    const doc = docsOf(docRepo())[0]
+    const bad = conversionDraft('concurrency')
+    const good = conversionDraft('behavior')
+    const stub = stubDriver(async ({ input, emit }) => {
+      await emit({ type: 'assistant-turn', text: 'finish', usage: { inputTokens: 100, outputTokens: 10, cacheReadTokens: 0, cacheCreateTokens: 0, costUsd: 0, costSource: 'unpriced' } })
+      if (!input.resume) {
+        expect((await callTool(input, 'check_claims', bad)).isError).toBe(true)
+        return { ...outcome(bad), resumeCursor: 'extract-cursor' }
+      }
+      expect(input.resume.cursor).toBe('extract-cursor')
+      expect(input.initialMessages[0]).toContain('Outcome schema needs correction')
+      expect(input.initialMessages[0]).toContain('An in-flight conversion')
+      expect(input.initialMessages[0]).toContain('A web obligation observes the UI')
+      expect(input.resume.events.some(e => e.type === 'tool-result' && e.isError)).toBe(true)
+      expect((await callTool(input, 'check_claims', good)).isError).toBeUndefined()
+      return outcome(good)
+    })
+    const { persistence } = memoryPersistence()
+    const settled = await runAgentLoop<ExtractOutcome>({
+      def: extractSessionDef({ doc, universe: buildGuardDocUniverse([doc]) }),
+      workItem: `doc:${doc.doc}`,
+      initialMessages: [extractSessionBriefing(doc)],
+      driver: stub.driver, persistence, sessionId: 'extract-repair',
+    }).outcome
+
+    expect(settled).toMatchObject({ status: 'completed', output: good, spent: { turns: 2, tokens: 220 } })
+    expect(stub.calls).toHaveLength(2)
+    expect(persistence.readEvents('extract-repair').filter(e => e.type === 'outcome')).toHaveLength(1)
+  })
+
+  it.each([false, true])('stops invalid outcomes at the repair limit or token ceiling: %s', async ceiling => {
+    const doc = docsOf(docRepo())[0]
+    const bad = conversionDraft('concurrency')
+    const def = extractSessionDef({ doc, universe: buildGuardDocUniverse([doc]) })
+    if (ceiling) def.budget = { ...def.budget, tokenCeiling: 100 }
+    const stub = stubDriver(async ({ input, emit }) => {
+      await callTool(input, 'check_claims', bad)
+      await emit({ type: 'assistant-turn', text: 'finish', usage: { inputTokens: 100, outputTokens: 10, cacheReadTokens: 0, cacheCreateTokens: 0, costUsd: 0, costSource: 'unpriced' } })
+      return outcome(bad)
+    })
+    const { persistence } = memoryPersistence()
+    const settled = await runAgentLoop<ExtractOutcome>({
+      def, workItem: `doc:${doc.doc}`, initialMessages: [extractSessionBriefing(doc)],
+      driver: stub.driver, persistence, sessionId: 'extract-repair-limit',
+    }).outcome
+
+    expect(settled).toMatchObject({ status: 'failed', failure: { kind: ceiling ? 'context-exhausted' : 'malformed' } })
+    expect(stub.calls).toHaveLength(ceiling ? 1 : 3)
+    expect(settled.spent.turns).toBe(stub.calls.length)
+    expect(persistence.readEvents('extract-repair-limit').filter(e => e.type === 'outcome')).toHaveLength(0)
+  })
+
   it('bounces a fabricated anchor from `check_claims`, then accepts the fixed draft', async () => {
     const doc = docsOf(docRepo())[0]
     const bad = { claims: [claim('no-such-section')], untestable: [] }

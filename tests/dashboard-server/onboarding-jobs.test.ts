@@ -825,6 +825,44 @@ describe('the guard generate job', () => {
     expect(enqueuedPayloads[1]).toMatchObject({ repoFullName: REPO, workspaceOrgId: ORG, source: 'chain' });
   });
 
+  it.each(['file', 'postgres'])('saves partial extraction results but fails the job and %s activity without chaining', async storage => {
+    if (storage === 'postgres') setSessionRunBackend(new PgSessionRunStore(db));
+    await saveSetupBundle();
+    const extractionFailures = [{ doc: 'docs/app.md', reason: 'outcome failed schema: invalid web verification method' }];
+    generateImpl = async (repoRoot, options) => {
+      const result = await authoring(repoRoot, options);
+      writeCloneGuardResult(repoRoot, {
+        ...okReport(['a1']), generatedAt: '2026-02-02T00:00:00Z', extractionFailures,
+      });
+      return result;
+    };
+
+    await jobs.enqueueGuardGenerate(request);
+    await Promise.all(running);
+
+    const [job] = await jobsOfType('repo.guard-generate');
+    expect(job).toMatchObject({ status: 'failed', error: expect.stringContaining('Claim extraction failed for docs/app.md') });
+    expect(job.error).toContain('Partial results were saved');
+    const baseline = await readGuardBaselineCommit(REPO);
+    expect(baseline).toMatch(/^[0-9a-f]{40}$/);
+    expect(await readGuardResult(REPO, baseline!)).toMatchObject({ extractionFailures });
+    expect((await loadScenarios({ repoKey: REPO, commitSha: baseline! })).scenarios.map(s => s.id)).toEqual(['a1']);
+    const [run] = await listStoredSessionRuns(REPO, 'guard-generate');
+    expect(run).toMatchObject({
+      status: 'failed', error: { message: job.error },
+      display: { blocks: expect.arrayContaining([expect.objectContaining({
+        kind: 'checklist', items: expect.arrayContaining([expect.objectContaining({ key: 'extract', status: 'error' })]),
+      })]) },
+    });
+    const opened = await openStoredSessionRun(REPO, 'guard-generate', run.runId);
+    expect(opened?.record()).toMatchObject({ status: 'failed', error: { message: job.error } });
+    const notes = await new NotificationStore(db).listForOrg(ORG);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatchObject({ level: 'error', title: 'Scenario generation failed', body: expect.stringContaining('docs/app.md') });
+    expect(enqueued).toEqual(['repo.guard-generate']);
+    expect(disposed).toEqual([clone]);
+  }, 60_000);
+
   it('chains nothing when the corpus was blocked, and says why', async () => {
     await saveSetupBundle();
     generateImpl = async () => {
