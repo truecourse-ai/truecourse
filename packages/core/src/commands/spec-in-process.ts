@@ -625,6 +625,9 @@ export async function curateInProcess(
         ...(options.only !== undefined ? { only: options.only } : {}),
         ...(options.concurrency !== undefined ? { concurrency: options.concurrency } : {}),
         ...(options.signal ? { signal: options.signal } : {}),
+        // What each phase did, line by line, onto the step it belongs to. The
+        // phase keys ARE the checklist's step keys, so no mapping is needed.
+        onFact: (step, line) => tracker?.fact(step, line),
         onDiscover: (docs, toCurate) =>
           tracker?.detail('discover', `${docs} docs · ${toCurate} to curate`),
         onScope: (state) => {

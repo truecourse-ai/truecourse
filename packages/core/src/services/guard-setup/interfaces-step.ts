@@ -97,7 +97,10 @@ export function buildInterfacesStep(
 ): GuardSetupInterfacesStep {
   return async (input) => {
     const notes: string[] = [];
-    const recorded: Pick<GuardSetupInterfacesStepResult, 'diagnostics' | 'resolutions' | 'changes'> = {};
+    const recorded: Pick<
+      GuardSetupInterfacesStepResult,
+      'diagnostics' | 'resolutions' | 'changes' | 'reconcileFromCache'
+    > = {};
 
     // ---- Half 1: reconcile the cli disputes. --------------------------------
     const disputes = reconcilable(input.diagnostics);
@@ -108,6 +111,7 @@ export function buildInterfacesStep(
         if (reconcile.note) notes.push(reconcile.note);
         if (reconcile.resolutions) recorded.resolutions = reconcile.resolutions;
         if (reconcile.changes && reconcile.changes.length > 0) recorded.changes = reconcile.changes;
+        if (reconcile.fromCache !== undefined) recorded.reconcileFromCache = reconcile.fromCache;
       } catch (error) {
         notes.push(`reconcile failed: ${message(error)}`);
       }
@@ -177,7 +181,13 @@ async function runReconcile(
   input: GuardSetupInterfacesStepInput,
   disputes: readonly MapperDiagnostic[],
   opts: BuildInterfacesStepOptions,
-): Promise<{ note?: string; resolutions?: InterfaceResolution[]; changes?: string[] }> {
+): Promise<{
+  note?: string;
+  resolutions?: InterfaceResolution[];
+  changes?: string[];
+  /** Whether the verdicts came out of the cache; absent when no outcome came back. */
+  fromCache?: boolean;
+}> {
   // The context's persistence exists only once a session actually runs, and a
   // cache hit must not create the run record — so the driver thunk (resolved
   // by the session runner BEFORE any transcript write) acquires it, and this
@@ -229,6 +239,7 @@ async function runReconcile(
     return {
       note: `reconcile resolutions ignored (${problems.length} mismatch(es) against the briefed disputes)`,
       resolutions: outcome.output.resolutions,
+      fromCache: outcome.fromCache === true,
     };
   }
 
@@ -247,7 +258,11 @@ async function runReconcile(
       atomicWriteJson(guardInterfacesPath(input.repoRoot), corrected);
     }
   }
-  return { resolutions: outcome.output.resolutions, changes: applied.changes };
+  return {
+    resolutions: outcome.output.resolutions,
+    changes: applied.changes,
+    fromCache: outcome.fromCache === true,
+  };
 }
 
 function joinNotes(head: string, notes: readonly string[]): string {

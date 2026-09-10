@@ -56,6 +56,7 @@ export interface AuthorSessionInput {
 export function interfaceAuthorSessionDef(input: AuthorSessionInput): SessionDef<AuthoredFragment> {
   return {
     kind: INTERFACE_AUTHOR_SESSION_KIND,
+    display: { title: 'Web tasks' },
     systemPrompt: SYSTEM_PROMPT,
     tools: buildAuthorTools(input),
     outcomeSchema: AuthoredFragmentSchema,

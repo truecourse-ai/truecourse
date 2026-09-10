@@ -215,6 +215,7 @@ export function curateDocSessionDef(input: CurateDocSessionInput): SessionDef<Do
     outcomeSchema: DocVerdictSchema,
     budget: CURATE_DOC_BUDGET,
     display: {
+      title: 'Document curation',
       intro: `I'm reading ${curateDocWorkItem(input.doc.path)} to decide whether it belongs in the corpus and which areas it covers.`,
     },
     presentOutcome: presentDocVerdict,

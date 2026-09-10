@@ -37,7 +37,9 @@ import {
   guardSetupInProcess,
   estimateGuardSetupCost,
   SetupStepNotReadyError,
+  GUARD_SETUP_STEPS,
 } from '../../packages/core/src/commands/guard-setup.js';
+import { StepTracker, type AnalysisStep } from '../../packages/core/src/progress.js';
 
 const FIXTURE = fileURLToPath(new URL('../fixtures/seed-draft', import.meta.url));
 
@@ -156,6 +158,18 @@ function seams(): {
 }
 
 const stepKeys = (r: string): string[] => (readGuardSetup(r)?.steps ?? []).map((s) => s.key);
+
+/** A real checklist tracker, plus a reader for the facts each step appended. */
+function factTracker(): { tracker: StepTracker; facts: (key: string) => string[] } {
+  let latest: AnalysisStep[] = [];
+  const tracker = new StepTracker(
+    (payload) => {
+      if (payload.steps) latest = payload.steps;
+    },
+    GUARD_SETUP_STEPS.map((s) => ({ key: s.key, label: s.label })),
+  );
+  return { tracker, facts: (key) => latest.find((s) => s.key === key)?.facts ?? [] };
+}
 
 // ---------------------------------------------------------------------------
 // --only-recipe
@@ -377,4 +391,65 @@ describe('--only-preparations', () => {
       expect(after?.steps.find(row => row.key === key)).toEqual(before?.steps.find(row => row.key === key));
     }
   });
+});
+
+// ---------------------------------------------------------------------------
+// the step facts: one line per thing the step did
+// ---------------------------------------------------------------------------
+
+describe('the step facts', () => {
+  it('names what each step did on a fresh run, and says "from cache" on an unchanged re-run', async () => {
+    const r = fixtureRepo();
+    writeRecipe(r);
+
+    const first = factTracker();
+    await guardSetupInProcess(r, {
+      tracker: first.tracker,
+      interfaces: interfaces(),
+      recipeRunner: neverCalled,
+      ...seams(),
+    });
+
+    // Every step names its own work; a step that reports nothing is a step no
+    // surface reading the run record can tell anything about.
+    for (const { key } of GUARD_SETUP_STEPS) {
+      expect(first.facts(key).length, `${key} wrote no facts`).toBeGreaterThan(0);
+    }
+    // The recipe step probed a live route, and says what answered.
+    expect(first.facts('recipe').some((line) => /^probed `.+`: GET \S+ answered /.test(line))).toBe(
+      true,
+    );
+    // Detect names each thing it saw, not a count.
+    expect(first.facts('detect')).toContain(
+      'stripe: sdk import; category payment; base url from STRIPE_BASE_URL',
+    );
+    expect(first.facts('detect')).toContain('sqlite via prisma: 1 table parsed');
+    // The catalog step names the skeleton's write and who classified.
+    expect(first.facts('catalog')).toContain('declared `stripe` under api.externals');
+    expect(first.facts('catalog')).toContain(
+      'the catalog session classified the starting state this run',
+    );
+    // A refused seed says so, in the words the seam refused with.
+    expect(first.facts('seed')).toContain('seed refused: stubbed in this test');
+    // Nothing was answered by a cache on the first run.
+    expect(
+      GUARD_SETUP_STEPS.flatMap(({ key }) => first.facts(key)).filter((line) =>
+        line.includes('from cache'),
+      ),
+    ).toEqual([]);
+
+    // The same run again with nothing moved: the settled steps say so.
+    const second = factTracker();
+    await guardSetupInProcess(r, {
+      tracker: second.tracker,
+      interfaces: interfaces(),
+      recipeRunner: neverCalled,
+      ...seams(),
+    });
+
+    expect(second.facts('recipe').join('\n')).toContain('from cache');
+    expect(second.facts('catalog').join('\n')).toContain('from cache');
+    // A settled recipe is neither re-derived nor re-probed, so it names no probe.
+    expect(second.facts('recipe').some((line) => line.startsWith('probed '))).toBe(false);
+  }, 120_000);
 });

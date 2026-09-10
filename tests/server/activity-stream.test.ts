@@ -6,6 +6,10 @@ import { readUIMessageStream } from 'ai';
 import { createSessionRun, openSessionRun, reconcileSessionsStore, recoverSessionActivity } from '@truecourse/core/lib/sessions-store';
 import { readActivityEvents, readActivityProgress, subscribeActivity } from '@truecourse/core/lib/activity-journal';
 import { createActivityStream } from '../../apps/dashboard/server/src/services/activity-stream.service';
+import { dashboardActivity } from '../../apps/dashboard/server/src/services/dashboard-activity.service';
+import { JobStepTracker, type JobContext } from '@truecourse/jobs';
+import type { OnboardingJobPayload } from '../../apps/dashboard/server/src/jobs/tasks/onboarding';
+import { KnownDisplayBlockSchema } from '../../packages/agent-loop/src/index';
 import type { SessionEvent } from '@truecourse/agent-loop';
 
 const event = (seq = 0): SessionEvent => ({ type: 'user-message', seq, ts: new Date().toISOString(), content: `Read café ${seq}` });
@@ -209,5 +213,55 @@ it('does not lose a commit arriving while an asynchronous replay query is in fli
   for (;;) { const next = await reader.read(); if (next.done) break; chunks.push(next.value); }
   expect(chunks.filter(c => c?.type === 'data-activity')).toHaveLength(3);
   expect(chunks.at(-1)).toMatchObject({ type: 'finish' });
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+// The hosted job's tracker is the only route a phase's own words have to the
+// stored run: whatever the engine said it did must survive the mirror.
+it('mirrors a step fact onto the run record checklist, beside its counter', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-activity-facts-'));
+  const ctx: JobContext<OnboardingJobPayload> = {
+    payload: {
+      jobId: 'job-1',
+      repoId: 'repo-1',
+      repoFullName: root,
+      workspaceOrgId: 'org-1',
+      source: 'manual',
+    },
+    org: 'org-1',
+    jobId: 'job-1',
+    tracker: new JobStepTracker([{ key: 'scan', label: 'Scanning' }], () => {}),
+    phase: async () => {},
+    detail: async () => {},
+  };
+
+  let runId = '';
+  await dashboardActivity(
+    ctx,
+    'spec-scan',
+    [{ key: 'discover', label: 'Discovering docs' }],
+    async (run, tracker) => {
+      runId = run.runId;
+      tracker.start('discover');
+      tracker.detail('discover', '2 docs · 1 to curate');
+      tracker.fact('discover', 'docs/a.md: kept, core/orders, from cache');
+      tracker.fact('discover', 'docs/b.md: dropped before curation, not a spec');
+      tracker.fact('nowhere', 'a fact for a step this checklist has not got');
+      tracker.done('discover');
+    },
+  );
+
+  const record = openSessionRun(root, 'spec-scan', runId).record();
+  const block = KnownDisplayBlockSchema.parse(
+    record.display?.blocks.find(b => b.kind === 'checklist'),
+  );
+  if (block.kind !== 'checklist') throw new Error('the run stamped no checklist block');
+  const discover = block.items.find(item => item.key === 'discover');
+  expect(discover?.detail).toBe('2 docs · 1 to curate');
+  expect(discover?.facts).toEqual([
+    'docs/a.md: kept, core/orders, from cache',
+    'docs/b.md: dropped before curation, not a spec',
+  ]);
+  expect(block.items.find(item => item.key === 'clone')?.facts).toBeUndefined();
   fs.rmSync(root, { recursive: true, force: true });
 });

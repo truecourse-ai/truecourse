@@ -347,6 +347,7 @@ export function flowWorkerSessionDef(input: FlowWorkerSessionInput): SessionDef<
   const { task } = input
   return {
     kind: FLOW_WORKER_SESSION_KIND,
+    display: { title: 'Scenario author' },
     systemPrompt: flowWorkerSystemPrompt(task.surface),
     tools: [runScenarioTool(task), submitScenarioTool(task, input.judgeWith), dropScenarioTool(task)],
     outcomeSchema: GuardFlowWorkerOutcomeSchema,

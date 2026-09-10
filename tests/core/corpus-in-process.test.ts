@@ -229,4 +229,34 @@ describe('curateInProcess', () => {
     expect(phase).toEqual([]);
     expect(frames[frames.length - 1].some((s) => s.key === 'estimate')).toBe(false);
   });
+
+  // The counters say how much a step did; the facts say WHAT it did, and
+  // whether a session judged it or a cache answered. A reader of a stored run
+  // has nothing else to go on.
+  it('records what each phase did as facts, naming the cache when it answered', async () => {
+    const frames: AnalysisStep[][] = [];
+    const track = (): StepTracker =>
+      new StepTracker(
+        (payload) => frames.push((payload.steps ?? []).map((s) => ({ ...s }))),
+        [...CURATE_STEPS],
+      );
+    const factsOf = (steps: AnalysisStep[]): Record<string, string[]> =>
+      Object.fromEntries(steps.map((s) => [s.key, s.facts ?? []]));
+
+    await curateInProcess(repo, { tracker: track(), ...scanOptions() });
+    const fresh = factsOf(frames[frames.length - 1]);
+    expect(fresh.discover).toContain('walked the repository for documentation files');
+    expect(fresh.discover).toContain('docs: kept by a decision, covered by the test');
+    expect(fresh.tag).toContain('docs/auth.md: kept, core/auth, by a session');
+    expect(fresh.tag).toContain('area labels settled by a session');
+    expect(fresh.verify).toContain('corpus.json written');
+
+    // Same docs, same instructions: every session outcome is served from its
+    // cache, and every fact that named a session now names the cache.
+    frames.length = 0;
+    await curateInProcess(repo, { tracker: track(), ...scanOptions() });
+    const cached = factsOf(frames[frames.length - 1]);
+    expect(cached.tag).toContain('docs/auth.md: kept, core/auth, from cache');
+    expect(cached.tag).toContain('area labels settled from cache');
+  });
 });

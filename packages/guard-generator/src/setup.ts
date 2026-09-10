@@ -200,6 +200,14 @@ export interface GuardSetupOptions {
    * depend on `@truecourse/core`, so the command layer adapts it onto its tracker.
    */
   onStepDetail?: (step: GuardSetupStepKey, detail: string) => void
+  /**
+   * One thing this step did, in the engine's own words. Appended; never a count
+   * `onStepDetail` already carries. A step's facts name the services it detected,
+   * the routes it probed, the catalog entries it classified, the seed it proved,
+   * and say "from cache" whenever a cache or a settle fingerprint answered
+   * instead of a session or a computation.
+   */
+  onStepFact?: (step: GuardSetupStepKey, line: string) => void
   // --- the session seams (plan 03) ---
   /**
    * The recipe-repair session (step 9), passed through to `discoverRecipe`.
@@ -319,6 +327,9 @@ export type GuardSetupInterfacesStepResult = {
   resolutions?: GuardSetupInterfaceResolution[]
   /** The catalog edits the resolutions produced, one line each. */
   changes?: string[]
+  /** True when the reconcile session's verdicts came out of the cache rather
+   *  than out of a session this run spent. Absent when no reconcile ran. */
+  reconcileFromCache?: boolean
 }
 export type GuardSetupInterfacesStep = (
   input: GuardSetupInterfacesStepInput,
@@ -402,6 +413,12 @@ export type GuardSetupAuthStepResult = {
   status: 'ok' | 'skipped' | 'failed' | 'blocked'
   reason?: string
   sessionRunId?: string
+  /**
+   * One line per supplied dependency the step reached, in the seam's own words:
+   * whether it proved, and when it did not, why. Only the seam holds the
+   * per-dependency verdicts, so it composes them and the engine reports them.
+   */
+  facts?: string[]
 }
 export type GuardSetupAuthStep = (input: GuardSetupAuthStepInput) => Promise<GuardSetupAuthStepResult>
 
@@ -437,6 +454,8 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   }
 
   const phases = stepPhases(opts)
+  /** One line naming one thing a step did. */
+  const fact = (step: GuardSetupStepKey, line: string): void => opts.onStepFact?.(step, line)
   const steps: GuardSetupTaxonomyStep[] = []
   const settled = settledFingerprints(repoRoot, opts.refresh === true)
 
@@ -489,6 +508,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     }
     recipe = preexisting
     recipeStep = { status: 'ok', outcome: 'exists' }
+    fact('recipe', 'replayed from recipe.json: not re-derived, not probed')
     opts.onStepDone?.('recipe', 'replayed from recipe.json — not re-derived, not probed')
   } else if (preexisting && settled('recipe') === recipeInputFp) {
     // Settled: the subject is byte-identical to what the last run verified, so
@@ -496,6 +516,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     recipe = preexisting
     recipeStep = { status: 'ok', outcome: 'exists' }
     steps.push({ key: 'recipe', status: 'skipped', reason: 'unchanged', inputFingerprint: recipeInputFp })
+    fact('recipe', 'unchanged since the last setup, from cache: neither re-derived nor re-probed')
     opts.onStepDone?.('recipe', 'unchanged — reused without re-verifying')
   } else {
     // A REFRESH re-derives, and discovery writes what it derived — which knows nothing
@@ -517,6 +538,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       onPhase: (phase) => phases.enter(recipePhase(phase)),
     })
     if (discovery.status === 'verify-failed') {
+      fact('recipe', `no recipe holds: ${firstReasonLine(discovery.reason)}`)
       return failed(discovery.reason, {
         recipe: { status: 'failed', reason: discovery.reason },
         steps: [
@@ -548,6 +570,22 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
           }
         : {}),
     }
+    if (discovery.status === 'exists') {
+      fact('recipe', 'recipe.json is already committed; it was reused, not re-derived')
+    } else {
+      fact(
+        'recipe',
+        discovery.source === 'deterministic'
+          ? `recipe derived deterministically from the repository's own manifests, written to ${discovery.wrotePath}`
+          : discovery.sessionRunId
+            ? `recipe repaired by a session after deterministic discovery failed, written to ${discovery.wrotePath}`
+            : `recipe proposed by the model, written to ${discovery.wrotePath}`,
+      )
+      if (discovery.composePath) {
+        fact('recipe', `generated a datastore compose file at ${discovery.composePath}`)
+      }
+      for (const todo of discovery.todos) fact('recipe', `left for a human to fill in: ${todo}`)
+    }
 
     // The live endpoint probe — the half verification does not do. See `endpoint-probe.ts`
     // for why any HTTP status (401 and 404 included) is a pass.
@@ -566,6 +604,14 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         })
       : []
     if (probes.length > 0) recipeStep.probes = probes
+    for (const probe of probes) {
+      fact(
+        'recipe',
+        probe.ok
+          ? `probed \`${probe.server}\`: GET ${probe.path} answered ${probe.status ?? 'without a status'}`
+          : `probed \`${probe.server}\`: GET ${probe.path} did not answer, ${firstReasonLine(probe.error ?? 'no reason reported')}`,
+      )
+    }
     const deadServer = probes.find((p) => !p.ok)
     if (deadServer) {
       const reason =
@@ -621,6 +667,17 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   const datastoreUrls = mapped.datastoreUrls ?? []
   const detectionSnapshotJson = canonicalDetectionJson(detectedExternals, database, datastoreUrls)
   steps.push({ key: 'detect', status: 'ok', inputFingerprint: '' })
+  for (const service of detectedExternals) fact('detect', detectedServiceFact(service))
+  if (database) {
+    fact(
+      'detect',
+      `${database.type} via ${database.driver}: ${database.tables.length} table${database.tables.length === 1 ? '' : 's'} parsed`,
+    )
+  }
+  for (const line of datastoreUrlFacts(datastoreUrls)) fact('detect', line)
+  if (detectedExternals.length === 0 && !database && datastoreUrls.length === 0) {
+    fact('detect', 'nothing detected: no external service, no database, no datastore url')
+  }
   opts.onStepDone?.(
     'detect',
     detectSummary(detectedExternals, database),
@@ -693,6 +750,8 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       if (!ranBefore('catalog')) {
         throw new SetupStepNotReadyError('catalog', 'no catalog row in guard/setup.json')
       }
+      fact('catalog', 'replayed: scenarios/dependencies.json stands as it is')
+      for (const line of catalogEntryFacts(repoRoot)) fact('catalog', line)
       opts.onStepDone?.('catalog', 'replayed — scenarios/dependencies.json stands as it is')
     } else if (settled('catalog') === catalogFpPre || settleSkip) {
       // The skeleton is still run for the legacy report field — with unchanged
@@ -703,6 +762,14 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       const enriched = catalogFpPost !== catalogFpPre
       if (settledSession !== catalogSessionFp || enriched) writeCatalogSettle(repoRoot, catalogSessionFpOf())
       steps.push({ key: 'catalog', status: enriched ? 'ok' : 'skipped', ...(!enriched ? { reason: 'unchanged' } : {}), inputFingerprint: catalogFpPost })
+      fact(
+        'catalog',
+        enriched
+          ? 'the classification was already settled, from cache; the skeleton added credential requirements'
+          : 'the classification was already settled, from cache; no session was spent',
+      )
+      for (const line of externalsSkeletonFacts(externalsStep)) fact('catalog', line)
+      for (const line of catalogEntryFacts(repoRoot)) fact('catalog', line)
       opts.onStepDone?.('catalog', enriched ? 'credential requirements updated' : 'unchanged')
     } else {
       externalsStep = applyExternalsSkeleton(repoRoot, recipe, detectedExternals)
@@ -741,11 +808,29 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
                 ...(result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}),
               },
         )
+        for (const line of externalsSkeletonFacts(externalsStep)) fact('catalog', line)
+        if (result.status === 'ok') {
+          fact(
+            'catalog',
+            result.fromCache
+              ? 'the catalog session\'s classification came from cache'
+              : 'the catalog session classified the starting state this run',
+          )
+          for (const finding of result.findings) {
+            fact('catalog', `finding recorded in guard/setup.findings.md: ${firstReasonLine(finding)}`)
+          }
+        } else {
+          fact('catalog', `the catalog session failed: ${firstReasonLine(result.reason)}`)
+        }
+        for (const line of catalogEntryFacts(repoRoot)) fact('catalog', line)
         opts.onStepDone?.('catalog', catalogSummary(externalsStep, result))
       } else {
         // No session wired (a test seam, or the deterministic-only edition): the
         // deterministic half is the whole step.
         steps.push({ key: 'catalog', status: 'ok', inputFingerprint: catalogFpOf() })
+        for (const line of externalsSkeletonFacts(externalsStep)) fact('catalog', line)
+        fact('catalog', 'no catalog session is wired into this run; the deterministic skeleton was the whole step')
+        for (const line of catalogEntryFacts(repoRoot)) fact('catalog', line)
         opts.onStepDone?.(
           'catalog',
           `${externalsStep.declared.length} declared · ${externalsStep.unprovided.length} awaiting an account`,
@@ -764,6 +849,9 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   if (enter('interfaces')) {
     const interfacesFp = interfacesFingerprint(repoRoot)
     const authoredExists = fs.existsSync(guardAuthoredInterfacesPath(repoRoot))
+    // The derived catalog is what this step reconciles and authors over, so it
+    // names what the derivation produced whichever branch below runs.
+    for (const line of derivedInterfaceFacts(repoRoot, mapped.interfaces)) fact('interfaces', line)
     if (replayed('interfaces')) {
       // Prior step: the merged catalog on disk — the derived half detect just
       // re-wrote, plus whatever authored half is committed — is what the later
@@ -771,10 +859,12 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       if (!ranBefore('interfaces')) {
         throw new SetupStepNotReadyError('interfaces', 'no interfaces row in guard/setup.json')
       }
+      fact('interfaces', 'replayed: the authored catalog stands as it is')
       opts.onStepDone?.('interfaces', 'replayed — the authored catalog stands as it is')
     } else if (settled('interfaces') === interfacesFp && authoredExists && opts.replace !== true &&
       webScreensNeedingReadables(readInterfaceCatalog(repoRoot), readAuthoredInterfaceCatalog(repoRoot)).size === 0) {
       steps.push({ key: 'interfaces', status: 'skipped', reason: 'unchanged', inputFingerprint: interfacesFp })
+      fact('interfaces', 'the place set is unchanged since the last setup, from cache: no reconcile, no authoring')
       opts.onStepDone?.('interfaces', 'unchanged')
     } else if (opts.authorInterfaces) {
       const result = await opts.authorInterfaces({
@@ -798,6 +888,19 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         ...(result.resolutions && result.resolutions.length > 0 ? { resolutions: result.resolutions } : {}),
         ...(result.changes && result.changes.length > 0 ? { changes: result.changes } : {}),
       })
+      if (result.resolutions && result.resolutions.length > 0) {
+        fact(
+          'interfaces',
+          result.reconcileFromCache
+            ? `${result.resolutions.length} tree-vs-probe dispute${result.resolutions.length === 1 ? '' : 's'} settled from cache`
+            : `the reconcile session settled ${result.resolutions.length} tree-vs-probe dispute${result.resolutions.length === 1 ? '' : 's'}`,
+        )
+        for (const resolution of result.resolutions) {
+          fact('interfaces', `${resolution.subject}: ${resolution.resolution}, ${firstReasonLine(resolution.evidence)}`)
+        }
+      }
+      for (const change of result.changes ?? []) fact('interfaces', `catalog edit: ${change}`)
+      if (result.reason) fact('interfaces', firstReasonLine(result.reason))
       opts.onStepDone?.('interfaces', result.reason ?? result.status)
     } else {
       steps.push({
@@ -807,6 +910,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
           'interface authoring is not wired into this run — run `truecourse guard interfaces author`, or inject the `authorInterfaces` seam (production does)',
         inputFingerprint: interfacesFp,
       })
+      fact('interfaces', 'interface authoring is not wired into this run; the derived catalog stands alone')
       opts.onStepDone?.('interfaces', 'not wired into this run')
     }
   }
@@ -828,6 +932,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
       if (!ranBefore('seed')) {
         throw new SetupStepNotReadyError('seed', 'no seed row in guard/setup.json')
       }
+      fact('seed', 'replayed: the declared `api.seed` stands as it is, nothing was drafted or proved')
       opts.onStepDone?.('seed', 'replayed — the declared `api.seed` stands as it is')
     } else if (settled('seed') === seedFpPre) {
       const existingSeed = current.api?.seed
@@ -841,6 +946,13 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
           }
         : { status: 'skipped', reason: 'unchanged since the last run, which drafted no seed either' }
       steps.push({ key: 'seed', status: 'skipped', reason: 'unchanged', inputFingerprint: seedFpPre })
+      fact(
+        'seed',
+        existingSeed
+          ? `seed unchanged since the last setup, from cache: \`${existingSeed.command}\` stands`
+          : 'seed unchanged since the last setup, from cache: the last run drafted none either',
+      )
+      for (const line of seedProvidesFacts(seedStep)) fact('seed', line)
       opts.onStepDone?.('seed', 'unchanged')
     } else {
       const schemes = collectSecuritySchemes(openApiDocs)
@@ -875,6 +987,8 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         inputFingerprint: seedFpOf(),
         ...(seedRun.sessionRunId ? { sessionRunId: seedRun.sessionRunId } : {}),
       })
+      fact('seed', seedOutcomeFact(seedStep, seedRun.fromCache === true))
+      for (const line of seedProvidesFacts(seedStep)) fact('seed', line)
       opts.onStepDone?.('seed', seedSummary(seedStep))
     }
   }
@@ -884,10 +998,14 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     const preparationFp = computeRecipeFingerprint(repoRoot)
     const preparationRecipe = reloadRecipe(repoRoot) ?? current
     if (replayed('preparations')) {
+      fact('preparations', 'replayed: the existing private preparation profiles stand as they are')
+      for (const line of preparationFacts(preparationRecipe)) fact('preparations', line)
       opts.onStepDone?.('preparations', 'existing private preparation profiles preserved')
     } else if (settled('preparations') === preparationFp &&
       preparationCatalog(preparationRecipe).length === Object.keys(preparationRecipe.preparations ?? {}).length) {
       steps.push({ key: 'preparations', status: 'skipped', reason: 'unchanged', inputFingerprint: preparationFp })
+      fact('preparations', 'every private preparation profile is unchanged since the last setup, from cache')
+      for (const line of preparationFacts(preparationRecipe)) fact('preparations', line)
       opts.onStepDone?.('preparations', 'unchanged')
     } else {
       const result = opts.preparationSession
@@ -896,6 +1014,13 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         : { status: 'skipped' as const, reason: 'private preparation authoring is unavailable; only profiles with runner-verified baseline checks are usable' }
       steps.push({ key: 'preparations', status: result.status, ...(result.reason ? { reason: result.reason } : {}),
         inputFingerprint: computeRecipeFingerprint(repoRoot), ...('sessionRunId' in result && result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}) })
+      fact(
+        'preparations',
+        result.status === 'ok'
+          ? 'the preparation session authored the private starting states'
+          : `no private starting state was authored: ${firstReasonLine(result.reason ?? result.status)}`,
+      )
+      for (const line of preparationFacts(reloadRecipe(repoRoot) ?? preparationRecipe)) fact('preparations', line)
       opts.onStepDone?.('preparations', result.reason ?? result.status)
     }
   }
@@ -907,6 +1032,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     const authFp = authFingerprint(repoRoot)
     if (settled('auth') === authFp) {
       steps.push({ key: 'auth', status: 'skipped', reason: 'unchanged', inputFingerprint: authFp })
+      fact('auth', 'the supplied entries are unchanged since the last setup, from cache: no proof session ran')
       opts.onStepDone?.('auth', 'unchanged')
     } else if (opts.verifyAuth) {
       const result = await opts.verifyAuth({ repoRoot, recipe: reloadRecipe(repoRoot) ?? current, fingerprint: authFp })
@@ -917,6 +1043,8 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         inputFingerprint: authFingerprint(repoRoot),
         ...(result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}),
       })
+      for (const line of result.facts ?? []) fact('auth', line)
+      if ((result.facts ?? []).length === 0 && result.reason) fact('auth', firstReasonLine(result.reason))
       opts.onStepDone?.('auth', result.reason ?? result.status)
     } else {
       steps.push({
@@ -926,6 +1054,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
           'auth verification is not wired into setup yet — supplied auth entries are checked at run time (plan step 14 wires the proof session here)',
         inputFingerprint: authFp,
       })
+      fact('auth', 'auth verification is not wired into this run; supplied entries are checked at run time instead')
       opts.onStepDone?.('auth', 'not wired into setup yet')
     }
   }
@@ -1142,6 +1271,154 @@ function firstReasonLine(reason: string): string {
   return reason.split('\n')[0]?.trim() ?? reason
 }
 
+// ---------------------------------------------------------------------------
+// The step facts: one line per thing a step did
+// ---------------------------------------------------------------------------
+
+/** One detected third party: how it was seen, and the variables it is reached through. */
+function detectedServiceFact(service: DetectedExternalService): string {
+  const evidence = service.evidence[0]
+  const how =
+    service.source === 'http'
+      ? `outbound requests to ${hostOf(evidence?.url) ?? 'a third-party host'}`
+      : service.source === 'binary'
+        ? `spawned binary \`${evidence?.binary ?? service.service}\``
+        : `sdk import${evidence?.importSource ? ` \`${evidence.importSource}\`` : ''}`
+  const parts = [`${service.service}: ${how}`]
+  if (service.category) parts.push(`category ${service.category}`)
+  const baseUrlEnvs = [
+    ...new Set([
+      ...(service.baseUrlEnvs ?? []).map((e) => e.envVar),
+      ...(service.baseUrlEnv ? [service.baseUrlEnv] : []),
+    ]),
+  ]
+  if (baseUrlEnvs.length > 0) parts.push(`base url from ${baseUrlEnvs.join(', ')}`)
+  const credentialEnvs = (service.credentialEnvs ?? []).map((e) => e.envVar)
+  if (credentialEnvs.length > 0) parts.push(`credential from ${credentialEnvs.join(', ')}`)
+  return parts.join('; ')
+}
+
+/** The host of a detected URL literal, when it parses. */
+function hostOf(url: string | undefined): string | null {
+  if (!url) return null
+  try {
+    return new URL(url).host || null
+  } catch {
+    return null
+  }
+}
+
+/** The datastore connection URLs, one line per distinct scheme + override variable.
+ *  The URL literal itself is never echoed: a dev default can carry a password. */
+function datastoreUrlFacts(refs: readonly DatastoreUrlRef[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const ref of refs) {
+    const key = `${ref.scheme}\x00${ref.envVar ?? ''}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(
+      ref.envVar
+        ? `datastore url: ${ref.scheme}, overridden by ${ref.envVar}`
+        : `datastore url: ${ref.scheme}, no override variable`,
+    )
+  }
+  return out
+}
+
+/** What the deterministic externals skeleton did to `recipe.json` this run. */
+function externalsSkeletonFacts(step: GuardSetupExternalsStep): string[] {
+  if (step.status === 'failed') {
+    return [`the externals skeleton was refused: ${firstReasonLine(step.reason ?? 'no reason reported')}`]
+  }
+  if (step.status === 'skipped') {
+    return [`no external service was declared: ${firstReasonLine(step.reason ?? 'no reason reported')}`]
+  }
+  const out: string[] = []
+  for (const service of step.declared) out.push(`declared \`${service}\` under api.externals`)
+  for (const service of step.undeclarable) {
+    out.push(`\`${service}\` was not declared: no base-url variable points anywhere`)
+  }
+  for (const service of step.unprovided) out.push(`\`${service}\` is declared but has no account behind it yet`)
+  return out
+}
+
+/** The catalog as it stands: one line per entry, with the class and how an
+ *  instance is registered. A catalog that does not parse says so and nothing more. */
+function catalogEntryFacts(repoRoot: string): string[] {
+  let entries: ReturnType<typeof loadDependencyCatalog>['dependencies']
+  try {
+    entries = loadDependencyCatalog(repoRoot).dependencies
+  } catch (error) {
+    return [`scenarios/dependencies.json could not be read: ${(error as Error).message}`]
+  }
+  return entries.map((entry) => {
+    if (entry.class !== 'supplied') return `${entry.name}: ${entry.class}`
+    const registration = entry.registration
+    if (registration?.kind === 'env') {
+      return `${entry.name}: supplied, env ${registration.vars.map((v) => v.name).join(', ')}`
+    }
+    if (registration?.kind === 'path') return `${entry.name}: supplied, a path on this machine`
+    if (registration?.kind === 'config-dir') {
+      return `${entry.name}: supplied, a config dir copied to ${registration.homePath}`
+    }
+    return `${entry.name}: supplied`
+  })
+}
+
+/** What the derivation produced, per surface, plus the web places the authoring
+ *  half stands on. */
+function derivedInterfaceFacts(repoRoot: string, interfaces: readonly Interface[]): string[] {
+  const perType = new Map<string, number>()
+  for (const entry of interfaces) perType.set(entry.type, (perType.get(entry.type) ?? 0) + 1)
+  const out = [...perType]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([type, count]) => `${type}: ${count} interface${count === 1 ? '' : 's'} derived`)
+  const places = readInterfaceCatalog(repoRoot)?.resources?.['web']?.length ?? 0
+  if (places > 0) out.push(`web: ${places} place${places === 1 ? '' : 's'} derived`)
+  if (out.length === 0) out.push('the derivation produced no interfaces')
+  return out
+}
+
+/** How the seed the step ended with came to be. */
+function seedOutcomeFact(step: GuardSetupSeedStep, fromCache: boolean): string {
+  if (step.status !== 'ok') return `seed refused: ${firstReasonLine(step.reason ?? 'no reason reported')}`
+  if (step.outcome === 'exists') return 'the recipe already declares `api.seed`; it was not re-drafted'
+  const where = step.scriptPath ? `, ${step.scriptPath}` : ''
+  const head = fromCache
+    ? `seed re-proved from cache${where}`
+    : `seed proved by running it against the live services${where}`
+  return step.salvaged ? `${head}; salvaged from a session that produced no outcome` : head
+}
+
+/** What the seed puts into the world, one line per fixture and per principal. */
+function seedProvidesFacts(step: GuardSetupSeedStep): string[] {
+  if (step.status !== 'ok') return []
+  return [
+    ...(step.fixtures ?? []).map((name) => `seed fixture: ${name}`),
+    ...(step.credentials ?? []).map((name) => `seed principal: ${name}`),
+  ]
+}
+
+/** The private starting states the recipe carries, one line per usable profile. */
+function preparationFacts(recipe: Recipe): string[] {
+  const usable = preparationCatalog(recipe)
+  const declared = Object.keys(recipe.preparations ?? {})
+  const out = usable.map((profile) => {
+    const provides = [
+      ...Object.keys(profile.fixtures).map((name) => `fixture ${name}`),
+      ...Object.keys(profile.credentials).map((name) => `principal ${name}`),
+    ]
+    const head = `${profile.name}: ${profile.baseline} baseline, ${profile.scope} scope`
+    return provides.length > 0 ? `${head}, provides ${provides.join(', ')}` : head
+  })
+  const usableNames = new Set(usable.map((p) => p.name))
+  for (const name of declared) {
+    if (!usableNames.has(name)) out.push(`${name}: unusable, it carries no runner-verified baseline checks`)
+  }
+  return out
+}
+
 /** The recipe blocks discovery never proposes — the user's and setup's own work. */
 interface AuthoredBlocks {
   preparations?: unknown
@@ -1319,7 +1596,7 @@ async function runSeedStep(args: {
   /** The step's PRE-RUN fingerprint — the seed session's cache key. */
   fingerprint: string
   onPhase: (running: string, done: string) => void
-}): Promise<{ step: GuardSetupSeedStep; sessionRunId?: string }> {
+}): Promise<{ step: GuardSetupSeedStep; sessionRunId?: string; fromCache?: boolean }> {
   const { opts, recipe, database, routes, schemes } = args
   const existing = recipe.api?.seed
 
@@ -1420,6 +1697,7 @@ async function runSeedStep(args: {
         ...(written ? declaredNames(written) : {}),
       },
       ...(result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}),
+      ...(result.fromCache ? { fromCache: true } : {}),
     }
   }
   return {

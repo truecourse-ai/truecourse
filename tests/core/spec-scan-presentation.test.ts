@@ -452,6 +452,15 @@ describe('spec-scan defs — declared display', () => {
     }),
   ]
 
+  it('names the kind of work it is, so a run can label the session', () => {
+    expect(defs().map((def) => def.display?.title)).toEqual([
+      'Scan scope',
+      'Document curation',
+      'Area settling',
+      'Overlap review',
+    ])
+  })
+
   it('opens every session with a line of its own, naming its work item', () => {
     for (const def of defs()) expect(def.display?.intro, def.kind).toBeTruthy()
     const [, curate, , overlap] = defs()

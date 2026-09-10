@@ -474,4 +474,32 @@ describe('the shapes one run cannot show', () => {
     ]);
     expect(steps.flatMap((s) => s.sessions.flatMap((p) => p.lines))).toEqual([]);
   });
+  it('carries what the engine recorded about a step, and a session’s own title', () => {
+    seq = 0;
+    const events = journal({
+      sessionId: 'ses-a',
+      events: [
+        ev({ type: 'session-start', kind: 'guard-generate.fidelity', workItem: 'flow:x:cli', systemPrompt: '', toolNames: [], display: { title: 'Fidelity check' } as never }),
+      ],
+    });
+    const record = run({
+      command: 'guard-generate',
+      display: {
+        blocks: [
+          {
+            kind: 'checklist',
+            items: [
+              { key: 'index', label: 'Indexing sections', status: 'done', detail: '0 of 18 sections changed', facts: ['README.md: 6 sections unchanged', 'docs/app.md: 12 sections unchanged'] } as never,
+              { key: 'author', label: 'Working flows', status: 'done', sessionKinds: ['guard-generate.fidelity'] },
+            ],
+          },
+        ],
+      },
+      sessions: [{ sessionId: 'ses-a', kind: 'guard-generate.fidelity', workItem: 'flow:x:cli', status: 'completed', spent: { ...spent } }],
+    });
+    const { steps } = foldConversation(record, events);
+    expect(steps[0].facts).toEqual(['README.md: 6 sections unchanged', 'docs/app.md: 12 sections unchanged']);
+    expect(steps[1].facts).toEqual([]);
+    expect(steps[1].sessions[0].title).toBe('Fidelity check');
+  });
 });

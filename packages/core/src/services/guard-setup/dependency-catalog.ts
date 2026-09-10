@@ -349,6 +349,7 @@ export function dependencyCatalogSessionDef(
   return {
     kind: DEPENDENCY_CATALOG_SESSION_KIND,
     display: {
+      title: 'Dependency catalog',
       intro: 'I\'m classifying the starting state this program needs — what a test can create, what must be seeded, and what only a user can supply.',
     },
     systemPrompt: SYSTEM_PROMPT,

@@ -402,6 +402,7 @@ export function seedSessionDef(world: SeedSessionWorld): SessionDef<SeedSessionO
   return {
     kind: SEED_SESSION_KIND,
     display: {
+      title: 'Seed',
       intro: 'I\'m authoring the seed script — the rows and the principals the tests reference — and proving each draft by running it against the live services.',
     },
     systemPrompt: SYSTEM_PROMPT,

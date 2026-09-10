@@ -469,6 +469,7 @@ export function overlapSessionDef(input: OverlapSessionInput): SessionDef<Overla
     outcomeSchema: OverlapOutcomeSchema,
     budget: OVERLAP_SESSION_BUDGET,
     display: {
+      title: 'Overlap review',
       intro: `I'm reviewing ${overlapWorkItem(input.item.areaId, input.item.cluster)}, reading its docs side by side to catch any claims that disagree.`,
     },
     presentOutcome: presentOverlapOutcome,

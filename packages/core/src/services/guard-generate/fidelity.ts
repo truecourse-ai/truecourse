@@ -210,6 +210,7 @@ export function fidelitySessionDef(universe: GuardDocUniverse, proofContext?: Gu
   const context = proofContext ? structuredClone(proofContext) : undefined
   return {
     kind: FIDELITY_SESSION_KIND,
+    display: { title: 'Fidelity check' },
     systemPrompt: FIDELITY_SESSION_SYSTEM_PROMPT,
     tools: [readClaimSectionTool(universe)],
     outcomeSchema: FidelityVerdictSchema,

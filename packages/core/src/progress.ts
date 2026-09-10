@@ -56,6 +56,13 @@ export interface AnalysisStep {
   label: string;
   status: StepStatus;
   detail?: string;
+  /**
+   * What this step DID, one line per thing, in the order it happened. Counts
+   * live in `detail`; a fact names the doc, the flow, the interface it worked
+   * on, and says "from cache" when a cache answered instead of a session or a
+   * computation.
+   */
+  facts?: string[];
 }
 
 export interface AnalysisProgressPayload {
@@ -111,6 +118,21 @@ export class StepTracker {
     const step = this.steps.find((s) => s.key === key);
     if (step) {
       step.detail = detail;
+      this.emit();
+    }
+  }
+
+  /**
+   * Append one thing this step did. Order is the order it happened and there
+   * is no dedupe: two docs that read the same are two facts, and a repeated
+   * line is a repeated event. A fact for a key this tracker doesn't carry is
+   * dropped, exactly as `detail` is, so a caller running a reduced checklist
+   * (`--only-<step>`) still names its work without knowing which keys exist.
+   */
+  fact(key: string, line: string): void {
+    const step = this.steps.find((s) => s.key === key);
+    if (step) {
+      step.facts = [...(step.facts ?? []), line];
       this.emit();
     }
   }

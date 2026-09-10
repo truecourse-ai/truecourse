@@ -101,9 +101,10 @@ export interface SessionDef<TOutcome = unknown> {
   budget: SessionBudget;
   /** May wait on user input. Non-interactive runs never block. */
   interactive?: boolean;
-  /** The session's opening line. A finished string, not a template: the def
-   *  factory already has the work item when it builds this. */
-  display?: { intro?: string };
+  /** The short name of this KIND of work ("Scenario author") and the session's
+   *  opening line. Both are finished strings, not templates: the def factory
+   *  already has the work item when it builds this. */
+  display?: { title?: string; intro?: string };
   /**
    * How this session's outcome reads. Typed against `outcomeSchema`, so a
    * schema change breaks the presenter at compile time instead of drifting

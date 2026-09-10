@@ -176,6 +176,7 @@ function StepList({
         {step.label}
       </h2>
       {step.detail && <p className="mt-2 text-[13px] leading-snug text-muted-foreground">{step.detail}</p>}
+      {step.facts.length > 0 && <Facts facts={step.facts} />}
       {step.sessions.length > 0 && (
         <div className="mt-2">
           {step.sessions.map((block) => (
@@ -199,8 +200,31 @@ function titleOf(block: SessionBlock): string {
   return lines.find((l) => l.startsWith('FLOW:')) ?? lines.find((l) => l !== '') ?? block.workItem ?? block.kind;
 }
 
-/** The kind of work, by the last segment of its kind id: `flow-worker`, `fidelity`, `curate-doc`. */
-const kindOf = (block: SessionBlock): string => block.kind.split('.').pop() ?? block.kind;
+/** The kind of work: the title the session stamped on itself, else the last segment of its kind id. */
+const kindOf = (block: SessionBlock): string => block.title ?? (block.kind.split('.').pop() ?? block.kind);
+
+/** How many of a step's facts show before the rest fold. */
+const FACTS_SHOWN = 12;
+
+/** What a step did, one line each as recorded; a long list folds past the first lines. */
+function Facts({ facts }: { facts: readonly string[] }) {
+  const [open, setOpen] = useState(false);
+  const shown = open ? facts : facts.slice(0, FACTS_SHOWN);
+  return (
+    <div className="mt-1.5">
+      {shown.map((fact, i) => (
+        <p key={i} className="whitespace-pre-wrap break-words text-[13px] leading-snug text-muted-foreground">
+          {fact}
+        </p>
+      ))}
+      {!open && facts.length > FACTS_SHOWN && (
+        <button type="button" onClick={() => setOpen(true)} className="mt-0.5 text-[11px] text-muted-foreground/70 hover:text-foreground">
+          +{facts.length - FACTS_SHOWN} lines
+        </button>
+      )}
+    </div>
+  );
+}
 
 /** How long a piece of work has been going, from its first event to its last. */
 function tookOf(block: SessionBlock): string | undefined {

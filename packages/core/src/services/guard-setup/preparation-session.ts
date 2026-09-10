@@ -173,6 +173,7 @@ export function buildPreparationSession(
       const { driver, persistence } = await context.acquire();
       const def: SessionDef<PreparationDraft> = {
         kind: PREPARATION_SESSION_KIND,
+        display: { title: 'Preparations' },
         systemPrompt: PREPARATION_PROMPT,
         budget: PREPARATION_SESSION_BUDGET,
         tools: [

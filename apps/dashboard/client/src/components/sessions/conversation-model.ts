@@ -58,6 +58,8 @@ export interface SessionBlock {
   kind: string;
   workItem: string;
   status: SessionStatus;
+  /** The short human name of this kind of work, when the session stamped one at start. */
+  title?: string;
   /** Set when another paragraph started this one; it renders right below it. */
   parentSessionId?: string;
   spent?: BudgetSpent;
@@ -71,6 +73,8 @@ export interface StepBlock {
   label: string;
   status: StepStatus;
   detail?: string;
+  /** What the step did, one line each, as the engine recorded it. */
+  facts: string[];
   sessions: SessionBlock[];
 }
 
@@ -133,11 +137,13 @@ export function foldConversation(
     const parentSessionId = parentOf.get(sessionId);
     const spent = entry?.spent;
     const live = progress[sessionId];
+    const title = start?.type === 'session-start' ? titleOf(start.display) : undefined;
     blocks.set(sessionId, {
       sessionId,
       kind: entry?.kind ?? (start?.type === 'session-start' ? start.kind : ''),
       workItem: entry?.workItem ?? (start?.type === 'session-start' ? start.workItem : ''),
       status: entry?.status ?? derivedStatus(own),
+      ...(title ? { title } : {}),
       ...(parentSessionId ? { parentSessionId } : {}),
       ...(spent ? { spent } : {}),
       lines: own.map(toLine).filter((line): line is ConversationLine => line !== null),
@@ -182,6 +188,7 @@ export function foldConversation(
       label: item.label,
       status: item.status,
       ...(item.detail ? { detail: item.detail } : {}),
+      facts: factsOf(item),
       sessions: roots.filter((b) => kinds.includes(b.kind)).flatMap(withKin),
     });
   }
@@ -191,10 +198,22 @@ export function foldConversation(
   for (const kind of [...new Set(roots.map((b) => b.kind))]) {
     if (claimed.has(kind)) continue;
     const sessions = roots.filter((b) => b.kind === kind).flatMap(withKin);
-    steps.push({ key: `kind:${kind}`, label: kind, status: kindStatus(sessions), sessions });
+    steps.push({ key: `kind:${kind}`, label: kind, status: kindStatus(sessions), facts: [], sessions });
   }
 
   return { ...(record.error ? { error: record.error.message } : {}), steps };
+}
+
+/** A checklist item's recorded facts: the strings under `facts`, read tolerantly since older records have none. */
+function factsOf(item: object): string[] {
+  const facts = (item as { facts?: unknown }).facts;
+  return Array.isArray(facts) ? facts.filter((f): f is string => typeof f === 'string') : [];
+}
+
+/** The title a session stamped on its display at start, read tolerantly. */
+function titleOf(display: unknown): string | undefined {
+  const title = (display as { title?: unknown } | undefined)?.title;
+  return typeof title === 'string' && title.trim() !== '' ? title : undefined;
 }
 
 // ---------------------------------------------------------------------------

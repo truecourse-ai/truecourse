@@ -530,6 +530,9 @@ export async function guardSetupInProcess(
       // A string the engine already composed, so the terminal checklist and the
       // dashboard popup render it without either of them knowing what a phase is.
       onStepDetail: (step, detail) => tracker?.detail(step, detail),
+      // One line per thing the step did. They ride the checklist into the run
+      // record, so a surface that never saw the process reads what setup did.
+      onStepFact: (step, line) => tracker?.fact(step, line),
     });
 
     // A hard-gate failure ran NO later step: the step it died in takes the error and
