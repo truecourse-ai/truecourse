@@ -213,6 +213,21 @@ describe('the Runs tab of a connected repository', () => {
     expect(within(table).queryByRole('columnheader', { name: 'Coverage' })).toBeNull();
   });
 
+  it('is a full-width search over an opaque sticky head, and no filter row', async () => {
+    serve();
+    renderAt(`/preview/repos/${REAL.id}/runs`);
+
+    const table = await screen.findByRole('table', { name: 'Runs' });
+    // The search box is the whole toolbar: Origin is a column, and one
+    // dimension does not earn a filter row.
+    expect(screen.getByRole('textbox', { name: 'Search runs' }).className).toContain('w-full');
+    expect(screen.queryByRole('group', { name: /^Filter/ })).toBeNull();
+    // The head sticks, so the rows scrolling under it must be hidden.
+    const head = within(table).getAllByRole('columnheader')[0]!.closest('thead')!;
+    expect(head.className).toContain('sticky');
+    expect(head.className).toContain('bg-card');
+  });
+
   it('opens a run as its own page, reading exactly that run', async () => {
     const calls = serve();
     renderAt(`/preview/repos/${REAL.id}/runs/r-head7`);

@@ -1,22 +1,19 @@
 /**
  * The workspace-level fake data: who is signed in, the two workspaces the
- * switcher offers, the members and plan of the active one, the provider
- * connections, the durable notification feed, the jobs in flight, and the
- * operator's cross-workspace lists.
+ * switcher offers, the members and plan of the active one, the durable
+ * notification feed, the jobs in flight, and the operator's cross-workspace
+ * lists.
  */
 
 import type {
   AdminJob,
   AdminTrace,
-  ConnectableRepo,
   Entitlement,
   JobChain,
   Member,
   ModelsConfig,
   PreviewNotification,
   PreviewUser,
-  ProviderConnection,
-  ProviderId,
   Workspace,
 } from './types';
 
@@ -47,138 +44,6 @@ export const PROVIDER_LABEL: Record<string, string> = {
   gitlab: 'GitLab',
   azure: 'Azure DevOps',
 };
-
-export const PROVIDER_CONNECTIONS: ProviderConnection[] = [
-  {
-    id: 'gh-acme',
-    provider: 'github',
-    account: 'acme',
-    kind: 'organization',
-    repoCount: 31,
-    about: 'The TrueCourse app is installed on the acme organization.',
-    connectedAt: '3 months ago',
-  },
-  {
-    id: 'gl-acme',
-    provider: 'gitlab',
-    account: 'acme-group',
-    kind: 'group',
-    repoCount: 6,
-    about: 'Group authorization on the self-managed GitLab at git.acme.dev.',
-    connectedAt: '6 weeks ago',
-  },
-  {
-    id: 'az-platform',
-    provider: 'azure',
-    account: 'platform',
-    kind: 'project collection',
-    repoCount: 4,
-    about: 'The TrueCourse app is authorized for the platform project collection.',
-    connectedAt: '2 weeks ago',
-  },
-];
-
-/** What a freshly added connection looks like, per provider, until the real callback lands. */
-export const NEW_CONNECTION: Record<ProviderId, Omit<ProviderConnection, 'id' | 'connectedAt'>> = {
-  github: {
-    provider: 'github',
-    account: 'mushegh',
-    kind: 'personal',
-    repoCount: 4,
-    about: 'The TrueCourse app is installed on a personal account.',
-  },
-  gitlab: {
-    provider: 'gitlab',
-    account: 'acme-mobile',
-    kind: 'group',
-    repoCount: 3,
-    about: 'Group authorization on gitlab.com.',
-  },
-  azure: {
-    provider: 'azure',
-    account: 'data-eng',
-    kind: 'project collection',
-    repoCount: 2,
-    about: 'The TrueCourse app is authorized for the data-eng project collection.',
-  },
-};
-
-/** The repositories a freshly added connection can see, so the picker is never empty. */
-export const NEW_CONNECTION_REPOS: Record<ProviderId, Omit<ConnectableRepo, 'connectionId'>[]> = {
-  github: [
-    { fullName: 'mushegh/dotfiles', provider: 'github', visibility: 'public', defaultBranch: 'main', about: 'Shell and editor setup.' },
-    { fullName: 'mushegh/recipe-cli', provider: 'github', visibility: 'private', defaultBranch: 'main', about: 'A small CLI side project.' },
-  ],
-  gitlab: [
-    { fullName: 'acme-mobile/ios-app', provider: 'gitlab', visibility: 'private', defaultBranch: 'main', about: 'The iOS client.' },
-    { fullName: 'acme-mobile/android-app', provider: 'gitlab', visibility: 'private', defaultBranch: 'main', about: 'The Android client.' },
-  ],
-  azure: [
-    { fullName: 'data-eng/etl-jobs', provider: 'azure', visibility: 'private', defaultBranch: 'main', about: 'Nightly ETL pipelines.' },
-  ],
-};
-
-export const CONNECTABLE_REPOS: ConnectableRepo[] = [
-  {
-    fullName: 'acme/payments-ledger',
-    provider: 'github',
-    connectionId: 'gh-acme',
-    visibility: 'private',
-    defaultBranch: 'main',
-    about: 'Double-entry ledger service.',
-  },
-  {
-    fullName: 'acme/notify-worker',
-    provider: 'github',
-    connectionId: 'gh-acme',
-    visibility: 'private',
-    defaultBranch: 'main',
-    about: 'Outbound e-mail and webhook worker.',
-  },
-  {
-    fullName: 'acme/design-tokens',
-    provider: 'github',
-    connectionId: 'gh-acme',
-    visibility: 'public',
-    defaultBranch: 'main',
-    about: 'Shared token package.',
-  },
-  {
-    fullName: 'acme/status-page',
-    provider: 'github',
-    connectionId: 'gh-acme',
-    visibility: 'public',
-    defaultBranch: 'trunk',
-    about: 'Public incident status site.',
-  },
-  {
-    fullName: 'acme-group/warehouse-sync',
-    provider: 'gitlab',
-    connectionId: 'gl-acme',
-    visibility: 'private',
-    defaultBranch: 'main',
-    about: 'Nightly warehouse replication jobs.',
-  },
-  {
-    fullName: 'acme-group/pricing-rules',
-    provider: 'gitlab',
-    connectionId: 'gl-acme',
-    visibility: 'private',
-    defaultBranch: 'main',
-    about: 'Rule engine for regional pricing.',
-  },
-  {
-    fullName: 'platform/release-bot',
-    provider: 'azure',
-    connectionId: 'az-platform',
-    visibility: 'private',
-    defaultBranch: 'main',
-    about: 'Release automation for the platform collection.',
-  },
-];
-
-/** The plan allowance line the picker shows above the checkbox list. */
-export const PRIVATE_REPO_ALLOWANCE = { used: 3, limit: 5 };
 
 export const ENTITLEMENTS: Entitlement[] = [
   { label: 'Private repositories', value: '3 of 5 used', locked: false },

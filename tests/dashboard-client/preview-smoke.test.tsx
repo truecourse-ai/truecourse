@@ -96,7 +96,7 @@ describe('one-product preview', () => {
     // GuardInterfacesPanel: rows keyed by the interface id the catalog derives,
     // grouped under the PLACE that owns them (the resource registry's title).
     expect((await screen.findAllByText('cli/orders-create')).length).toBeGreaterThan(0);
-    expect((await screen.findAllByRole('group', { name: 'Filter interfaces by surface' })).length).toBeGreaterThan(0);
+    expect((await screen.findAllByRole('group', { name: 'Filter interfaces' })).length).toBeGreaterThan(0);
   });
 
   it('opens a run as its own page from the runs table', async () => {

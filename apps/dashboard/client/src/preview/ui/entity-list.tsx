@@ -278,8 +278,11 @@ function GroupHeader<T>({ group, depth, open, onToggle }: {
   // hairline rule and the label indented, so the level it heads is legible at a
   // glance. It stays opaque: it sticks, and rows must not read through it.
   const level = group.subordinate ? 'border-border/60 font-medium' : 'border-border font-semibold';
-  const tone =
-    group.tone ?? (group.subordinate ? 'bg-card text-muted-foreground/80' : 'bg-card text-muted-foreground');
+  // A group's tone is its PAINT, and it rides an inner layer: the header's
+  // ground is the surface's own and is not a caller's to replace, or a tinted
+  // tone (`bg-red-500/15`) leaves the sticky header see-through and the rows
+  // scroll straight under it.
+  const tone = group.tone ?? (group.subordinate ? 'text-muted-foreground/80' : 'text-muted-foreground');
   const body = (
     <>
       {onToggle &&
@@ -301,7 +304,8 @@ function GroupHeader<T>({ group, depth, open, onToggle }: {
       {count != null && <span className="shrink-0 pl-2">{group.countLabel ?? count}</span>}
     </>
   );
-  const className = `${sticky} flex w-full items-center gap-1.5 border-b px-3 py-1 text-[10px] uppercase tracking-wider ${level} ${tone}`;
+  const ground = `${sticky} block w-full bg-card`;
+  const face = `flex w-full items-center gap-1.5 border-b px-3 py-1 text-[10px] uppercase tracking-wider ${level} ${tone}`;
   const name = group.name ?? (typeof group.label === 'string' ? group.label : undefined);
   return (
     <>
@@ -311,12 +315,14 @@ function GroupHeader<T>({ group, depth, open, onToggle }: {
           onClick={onToggle}
           aria-expanded={open}
           {...(name ? { 'aria-label': `${open ? 'Collapse' : 'Expand'} ${name}` } : {})}
-          className={`${className} hover:text-foreground`}
+          className={`${ground} group text-left`}
         >
-          {body}
+          <span className={`${face} group-hover:text-foreground`}>{body}</span>
         </button>
       ) : (
-        <div className={className}>{body}</div>
+        <div className={ground}>
+          <span className={face}>{body}</span>
+        </div>
       )}
       {open && group.hint && (
         <div className="border-b border-border/60 bg-muted/30 px-3 py-1 text-[10px] leading-snug text-muted-foreground">

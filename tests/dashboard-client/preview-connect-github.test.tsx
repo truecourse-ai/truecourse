@@ -179,12 +179,14 @@ function renderAt(path: string) {
   );
 }
 
-/** Open the dialog on GitHub's repositories: pick the provider, wait for its list. */
+/**
+ * Open the dialog on the repositories of the one installation: step 1 is the
+ * connected instances and the whole row is the button.
+ */
 async function openGithubRepos() {
   renderAt('/preview/code?connect=1');
   const dialog = await screen.findByRole('dialog');
-  const row = (await within(dialog).findByText('GitHub')).closest('li')!;
-  await userEvent.click(within(row).getByRole('button', { name: 'Select' }));
+  await userEvent.click(await within(dialog).findByRole('button', { name: /linkwarden/ }));
   return dialog;
 }
 
@@ -356,19 +358,49 @@ describe('connecting a repository through the GitHub App', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
-  it('names the account each installation belongs to', async () => {
+  it('lists each connected installation as one row, which is the pick', async () => {
+    serve({
+      status: () => json(status({ repos: [linkedRepo('linkwarden/linkwarden')] })),
+      installationRepos: { 42: [] },
+    });
+
+    renderAt('/preview/code?connect=1');
+    const dialog = await screen.findByRole('dialog');
+    const list = await within(dialog).findByRole('list', { name: 'Connected providers' });
+    const row = await within(list).findByRole('button', { name: /linkwarden/ });
+    // Every word on the row is data or a status word.
+    expect(within(row).getByText('linkwarden')).toBeInTheDocument();
+    expect(within(row).getByText('GitHub · organization · 1 repository linked')).toBeInTheDocument();
+    expect(within(row).getByText('Connected')).toBeInTheDocument();
+    // No separate Select button: the row itself is the button.
+    expect(within(row).queryByRole('button')).toBeNull();
+
+    await userEvent.click(row);
+    // Step 2 names the instance the repositories come from.
+    expect(await within(dialog).findByText('linkwarden')).toBeInTheDocument();
+  });
+
+  it('ends step one with the one link to Settings, and closes on the way', async () => {
     serve({ installationRepos: { 42: [] } });
 
     renderAt('/preview/code?connect=1');
     const dialog = await screen.findByRole('dialog');
-    const row = (await within(dialog).findByText('GitHub')).closest('li')!;
-    // The provider row says whose GitHub this is before anything is picked.
-    expect(await within(row).findByText('linkwarden')).toBeInTheDocument();
+    const link = await within(dialog).findByRole('link', {
+      name: 'Connect another provider in Settings',
+    });
+    expect(link).toHaveAttribute('href', '/preview/settings/repositories');
+    // Installing the App is Settings' business, not a control inside a step.
+    expect(within(dialog).queryByRole('link', { name: 'Install' })).toBeNull();
+    expect(within(dialog).queryByText('Add another')).toBeNull();
+    // The steps are named, never numbered.
+    for (const name of ['Provider', 'Repositories', 'Context', 'Confirm']) {
+      expect(within(dialog).getByText(name)).toBeInTheDocument();
+    }
+    expect(within(dialog).queryByText(/Step \d of \d/)).toBeNull();
 
-    await userEvent.click(within(row).getByRole('button', { name: 'Select' }));
-    expect(
-      await within(dialog).findByRole('button', { name: 'linkwarden' }),
-    ).toBeInTheDocument();
+    await userEvent.click(link);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(await screen.findByRole('navigation', { name: 'Settings sections' })).toBeInTheDocument();
   });
 
   it('falls back to the installation id when the account has no name', async () => {
@@ -380,8 +412,7 @@ describe('connecting a repository through the GitHub App', () => {
 
     renderAt('/preview/code?connect=1');
     const dialog = await screen.findByRole('dialog');
-    const row = (await within(dialog).findByText('GitHub')).closest('li')!;
-    expect(await within(row).findByText('#42')).toBeInTheDocument();
+    expect(await within(dialog).findByText('#42')).toBeInTheDocument();
   });
 
   it('says what the server is missing when the App is not configured', async () => {
@@ -393,21 +424,23 @@ describe('connecting a repository through the GitHub App', () => {
     renderAt('/preview/code?connect=1');
     const dialog = await screen.findByRole('dialog');
     expect(await within(dialog).findByText(missing)).toBeInTheDocument();
-    // Nothing to click: the fix is on the server, not in this dialog.
-    const row = within(dialog).getByText('GitHub').closest('li')!;
-    expect(within(row).queryByRole('button')).toBeNull();
-    expect(within(row).queryByRole('link')).toBeNull();
+    // Nothing to pick: the fix is on the server. The only way on is Settings.
+    const list = within(dialog).getByRole('list', { name: 'Connected providers' });
+    expect(within(list).queryByRole('button')).toBeNull();
+    expect(within(list).getAllByRole('link')).toHaveLength(1);
   });
 
-  it('sends the user to GitHub when the App is installed nowhere', async () => {
+  it('says nothing is connected yet when the App is installed nowhere', async () => {
     serve({ status: () => json(status({ installations: [] })) });
 
     renderAt('/preview/code?connect=1');
     const dialog = await screen.findByRole('dialog');
-    const row = within(dialog).getByText('GitHub').closest('li')!;
-    const install = await within(row).findByRole('link', { name: 'Install' });
-    expect(install).toHaveAttribute('href', INSTALL_URL);
-    expect(within(row).queryByRole('button')).toBeNull();
+    expect(await within(dialog).findByText('No provider connected yet.')).toBeInTheDocument();
+    const list = within(dialog).getByRole('list', { name: 'Connected providers' });
+    expect(within(list).queryByRole('button')).toBeNull();
+    expect(
+      within(list).getByRole('link', { name: 'Connect another provider in Settings' }),
+    ).toBeInTheDocument();
   });
 
   it('marks an already-connected repository and refuses to connect it twice', async () => {

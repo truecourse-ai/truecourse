@@ -289,7 +289,7 @@ export default function SourcePage({ sourceId }: { sourceId: string }) {
                     className={`mt-1 ${FIELD}`}
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-3">
                   <div>
                     <label className={LABEL} htmlFor="scope-include">
                       Include patterns

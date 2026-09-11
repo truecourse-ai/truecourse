@@ -2,7 +2,8 @@
  * Runs: a flat table of the repository's runs, newest first, the way
  * Repositories lists repositories. A row opens the run as its own page
  * (`/runs/:runId`, see ./RunPage.tsx), never a nested column. The search box
- * narrows by pull request number, commit or branch; Origin is the one filter.
+ * narrows by pull request number, commit or branch; there is no filter row,
+ * because a list with one dimension does not earn one — Origin is a column.
  *
  * The rows are EVERY run the store holds — the baseline runs and the
  * pull-request head runs the gate wrote — and a connected repository re-reads
@@ -15,7 +16,6 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { GuardHistoryEntry, GuardOutcome } from '@/preview/vendor/shared';
 import { CHIP_CLASS, PageHeader } from '@/preview/ui/bits';
-import { FilterBar } from '@/preview/ui/filter-bar';
 import { HoverPopover } from '@/preview/ui/hover-popover';
 import { GUARD_OUTCOMES, formatGuardTime } from '@/preview/vendor/lib/guard-drifts';
 import { guardStatusMeta } from '@/preview/vendor/lib/guard-status';
@@ -36,15 +36,6 @@ export function RunsTab({ repo }: { repo: Repo }) {
   const reloadKey = useGuardRefresh(repo, ['guard-run']);
   const { runs: history, loading, error } = useGuardRunList(repo.id, reloadKey);
   const [query, setQuery] = useState('');
-  const [originFilter, setOriginFilter] = useState<string[]>([]);
-
-  const originOptions = useMemo(
-    () =>
-      (['hosted', 'local'] as const)
-        .map((key) => ({ key, label: key, count: history.filter((h) => (h.origin ?? 'hosted') === key).length }))
-        .filter((o) => o.count > 0),
-    [history],
-  );
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -52,13 +43,12 @@ export function RunsTab({ repo }: { repo: Repo }) {
       .sort((a, b) => b.ranAt.localeCompare(a.ranAt))
       .filter(
         (h) =>
-          (originFilter.length === 0 || originFilter.includes(h.origin ?? 'hosted')) &&
-          (!q ||
-            (h.pullRequest != null && `#${h.pullRequest}`.includes(q)) ||
-            (h.commit ?? '').toLowerCase().includes(q) ||
-            (h.branch ?? '').toLowerCase().includes(q)),
+          !q ||
+          (h.pullRequest != null && `#${h.pullRequest}`.includes(q)) ||
+          (h.commit ?? '').toLowerCase().includes(q) ||
+          (h.branch ?? '').toLowerCase().includes(q),
       );
-  }, [history, query, originFilter]);
+  }, [history, query]);
 
   // The coverage version each run names, when the picker knows it (fixtures only, today).
   const versions = useMemo(() => {
@@ -80,20 +70,13 @@ export function RunsTab({ repo }: { repo: Repo }) {
         subtitle={rows.length === history.length ? `${history.length}` : `${rows.length} of ${history.length}`}
         right={repo.real ? <GenerateTestsAction repo={repo} /> : undefined}
       />
-      <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-x-6 gap-y-2 border-b border-border px-6 py-2 [&>div]:border-0 [&>div]:p-0">
+      <div className="min-w-0 shrink-0 border-b border-border px-6 py-2">
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           aria-label="Search runs"
           placeholder="Search runs (PR, commit, branch)"
-          className="w-64 max-w-full shrink-0 rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-        />
-        <FilterBar
-          label="Origin"
-          ariaLabel="Filter runs by origin"
-          options={originOptions}
-          selected={originFilter}
-          onChange={setOriginFilter}
+          className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
         />
       </div>
 

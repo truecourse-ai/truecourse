@@ -1,11 +1,12 @@
 /**
  * Admin, for operators: every workspace on this deployment. A left menu like
- * every other page (Jobs, Traces), each a table with search and chip filters.
+ * every other page (Jobs, Traces), each a table under the platform's toolbar:
+ * the search box across the top, then ONE Add-filter row over both dimensions.
  */
 
 import { useMemo, useState } from 'react';
 import { CHIP_CLASS, PageHeader, SideMenu } from '@/preview/ui/bits';
-import { FilterBar } from '@/preview/ui/filter-bar';
+import { FilterBuilder, filterKey, selectedValues, type FilterDimension } from '@/preview/ui/filter-builder';
 import { StatusWord, JOB_TONE, JOB_WORD } from '@/preview/ui/status-word';
 import { ADMIN_JOBS, ADMIN_TRACES } from '@/preview/data';
 import type { AdminJob } from '@/preview/data/types';
@@ -14,20 +15,36 @@ const BASE = '/preview/admin';
 
 function JobsTable() {
   const [query, setQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string[]>([]);
-  const [workspaceFilter, setWorkspaceFilter] = useState<string[]>([]);
+  /** One selection over both dimensions, as `dimension:value` keys. */
+  const [filters, setFilters] = useState<string[]>([]);
+  const statusFilter = useMemo(() => selectedValues(filters, 'status'), [filters]);
+  const workspaceFilter = useMemo(() => selectedValues(filters, 'workspace'), [filters]);
 
-  const statusOptions = useMemo(
-    () =>
-      (['queued', 'running', 'succeeded', 'failed'] as AdminJob['status'][])
-        .map((key) => ({ key, label: JOB_WORD[key], count: ADMIN_JOBS.filter((j) => j.status === key).length }))
-        .filter((o) => o.count > 0),
-    [],
-  );
-  const workspaceOptions = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const j of ADMIN_JOBS) counts.set(j.workspace, (counts.get(j.workspace) ?? 0) + 1);
-    return [...counts.entries()].map(([key, count]) => ({ key, label: key, count }));
+  const dimensions: FilterDimension[] = useMemo(() => {
+    const workspaces = new Map<string, number>();
+    for (const j of ADMIN_JOBS) workspaces.set(j.workspace, (workspaces.get(j.workspace) ?? 0) + 1);
+    return [
+      {
+        key: 'status',
+        label: 'Status',
+        options: (['queued', 'running', 'succeeded', 'failed'] as AdminJob['status'][])
+          .map((key) => ({
+            key: filterKey('status', key),
+            label: JOB_WORD[key],
+            count: ADMIN_JOBS.filter((j) => j.status === key).length,
+          }))
+          .filter((o) => o.count > 0),
+      },
+      {
+        key: 'workspace',
+        label: 'Workspace',
+        options: [...workspaces.entries()].map(([key, count]) => ({
+          key: filterKey('workspace', key),
+          label: key,
+          count,
+        })),
+      },
+    ];
   }, []);
 
   const rows = useMemo(() => {
@@ -42,26 +59,22 @@ function JobsTable() {
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <div className="flex shrink-0 flex-wrap items-center gap-x-6 gap-y-1 border-b border-border px-6 py-2">
+      <div className="min-w-0 shrink-0 border-b border-border px-6 py-2">
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           aria-label="Search jobs"
           placeholder="Search jobs"
-          className="w-64 rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
         />
-        <div className="flex flex-wrap items-center gap-x-4 [&>div]:border-0 [&>div]:px-0 [&>div]:py-0">
-          <FilterBar label="Status" ariaLabel="Filter jobs by status" options={statusOptions} selected={statusFilter} onChange={setStatusFilter} multi />
-          <FilterBar
-            label="Workspace"
-            ariaLabel="Filter jobs by workspace"
-            options={workspaceOptions}
-            selected={workspaceFilter}
-            onChange={setWorkspaceFilter}
-            multi
-          />
-        </div>
       </div>
+      <FilterBuilder
+        label="Filter"
+        ariaLabel="Filter jobs"
+        dimensions={dimensions}
+        selected={filters}
+        onChange={setFilters}
+      />
       <div className="min-h-0 flex-1 overflow-auto">
         <table className="w-full border-collapse text-[13px]" aria-label="Jobs across workspaces">
           <thead className="sticky top-0 z-10 bg-card">
@@ -101,18 +114,37 @@ function JobsTable() {
 
 function TracesTable() {
   const [query, setQuery] = useState('');
-  const [workspaceFilter, setWorkspaceFilter] = useState<string[]>([]);
-  const [modelFilter, setModelFilter] = useState<string[]>([]);
+  /** One selection over both dimensions, as `dimension:value` keys. */
+  const [filters, setFilters] = useState<string[]>([]);
+  const workspaceFilter = useMemo(() => selectedValues(filters, 'workspace'), [filters]);
+  const modelFilter = useMemo(() => selectedValues(filters, 'model'), [filters]);
 
-  const workspaceOptions = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const t of ADMIN_TRACES) counts.set(t.workspace, (counts.get(t.workspace) ?? 0) + 1);
-    return [...counts.entries()].map(([key, count]) => ({ key, label: key, count }));
-  }, []);
-  const modelOptions = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const t of ADMIN_TRACES) counts.set(t.model, (counts.get(t.model) ?? 0) + 1);
-    return [...counts.entries()].map(([key, count]) => ({ key, label: key, count }));
+  const dimensions: FilterDimension[] = useMemo(() => {
+    const count = (of: (t: (typeof ADMIN_TRACES)[number]) => string) => {
+      const counts = new Map<string, number>();
+      for (const t of ADMIN_TRACES) counts.set(of(t), (counts.get(of(t)) ?? 0) + 1);
+      return [...counts.entries()];
+    };
+    return [
+      {
+        key: 'workspace',
+        label: 'Workspace',
+        options: count((t) => t.workspace).map(([key, n]) => ({
+          key: filterKey('workspace', key),
+          label: key,
+          count: n,
+        })),
+      },
+      {
+        key: 'model',
+        label: 'Model',
+        options: count((t) => t.model).map(([key, n]) => ({
+          key: filterKey('model', key),
+          label: key,
+          count: n,
+        })),
+      },
+    ];
   }, []);
 
   const rows = useMemo(() => {
@@ -127,26 +159,22 @@ function TracesTable() {
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <div className="flex shrink-0 flex-wrap items-center gap-x-6 gap-y-1 border-b border-border px-6 py-2">
+      <div className="min-w-0 shrink-0 border-b border-border px-6 py-2">
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           aria-label="Search traces"
           placeholder="Search traces"
-          className="w-64 rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
         />
-        <div className="flex flex-wrap items-center gap-x-4 [&>div]:border-0 [&>div]:px-0 [&>div]:py-0">
-          <FilterBar
-            label="Workspace"
-            ariaLabel="Filter traces by workspace"
-            options={workspaceOptions}
-            selected={workspaceFilter}
-            onChange={setWorkspaceFilter}
-            multi
-          />
-          <FilterBar label="Model" ariaLabel="Filter traces by model" options={modelOptions} selected={modelFilter} onChange={setModelFilter} multi />
-        </div>
       </div>
+      <FilterBuilder
+        label="Filter"
+        ariaLabel="Filter traces"
+        dimensions={dimensions}
+        selected={filters}
+        onChange={setFilters}
+      />
       <div className="min-h-0 flex-1 overflow-auto">
         <table className="w-full border-collapse text-[13px]" aria-label="LLM traces">
           <thead className="sticky top-0 z-10 bg-card">

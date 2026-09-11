@@ -41,13 +41,8 @@ import {
 import { toast } from 'sonner';
 import {
   ACTIVE_WORKSPACE_ID,
-  CONNECTABLE_REPOS,
-  NEW_CONNECTION,
-  NEW_CONNECTION_REPOS,
   JOBS_IN_FLIGHT,
   NOTIFICATIONS,
-  PROVIDER_CONNECTIONS,
-  PRIVATE_REPO_ALLOWANCE,
   REPOS,
   WORKSPACES,
 } from '@/preview/data';
@@ -56,11 +51,8 @@ import { fetchLlmConfig } from '@/preview/data/llm-config';
 import { useAuth } from '@/ee/AuthContext';
 import { useRealRunStream, type RunFailure } from './real-runs';
 import type {
-  ConnectableRepo,
   JobChain,
   PreviewNotification,
-  ProviderConnection,
-  ProviderId,
   Repo,
   Workspace,
 } from '@/preview/data/types';
@@ -85,14 +77,6 @@ interface PreviewStateValue {
    * has reached a render.
    */
   refreshRealRepos: () => Promise<Repo[]>;
-  connections: ProviderConnection[];
-  /** Repositories the picker can offer: the seeded ones plus those of added connections. */
-  connectableRepos: ConnectableRepo[];
-  addConnection: (provider: ProviderId) => ProviderConnection;
-  revokeConnection: (id: string) => void;
-  connectRepositories: (fullNames: string[]) => void;
-  privateReposUsed: number;
-  privateRepoLimit: number;
   /** The real runs' notifications (newest first), then the fixture feed. */
   notifications: PreviewNotification[];
   unreadCount: number;
@@ -147,7 +131,6 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
   const [repos, setRepos] = useState<Repo[]>(REPOS);
   const [realRepos, setRealRepos] = useState<Repo[]>([]);
   const [realReposLoaded, setRealReposLoaded] = useState(false);
-  const [connections, setConnections] = useState<ProviderConnection[]>(PROVIDER_CONNECTIONS);
   const [notifications, setNotifications] = useState<PreviewNotification[]>(NOTIFICATIONS);
   const [jobs, setJobs] = useState<JobChain[]>(JOBS_IN_FLIGHT);
   const [llmProvider, setLlmProvider] = useState<LlmProviderState>('unknown');
@@ -234,72 +217,6 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
     [realRepos, refreshRealRepos],
   );
 
-  const [connectableRepos, setConnectableRepos] = useState<ConnectableRepo[]>(CONNECTABLE_REPOS);
-
-  const addConnection = useCallback((provider: ProviderId): ProviderConnection => {
-    const seed = NEW_CONNECTION[provider];
-    const id = `${provider}-${seed.account}`;
-    const connection: ProviderConnection = { ...seed, id, connectedAt: 'just now' };
-    setConnections((prev) => [...prev, connection]);
-    setConnectableRepos((prev) => [
-      ...prev,
-      ...NEW_CONNECTION_REPOS[provider].map((r) => ({ ...r, connectionId: id })),
-    ]);
-    return connection;
-  }, []);
-
-  const revokeConnection = useCallback((id: string) => {
-    setConnections((prev) => prev.filter((c) => c.id !== id));
-    setConnectableRepos((prev) => prev.filter((r) => r.connectionId !== id));
-  }, []);
-
-  const connectRepositories = useCallback((fullNames: string[]) => {
-    const picked = connectableRepos.filter((c) => fullNames.includes(c.fullName));
-    if (picked.length === 0) return;
-    setRepos((prev) => [
-      ...prev,
-      ...picked
-        .filter((c) => !prev.some((r) => r.fullName === c.fullName))
-        .map(
-          (c): Repo => ({
-            id: slugOf(c.fullName),
-            fullName: c.fullName,
-            provider: c.provider,
-            visibility: c.visibility,
-            defaultBranch: c.defaultBranch,
-            policy: 'blocking',
-            baselineSha: 'no baseline yet',
-            baselineAt: 'no baseline yet',
-            notifyEmails: [],
-            lastCheck: {
-              conclusion: 'neutral',
-              word: 'Neutral',
-              summary: 'Baseline not established, onboarding just started',
-              at: 'just now',
-            },
-            onboarding: true,
-          }),
-        ),
-    ]);
-    setJobs((prev) => [
-      ...prev,
-      ...picked.map(
-        (c): JobChain => ({
-          id: `job-onboard-${slugOf(c.fullName)}`,
-          title: `Onboarding ${c.fullName}`,
-          repoFullName: c.fullName,
-          steps: [
-            { key: 'clone', label: 'Clone and index', state: 'active', counter: 'indexing 3 of 412 files' },
-            { key: 'scan', label: 'Scan the spec corpus', state: 'pending' },
-            { key: 'setup', label: 'Guard setup', state: 'pending' },
-            { key: 'generate', label: 'Generate scenarios', state: 'pending' },
-            { key: 'baseline', label: 'Baseline run', state: 'pending' },
-          ],
-        }),
-      ),
-    ]);
-  }, [connectableRepos]);
-
   // The real repositories' runs, followed live. Inert without a server.
   const realRuns = useRealRunStream(realRepos, realReposLoaded);
 
@@ -346,13 +263,6 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
       updateRepo,
       unlinkRepo,
       refreshRealRepos,
-      connections,
-      connectableRepos,
-      addConnection,
-      revokeConnection,
-      connectRepositories,
-      privateReposUsed: allRepos.filter((r) => r.visibility === 'private').length,
-      privateRepoLimit: PRIVATE_REPO_ALLOWANCE.limit,
       notifications: allNotifications,
       unreadCount: allNotifications.filter((n) => !n.read).length,
       markRead,
@@ -370,7 +280,6 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
     repos,
     realRepos,
     realRuns,
-    connections,
     notifications,
     jobs,
     llmProvider,
@@ -378,10 +287,6 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
     updateRepo,
     unlinkRepo,
     refreshRealRepos,
-    connectableRepos,
-    addConnection,
-    revokeConnection,
-    connectRepositories,
     markRead,
     markAllRead,
   ]);

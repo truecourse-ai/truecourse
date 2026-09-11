@@ -12,7 +12,6 @@
  * and they carry an address: opening one goes to that repository's Activity.
  */
 
-import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { EntityList } from '@/preview/ui/entity-list';
 import { PageHeader } from '@/preview/ui/bits';
@@ -36,7 +35,6 @@ const LEVEL_WORD: Record<PreviewNotification['level'], string> = {
 
 export default function NotificationsPage() {
   const { notifications, unreadCount, markRead, markAllRead } = usePreviewState();
-  const [readFilter, setReadFilter] = useState<string[]>([]);
   const navigate = useNavigate();
 
   return (
@@ -84,17 +82,6 @@ export default function NotificationsPage() {
               placeholder: 'Search notifications',
               ariaLabel: 'Search notifications',
               match: (n, q) => n.title.toLowerCase().includes(q) || n.body.toLowerCase().includes(q),
-            }}
-            filter={{
-              label: 'Read',
-              ariaLabel: 'Filter notifications by read state',
-              options: [
-                { key: 'unread', label: 'Unread', count: notifications.filter((n) => !n.read).length },
-                { key: 'read', label: 'Read', count: notifications.filter((n) => n.read).length },
-              ],
-              selected: readFilter,
-              onChange: setReadFilter,
-              match: (n, key) => (key === 'unread' ? !n.read : n.read),
             }}
             noun={{ one: 'notification', many: 'notifications' }}
             emptyText="Nothing has happened yet."

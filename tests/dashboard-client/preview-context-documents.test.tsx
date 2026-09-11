@@ -120,6 +120,8 @@ function json(body: unknown, status = 200): Response {
 interface World {
   documents: ContextDocumentRow[];
   sources: ContextSourceView[];
+  /** The registry, as `/api/repos` answers it. */
+  repos: unknown[];
   stale: boolean;
   runs: unknown[];
   calls: string[];
@@ -130,6 +132,7 @@ function serve(over: Partial<World> = {}) {
   const state: World = {
     documents: [REFUNDS, ONBOARDING],
     sources: [REPO_SOURCE, SITE],
+    repos: [REPO_A, REPO_B],
     stale: false,
     runs: [],
     calls: [],
@@ -141,7 +144,7 @@ function serve(over: Partial<World> = {}) {
     const url = new URL(href, window.location.origin);
     const method = (init?.method ?? 'GET').toUpperCase();
     state.calls.push(method === 'GET' ? `${url.pathname}${url.search}` : `${method} ${url.pathname}`);
-    if (url.pathname === '/api/repos') return json([REPO_A, REPO_B]);
+    if (url.pathname === '/api/repos') return json(state.repos);
     if (url.pathname === '/api/llm/config') {
       return json({ config: { provider: 'anthropic' }, providers: ['anthropic'] });
     }
@@ -350,17 +353,24 @@ describe('the workspace scan', () => {
 });
 
 describe('Add context', () => {
-  it('offers the two kinds that work and locks the rest', async () => {
+  it('offers the two kinds that need no account, and sends the tools to Settings', async () => {
     serve();
     renderAt('/preview/context/documents');
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole('button', { name: 'Add context' }));
     const list = await screen.findByRole('list', { name: 'Kinds of source' });
-    expect(within(list).getByText('Repository')).toBeInTheDocument();
-    expect(within(list).getByText('Documentation site')).toBeInTheDocument();
-    expect(within(list).getAllByText('Coming soon')).toHaveLength(6);
-    expect(within(list).getByRole('button', { name: /Jira/ })).toBeDisabled();
+    // The whole row is the button, and there are only the two account-free kinds.
+    const rows = within(list).getAllByRole('button');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent('Repository');
+    expect(rows[1]).toHaveTextContent('Documentation site');
+    // The tool kinds are named on Settings › Connections, not here.
+    expect(within(list).queryByText('Jira')).toBeNull();
+    expect(within(list).queryByText('Coming soon')).toBeNull();
+    expect(
+      within(list).getByRole('link', { name: 'Connect another tool in Settings' }),
+    ).toHaveAttribute('href', '/preview/settings/connections');
   });
 
   it('checks a scope before anything is stored, then links and adds', async () => {
@@ -374,7 +384,8 @@ describe('Add context', () => {
     await user.type(screen.getByLabelText('llms.txt URL'), 'https://docs.other.com/llms.txt');
     await user.click(screen.getByRole('button', { name: 'Check' }));
 
-    expect(await screen.findByText(/docs\.other\.com yields 3 documents/)).toBeInTheDocument();
+    // A site's yield counts PAGES, in the words of the kind that was checked.
+    expect(await screen.findByText(/docs\.other\.com yields 3 pages/)).toBeInTheDocument();
     expect(screen.getByText('Getting started')).toBeInTheDocument();
     expect(state.calls).toContain('POST /api/context/sources/preview');
     // Checking stores nothing.
@@ -394,16 +405,60 @@ describe('Add context', () => {
     );
   });
 
-  it('refuses a second source for a repository that already has one', async () => {
+  it('names where you are with a stepper, and says what Check does for THIS kind', async () => {
+    serve();
+    renderAt('/preview/context/documents');
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole('button', { name: 'Add context' }));
+    const dialog = await screen.findByRole('dialog');
+    for (const name of ['Source', 'Scope', 'Link']) {
+      expect(within(dialog).getByText(name)).toBeInTheDocument();
+    }
+    expect(within(dialog).queryByText(/Step \d of \d/)).toBeNull();
+
+    await user.click(within(dialog).getByRole('button', { name: /Documentation site/ }));
+    expect(
+      await within(dialog).findByText(
+        'Check reads the llms.txt and counts the pages it lists; nothing is stored yet.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('lists a repository that already has a source, disabled, and refuses a second one', async () => {
     serve();
     renderAt('/preview/context/documents');
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole('button', { name: 'Add context' }));
     await user.click(await screen.findByRole('button', { name: /Repository/ }));
-    await user.click(await screen.findByRole('button', { name: 'acme/web' }));
 
-    expect(await screen.findByText(/already has a source/)).toBeInTheDocument();
+    // The repository is a select, never a row of chips.
+    const select = await screen.findByLabelText('Repository');
+    expect(select.tagName).toBe('SELECT');
+    const taken = await within(select).findByRole('option', { name: 'acme/web · already a source' });
+    expect(taken).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Check' })).toBeDisabled();
+    // The scope copy is the repository's, not one generic line for both kinds.
+    expect(
+      screen.getByText(
+        'Check walks the branch with these patterns and counts the files it would keep; nothing is stored yet.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('sends the user to Code when no repository is connected', async () => {
+    serve({ repos: [] });
+    renderAt('/preview/context/documents');
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole('button', { name: 'Add context' }));
+    await user.click(await screen.findByRole('button', { name: /Repository/ }));
+
+    expect(await screen.findByText('No repository connected yet.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Connect a repository' })).toHaveAttribute(
+      'href',
+      '/preview/code?connect=1',
+    );
   });
 });

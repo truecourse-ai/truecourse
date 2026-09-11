@@ -354,34 +354,6 @@ export interface AdminTrace {
   at: string;
 }
 
-export type ConnectionKind = 'organization' | 'personal' | 'group' | 'project collection';
-
-/**
- * One authorization of a provider for this workspace: a GitHub App installation
- * on an organization or a personal account, a GitLab group, an Azure DevOps
- * project collection. A workspace holds as many as it needs, several per
- * provider; a repository belongs to exactly one.
- */
-export interface ProviderConnection {
-  id: string;
-  provider: ProviderId;
-  account: string;
-  kind: ConnectionKind;
-  repoCount: number;
-  about: string;
-  connectedAt: string;
-}
-
-export interface ConnectableRepo {
-  fullName: string;
-  provider: ProviderId;
-  /** The connection that can see it. */
-  connectionId: string;
-  visibility: 'public' | 'private';
-  defaultBranch: string;
-  about: string;
-}
-
 export interface Entitlement {
   label: string;
   value: string;
