@@ -134,6 +134,10 @@ export async function workspaceContextScanInProcess(
 
     const identity = workspaceIdentity(options);
     const scopeSources = scopeSourceViews(sources, materialized.perSource);
+    // What each source yielded, one fact each, under the discovery step: the
+    // scan no longer walks a repository, and the reader must see where the
+    // universe came from. The step's detail stays the engine's count line.
+    for (const line of discoverFacts(materialized.facts)) options.tracker?.fact('discover', line);
     // The run is closed only after the workspace spec set is stored: a run that
     // reads `completed` while nothing was persisted is a record that lies.
     let runId: string | null = null;
@@ -145,7 +149,6 @@ export async function workspaceContextScanInProcess(
         sessionsKey: workspaceSessionsKey(org),
         scopeSources,
         docOrigins: materialized.origins,
-        discoverDetail: () => discoverFacts(materialized.facts),
         deferRunCompletion: true,
         ...(options.tracker ? { tracker: options.tracker } : {}),
         ...(options.source ? { source: options.source } : {}),
@@ -287,12 +290,12 @@ async function materializeWorkspaceDocuments(
   return { count, perSource, facts, origins, bodies };
 }
 
-/** "<source title>: N documents", every source, in title order. */
-export function discoverFacts(facts: readonly WorkspaceScanSourceFact[]): string {
-  if (facts.length === 0) return 'no sources';
-  return facts
-    .map((fact) => `${fact.title}: ${fact.documents} document${fact.documents === 1 ? '' : 's'}`)
-    .join(' · ');
+/** "<source title>: N documents", one line per source, in title order. */
+export function discoverFacts(facts: readonly WorkspaceScanSourceFact[]): string[] {
+  if (facts.length === 0) return ['no sources'];
+  return facts.map(
+    (fact) => `${fact.title}: ${fact.documents} document${fact.documents === 1 ? '' : 's'}`,
+  );
 }
 
 /** The sources as the scope session sees them: id, title, document count. */

@@ -269,10 +269,11 @@ describe('the workspace Document scan', () => {
     const runs = listSessionRuns(workspaceSessionsKey(ORG), 'spec-scan');
     expect(runs).toHaveLength(1);
     expect(runs[0]).toMatchObject({ status: 'completed' });
-    // "Discovering docs" says which source yielded how many documents.
-    expect(details.some((d) => d.includes('acme/widgets: 2 documents'))).toBe(true);
-    expect(details.some((d) => d.includes('Stripe Docs: 1 document'))).toBe(true);
-    expect(details.every((d) => !d.includes('to curate'))).toBe(true);
+    // "Discovering docs" says which source yielded how many documents, one
+    // fact each; the step's detail stays the engine's count line.
+    expect(details).toContain('acme/widgets: 2 documents');
+    expect(details).toContain('Stripe Docs: 1 document');
+    expect(details.some((d) => /^\d+ docs · \d+ to curate$/.test(d))).toBe(true);
   });
 
   it('reports the corpus as unchanged when nothing about it moved', async () => {
@@ -337,11 +338,11 @@ describe('the discovery facts', () => {
         { sourceId: 'a', title: 'Docs', documents: 2 },
         { sourceId: 'b', title: 'Site', documents: 1 },
       ]),
-    ).toBe('Docs: 2 documents · Site: 1 document');
+    ).toEqual(['Docs: 2 documents', 'Site: 1 document']);
   });
 
   it('says so when the workspace has no source at all', () => {
-    expect(discoverFacts([])).toBe('no sources');
+    expect(discoverFacts([])).toEqual(['no sources']);
   });
 });
 
@@ -351,6 +352,7 @@ async function setStoredDecisions(decisions: DecisionsFile): Promise<void> {
 }
 
 /** A tracker that records every step detail the scan reports. */
+/** A tracker that keeps every detail and every fact it is told, in order. */
 function trackerRecording(details: string[]) {
   return {
     start: () => {},
@@ -358,6 +360,9 @@ function trackerRecording(details: string[]) {
     error: () => {},
     detail: (_key: string, text: string) => {
       details.push(text);
+    },
+    fact: (_key: string, line: string) => {
+      details.push(line);
     },
     tap: () => () => {},
   } as unknown as NonNullable<Parameters<typeof workspaceContextScanInProcess>[0]['tracker']>;
