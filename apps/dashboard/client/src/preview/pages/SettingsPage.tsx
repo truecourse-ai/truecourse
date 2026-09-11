@@ -1,8 +1,7 @@
 /**
  * Settings as a hub: the workspace's members, where its repositories are
- * connected from, the document connectors, the LLM provider, and the
- * integrations. The sub-tab is in the URL, so a settings page is a place a link
- * can point at.
+ * connected from, the document connectors, and the LLM provider. The sub-tab
+ * is in the URL, so a settings page is a place a link can point at.
  *
  * Everything here is the server's. There is no plan and no entitlement read yet,
  * so nothing is drawn as plan-gated: a feature that is not built says Coming
@@ -37,7 +36,6 @@ const TABS = [
   { id: 'repositories', label: 'Repositories' },
   { id: 'connections', label: 'Connections' },
   { id: 'models', label: 'Models' },
-  { id: 'integrations', label: 'Integrations' },
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
@@ -45,21 +43,15 @@ type TabId = (typeof TABS)[number]['id'];
 function Card({
   title,
   description,
-  note,
   children,
 }: {
   title: string;
   description?: string;
-  /** A short word about the state of the thing, e.g. that it is not built yet. */
-  note?: string;
   children?: React.ReactNode;
 }) {
   return (
     <section className="rounded-md border border-border bg-card px-4 py-3">
-      <div className="flex items-center gap-2">
-        <h3 className="text-xs font-semibold text-foreground">{title}</h3>
-        {note && <span className="text-[11px] text-muted-foreground">{note}</span>}
-      </div>
+      <h3 className="text-xs font-semibold text-foreground">{title}</h3>
       {description && <p className="mt-1 text-[11px] text-muted-foreground">{description}</p>}
       {children && <div className="mt-2">{children}</div>}
     </section>
@@ -74,31 +66,29 @@ function Card({
 function MembersTab() {
   const user = usePreviewUser();
   return (
-    <div className="border-t border-border">
-      <EntityList<PreviewUser>
-        label="Workspace members"
-        variant="embedded"
-        items={user ? [user] : []}
-        itemId={(m) => m.email}
-        renderRow={(m) => (
-          <>
-            <div className="flex w-full min-w-0 items-center gap-2">
-              <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{m.name}</span>
-            </div>
-            <div className="flex w-full min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
-              <span className="min-w-0 truncate">{m.email}</span>
-            </div>
-          </>
-        )}
-        search={{
-          placeholder: 'Search members',
-          ariaLabel: 'Search members',
-          match: (m, q) => m.name.toLowerCase().includes(q) || m.email.toLowerCase().includes(q),
-        }}
-        noun={{ one: 'member', many: 'members' }}
-        emptyText="Nobody is signed in."
-      />
-    </div>
+    <EntityList<PreviewUser>
+      label="Workspace members"
+      variant="embedded"
+      items={user ? [user] : []}
+      itemId={(m) => m.email}
+      renderRow={(m) => (
+        <>
+          <div className="flex w-full min-w-0 items-center gap-2">
+            <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{m.name}</span>
+          </div>
+          <div className="flex w-full min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
+            <span className="min-w-0 truncate">{m.email}</span>
+          </div>
+        </>
+      )}
+      search={{
+        placeholder: 'Search members',
+        ariaLabel: 'Search members',
+        match: (m, q) => m.name.toLowerCase().includes(q) || m.email.toLowerCase().includes(q),
+      }}
+      noun={{ one: 'member', many: 'members' }}
+      emptyText="Nobody is signed in."
+    />
   );
 }
 
@@ -159,11 +149,11 @@ function RepositoriesTab() {
   const installations = github?.installations ?? [];
 
   return (
-    <ul className="divide-y divide-border border-y border-border" aria-label="Providers">
+    <ul className="divide-y divide-border border-b border-border" aria-label="Providers">
       {PROVIDERS.map((id) => {
         const live = id === 'github';
         return (
-          <li key={id} className="flex items-start gap-4 py-3">
+          <li key={id} className="flex items-start gap-4 px-6 py-3">
             <ProviderIcon provider={id} className="mt-0.5 h-6 w-6 shrink-0" />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-3">
@@ -233,9 +223,9 @@ const CONNECTORS: readonly { kind: ContextSourceKind; tool: ConnectorTool }[] = 
 
 function ConnectionsTab() {
   return (
-    <ul className="divide-y divide-border border-y border-border" aria-label="Connectors">
+    <ul className="divide-y divide-border border-b border-border" aria-label="Connectors">
       {CONNECTORS.map((connector) => (
-        <li key={connector.kind} className="flex items-start gap-4 py-3">
+        <li key={connector.kind} className="flex items-start gap-4 px-6 py-3">
           <ConnectorLogo tool={connector.tool} className="mt-0.5 h-6 w-6 shrink-0" />
           <div className="flex min-w-0 flex-1 items-center gap-3">
             <span className="truncate text-[13px] font-medium text-foreground">
@@ -320,15 +310,17 @@ function ModelsTab() {
   // no run ever reads, so there is none — only what the runs use.
   if (data?.operator) {
     return (
-      <Card title="Active provider">
-        <Facts
-          rows={[
-            { label: 'Provider', value: 'Claude Code (operator)' },
-            { label: 'Model', value: <span className="font-mono">{data.operator.model}</span> },
-            { label: 'Set by', value: <span className="font-mono">TRUECOURSE_LLM_TRANSPORT=claude-code</span> },
-          ]}
-        />
-      </Card>
+      <div className="max-w-3xl px-6 py-5">
+        <Card title="Active provider">
+          <Facts
+            rows={[
+              { label: 'Provider', value: 'Claude Code (operator)' },
+              { label: 'Model', value: <span className="font-mono">{data.operator.model}</span> },
+              { label: 'Set by', value: <span className="font-mono">TRUECOURSE_LLM_TRANSPORT=claude-code</span> },
+            ]}
+          />
+        </Card>
+      </div>
     );
   }
 
@@ -368,7 +360,7 @@ function ModelsTab() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="max-w-3xl space-y-4 px-6 py-5">
       {current && (
         <Card title="Active provider">
           <Facts
@@ -491,23 +483,6 @@ function ModelsTab() {
   );
 }
 
-function IntegrationsTab() {
-  return (
-    <div className="space-y-3">
-      <Card
-        title="Jira"
-        note="Coming soon"
-        description="Open a Jira issue from a gate failure, with the failing step, its evidence and the claim it breaks."
-      />
-      <Card
-        title="Confluence"
-        note="Coming soon"
-        description="Read Confluence spaces as spec sources, the way an llms.txt site is read today."
-      />
-    </div>
-  );
-}
-
 export default function SettingsPage() {
   const { tab } = useParams<{ tab?: string }>();
   // `providers` was this tab's address before it was named for what it holds.
@@ -525,14 +500,11 @@ export default function SettingsPage() {
           activeId={active}
           items={TABS.map((t) => ({ id: t.id, label: t.label, to: `${PREVIEW_BASE}/settings/${t.id}` }))}
         />
-        <div className="min-h-0 min-w-0 flex-1 overflow-auto px-6 py-5">
-          <div className="max-w-4xl">
-            {active === 'members' && <MembersTab />}
-            {active === 'repositories' && <RepositoriesTab />}
-            {active === 'connections' && <ConnectionsTab />}
-            {active === 'models' && <ModelsTab />}
-            {active === 'integrations' && <IntegrationsTab />}
-          </div>
+        <div className="min-h-0 min-w-0 flex-1 overflow-auto">
+          {active === 'members' && <MembersTab />}
+          {active === 'repositories' && <RepositoriesTab />}
+          {active === 'connections' && <ConnectionsTab />}
+          {active === 'models' && <ModelsTab />}
         </div>
       </div>
     </div>
