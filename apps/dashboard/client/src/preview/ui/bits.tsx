@@ -11,14 +11,14 @@
 
 import { useCallback, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronRight, Cloud, Github, Gitlab, Pin, type LucideIcon } from 'lucide-react';
+import { ChevronRight, Pin } from 'lucide-react';
 import type { ProviderId } from '@/preview/data/types';
+import azure from './logos/azure.svg';
+import github from './logos/github.svg';
+import gitlab from './logos/gitlab.svg';
 
-const PROVIDER_ICON: Record<ProviderId, LucideIcon> = {
-  github: Github,
-  gitlab: Gitlab,
-  azure: Cloud,
-};
+/** The providers' own marks (the SVG Logos and Devicon sets, CC0/MIT), as image files. */
+const PROVIDER_LOGO: Record<ProviderId, string> = { github, gitlab, azure };
 
 export const PROVIDER_NAME: Record<ProviderId, string> = {
   github: 'GitHub',
@@ -27,8 +27,13 @@ export const PROVIDER_NAME: Record<ProviderId, string> = {
 };
 
 export function ProviderIcon({ provider, className = 'h-3.5 w-3.5' }: { provider: ProviderId; className?: string }) {
-  const Icon = PROVIDER_ICON[provider];
-  return <Icon className={`${className} shrink-0 text-muted-foreground`} aria-label={PROVIDER_NAME[provider]} />;
+  return (
+    <img
+      src={PROVIDER_LOGO[provider]}
+      alt={PROVIDER_NAME[provider]}
+      className={`${className} shrink-0 object-contain`}
+    />
+  );
 }
 
 /** A neutral bounded label. Never a status: those are dot plus word. */
