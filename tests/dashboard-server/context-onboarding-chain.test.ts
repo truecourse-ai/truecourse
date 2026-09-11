@@ -341,8 +341,8 @@ describe('connecting a repository with no markdown', () => {
     expect(enqueued).not.toContain('repo.guard-generate');
     expect(await jobsOfType('repo.guard-generate')).toEqual([]);
     const notes = await new NotificationStore(db).listForOrg(ORG, { limit: 10 });
-    const setupNote = notes.find((n) => n.title === 'Guard setup complete');
-    expect(setupNote?.body).toContain('no documents linked yet');
+    const setupNote = notes.find((n) => n.title === 'Flow setup complete');
+    expect(setupNote?.body).toContain('No documents linked yet');
     // Nothing failed: a repository that reads nothing has failed at nothing.
     expect(notes.every((n) => n.level !== 'error')).toBe(true);
   });

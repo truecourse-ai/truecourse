@@ -194,17 +194,20 @@ export function createContextSyncTask(
         result: { sourceId, outcome: 'synced', ...counts } satisfies ContextSyncJobResult,
         notification: {
           level: 'success',
-          title: 'Context source synced',
-          body: `${result.title ?? source.title} — ${summary(counts)}.`,
-          data: { sourceId, ...counts },
+          title: 'Source synced',
+          body: `${summary(counts)}.`,
+          data: { sourceId, sourceTitle: result.title ?? source.title, ...counts },
         },
       };
     },
 
+    // The payload is all a failure is handed, and reading the source back to
+    // name it would be a store round trip on the way out: the row carries the
+    // source id, and the page reads its title from the source itself.
     onError: (err, payload) => ({
       level: 'error',
-      title: 'Context sync failed',
-      body: `${payload.sourceId} — ${err.message}`,
+      title: 'Source sync failed',
+      body: err.message,
       data: { sourceId: payload.sourceId },
     }),
 
@@ -256,13 +259,13 @@ export function createContextSyncTask(
   }
 }
 
-/** "3 added, 1 changed, 2 removed" — the counts that are not zero, or "no changes". */
+/** "3 added, 1 changed, 2 removed": the counts that are not zero, or "No changes". */
 function summary(counts: { added: number; changed: number; removed: number }): string {
   const parts: string[] = [];
   if (counts.added > 0) parts.push(`${counts.added} added`);
   if (counts.changed > 0) parts.push(`${counts.changed} changed`);
   if (counts.removed > 0) parts.push(`${counts.removed} removed`);
-  return parts.length > 0 ? parts.join(', ') : 'no changes';
+  return parts.length > 0 ? parts.join(', ') : 'No changes';
 }
 
 /** The single-flight key: one active sync per (workspace, source). */

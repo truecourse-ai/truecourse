@@ -64,14 +64,3 @@ export interface JobChain {
   /** Where the job is watched: the run's own conversation. */
   href: string;
 }
-
-export interface PreviewNotification {
-  id: string;
-  level: 'success' | 'failure' | 'blocked' | 'neutral';
-  title: string;
-  body: string;
-  at: string;
-  read: boolean;
-  /** Where the row opens: the run's own conversation. */
-  href?: string;
-}

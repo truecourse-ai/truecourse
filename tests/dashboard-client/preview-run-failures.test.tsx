@@ -1,5 +1,5 @@
 /**
- * A run that ended badly, told in the three places a user could be standing.
+ * A run that ended badly, told in the two places a user could be standing.
  *
  * The run record carries its own reason, and that reason beats every derived
  * sentence: the conversation opens with it rather than with how far the
@@ -45,7 +45,7 @@ vi.mock('@/lib/socket', () => {
 });
 
 import PreviewApp from '@/preview/PreviewApp';
-import { toFailure, toNotifications } from '@/preview/shell/real-runs';
+import { toFailure } from '@/preview/shell/real-runs';
 import type { PublicSessionRun } from '@/lib/api';
 
 if (!Element.prototype.scrollTo) {
@@ -246,17 +246,5 @@ describe('the failure toast', () => {
     // The row knows; the shell does not shout about it.
     await waitFor(() => expect(screen.queryByRole('button', { name: /Open conversation/ })).toBeNull());
     expect(screen.queryByText('Document scan failed on linkwarden/linkwarden')).toBeNull();
-  });
-
-  it('files the failure in the feed as well, still holding the reason', async () => {
-    serve([failed()]);
-    renderAt('/preview/notifications');
-
-    expect(await screen.findByText('Document scan failed on linkwarden/linkwarden')).toBeInTheDocument();
-    // The feed row shows the title only, so the reason is asserted on the
-    // notification itself: it is what a reader searches and what the bell body
-    // renders.
-    const settled = toNotifications({ id: REAL.id, fullName: REAL.name }, failed(), Date.now()).at(-1);
-    expect(settled?.body).toBe(REASON);
   });
 });

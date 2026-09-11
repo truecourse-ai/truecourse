@@ -151,13 +151,21 @@ interface RunOptions {
   payload?: Partial<ContextScanJobPayload>;
 }
 
+/** The run the stubbed engine opens, which the notification's address names. */
+const SCAN_RUN_ID = '2026-09-10T12-00-00Z_scanrun1';
+
 /** Run the scan job once, and hand back the settled row + its notifications. */
 async function runScan(result: WorkspaceContextScanResult, opts: RunOptions = {}) {
   const rt = runtime();
   const job = await rt.jobStore.create({ org: ORG, type: 'context.scan', key: 'context.scan' });
   const def = createContextScanTask({
     startLlm: async () => testLlm,
-    runScan: async () => result,
+    // The real engine announces its run record before it curates anything; the
+    // job's notification carries that id as its address.
+    runScan: async (options) => {
+      options.onRunStarted?.({ command: 'spec-scan', runId: SCAN_RUN_ID, dir: '' });
+      return result;
+    },
     now: () => new Date('2026-09-10T12:00:00.000Z'),
     ...opts.deps,
   });
@@ -187,6 +195,8 @@ describe('the context.scan job', () => {
     expect(result).toMatchObject({ documents: 2, areas: 1, openConflicts: 0, corpusChanged: true });
     expect(notifications).toHaveLength(1);
     expect(notifications[0]).toMatchObject({ level: 'success', title: 'Documents scanned' });
+    // The row's address: the scan's own conversation.
+    expect(notifications[0]!.data).toMatchObject({ runId: SCAN_RUN_ID });
   });
 
   it('says so when the workspace has an open conflict', async () => {
@@ -197,11 +207,34 @@ describe('the context.scan job', () => {
     expect(result?.openConflicts).toBe(1);
     expect(notifications[0]).toMatchObject({
       level: 'warning',
-      title: 'Documents scanned — conflicts to resolve',
+      title: 'Documents scanned, conflicts to resolve',
     });
+    expect(notifications[0]!.data).toMatchObject({ runId: SCAN_RUN_ID });
   });
 
   it('fails loudly when the scan did, and settles no corpus', async () => {
+    const rt = runtime();
+    const job = await rt.jobStore.create({ org: ORG, type: 'context.scan', key: 'context.scan' });
+    const def = createContextScanTask({
+      startLlm: async () => testLlm,
+      runScan: async (options) => {
+        options.onRunStarted?.({ command: 'spec-scan', runId: SCAN_RUN_ID, dir: '' });
+        throw new Error('the workspace store went away');
+      },
+    });
+    await executeJob(rt, def, { jobId: job.id, workspaceOrgId: ORG, source: 'manual' }).catch(
+      () => undefined,
+    );
+
+    const settled = await rt.jobStore.get(job.id);
+    expect(settled).toMatchObject({ status: 'failed', error: 'the workspace store went away' });
+    const notes = await rt.notifications.listForOrg(ORG, { limit: 10 });
+    expect(notes[0]).toMatchObject({ level: 'error', title: 'Document scan failed' });
+    // A run the scan opened before dying is still where the failure is read.
+    expect(notes[0]!.data).toMatchObject({ runId: SCAN_RUN_ID });
+  });
+
+  it('carries no address when the scan died before a run existed', async () => {
     const rt = runtime();
     const job = await rt.jobStore.create({ org: ORG, type: 'context.scan', key: 'context.scan' });
     const def = createContextScanTask({
@@ -214,10 +247,8 @@ describe('the context.scan job', () => {
       () => undefined,
     );
 
-    const settled = await rt.jobStore.get(job.id);
-    expect(settled).toMatchObject({ status: 'failed', error: 'the workspace store went away' });
     const notes = await rt.notifications.listForOrg(ORG, { limit: 10 });
-    expect(notes[0]).toMatchObject({ level: 'error', title: 'Document scan failed' });
+    expect(notes[0]!.data).not.toHaveProperty('runId');
   });
 });
 

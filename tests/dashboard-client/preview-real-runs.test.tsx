@@ -3,15 +3,14 @@
  *
  * The shell follows every repository's agent runs over the one socket it
  * holds, so a run that starts anywhere shows up on whatever page the user is
- * on: a toast, a job chain, the `onboarding` marker on the repository's row,
- * and a notification when it starts and again when it settles.
+ * on: a toast, a job chain, and the `onboarding` marker on the repository's row.
  *
  * The socket here is a hand-rolled emitter: the point of every case below is
  * what the shell does with a `session:runs-changed` event, so the test fires
  * them and lets the shell re-read the runs the fake server holds.
  *
  * The control group is a workspace with NOTHING connected: no repository is
- * asked about its runs, no room is joined, and the feed stays empty.
+ * asked about its runs and no room is joined.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -50,7 +49,7 @@ vi.mock('@/lib/socket', () => {
 });
 
 import PreviewApp from '@/preview/PreviewApp';
-import { relativeTime, repoRunState, toJobChain, toNotifications } from '@/preview/shell/real-runs';
+import { relativeTime, repoRunState, toJobChain } from '@/preview/shell/real-runs';
 import type { PublicSessionRun } from '@/lib/api';
 
 function fireSocket(event: string, payload: unknown): void {
@@ -157,13 +156,9 @@ describe('a run record as the shell reads it', () => {
     ]);
   });
 
-  it('opens the run’s own conversation from its job and from both of its notifications', () => {
+  it('opens the run’s own conversation from its job', () => {
     const run = runningScan();
-    const href = `/preview/agent/${encodeURIComponent(run.runId)}`;
-    expect(toJobChain(repo, run, true).href).toBe(href);
-    expect(toNotifications(repo, run, Date.now()).map((n) => n.href)).toEqual([href]);
-    const settled = runningScan({ status: 'failed', finishedAt: '2026-08-25T10:05:00Z' });
-    expect(toNotifications(repo, settled, Date.now()).map((n) => n.href)).toEqual([href, href]);
+    expect(toJobChain(repo, run, true).href).toBe(`/preview/agent/${encodeURIComponent(run.runId)}`);
   });
 
   it('names the command instead of onboarding on a re-scan', () => {
@@ -254,34 +249,6 @@ describe('a run in the shell', () => {
     expect(screen.queryByRole('button', { name: /Open conversation/ })).toBeNull();
   });
 
-  it('files a notification when the run starts and another when it settles', async () => {
-    const state = serve([runningScan()]);
-    renderAt('/preview/notifications');
-
-    await screen.findByText('Document scan started on linkwarden/linkwarden');
-    expect(screen.queryByText(/Document scan completed on/)).toBeNull();
-
-    state.runs = [runningScan({ status: 'completed', finishedAt: new Date().toISOString() })];
-    fireSocket('session:runs-changed', { repoId: 'linkwarden' });
-
-    expect(
-      await screen.findByText('Document scan completed on linkwarden/linkwarden'),
-    ).toBeInTheDocument();
-    // The start stays: the feed is a history, not a status line.
-    expect(screen.getByText('Document scan started on linkwarden/linkwarden')).toBeInTheDocument();
-  });
-
-  it('files a failure when the run fails', async () => {
-    const state = serve([runningScan()]);
-    renderAt('/preview/notifications');
-    await screen.findByText('Document scan started on linkwarden/linkwarden');
-
-    state.runs = [runningScan({ status: 'failed', finishedAt: new Date().toISOString() })];
-    fireSocket('session:runs-changed', { repoId: 'linkwarden' });
-
-    expect(await screen.findByText('Document scan failed on linkwarden/linkwarden')).toBeInTheDocument();
-  });
-
   it('asks nothing and joins nothing when no repository is connected', async () => {
     window.fetch = vi.fn(async (input: RequestInfo | URL) => {
       const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
@@ -290,12 +257,10 @@ describe('a run in the shell', () => {
       return json({ error: 'not found' }, 404);
     }) as unknown as typeof window.fetch;
 
-    renderAt('/preview/notifications');
+    renderAt('/preview/code');
 
-    // The feed is empty, in its own words, and nothing was invented to fill it.
-    expect(await screen.findByText('Nothing has happened yet.')).toBeInTheDocument();
-    expect(screen.queryByText(/Document scan started on/)).toBeNull();
-    // And no repository's sessions store was ever asked about.
+    // The one empty line, and no repository's sessions store ever asked about.
+    expect(await screen.findByText('No repository connected yet.')).toBeInTheDocument();
     const calls = (window.fetch as unknown as { mock: { calls: [RequestInfo | URL][] } }).mock.calls;
     expect(calls.some(([input]) => String(input).includes('/sessions/runs'))).toBe(false);
     expect(socketMock.joins).toEqual([]);

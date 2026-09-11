@@ -470,8 +470,11 @@ describe('the guard setup job', () => {
     expect(setup).toMatchObject({ status: 'succeeded', result: { status: 'ok', documents: 0 } });
     expect(setup?.error).toBeNull();
     const [note] = await new NotificationStore(db).listForOrg(ORG, { limit: 10 });
-    expect(note).toMatchObject({ level: 'success', title: 'Guard setup complete' });
-    expect(note?.body).toContain('no documents linked yet');
+    expect(note).toMatchObject({ level: 'success', title: 'Flow setup complete' });
+    expect(note?.body).toContain('No documents linked yet');
+    // The row's address: the setup's own conversation.
+    const [setupRun] = await listStoredSessionRuns(REPO, 'guard-setup');
+    expect(note?.data).toMatchObject({ repoFullName: REPO, runId: setupRun!.runId });
   }, 60_000);
 
   it('chains nothing when setup was refused', async () => {
@@ -762,7 +765,10 @@ describe('the guard generate job', () => {
     );
     expect(evidence).toBe('step 1 failed');
     const notes = await new NotificationStore(db).listForOrg(ORG);
-    expect(notes.map((n) => [n.level, n.title])).toEqual([['warning', 'Scenarios generated — findings to review']]);
+    expect(notes.map((n) => [n.level, n.title])).toEqual([['warning', 'Flows generated, findings to review']]);
+    // The row's address: the generate's own conversation.
+    const [generateRun] = await listStoredSessionRuns(REPO, 'guard-generate');
+    expect(notes[0]?.data).toMatchObject({ repoFullName: REPO, runId: generateRun!.runId });
     expect(fs.existsSync(clone)).toBe(false);
   }, 60_000);
 
@@ -809,7 +815,7 @@ describe('the guard generate job', () => {
     expect(opened?.record()).toMatchObject({ status: 'failed', error: { message: job.error } });
     const notes = await new NotificationStore(db).listForOrg(ORG);
     expect(notes).toHaveLength(1);
-    expect(notes[0]).toMatchObject({ level: 'error', title: 'Scenario generation failed', body: expect.stringContaining('docs/app.md') });
+    expect(notes[0]).toMatchObject({ level: 'error', title: 'Flow generation failed', body: expect.stringContaining('docs/app.md') });
     expect(enqueued).toEqual(['repo.guard-generate']);
     expect(disposed).toEqual([clone]);
   }, 60_000);
@@ -863,7 +869,7 @@ describe('the guard generate job', () => {
     });
     expect((await loadScenarios({ repoKey: REPO, commitSha: baseline! })).scenarios).toEqual([]);
     const notes = await new NotificationStore(db).listForOrg(ORG);
-    expect(notes[0]).toMatchObject({ level: 'warning', title: 'Scenario generation blocked' });
+    expect(notes[0]).toMatchObject({ level: 'warning', title: 'Flow generation blocked' });
   });
 
   it('a generate that authored nothing fails with its reason and stores nothing', async () => {
@@ -1103,7 +1109,10 @@ describe('the guard run job', () => {
     expect(await store.readGuardEvidenceBytesAt(REPO, dir, 'step-1.png')).toEqual(PNG);
 
     const notes = await new NotificationStore(db).listForOrg(ORG);
-    expect(notes.map((n) => [n.level, n.title])).toEqual([['warning', 'Scenarios ran — failures to review']]);
+    expect(notes.map((n) => [n.level, n.title])).toEqual([['warning', 'Flows ran, failures to review']]);
+    // The row's address: the repository's own page for THIS run.
+    expect(notes[0]?.data).toMatchObject({ repoFullName: REPO, guardRunId: RUN_ID });
+    expect(notes[0]?.data).not.toHaveProperty('runId');
     expect(fs.existsSync(clone)).toBe(false);
   }, 60_000);
 

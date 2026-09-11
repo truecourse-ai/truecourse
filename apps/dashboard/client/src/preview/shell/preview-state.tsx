@@ -8,13 +8,12 @@
  * from `GET /api/repos` on mount; unlinking one really disconnects it. Their
  * WORK rides `useRealRunStream`, which follows every repository's agent runs
  * over the shell's one socket: a run in flight is a job (a toast, an in-flight
- * chain whose steps are the run's own phase checklist), a settled one is a pair
- * of notifications (started, settled), and both feed the `onboarding` marker and
- * the last check on the repository's row.
+ * chain whose steps are the run's own phase checklist), a run that ended badly
+ * is an announcement, and both feed the `onboarding` marker and the last check
+ * on the repository's row. The NOTIFICATION FEED is the server's own store,
+ * read by `useNotifications`.
  *
- * Nothing is persisted: no localStorage, and the socket only listens. Read state
- * on the notification feed is session-local, because the feed itself is derived
- * from the runs rather than stored anywhere.
+ * Nothing is persisted here: no localStorage, and the socket only listens.
  */
 
 import {
@@ -32,12 +31,9 @@ import { disconnectRealRepo, fetchRealRepos } from '@/preview/data/real-repos';
 import { fetchLlmConfig } from '@/preview/data/llm-config';
 import { useAuth } from '@/ee/AuthContext';
 import { useRealRunStream, type RunFailure } from './real-runs';
-import type {
-  JobChain,
-  PreviewNotification,
-  Repo,
-  Workspace,
-} from '@/preview/data/types';
+import { useNotifications } from './use-notifications';
+import type { NotificationView } from '@truecourse/shared';
+import type { JobChain, Repo, Workspace } from '@/preview/data/types';
 
 interface PreviewStateValue {
   /** The organization of the session. Null until the session probe answers. */
@@ -55,8 +51,8 @@ interface PreviewStateValue {
    * has reached a render.
    */
   refreshRealRepos: () => Promise<Repo[]>;
-  /** Every start and settle this session watched, newest first. */
-  notifications: PreviewNotification[];
+  /** The workspace's stored notification feed, newest first. */
+  notifications: NotificationView[];
   unreadCount: number;
   markRead: (id: string) => void;
   markAllRead: () => void;
@@ -163,6 +159,8 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
 
   // The repositories' runs, followed live. Inert without a server.
   const realRuns = useRealRunStream(repos, reposLoaded);
+  // The workspace's notification feed, read from the store and followed live.
+  const feed = useNotifications();
 
   const value = useMemo<PreviewStateValue>(() => {
     const workspace: Workspace | null = orgName
@@ -189,10 +187,10 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
       repos: allRepos,
       unlinkRepo,
       refreshRealRepos,
-      notifications: realRuns.notifications,
-      unreadCount: realRuns.notifications.filter((n) => !n.read).length,
-      markRead: realRuns.markRead,
-      markAllRead: realRuns.markAllRead,
+      notifications: feed.notifications,
+      unreadCount: feed.unreadCount,
+      markRead: feed.markRead,
+      markAllRead: feed.markAllRead,
       jobs: realRuns.jobs,
       jobsReady: realRuns.ready,
       runFailures: realRuns.failures,
@@ -204,6 +202,7 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
     orgName,
     repos,
     realRuns,
+    feed,
     llmProvider,
     refreshLlmProvider,
     unlinkRepo,

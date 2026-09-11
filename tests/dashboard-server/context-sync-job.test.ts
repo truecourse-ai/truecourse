@@ -217,8 +217,12 @@ describe('the first sync', () => {
     );
     const feed = await rt.notifications.listForOrg(ORG);
     expect(feed).toHaveLength(1);
-    expect(feed[0]).toMatchObject({ kind: 'context.sync', level: 'success' });
+    expect(feed[0]).toMatchObject({ kind: 'context.sync', level: 'success', title: 'Source synced' });
     expect(feed[0]!.body).toContain('1 added');
+    // The source itself is neither in the title nor the body: the row's address
+    // carries it, and the page names it from the source.
+    expect(feed[0]!.body).not.toContain('Docs');
+    expect(feed[0]!.data).toMatchObject({ sourceId: SOURCE, sourceTitle: 'Docs' });
   });
 
   it('tells the workspace twice: it started, and what it holds now', async () => {

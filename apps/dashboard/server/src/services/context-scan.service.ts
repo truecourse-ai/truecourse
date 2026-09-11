@@ -111,12 +111,13 @@ export function contextIsStale(corpusAt: string | null, changedAt: string | null
 /**
  * A workspace scan run that exists only to carry its own failure — the
  * pre-flight died before the scan could create one. Best-effort: a store that
- * cannot be written must not turn one failure into two.
+ * cannot be written must not turn one failure into two. Answers with the run's
+ * id so the job's notification can address it, and null when nothing was written.
  */
 export async function recordFailedWorkspaceScanRun(
   org: string,
   error: RunError,
-): Promise<void> {
+): Promise<string | null> {
   try {
     const run = await createStoredSessionRun(workspaceSessionsKey(org), {
       command: 'spec-scan',
@@ -125,9 +126,11 @@ export async function recordFailedWorkspaceScanRun(
     });
     run.finish('failed', { error });
     await run.flush?.();
+    return run.runId;
   } catch (err) {
     log.warn(
       `[context] could not record the failed workspace scan for ${org}: ${(err as Error).message}`,
     );
+    return null;
   }
 }

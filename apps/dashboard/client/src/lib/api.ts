@@ -26,6 +26,7 @@ import type {
   ContextSourcesResponse,
   ContextSourceUpdateResponse,
   ContextSourceView,
+  NotificationsResponse,
 } from '@truecourse/shared';
 import type { GuardExternalPatch, GuardExternalsView } from '@/types/guard-externals';
 import type { RunRecord, SessionCommand, SessionEvent } from '@truecourse/agent-loop';
@@ -1702,5 +1703,24 @@ export function deleteContextConflictResolution(payload: {
   return fetchApi<SpecConflictAck>('/api/context/conflict-resolution', {
     method: 'DELETE',
     body: JSON.stringify(payload),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Notifications: the workspace's durable feed. Every job posts into it when it
+// settles; the page reads it back and marks rows read.
+// ---------------------------------------------------------------------------
+
+export function listNotifications(): Promise<NotificationsResponse> {
+  return fetchApi<NotificationsResponse>('/api/notifications');
+}
+
+/** Mark the named rows read, or every unread row. Answers with the new count. */
+export function markNotificationsRead(
+  what: { ids: string[] } | { all: true },
+): Promise<{ unreadCount: number }> {
+  return fetchApi<{ unreadCount: number }>('/api/notifications/read', {
+    method: 'POST',
+    body: JSON.stringify(what),
   });
 }

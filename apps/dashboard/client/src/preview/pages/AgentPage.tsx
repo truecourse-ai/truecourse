@@ -168,7 +168,7 @@ function AgentIndex() {
       },
       {
         key: 'took',
-        label: 'Took', width: '5rem',
+        label: 'Took', width: '6rem',
         align: 'right',
         className: 'text-muted-foreground',
         cell: (run) => runDuration(run),

@@ -80,6 +80,9 @@ export function createContextScanTask(
   // What the settle hook needs and the row cannot carry: the two corpora the
   // ripple compares. Keyed by job id, and cleared however the job settles.
   const rippleInputs = new Map<string, ContextRippleInput>();
+  // The session run the scan opened, so the failure notification can carry its
+  // address too: `onError` is handed the payload alone. Same lifetime.
+  const runIds = new Map<string, string>();
 
   return {
     type: CONTEXT_SCAN_TASK,
@@ -99,7 +102,11 @@ export function createContextScanTask(
         // The probe died before the scan could open a run — create one carrying
         // the reason, so the Agent page shows a failed scan instead of nothing.
         if (err instanceof LlmProbeFailedError) {
-          await recordFailedWorkspaceScanRun(org, { message: err.message, kind: 'llm-probe' });
+          const runId = await recordFailedWorkspaceScanRun(org, {
+            message: err.message,
+            kind: 'llm-probe',
+          });
+          if (runId) runIds.set(ctx.jobId, runId);
         }
         throw err;
       }
@@ -111,6 +118,9 @@ export function createContextScanTask(
         source: 'dashboard',
         driver: llm.driver(),
         transportMode: llm.mode,
+        onRunStarted: (info) => {
+          runIds.set(ctx.jobId, info.runId);
+        },
         ...(ctx.signal ? { signal: ctx.signal } : {}),
       });
 
@@ -130,36 +140,41 @@ export function createContextScanTask(
         corpusChanged: result.corpusChanged,
         startedAt,
       };
+      const runId = runIds.get(ctx.jobId);
       return {
         result: jobResult,
         notification:
           conflicts > 0
             ? {
                 level: 'warning',
-                title: 'Documents scanned — conflicts to resolve',
+                title: 'Documents scanned, conflicts to resolve',
                 body: `${result.corpus.docs.length} document${result.corpus.docs.length === 1 ? '' : 's'} curated, but ${conflicts} open conflict${conflicts === 1 ? '' : 's'} must be resolved before tests are regenerated.`,
-                data: { openConflicts: conflicts },
+                data: { openConflicts: conflicts, ...(runId ? { runId } : {}) },
               }
             : {
                 level: 'success',
                 title: 'Documents scanned',
                 body: `${result.corpus.docs.length} document${result.corpus.docs.length === 1 ? '' : 's'} in ${result.corpus.areas.length} area${result.corpus.areas.length === 1 ? '' : 's'}.`,
-                data: { documents: result.corpus.docs.length },
+                data: { documents: result.corpus.docs.length, ...(runId ? { runId } : {}) },
               },
       };
     },
 
-    onError: (err, payload) => ({
-      level: 'error',
-      title: 'Document scan failed',
-      body: err.message,
-      data: { workspaceOrgId: payload.workspaceOrgId },
-    }),
+    onError: (err, payload) => {
+      const runId = runIds.get(payload.jobId);
+      return {
+        level: 'error',
+        title: 'Document scan failed',
+        body: err.message,
+        data: { workspaceOrgId: payload.workspaceOrgId, ...(runId ? { runId } : {}) },
+      };
+    },
 
     async onSettled(ctx, outcome, result) {
       const org = ctx.payload.workspaceOrgId;
       const input = rippleInputs.get(ctx.jobId);
       rippleInputs.delete(ctx.jobId);
+      runIds.delete(ctx.jobId);
       if (outcome !== 'succeeded') return;
       const scan = result as ContextScanJobResult | undefined;
       if (!scan) return;

@@ -77,6 +77,10 @@ export function createRepoGuardGenerateTask(
 ): JobDefinition<GuardGenerateJobPayload> {
   const startLlm = deps.startLlm ?? startWorkspaceLlm;
   const runGenerate = deps.runGenerate ?? guardGenerateInProcess;
+  // The session run the body opened, so the failure notification can carry its
+  // address too: `onError` is handed the payload alone. Keyed by job id, and
+  // cleared however the job settles.
+  const runIds = new Map<string, string>();
 
   return {
     type: REPO_GUARD_GENERATE_TASK,
@@ -88,6 +92,7 @@ export function createRepoGuardGenerateTask(
     async run(ctx) {
       return dashboardActivity(ctx, 'guard-generate', GUARD_GENERATE_STEPS, async (activityRun, activityTracker) => {
         const { repoFullName } = ctx.payload;
+        runIds.set(ctx.jobId, activityRun.runId);
         const llm = await startLlm(ctx.payload.workspaceOrgId);
 
         await ctx.phase('clone');
@@ -167,9 +172,13 @@ export function createRepoGuardGenerateTask(
                 result,
                 notification: {
                   level: 'warning',
-                  title: 'Scenario generation blocked',
-                  body: `${repoFullName} — ${firstLine(err.message)}`,
-                  data: { repoFullName, openConflicts: err.conflicts.length },
+                  title: 'Flow generation blocked',
+                  body: firstLine(err.message),
+                  data: {
+                    repoFullName,
+                    runId: activityRun.runId,
+                    openConflicts: err.conflicts.length,
+                  },
                 },
               };
             }
@@ -212,22 +221,27 @@ export function createRepoGuardGenerateTask(
             notification: report.noChanges
               ? {
                   level: 'success',
-                  title: 'Scenarios up to date',
-                  body: `${repoFullName} — nothing changed since the last generate.`,
-                  data: { repoFullName },
+                  title: 'Flows up to date',
+                  body: 'Nothing changed since the last generate.',
+                  data: { repoFullName, runId: activityRun.runId },
                 }
               : findings > 0
                 ? {
                     level: 'warning',
-                    title: 'Scenarios generated — findings to review',
-                    body: `${repoFullName} — ${written} scenario${written === 1 ? '' : 's'} written, ${findings} birth finding${findings === 1 ? '' : 's'}.`,
-                    data: { repoFullName, written, birthFindings: findings },
+                    title: 'Flows generated, findings to review',
+                    body: `${written} scenario${written === 1 ? '' : 's'} written, ${findings} birth finding${findings === 1 ? '' : 's'}.`,
+                    data: {
+                      repoFullName,
+                      runId: activityRun.runId,
+                      written,
+                      birthFindings: findings,
+                    },
                   }
                 : {
                     level: 'success',
-                    title: 'Scenarios generated',
-                    body: `${repoFullName} — ${written} scenario${written === 1 ? '' : 's'} written.`,
-                    data: { repoFullName, written },
+                    title: 'Flows generated',
+                    body: `${written} scenario${written === 1 ? '' : 's'} written.`,
+                    data: { repoFullName, runId: activityRun.runId, written },
                   },
           };
         } finally {
@@ -236,14 +250,18 @@ export function createRepoGuardGenerateTask(
       });
     },
 
-    onError: (err, payload) => ({
-      level: 'error',
-      title: 'Scenario generation failed',
-      body: `${payload.repoFullName} — ${firstLine(err.message)}`,
-      data: { repoFullName: payload.repoFullName },
-    }),
+    onError: (err, payload) => {
+      const runId = runIds.get(payload.jobId);
+      return {
+        level: 'error',
+        title: 'Flow generation failed',
+        body: firstLine(err.message),
+        data: { repoFullName: payload.repoFullName, ...(runId ? { runId } : {}) },
+      };
+    },
 
     async onSettled(ctx, outcome, result) {
+      runIds.delete(ctx.jobId);
       // Clears the in-page progress popup and refreshes the guard surfaces,
       // however the generate ended.
       await emitRepoLifecycle(ctx.payload.repoFullName, 'guard-generate');

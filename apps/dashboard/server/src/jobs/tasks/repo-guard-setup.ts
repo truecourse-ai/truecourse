@@ -66,6 +66,10 @@ export function createRepoGuardSetupTask(
   const startLlm = deps.startLlm ?? startWorkspaceLlm;
   const runSetup = deps.runSetup ?? guardSetupInProcess;
   const sliceDocuments = deps.sliceDocuments ?? storedSliceSize;
+  // The session run the body opened, so the failure notification can carry its
+  // address too: `onError` is handed the payload alone. Keyed by job id, and
+  // cleared however the job settles.
+  const runIds = new Map<string, string>();
 
   return {
     type: REPO_GUARD_SETUP_TASK,
@@ -77,6 +81,7 @@ export function createRepoGuardSetupTask(
     async run(ctx) {
       return dashboardActivity(ctx, 'guard-setup', GUARD_SETUP_STEPS, async (activityRun, activityTracker) => {
         const { repoFullName, only, refresh } = ctx.payload;
+        runIds.set(ctx.jobId, activityRun.runId);
         const llm = await startLlm(ctx.payload.workspaceOrgId);
 
         await ctx.phase('clone');
@@ -151,18 +156,18 @@ export function createRepoGuardSetupTask(
               report.status === 'ok'
                 ? {
                     level: 'success',
-                    title: 'Guard setup complete',
+                    title: 'Flow setup complete',
                     body:
                       documents === 0
-                        ? `${repoFullName} — set up; no documents linked yet.`
-                        : `${repoFullName} — the recipe and its dependencies are ready.`,
-                    data: { repoFullName, documents },
+                        ? 'Set up. No documents linked yet.'
+                        : 'The recipe and its dependencies are ready.',
+                    data: { repoFullName, runId: activityRun.runId, documents },
                   }
                 : {
                     level: 'error',
-                    title: 'Guard setup did not complete',
-                    body: `${repoFullName} — ${reason || 'setup was refused.'}`,
-                    data: { repoFullName },
+                    title: 'Flow setup did not complete',
+                    body: reason || 'Setup was refused.',
+                    data: { repoFullName, runId: activityRun.runId },
                   },
           };
         } finally {
@@ -171,14 +176,18 @@ export function createRepoGuardSetupTask(
       });
     },
 
-    onError: (err, payload) => ({
-      level: 'error',
-      title: 'Guard setup failed',
-      body: `${payload.repoFullName} — ${err.message}`,
-      data: { repoFullName: payload.repoFullName },
-    }),
+    onError: (err, payload) => {
+      const runId = runIds.get(payload.jobId);
+      return {
+        level: 'error',
+        title: 'Flow setup failed',
+        body: err.message,
+        data: { repoFullName: payload.repoFullName, ...(runId ? { runId } : {}) },
+      };
+    },
 
     async onSettled(ctx, outcome, result) {
+      runIds.delete(ctx.jobId);
       // Clears the in-page progress popup and refreshes the guard surfaces,
       // however setup ended.
       await emitRepoLifecycle(ctx.payload.repoFullName, 'guard-setup');
