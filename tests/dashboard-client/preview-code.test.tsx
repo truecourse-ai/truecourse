@@ -1,3 +1,10 @@
+/**
+ * Code: the repositories of the workspace, and what the server stored about
+ * each one. The table moved off Home when Home became the product owner's
+ * dashboard, so the reads it makes and the words its cells wear are asserted
+ * here; Home's own test is the smoke file's, since Home now holds nothing.
+ */
+
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -6,7 +13,7 @@ import { toPreviewRepo } from '@/preview/data/real-repos';
 import { REPOS } from '@/preview/data/repos';
 import { statusSummary } from '@/preview/data/corpus-fixtures';
 import type { GuardStatusSummary } from '@/preview/vendor/shared';
-import HomePage from '@/preview/pages/HomePage';
+import CodePage from '@/preview/pages/CodePage';
 
 const state = vi.hoisted(() => ({ repos: [] as ReturnType<typeof toPreviewRepo>[] }));
 const listeners = vi.hoisted(() => new Map<string, Set<(payload: unknown) => void>>());
@@ -54,9 +61,9 @@ function serve(initial = summary()) {
   }));
   return server;
 }
-function renderHome() {
-  return render(<MemoryRouter initialEntries={['/preview']}><Routes>
-    <Route path="/preview" element={<HomePage />} />
+function renderCode() {
+  return render(<MemoryRouter initialEntries={['/preview/code']}><Routes>
+    <Route path="/preview/code" element={<CodePage />} />
     <Route path="/preview/repos/:id" element={<p>Console destination</p>} />
     <Route path="/preview/repos/:id/runs" element={<p>Runs destination</p>} />
   </Routes></MemoryRouter>);
@@ -68,10 +75,10 @@ function complete(id = repo.id) {
 beforeEach(() => { state.repos = [repo]; listeners.clear(); });
 afterEach(() => vi.unstubAllGlobals());
 
-describe('preview home stored summaries', () => {
+describe('Code, the repositories and their stored summaries', () => {
   it('loads requirements, flow totals, proven percentage, verdict and baseline from the server', async () => {
     serve();
-    renderHome();
+    renderCode();
     expect(await screen.findByText('6 sections · 50% proven')).toBeInTheDocument();
     expect(screen.getByRole('img', { name: 'Flows: 1 failed, 1 succeeded' })).toBeInTheDocument();
     expect(row().getByText('50%')).toBeInTheDocument();
@@ -84,7 +91,7 @@ describe('preview home stored summaries', () => {
 
   it('refreshes only the changed repository and updates totals after a scan or run completes', async () => {
     const server = serve();
-    const { unmount } = renderHome();
+    const { unmount } = renderCode();
     await screen.findByText('50%');
     const calls = vi.mocked(fetch).mock.calls.length;
     complete('unrelated-repo');
@@ -101,7 +108,7 @@ describe('preview home stored summaries', () => {
   it('keeps an empty repository distinct from loading and renders the missing baseline once', async () => {
     const server = serve(empty);
     server.corpus = null;
-    renderHome();
+    renderCode();
     expect(screen.getByText('Loading repository summaries…')).toBeInTheDocument();
     expect(row().queryByText('no corpus yet')).toBeNull();
     expect(await screen.findByText('no corpus yet')).toBeInTheDocument();
@@ -114,7 +121,7 @@ describe('preview home stored summaries', () => {
     const server = serve();
     server.statusCode = 500;
     server.corpusCode = 500;
-    renderHome();
+    renderCode();
     expect(await screen.findByText('Coverage unavailable')).toBeInTheDocument();
     expect(row().getByText('Baseline unavailable')).toBeInTheDocument();
     expect(screen.getByText('Totals exclude repositories whose coverage could not be loaded.')).toBeInTheDocument();
@@ -126,7 +133,7 @@ describe('preview home stored summaries', () => {
 
   it('does not call a blocked or empty test run passing', async () => {
     const server = serve({ ...summary(), lastRun: { ...summary().lastRun!, summary: { total: 2, pass: 1, blocked: 1, fail: 0, error: 0, stale: 0, orphaned: 0 } } });
-    renderHome();
+    renderCode();
     await screen.findByText('50%');
     expect(row().getByText('Neutral')).toBeInTheDocument();
     server.summary.lastRun!.summary = { total: 0, pass: 0, blocked: 0, fail: 0, error: 0, stale: 0, orphaned: 0 };
@@ -138,7 +145,7 @@ describe('preview home stored summaries', () => {
   it('includes fixture coverage in workspace totals without fetching fixture repositories', async () => {
     serve();
     state.repos = [repo, REPOS[0]!];
-    renderHome();
+    renderCode();
     await screen.findByText('50%');
     const fixtureSections = statusSummary(REPOS[0]!.id).sections!;
     const total = 6 + fixtureSections.total;
@@ -150,7 +157,7 @@ describe('preview home stored summaries', () => {
   it('retains coverage when the baseline read fails and uses manifest totals before whole-corpus totals exist', async () => {
     const server = serve({ ...summary(), sections: null });
     server.corpusCode = 500;
-    renderHome();
+    renderCode();
     expect(await screen.findByText('4 sections · 50% proven')).toBeInTheDocument();
     expect(row().getByText('Baseline unavailable')).toBeInTheDocument();
     expect(row().getByText('Failing')).toBeInTheDocument();
@@ -160,7 +167,7 @@ describe('preview home stored summaries', () => {
     serve();
     let resolveOld!: (response: Response) => void;
     vi.mocked(fetch).mockImplementationOnce(() => new Promise<Response>((resolve) => { resolveOld = resolve; }));
-    renderHome();
+    renderCode();
     complete();
     await screen.findByText('50%');
     await act(async () => { resolveOld(json(empty)); });
@@ -170,10 +177,17 @@ describe('preview home stored summaries', () => {
 
   it('opens the repository console from the row keyboard action', async () => {
     serve();
-    renderHome();
+    renderCode();
     await screen.findByText('50%');
     screen.getByText(repo.fullName).closest('tr')!.focus();
     await userEvent.keyboard('{Enter}');
     expect(screen.getByText('Console destination')).toBeInTheDocument();
+  });
+
+  it('is headed Code, and connecting a repository is its one action', async () => {
+    serve();
+    renderCode();
+    expect(await screen.findByRole('heading', { name: 'Code' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Connect repository' })).toBeInTheDocument();
   });
 });

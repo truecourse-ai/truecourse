@@ -5,7 +5,7 @@ import { getGuardStatus } from '@/preview/vendor/lib/api';
 import type { GuardStatusSummary } from '@/preview/vendor/shared';
 import type { Repo } from '@/preview/data/types';
 
-export interface HomeSummary {
+export interface RepoSummary {
   status?: GuardStatusSummary;
   corpus?: SpecCorpusResponse | null;
   statusError: boolean;
@@ -13,9 +13,9 @@ export interface HomeSummary {
 }
 
 /** Read each connected repository independently. The shell owns socket rooms. */
-export function useHomeSummaries(repos: readonly Repo[]): ReadonlyMap<string, HomeSummary> {
+export function useRepoSummaries(repos: readonly Repo[]): ReadonlyMap<string, RepoSummary> {
   const idsKey = JSON.stringify(repos.filter((repo) => repo.real).map((repo) => repo.id).sort());
-  const [summaries, setSummaries] = useState<ReadonlyMap<string, HomeSummary>>(new Map());
+  const [summaries, setSummaries] = useState<ReadonlyMap<string, RepoSummary>>(new Map());
 
   useEffect(() => {
     const ids = new Set<string>(JSON.parse(idsKey));

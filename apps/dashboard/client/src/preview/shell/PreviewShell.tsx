@@ -2,7 +2,8 @@
  * The one-product shell: the sidebar the whole dashboard hangs off.
  *
  * Top to bottom: the workspace switcher, then
- * Home, Context, Agent, Notifications (with the unread badge) and Settings, then Admin
+ * Home, Context, Code, Flows, Agent, Notifications (with the unread badge) and
+ * Settings, then Admin
  * on its own, separated, when the signed-in user is an operator, then the
  * user menu. Pull requests is NOT here: it lives inside a repository, and the
  * cross-repo feed it used to be is the home page's gate activity.
@@ -17,6 +18,8 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom';
 import {
   Bell,
+  FlaskConical,
+  GitBranch,
   Home,
   Layers,
   ChevronsUpDown,
@@ -47,6 +50,8 @@ const WORDMARK = { fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, 
 const NAV: { to: string; label: string; icon: LucideIcon; disabled?: boolean }[] = [
   { to: PREVIEW_BASE, label: 'Home', icon: Home },
   { to: `${PREVIEW_BASE}/context`, label: 'Context', icon: Layers },
+  { to: `${PREVIEW_BASE}/code`, label: 'Code', icon: GitBranch },
+  { to: `${PREVIEW_BASE}/flows`, label: 'Flows', icon: FlaskConical },
   { to: `${PREVIEW_BASE}/agent`, label: 'Agent', icon: MousePointer2 },
   { to: `${PREVIEW_BASE}/notifications`, label: 'Notifications', icon: Bell },
   { to: `${PREVIEW_BASE}/settings`, label: 'Settings', icon: Settings },
@@ -265,8 +270,8 @@ export function PreviewShell({ children }: { children: ReactNode }) {
     to === PREVIEW_BASE
       ? pathname === PREVIEW_BASE || pathname === `${PREVIEW_BASE}/`
       : pathname.startsWith(to) ||
-        // A repository page belongs to Home, where the repositories are: it stays lit inside one.
-        (to === PREVIEW_BASE && pathname.startsWith(`${PREVIEW_BASE}/repos/`));
+        // A repository page belongs to Code, where the repositories are: it stays lit inside one.
+        (to === `${PREVIEW_BASE}/code` && pathname.startsWith(`${PREVIEW_BASE}/repos/`));
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">

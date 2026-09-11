@@ -6,8 +6,8 @@
  * one moves. Nothing is added here and no scan starts here — both belong to
  * Context, which this tab links to.
  *
- * The retirements ride along: the console has no Corpus tab and no Sources tab
- * any more, and a bare repository address lands on Tests.
+ * The retirements ride along: the console has no Corpus tab, no Sources tab and
+ * no Tests tab any more, and a bare repository address lands on Runs.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -215,11 +215,13 @@ describe('what the console no longer has', () => {
     );
   });
 
-  it('lands a bare repository address on Tests', async () => {
+  it('has no Tests tab either: the flows are the workspace\'s, and a bare address lands on Runs', async () => {
     serve();
     renderAt(`/preview/repos/${REPO.id}`);
     const menu = await screen.findByRole('navigation', { name: 'Repository sections' });
-    expect(within(menu).getByRole('link', { name: 'Tests' })).toHaveAttribute(
+    expect(within(menu).queryByRole('link', { name: 'Tests' })).toBeNull();
+    expect(within(menu).queryByRole('link', { name: 'Flows' })).toBeNull();
+    expect(within(menu).getByRole('link', { name: 'Runs' })).toHaveAttribute(
       'aria-current',
       'page',
     );

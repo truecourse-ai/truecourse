@@ -218,7 +218,7 @@ describe('a real run in the shell', () => {
     const state = serve([]);
     // Home is not where the subscription lives — the shell is — so any address
     // would do here. This one is also the address that shows the marker.
-    renderAt('/preview');
+    renderAt('/preview/code');
 
     // The room is joined for the real repository — that is what makes the
     // server watch its store at all.
@@ -243,7 +243,7 @@ describe('a real run in the shell', () => {
 
   it('stays silent for a run already in flight when the page loads (every sign-in reloads)', async () => {
     serve([runningScan()]);
-    renderAt('/preview');
+    renderAt('/preview/code');
 
     // The run is known — the row carries the onboarding marker — but it was
     // in flight on arrival, so it never toasts. The runs arrive AFTER the
@@ -314,7 +314,7 @@ describe('a real run in the shell', () => {
       throw new TypeError('Failed to fetch');
     }) as unknown as typeof window.fetch;
 
-    renderAt('/preview');
+    renderAt('/preview/code');
     expect(await screen.findByText('acme/orders-api')).toBeInTheDocument();
     expect(screen.queryByText(/Onboarding linkwarden/)).toBeNull();
   });

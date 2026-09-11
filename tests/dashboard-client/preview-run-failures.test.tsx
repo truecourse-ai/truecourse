@@ -218,7 +218,7 @@ describe('the Agent index', () => {
 describe('the failure toast', () => {
   it('fires once when a watched run dies, and carries the reason', async () => {
     const state = serve([scan()]);
-    renderAt('/preview');
+    renderAt('/preview/code');
 
     // The world is loaded and the scan is up; NOW it dies.
     await screen.findByText('linkwarden/linkwarden');
@@ -240,7 +240,7 @@ describe('the failure toast', () => {
 
   it('stays silent for a run that was already dead when the page loaded', async () => {
     serve([failed()]);
-    renderAt('/preview');
+    renderAt('/preview/code');
 
     await screen.findByText('linkwarden/linkwarden');
     // The row knows; the shell does not shout about it.

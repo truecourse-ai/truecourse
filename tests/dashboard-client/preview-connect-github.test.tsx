@@ -5,7 +5,12 @@
  * dialog reads the real `/api/github/status`, lists what an installation can
  * see, posts one `/api/github/repos/link` per picked repository, and the shell
  * re-reads the real `/api/repos`. A repository that came back that way renders
- * on Home with none of the fixture coverage the mock repositories have.
+ * on Code with none of the fixture coverage the mock repositories have.
+ *
+ * The CONTEXT STEP is the second real seam: the workspace's sources come from
+ * `/api/context/sources`, the repository's own documentation leads them checked,
+ * and what was picked is written per repository with
+ * `PUT /api/repos/:id/context/bindings` once the link landed.
  *
  * The seam widened with the agent's own page: its conversations are the real
  * ones (`/api/sessions/runs`, over every connected repository), and a fixture
@@ -26,6 +31,7 @@ import type {
   GithubInstallableRepo,
   GithubRepoSummary,
 } from '@truecourse/shared';
+import type { ContextSourceView } from '@truecourse/shared';
 import PreviewApp from '@/preview/PreviewApp';
 import { parseRemote, toPreviewRepo } from '@/preview/data/real-repos';
 
@@ -95,6 +101,8 @@ function status(partial: Partial<GithubConnectStatusResponse> = {}): GithubConne
 
 interface Backend {
   registry?: RegistryEntry[];
+  /** The workspace's context sources, and the bindings each PUT recorded. */
+  sources?: ContextSourceView[];
   /** `/api/github/status` as a Response, so a test can answer 503. */
   status?: () => Response;
   /** What each installation can see. */
@@ -105,9 +113,25 @@ interface Backend {
   llm?: () => Response;
 }
 
+/** One workspace source, as `/api/context/sources` answers it. */
+function source(over: Partial<ContextSourceView> & Pick<ContextSourceView, 'id' | 'kind' | 'title'>): ContextSourceView {
+  return {
+    config: {},
+    status: 'never',
+    statusNote: null,
+    lastSyncAt: null,
+    createdAt: '2026-09-01T10:00:00.000Z',
+    updatedAt: '2026-09-01T10:00:00.000Z',
+    docCount: 0,
+    repositories: [],
+    ...over,
+  };
+}
+
 /** A server answering the registry, connect routes and empty guard summaries. */
 function serve(backend: Backend = {}) {
   const posted: LinkBody[] = [];
+  const bound: { repoId: string; sourceIds: string[] }[] = [];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const { pathname } = new URL(href, window.location.origin);
@@ -115,6 +139,15 @@ function serve(backend: Backend = {}) {
     if (pathname === '/api/repos' && method === 'GET') return json(backend.registry ?? []);
     if (/^\/api\/repos\/[^/]+\/guard\/status$/.test(pathname)) {
       return json({ coverage: null, sections: null, lastRun: null, lastGenerate: null });
+    }
+    if (pathname === '/api/context/sources' && method === 'GET') {
+      return json({ sources: backend.sources ?? [], changedAt: null });
+    }
+    const bindings = /^\/api\/repos\/([^/]+)\/context\/bindings$/.exec(pathname);
+    if (bindings && method === 'PUT') {
+      const body = JSON.parse(String(init?.body ?? '{}')) as { sourceIds: string[] };
+      bound.push({ repoId: bindings[1]!, sourceIds: body.sourceIds });
+      return json({ repoFullName: bindings[1]!, sourceIds: body.sourceIds });
     }
     if (pathname === '/api/llm/config' && backend.llm) return backend.llm();
     if (pathname === '/api/github/status') return backend.status?.() ?? json(status());
@@ -131,7 +164,7 @@ function serve(backend: Backend = {}) {
     return json({ error: 'not found' }, 404);
   });
   window.fetch = fetchMock as unknown as typeof window.fetch;
-  return { fetchMock, posted };
+  return { fetchMock, posted, bound };
 }
 
 function renderAt(path: string) {
@@ -148,7 +181,7 @@ function renderAt(path: string) {
 
 /** Open the dialog on GitHub's repositories: pick the provider, wait for its list. */
 async function openGithubRepos() {
-  renderAt('/preview?connect=1');
+  renderAt('/preview/code?connect=1');
   const dialog = await screen.findByRole('dialog');
   const row = (await within(dialog).findByText('GitHub')).closest('li')!;
   await userEvent.click(within(row).getByRole('button', { name: 'Select' }));
@@ -210,7 +243,7 @@ describe('a remote URL as a preview repository', () => {
 });
 
 describe('connecting a repository through the GitHub App', () => {
-  it('lists a connected repository on Home with no coverage yet', async () => {
+  it('lists a connected repository on Code with no coverage yet', async () => {
     serve({
       registry: [
         // A path-registered repo of the developer's own: never the product's business.
@@ -223,7 +256,7 @@ describe('connecting a repository through the GitHub App', () => {
         },
       ],
     });
-    renderAt('/preview');
+    renderAt('/preview/code');
     const name = await screen.findByText('linkwarden/linkwarden');
     expect(screen.queryByText('local-thing')).toBeNull();
     // Wait for the stored summary before asserting the empty state.
@@ -259,6 +292,8 @@ describe('connecting a repository through the GitHub App', () => {
     await userEvent.click(await screen.findByLabelText('linkwarden/linkwarden'));
     await userEvent.click(screen.getByLabelText('linkwarden/docs'));
     await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
+    // The Context step stands between picking repositories and confirming.
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
     await userEvent.click(within(dialog).getByRole('button', { name: 'Connect and start onboarding' }));
 
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
@@ -280,6 +315,8 @@ describe('connecting a repository through the GitHub App', () => {
 
     const dialog = await openGithubRepos();
     await userEvent.click(await screen.findByLabelText('linkwarden/linkwarden'));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
+    // The Context step stands between picking repositories and confirming.
     await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
     await userEvent.click(within(dialog).getByRole('button', { name: 'Connect and start onboarding' }));
 
@@ -308,6 +345,8 @@ describe('connecting a repository through the GitHub App', () => {
     const dialog = await openGithubRepos();
     await userEvent.click(await screen.findByLabelText('linkwarden/linkwarden'));
     await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
+    // The Context step stands between picking repositories and confirming.
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
     await userEvent.click(within(dialog).getByRole('button', { name: 'Connect and start onboarding' }));
 
     expect(await within(dialog).findByRole('button', { name: 'Cloning 1 of 1' })).toBeDisabled();
@@ -320,7 +359,7 @@ describe('connecting a repository through the GitHub App', () => {
   it('names the account each installation belongs to', async () => {
     serve({ installationRepos: { 42: [] } });
 
-    renderAt('/preview?connect=1');
+    renderAt('/preview/code?connect=1');
     const dialog = await screen.findByRole('dialog');
     const row = (await within(dialog).findByText('GitHub')).closest('li')!;
     // The provider row says whose GitHub this is before anything is picked.
@@ -339,7 +378,7 @@ describe('connecting a repository through the GitHub App', () => {
       installationRepos: { 42: [] },
     });
 
-    renderAt('/preview?connect=1');
+    renderAt('/preview/code?connect=1');
     const dialog = await screen.findByRole('dialog');
     const row = (await within(dialog).findByText('GitHub')).closest('li')!;
     expect(await within(row).findByText('#42')).toBeInTheDocument();
@@ -351,7 +390,7 @@ describe('connecting a repository through the GitHub App', () => {
       'GITHUB_APP_WEBHOOK_SECRET and GITHUB_APP_SLUG, then restart it.';
     serve({ status: () => json({ error: missing }, 503) });
 
-    renderAt('/preview?connect=1');
+    renderAt('/preview/code?connect=1');
     const dialog = await screen.findByRole('dialog');
     expect(await within(dialog).findByText(missing)).toBeInTheDocument();
     // Nothing to click: the fix is on the server, not in this dialog.
@@ -363,7 +402,7 @@ describe('connecting a repository through the GitHub App', () => {
   it('sends the user to GitHub when the App is installed nowhere', async () => {
     serve({ status: () => json(status({ installations: [] })) });
 
-    renderAt('/preview?connect=1');
+    renderAt('/preview/code?connect=1');
     const dialog = await screen.findByRole('dialog');
     const row = within(dialog).getByText('GitHub').closest('li')!;
     const install = await within(row).findByRole('link', { name: 'Install' });
@@ -407,6 +446,8 @@ describe('connecting a repository through the GitHub App', () => {
     await userEvent.click(await screen.findByLabelText('linkwarden/linkwarden'));
     await userEvent.click(screen.getByLabelText('linkwarden/docs'));
     await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
+    // The Context step stands between picking repositories and confirming.
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
     await userEvent.click(within(dialog).getByRole('button', { name: 'Connect and start onboarding' }));
 
     expect(
@@ -425,11 +466,102 @@ describe('connecting a repository through the GitHub App', () => {
     ]);
   });
 
+  it("offers the workspace's sources with the repository's own documentation first and checked", async () => {
+    serve({
+      sources: [source({ id: 'site-docs', kind: 'site', title: 'docs.acme.com', docCount: 12 })],
+      installationRepos: { 42: [{ fullName: 'linkwarden/linkwarden', defaultBranch: 'main', private: false }] },
+    });
+
+    const dialog = await openGithubRepos();
+    await userEvent.click(await screen.findByLabelText('linkwarden/linkwarden'));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
+
+    const list = await within(dialog).findByRole('list', { name: 'Context sources' });
+    const items = within(list).getAllByRole('listitem');
+    expect(within(items[0]!).getByRole('checkbox')).toBeChecked();
+    expect(within(items[0]!).getByText("This repository’s own documentation")).toBeInTheDocument();
+    expect(within(items[1]!).getByText('docs.acme.com')).toBeInTheDocument();
+    expect(within(items[1]!).getByRole('checkbox')).not.toBeChecked();
+    expect(within(dialog).getByRole('link', { name: 'Add context' })).toHaveAttribute(
+      'href',
+      '/preview/context',
+    );
+  });
+
+  it("binds what the step picked, plus the repository's own source, once the link lands", async () => {
+    const registry: RegistryEntry[] = [];
+    const own = source({
+      id: 'repo-linkwarden-linkwarden',
+      kind: 'repository',
+      title: 'linkwarden/linkwarden',
+      config: { repoFullName: 'linkwarden/linkwarden', include: ['docs/**'], exclude: [], branch: '' },
+    });
+    const sources: ContextSourceView[] = [source({ id: 'site-docs', kind: 'site', title: 'docs.acme.com' })];
+    const { bound } = serve({
+      registry,
+      sources,
+      installationRepos: { 42: [{ fullName: 'linkwarden/linkwarden', defaultBranch: 'main', private: false }] },
+      link: (body) => {
+        registry.push({
+          id: String(body.repoFullName).split('/')[1]!,
+          name: String(body.repoFullName),
+          path: `/clones/${String(body.repoFullName).replace('/', '__')}`,
+          remoteUrl: `https://github.com/${String(body.repoFullName)}`,
+          defaultBranch: body.defaultBranch,
+        });
+        // Linking creates the repository's own source, which is how the dialog
+        // learns its id rather than composing one.
+        sources.push(own);
+        return json({ ok: true }, 201);
+      },
+    });
+
+    const dialog = await openGithubRepos();
+    await userEvent.click(await screen.findByLabelText('linkwarden/linkwarden'));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
+    await userEvent.click(await within(dialog).findByLabelText(/docs\.acme\.com/));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Connect and start onboarding' }));
+
+    await waitFor(() => expect(bound).toEqual([
+      { repoId: 'linkwarden', sourceIds: ['site-docs', own.id] },
+    ]));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it("binds only the workspace sources when its own documentation is unchecked", async () => {
+    const registry: RegistryEntry[] = [];
+    const { bound } = serve({
+      registry,
+      sources: [source({ id: 'site-docs', kind: 'site', title: 'docs.acme.com' })],
+      installationRepos: { 42: [{ fullName: 'linkwarden/linkwarden', defaultBranch: 'main', private: false }] },
+      link: (body) => {
+        registry.push({
+          id: String(body.repoFullName).split('/')[1]!,
+          name: String(body.repoFullName),
+          path: `/clones/${String(body.repoFullName).replace('/', '__')}`,
+          remoteUrl: `https://github.com/${String(body.repoFullName)}`,
+          defaultBranch: body.defaultBranch,
+        });
+        return json({ ok: true }, 201);
+      },
+    });
+
+    const dialog = await openGithubRepos();
+    await userEvent.click(await screen.findByLabelText('linkwarden/linkwarden'));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
+    await userEvent.click(await within(dialog).findByLabelText(/own documentation/));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Connect and start onboarding' }));
+
+    await waitFor(() => expect(bound).toEqual([{ repoId: 'linkwarden', sourceIds: [] }]));
+  });
+
   it('is a mock with no server behind it: the fixtures render and nothing throws', async () => {
     window.fetch = vi.fn(async () => {
       throw new TypeError('Failed to fetch');
     }) as unknown as typeof window.fetch;
-    renderAt('/preview');
+    renderAt('/preview/code');
     expect(await screen.findByText('acme/orders-api')).toBeInTheDocument();
   });
 });

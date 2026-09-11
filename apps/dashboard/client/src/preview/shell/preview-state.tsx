@@ -78,8 +78,13 @@ interface PreviewStateValue {
   repos: Repo[];
   updateRepo: (id: string, patch: Partial<Repo>) => void;
   unlinkRepo: (id: string) => void;
-  /** Re-read the real registry. Called once a repository is linked through the GitHub App. */
-  refreshRealRepos: () => Promise<void>;
+  /**
+   * Re-read the real registry, and ANSWER with what it holds now. Called once a
+   * repository is linked through the GitHub App — the caller needs the fresh
+   * rows (a newly linked repository's registry id) before the state it just set
+   * has reached a render.
+   */
+  refreshRealRepos: () => Promise<Repo[]>;
   connections: ProviderConnection[];
   /** Repositories the picker can offer: the seeded ones plus those of added connections. */
   connectableRepos: ConnectableRepo[];
@@ -155,6 +160,7 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
   const refreshRealRepos = useCallback(async () => {
     const found = await fetchRealRepos();
     setRealRepos(found);
+    return found;
   }, []);
 
   // The real registry, read once on mount. `fetchRealRepos` never rejects, so a

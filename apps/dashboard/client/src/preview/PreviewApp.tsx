@@ -7,9 +7,13 @@
  * brings no router of its own. That is what lets a test render it under a
  * MemoryRouter, and it is why the shell's links are written absolute.
  *
- * A repository address without a tab lands on Tests, and a settings
+ * A repository address without a tab lands on Runs, and a settings
  * address without a sub-tab lands on Members: the two defaults are expressed as
  * routes rather than redirects, so a bare address is a place, not a bounce.
+ *
+ * The repositories are Code (`/code`) and the flows of every one of them are
+ * Flows (`/flows`, one flow at `/flows/:flowId?repo=`): neither is a tab of the
+ * other, and Home is the product owner's dashboard, which is not built yet.
  *
  * Context LANDS on its sources (`/context`), each source is a page of its own
  * (`/context/sources/:id`), and their documents are a place of their own
@@ -21,10 +25,12 @@
 import { Navigate, Route, Routes, useParams } from 'react-router-dom';
 import AdminPage from './pages/AdminPage';
 import AgentPage from './pages/AgentPage';
+import CodePage from './pages/CodePage';
 import ConflictsPage from './pages/ConflictsPage';
 import ContextConflictPage from './pages/ContextConflictPage';
 import ContextDocPage from './pages/ContextDocPage';
 import DocumentsPage from './pages/DocumentsPage';
+import FlowsPage from './pages/FlowsPage';
 import HomePage from './pages/HomePage';
 import NotificationsPage from './pages/NotificationsPage';
 import SettingsPage from './pages/SettingsPage';
@@ -41,6 +47,12 @@ import { PreviewStateProvider } from './shell/preview-state';
 function AgentRunRoute() {
   const { runId } = useParams<{ runId: string }>();
   return <AgentPage runId={runId ? decodeURIComponent(runId) : undefined} />;
+}
+
+/** ONE flow, by the id in the address, read through the `?repo=` beside it. */
+function FlowRoute() {
+  const { flowId } = useParams<{ flowId: string }>();
+  return <FlowsPage flowId={flowId ? decodeURIComponent(flowId) : undefined} />;
 }
 
 /** One document of Context, by the corpus ref in the address. */
@@ -73,6 +85,9 @@ export function PreviewRoutes() {
       <Route index element={<HomePage />} />
       <Route path="agent" element={<AgentPage />} />
       <Route path="agent/:runId" element={<AgentRunRoute />} />
+      <Route path="code" element={<CodePage />} />
+      <Route path="flows" element={<FlowsPage />} />
+      <Route path="flows/:flowId" element={<FlowRoute />} />
       <Route path="context" element={<SourcesPage />} />
       <Route path="context/sources/:sourceId" element={<ContextSourceRoute />} />
       <Route path="context/documents" element={<DocumentsPage />} />
@@ -83,7 +98,6 @@ export function PreviewRoutes() {
       <Route path="repos/:slug" element={<RepoConsole />} />
       <Route path="repos/:slug/:tab" element={<RepoConsole />} />
       <Route path="repos/:slug/runs/:runId" element={<RepoConsole />} />
-      <Route path="repos/:slug/tests/:flowId" element={<RepoConsole />} />
       <Route path="repos/:slug/interfaces/:interfaceId" element={<RepoConsole />} />
       <Route path="repos/:slug/dependencies/:dependencyName" element={<RepoConsole />} />
       <Route path="settings" element={<SettingsPage />} />

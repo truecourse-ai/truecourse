@@ -130,8 +130,9 @@ export function SettingsTab({ repo }: { repo: Repo }) {
               onClick={() => {
                 setConfirmUnlink(false);
                 unlinkRepo(repo.id);
-                // The repo route below our feet just died — land on Home.
-                navigate(PREVIEW_BASE);
+                // The repo route below our feet just died — land on Code,
+                // where the repositories are.
+                navigate(`${PREVIEW_BASE}/code`);
               }}
               className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
             >

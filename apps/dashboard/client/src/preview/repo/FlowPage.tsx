@@ -1,9 +1,13 @@
 /**
- * One test, as its own page (`/tests/:flowId`): the breadcrumb back to Tests,
- * then the vendored test workspace for a flow (`GuardFlowsPane`), pinned to
+ * One flow, as its own page (`/preview/flows/:flowId?repo=`): the breadcrumb
+ * back to Flows, then the vendored flow workspace (`GuardFlowsPane`), pinned to
  * this one flow. A scenario or finding the workspace opens rides the same URL
  * tabs it always did. A connected repository's reads are the server's, re-read
  * when a generate or a run lands; a fixture repository's are its fixtures.
+ *
+ * The flows of every repository are ONE list now, so this page belongs to the
+ * Flows page rather than to a repository tab: the repository it is read through
+ * comes in as a prop and rides the address as `?repo=`.
  */
 
 import { useMemo } from 'react';
@@ -20,11 +24,12 @@ import { useGuardView } from '@/preview/vendor/hooks/useGuardView';
 import type { GuardTabsState } from '@/preview/vendor/hooks/useGuardTabs';
 import { guardTestBinds } from '@/preview/vendor/lib/guard-tests';
 import type { Repo } from '@/preview/data/types';
+import { FLOWS_BASE, flowHref, flowsHref } from '@/preview/pages/flow-hrefs';
 import { useGuardTabJump } from './tab-jump';
 import { useGuardRefresh } from './use-guard-refresh';
 
-export function TestPage({ repo, flowId }: { repo: Repo; flowId: string }) {
-  useGuardTabJump();
+export function FlowPage({ repo, flowId }: { repo: Repo; flowId: string }) {
+  useGuardTabJump(repo.id);
   const navigate = useNavigate();
   const reloadKey = useGuardRefresh(repo, ['guard-generate', 'guard-run']);
   const flows = useGuardFlows(repo.id, true, reloadKey);
@@ -48,12 +53,12 @@ export function TestPage({ repo, flowId }: { repo: Repo; flowId: string }) {
       openTabs: [{ id: own, pinned: true }, ...others],
       open: (id, pinned) => {
         const target = tabFlowId(id);
-        if (target && target !== flowId) navigate(`/preview/repos/${repo.id}/tests/${encodeURIComponent(target)}`);
+        if (target && target !== flowId) navigate(flowHref(target, repo.id));
         else if (target === flowId) urlTabs.deselect();
         else urlTabs.open(id, pinned);
       },
       close: (id) => {
-        if (id === own) navigate(`/preview/repos/${repo.id}/tests`);
+        if (id === own) navigate(flowsHref(repo.id));
         else urlTabs.close(id);
       },
       deselect: urlTabs.deselect,
@@ -69,7 +74,7 @@ export function TestPage({ repo, flowId }: { repo: Repo; flowId: string }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader
-        crumbs={[{ label: 'Tests', to: `/preview/repos/${repo.id}/tests` }]}
+        crumbs={[{ label: 'Flows', to: FLOWS_BASE }]}
         title={flow?.title ?? flowId}
       />
       <div className="min-h-0 flex-1">

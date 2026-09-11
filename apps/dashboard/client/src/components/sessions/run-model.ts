@@ -50,9 +50,9 @@ export const STEP_DOT: Record<StepStatus, string> = {
 /** What each kind of run is called, in the product's words rather than the store's ids. */
 const COMMAND_LABEL: Record<string, string> = {
   'spec-scan': 'Document scan',
-  'guard-setup': 'Test setup',
-  'guard-generate': 'Test generation',
-  'guard-run': 'Test run',
+  'guard-setup': 'Flow setup',
+  'guard-generate': 'Flow generation',
+  'guard-run': 'Flow run',
   'guard-interfaces': 'Interface authoring',
   'guard-adjudicate': 'Failure adjudication',
 };

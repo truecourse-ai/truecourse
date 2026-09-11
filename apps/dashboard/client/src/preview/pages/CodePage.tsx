@@ -1,10 +1,15 @@
 /**
- * Home, for the product owner: the workspace's requirements and how much of
- * them is proven. The repository Coverage overview summed over every connected
- * repository (the same bars, the same five words), then one row per repository
- * with its own split and its last check, opening the repository's Coverage;
- * Connect repository is the page action. No feed, no jobs: gate activity lives
- * on a repository's Runs, the agent's work on Agent.
+ * Code: the repositories of the workspace, which is the engineer's reading of
+ * it. The Coverage overview summed over every connected repository (the same
+ * bars, the same five words), then one row per repository with its own split
+ * and its last check, opening the repository's console; Connect repository is
+ * the page action. No feed, no jobs: gate activity lives on a repository's
+ * Runs, the agent's work on Agent.
+ *
+ * A connected repository's row reads its STORED summary from the server (the
+ * coverage split, the last run's verdict, the corpus commit as its baseline),
+ * re-read when a run of it completes; a fixture repository's row reads its
+ * fixtures.
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -19,7 +24,7 @@ import { statusSummary } from '@/preview/data/corpus-fixtures';
 import { usePreviewState } from '@/preview/shell/preview-state';
 import { activityHref, relativeTime } from '@/preview/shell/real-runs';
 import { ConnectDialog } from './ConnectDialog';
-import { useHomeSummaries } from './use-home-summaries';
+import { useRepoSummaries } from './use-repo-summaries';
 
 type ByStatus = Record<GuardCoveragePlainStatus, number>;
 
@@ -49,9 +54,9 @@ function checkForRun(run: GuardLastRunSummary): Repo['lastCheck'] {
   };
 }
 
-export default function HomePage() {
-  const { workspace, repos } = usePreviewState();
-  const summaries = useHomeSummaries(repos);
+export default function CodePage() {
+  const { repos } = usePreviewState();
+  const summaries = useRepoSummaries(repos);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [connectOpen, setConnectOpen] = useState(searchParams.get('connect') === '1');
@@ -98,8 +103,7 @@ export default function HomePage() {
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <PageHeader
-        title={workspace.name}
-        subtitle={`${repos.length} repositories`}
+        title="Code"
         right={
           <button
             type="button"

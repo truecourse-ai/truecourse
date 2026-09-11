@@ -3,9 +3,16 @@
 
 /**
  * Connect a repository: pick a provider (a provider with nothing connected
- * authorizes first), pick the account and the repositories it can see, confirm.
- * The repository then appears on Home with its onboarding chain in flight.
- * Opened from Home.
+ * authorizes first), pick the account and the repositories it can see, pick the
+ * CONTEXT each of them reads, confirm. The repository then appears on Code with
+ * its onboarding chain in flight. Opened from Code.
+ *
+ * THE CONTEXT STEP is real for GitHub: the workspace's sources come from
+ * `GET /api/context/sources`, and the repository's OWN documentation leads the
+ * list, checked — it is not a workspace source yet, it is the Repository source
+ * connecting creates, so it is read back off the sources list after the link
+ * rather than composed from a name. What the step picked is written per
+ * repository with `PUT /api/repos/:id/context/bindings` once the link landed.
  *
  * GITHUB IS THE REAL ONE. The row reads `/api/github/status`: the App's
  * installations on this workspace and the repositories already linked. An
@@ -15,15 +22,16 @@
  * per-repository outcome still matters: a failure leaves the dialog standing
  * rather than swallowing the rest of the batch.
  * Installing the App is a top-level navigation to GitHub; its setup redirect
- * lands back on `/preview?connect=1`, so a new installation is pickable at once.
+ * lands back on `/preview/code?connect=1`, so a new installation is pickable at once.
  *
  * GitLab and Azure are still the fixture flow: authorize, pick, confirm, and the
  * rows they add are mock rows.
  */
 
 import { useEffect, useState, type ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Plus } from 'lucide-react';
+import { toast } from 'sonner';
 import {
   Dialog,
   DialogContent,
@@ -33,7 +41,14 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Capsule, ProviderIcon, PROVIDER_NAME } from '@/preview/ui/bits';
-import type { GithubInstallableRepo, GithubInstallationSummary } from '@truecourse/shared';
+import type {
+  ContextSourceView,
+  GithubInstallableRepo,
+  GithubInstallationSummary,
+  RepositorySourceConfig,
+} from '@truecourse/shared';
+import { CONTEXT_SOURCE_KIND_LABEL } from '@truecourse/shared';
+import { listContextSources, putRepoContextBindings } from '@/lib/api';
 import type { ProviderId } from '@/preview/data/types';
 import {
   fetchGithubStatus,
@@ -41,6 +56,7 @@ import {
   linkGithubRepo,
 } from '@/preview/data/real-repos';
 import { usePreviewState } from '@/preview/shell/preview-state';
+import { PREVIEW_BASE } from '@/preview/shell/base';
 import { toastNoLlmProvider } from '@/preview/shell/use-run-trigger';
 
 const PROVIDER_OPTIONS: ProviderId[] = ['github', 'gitlab', 'azure'];
@@ -85,10 +101,20 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
     llmProvider,
   } = usePreviewState();
   const navigate = useNavigate();
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [provider, setProvider] = useState<ProviderId>('github');
   const [connectionId, setConnectionId] = useState<string | null>(null);
   const [picked, setPicked] = useState<string[]>([]);
+  /**
+   * The Context step. The repository's OWN documentation is not a workspace
+   * source yet — it is the Repository source connecting creates — so it is a
+   * flag here and an id only after the link, while `contextPicked` holds the
+   * workspace sources that already exist.
+   */
+  const [ownDocs, setOwnDocs] = useState(true);
+  const [contextPicked, setContextPicked] = useState<string[]>([]);
+  /** The workspace's sources; null while they are being read. */
+  const [sources, setSources] = useState<ContextSourceView[] | null>(null);
   const [github, setGithub] = useState<GithubStatus>({ kind: 'loading' });
   const [installationId, setInstallationId] = useState<number | null>(null);
   /** The installation's repositories; null while they are being read. */
@@ -111,7 +137,28 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
       setReposError(null);
       setLinking(null);
       setLinkErrors({});
+      setOwnDocs(true);
+      setContextPicked([]);
     }
+  }, [open]);
+
+  // The workspace's context, read each time the dialog opens. With no server to
+  // ask the step still stands: the repository's own documentation is the one
+  // source connecting always creates.
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    setSources(null);
+    void listContextSources()
+      .then((answer) => {
+        if (live) setSources(answer.sources);
+      })
+      .catch(() => {
+        if (live) setSources([]);
+      });
+    return () => {
+      live = false;
+    };
   }, [open]);
 
   // The App's state, read each time the dialog opens — the user may have just
@@ -169,6 +216,42 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   const toggle = (fullName: string) =>
     setPicked((prev) => (prev.includes(fullName) ? prev.filter((n) => n !== fullName) : [...prev, fullName]));
 
+  /**
+   * What the Context step picked, written as each landed repository's bindings:
+   * the workspace sources it checked, plus the repository's OWN source — read
+   * back off the sources list the link just added it to, never composed from a
+   * name. A repository whose source has not appeared yet is bound to what it
+   * did pick; the binding a failed write leaves unmade is spoken, since the
+   * repository is connected either way.
+   */
+  const bindContext = async (landed: readonly string[], connected: readonly { id: string; fullName: string }[]) => {
+    if (landed.length === 0) return;
+    let workspaceSources: ContextSourceView[] = [];
+    try {
+      workspaceSources = (await listContextSources()).sources;
+    } catch {
+      // No sources to read is not a reason to skip what the step picked.
+    }
+    setSources(workspaceSources);
+    for (const fullName of landed) {
+      const repoId = connected.find((r) => r.fullName === fullName)?.id;
+      if (!repoId) continue;
+      const own = ownDocs
+        ? workspaceSources.find(
+            (source) =>
+              source.kind === 'repository' &&
+              (source.config as RepositorySourceConfig).repoFullName === fullName,
+          )?.id
+        : undefined;
+      const ids = [...new Set([...contextPicked, ...(own ? [own] : [])])];
+      try {
+        await putRepoContextBindings(repoId, ids);
+      } catch (error) {
+        toast.error(`Could not set the context of ${fullName}`, { description: reasonOf(error) });
+      }
+    }
+  };
+
   /** Pick a provider: straight to its repositories, authorizing first when nothing is connected yet. */
   const choose = (id: ProviderId) => {
     setProvider(id);
@@ -218,8 +301,11 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
         ? { ...prev, linked: [...prev.linked, ...landed.filter((n) => !prev.linked.includes(n))] }
         : prev,
     );
-    // Whatever landed is a real repository now, failures beside it or not.
-    await refreshRealRepos();
+    // Whatever landed is a real repository now, failures beside it or not —
+    // and the fresh registry is what names each one's id, which is what the
+    // bindings are written against.
+    const connected = await refreshRealRepos();
+    await bindContext(landed, connected);
     // Connected but unscannable must not pass silently: the row landed, the
     // onboarding scan did not start, and the toast names the remedy.
     if (landed.length > 0 && llmProvider === 'missing') {
@@ -299,8 +385,14 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
         <DialogHeader>
           <DialogTitle>Connect a repository</DialogTitle>
           <DialogDescription>
-            Step {step} of 3 ·{' '}
-            {step === 1 ? 'pick a provider' : step === 2 ? 'pick repositories' : 'confirm and start onboarding'}
+            Step {step} of 4 ·{' '}
+            {step === 1
+              ? 'pick a provider'
+              : step === 2
+                ? 'pick repositories'
+                : step === 3
+                  ? 'pick the context they read'
+                  : 'confirm and start onboarding'}
           </DialogDescription>
         </DialogHeader>
 
@@ -457,6 +549,57 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
         )}
 
         {step === 3 && (
+          <div>
+            <ul className="max-h-64 divide-y divide-border overflow-y-auto rounded-md border border-border" aria-label="Context sources">
+              <li className="flex items-center gap-3 px-3 py-2">
+                <input
+                  type="checkbox"
+                  id="ctx-own-docs"
+                  checked={ownDocs}
+                  onChange={() => setOwnDocs((v) => !v)}
+                  className="h-3.5 w-3.5 shrink-0 rounded border-border"
+                />
+                <label htmlFor="ctx-own-docs" className="min-w-0 flex-1 cursor-pointer">
+                  <span className="block truncate text-[13px] text-foreground">This repository’s own documentation</span>
+                </label>
+                <Capsule>{CONTEXT_SOURCE_KIND_LABEL.repository}</Capsule>
+              </li>
+              {(sources ?? []).map((source) => (
+                <li key={source.id} className="flex items-center gap-3 px-3 py-2">
+                  <input
+                    type="checkbox"
+                    id={`ctx-bind-${source.id}`}
+                    checked={contextPicked.includes(source.id)}
+                    onChange={() =>
+                      setContextPicked((prev) =>
+                        prev.includes(source.id) ? prev.filter((id) => id !== source.id) : [...prev, source.id],
+                      )
+                    }
+                    className="h-3.5 w-3.5 shrink-0 rounded border-border"
+                  />
+                  <label htmlFor={`ctx-bind-${source.id}`} className="min-w-0 flex-1 cursor-pointer">
+                    <span className="block truncate text-[13px] text-foreground">{source.title}</span>
+                    <span className="block truncate text-[11px] text-muted-foreground">
+                      {source.docCount} document{source.docCount === 1 ? '' : 's'}
+                    </span>
+                  </label>
+                  <Capsule>{CONTEXT_SOURCE_KIND_LABEL[source.kind]}</Capsule>
+                </li>
+              ))}
+              {sources === null && (
+                <li className="px-3 py-2 text-[11px] text-muted-foreground">Reading the workspace's sources</li>
+              )}
+            </ul>
+            <p className="mt-2 text-[11px] text-muted-foreground">
+              <Link to={`${PREVIEW_BASE}/context`} className="text-primary hover:underline">
+                Add context
+              </Link>{' '}
+              to connect a source this workspace does not have yet.
+            </p>
+          </div>
+        )}
+
+        {step === 4 && (
           <div className="rounded-md border border-border px-3 py-2.5">
             <p className="text-xs text-foreground">
               {picked.length} repositor{picked.length === 1 ? 'y' : 'ies'} from{' '}
@@ -494,7 +637,7 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
             <button
               type="button"
               disabled={linking !== null}
-              onClick={() => setStep((s) => (s === 3 ? 2 : 1))}
+              onClick={() => setStep((s) => (s > 1 ? ((s - 1) as 1 | 2 | 3) : s))}
               className="rounded border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/60 disabled:opacity-50"
             >
               Back
@@ -511,6 +654,15 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
             </button>
           )}
           {step === 3 && (
+            <button
+              type="button"
+              onClick={() => setStep(4)}
+              className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
+            >
+              Continue
+            </button>
+          )}
+          {step === 4 && (
             <button
               type="button"
               disabled={linking !== null}

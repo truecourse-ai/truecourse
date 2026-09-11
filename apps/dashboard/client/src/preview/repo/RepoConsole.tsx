@@ -2,17 +2,22 @@
 // repository the Interfaces tab reads the server's own
 // interface catalog for that repository, the Dependencies tab reads and
 // registers against its stored dependency catalog, the Context tab reads and
-// edits which workspace sources it is linked to, and the Tests and Runs tabs
-// read what its generate and runs stored.
+// edits which workspace sources it is linked to, and the Runs tab reads what
+// its runs stored.
 
 /**
  * The repository console: one header, ONE menu, no toggle.
  *
  * The section switcher is gone with Code Analysis, so the left menu here is not
  * a switcher between products, it is the tabs of the one thing this repository
- * has: Tests first (what is proven, and by what), then Runs, then the setup
+ * has: Runs first (what this repository's tests did, and when), then the setup
  * group — Context (which workspace sources this repository reads), Interfaces,
  * Dependencies and the repository's Settings.
+ *
+ * FLOWS ARE NOT A TAB HERE any more: a flow is the workspace's, listed across
+ * every repository on the Flows page, and one flow is a page of its own
+ * (`/preview/flows/<id>?repo=<id>`). Generating them is still a REPOSITORY
+ * action, so it sits in the Runs tab's header.
  *
  * DOCUMENTATION IS NOT A TAB HERE any more: a source is a workspace object and
  * the corpus is the workspace's, so the documents, their coverage, their
@@ -23,8 +28,8 @@
  * pull request page: a PR is seen through its runs (the Pull request filter in
  * Runs).
  *
- * The tab is in the URL, so a tab is a place: it can be linked, and Runs can
- * hand a test to Tests without either of them owning the other's pane.
+ * The tab is in the URL, so a tab is a place: it can be linked, and a run can
+ * hand a flow to the Flows page without either of them owning the other's pane.
  */
 
 import { Link, useParams } from 'react-router-dom';
@@ -44,11 +49,8 @@ import { InterfacesTab } from './InterfacesTab';
 import { RunPage } from './RunPage';
 import { RunsTab } from './RunsTab';
 import { SettingsTab } from './SettingsTab';
-import { TestPage } from './TestPage';
-import { TestsTab } from './TestsTab';
 
 const TABS = [
-  { id: 'tests', label: 'Tests', group: 'work' },
   { id: 'runs', label: 'Runs', group: 'work' },
   { id: 'context', label: 'Context', group: 'setup' },
   { id: 'interfaces', label: 'Interfaces', group: 'setup' },
@@ -59,11 +61,10 @@ const TABS = [
 type TabId = (typeof TABS)[number]['id'];
 
 export default function RepoConsole() {
-  const { slug, tab, runId, flowId, interfaceId, dependencyName } = useParams<{
+  const { slug, tab, runId, interfaceId, dependencyName } = useParams<{
     slug: string;
     tab?: string;
     runId?: string;
-    flowId?: string;
     interfaceId?: string;
     dependencyName?: string;
   }>();
@@ -72,14 +73,12 @@ export default function RepoConsole() {
   const guard = guardForRepo(slug);
   const implied = runId
     ? 'runs'
-    : flowId
-      ? 'tests'
-      : interfaceId
-        ? 'interfaces'
-        : dependencyName
-          ? 'dependencies'
-          : undefined;
-  const active = (TABS.find((t) => t.id === (tab ?? implied))?.id ?? 'tests') as TabId;
+    : interfaceId
+      ? 'interfaces'
+      : dependencyName
+        ? 'dependencies'
+        : undefined;
+  const active = (TABS.find((t) => t.id === (tab ?? implied))?.id ?? 'runs') as TabId;
 
   if (!repo) {
     return (
@@ -89,8 +88,8 @@ export default function RepoConsole() {
         body={
           <>
             Nothing is connected under that address.{' '}
-            <Link to={PREVIEW_BASE} className="text-primary hover:underline">
-              Open Home
+            <Link to={`${PREVIEW_BASE}/code`} className="text-primary hover:underline">
+              Open Code
             </Link>
             .
           </>
@@ -102,7 +101,7 @@ export default function RepoConsole() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader
-        crumbs={[{ label: 'Home', to: PREVIEW_BASE }]}
+        crumbs={[{ label: 'Code', to: `${PREVIEW_BASE}/code` }]}
         icon={<ProviderIcon provider={repo.provider} className="mr-1.5 inline-block h-4 w-4 align-text-bottom" />}
         title={repo.fullName}
         subtitle={
@@ -174,16 +173,6 @@ export default function RepoConsole() {
             ) : (
               <DependenciesTab repo={repo} />
             )
-          ) : active === 'tests' && repo.real ? (
-            // REAL, not mock: the tests of a connected repository are the flows
-            // its generate stored, read over `/api/repos/<id>/guard/flows` and
-            // re-read when a generate or a run lands — the same two views the
-            // fixture repositories get, the table and one test as its own page.
-            flowId ? (
-              <TestPage repo={repo} flowId={decodeURIComponent(flowId)} />
-            ) : (
-              <TestsTab repo={repo} />
-            )
           ) : active === 'runs' && repo.real ? (
             // REAL, not mock: every run the server stored for a connected
             // repository — the baseline runs and the pull-request head runs the
@@ -225,12 +214,6 @@ export default function RepoConsole() {
                 )
               }
             />
-          ) : active === 'tests' ? (
-            flowId ? (
-              <TestPage repo={repo} flowId={decodeURIComponent(flowId)} />
-            ) : (
-              <TestsTab repo={repo} />
-            )
           ) : active === 'interfaces' ? (
             interfaceId ? (
               <InterfacePage repo={repo} interfaceId={decodeURIComponent(interfaceId)} />

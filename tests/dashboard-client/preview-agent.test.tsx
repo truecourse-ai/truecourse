@@ -190,7 +190,7 @@ describe('Agent, the index', () => {
     await waitFor(() => expect(rows()).toHaveLength(2));
 
     const [first, second] = rows();
-    expect(within(first!).getByText('Test setup')).toBeInTheDocument();
+    expect(within(first!).getByText('Flow setup')).toBeInTheDocument();
     expect(within(first!).getByText('spiderhands/filecli')).toBeInTheDocument();
     expect(within(first!).getByText('Failed')).toBeInTheDocument();
     expect(within(first!).getByText('2m 30s')).toBeInTheDocument();
@@ -233,7 +233,7 @@ describe('Agent, the index', () => {
 
     await user.click(screen.getByRole('button', { name: 'Add filter' }));
     await user.click(await screen.findByRole('option', { name: /Kind/ }));
-    await user.click(await screen.findByRole('option', { name: /Test setup/ }));
+    await user.click(await screen.findByRole('option', { name: /Flow setup/ }));
 
     await waitFor(() => expect(rows()).toHaveLength(1));
     expect(screen.getByTestId('address')).toHaveTextContent('/preview/agent?kind=guard-setup');
@@ -319,7 +319,7 @@ describe('one conversation', () => {
 
     await user.click(rows()[0]!);
 
-    expect(await screen.findByRole('heading', { name: 'Test setup' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Flow setup' })).toBeInTheDocument();
     const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' });
     expect(within(crumbs).getByRole('link', { name: 'Agent' })).toHaveAttribute('href', '/preview/agent');
     expect(screen.getByText('spiderhands/filecli')).toBeInTheDocument();
@@ -383,10 +383,10 @@ describe('the way in', () => {
 
   it('is no longer a tab of the repository console', async () => {
     serve([SCAN]);
-    renderAt('/preview/repos/orders-api/tests');
+    renderAt('/preview/repos/orders-api/runs');
 
     const menu = await screen.findByRole('navigation', { name: 'Repository sections' });
     expect(within(menu).queryByRole('link', { name: 'Activity' })).toBeNull();
-    expect(within(menu).getByRole('link', { name: 'Tests' })).toBeInTheDocument();
+    expect(within(menu).getByRole('link', { name: 'Runs' })).toBeInTheDocument();
   });
 });

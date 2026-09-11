@@ -50,13 +50,13 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-describe('the Tests generation action', () => {
+describe('the flow generation action', () => {
   it('disables duplicate starts during the request and follows active repository progress', async () => {
     let release!: () => void;
     const pending = new Promise<void>((resolve) => { release = resolve; });
     const { calls } = serve({ pending });
     const rendered = render(page());
-    await userEvent.click(await screen.findByRole('button', { name: 'Generate tests' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Generate flows' }));
     expect(screen.getByRole('button', { name: 'Starting generation…' })).toBeDisabled();
     await userEvent.click(screen.getByRole('button', { name: 'Starting generation…' }));
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
@@ -68,18 +68,18 @@ describe('the Tests generation action', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Authoring tests');
     mocks.jobs = [];
     rendered.rerender(page());
-    expect(screen.getByRole('button', { name: 'Generate tests' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Generate flows' })).toBeEnabled();
   });
 
   it('waits for the initial job snapshot and ignores jobs belonging to other repositories', async () => {
     serve();
     mocks.jobsReady = false;
     const rendered = render(page());
-    expect(await screen.findByRole('button', { name: 'Generate tests' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'Generate flows' })).toBeDisabled();
     mocks.jobsReady = true;
     mocks.jobs = [{ id: 'other', title: 'Other run', repoFullName: 'owner/other', steps: [] }];
     rendered.rerender(page());
-    expect(screen.getByRole('button', { name: 'Generate tests' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Generate flows' })).toBeEnabled();
   });
 
   it.each([
@@ -90,11 +90,11 @@ describe('the Tests generation action', () => {
   ] as const)('shows a refused retry (%s) and permits another attempt', async (status, error, message) => {
     serve({ status, error });
     render(page());
-    await userEvent.click(await screen.findByRole('button', { name: 'Generate tests' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Generate flows' }));
     await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledWith(expect.stringMatching(message), ...(
       status === 422 || status === 500 ? [expect.objectContaining({ description: error })] : []
     )));
-    expect(screen.getByRole('button', { name: 'Generate tests' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Generate flows' })).toBeEnabled();
     expect(mocks.toast.success).not.toHaveBeenCalled();
   });
 

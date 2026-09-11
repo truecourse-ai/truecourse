@@ -6,8 +6,13 @@ import { usePreviewState } from '@/preview/shell/preview-state';
 import { activityHref } from '@/preview/shell/real-runs';
 import type { Repo } from '@/preview/data/types';
 
-/** A manual generation entry point, independent of the previous outcome's classification. */
-export function GenerateTestsAction({ repo, disabled = false, label = 'Generate tests' }: {
+/**
+ * A manual generation entry point, independent of the previous outcome's
+ * classification. Generating is a REPOSITORY action even though the flows it
+ * writes are listed at the workspace, so this lives in the console's Runs
+ * header.
+ */
+export function GenerateTestsAction({ repo, disabled = false, label = 'Generate flows' }: {
   repo: Repo;
   disabled?: boolean;
   label?: string;

@@ -44,7 +44,9 @@ function renderAt(path: string) {
 }
 
 const ROUTES: { path: string; heading: RegExp }[] = [
-  { path: '/preview', heading: /^Acme Payments$/ },
+  { path: '/preview', heading: /^Home$/ },
+  { path: '/preview/code', heading: /^Code$/ },
+  { path: '/preview/flows', heading: /^Flows$/ },
   { path: '/preview/context', heading: /^Context$/ },
   { path: '/preview/context/documents', heading: /^Documents$/ },
   { path: '/preview/context/conflicts', heading: /^Conflicts$/ },
@@ -75,19 +77,18 @@ describe('one-product preview', () => {
   // design) over the preview fetch shim, so each one's rows
   // arrive async. Each case names one thing only that tab's component draws.
 
-  it('opens a test as its own page from the tests table', async () => {
-    renderAt('/preview/repos/orders-api/tests/checkout-card-declined');
-    // The breadcrumb's Tests link beside the menu's.
-    expect((await screen.findAllByRole('link', { name: 'Tests' })).length).toBeGreaterThan(1);
+  it('opens a flow as its own page from the flows table', async () => {
+    renderAt('/preview/flows/checkout-card-declined?repo=orders-api');
+    // The page's own breadcrumb back to Flows, beside the nav entry.
+    expect((await screen.findAllByRole('link', { name: 'Flows' })).length).toBeGreaterThan(1);
     expect((await screen.findAllByText('Checkout, card declined')).length).toBeGreaterThan(0);
   });
 
-  it('renders /preview/repos/orders-api/tests', async () => {
-    renderAt('/preview/repos/orders-api/tests');
-    // GuardFlowsPanel: one row per flow, titled by the flow it guards, over the
-    // status and driver chip bars only this panel carries.
-    expect((await screen.findAllByText('Checkout, card declined')).length).toBeGreaterThan(0);
-    expect((await screen.findAllByRole('group', { name: 'Filter by driver' })).length).toBeGreaterThan(0);
+  it('renders /preview/flows over every repository', async () => {
+    renderAt('/preview/flows');
+    const table = await screen.findByRole('table', { name: 'Flows' });
+    expect((await within(table).findAllByText('Checkout, card declined')).length).toBeGreaterThan(0);
+    expect(screen.getByRole('group', { name: 'Filter flows' })).toBeInTheDocument();
   });
 
   it('renders /preview/repos/orders-api/interfaces', async () => {
@@ -131,21 +132,23 @@ describe('one-product preview', () => {
     expect((await screen.findAllByRole('heading', { name: 'Postmark sandbox' })).length).toBeGreaterThan(0);
   });
 
-  it('opens a flow from ?flow= on the tests tab', async () => {
-    renderAt('/preview/repos/orders-api/tests?flow=refund-partial-capture');
+  it('opens a flow page from its own address', async () => {
+    renderAt('/preview/flows/refund-partial-capture?repo=orders-api');
     // GuardFlowDetail + GuardTestView: the merged detail, its failing step's
     // expectation and the actual the run recorded.
     expect((await screen.findAllByText(/409 Conflict/)).length).toBeGreaterThan(0);
   });
 
-  it('lands a repository address with no tab on Tests', async () => {
+  it('lands a repository address with no tab on Runs, under the Code crumb', async () => {
     renderAt('/preview/repos/orders-api');
     const menu = await screen.findByRole('navigation', { name: 'Repository sections' });
-    expect(within(menu).getByRole('link', { name: 'Tests' })).toHaveAttribute('aria-current', 'page');
+    expect(within(menu).getByRole('link', { name: 'Runs' })).toHaveAttribute('aria-current', 'page');
+    const crumbs = screen.getAllByRole('navigation', { name: 'Breadcrumb' })[0]!;
+    expect(within(crumbs).getByRole('link', { name: 'Code' })).toHaveAttribute('href', '/preview/code');
   });
 
   it('has no Corpus and no Sources tab: documentation is the workspace\'s', async () => {
-    renderAt('/preview/repos/orders-api/tests');
+    renderAt('/preview/repos/orders-api/runs');
     const menu = await screen.findByRole('navigation', { name: 'Repository sections' });
     expect(within(menu).queryByRole('link', { name: 'Corpus' })).toBeNull();
     expect(within(menu).queryByRole('link', { name: 'Sources' })).toBeNull();
@@ -158,13 +161,13 @@ describe('one-product preview', () => {
   it("carries a cross-tab jump's destination into the address", async () => {
     // The vendored components jump by writing `?section=guard&tab=<id>` beside
     // the selection; the preview reads its tab out of the PATH, so the jump is
-    // translated (src/preview/repo/tab-jump.ts) and lands on the Tests tab with
-    // the flow the jump named already open.
+    // translated (src/preview/repo/tab-jump.ts). A jump that names a flow now
+    // leaves the console entirely: flows are the workspace's page.
     renderAt('/preview/repos/orders-api/runs?section=guard&tab=guardflows&flow=refund-partial-capture');
-    // The named flow's own page (the Tests breadcrumb beside the menu entry) and
+    // The named flow's own page (its Flows breadcrumb beside the nav entry) and
     // its failing step, neither of which the Runs tab draws.
     expect((await screen.findAllByText(/409 Conflict/)).length).toBeGreaterThan(0);
-    expect((await screen.findAllByRole('link', { name: 'Tests' })).length).toBeGreaterThan(1);
+    expect((await screen.findAllByRole('link', { name: 'Flows' })).length).toBeGreaterThan(1);
     // The run list the address arrived on is gone.
     expect(screen.queryByRole('textbox', { name: 'Search runs' })).toBeNull();
   });
@@ -184,10 +187,20 @@ describe('one-product preview', () => {
     expect(within(table).getAllByRole('row')).toHaveLength(2);
   });
 
+  it('sends Home to Code, where the repositories now are', () => {
+    renderAt('/preview');
+    expect(screen.getAllByRole('link', { name: 'Code' }).length).toBeGreaterThan(0);
+    // Home holds no repository table any more.
+    expect(screen.queryByRole('button', { name: 'Connect repository' })).toBeNull();
+    expect(screen.queryByText('acme/orders-api')).toBeNull();
+  });
+
   it('keeps the workspace shell around every route', () => {
     renderAt('/preview/notifications');
     expect(screen.getByRole('link', { name: 'Home' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Context' })).toHaveAttribute('href', '/preview/context');
+    expect(screen.getByRole('link', { name: 'Code' })).toHaveAttribute('href', '/preview/code');
+    expect(screen.getByRole('link', { name: 'Flows' })).toHaveAttribute('href', '/preview/flows');
     // Knowledge is gone: Context is where the workspace's documents live.
     expect(screen.queryByText('Knowledge')).toBeNull();
     // There is no pull request page anywhere: a PR is seen through its runs.

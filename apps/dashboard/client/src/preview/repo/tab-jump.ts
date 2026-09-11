@@ -25,13 +25,13 @@ import { useEffect } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { PREVIEW_BASE } from '@/preview/shell/PreviewShell';
 import { DOCUMENTS_BASE, conflictHref, docHref } from '@/preview/pages/context-hrefs';
+import { flowHref, flowsHref } from '@/preview/pages/flow-hrefs';
 
 /** The dashboard's guard tab ids, as the preview's path segments. */
 const TAB_PATH: Record<string, string> = {
   // Documentation is the workspace's: a jump that named the repository's
   // retired Sources tab lands on the links this repository reads through.
   sources: 'context',
-  guardflows: 'tests',
   interfaces: 'interfaces',
   guarddrifts: 'runs',
   externals: 'dependencies',
@@ -49,6 +49,21 @@ export function useGuardTabJump(repoId?: string): void {
     const tab = next.get('tab');
     if (!slug || !tab) return;
     next.delete('tab');
+    // FLOWS ARE NOT A TAB either: they are the workspace's list, so a jump
+    // that named the retired Flows tab lands on the Flows page — on the flow
+    // it named, read through this repository, or on the list narrowed to it.
+    if (tab === 'guardflows') {
+      const flow = next.get('flow');
+      next.delete('flow');
+      next.delete('section');
+      // The reading repository is the destination's own parameter, written by
+      // `flowHref` — carrying the old one through would double it.
+      next.delete('repo');
+      const to = flow ? flowHref(flow, slug) : flowsHref(slug);
+      const query = next.toString();
+      navigate(query ? `${to}&${query}` : to, { replace: true });
+      return;
+    }
     // COVERAGE IS NOT A TAB. Documents, their coverage and their conflicts
     // belong to the workspace, so every coverage jump lands on Context: on the
     // document's own page (read through the repository the jump came from), on

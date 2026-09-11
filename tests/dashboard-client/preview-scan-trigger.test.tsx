@@ -140,7 +140,7 @@ function renderAt(path: string) {
 const CONTEXT = '/preview/context/documents';
 
 /** A console tab, for the things the console itself says. */
-const CONSOLE = `/preview/repos/${REAL.id}/tests`;
+const CONSOLE = `/preview/repos/${REAL.id}/runs`;
 
 /** One conversation, where another go at it is offered. */
 const conversation = (runId: string) => `/preview/agent/${encodeURIComponent(runId)}`;
