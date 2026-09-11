@@ -175,19 +175,6 @@ describe('one-product preview', () => {
     expect(screen.getByText('api/post-refunds')).toBeInTheDocument();
   });
 
-  it('renders /preview/knowledge as the enterprise page, two levels', async () => {
-    renderAt('/preview/knowledge');
-    expect((await screen.findAllByText('Refund policy (company-wide)')).length).toBeGreaterThan(0);
-    expect(screen.getByRole('link', { name: 'Sources' })).toBeInTheDocument();
-  });
-
-  it('opens a workspace document as its own page', async () => {
-    renderAt('/preview/knowledge/doc/confluence%2FPAY%2Frefund-policy');
-    // The Spec breadcrumb beside the Knowledge menu's Spec entry.
-    expect((await screen.findAllByRole('link', { name: 'Spec' })).length).toBeGreaterThan(1);
-    expect((await screen.findAllByText(/Refund policy/)).length).toBeGreaterThan(0);
-  });
-
   it('lists nothing on Agent, since no repository of the mock is connected', async () => {
     renderAt('/preview/agent');
     // No server behind the smoke test, so the table is there and empty: the
@@ -200,9 +187,8 @@ describe('one-product preview', () => {
     renderAt('/preview/notifications');
     expect(screen.getByRole('link', { name: 'Home' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Context' })).toHaveAttribute('href', '/preview/context');
-    // Knowledge is parked: shown in the menu, not a link.
-    expect(screen.getByText('Knowledge')).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Knowledge' })).toBeNull();
+    // Knowledge is gone: Context is where the workspace's documents live.
+    expect(screen.queryByText('Knowledge')).toBeNull();
     // There is no pull request page anywhere: a PR is seen through its runs.
     expect(screen.queryByRole('link', { name: 'Pull requests' })).toBeNull();
   });

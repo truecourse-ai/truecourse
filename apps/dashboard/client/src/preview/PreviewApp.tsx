@@ -23,7 +23,6 @@ import ContextConflictPage from './pages/ContextConflictPage';
 import ContextDocPage from './pages/ContextDocPage';
 import DocumentsPage from './pages/DocumentsPage';
 import HomePage from './pages/HomePage';
-import KnowledgePage from './pages/KnowledgePage';
 import NotificationsPage from './pages/NotificationsPage';
 import SettingsPage from './pages/SettingsPage';
 import RepoConsole from './repo/RepoConsole';
@@ -59,12 +58,6 @@ function ContextSourceRedirect() {
   );
 }
 
-function KnowledgeItemRoute({ kind }: { kind: 'doc' | 'conflict' }) {
-  const { docRef, conflictId } = useParams<{ docRef?: string; conflictId?: string }>();
-  const id = kind === 'doc' ? docRef : conflictId;
-  return <KnowledgePage kind={kind} itemId={id ? decodeURIComponent(id) : undefined} />;
-}
-
 export function PreviewRoutes() {
   return (
     <Routes>
@@ -76,10 +69,6 @@ export function PreviewRoutes() {
       <Route path="context/conflicts/:conflictId" element={<ContextConflictRoute />} />
       <Route path="context/doc/:docRef" element={<ContextDocRoute />} />
       <Route path="context/source/:sourceId" element={<ContextSourceRedirect />} />
-      <Route path="knowledge" element={<KnowledgePage />} />
-      <Route path="knowledge/sources" element={<KnowledgePage tab="sources" />} />
-      <Route path="knowledge/doc/:docRef" element={<KnowledgeItemRoute kind="doc" />} />
-      <Route path="knowledge/conflict/:conflictId" element={<KnowledgeItemRoute kind="conflict" />} />
       <Route path="repos/:slug" element={<RepoConsole />} />
       <Route path="repos/:slug/:tab" element={<RepoConsole />} />
       <Route path="repos/:slug/runs/:runId" element={<RepoConsole />} />

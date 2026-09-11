@@ -21,7 +21,6 @@
 
 import type { SpecSource } from '@/components/spec/spec-source';
 import { sliceSkipped } from '@/components/spec/spec-source';
-import { KNOWLEDGE_DOCS, knowledgeCorpusResponse, knowledgeDocByRef } from './knowledge';
 import type { SpecCorpusResponse } from '@/preview/vendor/lib/api';
 import type { GuardDecisions } from '@/preview/vendor/shared';
 import { EMPTY_GUARD_DECISIONS } from '@/preview/vendor/shared';
@@ -256,75 +255,7 @@ function answerPut(repoId: string, rest: string, body: Record<string, unknown>):
   return missing(rest);
 }
 
-/** The WORKSPACE source: the Knowledge corpus, read the way the repo one is. */
-export function createWorkspaceSpecSource(): SpecSource {
-  let state: SpecCorpusResponse = knowledgeCorpusResponse();
-  const ack = () => ({ manualIncludes: state.manualIncludes ?? [], manualExcludes: state.manualExcludes ?? [] });
-  return {
-    supportsScan: false,
-    async getCorpus() {
-      return state;
-    },
-    async getDoc(ref) {
-      const doc = knowledgeDocByRef(ref);
-      return { ref, content: doc ? doc.body : `# ${ref}\n\nNo snapshot for this document.` };
-    },
-    async listSkipped(q) {
-      return sliceSkipped(state.corpus.skippedDocs ?? [], q);
-    },
-    async addInclude(ref) {
-      state = { ...state, manualIncludes: [...(state.manualIncludes ?? []), ref] };
-      return ack();
-    },
-    async removeInclude(ref) {
-      state = { ...state, manualIncludes: (state.manualIncludes ?? []).filter((r) => r !== ref) };
-      return ack();
-    },
-    async addExclude(ref) {
-      state = { ...state, manualExcludes: [...(state.manualExcludes ?? []), ref] };
-      return ack();
-    },
-    async removeExclude(ref) {
-      state = { ...state, manualExcludes: (state.manualExcludes ?? []).filter((r) => r !== ref) };
-      return ack();
-    },
-    async postConflictResolution(payload) {
-      const resolution = { ...payload, resolvedAt: new Date().toISOString() };
-      state = { ...state, conflictResolutions: [...(state.conflictResolutions ?? []), resolution] };
-      return { conflictResolutions: state.conflictResolutions ?? [] };
-    },
-    async deleteConflictResolution(payload) {
-      state = {
-        ...state,
-        conflictResolutions: (state.conflictResolutions ?? []).filter(
-          (r) =>
-            !(
-              ((r.docA === payload.docA && r.docB === payload.docB) || (r.docA === payload.docB && r.docB === payload.docA)) &&
-              r.anchorA === payload.anchorA &&
-              r.anchorB === payload.anchorB
-            ),
-        ),
-      };
-      return { conflictResolutions: state.conflictResolutions ?? [] };
-    },
-    async scan() {
-      // No on-demand scan over fixtures.
-    },
-  };
-}
-
 /** The provenance ledger: identity, deep link, kind, last synced; paged and searched like the real endpoint. */
-function knowledgeLedger(params: URLSearchParams): { documents: unknown[]; total: number } {
-  const q = (params.get('query') ?? '').trim().toLowerCase();
-  const kind = params.get('kind') ?? '';
-  const limit = Number(params.get('limit') ?? 50);
-  const offset = Number(params.get('offset') ?? 0);
-  const all = KNOWLEDGE_DOCS.filter(
-    (d) => (!kind || d.sourceKind === kind) && (!q || d.title.toLowerCase().includes(q) || d.ref.toLowerCase().includes(q)),
-  ).map((d) => ({ title: d.title, url: d.url, sourceKind: d.sourceKind, externalId: d.ref.split('/').pop() ?? d.ref, lastSyncedAt: d.lastSyncedAt }));
-  return { documents: all.slice(offset, offset + limit), total: all.length };
-}
-
 const ROUTE = /^\/api\/repos\/([^/]+)\/(.+)$/;
 
 /** The repositories the fixtures describe. Every other id is a REAL, connected
@@ -347,8 +278,6 @@ export function installPreviewFetch(): void {
     if (!window.location.pathname.startsWith('/preview')) return real(input, init);
     const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const url = new URL(href, window.location.origin);
-    // The workspace Knowledge ledger (the EE page's Sources tab).
-    if (url.pathname.endsWith('/api/ee/knowledge/documents')) return json(knowledgeLedger(url.searchParams));
     const match = ROUTE.exec(url.pathname);
     if (!match) return real(input, init);
     const repoId = decodeURIComponent(match[1]!);

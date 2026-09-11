@@ -2,7 +2,7 @@
  * The one-product shell: the sidebar the whole dashboard hangs off.
  *
  * Top to bottom: the workspace switcher, then
- * Home, Context, Knowledge, Agent, Notifications (with the unread badge) and Settings, then Admin
+ * Home, Context, Agent, Notifications (with the unread badge) and Settings, then Admin
  * on its own, separated, when the signed-in user is an operator, then the
  * user menu. Pull requests is NOT here: it lives inside a repository, and the
  * cross-repo feed it used to be is the home page's gate activity.
@@ -17,7 +17,6 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom';
 import {
   Bell,
-  BookOpen,
   Home,
   Layers,
   ChevronsUpDown,
@@ -48,7 +47,6 @@ const WORDMARK = { fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, 
 const NAV: { to: string; label: string; icon: LucideIcon; disabled?: boolean }[] = [
   { to: PREVIEW_BASE, label: 'Home', icon: Home },
   { to: `${PREVIEW_BASE}/context`, label: 'Context', icon: Layers },
-  { to: `${PREVIEW_BASE}/knowledge`, label: 'Knowledge', icon: BookOpen, disabled: true },
   { to: `${PREVIEW_BASE}/agent`, label: 'Agent', icon: MousePointer2 },
   { to: `${PREVIEW_BASE}/notifications`, label: 'Notifications', icon: Bell },
   { to: `${PREVIEW_BASE}/settings`, label: 'Settings', icon: Settings },
