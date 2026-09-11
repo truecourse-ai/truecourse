@@ -15,6 +15,10 @@
  *
  * A document whose content did not change keeps the stamp it already had, so a
  * re-fetch never reads as an edit.
+ *
+ * The settle hook is where onboarding continues: a repository's FIRST sync
+ * starts its Test setup whatever it reconciled (setup needs no documents), and
+ * a sync that reconciled something chains the workspace Document scan.
  */
 
 import { log } from '@truecourse/core/lib/logger';
@@ -62,6 +66,22 @@ export interface ContextSyncTaskDeps {
   drivers?: () => ReturnType<typeof contextDrivers>;
   /** The clock the sync record is stamped with. */
   now?: () => Date;
+  /**
+   * Chain the workspace Document scan when this sync RECONCILED something. A
+   * sync that changed no document leaves the corpus current, so the chain is
+   * the settle hook's own judgment, not an unconditional follow-on.
+   */
+  chainScan?: (request: ContextSyncJobRequest, result: ContextSyncJobResult) => Promise<void>;
+  /**
+   * Start the repository's Test setup after its FIRST sync — whatever that sync
+   * reconciled, zero included. A connected repository always onboards: setup
+   * derives its recipe, dependencies and interfaces from the code and needs no
+   * documents at all, so a repository whose markdown is empty must not be left
+   * waiting for a scan that will never be chained. The mount decides whether
+   * this sync is that one (a repository source, added) and whether the
+   * repository is already set up.
+   */
+  chainSetup?: (request: ContextSyncJobRequest, result: ContextSyncJobResult) => Promise<void>;
 }
 
 const NOTHING: Omit<ContextSyncJobResult, 'sourceId' | 'outcome'> = {
@@ -187,6 +207,34 @@ export function createContextSyncTask(
       body: `${payload.sourceId} — ${err.message}`,
       data: { sourceId: payload.sourceId },
     }),
+
+    async onSettled(ctx, outcome, result) {
+      // A sync that reconciled something is what makes the workspace corpus
+      // stale, so the scan follows it — one motion, exactly as a repository's
+      // scan used to chain its setup. A failed or cancelled sync chains nothing.
+      if (outcome !== 'succeeded') return;
+      const settled = result as ContextSyncJobResult | undefined;
+      if (!settled || settled.outcome !== 'synced') return;
+      // The repository's own onboarding first: it does not wait on documents,
+      // and starting it here means the ripple below finds it already working
+      // rather than racing it.
+      try {
+        await deps.chainSetup?.(ctx.payload, settled);
+      } catch (err) {
+        log.warn(
+          `[context] could not start ${ctx.payload.sourceId}'s test setup: ${(err as Error).message}`,
+        );
+      }
+      if (!deps.chainScan) return;
+      try {
+        await deps.chainScan(ctx.payload, settled);
+      } catch (err) {
+        // The sync already succeeded; the scan can be started by hand.
+        log.warn(
+          `[context] could not chain the document scan after ${ctx.payload.sourceId}: ${(err as Error).message}`,
+        );
+      }
+    },
   };
 
   /** Put the source back where the failure (or the stop) leaves it. */

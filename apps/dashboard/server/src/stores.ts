@@ -15,7 +15,9 @@ import path from 'node:path';
 import type { DbHandle } from '@truecourse/db';
 import { log } from '@truecourse/core/lib/logger';
 import { setAnalysisStore } from '@truecourse/core/lib/analysis-store';
-import { loadSpecDoc, setSpecStore } from '@truecourse/core/lib/spec-store';
+import { loadSpecDoc, loadWorkspaceSpecDoc, setSpecStore } from '@truecourse/core/lib/spec-store';
+import { isContextDocRef } from '@truecourse/core/lib/context-ref';
+import { readContextDocByRef } from '@truecourse/core/lib/context-store';
 import { setRepoDocReader, type RepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
 import { setGuardStore } from '@truecourse/core/lib/guard-store';
 import { setGuardOverlayStore } from '@truecourse/core/lib/guard-overlays';
@@ -56,10 +58,60 @@ export interface InstallDbStoresOptions {
   masterSecret: string;
 }
 
-/** Corpus reads honor their snapshot; a pinned miss must never read current sources. */
-export const readStoredRepoDoc: RepoDocReader = async (repoKey, docPath, opts) =>
-  (await loadSpecDoc(repoKey, docPath, opts?.commit)) ??
-  (opts?.commit ? null : await readSpecSourceDoc(repoKey, docPath));
+/**
+ * One document's body, however it is addressed.
+ *
+ * A `context/<sourceId>/<docPath>` ref is a WORKSPACE document — the workspace
+ * corpus names it, and no repository holds it — so it is read from the context
+ * store (the live body) and, when a source has stopped yielding it, from the
+ * scan's own snapshot, which is what keeps a document readable after it is
+ * gone. The workspace a ref belongs to is the one that has it: a ref names no
+ * workspace of its own, and a reader that was handed a repository key is asking
+ * on behalf of a repository whose workspace is resolved here.
+ *
+ * Every other ref is a repository document: its snapshot first (a pinned commit
+ * must never read current sources), then the registered sources store for a
+ * page no scan has kept yet.
+ */
+export const readStoredRepoDoc: RepoDocReader = async (repoKey, docPath, opts) => {
+  if (isContextDocRef(docPath)) return readWorkspaceDoc(repoKey, docPath);
+  return (
+    (await loadSpecDoc(repoKey, docPath, opts?.commit)) ??
+    (opts?.commit ? null : await readSpecSourceDoc(repoKey, docPath))
+  );
+};
+
+/**
+ * A workspace document, read through the workspace that reads `repoKey`. The
+ * repo→workspace lookup is installed at boot with the GitHub link store; with
+ * none installed (a test app, a server with no App configured) there is no
+ * workspace to resolve and the ref answers absent.
+ */
+async function readWorkspaceDoc(repoKey: string, ref: string): Promise<string | null> {
+  const org = await workspaceOfRepo(repoKey);
+  if (!org) return null;
+  return (await readContextDocByRef(org, ref)) ?? (await loadWorkspaceSpecDoc(org, ref));
+}
+
+/** How a repository key resolves to the workspace whose Context it reads. */
+export type RepoWorkspaceLookup = (repoKey: string) => Promise<string | null>;
+
+let repoWorkspace: RepoWorkspaceLookup | null = null;
+
+/** Install the repo→workspace lookup (boot: the GitHub link store). */
+export function setRepoWorkspaceLookup(lookup: RepoWorkspaceLookup | null): void {
+  repoWorkspace = lookup;
+}
+
+async function workspaceOfRepo(repoKey: string): Promise<string | null> {
+  if (!repoWorkspace) return null;
+  try {
+    return await repoWorkspace(repoKey);
+  } catch (err) {
+    log.warn(`[Server] could not resolve the workspace of ${repoKey}: ${(err as Error).message}`);
+    return null;
+  }
+}
 
 /** Swap every core/llm storage seam for its Postgres impl. */
 export function installDbStores(

@@ -29,6 +29,11 @@
       "types": "./dist/commands/spec-in-process.d.ts",
       "import": "./dist/commands/spec-in-process.js"
     },
+    "./commands/context-scan": {
+      "truecourse-source": "./src/commands/context-scan.ts",
+      "types": "./dist/commands/context-scan.d.ts",
+      "import": "./dist/commands/context-scan.js"
+    },
     "./commands/spec-sources": {
       "truecourse-source": "./src/commands/spec-sources.ts",
       "types": "./dist/commands/spec-sources.d.ts",

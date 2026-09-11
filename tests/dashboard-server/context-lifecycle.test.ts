@@ -142,19 +142,16 @@ describe('connecting a repository', () => {
 });
 
 describe('the connect hook', () => {
-  it('creates and syncs the source before the onboarding scan is enqueued', async () => {
-    const order: string[] = [];
+  // The onboarding chain starts in Context now: connecting creates the
+  // repository's source and syncs it, and nothing else is enqueued here — the
+  // sync chains the workspace Document scan, whose ripple starts Test setup.
+  it('creates the source and syncs it, and enqueues nothing else', async () => {
     const github = createGithubConnection({
       store: gate,
       octokitFor: () => ({}) as never,
       workTree: async () => ({ dir: '/nowhere', dispose: () => {} }),
       contextSync: async (orgId, sourceId, source) => {
-        order.push('context');
         syncs.push({ orgId, sourceId, source });
-        return 'queued';
-      },
-      scan: async () => {
-        order.push('scan');
         return 'queued';
       },
     });
@@ -164,7 +161,6 @@ describe('the connect hook', () => {
     // flow does, through the mount's own onRepoLinked wiring.
     await linkThroughMount(github!, { repoFullName: REPO, workspaceOrgId: ORG });
 
-    expect(order).toEqual(['context', 'scan']);
     expect(syncs).toEqual([{ orgId: ORG, sourceId: 'repo-acme-api', source: 'add' }]);
     expect(await repositoryContextSource(ORG, REPO)).not.toBeNull();
   });

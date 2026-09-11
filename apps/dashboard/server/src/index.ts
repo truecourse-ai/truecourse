@@ -7,7 +7,7 @@ import { createAuth } from './auth/index.js';
 import { createGithubConnection } from './github/index.js';
 import { createServerJobs } from './jobs/index.js';
 import { closeDb, getDb, getDbHandle, initDb } from './db.js';
-import { installDbStores } from './stores.js';
+import { installDbStores, setRepoWorkspaceLookup } from './stores.js';
 import { setContextEventPublisher } from './services/context.service.js';
 import { startContextSyncSchedule, type ContextSchedule } from './services/context-schedule.service.js';
 import { operatorClaudeCode } from './services/workspace-llm.service.js';
@@ -19,7 +19,7 @@ import { wipeLegacyPostgresData, getLogDir } from '@truecourse/core/config/paths
 import { getProjectByPath } from '@truecourse/core/config/registry';
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { closeLogger, configureLogger, log } from '@truecourse/core/lib/logger';
-import { migrateWorkspaceContext } from '@truecourse/data-store';
+import { migrateWorkspaceContext, migrateWorkspaceDecisions } from '@truecourse/data-store';
 import { publishEvent } from '@truecourse/jobs';
 
 const port = parseInt(process.env.PORT || '3001', 10);
@@ -72,6 +72,10 @@ async function main() {
   // per connected repository, and the old per-repository llms.txt registries as
   // workspace site sources. Idempotent — a second boot changes nothing.
   await migrateWorkspaceContext(getDb());
+  // And their standing choices with them: a force-include, a conflict verdict
+  // or a scope call is about a DOCUMENT, and documents are now addressed by the
+  // context grammar. Runs after the sources exist, since it maps onto them.
+  await migrateWorkspaceDecisions(getDb());
   sweepStaleRunClones();
   if (operatorClaudeCode()) {
     log.info("[LLM] operator mode — every workspace runs on this process's Claude Code login");
@@ -95,24 +99,20 @@ async function main() {
   // 5. GitHub App connection. Optional: without GITHUB_APP_* the server still
   //    boots, and /api/github answers 503 with the vars to set.
   const github = createGithubConnection({
-    // Connecting a repository creates its Repository source and syncs it,
-    // before the onboarding scan is enqueued.
+    // Connecting a repository creates its Repository source and syncs it; that
+    // sync chains the workspace Document scan, whose ripple starts the new
+    // repository's Test setup. Connect enqueues nothing else.
     contextSync: async (orgId, sourceId, source) => {
       const outcome = await jobs.enqueueContextSync({ workspaceOrgId: orgId, sourceId, source });
-      return outcome.status;
-    },
-    scan: async (repoId, repoKey, orgId) => {
-      const outcome = await jobs.enqueueScan({
-        repoId,
-        repoFullName: repoKey,
-        workspaceOrgId: orgId,
-        source: 'connect',
-      });
       return outcome.status;
     },
   });
   if (github) {
     log.info('[Server] GitHub connect enabled');
+    // A `context/` document ref belongs to a workspace, not to a repository, so
+    // the doc reader needs to know whose workspace a repository reads. The link
+    // row is that answer.
+    setRepoWorkspaceLookup(async (repoKey) => (await github.store.getRepo(repoKey))?.workspaceOrgId ?? null);
     // A decision that clears the last block on a generate (the final conflict
     // resolved, the last active finding dismissed) re-generates on its own. The
     // seam is keyed by repo identity alone, so the workspace and the slug are

@@ -51,7 +51,14 @@ import {
   writeGuardResult,
 } from '@truecourse/core/lib/guard-store';
 import { setGuardOverlayStore, writeGuardOverlays } from '@truecourse/core/lib/guard-overlays';
-import { setSpecStore, saveSpec } from '@truecourse/core/lib/spec-store';
+import { setSpecStore, saveWorkspaceSpec } from '@truecourse/core/lib/spec-store';
+import {
+  resetContextStore,
+  setContextBindings,
+  setContextStore,
+  writeContextDocuments,
+} from '@truecourse/core/lib/context-store';
+import { memoryContextStore } from '../helpers/memory-context-store';
 import {
   listSessionRuns,
   listStoredSessionRuns,
@@ -170,6 +177,9 @@ beforeEach(async () => {
   setGuardStore(new PgGuardStore(db));
   setGuardOverlayStore(new PgGuardOverlayStore(db, 'master-secret-at-least-32-chars-long!!'));
   setSpecStore(new PgSpecStore(db));
+  // Documentation is the WORKSPACE's: the jobs materialize the repository's
+  // slice of the workspace corpus, so the workspace store has to exist.
+  setContextStore(memoryContextStore());
   running = [];
   enqueued = [];
   enqueuedPayloads = [];
@@ -178,6 +188,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await Promise.all(running);
+  resetContextStore();
   setRepoJobsCanceller(null);
   setWorkTreeProvider(null);
   await jobs.stop();
@@ -208,6 +219,43 @@ const cleanScan = (): Awaited<ReturnType<ScanEngine>> =>
   ({ curate: { corpus: { areas: [] }, decisions: {} } }) as unknown as Awaited<
     ReturnType<ScanEngine>
   >;
+
+/**
+ * The scan's output, as the store holds it now: a workspace corpus over the
+ * repository's own Context source, with the documents it names in the context
+ * store and the repository linked to that source. This is what a job
+ * materializes into its clone.
+ */
+async function seedWorkspaceSpec(docPaths: string[] = ['docs/orgs.md']): Promise<void> {
+  const sourceId = 'repo-acme-widgets';
+  await writeContextDocuments(ORG, sourceId, {
+    documents: docPaths.map((docPath) => ({
+      docId: docPath,
+      docPath,
+      title: docPath,
+      url: null,
+      contentHash: `sha-${docPath}`,
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      body: `# ${docPath}\n`,
+    })),
+    removed: [],
+  });
+  await setContextBindings(ORG, REPO, [sourceId]);
+  await saveWorkspaceSpec({ workspaceOrgId: ORG }, 'corpus', {
+    version: 3,
+    generatedAt: '2026-01-01T00:00:00Z',
+    docs: docPaths.map((docPath) => ({
+      ref: `context/${sourceId}/${docPath}`,
+      kind: 'prd',
+      lastTouched: '',
+      areaTags: [],
+      sourceId,
+      sourceKind: 'repository',
+    })),
+    areas: [],
+    skippedDocs: [],
+  });
+}
 
 const jobsOfType = async (type: string): Promise<JobView[]> =>
   (await new JobStore(db).listForOrg(ORG)).filter((j) => j.type === type);
@@ -359,16 +407,9 @@ describe('the guard setup job', () => {
     catalogCalls.length = 0;
     overlaysSeen.length = 0;
     installWorkTree();
-    // The scan's output, as the store holds it: setup reads the curated doc
-    // universe, and the job materializes it into the clone.
-    await saveSpec({ repoKey: REPO, commitSha: 'scan-commit' }, 'corpus', {
-      version: 3,
-      generatedAt: '2026-01-01T00:00:00Z',
-      docs: [{ ref: 'docs/orgs.md', kind: 'prd', lastTouched: '', areaTags: [] }],
-      areas: [],
-      relations: [],
-      skippedDocs: [],
-    });
+    // Setup reads the curated doc universe, and the job materializes the
+    // repository's slice of the workspace corpus into the clone.
+    await seedWorkspaceSpec();
     jobs = createServerJobs({
       db,
       connectionString: 'postgres://unused',
@@ -514,6 +555,25 @@ describe('the guard setup job', () => {
     const [generate] = await jobsOfType('repo.guard-generate');
     expect(generate).toMatchObject({ status: 'queued', key: `repo.guard-generate:${REPO}` });
     expect(enqueuedPayloads[1]).toMatchObject({ jobId: generate?.id, repoFullName: REPO, source: 'chain' });
+  }, 60_000);
+
+  // A connected repository always onboards, documents or not: setup derives its
+  // recipe, dependencies and interfaces from the CODE. What it must not do is
+  // chain a generate that has no spec to generate from — that generate would
+  // fail, and a repository that simply reads nothing has failed at nothing.
+  it('is set up, and chains no generation, for a repository that reads no document', async () => {
+    await setContextBindings(ORG, REPO, []);
+
+    await jobs.enqueueGuardSetup(request);
+    await Promise.all(running);
+
+    expect(enqueued).toEqual(['repo.guard-setup']);
+    const [setup] = await jobsOfType('repo.guard-setup');
+    expect(setup).toMatchObject({ status: 'succeeded', result: { status: 'ok', documents: 0 } });
+    expect(setup?.error).toBeNull();
+    const [note] = await new NotificationStore(db).listForOrg(ORG, { limit: 10 });
+    expect(note).toMatchObject({ level: 'success', title: 'Guard setup complete' });
+    expect(note?.body).toContain('no documents linked yet');
   }, 60_000);
 
   it('chains nothing when setup was refused', async () => {
@@ -710,14 +770,7 @@ describe('the guard generate job', () => {
     generateLlm = testLlm;
     generateImpl = authoring;
     installWorkTree();
-    await saveSpec({ repoKey: REPO, commitSha: 'scan-commit' }, 'corpus', {
-      version: 3,
-      generatedAt: '2026-01-01T00:00:00Z',
-      docs: [{ ref: 'docs/orgs.md', kind: 'prd', lastTouched: '', areaTags: [] }],
-      areas: [],
-      relations: [],
-      skippedDocs: [],
-    });
+    await seedWorkspaceSpec();
     // Only the generate runs here: the run it chains into is observed as an
     // enqueue, never executed (its clone would race the assertions below).
     jobs = createServerJobs({
@@ -1188,14 +1241,7 @@ describe('disconnecting a repository mid-setup', () => {
       dispose: () => disposedHere.push(dir),
     }));
     setRepoJobsCanceller((repoKey, orgId) => jobs.cancelRepoJobs(repoKey, orgId));
-    await saveSpec({ repoKey: REPO, commitSha: 'scan-commit' }, 'corpus', {
-      version: 3,
-      generatedAt: '2026-01-01T00:00:00Z',
-      docs: [],
-      areas: [],
-      relations: [],
-      skippedDocs: [],
-    });
+    await seedWorkspaceSpec();
     jobs = createServerJobs({
       db,
       connectionString: 'postgres://unused',

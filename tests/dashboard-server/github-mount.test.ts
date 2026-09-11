@@ -88,7 +88,7 @@ vi.mock('@truecourse/core/commands/spec-in-process', async (importOriginal) => {
 import { createApp } from '../../apps/dashboard/server/src/app';
 import {
   createGithubConnection,
-  type OnboardingScanStart,
+  type ContextSyncStart,
 } from '../../apps/dashboard/server/src/github/index';
 import {
   createRunClone,
@@ -124,8 +124,10 @@ import {
   setSessionsRootResolver,
   resetSessionsRootResolver,
 } from '@truecourse/core/lib/sessions-store';
+import { resetContextStore, setContextStore } from '@truecourse/core/lib/context-store';
 import type { OctokitClient } from '../../packages/github-app/src/octokit';
 import { MemoryGateStore } from '../github-app/memory-store';
+import { memoryContextStore } from '../helpers/memory-context-store';
 
 const ORG = 'org_A';
 const OTHER_ORG = 'org_B';
@@ -217,7 +219,7 @@ function derivedRegistry(gate: MemoryGateStore): RegistryStore {
 
 interface MountOptions {
   workTree?: WorkTreeProvider;
-  scan?: OnboardingScanStart;
+  contextSync?: ContextSyncStart;
   lookupInstallationAccount?: (
     installationId: number,
   ) => Promise<{ accountLogin: string; accountType: string } | null>;
@@ -256,6 +258,9 @@ beforeAll(() => {
 
 beforeEach(async () => {
   store = new MemoryGateStore();
+  // Connecting a repository creates its workspace Context source, so the
+  // workspace store has to exist for the connect hook to do anything.
+  setContextStore(memoryContextStore());
   setRegistryStore(derivedRegistry(store));
   await store.saveInstallation({
     installationId: INSTALLATION_ID,
@@ -280,6 +285,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   resetRegistryStore();
+  resetContextStore();
   resetWorkspaceLlmConfigStore();
   resetWorkspaceLlmBackend();
   setWorkTreeProvider(null);
@@ -328,7 +334,7 @@ describe('a server with no GitHub App configured', () => {
 
 describe('mount order', () => {
   it('takes a signed webhook with no session cookie', async () => {
-    const app = buildApp({ scan: async () => 'queued' });
+    const app = buildApp({ contextSync: async () => 'queued' });
     const { payload, signature } = signed({
       action: 'created',
       installation: { id: 77, account: { login: 'acme', type: 'Organization' } },
@@ -346,7 +352,7 @@ describe('mount order', () => {
   });
 
   it('rejects an unsigned webhook on the signature, not the gate', async () => {
-    const app = buildApp({ scan: async () => 'queued' });
+    const app = buildApp({ contextSync: async () => 'queued' });
     const res = await request(app)
       .post('/api/github/webhook')
       .set('X-GitHub-Event', 'installation')
@@ -358,7 +364,7 @@ describe('mount order', () => {
   });
 
   it('puts the connect routes behind the auth gate', async () => {
-    const app = buildApp({ scan: async () => 'queued' });
+    const app = buildApp({ contextSync: async () => 'queued' });
     await request(app).get('/api/github/status').expect(401);
     await request(app).get('/api/github/status').set('Cookie', `tc_session=${ORG}`).expect(200);
   });
@@ -405,11 +411,14 @@ const linkRepo = (app: Express, org = ORG) =>
     .send({ repoFullName: REPO, installationId: INSTALLATION_ID, defaultBranch: 'main' });
 
 describe('linking a repository', () => {
-  it('writes the row, enqueues the scan, and clones nothing in the request', async () => {
+  // Onboarding starts in Context: the repository's own documentation becomes a
+  // workspace source and its SYNC is what the connect enqueues. That sync
+  // chains the workspace Document scan, whose ripple starts the tests.
+  it('writes the row, enqueues the context sync, and clones nothing in the request', async () => {
     const started: Array<[string, string, string]> = [];
     const app = buildApp({
-      scan: async (repoId, repoKey, orgId) => {
-        started.push([repoId, repoKey, orgId]);
+      contextSync: async (orgId, sourceId, source) => {
+        started.push([orgId, sourceId, source]);
         return 'queued';
       },
     });
@@ -432,25 +441,25 @@ describe('linking a repository', () => {
       remoteUrl: `https://github.com/${REPO}`,
     });
 
-    // The scan was pointed at the repo IDENTITY; no clone dir exists. It runs
-    // on the provider of the workspace that connected the repository.
-    expect(started).toEqual([[REPO_SLUG, REPO, ORG]]);
+    // The sync was pointed at the repository's own source; no clone dir exists.
+    // The work happens on the queue, on the connecting workspace's provider.
+    expect(started).toEqual([[ORG, 'repo-acme-widgets', 'add']]);
     expect(fs.existsSync(getRunClonesDir())).toBe(false);
   });
 
   it('refuses to connect the same repository twice', async () => {
-    let scans = 0;
+    let syncs = 0;
     const app = buildApp({
-      scan: async () => {
-        scans += 1;
+      contextSync: async () => {
+        syncs += 1;
         return 'queued';
       },
     });
 
     await linkRepo(app).expect(201);
-    // A second link would re-fire the onboarding scan on a live repo.
+    // A second link would re-fire the whole onboarding chain on a live repo.
     await linkRepo(app).expect(409);
-    expect(scans).toBe(1);
+    expect(syncs).toBe(1);
   });
 });
 
@@ -460,7 +469,7 @@ describe('linking a repository', () => {
 
 describe('disconnecting a repository', () => {
   it('drops the row and the repo’s session transcripts', async () => {
-    const app = buildApp({ scan: async () => 'queued' });
+    const app = buildApp({ contextSync: async () => 'queued' });
     await linkRepo(app).expect(201);
 
     // Transcripts a scan left behind, keyed by identity.
@@ -478,7 +487,7 @@ describe('disconnecting a repository', () => {
   });
 
   it('drops the link row when the repo is disconnected from Home', async () => {
-    const app = buildApp({ scan: async () => 'queued' });
+    const app = buildApp({ contextSync: async () => 'queued' });
     await linkRepo(app).expect(201);
 
     await request(app)
@@ -501,7 +510,7 @@ describe('disconnecting a repository', () => {
 // ---------------------------------------------------------------------------
 
 describe('a slug that belongs to another workspace', () => {
-  const app = (): Express => buildApp({ scan: async () => 'queued' });
+  const app = (): Express => buildApp({ contextSync: async () => 'queued' });
 
   it('404s the repo detail route — not 403, which would confirm it exists', async () => {
     const server = app();
@@ -564,7 +573,7 @@ describe('a slug that belongs to another workspace', () => {
 
 describe('GET /api/repos with a link store', () => {
   it("hides another workspace's connected repository", async () => {
-    const app = buildApp({ scan: async () => 'queued' });
+    const app = buildApp({ contextSync: async () => 'queued' });
     await linkRepo(app).expect(201);
 
     const mine = await request(app)
@@ -703,7 +712,12 @@ async function until(predicate: () => boolean, timeoutMs = 5000): Promise<void> 
   while (!predicate() && Date.now() < deadline) await settle(10);
 }
 
-describe('connecting a repository enqueues its spec scan', () => {
+// The spec-scan JOB's mechanics, on the real queue. Connecting no longer
+// enqueues it (Context's sync is the first link of the chain now), so these
+// drive the enqueue directly — what is pinned here is the job's brackets: it
+// acquires and disposes its own work tree, one runs per repository at a time,
+// a disconnect cancels it, and a scan another process owns is visible.
+describe('the spec-scan job on the real queue', () => {
   const held: Deferred[] = [];
   const disposed: string[] = [];
   let workTreeDir: string;
@@ -755,18 +769,13 @@ describe('connecting a repository enqueues its spec scan', () => {
     });
     await jobs.start();
     setRepoJobsCanceller(jobs.cancelRepoJobs);
-    return buildApp({
-      workTree,
-      scan: async (repoId, repoKey, orgId) =>
-        (
-          await jobs.enqueueScan({
-            repoId,
-            repoFullName: repoKey,
-            workspaceOrgId: orgId,
-            source: 'connect',
-          })
-        ).status,
-    });
+    return buildApp({ workTree, contextSync: async () => 'queued' });
+  }
+
+  /** Link the repository, then start its scan the way the Scan button does. */
+  async function linkAndScan(app: Express): Promise<void> {
+    await linkRepo(app).expect(201);
+    await jobs.enqueueScan(scanRequest);
   }
 
   afterEach(async () => {
@@ -785,8 +794,8 @@ describe('connecting a repository enqueues its spec scan', () => {
     disposed.length = 0;
   });
 
-  it('runs the scan on the acquired work tree, in the background of the 201', async () => {
-    await linkRepo(await appWithRealScan()).expect(201);
+  it('runs the scan on a work tree it acquires and disposes itself', async () => {
+    await linkAndScan(await appWithRealScan());
 
     await until(() => scan.calls.length > 0);
     expect(scan.calls).toEqual([workTreeDir]);
@@ -795,13 +804,13 @@ describe('connecting a repository enqueues its spec scan', () => {
     expect(disposed).toEqual([workTreeDir]);
   });
 
-  it('answers before the scan finishes — a held scan does not hold the response', async () => {
+  it('answers before the scan finishes — a held scan does not hold the enqueue', async () => {
     const pending = heldScan();
     held.push(pending);
     scan.impl = () => pending.promise;
 
-    // Only passes if the link never awaits the scan: this one never settles.
-    await linkRepo(await appWithRealScan()).expect(201);
+    // Only passes if nothing awaits the scan: this one never settles.
+    await linkAndScan(await appWithRealScan());
 
     await until(() => scan.calls.length > 0);
     expect(scan.calls).toEqual([workTreeDir]);
@@ -809,7 +818,7 @@ describe('connecting a repository enqueues its spec scan', () => {
     expect(disposed).toEqual([]);
   });
 
-  it('a scan that fails leaves the link response alone and rejects nothing', async () => {
+  it('a scan that fails rejects nothing into the process', async () => {
     scan.impl = () => Promise.reject(new Error('no LLM transport configured'));
     const unhandled: unknown[] = [];
     const onUnhandled = (reason: unknown): void => {
@@ -817,7 +826,7 @@ describe('connecting a repository enqueues its spec scan', () => {
     };
     process.on('unhandledRejection', onUnhandled);
     try {
-      await linkRepo(await appWithRealScan()).expect(201);
+      await linkAndScan(await appWithRealScan());
 
       await until(() => disposed.length > 0);
       expect(scan.calls).toHaveLength(1);
@@ -855,7 +864,7 @@ describe('connecting a repository enqueues its spec scan', () => {
       });
 
     const app = await appWithRealScan();
-    await linkRepo(app).expect(201);
+    await linkAndScan(app);
     await until(() => reached);
 
     await request(app)

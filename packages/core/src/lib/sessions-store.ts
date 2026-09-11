@@ -26,7 +26,7 @@ import {
   type SessionPersistence,
 } from '@truecourse/agent-loop';
 import type { ActivityEvent } from '@truecourse/shared/activity-stream';
-import { getRepoTruecourseDir } from '../config/paths.js';
+import { getGlobalDir, getRepoTruecourseDir } from '../config/paths.js';
 import { atomicWriteJson } from './atomic-write.js';
 import { appendActivityEvent, publishActivityProgress, readActivityEvents, validateActivityCursor } from './activity-journal.js';
 
@@ -40,8 +40,31 @@ import { appendActivityEvent, publishActivityProgress, readActivityEvents, valid
  */
 export type SessionsRootResolver = (repoDirOrKey: string) => string;
 
-const defaultSessionsRoot: SessionsRootResolver = (repoDir) =>
-  path.join(getRepoTruecourseDir(repoDir), 'sessions');
+/**
+ * The key a WORKSPACE's own runs are recorded under — the Document scan belongs
+ * to a workspace, not to any repository, so it has no `owner/repo` to key by.
+ * The grammar lives here because this store is what addresses by it.
+ */
+export function workspaceSessionsKey(workspaceOrgId: string): string {
+  return `workspace:${workspaceOrgId}`;
+}
+
+/** Is this a workspace run key rather than a repository path or `owner/repo`? */
+export function isWorkspaceSessionsKey(key: string): boolean {
+  return key.startsWith('workspace:');
+}
+
+/** A workspace key as one safe directory segment. */
+function workspaceDirName(key: string): string {
+  return key.replace(/[^A-Za-z0-9._-]+/g, '-');
+}
+
+const defaultSessionsRoot: SessionsRootResolver = (repoDirOrKey) =>
+  // A workspace key is not a path: joining it to a tree would put a directory
+  // named `workspace:<org>` wherever the process happens to be standing.
+  isWorkspaceSessionsKey(repoDirOrKey)
+    ? path.join(getGlobalDir(), 'sessions', workspaceDirName(repoDirOrKey))
+    : path.join(getRepoTruecourseDir(repoDirOrKey), 'sessions');
 
 let activeSessionsRoot: SessionsRootResolver = defaultSessionsRoot;
 

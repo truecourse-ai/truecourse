@@ -9,6 +9,13 @@
  *   DELETE /api/context/sources/:id           drop the source, its documents and every link
  *   GET    /api/context/sources/:id/documents its ledger
  *   GET    /api/context/doc?ref=              one document's body, by its corpus ref
+ *   POST   /api/context/scan                  the workspace Document scan; 202 { jobId }
+ *   GET    /api/context/staleness             has the context moved since the corpus?
+ *   GET    /api/context/corpus                the workspace corpus + its decisions
+ *   POST|DELETE /api/context/includes         force-include / un-include a document
+ *   POST|DELETE /api/context/excludes         force-exclude / restore a document
+ *   POST|DELETE /api/context/conflict-resolution   a section-scoped conflict verdict
+ *   GET    /api/context/runs                  the workspace's own agent runs
  *
  * A source belongs to the workspace, not to a repository, so this router mounts
  * ABOVE the repository routers and behind the auth gate alone — there is no
@@ -22,6 +29,7 @@
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { createAppError } from '@truecourse/core/lib/errors';
+import { log } from '@truecourse/core/lib/logger';
 import { getProjectBySlug, readRegistry, type RegistryEntry } from '@truecourse/core/config/registry';
 import {
   contextBindings,
@@ -48,7 +56,30 @@ import {
 import {
   InvalidSourceUrlError,
   LlmsTxtFetchError,
+  type ConflictResolution,
+  type CuratedCorpus,
+  type DecisionsFile,
 } from '@truecourse/spec-consolidator';
+import { loadWorkspaceSpec } from '@truecourse/core/lib/spec-store';
+import {
+  addWorkspaceConflictResolution,
+  addWorkspaceManualExclude,
+  addWorkspaceManualInclude,
+  getWorkspaceDecisions,
+  removeWorkspaceConflictResolution,
+  removeWorkspaceManualExclude,
+  removeWorkspaceManualInclude,
+} from '@truecourse/core/commands/spec-in-process';
+import {
+  listStoredSessionRuns,
+  toPublicRunRecord,
+} from '@truecourse/core/lib/sessions-store';
+import { workspaceSessionsKey } from '@truecourse/core/commands/context-scan';
+import { LlmNotConfiguredError, LlmProbeFailedError, startWorkspaceLlm } from '../services/workspace-llm.service.js';
+import {
+  contextIsStale,
+  recordFailedWorkspaceScanRun,
+} from '../services/context-scan.service.js';
 import {
   CONTEXT_SOURCE_KINDS,
   type ContextSource,
@@ -138,6 +169,27 @@ function titleFor(scope: NormalizedConfig): string {
   return scope.kind === 'repository'
     ? scope.config.repoFullName
     : new URL(scope.config.llmsTxtUrl).host;
+}
+
+/** The verdicts a conflict resolution may carry — the repository route's set. */
+const CONFLICT_VERDICTS = ['a', 'b', 'dismissed'] as const;
+
+/**
+ * Start the workspace Document scan after a change to WHICH documents the
+ * corpus should hold (a source removed, a repository's links replaced). Returns
+ * the job id, or null when a scan is already running — which is not a failure:
+ * the running scan's settle hook re-reads the workspace's staleness stamp and
+ * queues the one follow-up run itself.
+ */
+async function startWorkspaceScan(org: string, source: 'link'): Promise<string | null> {
+  try {
+    const outcome = await requireJobs().enqueueContextScan({ workspaceOrgId: org, source });
+    return outcome.status === 'queued' ? outcome.jobId : null;
+  } catch (err) {
+    // A queue that is not running must not fail the change the user just made.
+    log.warn(`[context] could not start the document scan for ${org}: ${(err as Error).message}`);
+    return null;
+  }
 }
 
 /** Read `kind` off a request body, refusing anything that cannot sync. */
@@ -238,6 +290,207 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
         return;
       }
       res.json({ ref, content });
+    } catch (e) {
+      respond(res, next, e);
+    }
+  });
+
+  // The workspace corpus, in the same payload shape the repository's corpus
+  // route answers with, so the corpus components render either unchanged. The
+  // documents carry their source in the artifact (the scan stamps it), so
+  // nothing is enriched at read time.
+  router.get('/corpus', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const org = orgOf(req);
+      const [corpus, decisions] = await Promise.all([
+        loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId: org }, 'corpus'),
+        getWorkspaceDecisions(org),
+      ]);
+      if (!corpus) {
+        res.status(404).json({ error: 'No documents have been scanned yet.' });
+        return;
+      }
+      res.json({
+        corpus,
+        manualIncludes: decisions.manualIncludes ?? [],
+        manualExcludes: decisions.manualExcludes ?? [],
+        conflictResolutions: decisions.conflictResolutions ?? [],
+      });
+    } catch (e) {
+      respond(res, next, e);
+    }
+  });
+
+  // Has the workspace's Context moved since the corpus was built? One stamp
+  // against one stamp — the amber dot on Scan reads exactly this.
+  router.get('/staleness', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const org = orgOf(req);
+      const [changedAt, corpus] = await Promise.all([
+        contextChangedAt(org),
+        loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId: org }, 'corpus'),
+      ]);
+      const corpusAt = corpus?.generatedAt ?? null;
+      // No corpus yet is not "stale": there is nothing to be behind. The
+      // Context page shows a workspace that never scanned as never scanned.
+      res.json({ changedAt, corpusAt, stale: contextIsStale(corpusAt, changedAt) });
+    } catch (e) {
+      respond(res, next, e);
+    }
+  });
+
+  // The workspace's own agent runs — the Document scans, which belong to no
+  // repository and therefore appear under no repository's runs.
+  router.get('/runs', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const org = orgOf(req);
+      const runs = await listStoredSessionRuns(workspaceSessionsKey(org));
+      res.json({ runs: runs.map(toPublicRunRecord) });
+    } catch (e) {
+      respond(res, next, e);
+    }
+  });
+
+  // --- Scan ----------------------------------------------------------------
+
+  // The workspace Document scan. The asking workspace's provider is proved
+  // BEFORE anything is queued, exactly as the repository scan route did it: an
+  // unconfigured provider is a setting to fill in, not a job that dies later.
+  router.post('/scan', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const org = orgOf(req);
+      try {
+        await startWorkspaceLlm(org);
+      } catch (e) {
+        if (e instanceof LlmNotConfiguredError) {
+          res.status(409).json({ error: e.code, message: e.message });
+          return;
+        }
+        if (e instanceof LlmProbeFailedError) {
+          await recordFailedWorkspaceScanRun(org, { message: e.message, kind: 'llm-probe' });
+          res.status(502).json({ error: e.code, message: e.message });
+          return;
+        }
+        throw e;
+      }
+      const outcome = await requireJobs().enqueueContextScan({
+        workspaceOrgId: org,
+        source: 'manual',
+      });
+      if (outcome.status === 'busy') {
+        res.status(409).json({ error: 'A document scan is already running for this workspace.' });
+        return;
+      }
+      res.status(202).json({ jobId: outcome.jobId });
+    } catch (e) {
+      respond(res, next, e);
+    }
+  });
+
+  // --- Decisions, at workspace scope ---------------------------------------
+  //
+  // The workspace's corpus is one corpus, so a force-include, a force-exclude
+  // and a conflict verdict are settled ONCE here rather than per repository.
+  // Each write persists the decisions artifact and acks it; the corpus itself
+  // is unchanged until the next scan, which is what the staleness dot says.
+
+  const includeAck = (decisions: DecisionsFile): Record<string, unknown> => ({
+    manualIncludes: decisions.manualIncludes ?? [],
+    manualExcludes: decisions.manualExcludes ?? [],
+  });
+
+  /** `{ ref }` off a decision request body, or a refusal. */
+  function readRef(req: Request): string {
+    const ref = (req.body as { ref?: unknown })?.ref;
+    if (typeof ref !== 'string' || !ref.trim()) throw new ContextConfigError('Missing ref.');
+    return ref.trim();
+  }
+
+  router.post('/includes', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const org = orgOf(req);
+      res.json(includeAck(await addWorkspaceManualInclude(org, readRef(req))));
+    } catch (e) {
+      respond(res, next, e);
+    }
+  });
+
+  router.delete('/includes', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const org = orgOf(req);
+      res.json(includeAck(await removeWorkspaceManualInclude(org, readRef(req))));
+    } catch (e) {
+      respond(res, next, e);
+    }
+  });
+
+  router.post('/excludes', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const org = orgOf(req);
+      res.json(includeAck(await addWorkspaceManualExclude(org, readRef(req))));
+    } catch (e) {
+      respond(res, next, e);
+    }
+  });
+
+  router.delete('/excludes', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const org = orgOf(req);
+      res.json(includeAck(await removeWorkspaceManualExclude(org, readRef(req))));
+    } catch (e) {
+      respond(res, next, e);
+    }
+  });
+
+  router.post('/conflict-resolution', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const org = orgOf(req);
+      const body = (req.body ?? {}) as Partial<ConflictResolution>;
+      if (!body.docA || !body.docB || body.docA === body.docB) {
+        res.status(400).json({ error: 'docA and docB are required and must differ.' });
+        return;
+      }
+      if (!body.verdict || !CONFLICT_VERDICTS.includes(body.verdict)) {
+        res.status(400).json({ error: `verdict must be one of ${CONFLICT_VERDICTS.join(', ')}.` });
+        return;
+      }
+      const decisions = await addWorkspaceConflictResolution(org, {
+        docA: body.docA,
+        anchorA: body.anchorA ?? null,
+        quoteA: body.quoteA,
+        docB: body.docB,
+        anchorB: body.anchorB ?? null,
+        quoteB: body.quoteB,
+        verdict: body.verdict,
+        resolvedAt: new Date().toISOString(),
+        note: body.note,
+      });
+      res.json({ conflictResolutions: decisions.conflictResolutions ?? [] });
+    } catch (e) {
+      respond(res, next, e);
+    }
+  });
+
+  router.delete('/conflict-resolution', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const org = orgOf(req);
+      const body = (req.body ?? {}) as {
+        docA?: string;
+        anchorA?: string | null;
+        docB?: string;
+        anchorB?: string | null;
+      };
+      if (!body.docA || !body.docB) {
+        res.status(400).json({ error: 'docA and docB are required.' });
+        return;
+      }
+      const decisions = await removeWorkspaceConflictResolution(org, {
+        docA: body.docA,
+        anchorA: body.anchorA ?? null,
+        docB: body.docB,
+        anchorB: body.anchorB ?? null,
+      });
+      res.json({ conflictResolutions: decisions.conflictResolutions ?? [] });
     } catch (e) {
       respond(res, next, e);
     }
@@ -436,7 +689,10 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
         .map((binding) => binding.repoFullName);
       await removeContextSource(org, sourceId);
       await emitContextChanged(org, { change: 'sources', sourceId });
-      res.json({ removed: source, repositories });
+      // The corpus still holds this source's documents; re-scanning is what
+      // takes them out of it (and out of every repository's slice).
+      const scan = await startWorkspaceScan(org, 'link');
+      res.json({ removed: source, repositories, ...(scan ? { jobId: scan } : {}) });
     } catch (e) {
       respond(res, next, e);
     }
@@ -485,9 +741,25 @@ export function createContextBindingsRouter(): Router {
         }
         if (!wanted.includes(sourceId)) wanted.push(sourceId);
       }
+      // Only a set that actually DIFFERS is a change: saving the toggles
+      // untouched must not re-scan the workspace.
+      const before = await contextBindings(org, entry.name);
+      const differs =
+        before.length !== wanted.length || wanted.some((id) => !before.includes(id));
       await setContextBindings(org, entry.name, wanted);
+      if (!differs) {
+        res.json({ repoFullName: entry.name, sourceIds: await contextBindings(org, entry.name) });
+        return;
+      }
       await emitContextChanged(org, { change: 'bindings', repoFullName: entry.name });
-      res.json({ repoFullName: entry.name, sourceIds: await contextBindings(org, entry.name) });
+      // The slices moved, so the corpus must be recomputed over them — the scan
+      // is what re-derives who reads what, and its ripple regenerates the tests.
+      const jobId = await startWorkspaceScan(org, 'link');
+      res.json({
+        repoFullName: entry.name,
+        sourceIds: await contextBindings(org, entry.name),
+        ...(jobId ? { jobId } : {}),
+      });
     } catch (e) {
       respond(res, next, e);
     }

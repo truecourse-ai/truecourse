@@ -233,6 +233,14 @@ export const CorpusDocSchema = z.object({
   lastTouched: z.string(),
   /** Canonical area ids (`product/concern`) this doc covers. May be many. */
   areaTags: z.array(z.string()),
+  /**
+   * The workspace source the document came from, and what kind of source that
+   * is — stamped INTO the artifact by the workspace scan (the ref already
+   * carries the id; the kind is what the ref cannot say). Absent on a
+   * per-repository corpus, where the source is read at display time instead.
+   */
+  sourceId: z.string().optional(),
+  sourceKind: z.string().optional(),
 });
 export type CorpusDoc = z.infer<typeof CorpusDocSchema>;
 

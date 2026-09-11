@@ -35,7 +35,7 @@ import {
 import type { JobDefinition, JobPayload } from '@truecourse/jobs';
 import { startWorkspaceLlm, type WorkspaceLlm } from '../../services/workspace-llm.service.js';
 import { acquireWorkTree } from '../../services/work-tree.service.js';
-import { materializeStoredSpec } from '../materialize-spec.js';
+import { materializeStoredSpec, storedSliceSize } from '../materialize-spec.js';
 import { firstLine, type OnboardingJobRequest } from './onboarding.js';
 
 export const REPO_GUARD_SETUP_TASK = 'repo.guard-setup';
@@ -56,6 +56,8 @@ export interface RepoGuardSetupTaskDeps {
   chainGuardGenerate(request: OnboardingJobRequest): Promise<void>;
   startLlm?: (orgId: string) => Promise<WorkspaceLlm>;
   runSetup?: typeof guardSetupInProcess;
+  /** How many documents the repository reads right now (the store, not the clone). */
+  sliceDocuments?: typeof storedSliceSize;
 }
 
 export function createRepoGuardSetupTask(
@@ -63,6 +65,7 @@ export function createRepoGuardSetupTask(
 ): JobDefinition<GuardSetupJobPayload> {
   const startLlm = deps.startLlm ?? startWorkspaceLlm;
   const runSetup = deps.runSetup ?? guardSetupInProcess;
+  const sliceDocuments = deps.sliceDocuments ?? storedSliceSize;
 
   return {
     type: REPO_GUARD_SETUP_TASK,
@@ -83,12 +86,19 @@ export function createRepoGuardSetupTask(
           activityRun.setGitRef?.(commitSha);
           activityTracker.fact('clone', `cloned ${repoFullName} at ${commitSha.slice(0, 8)}`);
           const ref = { repoKey: repoFullName, commitSha };
-          if (!(await materializeStoredSpec(ref, tree.dir))) {
-            throw new Error(
-              `${repoFullName} has no scanned spec yet — run the spec scan before guard setup.`,
-            );
-          }
-          activityTracker.fact('clone', 'the stored spec corpus and decisions written into the clone');
+          // Setup runs with or without documents: the recipe, its dependencies
+          // and the interface catalog are derived from the CODE. A repository
+          // that reads nothing gets an empty corpus in its clone and is set up
+          // exactly the same; what it does NOT get is a generate (below).
+          const slice = await materializeStoredSpec(ref, tree.dir, ctx.payload.workspaceOrgId);
+          activityTracker.fact(
+            'clone',
+            slice.documents > 0
+              ? `the repository's slice of the workspace corpus written into the clone: ${slice.documents} document${slice.documents === 1 ? '' : 's'}`
+              : slice.hasWorkspaceCorpus
+                ? 'the repository reads no document of the workspace corpus: an empty corpus written into the clone'
+                : 'the workspace has no corpus yet: an empty corpus written into the clone',
+          );
           // The NEWEST bundle, not this commit's: what carries the settle spine
           // forward is the last setup that ran, whatever commit it ran on.
           const stored = await loadGuardSetupBundle(repoFullName);
@@ -126,15 +136,27 @@ export function createRepoGuardSetupTask(
 
           const reason = firstLine(report.reason);
           if (report.status !== 'ok') activityRun.setError({ message: reason || 'Setup did not complete' });
+          // What the repository reads as of NOW, not as of the clone: on a
+          // connect the first Document scan runs beside this job, so the
+          // materialized slice can be older than the answer.
+          const documents = await sliceDocuments(repoFullName, ctx.payload.workspaceOrgId);
           return {
-            result: { repoFullName, status: report.status, ...(reason ? { reason } : {}) },
+            result: {
+              repoFullName,
+              status: report.status,
+              documents,
+              ...(reason ? { reason } : {}),
+            },
             notification:
               report.status === 'ok'
                 ? {
                     level: 'success',
                     title: 'Guard setup complete',
-                    body: `${repoFullName} — the recipe and its dependencies are ready.`,
-                    data: { repoFullName },
+                    body:
+                      documents === 0
+                        ? `${repoFullName} — set up; no documents linked yet.`
+                        : `${repoFullName} — the recipe and its dependencies are ready.`,
+                    data: { repoFullName, documents },
                   }
                 : {
                     level: 'error',
@@ -163,7 +185,27 @@ export function createRepoGuardSetupTask(
       // Only a setup whose recipe gate held has anything to generate against: a
       // refused setup ends the chain here, and its notification already says why.
       if (outcome !== 'succeeded') return;
-      if ((result as { status?: string } | undefined)?.status !== 'ok') return;
+      const settled = result as { status?: string; documents?: number } | undefined;
+      if (settled?.status !== 'ok') return;
+      // And only a repository that actually READS something has anything to
+      // generate FROM. A repository linked to no source with documents is set
+      // up and stops here — a generate would fail for want of a spec it was
+      // never given. The Document scan's ripple starts it when documents arrive.
+      //
+      // Asked ONE more time, here, because this is the latest moment there is:
+      // the scan this job was started beside may have stored its corpus while
+      // the body was still running, and by now the job's row is settled, so a
+      // ripple that meant to skip this repository no longer will.
+      const documents =
+        (settled.documents ?? 0) > 0
+          ? (settled.documents ?? 0)
+          : await sliceDocuments(ctx.payload.repoFullName, ctx.payload.workspaceOrgId).catch(() => 0);
+      if (documents === 0) {
+        log.info(
+          `[jobs] ${ctx.payload.repoFullName} is set up but reads no documents — scenario generation not chained`,
+        );
+        return;
+      }
       try {
         // A fresh request, not this job's payload: the chained job gets its own
         // row id from the enqueue, never setup's.

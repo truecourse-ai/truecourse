@@ -43,7 +43,9 @@ vi.mock('@truecourse/core/commands/spec-in-process', async (importOriginal) => {
   };
 });
 
-import { createTestApp } from '../helpers/test-app';
+import { createTestApp, TEST_ORG } from '../helpers/test-app';
+import { memoryContextStore } from '../helpers/memory-context-store';
+import { resetContextStore, setContextStore } from '@truecourse/core/lib/context-store';
 import { curateInProcess } from '@truecourse/core/commands/spec-in-process';
 import {
   setBackgroundTaskRunner,
@@ -60,6 +62,7 @@ import {
   type SpecStore,
   type RepoRef,
   type SpecArtifact,
+  type WorkspaceRef,
 } from '@truecourse/core/lib/spec-store';
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { writeLatest } from '@truecourse/core/lib/analysis-store';
@@ -94,12 +97,14 @@ import {
  * A minimal in-memory hosted `SpecStore` — the shape EE actually installs
  * (`materializesInPlace: false`, Postgres-backed). Map-backed round-trip for
  * decisions writes / corpus reads so the EE route paths (which read/write through
- * the ACTIVE spec store) work without a real database. Workspace scope is
- * unused here (throw / null, mirroring the file default).
+ * the ACTIVE spec store) work without a real database. Workspace scope is a
+ * third map — the hosted corpus and decisions are the WORKSPACE's now.
  */
 function makeMemSpecStore(): SpecStore {
   const byRef = new Map<string, unknown>(); // (repoKey, commitSha, artifact) → json
   const latest = new Map<string, unknown>(); // (repoKey, artifact) → json
+  const workspace = new Map<string, unknown>(); // (org, artifact) → json
+  const workspaceDocs = new Map<string, string>(); // (org, ref) → body
   const rk = (ref: RepoRef, a: SpecArtifact) => `${ref.repoKey}\x00${ref.commitSha}\x00${a}`;
   const lk = (repoKey: string, a: SpecArtifact) => `${repoKey}\x00${a}`;
   return {
@@ -120,14 +125,80 @@ function makeMemSpecStore(): SpecStore {
     async latestCommit() {
       return null;
     },
-    async saveWorkspaceSpec() {
-      throw new Error('[mem-spec-store] workspace scope unused in these tests');
+    async saveWorkspaceSpec(ref, artifact, json) {
+      workspace.set(`${ref.workspaceOrgId}\x00${artifact}`, json);
     },
-    async loadWorkspaceSpec<T = unknown>() {
-      return null as T | null;
+    async loadWorkspaceSpec<T = unknown>(ref: WorkspaceRef, artifact: SpecArtifact) {
+      return (workspace.get(`${ref.workspaceOrgId}\x00${artifact}`) as T) ?? null;
+    },
+    async saveSpecDocs(ref, files) {
+      for (const [docRef, body] of Object.entries(files)) {
+        workspaceDocs.set(`${ref.repoKey}\x00${docRef}`, body);
+      }
+    },
+    async loadSpecDoc(repoKey: string, docRef: string) {
+      return workspaceDocs.get(`${repoKey}\x00${docRef}`) ?? null;
+    },
+    async saveWorkspaceSpecDocs(ref, files) {
+      for (const [docRef, body] of Object.entries(files)) {
+        workspaceDocs.set(`${ref.workspaceOrgId}\x00${docRef}`, body);
+      }
+    },
+    async loadWorkspaceSpecDoc(org: string, docRef: string) {
+      return workspaceDocs.get(`${org}\x00${docRef}`) ?? null;
     },
   } satisfies SpecStore;
 }
+
+/**
+ * The hosted corpus as the store holds it now: ONE workspace corpus over
+ * `context/<sourceId>/…` documents. `conflict` flags a v1/v2 disagreement so the
+ * workspace has exactly one open conflict.
+ */
+async function seedWorkspaceCorpus(
+  store: SpecStore,
+  opts: { conflict?: boolean } = {},
+): Promise<void> {
+  const ref = (name: string) => `context/repo-src/docs/${name}`;
+  await store.saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', {
+    version: 3,
+    generatedAt: '2026-01-01T00:00:00Z',
+    docs: [
+      { ref: ref('v1.md'), kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['booking/appointments'], sourceId: 'repo-src', sourceKind: 'repository' },
+      { ref: ref('v2.md'), kind: 'prd', lastTouched: '2026-02-01T00:00:00Z', areaTags: ['booking/appointments'], sourceId: 'repo-src', sourceKind: 'repository' },
+    ],
+    areas: [
+      {
+        id: 'booking/appointments',
+        product: 'booking',
+        concern: 'appointments',
+        docRefs: [ref('v1.md'), ref('v2.md')],
+        overlaps: opts.conflict
+          ? [
+              {
+                docs: [ref('v1.md'), ref('v2.md')],
+                note: '24h vs 48h',
+                sections: [
+                  { doc: ref('v1.md'), heading: 'Cancellation' },
+                  { doc: ref('v2.md'), heading: 'Cancellation policy' },
+                ],
+              },
+            ]
+          : [],
+      },
+    ],
+    skippedDocs: [{ ref: ref('dropped.md'), reason: 'changelog' }],
+  });
+}
+
+/** The verdict that resolves the seeded workspace v1/v2 dispute. */
+const WS_VERDICT = {
+  docA: 'context/repo-src/docs/v1.md',
+  anchorA: 'Cancellation',
+  docB: 'context/repo-src/docs/v2.md',
+  anchorB: 'Cancellation policy',
+  verdict: 'b',
+};
 
 describe('GET /api/repos/:id/spec/decisions', () => {
   let app: Express;
@@ -425,6 +496,7 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
   });
   afterEach(async () => {
     resetSpecStore();
+    resetContextStore();
     resetGuardStore();
     setGuardGenerateEnqueue(null);
     setBackgroundTaskRunner(null);
@@ -586,22 +658,25 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
   });
 
   // The Rescan dot: an include/exclude the stored corpus has not absorbed pends
-  // (a Scan would materialize it); a verdict derives live and never does.
+  // (a Scan would materialize it); a verdict derives live and never does. Both
+  // the corpus and the decisions it is read against are the WORKSPACE's now, so
+  // the decisions are written through the workspace routes.
   it('GET /spec/staleness reports decisionsPending for an unabsorbed exclude, not for a verdict', async () => {
-    seedCorpus({ conflict: true });
-    const before = await request(app).get(`/api/repos/${fixture.project.slug}/spec/staleness`).expect(200);
+    setContextStore(memoryContextStore());
+    await seedWorkspaceCorpus(memSpec, { conflict: true });
+    const staleness = () =>
+      request(app).get(`/api/repos/${fixture.project.slug}/spec/staleness`).expect(200);
+
+    const before = await staleness();
     expect(before.body.decisionsPending).toBe(false);
-    await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`)
-      .send(VERDICT)
-      .expect(200);
-    const afterVerdict = await request(app).get(`/api/repos/${fixture.project.slug}/spec/staleness`).expect(200);
+    await request(app).post('/api/context/conflict-resolution').send(WS_VERDICT).expect(200);
+    const afterVerdict = await staleness();
     expect(afterVerdict.body.decisionsPending).toBe(false);
     await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
-      .send({ ref: 'docs/v2.md' })
+      .post('/api/context/excludes')
+      .send({ ref: 'context/repo-src/docs/v2.md' })
       .expect(200);
-    const afterExclude = await request(app).get(`/api/repos/${fixture.project.slug}/spec/staleness`).expect(200);
+    const afterExclude = await staleness();
     expect(afterExclude.body.decisionsPending).toBe(true);
   });
 });

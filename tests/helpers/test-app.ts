@@ -14,6 +14,8 @@ import type { AuthVerifier } from '@truecourse/shared';
 import type { EnqueueResult, JobsMount } from '../../apps/dashboard/server/src/jobs/index';
 import type { OnboardingJobRequest } from '../../apps/dashboard/server/src/jobs/tasks/onboarding';
 import type { GuardSetupJobRequest } from '../../apps/dashboard/server/src/jobs/tasks/repo-guard-setup';
+import type { ContextScanJobRequest } from '../../apps/dashboard/server/src/jobs/tasks/context-scan';
+import type { ContextSyncJobRequest } from '../../apps/dashboard/server/src/jobs/tasks/context-sync';
 import { readRegistry, unregisterProject } from '@truecourse/core/config/registry';
 import { createApp, type CreateAppOptions } from '../../apps/dashboard/server/src/app';
 import type { GithubMount } from '../../apps/dashboard/server/src/github/index';
@@ -61,6 +63,9 @@ export interface StubJobs {
   guardSetups: GuardSetupJobRequest[];
   guardGenerates: OnboardingJobRequest[];
   guardRuns: OnboardingJobRequest[];
+  /** Workspace Document scans — what every Scan button enqueues now. */
+  contextScans: ContextScanJobRequest[];
+  contextSyncs: ContextSyncJobRequest[];
   /** What the next enqueue answers — set it to `{ status: 'busy' }` for a 409. */
   answer: EnqueueResult;
 }
@@ -71,12 +76,22 @@ export function stubJobs(): StubJobs {
     guardSetups: [],
     guardGenerates: [],
     guardRuns: [],
+    contextScans: [],
+    contextSyncs: [],
     answer: { status: 'queued', jobId: 'job_test' },
     mount: null as unknown as JobsMount,
   };
   stub.mount = {
     enqueueScan: async (request: OnboardingJobRequest) => {
       stub.scans.push(request);
+      return stub.answer;
+    },
+    enqueueContextScan: async (request: ContextScanJobRequest) => {
+      stub.contextScans.push(request);
+      return stub.answer;
+    },
+    enqueueContextSync: async (request: ContextSyncJobRequest) => {
+      stub.contextSyncs.push(request);
       return stub.answer;
     },
     enqueueGuardSetup: async (request: GuardSetupJobRequest) => {

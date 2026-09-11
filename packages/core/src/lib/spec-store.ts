@@ -67,6 +67,17 @@ export interface SpecStore {
    */
   loadWorkspaceSpec<T = unknown>(ref: WorkspaceRef, artifact: SpecArtifact): Promise<T | null>;
   /**
+   * Snapshot the workspace scan's kept documents — `{ contextRef: body }` — so
+   * a document can still be read exactly as the scan read it after its source
+   * dropped or rewrote it (the context ledger keeps only what a source yields
+   * NOW, and sweeps the bodies it stops naming). Bodies are content-addressed
+   * under the workspace's spec scope; the file default throws, like every other
+   * workspace write.
+   */
+  saveWorkspaceSpecDocs(ref: WorkspaceRef, files: Record<string, string>): Promise<void>;
+  /** One snapshotted workspace document's body, or `null` when it is not in it. */
+  loadWorkspaceSpecDoc(workspaceOrgId: string, docRef: string): Promise<string | null>;
+  /**
    * Snapshot the kept documents' bodies for `ref` — `{ repoRelativeRef: body }`,
    * source refs (`.truecourse/specs/sources/…`) included. The hosted store
    * content-addresses the bodies and writes the `docs` manifest; the file impl
@@ -173,6 +184,14 @@ class FileSpecStore implements SpecStore {
   async loadWorkspaceSpec<T = unknown>(): Promise<T | null> {
     return null;
   }
+
+  async saveWorkspaceSpecDocs(): Promise<void> {
+    throw new Error('[spec-store] workspace-scoped specs require the enterprise store');
+  }
+
+  async loadWorkspaceSpecDoc(): Promise<string | null> {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -222,5 +241,13 @@ export const loadWorkspaceSpec = <T = unknown>(
   ref: WorkspaceRef,
   artifact: SpecArtifact,
 ): Promise<T | null> => active.loadWorkspaceSpec<T>(ref, artifact);
+export const saveWorkspaceSpecDocs = (
+  ref: WorkspaceRef,
+  files: Record<string, string>,
+): Promise<void> => active.saveWorkspaceSpecDocs(ref, files);
+export const loadWorkspaceSpecDoc = (
+  workspaceOrgId: string,
+  docRef: string,
+): Promise<string | null> => active.loadWorkspaceSpecDoc(workspaceOrgId, docRef);
 /** Whether the active spec store reads/writes the live repo files (file) or Postgres (EE). */
 export const specsMaterializeInPlace = (): boolean => active.materializesInPlace;

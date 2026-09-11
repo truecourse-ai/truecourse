@@ -33,13 +33,17 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
   };
 });
 
-import { createTestApp } from '../helpers/test-app';
+import { createTestApp, TEST_ORG } from '../helpers/test-app';
+import { memoryContextStore } from '../helpers/memory-context-store';
+import { resetContextStore, setContextStore } from '@truecourse/core/lib/context-store';
+import { enrichWebSources } from '../../apps/dashboard/server/src/routes/spec';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 import {
   setSpecStore,
   resetSpecStore,
   saveSpec,
   saveSpecDocs,
+  saveWorkspaceSpec,
   type SpecStore,
   type RepoRef,
   type SpecArtifact,
@@ -82,11 +86,17 @@ function memSpecStore(): SpecStore {
     async latestCommit() {
       return null;
     },
-    async saveWorkspaceSpec() {
-      throw new Error('unused');
+    async saveWorkspaceSpec(ref, artifact, json) {
+      rows.set(key(`ws:${ref.workspaceOrgId}`, artifact), json);
     },
-    async loadWorkspaceSpec<T = unknown>() {
-      return null as T | null;
+    async loadWorkspaceSpec<T = unknown>(ref, artifact: SpecArtifact) {
+      return (rows.get(key(`ws:${ref.workspaceOrgId}`, artifact)) as T) ?? null;
+    },
+    async saveWorkspaceSpecDocs(ref, files) {
+      snapshots.set(`ws:${ref.workspaceOrgId}`, files);
+    },
+    async loadWorkspaceSpecDoc(org, ref) {
+      return snapshots.get(`ws:${org}`)?.[ref] ?? null;
     },
     async saveSpecDocs(ref, files) {
       snapshots.set(`${ref.repoKey}:${ref.commitSha}`, files);
@@ -150,6 +160,7 @@ describe('web source routes — hosted (stored sources, no working tree)', () =>
     resetRepoDocReader();
     resetSpecSourcesStore();
     resetSpecStore();
+    resetContextStore();
     await site.close();
     await teardownTestFixture(fixture.project.slug);
   });
@@ -229,23 +240,21 @@ describe('web source routes — hosted (stored sources, no working tree)', () =>
     expect(result.body.error).toContain('Reload');
   });
 
-  it('labels a stored source\'s pages in the corpus', async () => {
+  // The corpus the registry's pages are labelled in is no longer a
+  // per-repository one (the workspace's corpus stamps each document's source
+  // into the artifact), so the labelling is pinned on the enricher itself,
+  // which still serves the file-mode corpus until slice 4 retires it.
+  it('labels a stored source\'s pages for display', async () => {
     const id = (await add()).body.source.id as string;
     const ref = `.truecourse/specs/sources/${id}/cms/installation.md`;
-    await saveSpec(
-      { repoKey: fixture.repoPath, commitSha: 'seed' },
-      'corpus',
-      {
-        version: 3,
-        generatedAt: '2026-01-01T00:00:00Z',
-        docs: [{ ref, kind: 'reference', lastTouched: '2026-01-01T00:00:00Z', areaTags: [] }],
-        areas: [],
-        relations: [],
-        skippedDocs: [],
-      },
-    );
-    const res = await request(app).get(api('/spec/corpus')).expect(200);
-    expect(res.body.corpus.docs[0]).toMatchObject({
+    const enriched = await enrichWebSources(fixture.repoPath, {
+      version: 3,
+      generatedAt: '2026-01-01T00:00:00Z',
+      docs: [{ ref, kind: 'reference', lastTouched: '2026-01-01T00:00:00Z', areaTags: [] }],
+      areas: [],
+      skippedDocs: [],
+    });
+    expect(enriched!.docs[0]).toMatchObject({
       ref,
       origin: 'web',
       sourceId: id,
@@ -254,28 +263,41 @@ describe('web source routes — hosted (stored sources, no working tree)', () =>
     });
   });
 
-  it('lights docsChanged once the sources are newer than the corpus, until a scan is', async () => {
+  // The docs half of a hosted repository's staleness is the WORKSPACE's context
+  // stamp against the workspace corpus — a repository's own registry no longer
+  // decides whether its spec is behind.
+  it('lights docsChanged from the workspace context stamp, until a scan catches up', async () => {
+    const context = memoryContextStore();
+    setContextStore(context);
     const seedCorpus = (generatedAt: string) =>
-      saveSpec({ repoKey: fixture.repoPath, commitSha: 'seed' }, 'corpus', {
+      saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', {
         version: 3,
         generatedAt,
         docs: [],
         areas: [],
-        relations: [],
         skippedDocs: [],
       });
     const staleness = async () =>
       (await request(app).get(api('/spec/staleness')).expect(200)).body as { docsChanged: boolean; hasCorpus: boolean };
 
-    // No corpus, no sources: nothing to be behind on.
+    // No corpus, no context: nothing to be behind on.
     expect(await staleness()).toMatchObject({ docsChanged: false, hasCorpus: false });
     await seedCorpus('2026-01-01T00:00:00Z');
     expect((await staleness()).docsChanged).toBe(false);
 
-    await add();
+    // A sync that reconciled something moves the workspace's stamp.
+    await context.recordSync(TEST_ORG, {
+      sourceId: 'site-1',
+      at: new Date().toISOString(),
+      parentAt: null,
+      added: 3,
+      changed: 0,
+      removed: 0,
+      unchanged: 0,
+    });
     expect((await staleness()).docsChanged).toBe(true);
 
-    // The scan that follows stamps the corpus after reading the sources.
+    // The scan that follows stamps the corpus after reading the context.
     await new Promise((resolve) => setTimeout(resolve, 5));
     await seedCorpus(new Date().toISOString());
     expect((await staleness()).docsChanged).toBe(false);
@@ -293,13 +315,9 @@ describe('web source routes — hosted (stored sources, no working tree)', () =>
     expect(missing.body.error).toContain(id);
   });
 
-  it('removes the last source and keeps the corpus stale until rescanned', async () => {
+  it('removes the last source from the registry', async () => {
     const id = (await add()).body.source.id as string;
-    await saveSpec({ repoKey: fixture.repoPath, commitSha: 'seed' }, 'corpus', {
-      version: 3, generatedAt: '2026-01-01T00:00:00Z', docs: [], areas: [], relations: [], skippedDocs: [],
-    });
     await request(app).delete(api(`/spec/sources/${id}`)).expect(200);
-    expect((await request(app).get(api('/spec/staleness')).expect(200)).body.docsChanged).toBe(true);
     expect((await request(app).get(api('/spec/sources')).expect(200)).body.sources).toEqual([]);
     const missing = await request(app).delete(api(`/spec/sources/${id}`)).expect(404);
     expect(missing.body.error).toContain('nothing is registered yet');

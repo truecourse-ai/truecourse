@@ -4,10 +4,11 @@
  * `@truecourse/github-app` owns the protocol — the webhook receiver, the connect
  * API, the link store. This module owns what connecting a repository MEANS here:
  * the `gh_repos` row IS the connection. Nothing is cloned at connect time — the
- * work-tree provider installed here clones per run (spec scan now; guard runs
- * later) and the clone is deleted when the run settles. Linking ENQUEUES the
- * onboarding scan; unlinking cancels the repo's in-flight jobs and drops its
- * persistent session transcripts.
+ * work-tree provider installed here clones per run (a source's sync, a guard
+ * run) and the clone is deleted when the run settles. Linking creates the
+ * repository's Context source and ENQUEUES its sync, which is the first link of
+ * the onboarding chain; unlinking cancels the repo's in-flight jobs and drops
+ * its persistent session transcripts.
  *
  * The factory reads its configuration from the environment and returns `null`
  * when the App is not configured, so a server with no GITHUB_APP_* still boots
@@ -19,7 +20,6 @@
 
 import type { Router } from 'express';
 import { log } from '@truecourse/core/lib/logger';
-import { slugify } from '@truecourse/core/config/registry';
 import {
   createConnectRouter,
   createGithubAuth,
@@ -43,13 +43,6 @@ import {
   removeRepositoryContext,
   repositoryContextSource,
 } from '../services/context-lifecycle.service.js';
-
-/** How connecting a repository starts its onboarding: enqueue, or say why not. */
-export type OnboardingScanStart = (
-  repoId: string,
-  repoKey: string,
-  orgId: string,
-) => Promise<'queued' | 'busy' | 'failed'>;
 
 /** How a repository's Repository source is refreshed (on connect, and on a push). */
 export type ContextSyncStart = (
@@ -80,22 +73,11 @@ export interface GithubConnectionOverrides {
   /** Per-run work trees. Default: a token clone into the workspace's run dir. */
   workTree?: WorkTreeProvider;
   /**
-   * Start a repo's onboarding scan. Boot passes the job enqueue; without one a
-   * connect writes the link row and starts nothing.
-   */
-  scan?: OnboardingScanStart;
-  /**
    * Sync a context source. Boot passes the job enqueue; without one the source
    * is created and left for a Sync now.
    */
   contextSync?: ContextSyncStart;
 }
-
-/** No runner installed (a server whose job queue never came up). */
-const noScanRunner: OnboardingScanStart = async (_repoId, repoKey) => {
-  log.warn(`[github] background jobs are not running — ${repoKey} was connected without a scan`);
-  return 'failed';
-};
 
 const noContextSyncRunner: ContextSyncStart = async (_orgId, sourceId) => {
   log.warn(`[github] background jobs are not running — ${sourceId} was not synced`);
@@ -111,7 +93,6 @@ export function createGithubConnection(
   const store = overrides.store ?? new PostgresGateStore(getDb());
   const octokitFor =
     overrides.octokitFor ?? ((installationId: number) => installationOctokit(cfg, installationId));
-  const scan = overrides.scan ?? noScanRunner;
   const contextSync = overrides.contextSync ?? noContextSyncRunner;
 
   // App auth is built on first use: the private key is only parsed when a token
@@ -178,39 +159,34 @@ export function createGithubConnection(
       overrides.lookupInstallationAccount ??
       ((installationId: number) => fetchInstallationAccount(cfg, installationId)),
     onRepoLinked: async (link: RepoLinkRecord) => {
-      // Context first: the repository's own documentation is a workspace source
-      // from the moment it is connected, and its sync is enqueued before the
-      // onboarding scan so nothing reads the workspace before it knows the docs.
+      // The whole onboarding chain now starts HERE, in Context: the
+      // repository's own documentation becomes a workspace source, its sync is
+      // enqueued, and that sync — which always reconciles something the first
+      // time — chains the workspace Document scan, whose ripple starts this
+      // repository's Test setup. The row is the connection: no clone, no
+      // registration, nothing awaited but the enqueue.
       try {
         const sourceId = await ensureRepositoryContextSource({
           repoFullName: link.repoFullName,
           workspaceOrgId: link.workspaceOrgId,
           defaultBranch: link.defaultBranch,
         });
-        if (sourceId) await contextSync(link.workspaceOrgId, sourceId, 'add');
+        if (!sourceId) {
+          log.warn(
+            `[github] ${link.repoFullName} connected without a context source — no workspace store`,
+          );
+          return;
+        }
+        const outcome = await contextSync(link.workspaceOrgId, sourceId, 'add');
+        if (outcome !== 'queued') {
+          log.info(`[github] ${link.repoFullName} connected — context sync ${outcome}`);
+        }
       } catch (err) {
         // A context source that could not be created is not a reason to refuse
         // the connection — the repository is linked, and Sync now still works.
         log.error(
           `[github] could not create ${link.repoFullName}'s context source: ${(err as Error).message}`,
         );
-      }
-      // The row is the connection — no clone, no registration. Onboarding is a
-      // queued job that acquires (and disposes) its own ephemeral work tree and
-      // spends on the provider of the workspace that just connected the repo,
-      // so the enqueue is awaited but the scan itself is not.
-      const outcome = await scan(
-        slugify(link.repoFullName, []),
-        link.repoFullName,
-        link.workspaceOrgId,
-      ).catch((err: unknown) => {
-        log.error(
-          `[github] could not start the scan of ${link.repoFullName}: ${(err as Error).message}`,
-        );
-        return 'failed' as const;
-      });
-      if (outcome !== 'queued') {
-        log.info(`[github] ${link.repoFullName} connected — scan ${outcome}`);
       }
     },
     onRepoUnlinked: async (link: RepoLinkRecord) => {

@@ -26,11 +26,14 @@ import { resolveProjectForRequest } from '@truecourse/core/config/current-projec
 import {
   loadLatestSpec,
   loadSpec,
+  loadWorkspaceSpec,
   specsMaterializeInPlace,
 } from '@truecourse/core/lib/spec-store';
+import { contextBindings, contextChangedAt } from '@truecourse/core/lib/context-store';
+import { sliceCorpus } from '@truecourse/core/services/context';
 import { listContractFiles } from '@truecourse/core/lib/contract-store';
 import { readRepoDoc } from '@truecourse/core/lib/repo-doc-reader';
-import { readSpecSourcesRegistry, specSourcesChangedAt } from '@truecourse/core/lib/spec-sources';
+import { readSpecSourcesRegistry } from '@truecourse/core/lib/spec-sources';
 import { getBackgroundTaskRunner } from '@truecourse/core/lib/background-tasks';
 import { getGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import {
@@ -45,6 +48,7 @@ import {
   generatedMarkerPath,
   getCorpus,
   getDecisions,
+  getWorkspaceDecisions,
   recuratePrCorpus,
   removeConflictResolution,
   removeManualExclude,
@@ -57,7 +61,10 @@ import {
   orgOf,
   startWorkspaceLlm,
 } from '../services/workspace-llm.service.js';
-import { recordFailedScanRun } from '../services/spec-scan.service.js';
+import {
+  contextIsStale,
+  recordFailedWorkspaceScanRun,
+} from '../services/context-scan.service.js';
 import { requireJobs } from '../jobs/current.js';
 
 const router: Router = Router();
@@ -227,6 +234,34 @@ export async function readInheritedDoc(
   return { inherited: true, content: reader ? await reader(repoKey, ref) : null };
 }
 
+/**
+ * The repository's SLICE of the workspace corpus (hosted), or null when the
+ * workspace has never been scanned — in which case the caller answers exactly
+ * as it does for a repository that never scanned.
+ *
+ * A slice has no commit: the workspace corpus is not keyed by one, and the
+ * documents in it come from several repositories and sites. So `corpusCommit`
+ * is absent, and the decisions folded in are the workspace's — a conflict is
+ * settled once, for everyone who reads those documents (plan §2).
+ */
+async function workspaceSlicePayload(
+  org: string,
+  repoKey: string,
+): Promise<SpecCorpusPayload | null> {
+  const corpus = await loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId: org }, 'corpus');
+  if (!corpus) return null;
+  const [sourceIds, decisions] = await Promise.all([
+    contextBindings(org, repoKey),
+    getWorkspaceDecisions(org),
+  ]);
+  return {
+    corpus: sliceCorpus(corpus, sourceIds),
+    manualIncludes: decisions.manualIncludes ?? [],
+    manualExcludes: decisions.manualExcludes ?? [],
+    conflictResolutions: decisions.conflictResolutions ?? [],
+  };
+}
+
 async function corpusPayload(repoPath: string, ref?: string, pr?: number): Promise<SpecCorpusPayload> {
   const { corpus, corpusCommit } = await loadCorpusForRef(repoPath, ref);
   // PR view: fold the PR's decisions overlay so resolved conflicts render.
@@ -276,8 +311,14 @@ router.get(
           return;
         }
       }
-      const payload = await corpusPayload(repo.path, ref, pr);
-      if (!payload.corpus) {
+      // Hosted: the repository's corpus IS the workspace corpus cut down to
+      // the sources it reads. Its own stored corpus (a pre-Context scan's) is
+      // no longer what it runs against, so it is not what it shows either; a
+      // workspace that has never scanned answers like a never-scanned repository.
+      const payload = specsMaterializeInPlace()
+        ? await corpusPayload(repo.path, ref, pr)
+        : await workspaceSlicePayload(orgOf(req), repo.path);
+      if (!payload?.corpus) {
         res.status(404).json({ error: 'No corpus has been scanned yet.' });
         return;
       }
@@ -288,18 +329,24 @@ router.get(
   },
 );
 
+// RETIRED, MAPPED (slice 4 removes it). The scan is the workspace's now — there
+// is no per-repository scan to start — so this answers exactly as it did while
+// enqueueing the workspace Document scan instead. The client on this branch
+// still presses it from the repository console; `POST /api/context/scan` is
+// where the Context page starts the same job.
 router.post(
   '/:id/spec/corpus/scan',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const repo = await resolveProjectForRequest(req.params.id as string);
+      await resolveProjectForRequest(req.params.id as string);
+      const org = orgOf(req);
       // The asking workspace's provider, proved BEFORE anything is queued: an
       // unconfigured or unusable provider is a refusal the caller can act on,
       // not a job that will fail minutes later. Unconfigured is not an error to
       // debug — it's a setting to fill in — so it answers with the
       // machine-readable code the client routes on.
       try {
-        await startWorkspaceLlm(orgOf(req));
+        await startWorkspaceLlm(org);
       } catch (e) {
         if (e instanceof LlmNotConfiguredError) {
           res.status(409).json({ error: e.code, message: e.message });
@@ -308,20 +355,18 @@ router.post(
         if (e instanceof LlmProbeFailedError) {
           // The run exists only to carry the failure, so Activity shows a failed
           // scan rather than nothing at all.
-          await recordFailedScanRun(repo.path, { message: e.message, kind: 'llm-probe' });
+          await recordFailedWorkspaceScanRun(org, { message: e.message, kind: 'llm-probe' });
           res.status(502).json({ error: e.code, message: e.message });
           return;
         }
         throw e;
       }
-      const outcome = await requireJobs().enqueueScan({
-        repoId: req.params.id as string,
-        repoFullName: repo.path,
-        workspaceOrgId: orgOf(req),
+      const outcome = await requireJobs().enqueueContextScan({
+        workspaceOrgId: org,
         source: 'manual',
       });
       if (outcome.status === 'busy') {
-        res.status(409).json({ error: 'A spec scan is already running for this repository.' });
+        res.status(409).json({ error: 'A document scan is already running for this workspace.' });
         return;
       }
       res.status(202).json({ jobId: outcome.jobId });
@@ -703,22 +748,24 @@ router.get(
       const repo = await resolveProjectForRequest(req.params.id as string);
 
       // Hosted (stored sets, not a live tree): there are no local marker files
-      // to stat, and repository docs cannot drift out from under the stored
-      // corpus. The one thing that can is the web sources: an add, a refresh or
-      // a remove stamps the sources row, and a stamp newer than the corpus's own
-      // timestamp means the last scan never saw the current sources.
+      // to stat. What can move under the stored corpus is the workspace's
+      // CONTEXT — a source synced, a link made or dropped, a source removed —
+      // and the workspace stamps every one of those. A stamp newer than the
+      // corpus's own timestamp means the last scan never saw the current
+      // context, which is the same amber dot the Context page draws.
       if (!specsMaterializeInPlace()) {
-        const [corpus, decisions, contractFiles, sourcesChangedAt] = await Promise.all([
-          getCorpus(repo.path),
-          getDecisions(repo.path),
+        const org = orgOf(req);
+        const [corpus, decisions, contractFiles, changedAt] = await Promise.all([
+          loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId: org }, 'corpus'),
+          getWorkspaceDecisions(org),
           listContractFiles(repo.path, 'contracts'),
-          specSourcesChangedAt(repo.path),
+          contextChangedAt(org),
         ]);
         res.json({
           // An include/exclude the stored corpus has not absorbed yet — a Scan
           // would materialize it. Verdicts derive live and never pend.
           decisionsPending: corpus !== null && hasUnabsorbedDecisions(corpus, decisions),
-          docsChanged: sourcesNewerThanCorpus(corpus, sourcesChangedAt),
+          docsChanged: contextIsStale(corpus?.generatedAt ?? null, changedAt),
           hasCorpus: corpus !== null,
           hasGenerated: contractFiles.length > 0,
         });
@@ -776,15 +823,6 @@ function hasPendingDecisions(repoPath: string): boolean {
   } catch {
     return false;
   }
-}
-
-/** True when sources changed after the corpus was curated, including removal
- *  of the last source. A repository with no corpus has nothing to be behind on. */
-function sourcesNewerThanCorpus(corpus: CuratedCorpus | null, sourcesChangedAt: string | null): boolean {
-  if (!corpus || !sourcesChangedAt) return false;
-  const generatedAt = Date.parse(corpus.generatedAt);
-  const changedAt = Date.parse(sourcesChangedAt);
-  return !Number.isNaN(generatedAt) && !Number.isNaN(changedAt) && changedAt > generatedAt;
 }
 
 // The docs-content half of the scan-staleness signal (closes the long-logged

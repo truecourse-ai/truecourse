@@ -52,8 +52,21 @@ import {
   contextSyncJobKey,
   CONTEXT_SYNC_TASK,
   type ContextSyncJobRequest,
+  type ContextSyncJobResult,
   type ContextSyncTaskDeps,
 } from './tasks/context-sync.js';
+import {
+  createContextScanTask,
+  contextScanJobKey,
+  CONTEXT_SCAN_TASK,
+  type ContextScanJobRequest,
+  type ContextScanTaskDeps,
+} from './tasks/context-scan.js';
+import {
+  repositoryOfSource,
+  workspaceRepositories,
+} from '../services/context-scan.service.js';
+import { loadGuardSetupBundle } from '@truecourse/core/lib/guard-store';
 import type { OnboardingJobRequest } from './tasks/onboarding.js';
 
 /** What an enqueue did: it queued a job, or the repo is already working. */
@@ -71,6 +84,12 @@ export interface JobsMount extends Jobs {
    */
   enqueueContextSync(request: ContextSyncJobRequest): Promise<EnqueueResult>;
   /**
+   * The workspace Document scan. One per workspace: a second request while one
+   * runs is `busy`, and the scan itself queues the single follow-up run when
+   * the context moved under it (see `tasks/context-scan.ts`).
+   */
+  enqueueContextScan(request: ContextScanJobRequest): Promise<EnqueueResult>;
+  /**
    * Stop everything this repository has in flight, for a disconnect. `not-here`
    * means one of its jobs is running on another replica, which is not ours to
    * settle — the caller must refuse the disconnect.
@@ -87,6 +106,7 @@ export interface CreateServerJobsOptions {
   guardGenerate?: Omit<RepoGuardGenerateTaskDeps, 'chainGuardRun'>;
   guardRun?: RepoGuardRunTaskDeps;
   contextSync?: ContextSyncTaskDeps;
+  contextScan?: Omit<ContextScanTaskDeps, 'ripple' | 'rescan'>;
   /** How the worker runner is started. Substituted in tests. */
   startWorker?: StartWorker<Record<string, unknown>>;
   /** The live backplane. Defaults to the queue's Postgres LISTEN/NOTIFY hub. */
@@ -139,6 +159,55 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
     return jobId ? { status: 'queued', jobId } : { status: 'busy' };
   };
 
+  // One scan per workspace — the key is the task itself, since the row is
+  // already scoped to the org. A loser is `busy`, never a queued duplicate: the
+  // scan re-reads the workspace's staleness stamp when it settles and queues
+  // the single follow-up run itself.
+  const enqueueContextScan = async (request: ContextScanJobRequest): Promise<EnqueueResult> => {
+    const jobId = await jobs.singleFlightEnqueue(
+      CONTEXT_SCAN_TASK,
+      request.workspaceOrgId,
+      contextScanJobKey(),
+      { ...request },
+    );
+    return jobId ? { status: 'queued', jobId } : { status: 'busy' };
+  };
+
+  /**
+   * The ripple's collaborators: who reads what, whether a repository has been
+   * set up, and the two enqueues that start it. Built here because only the
+   * mount holds them.
+   */
+  const rippleDeps = (workspaceOrgId: string) => ({
+    workspaceOrgId,
+    listRepos: () => workspaceRepositories(workspaceOrgId),
+    hasSetup: async (repoFullName: string) =>
+      (await loadGuardSetupBundle(repoFullName)) !== null,
+    isSettingUp: async (repoFullName: string) =>
+      (await jobs.jobStore.getActiveByKey(
+        workspaceOrgId,
+        jobKey(REPO_GUARD_SETUP_TASK, repoFullName),
+      )) !== null,
+    startSetup: async (repo: { repoId: string; repoFullName: string }) =>
+      (
+        await enqueueGuardSetup({
+          repoId: repo.repoId,
+          repoFullName: repo.repoFullName,
+          workspaceOrgId,
+          source: 'chain',
+        })
+      ).status === 'queued',
+    startGenerate: async (repo: { repoId: string; repoFullName: string }) =>
+      (
+        await enqueueGuardGenerate({
+          repoId: repo.repoId,
+          repoFullName: repo.repoFullName,
+          workspaceOrgId,
+          source: 'chain',
+        })
+      ).status === 'queued',
+  });
+
   const tasks: readonly JobTask[] = [
     createRepoScanTask({
       ...opts.scan,
@@ -168,7 +237,50 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
       },
     }),
     createRepoGuardRunTask(opts.guardRun),
-    createContextSyncTask(opts.contextSync),
+    createContextSyncTask({
+      ...opts.contextSync,
+      // A repository's FIRST sync is the rest of its onboarding: Test setup
+      // needs no documents, so it starts whatever the sync reconciled — a
+      // repository with no markdown at all still gets set up. Started here, the
+      // scan's ripple finds it working rather than racing it.
+      chainSetup: async (request) => {
+        if (request.source !== 'add') return;
+        const repo = await repositoryOfSource(request.workspaceOrgId, request.sourceId);
+        if (!repo) return;
+        // A repository that has been set up before is not onboarding: what it
+        // needs from a sync is the scan, which the chain below starts.
+        if ((await loadGuardSetupBundle(repo.repoFullName)) !== null) return;
+        const outcome = await enqueueGuardSetup({
+          ...repo,
+          workspaceOrgId: request.workspaceOrgId,
+          source: 'chain',
+        });
+        if (outcome.status === 'busy') {
+          log.info(`[jobs] test setup for ${repo.repoFullName} is already in flight`);
+        }
+      },
+      // A sync that reconciled nothing changed no document, so there is nothing
+      // for the scan to re-read; one that did is what makes the corpus stale.
+      chainScan: async (request, result) => {
+        if (result.added + result.changed + result.removed === 0) return;
+        const outcome = await enqueueContextScan({
+          workspaceOrgId: request.workspaceOrgId,
+          source: 'sync',
+        });
+        if (outcome.status === 'busy') {
+          log.info(
+            `[jobs] a document scan is already running for ${request.workspaceOrgId} — it will re-read the sync`,
+          );
+        }
+      },
+    }),
+    createContextScanTask({
+      ...opts.contextScan,
+      ripple: rippleDeps,
+      rescan: async (request) => {
+        await enqueueContextScan(request);
+      },
+    }),
   ];
 
   jobs = createJobs({
@@ -202,6 +314,7 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
     enqueueGuardGenerate,
     enqueueGuardRun,
     enqueueContextSync,
+    enqueueContextScan,
     cancelRepoJobs,
   });
 }

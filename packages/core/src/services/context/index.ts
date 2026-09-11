@@ -50,6 +50,19 @@ export {
   type RepositoryDriverDeps,
 } from './repository-driver.js';
 export { diffAgainstLedger, type ContextDiff } from './diff.js';
+export { corpusDocSourceId, corpusSourceIds, sliceCorpus } from './slice.js';
+export {
+  foldRepoDecisions,
+  fullDecisions,
+  mapDecisionDocRef,
+  mapDecisionScopePath,
+  normalizeDecisionPath,
+  sameDispute,
+  type DecisionConflictNote,
+  type DecisionsFoldInput,
+  type DecisionsFoldResult,
+  type DroppedDecision,
+} from './decisions-fold.js';
 export {
   repositoryConfig,
   repositorySourceId,

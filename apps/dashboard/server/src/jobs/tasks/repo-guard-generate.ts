@@ -97,9 +97,16 @@ export function createRepoGuardGenerateTask(
           activityRun.setGitRef?.(commitSha);
           activityTracker.fact('clone', `cloned ${repoFullName} at ${commitSha.slice(0, 8)}`);
           const ref = { repoKey: repoFullName, commitSha };
-          if (!(await materializeStoredSpec(ref, tree.dir))) {
+          // Generate needs documents, which setup does not: a repository that
+          // reads none is never rippled here (the scan's ripple skips an empty
+          // slice), so reaching this is somebody pressing Generate on a
+          // repository linked to nothing — which is a refusal with a reason.
+          const slice = await materializeStoredSpec(ref, tree.dir, ctx.payload.workspaceOrgId);
+          if (slice.documents === 0) {
             throw new Error(
-              `${repoFullName} has no scanned spec yet — run the spec scan before generating scenarios.`,
+              slice.hasWorkspaceCorpus
+                ? `${repoFullName} reads no scanned document — link it to a source with documents on its Context tab before generating scenarios.`
+                : `${repoFullName}'s workspace has no scanned documents yet — run the Document scan before generating scenarios.`,
             );
           }
           activityTracker.fact('clone', 'the stored spec corpus and decisions written into the clone');
