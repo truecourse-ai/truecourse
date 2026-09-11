@@ -39,10 +39,8 @@ import {
   setSpecStore,
 } from '@truecourse/core/lib/spec-store';
 import {
-  createSessionRun,
   resetSessionsRootResolver,
   setSessionsRootResolver,
-  workspaceSessionsKey,
 } from '@truecourse/core/lib/sessions-store';
 import type { CuratedCorpus } from '@truecourse/spec-consolidator';
 import fs from 'node:fs';
@@ -238,26 +236,6 @@ describe('the workspace corpus and its decisions', () => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /api/context/runs — the workspace's own agent runs
-// ---------------------------------------------------------------------------
-
-describe('GET /api/context/runs', () => {
-  it('lists the workspace’s scans, which belong to no repository', async () => {
-    const run = createSessionRun(workspaceSessionsKey(TEST_ORG), {
-      command: 'spec-scan',
-      gitRef: 'workspace',
-    });
-    run.finish('completed');
-
-    const res = await request(app).get('/api/context/runs').expect(200);
-    expect(res.body.runs).toHaveLength(1);
-    expect(res.body.runs[0]).toMatchObject({ command: 'spec-scan', status: 'completed' });
-    // Never the session endpoint — it carries a token.
-    expect(res.body.runs[0]).not.toHaveProperty('endpoint');
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Linking, which changes what the corpus should hold
 // ---------------------------------------------------------------------------
 
@@ -311,18 +289,15 @@ describe('DELETE /api/context/sources/:id', () => {
 });
 
 // ---------------------------------------------------------------------------
-// The per-repository routes, mapped (slice 4 removes them)
+// What a repository still reads: its SLICE of the workspace corpus, and whether
+// the workspace's context has moved under it. It starts no scan of its own —
+// `POST /api/repos/:id/spec/corpus/scan` is gone.
 // ---------------------------------------------------------------------------
 
-describe('the repository routes the client still calls', () => {
-  it('POST /spec/corpus/scan enqueues the WORKSPACE scan and answers as before', async () => {
-    const res = await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/corpus/scan`)
-      .expect(202);
-
-    expect(res.body).toEqual({ jobId: 'job_test' });
-    expect(jobs.contextScans).toEqual([{ workspaceOrgId: TEST_ORG, source: 'manual' }]);
-    expect(jobs.scans).toEqual([]);
+describe('the repository routes over the workspace corpus', () => {
+  it('has no per-repository scan route', async () => {
+    await request(app).post(`/api/repos/${fixture.project.slug}/spec/corpus/scan`).expect(404);
+    expect(jobs.contextScans).toEqual([]);
   });
 
   it('GET /spec/corpus answers the repository’s slice of the workspace corpus', async () => {

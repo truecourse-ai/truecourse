@@ -5,7 +5,7 @@
  * `content` pool under scope `context:ws:<org>`.
  *
  * The pool keys a body `sha256-<hex>` while the ledger carries the same digest
- * bare as `content_hash`, the convention `PgSpecSourcesStore` already uses: a
+ * bare as `content_hash`: a
  * body identical across two sources (a page mirrored into a repository) is
  * stored once per workspace, and a body is read back by the hash the ledger
  * names.

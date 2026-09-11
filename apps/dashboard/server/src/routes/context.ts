@@ -16,7 +16,6 @@
  *   POST|DELETE /api/context/includes         force-include / un-include a document
  *   POST|DELETE /api/context/excludes         force-exclude / restore a document
  *   POST|DELETE /api/context/conflict-resolution   a section-scoped conflict verdict
- *   GET    /api/context/runs                  the workspace's own agent runs
  *
  * A source belongs to the workspace, not to a repository, so this router mounts
  * ABOVE the repository routers and behind the auth gate alone — there is no
@@ -75,14 +74,9 @@ import {
   removeWorkspaceManualInclude,
 } from '@truecourse/core/commands/spec-in-process';
 import {
-  listStoredSessionRuns,
-  toPublicRunRecord,
-} from '@truecourse/core/lib/sessions-store';
-import {
   docCoveragePlainStatus,
   readGuardCoverageSources,
 } from '@truecourse/core/commands/guard-read';
-import { workspaceSessionsKey } from '@truecourse/core/commands/context-scan';
 import { LlmNotConfiguredError, LlmProbeFailedError, startWorkspaceLlm } from '../services/workspace-llm.service.js';
 import {
   contextIsStale,
@@ -448,18 +442,6 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
       // No corpus yet is not "stale": there is nothing to be behind. The
       // Context page shows a workspace that never scanned as never scanned.
       res.json({ changedAt, corpusAt, stale: contextIsStale(corpusAt, changedAt) });
-    } catch (e) {
-      respond(res, next, e);
-    }
-  });
-
-  // The workspace's own agent runs — the Document scans, which belong to no
-  // repository and therefore appear under no repository's runs.
-  router.get('/runs', async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const org = orgOf(req);
-      const runs = await listStoredSessionRuns(workspaceSessionsKey(org));
-      res.json({ runs: runs.map(toPublicRunRecord) });
     } catch (e) {
       respond(res, next, e);
     }

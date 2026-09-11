@@ -1,11 +1,11 @@
 /**
  * The dashboard server's background job runner.
  *
- * Long-running work (a spec scan, a guard setup) runs here rather than inside
- * the request that asked for it: the route enqueues and answers, the queue runs
- * the job, and the client follows it over the SSE stream and the repo's socket
- * room. `createServerJobs` builds the runner and `JobsMount` is what
- * `createApp` needs to expose it.
+ * Long-running work (a document scan, a guard setup) runs here rather than
+ * inside the request that asked for it: the route enqueues and answers, the
+ * queue runs the job, and the client follows it over the SSE stream and the
+ * repo's socket room. `createServerJobs` builds the runner and `JobsMount` is
+ * what `createApp` needs to expose it.
  *
  * ENQUEUEING IS GUARDED TWICE. The queue's single-flight key stops a second
  * job for the same repo in the same workspace; a store-wide look at the repo's
@@ -24,11 +24,6 @@ import {
 import { listStoredSessionRuns } from '@truecourse/core/lib/sessions-store';
 import { log } from '@truecourse/core/lib/logger';
 import type { Db } from '@truecourse/db';
-import {
-  createRepoScanTask,
-  REPO_SCAN_TASK,
-  type RepoScanTaskDeps,
-} from './tasks/repo-scan.js';
 import {
   createRepoGuardSetupTask,
   REPO_GUARD_SETUP_TASK,
@@ -74,7 +69,6 @@ export type EnqueueResult = { status: 'queued'; jobId: string } | { status: 'bus
 
 /** The job surface the app mounts and the routes enqueue onto. */
 export interface JobsMount extends Jobs {
-  enqueueScan(request: OnboardingJobRequest): Promise<EnqueueResult>;
   enqueueGuardSetup(request: GuardSetupJobRequest): Promise<EnqueueResult>;
   enqueueGuardGenerate(request: GuardGenerateJobRequest): Promise<EnqueueResult>;
   enqueueGuardRun(request: GuardRunJobRequest): Promise<EnqueueResult>;
@@ -101,7 +95,6 @@ export interface CreateServerJobsOptions {
   db: Db;
   connectionString: string;
   /** Task-body seams (tests substitute the engines each job drives). */
-  scan?: Omit<RepoScanTaskDeps, 'chainGuardSetup'>;
   guardSetup?: Omit<RepoGuardSetupTaskDeps, 'chainGuardGenerate'>;
   guardGenerate?: Omit<RepoGuardGenerateTaskDeps, 'chainGuardRun'>;
   guardRun?: RepoGuardRunTaskDeps;
@@ -114,9 +107,9 @@ export interface CreateServerJobsOptions {
 }
 
 export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
-  // The scan chains into setup, setup into generate and generate into the
-  // baseline run, and every enqueue lives on the mount the runner is part of —
-  // so the task list closes over a runner that exists a line later.
+  // Setup chains into generate and generate into the baseline run, and every
+  // enqueue lives on the mount the runner is part of — so the task list closes
+  // over a runner that exists a line later.
   let jobs!: Jobs;
 
   const enqueue = async (
@@ -134,9 +127,6 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
     );
     return jobId ? { status: 'queued', jobId } : { status: 'busy' };
   };
-
-  const enqueueScan = (request: OnboardingJobRequest): Promise<EnqueueResult> =>
-    enqueue(REPO_SCAN_TASK, 'spec-scan', request, { ...request });
 
   const enqueueGuardSetup = (request: GuardSetupJobRequest): Promise<EnqueueResult> =>
     enqueue(REPO_GUARD_SETUP_TASK, 'guard-setup', request, { ...request });
@@ -209,15 +199,6 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
   });
 
   const tasks: readonly JobTask[] = [
-    createRepoScanTask({
-      ...opts.scan,
-      chainGuardSetup: async (request) => {
-        const outcome = await enqueueGuardSetup(request);
-        if (outcome.status === 'busy') {
-          log.info(`[jobs] guard setup for ${request.repoFullName} is already in flight`);
-        }
-      },
-    }),
     createRepoGuardSetupTask({
       ...opts.guardSetup,
       chainGuardGenerate: async (request) => {
@@ -296,7 +277,6 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
     orgId: string,
   ): Promise<'stopped' | 'not-here'> => {
     for (const task of [
-      REPO_SCAN_TASK,
       REPO_GUARD_SETUP_TASK,
       REPO_GUARD_GENERATE_TASK,
       REPO_GUARD_RUN_TASK,
@@ -309,7 +289,6 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
   };
 
   return Object.assign(jobs, {
-    enqueueScan,
     enqueueGuardSetup,
     enqueueGuardGenerate,
     enqueueGuardRun,
@@ -321,7 +300,7 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
 
 /** The session-run commands the onboarding jobs run — what `repoIsWorking` reads.
  *  A run spends no sessions, so `guard-run` never has a record to find. */
-type RepoCommand = 'spec-scan' | 'guard-setup' | 'guard-generate' | 'guard-run';
+type RepoCommand = 'guard-setup' | 'guard-generate' | 'guard-run';
 
 /** One active job per (workspace, repo, task) — the queue's single-flight key. */
 const jobKey = (task: string, repoFullName: string): string => `${task}:${repoFullName}`;

@@ -26,7 +26,7 @@ export type RunStart =
   | { kind: 'busy'; message: string }
   | { kind: 'failed'; message: string };
 
-/** POST a repo-scoped start route (`spec/corpus/scan`, `guard/setup`, …). */
+/** POST a repo-scoped start route (`guard/setup`, `guard/generate`, …). */
 export async function startRun(repoId: string, path: string): Promise<RunStart> {
   const url = `${getServerUrl()}/api/repos/${encodeURIComponent(repoId)}/${path}`;
   let res: Response;
@@ -54,9 +54,6 @@ export async function startRun(repoId: string, path: string): Promise<RunStart> 
   if (res.status === 409) return { kind: 'busy', message };
   return { kind: 'failed', message };
 }
-
-export const startSpecScan = (repoId: string): Promise<RunStart> =>
-  startRun(repoId, 'spec/corpus/scan');
 
 export const startGuardSetup = (repoId: string): Promise<RunStart> =>
   startRun(repoId, 'guard/setup');

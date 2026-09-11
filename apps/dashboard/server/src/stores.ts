@@ -21,7 +21,6 @@ import { readContextDocByRef } from '@truecourse/core/lib/context-store';
 import { setRepoDocReader, type RepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
 import { setGuardStore } from '@truecourse/core/lib/guard-store';
 import { setGuardOverlayStore } from '@truecourse/core/lib/guard-overlays';
-import { readSpecSourceDoc, setSpecSourcesStore } from '@truecourse/core/lib/spec-sources';
 import { setContextStore } from '@truecourse/core/lib/context-store';
 import { setInferredActionStore } from '@truecourse/core/lib/inferred-action-store';
 import { setRepoConfigStore } from '@truecourse/core/config/project-config';
@@ -35,7 +34,6 @@ import {
   PgSessionRunStore,
   PgAnalysisStore,
   PgSpecStore,
-  PgSpecSourcesStore,
   PgContextStore,
   PgGuardStore,
   PgGuardOverlayStore,
@@ -69,17 +67,13 @@ export interface InstallDbStoresOptions {
  * workspace of its own, and a reader that was handed a repository key is asking
  * on behalf of a repository whose workspace is resolved here.
  *
- * Every other ref is a repository document: its snapshot first (a pinned commit
- * must never read current sources), then the registered sources store for a
- * page no scan has kept yet.
+ * Every other ref is a repository document, read from the scan snapshot that
+ * kept it (a pinned commit reads that commit's).
  */
-export const readStoredRepoDoc: RepoDocReader = async (repoKey, docPath, opts) => {
-  if (isContextDocRef(docPath)) return readWorkspaceDoc(repoKey, docPath);
-  return (
-    (await loadSpecDoc(repoKey, docPath, opts?.commit)) ??
-    (opts?.commit ? null : await readSpecSourceDoc(repoKey, docPath))
-  );
-};
+export const readStoredRepoDoc: RepoDocReader = async (repoKey, docPath, opts) =>
+  isContextDocRef(docPath)
+    ? readWorkspaceDoc(repoKey, docPath)
+    : loadSpecDoc(repoKey, docPath, opts?.commit);
 
 /**
  * A workspace document, read through the workspace that reads `repoKey`. The
@@ -120,9 +114,6 @@ export function installDbStores(
 ): void {
   setAnalysisStore(new PgAnalysisStore(db));
   setSpecStore(new PgSpecStore(db));
-  // The registered web spec sources: one registry row per repo, the page
-  // bodies in the spec content scope, materialized into the scan's clone.
-  setSpecSourcesStore(new PgSpecSourcesStore(db));
   // The workspace's CONTEXT: its documentation sources, the documents they
   // yielded (bodies content-addressed under `context:ws:<org>`), the syncs and
   // the repositories that read them. Hosted only — a CLI checkout is one
@@ -131,9 +122,8 @@ export function installDbStores(
   // A document body is read from the scan's snapshot, never from a tree: the
   // doc page, the coverage join and the spec reads all go through this seam,
   // and a connected repository has no working tree to read from. The commit
-  // pins a snapshot (a PR view); without one the newest scan answers. A source
-  // page no scan has snapshotted yet (just added) answers from the sources
-  // store, so it can be read before the scan that would keep it.
+  // pins a snapshot (a PR view); without one the newest scan answers. A
+  // `context/` ref is the workspace's and is read from the context store.
   setRepoDocReader(readStoredRepoDoc);
   // Guard run store + scenario corpus + dismissedClaims decisions.
   setGuardStore(new PgGuardStore(db));

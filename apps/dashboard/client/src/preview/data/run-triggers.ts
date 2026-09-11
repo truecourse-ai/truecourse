@@ -8,12 +8,14 @@
  * up by adding their call here, and nothing else changes.
  */
 
-import { startGuardGenerate, startGuardSetup, startSpecScan, type RunStart } from './scan';
+import { startContextScan, startGuardGenerate, startGuardSetup, type RunStart } from './scan';
 
 export type RunTrigger = (repoId: string) => Promise<RunStart>;
 
 const RUN_TRIGGERS: Record<string, RunTrigger> = {
-  'spec-scan': startSpecScan,
+  // The Document scan belongs to the workspace, not to a repository: whichever
+  // run row offers it, it starts the one workspace scan.
+  'spec-scan': () => startContextScan(),
   'guard-setup': startGuardSetup,
   'guard-generate': startGuardGenerate,
 };

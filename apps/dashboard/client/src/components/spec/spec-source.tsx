@@ -142,8 +142,10 @@ export function createRepoSpecSource(repoId: string, prScope?: SpecPrScope): Spe
     removeExclude: (ref) => api.removeSpecExclude(repoId, ref, scope),
     postConflictResolution: (payload) => api.postSpecConflictResolution(repoId, payload, scope),
     deleteConflictResolution: (payload) => api.deleteSpecConflictResolution(repoId, payload, scope),
+    // Documentation is the workspace's: the one scan is the workspace Document
+    // scan, whichever repository's corpus the reader was looking at.
     scan: async () => {
-      await api.startSpecCorpusScan(repoId);
+      await api.startContextScan();
     },
   };
 }

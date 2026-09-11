@@ -1,26 +1,27 @@
 // PREVIEW (UI mock, fake data) with exceptions: on a REAL (provider-connected)
 // repository the Interfaces tab reads the server's own
 // interface catalog for that repository, the Dependencies tab reads and
-// registers against its stored dependency catalog, the Coverage tab reads the
-// stored coverage summary over its slice of the workspace corpus, the Context
-// tab reads and edits which workspace sources it is linked to, and the Tests
-// and Runs tabs read what its generate and runs stored.
+// registers against its stored dependency catalog, the Context tab reads and
+// edits which workspace sources it is linked to, and the Tests and Runs tabs
+// read what its generate and runs stored.
 
 /**
  * The repository console: one header, ONE menu, no toggle.
  *
  * The section switcher is gone with Code Analysis, so the left menu here is not
  * a switcher between products, it is the tabs of the one thing this repository
- * has: Tests first (what is proven, and by what), then Coverage and Runs, then
- * the setup group — Context (which workspace sources this repository reads),
- * Interfaces, Dependencies and the repository's Settings.
+ * has: Tests first (what is proven, and by what), then Runs, then the setup
+ * group — Context (which workspace sources this repository reads), Interfaces,
+ * Dependencies and the repository's Settings.
  *
  * DOCUMENTATION IS NOT A TAB HERE any more: a source is a workspace object and
- * the corpus is the workspace's, so the documents, their conflicts and the scan
- * that curates them live on Context. This tab only says which of them this
- * repository reads. The agent's own work is not a tab either: it lives on the
- * Agent page, narrowed to this repository. There is no pull request page: a PR
- * is seen through its runs (the Pull request filter in Runs).
+ * the corpus is the workspace's, so the documents, their coverage, their
+ * conflicts and the scan that curates them live on Context — a document's
+ * coverage page is `/preview/context/doc/<ref>?repo=<id>`. This tab only says
+ * which of them this repository reads. The agent's own work is not a tab
+ * either: it lives on the Agent page, narrowed to this repository. There is no
+ * pull request page: a PR is seen through its runs (the Pull request filter in
+ * Runs).
  *
  * The tab is in the URL, so a tab is a place: it can be linked, and Runs can
  * hand a test to Tests without either of them owning the other's pane.
@@ -36,7 +37,6 @@ import { usePreviewState } from '@/preview/shell/preview-state';
 import { activityHref } from '@/preview/shell/real-runs';
 import { PREVIEW_BASE } from '@/preview/shell/PreviewShell';
 import { ContextTab } from './ContextTab';
-import { CoverageTab } from './CoverageTab';
 import { DependenciesTab } from './DependenciesTab';
 import { DependencyPage } from './DependencyPage';
 import { InterfacePage } from './InterfacePage';
@@ -49,7 +49,6 @@ import { TestsTab } from './TestsTab';
 
 const TABS = [
   { id: 'tests', label: 'Tests', group: 'work' },
-  { id: 'coverage', label: 'Coverage', group: 'work' },
   { id: 'runs', label: 'Runs', group: 'work' },
   { id: 'context', label: 'Context', group: 'setup' },
   { id: 'interfaces', label: 'Interfaces', group: 'setup' },
@@ -154,13 +153,6 @@ export default function RepoConsole() {
             // `/api/context/sources`, and the switches save this repository's
             // links over `/api/repos/<id>/context/bindings`.
             <ContextTab repo={repo} />
-          ) : active === 'coverage' && repo.real ? (
-            // REAL, not mock: the coverage of a connected repository is the
-            // server's summary over what its scan, generate and runs stored,
-            // read over `/api/repos/<id>/guard/*` and `/spec/corpus`. The tab
-            // owns its own empty state, so a repository nothing ran on says so
-            // here rather than through the fixture gate below.
-            <CoverageTab repo={repo} />
           ) : active === 'interfaces' && repo.real ? (
             // REAL, not mock: the interface catalog of a connected repository is
             // derived from that repository's own tree, so this surface reads the
@@ -233,8 +225,6 @@ export default function RepoConsole() {
                 )
               }
             />
-          ) : active === 'coverage' ? (
-            <CoverageTab repo={repo} />
           ) : active === 'tests' ? (
             flowId ? (
               <TestPage repo={repo} flowId={decodeURIComponent(flowId)} />

@@ -36,7 +36,8 @@ import {
 import { interfacesView } from '@/preview/data/interface-fixtures';
 import { latestRun, runHistory, scenarioSource } from '@/preview/data/run-fixtures';
 import { dependenciesView, saveDependency } from '@/preview/data/dependency-fixtures';
-import { corpusResponse, docByRef, docCoverage, statusSummary } from '@/preview/data/corpus-fixtures';
+import { docByRef, docCoverage, statusSummary } from '@/preview/data/corpus-fixtures';
+import { docsForRepo } from '@/preview/data/corpus';
 import { artifactRaw } from '@/preview/data/artifact-fixtures';
 import { REPO_GUARD } from '@/preview/data';
 
@@ -137,8 +138,9 @@ describe('preview fixtures agree on identities across the tabs', () => {
   });
 
   it("a section's flow rows name flows the flows view lists", () => {
-    for (const doc of corpusResponse(MAIN)!.corpus.docs) {
-      const spec = docByRef(MAIN, doc.ref);
+    expect(docsForRepo(MAIN).length).toBeGreaterThan(0);
+    for (const doc of docsForRepo(MAIN)) {
+      const spec = docByRef(MAIN, doc.path);
       if (!spec) continue;
       for (const section of docCoverage(MAIN, spec).sections) {
         for (const flow of section.flows) expect(flowIds.has(flow.flowId)).toBe(true);

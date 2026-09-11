@@ -45,7 +45,6 @@ import {
   startContextScan,
   startGuardGenerate,
   startGuardSetup,
-  startSpecScan,
 } from '@/preview/data/scan';
 import { triggerFor } from '@/preview/data/run-triggers';
 import type { PublicSessionRun } from '@/lib/api';
@@ -84,13 +83,12 @@ function failedScan(over: Partial<PublicSessionRun> = {}): PublicSessionRun {
 function serve(options: {
   runs?: PublicSessionRun[];
   config?: unknown;
-  scan?: () => Response;
   contextScan?: () => Response;
   setup?: () => Response;
   generate?: () => Response;
 }) {
   const calls: string[] = [];
-  const scan = options.scan ?? (() => json({ jobId: 'job_1' }, 202));
+  const contextScan = options.contextScan ?? (() => json({ jobId: 'job_1' }, 202));
   const setup = options.setup ?? (() => json({ jobId: 'job_2' }, 202));
   const generate = options.generate ?? (() => json({ jobId: 'job_3' }, 202));
   window.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -113,8 +111,7 @@ function serve(options: {
         ? json({ run: { ...found, repo: { id: REAL.id, fullName: REAL.name } } })
         : json({ error: 'run not found' }, 404);
     }
-    if (url.pathname === `/api/repos/${REAL.id}/spec/corpus/scan`) return scan();
-    if (url.pathname === '/api/context/scan') return (options.contextScan ?? scan)();
+    if (url.pathname === '/api/context/scan') return contextScan();
     if (url.pathname === '/api/context/documents') return json({ documents: [], corpusAt: null });
     if (url.pathname === '/api/context/sources') return json({ sources: [], changedAt: null });
     if (url.pathname === '/api/context/staleness') {
@@ -163,52 +160,36 @@ afterEach(() => {
 describe('starting a run', () => {
   it('reads the refusals apart by their code, not their status', async () => {
     serve({
-      scan: () => json({ error: 'llm-not-configured', message: 'This workspace has no LLM provider.' }, 409),
+      contextScan: () =>
+        json({ error: 'llm-not-configured', message: 'This workspace has no LLM provider.' }, 409),
     });
-    expect(await startSpecScan('linkwarden')).toEqual({
+    expect(await startContextScan()).toEqual({
       kind: 'not-configured',
       message: 'This workspace has no LLM provider.',
     });
 
     serve({
-      scan: () => json({ error: 'llm-probe-failed', message: '401 invalid x-api-key' }, 502),
+      contextScan: () => json({ error: 'llm-probe-failed', message: '401 invalid x-api-key' }, 502),
     });
-    expect(await startSpecScan('linkwarden')).toEqual({
+    expect(await startContextScan()).toEqual({
       kind: 'probe-failed',
       message: '401 invalid x-api-key',
     });
 
     // Same 409 as the unconfigured case, and only the code tells them apart.
     serve({
-      scan: () => json({ error: 'A spec scan is already running for this repository.' }, 409),
+      contextScan: () => json({ error: 'A document scan is already running.' }, 409),
     });
-    expect(await startSpecScan('linkwarden')).toEqual({
+    expect(await startContextScan()).toEqual({
       kind: 'busy',
-      message: 'A spec scan is already running for this repository.',
+      message: 'A document scan is already running.',
     });
-  });
-
-  it('POSTs the start route, and calls the 202 a start', async () => {
-    const calls = serve({ scan: () => json({ jobId: 'job_1' }, 202) });
-    expect(await startSpecScan('linkwarden')).toEqual({ kind: 'started' });
-    expect(calls).toContain('POST /api/repos/linkwarden/spec/corpus/scan');
   });
 
   it('starts the workspace Document scan at the workspace address', async () => {
     const calls = serve({ contextScan: () => json({ jobId: 'job_ctx' }, 202) });
     expect(await startContextScan()).toEqual({ kind: 'started' });
     expect(calls).toContain('POST /api/context/scan');
-  });
-
-  it('reads the workspace scan\'s refusals apart the same way', async () => {
-    serve({ contextScan: () => json({ error: 'llm-not-configured', message: 'No provider.' }, 409) });
-    expect(await startContextScan()).toEqual({ kind: 'not-configured', message: 'No provider.' });
-
-    serve({ contextScan: () => json({ error: 'A document scan is already running.' }, 409) });
-    expect(await startContextScan()).toEqual({
-      kind: 'busy',
-      message: 'A document scan is already running.',
-    });
   });
 
   it('starts guard setup through the same route shape', async () => {
@@ -252,9 +233,9 @@ describe('the surfaces of a connected repository', () => {
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole('button', { name: 'Run again' }));
-    await waitFor(() =>
-      expect(calls).toContain(`POST /api/repos/${REAL.id}/spec/corpus/scan`),
-    );
+    // Another go at a Document scan is another go at the WORKSPACE's scan —
+    // the repository never had one of its own.
+    await waitFor(() => expect(calls).toContain('POST /api/context/scan'));
   });
 
   it('leaves a finished one alone', async () => {

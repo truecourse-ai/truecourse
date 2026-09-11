@@ -14,7 +14,10 @@
  * LINKS (`context_bindings`), never a source another repository still reads. The
  * repository's own Repository source is removed by the disconnect hook
  * (`removeRepositoryContext`), which checks the remaining readers first — a
- * source is not the repository's to delete just because it was its own.
+ * source is not the repository's to delete just because it was its own. The
+ * content scopes dropped below are the repository's alone (`spec:<owner/repo>`
+ * and the guard ones); the workspace's own pools (`spec:ws:<org>`,
+ * `context:ws:<org>`) are never named here.
  */
 
 import { eq, inArray, or, sql } from 'drizzle-orm';
@@ -60,6 +63,8 @@ export async function purgeRepoData(db: Db, repoKey: string): Promise<void> {
     await tx.delete(repoConfig).where(eq(repoConfig.repoKey, repoKey));
     await tx.delete(repoUiState).where(eq(repoUiState.repoKey, repoKey));
     await tx.delete(specSets).where(eq(specSets.repoKey, repoKey));
+    // Legacy: nothing writes `spec_sources` any more, but a repository
+    // connected before Context may still have the row the boot migration read.
     await tx.delete(specSources).where(eq(specSources.repoKey, repoKey));
     // Only the LINKS: the sources themselves belong to the workspace, and one
     // another repository still reads must survive this disconnect.

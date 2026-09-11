@@ -13,7 +13,6 @@ export { PgRepoConfigStore, PgUiStateStore } from './config-store.js';
 export { PgRegistryStore } from './registry-store.js';
 export { GhReposRegistryStore } from './gh-repos-registry-store.js';
 export { PgSpecStore } from './spec-store.js';
-export { PgSpecSourcesStore } from './spec-sources-store.js';
 export {
   PgContextStore,
   listDueContextSites,

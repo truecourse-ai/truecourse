@@ -135,9 +135,9 @@ export default function HomePage() {
                 <tr
                   key={repo.id}
                   tabIndex={0}
-                  onClick={() => navigate(`/preview/repos/${repo.id}/coverage`)}
+                  onClick={() => navigate(`/preview/repos/${repo.id}`)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && e.target === e.currentTarget) navigate(`/preview/repos/${repo.id}/coverage`);
+                    if (e.key === 'Enter' && e.target === e.currentTarget) navigate(`/preview/repos/${repo.id}`);
                   }}
                   className="cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/40 focus:bg-muted/40 focus:outline-none"
                 >

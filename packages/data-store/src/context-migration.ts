@@ -15,10 +15,12 @@
  *      is written with the hash the old registry already named — so a migrated
  *      site is readable before its first sync.
  *
- * Nothing is dropped: `spec_sources` keeps its rows, the per-repository routes
- * keep working, and the two live side by side until slice 4 retires the old
- * half. A page the old store never held a body for is skipped rather than
- * written as an empty document — the next sync fetches it.
+ * `spec_sources` is READ-ONLY LEGACY: nothing writes it any more (the routes,
+ * the store and the seam that did are gone), and this migration is the only
+ * thing that still reads it, straight off the table. Its rows are left where
+ * they are so a re-boot can read them again. A page the old store never held a
+ * body for is skipped rather than written as an empty document — the next sync
+ * fetches it.
  */
 
 import { and, eq } from 'drizzle-orm';

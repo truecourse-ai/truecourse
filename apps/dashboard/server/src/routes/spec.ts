@@ -3,9 +3,12 @@
  * spec scan (Module 1).
  *
  *   GET    /api/repos/:id/spec/corpus       read corpus.json. 404 if no scan.
- *   POST   /api/repos/:id/spec/corpus/scan  enqueue the scan job; 202 { jobId }.
  *   GET    /api/repos/:id/spec/doc?ref=...  a doc's markdown (for the prose Spec tab).
  *   GET    /api/repos/:id/spec/staleness    cheap mtime probe powering the amber dots.
+ *
+ * There is NO scan here. Documentation belongs to the workspace, so the
+ * Document scan is `POST /api/context/scan` and nothing starts one per
+ * repository.
  */
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
@@ -15,6 +18,7 @@ import { openConflicts } from '@truecourse/shared';
 import {
   corpusFilePath,
   decisionsPath,
+  readSourcesFile,
   sourcesDirPath,
   sourcesFilePath,
   SOURCES_REF_PREFIX,
@@ -33,7 +37,6 @@ import { contextBindings, contextChangedAt } from '@truecourse/core/lib/context-
 import { sliceCorpus } from '@truecourse/core/services/context';
 import { listContractFiles } from '@truecourse/core/lib/contract-store';
 import { readRepoDoc } from '@truecourse/core/lib/repo-doc-reader';
-import { readSpecSourcesRegistry } from '@truecourse/core/lib/spec-sources';
 import { getBackgroundTaskRunner } from '@truecourse/core/lib/background-tasks';
 import { getGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import {
@@ -55,17 +58,8 @@ import {
   removeManualInclude,
 } from '@truecourse/core/commands/spec-in-process';
 import { baselineCommit } from './diff-base.js';
-import {
-  LlmNotConfiguredError,
-  LlmProbeFailedError,
-  orgOf,
-  startWorkspaceLlm,
-} from '../services/workspace-llm.service.js';
-import {
-  contextIsStale,
-  recordFailedWorkspaceScanRun,
-} from '../services/context-scan.service.js';
-import { requireJobs } from '../jobs/current.js';
+import { orgOf } from '../services/workspace-llm.service.js';
+import { contextIsStale } from '../services/context-scan.service.js';
 
 const router: Router = Router();
 
@@ -151,16 +145,17 @@ interface WebDocMeta {
 
 /**
  * Every snapshot page the registry names, by its corpus ref. Read per corpus
- * payload through the sources seam (the tree's registry, or a hosted repo's
- * stored one); a corrupt registry yields NO meta rather than failing the corpus
- * read — enrichment is display-only, and the sources routes are where that
- * registry's state is reported.
+ * payload out of the working tree's own `sources.json` — this runs only on the
+ * in-place (CLI) path, since a hosted repository's documents are the
+ * workspace's and carry their source in the corpus itself. A corrupt registry
+ * yields NO meta rather than failing the corpus read: enrichment is
+ * display-only.
  */
 async function webSourceMeta(repoKey: string): Promise<Map<string, WebDocMeta>> {
   const meta = new Map<string, WebDocMeta>();
   let sources;
   try {
-    sources = (await readSpecSourcesRegistry(repoKey)).sources;
+    sources = readSourcesFile(repoKey).sources;
   } catch {
     return meta;
   }
@@ -323,53 +318,6 @@ router.get(
         return;
       }
       res.json(payload);
-    } catch (e) {
-      next(e);
-    }
-  },
-);
-
-// RETIRED, MAPPED (slice 4 removes it). The scan is the workspace's now — there
-// is no per-repository scan to start — so this answers exactly as it did while
-// enqueueing the workspace Document scan instead. The client on this branch
-// still presses it from the repository console; `POST /api/context/scan` is
-// where the Context page starts the same job.
-router.post(
-  '/:id/spec/corpus/scan',
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      await resolveProjectForRequest(req.params.id as string);
-      const org = orgOf(req);
-      // The asking workspace's provider, proved BEFORE anything is queued: an
-      // unconfigured or unusable provider is a refusal the caller can act on,
-      // not a job that will fail minutes later. Unconfigured is not an error to
-      // debug — it's a setting to fill in — so it answers with the
-      // machine-readable code the client routes on.
-      try {
-        await startWorkspaceLlm(org);
-      } catch (e) {
-        if (e instanceof LlmNotConfiguredError) {
-          res.status(409).json({ error: e.code, message: e.message });
-          return;
-        }
-        if (e instanceof LlmProbeFailedError) {
-          // The run exists only to carry the failure, so Activity shows a failed
-          // scan rather than nothing at all.
-          await recordFailedWorkspaceScanRun(org, { message: e.message, kind: 'llm-probe' });
-          res.status(502).json({ error: e.code, message: e.message });
-          return;
-        }
-        throw e;
-      }
-      const outcome = await requireJobs().enqueueContextScan({
-        workspaceOrgId: org,
-        source: 'manual',
-      });
-      if (outcome.status === 'busy') {
-        res.status(409).json({ error: 'A document scan is already running for this workspace.' });
-        return;
-      }
-      res.status(202).json({ jobId: outcome.jobId });
     } catch (e) {
       next(e);
     }

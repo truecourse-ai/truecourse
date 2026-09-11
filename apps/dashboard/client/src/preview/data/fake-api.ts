@@ -27,7 +27,6 @@ import type { GuardDecisions } from '@/preview/vendor/shared';
 import { EMPTY_GUARD_DECISIONS } from '@/preview/vendor/shared';
 import type { GuardDependencyPatch } from '@/preview/vendor/types/guard-dependencies';
 import {
-  corpusResponse,
   docByRef,
   docCoverage,
   docMarkdown,
@@ -55,80 +54,11 @@ import {
   runHistory,
   scenarioSource,
 } from './run-fixtures';
-import {
-  addSource,
-  listSources,
-  previewSource,
-  refreshSources,
-  removeSource,
-  sourceDetail,
-  sourcePageMarkdown,
-} from './source-fixtures';
 
-/** One doc's markdown: a curated corpus doc, else a snapshotted web page. */
+/** One doc's markdown, when the fixtures' corpus has it. */
 function markdownFor(repoId: string, ref: string): string | null {
   const doc = docByRef(repoId, ref);
-  if (doc) return docMarkdown(doc);
-  return sourcePageMarkdown(repoId, ref);
-}
-
-export function createPreviewSpecSource(repoId: string, versionId?: string | null): SpecSource {
-  let state: SpecCorpusResponse | null = corpusResponse(repoId, versionId);
-  const ack = () => ({ manualIncludes: state?.manualIncludes ?? [], manualExcludes: state?.manualExcludes ?? [] });
-  return {
-    supportsScan: false,
-    async getCorpus() {
-      return state;
-    },
-    async getDoc(ref) {
-      const content = markdownFor(repoId, ref);
-      return { ref, content: content ?? `# ${ref}\n\nNo snapshot for this document.` };
-    },
-    async listSkipped(q) {
-      return sliceSkipped(state?.corpus.skippedDocs ?? [], q);
-    },
-    async addInclude(ref) {
-      if (state) state = { ...state, manualIncludes: [...(state.manualIncludes ?? []), ref] };
-      return ack();
-    },
-    async removeInclude(ref) {
-      if (state) state = { ...state, manualIncludes: (state.manualIncludes ?? []).filter((r) => r !== ref) };
-      return ack();
-    },
-    async addExclude(ref) {
-      if (state) state = { ...state, manualExcludes: [...(state.manualExcludes ?? []), ref] };
-      return ack();
-    },
-    async removeExclude(ref) {
-      if (state) state = { ...state, manualExcludes: (state.manualExcludes ?? []).filter((r) => r !== ref) };
-      return ack();
-    },
-    async postConflictResolution(payload) {
-      const resolution = { ...payload, resolvedAt: new Date().toISOString() };
-      if (state) state = { ...state, conflictResolutions: [...(state.conflictResolutions ?? []), resolution] };
-      return { conflictResolutions: state?.conflictResolutions ?? [] };
-    },
-    async deleteConflictResolution(payload) {
-      if (state) {
-        state = {
-          ...state,
-          conflictResolutions: (state.conflictResolutions ?? []).filter(
-            (r) =>
-              !(
-                ((r.docA === payload.docA && r.docB === payload.docB) ||
-                  (r.docA === payload.docB && r.docB === payload.docA)) &&
-                r.anchorA === payload.anchorA &&
-                r.anchorB === payload.anchorB
-              ),
-          ),
-        };
-      }
-      return { conflictResolutions: state?.conflictResolutions ?? [] };
-    },
-    async scan() {
-      // No on-demand scan over fixtures.
-    },
-  };
+  return doc ? docMarkdown(doc) : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -254,8 +184,6 @@ function answerGet(repoId: string, rest: string, params: URLSearchParams): Respo
       // Every fake run is cli or api, so none recorded a screenshot or a video:
       // the route answers an empty list, exactly as a browserless run's does.
       return json({ visuals: [] });
-    case 'spec/sources':
-      return json(listSources(repoId));
     default:
       break;
   }
@@ -300,15 +228,10 @@ function answerGet(repoId: string, rest: string, params: URLSearchParams): Respo
     const run = runById(repoId, parts[2]!);
     return run ? json(run) : missing(parts[2]!);
   }
-  if (parts.length === 3 && parts[0] === 'spec' && parts[1] === 'sources') {
-    const detail = sourceDetail(repoId, parts[2]!);
-    return detail ? json(detail) : missing(parts[2]!);
-  }
   return missing(rest);
 }
 
 function answerPost(repoId: string, rest: string, body: Record<string, unknown>): Response {
-  const parts = segments(rest);
   switch (rest) {
     case 'guard/map':
       return json(interfacesView(repoId));
@@ -320,34 +243,15 @@ function answerPost(repoId: string, rest: string, body: Record<string, unknown>)
       return json(dismissFlow(repoId, body as unknown as { flowId: string; title: string }));
     case 'guard/flows/undismiss':
       return json(undismissFlow(repoId, String(body.flowId ?? '')));
-    case 'spec/sources/preview':
-      return json(previewSource(String(body.url ?? '')));
-    case 'spec/sources/refresh':
-      return json(refreshSources(repoId));
-    case 'spec/sources':
-      return json(addSource(repoId, String(body.url ?? ''), body.id ? String(body.id) : undefined));
     default:
-      break;
+      return missing(rest);
   }
-  if (parts.length === 4 && parts[0] === 'spec' && parts[1] === 'sources' && parts[3] === 'refresh') {
-    return json(refreshSources(repoId, parts[2]!));
-  }
-  return missing(rest);
 }
 
 function answerPut(repoId: string, rest: string, body: Record<string, unknown>): Response {
   if (rest === 'guard/dependencies') {
     const { name, ...patch } = body as { name?: string } & GuardDependencyPatch;
     return json(saveDependency(repoId, String(name ?? ''), patch));
-  }
-  return missing(rest);
-}
-
-function answerDelete(repoId: string, rest: string): Response {
-  const parts = segments(rest);
-  if (parts.length === 3 && parts[0] === 'spec' && parts[1] === 'sources') {
-    const removed = removeSource(repoId, parts[2]!);
-    return removed ? json(removed) : missing(parts[2]!);
   }
   return missing(rest);
 }
@@ -460,9 +364,7 @@ export function installPreviewFetch(): void {
     if (rest === 'sessions' || rest.startsWith('sessions/')) return real(input, init);
     // So is starting a run: no fixture could stand in for the answer — it is
     // where "this workspace has no provider" is found out.
-    if (rest === 'spec/corpus/scan' || rest === 'guard/setup' || rest === 'guard/generate') {
-      return real(input, init);
-    }
+    if (rest === 'guard/setup' || rest === 'guard/generate') return real(input, init);
     // So is the INTERFACE CATALOG of a connected repository: it is derived from
     // that repository's own tree, and no fixture could stand in for it. A
     // repository with guard fixtures is one of the mock ones and keeps them.
@@ -483,7 +385,6 @@ export function installPreviewFetch(): void {
     }
     if (method === 'POST') return answerPost(repoId, rest, body);
     if (method === 'PUT') return answerPut(repoId, rest, body);
-    if (method === 'DELETE') return answerDelete(repoId, rest);
     return answerGet(repoId, rest, url.searchParams);
   };
 }

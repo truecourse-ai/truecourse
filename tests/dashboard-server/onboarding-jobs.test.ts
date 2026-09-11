@@ -1,10 +1,10 @@
 /**
- * Onboarding as a chain of background jobs: `repo.scan` → `repo.guard-setup`
- * → `repo.guard-generate` → `repo.guard-run`.
+ * Onboarding as a chain of background jobs: `repo.guard-setup` →
+ * `repo.guard-generate` → `repo.guard-run`, which the workspace Document scan
+ * and its sync start (`tests/dashboard-server/context-*`).
  *
  * What is pinned here is the chain's semantics and the setup job's brackets.
- * The scan enqueues its successor ONLY when it succeeded — a failed or
- * cancelled scan leaves the repository alone. The setup job materializes the
+ * The setup job materializes the
  * stored spec and the newest setup BUNDLE into its ephemeral clone, runs the
  * real engine over it, and saves the bundle back under the clone's commit, so
  * a second run replays the settled steps instead of re-deriving them. The
@@ -79,7 +79,6 @@ import {
 import { GUARD_FORMAT_VERSION, type GuardGenerateReport, type GuardLatest } from '@truecourse/shared';
 import type { LlmTransport } from '@truecourse/shared/llm';
 import { createServerJobs, type JobsMount } from '../../apps/dashboard/server/src/jobs/index';
-import type { RepoScanTaskDeps } from '../../apps/dashboard/server/src/jobs/tasks/repo-scan';
 import type { RepoGuardGenerateTaskDeps } from '../../apps/dashboard/server/src/jobs/tasks/repo-guard-generate';
 import type { RepoGuardRunTaskDeps } from '../../apps/dashboard/server/src/jobs/tasks/repo-guard-run';
 import { setWorkTreeProvider } from '../../apps/dashboard/server/src/services/work-tree.service';
@@ -208,18 +207,6 @@ afterAll(() => {
 
 const request = { repoId: 'widgets', repoFullName: REPO, workspaceOrgId: ORG, source: 'connect' as const };
 
-type ScanEngine = NonNullable<RepoScanTaskDeps['runScan']>;
-
-/**
- * A scan result with nothing to resolve. Only the corpus + decisions the
- * conflict count derives from are real; the rest of the result shape belongs to
- * the scan's own suites.
- */
-const cleanScan = (): Awaited<ReturnType<ScanEngine>> =>
-  ({ curate: { corpus: { areas: [] }, decisions: {} } }) as unknown as Awaited<
-    ReturnType<ScanEngine>
-  >;
-
 /**
  * The scan's output, as the store holds it now: a workspace corpus over the
  * repository's own Context source, with the documents it names in the context
@@ -265,95 +252,6 @@ const checklistKeys = (run: { display?: { blocks: { kind: string }[] } }): strin
   const block = run.display?.blocks.find((b) => b.kind === 'checklist');
   return ((block as { items: { key: string }[] } | undefined)?.items ?? []).map((i) => i.key);
 };
-
-// ---------------------------------------------------------------------------
-// The chain
-// ---------------------------------------------------------------------------
-
-describe('a spec scan chains into guard setup', () => {
-  /** The scan body's engine, per test. */
-  let scanImpl: ScanEngine;
-
-  beforeEach(() => {
-    scanImpl = async () => cleanScan();
-    jobs = createServerJobs({
-      db,
-      connectionString: 'postgres://unused',
-      hub,
-      // Only the scan runs: a chained setup is observable as an enqueue without
-      // dragging the whole engine into a test about the chain.
-      startWorker: fakeWorker(['repo.scan']),
-      scan: {
-        startLlm: async () => testLlm,
-        runScan: (repoKey, options) => scanImpl(repoKey, options),
-      },
-    });
-    return jobs.start();
-  });
-
-  it('enqueues the setup job when the scan succeeded', async () => {
-    const outcome = await jobs.enqueueScan(request);
-    expect(outcome.status).toBe('queued');
-    await Promise.all(running);
-
-    expect(enqueued).toEqual(['repo.scan', 'repo.guard-setup']);
-    const [setup] = await jobsOfType('repo.guard-setup');
-    expect(setup).toMatchObject({ status: 'queued', key: `repo.guard-setup:${REPO}` });
-    // The scan itself succeeded, with the spec-ready notification.
-    const [scan] = await jobsOfType('repo.scan');
-    expect(scan?.status).toBe('succeeded');
-    // The chained enqueue addresses ITS row: a payload built from the scan's
-    // would carry the scan's id, and the worker would find that row settled
-    // and skip setup without a trace.
-    expect(enqueuedPayloads[1]).toMatchObject({
-      jobId: setup?.id,
-      repoFullName: REPO,
-      source: 'chain',
-    });
-    expect(enqueuedPayloads[1]?.jobId).not.toBe(scan?.id);
-    const notes = await new NotificationStore(db).listForOrg(ORG);
-    expect(notes.map((n) => n.title)).toEqual(['Repository scan complete']);
-  });
-
-  it('chains nothing when the scan failed, and says why', async () => {
-    scanImpl = async () => {
-      throw new Error('the clone went missing');
-    };
-
-    await jobs.enqueueScan(request);
-    await Promise.all(running);
-
-    expect(enqueued).toEqual(['repo.scan']);
-    expect(await jobsOfType('repo.guard-setup')).toEqual([]);
-    const [scan] = await jobsOfType('repo.scan');
-    expect(scan).toMatchObject({ status: 'failed', error: 'the clone went missing' });
-    const notes = await new NotificationStore(db).listForOrg(ORG);
-    expect(notes[0]).toMatchObject({ level: 'error', title: 'Repository scan failed' });
-  });
-
-  it('chains nothing when the scan was cancelled, and stays quiet', async () => {
-    let reached = false;
-    scanImpl = (_repoKey, options = {}) =>
-      new Promise((_resolve, reject) => {
-        reached = true;
-        const stop = (): void => reject(new Error('the spec scan was cancelled'));
-        if (options.signal?.aborted) stop();
-        else options.signal?.addEventListener('abort', stop, { once: true });
-      });
-
-    const outcome = await jobs.enqueueScan(request);
-    await until(() => reached);
-    if (outcome.status !== 'queued') throw new Error('the scan was not queued');
-    expect(await jobs.cancel(outcome.jobId)).toBe('cancelled');
-
-    expect(enqueued).toEqual(['repo.scan']);
-    expect(await jobsOfType('repo.guard-setup')).toEqual([]);
-    const [scan] = await jobsOfType('repo.scan');
-    expect(scan).toMatchObject({ status: 'cancelled', error: null });
-    // Cancellation is a normal outcome — nobody is told about work they stopped.
-    expect(await new NotificationStore(db).listForOrg(ORG)).toEqual([]);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // The setup job, over a real repository

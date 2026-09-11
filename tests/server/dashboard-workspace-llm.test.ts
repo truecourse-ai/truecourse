@@ -73,9 +73,8 @@ import { analyzeInProcess } from '@truecourse/core/commands/analyze-in-process';
 import { isAnalysisActive } from '@truecourse/core/services/analysis-registry';
 import { createLLMProvider } from '@truecourse/core/services/llm/provider';
 import { getFlowFromLatest, enrichFlowWithLLM } from '@truecourse/core/services/flow';
-import { createSessionRun, listSessionRuns } from '@truecourse/core/lib/sessions-store';
+import { listSessionRuns } from '@truecourse/core/lib/sessions-store';
 import { workspaceSessionsKey } from '@truecourse/core/commands/context-scan';
-import { runStoredSpecScan } from '../../apps/dashboard/server/src/services/spec-scan.service';
 import type { SessionDriver } from '@truecourse/agent-loop';
 import type { LlmTransport } from '@truecourse/shared/llm';
 import type { GlobalApiLlmConfig } from '@truecourse/core/config/global-config';
@@ -155,8 +154,10 @@ const url = (suffix: string) => `/api/repos/${fixture.project.slug}/${suffix}`;
 
 const start = (suffix: string) => {
   switch (suffix) {
+    // The Document scan belongs to the WORKSPACE: it is started at the
+    // workspace address, not under a repository.
     case 'spec scan':
-      return request(app).post(url('spec/corpus/scan'));
+      return request(app).post('/api/context/scan');
     case 'guard generate':
       return request(app).post(url('guard/generate')).send({ confirmed: true });
     case 'analyze':
@@ -275,33 +276,6 @@ describe('a configured, answering provider', () => {
     expect(vi.mocked(enrichFlowWithLLM)).toHaveBeenCalledWith(fixture.repoPath, 'f1', transport);
   });
 
-  // The pipeline itself, not the route: whatever kills a scan lands ON the run
-  // record before it is rethrown, because Activity shows runs, not this
-  // process's log.
-  it('records WHY a scan crashed on the run it created', async () => {
-    vi.mocked(curateInProcess).mockImplementationOnce(async (_repoRoot, options) => {
-      const run = createSessionRun(fixture.repoPath, { command: 'spec-scan', gitRef: 'main' });
-      options?.onRunStarted?.({ command: 'spec-scan', runId: run.runId, dir: run.dir });
-      run.finish('failed');
-      throw new Error('the clone went missing');
-    });
-
-    await expect(runStoredSpecScan(fixture.repoPath, { driver })).rejects.toThrow(
-      'the clone went missing',
-    );
-
-    expect(listSessionRuns(fixture.repoPath, 'spec-scan')[0]).toMatchObject({
-      status: 'failed',
-      error: { message: 'the clone went missing' },
-    });
-  });
-
-  it('runs the spec scan on the driver built from the workspace config', async () => {
-    await runStoredSpecScan(fixture.repoPath, { driver, transportMode: 'api' });
-
-    expect(vi.mocked(curateInProcess).mock.calls[0][1]).toMatchObject({ driver });
-  });
-
   it('leaves analyze alone when LLM rules are off — no provider is needed', async () => {
     const { writeProjectConfig } = await import('@truecourse/core/config/project-config');
     await writeProjectConfig(fixture.repoPath, { enableLlmRules: false });
@@ -353,6 +327,6 @@ describe("operator mode — the server's own Claude Code", () => {
 
     const res = await start('spec scan').expect(502);
     expect(res.body).toMatchObject({ error: 'llm-probe-failed', message: 'Not logged in · run claude login' });
-    expect(jobs.scans).toEqual([]);
+    expect(jobs.contextScans).toEqual([]);
   });
 });

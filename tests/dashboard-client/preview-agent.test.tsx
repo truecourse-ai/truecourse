@@ -383,10 +383,10 @@ describe('the way in', () => {
 
   it('is no longer a tab of the repository console', async () => {
     serve([SCAN]);
-    renderAt('/preview/repos/orders-api/coverage');
+    renderAt('/preview/repos/orders-api/tests');
 
     const menu = await screen.findByRole('navigation', { name: 'Repository sections' });
     expect(within(menu).queryByRole('link', { name: 'Activity' })).toBeNull();
-    expect(within(menu).getByRole('link', { name: 'Coverage' })).toBeInTheDocument();
+    expect(within(menu).getByRole('link', { name: 'Tests' })).toBeInTheDocument();
   });
 });

@@ -57,7 +57,7 @@ function serve(initial = summary()) {
 function renderHome() {
   return render(<MemoryRouter initialEntries={['/preview']}><Routes>
     <Route path="/preview" element={<HomePage />} />
-    <Route path="/preview/repos/:id/coverage" element={<p>Coverage destination</p>} />
+    <Route path="/preview/repos/:id" element={<p>Console destination</p>} />
     <Route path="/preview/repos/:id/runs" element={<p>Runs destination</p>} />
   </Routes></MemoryRouter>);
 }
@@ -168,12 +168,12 @@ describe('preview home stored summaries', () => {
     expect(row().getByText('Failing')).toBeInTheDocument();
   });
 
-  it('opens Coverage from the row keyboard action', async () => {
+  it('opens the repository console from the row keyboard action', async () => {
     serve();
     renderHome();
     await screen.findByText('50%');
     screen.getByText(repo.fullName).closest('tr')!.focus();
     await userEvent.keyboard('{Enter}');
-    expect(screen.getByText('Coverage destination')).toBeInTheDocument();
+    expect(screen.getByText('Console destination')).toBeInTheDocument();
   });
 });

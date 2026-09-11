@@ -59,7 +59,6 @@ export function testGithubMount(orgId: string = TEST_ORG): GithubMount {
  *  enqueue surface is real; the cast is confined to this helper. */
 export interface StubJobs {
   mount: JobsMount;
-  scans: OnboardingJobRequest[];
   guardSetups: GuardSetupJobRequest[];
   guardGenerates: OnboardingJobRequest[];
   guardRuns: OnboardingJobRequest[];
@@ -72,7 +71,6 @@ export interface StubJobs {
 
 export function stubJobs(): StubJobs {
   const stub: StubJobs = {
-    scans: [],
     guardSetups: [],
     guardGenerates: [],
     guardRuns: [],
@@ -82,10 +80,6 @@ export function stubJobs(): StubJobs {
     mount: null as unknown as JobsMount,
   };
   stub.mount = {
-    enqueueScan: async (request: OnboardingJobRequest) => {
-      stub.scans.push(request);
-      return stub.answer;
-    },
     enqueueContextScan: async (request: ContextScanJobRequest) => {
       stub.contextScans.push(request);
       return stub.answer;

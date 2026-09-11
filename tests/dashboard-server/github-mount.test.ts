@@ -60,31 +60,6 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
   };
 });
 
-// The scan engine. Stubbed so the link path is exercised without an LLM, an
-// agent session, or a run store — and so a test can hold the scan open and
-// watch the response come back anyway.
-const scan = vi.hoisted(() => ({
-  calls: [] as string[],
-  impl: (async () => ({
-    noChanges: false,
-    curate: { corpus: {}, stats: {} },
-  })) as (repoRoot: string, options?: { signal?: AbortSignal }) => Promise<unknown>,
-}));
-
-vi.mock('@truecourse/core/commands/spec-in-process', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@truecourse/core/commands/spec-in-process')>();
-  return {
-    ...actual,
-    // The real options ride through — `signal` above all, since disconnecting a
-    // repository cancels the scan holding it.
-    curateInProcess: (repoRoot: string, options?: { signal?: AbortSignal }) => {
-      scan.calls.push(repoRoot);
-      return scan.impl(repoRoot, options);
-    },
-  };
-});
-
 import { createApp } from '../../apps/dashboard/server/src/app';
 import {
   createGithubConnection,
@@ -135,14 +110,6 @@ const INSTALLATION_ID = 42;
 const REPO = 'acme/widgets';
 const REPO_SLUG = slugify(REPO, []);
 const WEBHOOK_SECRET = 'shhh';
-
-/** What a manual enqueue of the connected repo's scan looks like. */
-const scanRequest = {
-  repoId: REPO_SLUG,
-  repoFullName: REPO,
-  workspaceOrgId: ORG,
-  source: 'manual' as const,
-};
 
 const APP_ENV = {
   GITHUB_APP_ID: '1234',
@@ -270,8 +237,6 @@ beforeEach(async () => {
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
   });
-  scan.calls.length = 0;
-  scan.impl = async () => ({ noChanges: false, curate: { corpus: {}, stats: {} } });
   // The onboarding scan runs on the connecting workspace's provider — give the
   // workspace one, and answer its pre-flight probe without a network call.
   setWorkspaceLlmConfigStore({
@@ -681,210 +646,5 @@ describe('createRunClone', () => {
     expect(fs.existsSync(fresh.dir)).toBe(true);
     expect(fs.existsSync(stale.dir)).toBe(false);
     fresh.dispose();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// The onboarding scan (the real job runner, with the scan engine stubbed)
-// ---------------------------------------------------------------------------
-
-interface Deferred {
-  promise: Promise<unknown>;
-  resolve: () => void;
-}
-
-/** A scan the test holds open, so "the response did not wait" is observable. */
-function heldScan(): Deferred {
-  let resolve!: () => void;
-  const promise = new Promise<unknown>((res) => {
-    resolve = () => res({ noChanges: false, curate: { corpus: { areas: [] }, decisions: {} } });
-  });
-  // Nothing awaits this promise but the job body; a rejection there is handled.
-  promise.catch(() => {});
-  return { promise, resolve };
-}
-
-const settle = (ms = 50): Promise<void> => new Promise((r) => setTimeout(r, ms));
-
-/** Wait for a background effect, rather than guessing how long it will take. */
-async function until(predicate: () => boolean, timeoutMs = 5000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate() && Date.now() < deadline) await settle(10);
-}
-
-// The spec-scan JOB's mechanics, on the real queue. Connecting no longer
-// enqueues it (Context's sync is the first link of the chain now), so these
-// drive the enqueue directly — what is pinned here is the job's brackets: it
-// acquires and disposes its own work tree, one runs per repository at a time,
-// a disconnect cancels it, and a scan another process owns is visible.
-describe('the spec-scan job on the real queue', () => {
-  const held: Deferred[] = [];
-  const disposed: string[] = [];
-  let workTreeDir: string;
-  let jobs: JobsMount;
-  /** Every job body the fake worker started — awaited so nothing leaks. */
-  let running: Promise<void>[];
-  // One database for the whole block: a PGlite instance per test would leave
-  // several WASM heaps alive in the worker at once.
-  let pg: PGlite;
-  let db: Db;
-
-  beforeAll(async () => {
-    pg = new PGlite();
-    db = drizzle(pg, { schema }) as unknown as Db;
-    await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
-  });
-
-  afterAll(async () => {
-    await pg.close();
-  });
-
-  /**
-   * The mount with the REAL enqueue behind its scan seam: the queue is real
-   * (PGlite + the harness) and only graphile is faked, so a connect really
-   * queues a job and the job really runs — with the scan engine, work tree and
-   * provider stubbed.
-   */
-  async function appWithRealScan(): Promise<Express> {
-    workTreeDir = fakeWorkTree();
-    const workTree: WorkTreeProvider = async () => ({
-      dir: workTreeDir,
-      dispose: () => disposed.push(workTreeDir),
-    });
-    running = [];
-    jobs = createServerJobs({
-      db,
-      connectionString: 'postgres://unused',
-      hub: { start: async () => {}, stop: async () => {}, subscribe: () => () => {} },
-      startWorker: async ({ rt, tasks }) => {
-        const handlers = new Map(tasks.map((t) => [t.type, registerJob(rt, t)] as const));
-        return {
-          addJob: async (name: string, payload: unknown) => {
-            const handler = handlers.get(name);
-            if (handler) running.push(handler(payload, {}).catch(() => undefined));
-          },
-          stop: async () => {},
-        } as unknown as Runner;
-      },
-    });
-    await jobs.start();
-    setRepoJobsCanceller(jobs.cancelRepoJobs);
-    return buildApp({ workTree, contextSync: async () => 'queued' });
-  }
-
-  /** Link the repository, then start its scan the way the Scan button does. */
-  async function linkAndScan(app: Express): Promise<void> {
-    await linkRepo(app).expect(201);
-    await jobs.enqueueScan(scanRequest);
-  }
-
-  afterEach(async () => {
-    // Release anything still held so the bodies settle, and only then drop the
-    // dispose log — the release itself disposes a tree.
-    for (const d of held.splice(0)) d.resolve();
-    // Drain, rather than await once: a succeeded scan CHAINS the guard setup,
-    // whose body is pushed onto `running` while we are already awaiting the
-    // scan's. Awaiting the array once would leave that body running past the
-    // reset below, and its `dispose()` would land in the next test's log.
-    for (let pending = running?.splice(0) ?? []; pending.length > 0; pending = running.splice(0)) {
-      await Promise.all(pending);
-    }
-    setRepoJobsCanceller(null);
-    await jobs?.stop();
-    disposed.length = 0;
-  });
-
-  it('runs the scan on a work tree it acquires and disposes itself', async () => {
-    await linkAndScan(await appWithRealScan());
-
-    await until(() => scan.calls.length > 0);
-    expect(scan.calls).toEqual([workTreeDir]);
-    // The tree is disposed once the scan settles.
-    await until(() => disposed.length > 0);
-    expect(disposed).toEqual([workTreeDir]);
-  });
-
-  it('answers before the scan finishes — a held scan does not hold the enqueue', async () => {
-    const pending = heldScan();
-    held.push(pending);
-    scan.impl = () => pending.promise;
-
-    // Only passes if nothing awaits the scan: this one never settles.
-    await linkAndScan(await appWithRealScan());
-
-    await until(() => scan.calls.length > 0);
-    expect(scan.calls).toEqual([workTreeDir]);
-    // The job holds the tree until it settles.
-    expect(disposed).toEqual([]);
-  });
-
-  it('a scan that fails rejects nothing into the process', async () => {
-    scan.impl = () => Promise.reject(new Error('no LLM transport configured'));
-    const unhandled: unknown[] = [];
-    const onUnhandled = (reason: unknown): void => {
-      unhandled.push(reason);
-    };
-    process.on('unhandledRejection', onUnhandled);
-    try {
-      await linkAndScan(await appWithRealScan());
-
-      await until(() => disposed.length > 0);
-      expect(scan.calls).toHaveLength(1);
-      expect(unhandled).toEqual([]);
-      // The failure landed on the job row and disposed the tree.
-      expect(disposed).toEqual([workTreeDir]);
-    } finally {
-      process.off('unhandledRejection', onUnhandled);
-    }
-  });
-
-  it('does not queue a second scan while one is running', async () => {
-    const pending = heldScan();
-    held.push(pending);
-    scan.impl = () => pending.promise;
-    await appWithRealScan();
-
-    expect((await jobs.enqueueScan(scanRequest)).status).toBe('queued');
-    await until(() => scan.calls.length > 0);
-    expect((await jobs.enqueueScan(scanRequest)).status).toBe('busy');
-
-    expect(scan.calls).toEqual([workTreeDir]);
-  });
-
-  it('unlinking mid-scan cancels the scan and disposes its work tree', async () => {
-    // A scan that ends only when it is cancelled: without cancellation the
-    // unlink hook has nothing to do but refuse.
-    let reached = false;
-    scan.impl = (_repoRoot, options) =>
-      new Promise((_resolve, reject) => {
-        reached = true;
-        const stop = (): void => reject(new Error('the spec scan was cancelled'));
-        if (options?.signal?.aborted) stop();
-        else options?.signal?.addEventListener('abort', stop, { once: true });
-      });
-
-    const app = await appWithRealScan();
-    await linkAndScan(app);
-    await until(() => reached);
-
-    await request(app)
-      .delete('/api/github/repos/link')
-      .query({ repoFullName: REPO })
-      .set('Cookie', `tc_session=${ORG}`)
-      .expect(200);
-
-    expect(await store.getRepo(REPO)).toBeNull();
-    expect(disposed).toEqual([workTreeDir]);
-  });
-
-  it('sees a scan another process started, through the sessions store', async () => {
-    await appWithRealScan();
-    // A run record left `running` by a live process — what a scan owned by an
-    // earlier server process (or another workspace) looks like from here.
-    createSessionRun(REPO, { command: 'spec-scan', gitRef: 'HEAD' });
-
-    expect((await jobs.enqueueScan(scanRequest)).status).toBe('busy');
-    await settle();
-    expect(scan.calls).toEqual([]);
   });
 });

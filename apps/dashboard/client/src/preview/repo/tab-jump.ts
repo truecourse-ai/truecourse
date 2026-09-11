@@ -24,11 +24,10 @@
 import { useEffect } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { PREVIEW_BASE } from '@/preview/shell/PreviewShell';
-import { conflictHref, docHref } from '@/preview/pages/context-hrefs';
+import { CONTEXT_BASE, conflictHref, docHref } from '@/preview/pages/context-hrefs';
 
 /** The dashboard's guard tab ids, as the preview's path segments. */
 const TAB_PATH: Record<string, string> = {
-  coverage: 'coverage',
   // Documentation is the workspace's: a jump that named the repository's
   // retired Sources tab lands on the links this repository reads through.
   sources: 'context',
@@ -49,25 +48,33 @@ export function useGuardTabJump(repoId?: string): void {
     const next = new URLSearchParams(search);
     const tab = next.get('tab');
     if (!slug || !tab) return;
-    // `section` is the real dashboard's product switch, which the preview does
-    // not have: the jump wrote it, so the jump's translation drops it.
     next.delete('tab');
-    next.delete('section');
-    // A coverage jump that names a document or a conflict lands on that item's
-    // own CONTEXT page: documents and conflicts belong to the workspace, and a
-    // document is read through the repository the jump came from.
+    // COVERAGE IS NOT A TAB. Documents, their coverage and their conflicts
+    // belong to the workspace, so every coverage jump lands on Context: on the
+    // document's own page (read through the repository the jump came from), on
+    // the conflict's resolver, or — a jump that named neither — on the
+    // documents view.
     if (tab === 'coverage') {
       const doc = next.get('doc');
       const conflict = next.get('conflict');
-      if (doc || conflict) {
-        next.delete('doc');
-        next.delete('conflict');
-        const query = next.toString();
-        const to = doc ? docHref(doc, slug) : conflictHref(conflict!);
-        navigate(query ? `${to}${to.includes('?') ? '&' : '?'}${query}` : to, { replace: true });
-        return;
-      }
+      next.delete('doc');
+      next.delete('conflict');
+      // The reading repository is the destination's own parameter, written by
+      // `docHref` — carrying the old one through would double it.
+      next.delete('repo');
+      // `section` carries two things under one key: the real dashboard's
+      // product switch (which the preview does not have) and, on a jump that
+      // named a document, the within-document anchor it wrote over the switch.
+      // Only the anchor survives.
+      if (!doc) next.delete('section');
+      const to = doc ? docHref(doc, slug) : conflict ? conflictHref(conflict) : CONTEXT_BASE;
+      const query = next.toString();
+      navigate(query ? `${to}${to.includes('?') ? '&' : '?'}${query}` : to, { replace: true });
+      return;
     }
+    // `section` is the real dashboard's product switch, which the preview does
+    // not have: the jump wrote it, so the jump's translation drops it.
+    next.delete('section');
     const path = TAB_PATH[tab] ?? '';
     const query = next.toString();
     navigate(

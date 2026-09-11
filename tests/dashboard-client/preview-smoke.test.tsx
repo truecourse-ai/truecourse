@@ -70,13 +70,6 @@ describe('one-product preview', () => {
     expect(screen.getAllByText('#482').length).toBeGreaterThan(0);
   });
 
-  it('renders /preview/repos/orders-api/coverage', async () => {
-    renderAt('/preview/repos/orders-api/coverage');
-    // The overview only: GuardCoverageOverview draws the composition bars.
-    expect(await screen.findByText('Coverage overview')).toBeInTheDocument();
-    expect((await screen.findAllByLabelText('Statements')).length).toBeGreaterThan(0);
-  });
-
   // The five guard tabs render the vendored components (the current dashboard
   // design) over the preview fetch shim, so each one's rows
   // arrive async. Each case names one thing only that tab's component draws.
@@ -166,13 +159,13 @@ describe('one-product preview', () => {
     // the selection; the preview reads its tab out of the PATH, so the jump is
     // translated (src/preview/repo/tab-jump.ts) and lands on the Tests tab with
     // the flow the jump named already open.
-    renderAt('/preview/repos/orders-api/coverage?section=guard&tab=guardflows&flow=refund-partial-capture');
+    renderAt('/preview/repos/orders-api/runs?section=guard&tab=guardflows&flow=refund-partial-capture');
     // The named flow's own page (the Tests breadcrumb beside the menu entry) and
-    // its failing step, neither of which the Coverage tab draws.
+    // its failing step, neither of which the Runs tab draws.
     expect((await screen.findAllByText(/409 Conflict/)).length).toBeGreaterThan(0);
     expect((await screen.findAllByRole('link', { name: 'Tests' })).length).toBeGreaterThan(1);
-    // The corpus sidebar the address arrived on is gone.
-    expect(screen.queryByText('Coverage overview')).toBeNull();
+    // The run list the address arrived on is gone.
+    expect(screen.queryByRole('textbox', { name: 'Search runs' })).toBeNull();
   });
 
   it('opens an interface from ?interface= on the interfaces tab', async () => {
@@ -210,7 +203,7 @@ describe('one-product preview', () => {
     // Knowledge is parked: shown in the menu, not a link.
     expect(screen.getByText('Knowledge')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Knowledge' })).toBeNull();
-    // There is no pull request page anywhere: a PR is seen through Runs and Coverage.
+    // There is no pull request page anywhere: a PR is seen through its runs.
     expect(screen.queryByRole('link', { name: 'Pull requests' })).toBeNull();
   });
 });
