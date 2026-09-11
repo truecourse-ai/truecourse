@@ -218,7 +218,7 @@ describe('Sessions routes', () => {
 
   it('refuses bad activity cursors, limits, commands, run IDs, and legacy runs', async () => {
     const run = seedActivityRun();
-    for (const query of ['after=NaN', 'after=-2', 'after=1.2', 'after=1', 'after=999999', 'limit=0', 'limit=1001', 'limit=x']) {
+    for (const query of ['after=NaN', 'after=-2', 'after=1.2', 'after=1', 'after=999999', 'limit=0', 'limit=1001', 'limit=x', 'compact=bad']) {
       const res = await request(app).get(url(`runs/guard-setup/${run.runId}/activity?${query}`));
       expect([query, res.status]).toEqual([query, 400]);
     }
@@ -226,6 +226,27 @@ describe('Sessions routes', () => {
     await request(app).get(url('runs/guard-setup/..%2Foutside/activity')).expect(400);
     await request(app).get(url('runs/guard-setup/2026-01-01T00-00-00Z_00000000/activity')).expect(404);
     await request(app).get(url(`runs/spec-scan/${seedRun().runId}/activity`)).expect(409);
+  });
+
+  it('serves compact pages with the original cursor window and every transcript event', async () => {
+    const run = seedActivityRun();
+    let after = -1;
+    const transcripts: unknown[] = [];
+    for (;;) {
+      const endpoint = url(`runs/guard-setup/${run.runId}/activity?after=${after}&limit=2`);
+      const full = await request(app).get(endpoint).expect(200);
+      const compact = await request(app).get(`${endpoint}&compact=1`).expect(200);
+      const snapshots = full.body.events.filter((e: { kind: string }) => e.kind === 'run');
+      expect(compact.body).toEqual({
+        ...full.body,
+        events: full.body.events.filter((e: { kind: string; cursor: number }) => e.kind !== 'run' || e.cursor === snapshots.at(-1)?.cursor),
+      });
+      expect(compact.text).not.toContain('SECRET-TOKEN');
+      transcripts.push(...compact.body.events.filter((e: { kind: string }) => e.kind === 'session-event'));
+      after = compact.body.nextCursor;
+      if (compact.body.done) break;
+    }
+    expect(transcripts).toHaveLength(4);
   });
 });
 

@@ -106,6 +106,25 @@ const pane = () => screen.getByRole('complementary', { name: 'Work' });
 const rx = (text: string) => new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
 
 describe('one conversation, as a page', () => {
+  it('requests compact history and aborts its pending download when closed', async () => {
+    let signal: AbortSignal | undefined;
+    let requested: URL | undefined;
+    window.fetch = vi.fn((input, init) => {
+      requested = new URL(String(input), window.location.origin);
+      signal = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+      });
+    }) as typeof window.fetch;
+    const view = renderPage(SETUP_RUN);
+    await waitFor(() => expect(requested?.searchParams.get('compact')).toBe('1'));
+    expect(signal?.aborted).toBe(false);
+    view.unmount();
+    expect(signal?.aborted).toBe(true);
+    await Promise.resolve();
+    expect(window.fetch).toHaveBeenCalledTimes(1);
+  });
+
   it('lists the run’s steps in order, each with the work that happened under it as rows', async () => {
     serve(SETUP_JOURNAL);
     renderPage(SETUP_RUN);

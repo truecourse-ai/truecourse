@@ -1569,8 +1569,10 @@ export function readRunActivity(
   runId: string,
   after: number,
   limit: number,
+  signal?: AbortSignal,
 ): Promise<{ events: ActivityEvent[]; nextCursor: number; done: boolean }> {
   return fetchApi<{ events: ActivityEvent[]; nextCursor: number; done: boolean }>(
-    `/api/repos/${repoId}/sessions/runs/${command}/${encodeURIComponent(runId)}/activity?after=${after}&limit=${limit}`,
+    `/api/repos/${repoId}/sessions/runs/${command}/${encodeURIComponent(runId)}/activity?after=${after}&limit=${limit}&compact=1`,
+    { signal },
   );
 }

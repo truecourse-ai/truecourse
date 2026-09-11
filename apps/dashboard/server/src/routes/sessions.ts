@@ -131,6 +131,9 @@ router.get('/:id/sessions/runs/:command/:runId/activity', async (req: Request, r
     if (after === null) { res.status(400).json({ error: 'after must be a journal cursor' }); return; }
     const limit = parseLimit(req.query.limit, 500, 1000);
     if (limit === null) { res.status(400).json({ error: 'limit must be between 1 and 1000' }); return; }
+    if (req.query.compact !== undefined && req.query.compact !== '1') {
+      res.status(400).json({ error: 'compact must be 1 when supplied' }); return;
+    }
     const repo = await resolveProjectForRequest(req.params.id as string);
     let run;
     try { run = await openStoredSessionRun(repo.path, command, req.params.runId as string); }
@@ -143,7 +146,7 @@ router.get('/:id/sessions/runs/:command/:runId/activity', async (req: Request, r
     }
     if (!run.readActivity) recoverSessionActivity(run);
     try {
-      res.json(await readStoredActivityPage(run, after, limit));
+      res.json(await readStoredActivityPage(run, after, limit, req.query.compact === '1'));
     } catch (error) {
       if (error instanceof Error && error.message.startsWith('Activity cursor')) {
         res.status(400).json({ error: error.message }); return;

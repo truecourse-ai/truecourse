@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ActivityEvent, ActivityProgress } from '@truecourse/shared/activity-stream';
+import { compactRunSnapshots, type ActivityEvent, type ActivityProgress } from '@truecourse/shared/activity-stream';
 import * as api from '@/lib/api';
 import type { PublicSessionRun } from '@/lib/api';
 import { followActivity } from '@/lib/activity-stream';
@@ -85,7 +85,7 @@ export function useRunConversation(run: PublicSessionRun, repoId: string): RunCo
           seen.add(event.cursor);
           next.push(event);
         }
-        return next.length === prev.length ? prev : next.sort((a, b) => a.cursor - b.cursor);
+        return next.length === prev.length ? prev : compactRunSnapshots(next).sort((a, b) => a.cursor - b.cursor);
       });
     };
 
@@ -96,7 +96,7 @@ export function useRunConversation(run: PublicSessionRun, repoId: string): RunCo
       }
       let after = -1;
       for (;;) {
-        const page = await api.readRunActivity(repoId, command, runId, after, PAGE);
+        const page = await api.readRunActivity(repoId, command, runId, after, PAGE, controller.signal);
         if (cancelled) return;
         absorb(page.events);
         after = page.nextCursor;

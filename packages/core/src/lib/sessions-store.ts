@@ -25,7 +25,7 @@ import {
   type SessionIndexEntry,
   type SessionPersistence,
 } from '@truecourse/agent-loop';
-import type { ActivityEvent } from '@truecourse/shared/activity-stream';
+import { compactRunSnapshots, type ActivityEvent } from '@truecourse/shared/activity-stream';
 import { getRepoTruecourseDir } from '../config/paths.js';
 import { atomicWriteJson } from './atomic-write.js';
 import { appendActivityEvent, publishActivityProgress, readActivityEvents, validateActivityCursor } from './activity-journal.js';
@@ -98,6 +98,8 @@ export interface SessionRunStore {
   /** One bounded slice of the journal, so a reader pages a long run instead of
    *  loading every event to show its first screen. */
   readActivityPage?(after: number, limit: number): Promise<ActivityEvent[]>;
+  /** The same cursor window, omitting superseded run snapshots before transfer. */
+  readCompactActivityPage?(after: number, limit: number): Promise<ActivityPage>;
   validateActivityCursor?(after: number): Promise<void>;
   /** Dashboard reads load only this session; synchronous persistence reads belong to live writers. */
   readTranscript?(sessionId: string, since: number): Promise<SessionEvent[]>;
@@ -505,12 +507,18 @@ export async function readStoredActivityPage(
   run: SessionRunStore,
   after: number,
   limit: number,
+  compact = false,
 ): Promise<ActivityPage> {
+  if (compact && run.readCompactActivityPage) return run.readCompactActivityPage(after, limit);
   const events = run.readActivityPage
     ? await run.readActivityPage(after, limit)
     : (await readStoredActivity(run, after)).slice(0, limit);
   const last = events[events.length - 1];
-  return { events, nextCursor: last ? last.cursor : after, done: events.length < limit };
+  return {
+    events: compact ? compactRunSnapshots(events) : events,
+    nextCursor: last ? last.cursor : after,
+    done: events.length < limit,
+  };
 }
 
 export async function validateStoredActivityCursor(run: SessionRunStore, after: number): Promise<void> {

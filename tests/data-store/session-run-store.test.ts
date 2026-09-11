@@ -48,6 +48,27 @@ async function create(command: 'spec-scan' | 'guard-setup' | 'guard-generate' | 
 }
 
 describe('Postgres activity storage', () => {
+  it('compacts snapshot-heavy pages without skipping transcripts or altering stored history', async () => {
+    const run = await create();
+    for (let i = 0; i < 100; i++) run.setGitRef!(`${i}-${'x'.repeat(10_000)}`);
+    run.persistence.appendEvent('s', event(0));
+    run.setGitRef!('latest');
+    run.persistence.appendEvent('s', event(1));
+    run.finish('completed');
+    await run.flush!();
+    const whole = await run.readActivity!(-1);
+    const first = await readStoredActivityPage(run, -1, 100, true);
+    expect(first).toEqual({ events: [whole[99]], nextCursor: 99, done: false });
+    expect(JSON.stringify(first).length).toBeLessThan(JSON.stringify(whole).length / 50);
+    const second = await readStoredActivityPage(run, first.nextCursor, 100, true);
+    expect(second.events).toEqual(whole.slice(100).filter(e => e.kind !== 'run' || e.cursor === whole.at(-1)!.cursor));
+    expect(second.nextCursor).toBe(whole.at(-1)!.cursor);
+    expect(second.done).toBe(true);
+    expect(await readStoredActivityPage(run, second.nextCursor, 100, true)).toEqual({ events: [], nextCursor: second.nextCursor, done: true });
+    expect(await run.readActivity!(-1)).toEqual(whole);
+    await expect(readStoredActivityPage(run, 900, 100, true)).rejects.toThrow('boundary');
+  });
+
   const arbitraryText = 'before\u0000after \\u0000 lone \ud800 emoji 🎉';
 
   it.each([false, true])('imports transcripts losslessly, with activity journal=%s', async activityStream => {

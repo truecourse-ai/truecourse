@@ -5,7 +5,7 @@ import { activityRuns, activityEvents, type Db, type Pool, type PoolClient } fro
 import {
   SessionRunNotFoundError, createSessionRun, listSessionRuns, openSessionRun, parseSessionRunCursor,
   sessionRunDir, toPublicRunRecord,
-  type RepoRunRecord, type SessionRunBackend, type SessionRunQuery, type SessionRunStore,
+  type ActivityPage, type RepoRunRecord, type SessionRunBackend, type SessionRunQuery, type SessionRunStore,
 } from '@truecourse/core/lib/sessions-store';
 import { publishActivityProgress, publishCommittedActivity, readActivityEvents } from '@truecourse/core/lib/activity-journal';
 import { ActivityEventSchema, type ActivityEvent, type ActivityEventBody } from '@truecourse/shared/activity-stream';
@@ -277,6 +277,30 @@ export class PgSessionRunStore implements SessionRunBackend {
     });
   }
 
+  private async readCompactPage(runId: string, after: number, limit: number): Promise<ActivityPage> {
+    await this.validateCursor(runId, after);
+    // Select the cursor window first. Only fetch bodies that the conversation
+    // uses: thousands of run snapshots can dwarf the entire transcript.
+    const result = await this.db.execute(sql`
+      WITH page AS MATERIALIZED (
+        SELECT cursor, body->>'kind' AS kind FROM ${activityEvents}
+        WHERE run_id = ${runId} AND cursor > ${after} ORDER BY cursor LIMIT ${limit}
+      )
+      SELECT e.cursor, e.body, (SELECT count(*) FROM page) AS page_count
+      FROM ${activityEvents} e JOIN page p ON e.cursor = p.cursor
+      WHERE e.run_id = ${runId}
+        AND (p.kind IS DISTINCT FROM 'run' OR p.cursor = (SELECT max(cursor) FROM page WHERE kind = 'run'))
+      ORDER BY e.cursor
+    `);
+    const rows = result.rows as { cursor: string | number; body: { [key: string]: unknown }; page_count: string | number }[];
+    const events = rows.map(row => decodeActivityEvent(row.body, Number(row.cursor)));
+    return {
+      events,
+      nextCursor: events.at(-1)?.cursor ?? after,
+      done: Number(rows[0]?.page_count ?? 0) < limit,
+    };
+  }
+
   private handle(repoKey: string, record: Record, owned = true): SessionRunStore {
     const dir = sessionRunDir(repoKey, record.command, record.runId);
     const transcripts = new Map<string, Event[]>();
@@ -323,6 +347,7 @@ export class PgSessionRunStore implements SessionRunBackend {
       subscribeActivity: notify => this.subscribe(`run:${record.runId}`, notify),
       readActivity: async after => { await flush(); await this.reconcile([repoKey]); return this.readEvents(record.runId, after); },
       readActivityPage: async (after, limit) => { await flush(); await this.reconcile([repoKey]); return this.readEvents(record.runId, after, limit); },
+      readCompactActivityPage: async (after, limit) => { await flush(); await this.reconcile([repoKey]); return this.readCompactPage(record.runId, after, limit); },
       validateActivityCursor: async after => { await flush(); await this.validateCursor(record.runId, after); },
       readTranscript: async (sessionId, since) => { await flush(); return this.readTranscript(record.runId, sessionId, since); },
       setGitRef(gitRef) { record.gitRef = gitRef; write(); },
