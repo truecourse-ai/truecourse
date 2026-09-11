@@ -1,3 +1,4 @@
+import { log } from '../../lib/logger.js'
 /**
  * THE GUARD-GENERATE SESSION SEAMS — the implementations `@truecourse/core`
  * injects into `generateGuards` for plan 04 steps 15 (claim extraction) and 16
@@ -66,6 +67,7 @@ import {
   type GuardDoc,
   type GuardSessionSummary,
   flowAreaKey,
+  AUTHOR_INITIAL_BYTES,
 } from '@truecourse/guard-generator'
 import { createSessionRun, type SessionRunStartedInfo, type SessionRunStore } from '../../lib/sessions-store.js'
 import { resolveCommitSha } from '../../lib/repo-ref.js'
@@ -106,6 +108,7 @@ import {
   cacheableWorkerOutcome,
   flowWorkerCacheKey,
   flowWorkerSessionDef,
+  flowWorkerSystemPrompt,
   type CachedWorkerEntry,
 } from './flow-worker.js'
 import { FIDELITY_SESSION_KIND, emptyFidelityTally, judgeWorkerFidelity } from './fidelity.js'
@@ -659,7 +662,24 @@ export function createGuardGenerateSessionSeams(
       // purpose — cli briefings spawn probe sandboxes, and a stampede of them
       // is exactly what the probe cache exists to avoid paying twice.
       const briefings = new Map<string, string>()
-      for (const task of misses) briefings.set(task.workItem, await task.prepare())
+      const ready: FlowWorkerTask[] = []
+      for (const task of misses) {
+        const briefing = await task.prepare()
+        const initialBytes = Buffer.byteLength(flowWorkerSystemPrompt(task.surface), 'utf8') + Buffer.byteLength(briefing, 'utf8')
+        log.info(`[Guard author] ${task.workItem}: initialInputBytes=${initialBytes}`)
+        if (task.surface === 'web' && initialBytes > AUTHOR_INITIAL_BYTES) {
+          const reason = `author-initial-context-oversize: ${initialBytes} UTF-8 bytes exceeds ${AUTHOR_INITIAL_BYTES}; required obligations were retained. Split the flow or reduce its authoritative input before retrying.`
+          summary.failed++
+          summary.allTransport = false
+          summary.firstError ??= reason
+          byTask.set(task.workItem, { kind: 'failed', reason })
+          tick('failed')
+          continue
+        }
+        briefings.set(task.workItem, briefing)
+        ready.push(task)
+      }
+      if (ready.length === 0) return
       // The same construction guard `runCachedGuardPool` applies: an
       // unconstructible driver fails every miss of the wave transport-class
       // instead of crashing the generate.
@@ -669,7 +689,7 @@ export function createGuardGenerateSessionSeams(
       } catch (e) {
         const outcome = driverConstructionFailure(e)
         const reason = describeSessionFailure(outcome.failure)
-        for (const task of misses) {
+        for (const task of ready) {
           summary.ran++
           summary.failed++
           summary.firstError ??= reason
@@ -680,7 +700,7 @@ export function createGuardGenerateSessionSeams(
       }
       const { driver, persistence } = acquiredCtx
       await runSessionPool<FlowWorkerTask, GuardFlowWorkerOutcome>({
-        items: misses,
+        items: ready,
         workItem: (t) => t.workItem,
         session: (t) =>
           flowWorkerSessionDef({

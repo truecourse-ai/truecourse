@@ -1,3 +1,4 @@
+import type { AuthorCatalogSummary } from './author-catalog.js'
 import type { preparationCatalog } from '@truecourse/guard-runner'
 import type { GuardVerification } from '@truecourse/shared'
 /**
@@ -1033,8 +1034,8 @@ export interface AuthorUserContext {
    * keeps the prompt byte-identical. USER-prompt only.
    */
   otherOperations?: InterfaceContractHint[]
-  /** Other mapped browser actions, for arranging prerequisites without inventing controls. */
-  webSetupInterfaces?: InterfaceDigest[]
+  /** At most six metadata candidates; full action/resource fields are fetched lazily. */
+  webSetupCandidates?: AuthorCatalogSummary[]
   /** How many other operations the cap dropped, so the block can say so. */
   otherOperationsOverflow?: number
   /**
@@ -1537,17 +1538,16 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       'nothing FAILS its step, so capture only what these places really show.',
     )
   }
-  if (ctx.driver === 'web' && ctx.webSetupInterfaces?.length) {
-    lines.push('', 'BROWSER ACTIONS AVAILABLE FOR SETUP',
-      'Use these mapped actions to create the records this flow needs before its assertions.',
-      'Create your own records with ${unique} for edit/delete flows. A missing seed row',
-      'does not block a record the app can create. Keep arrange steps untagged; the',
-      'selected milestones still need browser assertions. Do not edit shared fixtures.',
-      'These actions supply setup, not proof of otherwise omitted cases.');
-    for (const j of ctx.webSetupInterfaces) {
-      lines.push('', `--- id: ${j.id}`, `title: ${j.title}`, `entry: ${j.entry}`,
-        ...(j.context ?? []), ...j.steps);
-    }
+  if (ctx.driver === 'web' && ctx.webSetupCandidates) {
+    lines.push('', 'BROWSER SETUP CANDIDATES (summaries only)',
+      'Fetch full action and resource fields with get_interfaces before using a candidate.',
+      'Search the available catalog with search_interfaces for other prerequisites. These candidates',
+      'are metadata associations, not execution evidence or an exhaustive list. Resource readables',
+      'omitted above are available through get_interfaces for the selected action IDs.',
+      'A zero-result search or retrieval error does not prove missing product behavior.',
+      'Resolve retrieval errors before authoring dependent steps; keep all assigned obligations.',
+      'Create independent records with ${unique}; setup summaries never prove milestone coverage.');
+    for (const candidate of ctx.webSetupCandidates) lines.push(JSON.stringify(candidate));
   }
   // The flow's own operations as the repo's ROUTE REGISTRATIONS declare
   // them — the exact paths, and what each handler reads off the request. api-only and

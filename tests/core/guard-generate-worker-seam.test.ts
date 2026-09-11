@@ -1,3 +1,4 @@
+import { createAuthorCatalog } from '../../packages/guard-generator/src/author-catalog.js'
 /**
  * THE FLOW-WORKER SEAM AND THE FIDELITY CHILD (plan 04 steps 17 + 18) — core's
  * half: the session def, the `guard/generate` cache (kept name, session prompt
@@ -180,6 +181,27 @@ async function callTool(call: StubCall, name: string, args: unknown): Promise<{ 
 // ---------------------------------------------------------------------------
 
 describe('flowWorkerSessionDef', () => {
+  it('offers web-only bounded catalog tools without weakening the execution gate', async () => {
+    const catalog = createAuthorCatalog([{ id: 'web/setup-late', type: 'web', title: 'Create prerequisite', entry: { method: 'GET', path: '/setup' }, steps: [{ kind: 'activate', target: 'button "Create"' }], fingerprint: 'setup-v1' }])
+    const { task } = fakeTask({ surface: 'web', catalog })
+    const def = flowWorkerSessionDef({ task, judgeWith: () => async () => ({ kind: 'faithful' }) })
+    expect(def.tools.map(t => t.name)).toEqual(['search_interfaces', 'get_interfaces', 'run_scenario', 'submit_scenario', 'drop_scenario'])
+    expect(def.outcomePrecondition?.tool).toBe('run_scenario')
+    const ctx = { workItem: task.workItem, signal: new AbortController().signal, dispatchChild: async () => { throw new Error('unexpected child') } }
+    const search = def.tools.find(t => t.name === 'search_interfaces')!
+    const fetch = def.tools.find(t => t.name === 'get_interfaces')!
+    expect(search.readOnly).toBe(true)
+    expect(search.destructive).toBe(false)
+    expect(fetch.readOnly).toBe(true)
+    const found = await search.execute({ query: 'prerequisite' }, ctx)
+    expect(found.content).toContain('web/setup-late')
+    const full = await fetch.execute({ ids: ['web/setup-late'] }, ctx)
+    expect(full.content).toContain('Create')
+    expect((await fetch.execute({ ids: ['web/another-app'] }, ctx)).isError).toBe(true)
+    const cli = flowWorkerSessionDef({ task: fakeTask({ catalog }).task, judgeWith: () => async () => ({ kind: 'faithful' }) })
+    expect(cli.tools.some(t => t.name === 'search_interfaces')).toBe(false)
+  })
+
   const def = (surface: 'cli' | 'api' | 'web') =>
     flowWorkerSessionDef({
       task: { ...fakeTask().task, surface },
@@ -318,6 +340,28 @@ describe('cacheableWorkerOutcome', () => {
 // ---------------------------------------------------------------------------
 
 const workerSeam = (r: string) => createGuardGenerateSessionSeams({ repoRoot: r }).flowWorkerSession
+
+describe('web initial context budget', () => {
+  it('rejects an oversized briefing before building a model driver', async () => {
+    const r = docRepo()
+    const { task } = fakeTask({ surface: 'web', prepare: async () => 'required obligation '.repeat(10_000) })
+    const { byTask, summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], mutatorTasks: [], docs: docsOf(r) })
+    expect(constructions).toBe(0)
+    expect(summary.failed).toBe(1)
+    expect(summary.ran).toBe(0)
+    expect(byTask.get(task.workItem)).toMatchObject({ kind: 'failed', reason: expect.stringContaining('author-initial-context-oversize') })
+  })
+
+  it('lets another task finish when one web briefing is oversized', async () => {
+    const r = docRepo()
+    const large = fakeTask({ surface: 'web', prepare: async () => 'required obligation '.repeat(10_000) }, 'large').task
+    const normal = fakeTask({}, 'normal').task
+    sessionScript = settleScript
+    const { byTask, summary } = await workerSeam(r)({ tasks: [large, normal], epicTasks: [], mutatorTasks: [], docs: docsOf(r) })
+    expect(summary).toMatchObject({ failed: 1, ran: 1 })
+    expect(byTask.get(normal.workItem)).toMatchObject({ kind: 'outcome', outcome: { kind: 'settled' } })
+  })
+})
 
 /** Script a driver that submits `YAML` and settles on the accepted sha. */
 const settleScript: StubScript = async (call) => {

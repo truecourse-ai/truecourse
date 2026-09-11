@@ -1,3 +1,4 @@
+import { GuardFailureObservationSchema } from './failure-observation.js'
 /**
  * Guard FLOWS — the spec-side generation unit (WHAT to test), stored in
  * `.truecourse/scenarios/flows.json` (committable, next to `manifest.json`).
@@ -203,7 +204,9 @@ export const GuardExpectedRedSchema = z
     step: z.number().int().positive(),
     /** The actual the worker OBSERVED (copied off its own run) and predicts the
      *  confirmation run reproduces. */
-    predictedActual: z.string().min(1),
+    predictedActual: z.string().trim().min(1),
+    observationId: z.string().min(1).optional(),
+    observation: GuardFailureObservationSchema.optional(),
     /** The worker's drift verdict — `generation-defect` is deliberately absent:
      *  a worker that authored a defective scenario fixes or retires it in-loop. */
     verdict: z.enum(['doc-drift', 'code-drift']),

@@ -328,6 +328,7 @@ describe('browser setup grounding', () => {
       fingerprint: 'sha256:create' }
     const briefings: string[] = []
     const cacheInputs: string[][] = []
+    const fetched: string[] = []
     const run = (setup: Interface) => runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, webInterface(), setup),
@@ -335,17 +336,20 @@ describe('browser setup grounding', () => {
       matchRunner: async () => ({ plan: [{ interfaceId: 'web/board', milestone: 1 }] }),
       flowWorkerSession: submitWorkerSessions((task) => {
         cacheInputs.push(task.cacheMaterial.interfaceFingerprints)
+        fetched.push(task.catalog!.get({ ids: [setup.id] }).content)
         return { blocked: [{ order: 1, capability: 'missing-data: record' }] }
       }, { onBriefing: (_task, briefing) => briefings.push(briefing) }),
     })
     await run(create)
     expect(briefings).toHaveLength(1)
-    expect(briefings[0]).toContain('BROWSER ACTIONS AVAILABLE FOR SETUP')
-    expect(briefings[0]).toContain('activate: button "Add record"')
-    expect(briefings[0]).toContain('Do not edit shared fixtures')
+    expect(briefings[0]).toContain('BROWSER SETUP CANDIDATES')
+    expect(briefings[0]).not.toContain('Add record')
+    expect(fetched[0]).toContain('Add record')
+    expect(briefings[0]).toContain('metadata associations')
     await run({ ...create, steps: [{ kind: 'activate', target: 'button "New record"' }], fingerprint: 'sha256:create-v2' })
     expect(briefings).toHaveLength(2)
-    expect(briefings[1]).toContain('activate: button "New record"')
+    expect(briefings[1]).not.toContain('New record')
+    expect(fetched[1]).toContain('New record')
     expect(cacheInputs[0]).not.toEqual(cacheInputs[1])
   })
 })

@@ -241,6 +241,7 @@ describe('the web driver', () => {
       expect(result.failure?.step).toBe(2)
       expect(result.failure?.expected).toContain('button “Publish”')
       expect(result.failure?.actual).toContain('no button named “Publish” is on the page')
+      expect(result.failure?.observation).toMatchObject({ version: 1, kind: 'web-target', assertion: 'action', page: 'guard-server://web/', operation: 'to click', locator: { role: 'button', name: 'Publish' }, matchCount: 0, reason: 'absent' })
       // The evidence names what IS there — the answer is usually "it is called
       // something else now".
       const diff = fs.readFileSync(path.join(evidenceDir(repo), 'diff.txt'), 'utf-8')
@@ -279,6 +280,7 @@ describe('the web driver', () => {
       ])
       expect(result.outcome).toBe('fail')
       expect(result.failure?.expected).toContain('the page text contains')
+      expect(result.failure?.observation).toMatchObject({ version: 1, kind: 'web-text', assertion: 'text:0', page: 'guard-server://web/', operator: 'contains', matcher: { contains: 'Totally Different Product' }, observed: false })
       // The page's own words ride the failure the way a cli step's stdout does.
       expect(result.failure?.stdout).toContain('Guard Web Fixture')
     },

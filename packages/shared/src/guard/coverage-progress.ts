@@ -2,7 +2,7 @@ import type { GuardFlowMilestone } from './flows.js'
 import type { GuardMilestoneProof } from './proof.js'
 
 /** Bump when old reviews no longer establish the current assertion contract. */
-export const GUARD_REVIEW_POLICY_VERSION = 4
+export const GUARD_REVIEW_POLICY_VERSION = 5
 
 export interface GuardObligation {
   milestone: number

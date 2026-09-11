@@ -92,6 +92,8 @@ export interface StepRunContext {
   resolveEnv(env: Record<string, string>): Record<string, string>
   /** Apply the scenario's normalizers (used for stream and file comparison). */
   normText(text: string): string
+  /** Redacts all known run secrets before evidence digests are computed. */
+  redact?: (text: string) => string
   /** Publish what this step captured, for the steps after it. */
   publishCaptures(values: Record<string, string>): void
   /** The run's default per-step budget; a step's own `timeoutMs` wins over it. */

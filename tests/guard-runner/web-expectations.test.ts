@@ -5,6 +5,7 @@ import path from 'node:path'
 import { loadScenarios, launchWebBrowser, resolveWebStep, type WebBrowserHandle } from '@truecourse/guard-runner'
 import { describeWebExpect, GuardStepWebCheckSchema, GuardWebExpectSchema, GuardWebStepSchema, webStepPatterns, type GuardWebExpect, type GuardWebStep } from '@truecourse/shared'
 import { executeWebStep } from '../../packages/guard-runner/src/web/executor'
+import { compareFailureObservations } from '../../packages/guard-generator/src/failure-observation.js'
 import { makeTempRepo, rmrf, writeScenarioFile, specBinds } from './helpers.js'
 
 const dialog = { role: 'dialog' as const, name: 'Add expense', exact: true }
@@ -79,6 +80,89 @@ describe('closure, visible counts and DOM values in Chromium', () => {
     expect(result.mismatch).toBeUndefined()
     expect(result.checks).toMatchObject([{ subject: 'hidden', ok: true, actual: expect.stringContaining('0 visible matches') }])
     expect(GuardStepWebCheckSchema.safeParse(result.checks[0]).success).toBe(true)
+  })
+
+  it('records hidden, absent and ambiguous targets as distinct typed evidence', async () => {
+    const step: GuardWebStep = { driver: 'web', expect: { visible: { text: 'Save', exact: true } } }
+    await browser.page.setContent('<span style="display:none">Save</span>')
+    const hidden = await execute(step)
+    expect(hidden.mismatch?.observation).toMatchObject({ kind: 'web-target', assertion: 'visible:0', matchCount: 1, visibility: 'hidden', reason: 'hidden' })
+    await browser.page.setContent('<p>Other</p>')
+    const absent = await execute(step)
+    expect(absent.mismatch?.observation).toMatchObject({ matchCount: 0, reason: 'absent' })
+    await browser.page.setContent('<span>Save</span><span>Save</span>')
+    expect((await execute(step)).mismatch?.observation).toMatchObject({ matchCount: 2, reason: 'ambiguous' })
+  })
+
+  it.each(['assertion', 'click', 'scope'] as const)('distinguishes hidden and absent role targets in %s evidence', async kind => {
+    const target = { role: 'button' as const, name: 'Save', exact: true }
+    const step: GuardWebStep = kind === 'click'
+      ? { driver: 'web', click: target }
+      : { driver: 'web', expect: { visible: kind === 'scope'
+        ? { text: 'Save', within: dialog }
+        : target } }
+    await browser.page.setContent(kind === 'scope'
+      ? '<section role="dialog" aria-label="Add expense" hidden>Save</section>'
+      : '<button aria-label="Save" hidden>Save</button>')
+    const hidden = await execute(step)
+    expect(hidden.mismatch?.observation).toMatchObject({ kind: 'web-target', matchCount: 1, visibility: 'hidden', reason: 'hidden' })
+    expect(hidden.mismatch?.actual).toContain('not visible')
+    await browser.page.setContent('<p>Other</p>')
+    const absent = await execute(step)
+    expect(absent.mismatch?.observation).toMatchObject({ matchCount: 0, reason: 'absent' })
+    expect(compareFailureObservations(hidden.mismatch!.observation!, absent.mismatch!.observation!)).toBeDefined()
+  })
+
+  it('keeps hidden role duplicates out of successful visibility assertions and clicks', async () => {
+    const target = { role: 'button' as const, name: 'Save', exact: true }
+    await browser.page.setContent('<button aria-label="Save" hidden>Save</button><button aria-label="Save" onclick="this.textContent=\'Saved\'">Save</button>')
+    expect((await check({ visible: target })).mismatch).toBeUndefined()
+    const clicked = await execute({ driver: 'web', click: target, expect: { text: { contains: 'Saved' } } })
+    expect(clicked.infra).toBeUndefined()
+    expect(clicked.mismatch).toBeUndefined()
+  })
+
+  it('does not label a visible aria-hidden role target as physically hidden', async () => {
+    await browser.page.setContent('<button aria-label="Save" aria-hidden="true">Save</button>')
+    const result = await check({ visible: { role: 'button', name: 'Save', exact: true } })
+    expect(result.mismatch).toBeDefined()
+    expect(result.mismatch?.observation).toBeUndefined()
+    expect(result.mismatch?.observationUnavailable).toBeDefined()
+    expect(result.mismatch?.actual).toContain('could not establish')
+  })
+
+  it('captures the first failed text operator and full text beyond display truncation', async () => {
+    const step: GuardWebStep = { driver: 'web', expect: { text: { contains: 'prefix', equals: 'Required' } } }
+    await browser.page.setContent(`<p>prefix ${'x'.repeat(3000)} one</p>`)
+    const first = await execute(step)
+    expect(first.mismatch?.observation).toMatchObject({ kind: 'web-text', assertion: 'text:0', operator: 'equals', observed: false })
+    await browser.page.setContent(`<p>prefix ${'x'.repeat(3000)} two</p>`)
+    const second = await execute(step)
+    expect(first.mismatch?.actual).toBe(second.mismatch?.actual)
+    expect(first.mismatch?.observation).not.toEqual(second.mismatch?.observation)
+  })
+
+  it('normalizes only the runner origin in full captured text and page identity', async () => {
+    await browser.page.route('http://127.0.0.1:*/**', route => route.fulfill({ contentType: 'text/html', body: `<p>${route.request().url()}</p>` }))
+    try {
+      const runAt = async (port: number, pagePath = '/settings?team=123') => {
+        const baseUrl = `http://127.0.0.1:${port}`
+        await browser.page.goto(`${baseUrl}${pagePath}`)
+        return executeWebStep({ page: browser.page, baseUrl, originBinding: 'web', step: { driver: 'web', expect: { text: { contains: 'Saved' } } }, stepIndex: 1, evidenceDir, timeoutMs: 1 })
+      }
+      const first = await runAt(3011)
+      const second = await runAt(3012)
+      expect(first.mismatch?.observation).toEqual(second.mismatch?.observation)
+      expect((await runAt(3012, '/settings?team=456')).mismatch?.observation).not.toEqual(first.mismatch?.observation)
+    } finally { await browser.page.unroute('http://127.0.0.1:*/**') }
+  })
+
+  it('declines secret-bearing evidence rather than equating redacted values', async () => {
+    await browser.page.setContent('<p>private-secret</p>')
+    const result = await executeWebStep({ page: browser.page, baseUrl: 'http://localhost', step: { driver: 'web', expect: { text: { contains: 'Saved' } } }, stepIndex: 1, evidenceDir, timeoutMs: 1, redact: text => text.replaceAll('private-secret', '[secret]') })
+    expect(result.mismatch?.observation).toBeUndefined()
+    expect(result.mismatch?.observationUnavailable).toBe('failure evidence contains sensitive values')
+    expect(JSON.stringify({ observation: result.mismatch?.observation, unavailable: result.mismatch?.observationUnavailable })).not.toContain('private-secret')
   })
 
   it('fails a broken Cancel handler even though clicking succeeded', async () => {

@@ -1,3 +1,4 @@
+import { createAuthorCatalog, scopedAuthorResources, type AuthorCatalog } from './author-catalog.js'
 import { completeRealization } from './match.js'
 import { navigationGroundingProblem } from './proof-grounding.js'
 import { resolvePrerequisites } from '@truecourse/guard-runner'
@@ -52,6 +53,8 @@ import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
  */
 
 import { createHash } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
+import { WorkerObservations, redObservationMismatch } from './worker-observations.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import pLimit from 'p-limit'
@@ -866,6 +869,8 @@ export interface FlowWorkerTask {
    *  from-scratch author. */
   prior?: { scenarios: readonly { id: string; yaml: string }[] }
   cacheMaterial: FlowWorkerCacheMaterial
+  /** Web-only immutable catalog access. */
+  catalog?: AuthorCatalog
   /**
    * Render the briefing — today's `buildAuthorCtx` payload through
    * `buildAuthorUserPrompt`, plus (epics) the members' settled scenarios.
@@ -1462,6 +1467,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // not itself walk when a SETUP step needs one (sign up, then sign in, then test
   // favorites). Empty for a repo with no api interfaces — the block simply renders not.
   const apiInterfaces = catalogs.get('api')?.interfaces ?? []
+  const authorCatalog = createAuthorCatalog((catalogs.get('web')?.interfaces ?? []).filter(i => !servedByOtherApp(serverIndex, recipe.web?.app, interfaceEntryPath(i))), mapped.resources)
   // The counts describe what this run GROUNDED ON — the surface catalogs, not the
   // catalog file — which is why the total is their sum. They are read when flows
   // settle unrealized, and an entry the matcher never sees (an RPC-derived
@@ -2760,13 +2766,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       ): boolean => {
         if (result.outcome === 'pass') return expectedReds.length === 0
         if (result.outcome !== 'fail') return false
-        if (expectedReds.length === 0) return false
+        if (expectedReds.length !== 1) return false
         const step = result.failure?.step ?? 1
         if (expectedReds.some((r) => r.step !== step)) return false
         const declared = expectedReds.find((r) => r.step === step)
         return (
           declared !== undefined &&
-          actualMatchesPrediction(result.failure?.actual ?? '', declared.predictedActual)
+          redObservationMismatch(result, declared) === undefined
         )
       }
 
@@ -2853,6 +2859,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         if (outcome.kind !== 'settled') return undefined
         if (settledScenariosOf(outcome).some(s => stash.get(s.scenarioYamlSha)?.candidate.ref !== taskKey(state.task)))
           return 'Outcome refused: the settled outcome references a sha the engine never accepted for this task.'
+        if (settledScenariosOf(outcome).some(s => !isDeepStrictEqual(s.expectedReds, stash.get(s.scenarioYamlSha)?.expectedReds)))
+          return 'Outcome refused: expectedReds must exactly match the canonical evidence returned by the accepted submission.'
         if (outcome.droppedScenarios?.some(d => !state.drops.some(p => p.id === d.id)))
           return 'Outcome refused: a dropped scenario must first be accepted through drop_scenario.'
         if (!progress.complete) return 'Outcome refused: generation is incomplete. Submit one complete candidate verifying these remaining obligations before settling:\n' +
@@ -3024,13 +3032,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           }
         }
         const declared = expectedReds.find((r) => r.step === step)!
-        const actual = result.failure?.actual ?? ''
-        if (!actualMatchesPrediction(actual, declared.predictedActual)) {
+        const mismatch = expectedReds.length !== 1
+          ? 'Declare only one prediction for the first failing step.'
+          : redObservationMismatch(result, declared)
+        if (mismatch) {
           return {
-            content:
-              `not accepted — the confirmation's actual at step ${step} does not match your predictedActual.\n` +
-              `predicted: ${declared.predictedActual}\nobserved:  ${actual}\n` +
-              'Copy the observed actual into predictedActual (the prediction proves you ran it), then submit again.',
+            content: `not accepted — ${mismatch}\nRun the exact candidate again and use its observationId for supported web failures. Repair changed semantic evidence before submitting.`,
             isError: true,
           }
         }
@@ -3077,6 +3084,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         return out
       }
 
+      const observationStores = new Set<WorkerObservations>()
       const makeWorkerTask = (state: WorkerTaskState): FlowWorkerTask => {
         const task = state.task
         const ref = taskKey(task)
@@ -3084,6 +3092,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         const epic = task.work.flow.composedOf.length > 0
         const priorScenarios = [...state.priors.entries()].map(([id, yaml]) => ({ id, yaml }))
         const editMode = priorScenarios.length > 0
+        const observations = new WorkerObservations(task.surface)
+        observationStores.add(observations)
         return {
           workItem: `flow:${task.work.flow.id}:${task.surface}`,
           flowId: task.work.flow.id,
@@ -3092,13 +3102,14 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           milestoneCount: new Set(task.plan.steps.map((s) => s.milestone)).size,
           ...(taint ? { taint: { title: taint.title, mismatch: taint.mismatch } } : {}),
           ...(editMode ? { prior: { scenarios: priorScenarios } } : {}),
+          ...(task.surface === 'web' ? { catalog: authorCatalog } : {}),
           cacheMaterial: {
             flowFingerprint: task.work.flow.fingerprint,
             sectionKeys: task.work.sectionKeys,
             interfaceFingerprints: [
               realizationAssignmentFingerprint(task.plan),
               ...task.plan.interfaces.map((j) => j.fingerprint),
-              ...(task.surface === 'web' ? [catalogs.get('web')!.fingerprint] : []),
+              ...(task.surface === 'web' ? [authorCatalog.fingerprint] : []),
             ],
             recipeFingerprint,
             mode: editMode ? 'edit' : 'scratch',
@@ -3118,7 +3129,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                 docText,
                 externalServices: externalServiceHints,
                 apiInterfaces,
-                webInterfaces: catalogs.get('web')?.interfaces ?? [],
+                authorCatalog,
                 outboundRequests: outboundRequestHints,
                 outboundRequestsOverflow,
                 ...(mapped.resources ? { resources: mapped.resources } : {}),
@@ -3188,12 +3199,15 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                 }
               }
             }
+            const observationId = observations.record(yamlText, run.result)
             return {
-              content: renderCondensedResult(run.result),
+              content: renderCondensedResult(run.result) + (observationId ? `\nobservationId: ${observationId}\nUse this ID only with this exact YAML and failing step in submit_scenario.` : ''),
               ...(run.result.outcome === 'pass' ? {} : { isError: true }),
             }
           },
           submitScenario: async (yamlText, expectedReds, judge, replaces) => {
+            const evidence = observations.resolve(yamlText, expectedReds)
+            if ('error' in evidence) return { content: `not accepted — ${evidence.error}`, isError: true }
             // Id resolution. Scratch mode: the pre-assigned id, every attempt
             // (`replaces` is meaningless there). Edit mode: `replaces` keeps a
             // briefed prior's id; omitted, the submission is a NEW scenario
@@ -3239,10 +3253,14 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             }
             const run = await executeOnce(built.candidate, task)
             if ('report' in run) return run.report
-            return settleSubmission(state, built.candidate, run.result, expectedReds, judge)
+            return settleSubmission(state, built.candidate, run.result, evidence.expectedReds, judge)
           },
           hasStash: (sha) => stash.get(sha)?.candidate.ref === ref,
-          validateOutcome: outcome => validateTaskOutcome(state, outcome),
+          validateOutcome: outcome => {
+            const defect = validateTaskOutcome(state, outcome)
+            if (!defect) observations.clear()
+            return defect
+          },
           stashedReview: sha => stash.get(sha)?.candidate.ref === ref ? stash.get(sha)?.review : undefined,
           stashedYaml: (sha) => {
             const entry = stash.get(sha)
@@ -3418,7 +3436,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           else if (outcome === 'blocked') workerBlockedCount++
           options.onWorkerProgress?.({ done, total, settled: workerSettledCount, blocked: workerBlockedCount })
         },
-      })
+      }).finally(() => { for (const observations of observationStores) observations.clear() })
       const byTask = phaseA.byTask
       let summary = phaseA.summary
       let fidelitySummary = phaseA.fidelitySummary
@@ -3451,7 +3469,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             else if (outcome === 'blocked') workerBlockedCount++
             options.onWorkerProgress?.({ done, total, settled: workerSettledCount, blocked: workerBlockedCount })
           },
-        })
+        }).finally(() => { for (const observations of observationStores) observations.clear() })
         for (const [workItem, result] of phaseB.byTask) byTask.set(workItem, result)
         summary = mergeSummaries(summary, phaseB.summary)
         if (phaseB.fidelitySummary) {
@@ -4733,7 +4751,7 @@ function assembleAuthorCtx(opts: {
   docText: ReadonlyMap<string, string>
   externalServices: ExternalServiceHint[]
   apiInterfaces: Interface[]
-  webInterfaces: Interface[]
+  authorCatalog: AuthorCatalog
   outboundRequests: OutboundRequestHint[]
   outboundRequestsOverflow: number
   resources?: Record<string, InterfaceResource[]>
@@ -4746,11 +4764,6 @@ function assembleAuthorCtx(opts: {
     ? opts.apiInterfaces.filter((j) => !servedByOtherApp(opts.serverIndex, boundApp, interfaceEntryPath(j)))
     : opts.apiInterfaces
   const other = buildOtherOperationHints(reachableInterfaces, interfaceContracts)
-  const webApp = opts.recipe.web?.app
-  const webSetup = task.surface === 'web'
-    ? opts.webInterfaces.filter((j) => !task.plan.interfaces.some((own) => own.id === j.id) &&
-        !servedByOtherApp(opts.serverIndex, webApp, interfaceEntryPath(j)))
-    : []
   const ctx = buildAuthorCtx(
     task.work,
     task.surface,
@@ -4767,10 +4780,10 @@ function assembleAuthorCtx(opts: {
       otherOperationsOverflow: other.overflow,
       outboundRequests: opts.outboundRequests,
       outboundRequestsOverflow: opts.outboundRequestsOverflow,
-      resources: buildResourceHints([...task.plan.interfaces, ...webSetup], opts.resources),
+      resources: task.surface === 'web' ? scopedAuthorResources(task.plan.interfaces, opts.resources) : buildResourceHints(task.plan.interfaces, opts.resources),
     },
   )
-  return { ...ctx, ...(webSetup.length ? { webSetupInterfaces: webSetup.map(interfaceDigest) } : {}) }
+  return { ...ctx, ...(task.surface === 'web' ? { webSetupCandidates: opts.authorCatalog.candidates(task.plan.interfaces, JSON.stringify(task.work.flow)) } : {}) }
 }
 
 // --- Flow-worker helpers (plan 04 step 17) -----------------------------------
@@ -4854,19 +4867,6 @@ function worldLostMessage(failure: GuardScenarioResult, boots: number, repairs: 
     'the world down — a container that exited, a port another process took, a reset run under the pool — and ' +
     're-run `truecourse guard generate`.'
   )
-}
-
-/**
- * Whether the confirmation's observed actual matches a declared prediction:
- * whitespace-normalized equality or containment. Containment, deliberately —
- * the worker copies `predictedActual` off its own run, and the runner's display
- * truncation must not fail an honest prediction.
- */
-function actualMatchesPrediction(actual: string, predicted: string): boolean {
-  const norm = (t: string): string => t.replace(/\s+/g, ' ').trim()
-  const na = norm(actual)
-  const np = norm(predicted)
-  return na === np || na.includes(np)
 }
 
 /**

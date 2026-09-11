@@ -39,6 +39,7 @@ import {
   GENERATE_API_SYSTEM_PROMPT,
   GENERATE_WEB_SYSTEM_PROMPT,
   workerCacheKey,
+  AUTHOR_CATALOG_VERSION,
   type FlowWorkerTask,
   type WorkerFidelityJudge,
 } from '@truecourse/guard-generator'
@@ -167,7 +168,7 @@ no run behind it is refused once and costs you a turn.`
 
 export const FLOW_WORKER_CLI_SYSTEM_PROMPT = GENERATE_SYSTEM_PROMPT + WORKER_ADDENDUM
 export const FLOW_WORKER_API_SYSTEM_PROMPT = GENERATE_API_SYSTEM_PROMPT + WORKER_ADDENDUM
-export const FLOW_WORKER_WEB_SYSTEM_PROMPT = GENERATE_WEB_SYSTEM_PROMPT + WORKER_ADDENDUM
+export const FLOW_WORKER_WEB_SYSTEM_PROMPT = GENERATE_WEB_SYSTEM_PROMPT + WORKER_ADDENDUM + `\n${AUTHOR_CATALOG_VERSION}: Use search_interfaces to discover setup actions and get_interfaces to fetch their authoritative fields and resource readables. Fetch continuation pages until the action appears in actionCompleteIds before using it. All requested action fields precede optional resource pages; fetch further resource pages only when their evidence is needed for the scenario. The complete flag covers the full resource payload, not action readiness. Summaries are candidates, never proof. Retrieval errors must be resolved before dependent authoring; zero search results do not establish product drift.\nWeb confirmation evidence v1: run_scenario returns observationId for supported failures. Submit it in the expected red with exactly the same YAML bytes and step. Never construct observation objects. The engine confirms typed assertion and page evidence in a fresh run. Copy the canonical expectedReds from the acceptance's final outcome hint when settling; it replaces the temporary ID with recorded evidence. Changed YAML requires another run_scenario.`
 
 /** Exported for the step-20 estimate rework (probe the REAL keys). */
 export const FLOW_WORKER_CLI_PROMPT_FINGERPRINT = promptFingerprint(FLOW_WORKER_CLI_SYSTEM_PROMPT)
@@ -293,7 +294,7 @@ const submitScenarioTool = (
     inputSchema: z
       .object({
         yaml: z.string().min(1),
-        expectedReds: z.array(GuardExpectedRedSchema).default([]),
+        expectedReds: z.array(GuardExpectedRedSchema.omit({ observation: true })).default([]),
         /** Edit mode: the prior scenario this submission replaces (keeps its id). */
         replaces: z.string().min(1).optional(),
       })
@@ -323,6 +324,27 @@ const dropScenarioTool = (task: FlowWorkerTask): SessionTool =>
     },
   })
 
+function catalogTools(task: FlowWorkerTask): SessionTool[] {
+  if (task.surface !== 'web' || !task.catalog) return []
+  const catalog = task.catalog
+  return [
+    defineSessionTool({
+      name: 'search_interfaces', kind: 'read-interface-catalog',
+      description: 'Search eligible browser action metadata. Results omit action details; fetch IDs with get_interfaces. Continue using nextCursor.',
+      readOnly: true, destructive: false,
+      inputSchema: z.object({ query: z.string().max(500), purpose: z.enum(['task', 'control']).optional(), resource: z.string().min(1).max(200).optional(), limit: z.number().int().min(1).max(20).optional(), cursor: z.string().max(1000).optional() }).strict(),
+      async execute(args) { return catalog.search(args) },
+    }),
+    defineSessionTool({
+      name: 'get_interfaces', kind: 'read-interface-catalog',
+      description: 'Read authoritative fields of 1–5 browser actions and resources. Items carry action ID, JSON field path and exact value. Partial pages require nextCursor with the same IDs; never infer absence from incomplete retrieval.',
+      readOnly: true, destructive: false,
+      inputSchema: z.object({ ids: z.array(z.string().min(1).max(200)).min(1).max(5), cursor: z.string().max(1000).optional() }).strict(),
+      async execute(args) { return catalog.get(args) },
+    }),
+  ]
+}
+
 export interface FlowWorkerSessionInput {
   task: FlowWorkerTask
   /** Build the fidelity judge for one tool invocation — needs the invocation's
@@ -336,7 +358,7 @@ export function flowWorkerSessionDef(input: FlowWorkerSessionInput): SessionDef<
     kind: FLOW_WORKER_SESSION_KIND,
     display: { title: 'Scenario author' },
     systemPrompt: flowWorkerSystemPrompt(task.surface),
-    tools: [runScenarioTool(task), submitScenarioTool(task, input.judgeWith), dropScenarioTool(task)],
+    tools: [...catalogTools(task), runScenarioTool(task), submitScenarioTool(task, input.judgeWith), dropScenarioTool(task)],
     outcomeSchema: GuardFlowWorkerOutcomeSchema,
     validateOutcome: outcome => task.validateOutcome(outcome),
     outcomeSchemaRepairs: 2,

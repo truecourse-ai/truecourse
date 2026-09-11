@@ -460,3 +460,5 @@ export type { GuardSetupPreparationSession, GuardSetupPreparationSessionInput } 
 export { bindClaimPrerequisites, partitionFlowPrerequisites, flowPrerequisiteStateMaterial, flowInvocationGaps } from './prerequisites.js'
 
 export { completeRealization } from './match.js'
+
+export { createAuthorCatalog, scopedAuthorResources, AUTHOR_CATALOG_VERSION, AUTHOR_TOOL_RESULT_CHARS, AUTHOR_INITIAL_BYTES, type AuthorCatalog, type CatalogSearch, type CatalogGet } from './author-catalog.js'
