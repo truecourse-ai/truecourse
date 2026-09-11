@@ -12,6 +12,10 @@
  * page: its record names its work, and each piece of work has a transcript of
  * its own. Those are read and stitched into the same event shape, so the fold
  * below is the same fold.
+ *
+ * A run of the WORKSPACE (a Document scan, which reads every source and clones
+ * nothing) belongs to no repository: `repoId` is null and the same journal is
+ * read by run id alone, under `/api/sessions`. One reader, two addresses.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -36,7 +40,10 @@ export interface RunConversationState {
   connectionError: string | null;
 }
 
-export function useRunConversation(run: PublicSessionRun, repoId: string): RunConversationState {
+export function useRunConversation(
+  run: PublicSessionRun,
+  repoId: string | null,
+): RunConversationState {
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [progress, setProgress] = useState<ActivityProgress>({});
   const [loading, setLoading] = useState(true);
@@ -96,7 +103,9 @@ export function useRunConversation(run: PublicSessionRun, repoId: string): RunCo
       }
       let after = -1;
       for (;;) {
-        const page = await api.readRunActivity(repoId, command, runId, after, PAGE);
+        const page = repoId
+          ? await api.readRunActivity(repoId, command, runId, after, PAGE)
+          : await api.readWorkspaceRunActivity(runId, after, PAGE);
         if (cancelled) return;
         absorb(page.events);
         after = page.nextCursor;
@@ -104,7 +113,9 @@ export function useRunConversation(run: PublicSessionRun, repoId: string): RunCo
       }
       if (cancelled || latest.current.status !== 'running') return;
       void followActivity({
-        url: `${getServerUrl()}/api/repos/${encodeURIComponent(repoId)}/sessions/runs/${command}/${encodeURIComponent(runId)}/stream`,
+        url: repoId
+          ? `${getServerUrl()}/api/repos/${encodeURIComponent(repoId)}/sessions/runs/${command}/${encodeURIComponent(runId)}/stream`
+          : `${getServerUrl()}/api/sessions/runs/${encodeURIComponent(runId)}/stream`,
         runId,
         from: after,
         signal: controller.signal,
@@ -149,15 +160,17 @@ export function useRunConversation(run: PublicSessionRun, repoId: string): RunCo
  * here and mean only "this came before that", which is all the fold reads.
  */
 async function readTranscripts(
-  repoId: string,
+  repoId: string | null,
   run: PublicSessionRun,
 ): Promise<ActivityEvent[]> {
   const events: ActivityEvent[] = [{ cursor: 0, kind: 'run', run }];
   let cursor = 1;
   const transcripts = await Promise.all(
     run.sessions.map((entry) =>
-      api
-        .getSessionTranscript(repoId, run.command, run.runId, entry.sessionId)
+      (repoId
+        ? api.getSessionTranscript(repoId, run.command, run.runId, entry.sessionId)
+        : api.getWorkspaceRunTranscript(run.runId, entry.sessionId)
+      )
         .then((res) => ({ sessionId: entry.sessionId, events: res.events }))
         .catch(() => ({ sessionId: entry.sessionId, events: [] })),
     ),

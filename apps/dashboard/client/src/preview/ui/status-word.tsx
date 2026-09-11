@@ -13,6 +13,7 @@
  * status or a job state becomes a colour.
  */
 
+import type { ContextDocumentStatus, ContextSourceStatus } from '@truecourse/shared';
 import { HoverPopover } from '@/preview/ui/hover-popover';
 import type { CheckConclusion, RunOrigin, StepDriver, TestStatus } from '@/preview/data/types';
 
@@ -80,6 +81,37 @@ export const TEST_WORD: Record<TestStatus, string> = {
   blocked: 'Blocked',
   'not-testable': 'Not testable',
   'never-run': 'Never run',
+};
+
+/**
+ * A document of Context, in the product owner's six words. Not linked is grey
+ * with Not testable: neither is anybody's to-do. The WORDS live in
+ * `@truecourse/shared` (the server folds by them); only the colour is here.
+ */
+export const CONTEXT_DOC_TONE: Record<ContextDocumentStatus, StatusTone> = {
+  proved: 'success',
+  failed: 'failure',
+  blocked: 'blocked',
+  'not-run': 'neutral',
+  'not-testable': 'neutral',
+  'not-linked': 'neutral',
+};
+
+/** A source's sync state as a status word, everywhere a source appears. */
+export const CONTEXT_SYNC_WORD: Record<ContextSourceStatus, string> = {
+  synced: 'Synced',
+  syncing: 'Syncing',
+  failed: 'Failed',
+  paused: 'Paused',
+  never: 'Never synced',
+};
+
+export const CONTEXT_SYNC_TONE: Record<ContextSourceStatus, StatusTone> = {
+  synced: 'success',
+  syncing: 'running',
+  failed: 'failure',
+  paused: 'neutral',
+  never: 'neutral',
 };
 
 export const VERDICT_TONE: Record<'passed' | 'failed' | 'blocked', StatusTone> = {

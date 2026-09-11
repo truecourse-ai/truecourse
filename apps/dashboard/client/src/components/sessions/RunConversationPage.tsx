@@ -46,7 +46,14 @@ const WORK_DOT: Record<SessionStatus, string> = {
   failed: 'bg-red-500',
 };
 
-export function RunConversationPage({ run, repoId }: { run: PublicSessionRun; repoId: string }) {
+export function RunConversationPage({
+  run,
+  repoId,
+}: {
+  run: PublicSessionRun;
+  /** Null for a run of the WORKSPACE, which belongs to no repository. */
+  repoId: string | null;
+}) {
   const { conversation, loading, error, connectionError } = useRunConversation(run, repoId);
   // History lands page by page; painting it as it comes shows every row before
   // its lines, so the page waits for the whole of it and paints once.

@@ -12,6 +12,8 @@
  * vocabulary; nothing in this slice creates a source of those kinds.
  */
 
+import type { GuardCoveragePlainStatus } from '../guard/dashboard.js';
+
 /** Every kind a source can be. Only `repository` and `site` have a driver. */
 export const CONTEXT_SOURCE_KINDS = [
   'repository',
@@ -160,4 +162,102 @@ export interface ContextDocumentsResponse {
 export interface ContextBindingsResponse {
   repoFullName: string;
   sourceIds: string[];
+}
+
+// --- The Documents view -----------------------------------------------------
+
+/**
+ * What a reader is told about ONE DOCUMENT of the workspace corpus. Five of the
+ * six are the coverage vocabulary in the product owner's words (the engine's
+ * `succeeded` reads Proved, its `never-run` reads Not run); the sixth is the
+ * one state only Context has — a document no repository reads, which nothing
+ * has tried to prove because nothing was asked to.
+ */
+export type ContextDocumentStatus =
+  | 'proved'
+  | 'failed'
+  | 'blocked'
+  | 'not-testable'
+  | 'not-run'
+  | 'not-linked';
+
+/**
+ * The six in SEVERITY order — worst first. It is the order a document's
+ * repositories are folded in (a failure in one repository outranks a proof in
+ * another), the order the rows are sorted in, and the order the Status filter
+ * lists them in. `not-linked` is last with `not-testable`: neither is anybody's
+ * to-do.
+ */
+export const CONTEXT_DOCUMENT_STATUS_ORDER = [
+  'failed',
+  'blocked',
+  'not-run',
+  'proved',
+  'not-testable',
+  'not-linked',
+] as const satisfies readonly ContextDocumentStatus[];
+
+/** The ONE word per status. Nothing else may name a document's state. */
+export const CONTEXT_DOCUMENT_STATUS_WORD: Record<ContextDocumentStatus, string> = {
+  proved: 'Proved',
+  failed: 'Failed',
+  blocked: 'Blocked',
+  'not-testable': 'Not testable',
+  'not-run': 'Not run',
+  'not-linked': 'Not linked',
+};
+
+/**
+ * The engine's five coverage words in the product owner's five. One map, so a
+ * document's row and the coverage page it opens can never disagree about what
+ * the same section statuses mean.
+ */
+export const CONTEXT_DOCUMENT_STATUS_OF_COVERAGE: Record<
+  GuardCoveragePlainStatus,
+  ContextDocumentStatus
+> = {
+  succeeded: 'proved',
+  failed: 'failed',
+  blocked: 'blocked',
+  'never-run': 'not-run',
+  'not-testable': 'not-testable',
+};
+
+/**
+ * How ONE repository reads one document. The Documents view folds these into
+ * the row's single status; the document page uses them to open on the
+ * repository with the most to say — the worst reading, which is the one a
+ * reader came for.
+ */
+export interface ContextDocumentReading {
+  /** `owner/repo`. */
+  repository: string;
+  status: ContextDocumentStatus;
+}
+
+/** One row of the Documents view — one document of the workspace corpus. */
+export interface ContextDocumentRow {
+  /** `context/<sourceId>/<docPath>` — the document's address everywhere. */
+  ref: string;
+  /** The ledger's title, else the ref's file name. Never composed. */
+  title: string;
+  /** The corpus's area tag (the first when a document carries several); '' when none. */
+  area: string;
+  sourceId: string;
+  sourceTitle: string;
+  sourceKind: ContextSourceKind;
+  /** `owner/repo` of every repository that reads this document's source, by name. */
+  repositories: string[];
+  /** The same repositories with what each says about the document, WORST FIRST. */
+  readings: ContextDocumentReading[];
+  /** Folded worst-first across those repositories; `not-linked` when there are none. */
+  status: ContextDocumentStatus;
+  /** When the document last changed at its source, or null when the ledger has lost it. */
+  updatedAt: string | null;
+}
+
+export interface ContextDocumentsViewResponse {
+  documents: ContextDocumentRow[];
+  /** When the corpus these rows come from was built; null when none has been. */
+  corpusAt: string | null;
 }

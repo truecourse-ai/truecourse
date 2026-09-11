@@ -377,6 +377,59 @@ async function readCorpusForView(repoKey: string, ref?: string): Promise<Curated
 }
 
 /**
+ * Everything the coverage join reads for ONE repository, in one place: seven
+ * store reads that do not depend on which document is being joined. A caller
+ * that joins MANY documents of the same repository (the Documents view of the
+ * workspace's Context) reads this once and composes each document against it,
+ * rather than re-reading the repository's whole guard state per document.
+ */
+export async function readGuardCoverageSources(
+  repoKey: string,
+  ref?: string,
+  opts: {
+    /**
+     * Read the externals index too. It is the one input that materializes a
+     * scratch tree, and it only ever moves a section between `blocked-on` and
+     * `needs-setup` — two statuses of the SAME word. A caller that wants the
+     * five-word reading and nothing finer (the Documents view) passes false and
+     * pays no tree per repository; anything rendering a section's reason keeps
+     * the default.
+     */
+    externals?: boolean
+  } = {},
+): Promise<GuardCoverageSources> {
+  return {
+    scenarios: await readGuardScenariosForView(repoKey, ref),
+    manifest: await readManifestForView(repoKey, ref),
+    latest: await readGuardRunForView(repoKey, ref),
+    result: await readGuardReport(repoKey, ref),
+    flows: await readGuardFlowsForView(repoKey, ref),
+    claims: await readGuardClaimsForView(repoKey, ref),
+    externals: opts.externals === false ? null : await guardExternalSetupIndexForView(repoKey, ref),
+  }
+}
+
+/**
+ * One document's coverage as ONE of the five words: the worst of its sections,
+ * by {@link GUARD_COVERAGE_PLAIN_ORDER}. Null when the document has no section
+ * at all — nothing was joined, which is not the same as nothing being proven,
+ * and the caller decides what to say about it. Pure: `content` is the live doc
+ * text and `sources` the repository's guard state.
+ */
+export function docCoveragePlainStatus(
+  doc: string,
+  content: string,
+  sources: GuardCoverageSources,
+): GuardCoveragePlainStatus | null {
+  const words = new Set(
+    composeDocCoverage(doc, content, sources).sections.map((sec) =>
+      guardCoveragePlainStatus(sec.status),
+    ),
+  )
+  return GUARD_COVERAGE_PLAIN_ORDER.find((word) => words.has(word)) ?? null
+}
+
+/**
  * Every kept doc's sections counted under the five coverage words, through the
  * same per-section derivation the doc view renders ({@link composeDocCoverage})
  * — the constraint: no summary may classify a section differently than the doc
@@ -389,15 +442,7 @@ export async function readGuardSectionTotals(
   repoKey: string,
   ref?: string,
 ): Promise<GuardSectionTotals | null> {
-  const sources: GuardCoverageSources = {
-    scenarios: await readGuardScenariosForView(repoKey, ref),
-    manifest: await readManifestForView(repoKey, ref),
-    latest: await readGuardRunForView(repoKey, ref),
-    result: await readGuardReport(repoKey, ref),
-    flows: await readGuardFlowsForView(repoKey, ref),
-    claims: await readGuardClaimsForView(repoKey, ref),
-    externals: await guardExternalSetupIndexForView(repoKey, ref),
-  }
+  const sources = await readGuardCoverageSources(repoKey, ref)
 
   const corpusDocs = (await readCorpusForView(repoKey, ref))?.docs.map((d) => d.ref)
   const docs =

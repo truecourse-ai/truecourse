@@ -17,6 +17,14 @@ import type {
   GuardScenarioSource,
   GuardStaleness,
 } from '@truecourse/shared';
+import type {
+  ContextBindingsResponse,
+  ContextDocumentsViewResponse,
+  ContextSource,
+  ContextSourceCheck,
+  ContextSourcesResponse,
+  ContextSourceView,
+} from '@truecourse/shared';
 import type { GuardExternalPatch, GuardExternalsView } from '@/types/guard-externals';
 import type { RunRecord, SessionCommand, SessionEvent } from '@truecourse/agent-loop';
 import type { ActivityEvent } from '@truecourse/shared/activity-stream';
@@ -1527,8 +1535,12 @@ export function getSessionTranscript(
 // The workspace's agent runs (the Agent page) — every connected repository at once.
 // ---------------------------------------------------------------------------
 
-/** A run of the workspace, tagged with the repository it ran for. */
-export type WorkspaceRun = PublicSessionRun & { repo: { id: string; fullName: string } };
+/**
+ * A run of the workspace, tagged with the repository it ran for — or with
+ * NOBODY: a Document scan is the workspace's own work over its sources, so it
+ * names no repository and its `repo` is null.
+ */
+export type WorkspaceRun = PublicSessionRun & { repo: { id: string; fullName: string } | null };
 
 /**
  * Every run of the workspace, newest first, narrowed by the server. `before` is
@@ -1573,4 +1585,212 @@ export function readRunActivity(
   return fetchApi<{ events: ActivityEvent[]; nextCursor: number; done: boolean }>(
     `/api/repos/${repoId}/sessions/runs/${command}/${encodeURIComponent(runId)}/activity?after=${after}&limit=${limit}`,
   );
+}
+
+/**
+ * One page of a WORKSPACE run's activity journal — the same journal, addressed
+ * by run id alone. A Document scan belongs to no repository, so its
+ * conversation is read here rather than under `/api/repos/:id`.
+ */
+export function readWorkspaceRunActivity(
+  runId: string,
+  after: number,
+  limit: number,
+): Promise<{ events: ActivityEvent[]; nextCursor: number; done: boolean }> {
+  return fetchApi<{ events: ActivityEvent[]; nextCursor: number; done: boolean }>(
+    `/api/sessions/runs/${encodeURIComponent(runId)}/activity?after=${after}&limit=${limit}`,
+  );
+}
+
+/** One piece of a workspace run's work, verbatim. */
+export function getWorkspaceRunTranscript(
+  runId: string,
+  sessionId: string,
+  since?: number,
+): Promise<{ events: SessionEvent[] }> {
+  const query = since !== undefined ? `?since=${since}` : '';
+  return fetchApi<{ events: SessionEvent[] }>(
+    `/api/sessions/runs/${encodeURIComponent(runId)}/transcript/${encodeURIComponent(sessionId)}${query}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Context — the WORKSPACE's documentation sources, the documents they yield,
+// and the one corpus the Document scan curates from them. Everything here is
+// workspace-scoped: no repository id appears, because a source belongs to the
+// workspace and a repository only LINKS the ones it reads.
+// ---------------------------------------------------------------------------
+
+export function listContextSources(): Promise<ContextSourcesResponse> {
+  return fetchApi<ContextSourcesResponse>('/api/context/sources');
+}
+
+/** The rows of the Documents view, composed and folded on the server. */
+export function listContextDocuments(query: {
+  area?: string[];
+  status?: string[];
+  source?: string[];
+  repo?: string[];
+} = {}): Promise<ContextDocumentsViewResponse> {
+  const params = new URLSearchParams();
+  for (const [key, values] of Object.entries(query)) {
+    for (const value of values ?? []) params.append(key, value);
+  }
+  const search = params.toString();
+  return fetchApi<ContextDocumentsViewResponse>(
+    `/api/context/documents${search ? `?${search}` : ''}`,
+  );
+}
+
+/** One document's body, by the ref the corpus names it with. */
+export function getContextDoc(ref: string): Promise<{ ref: string; content: string }> {
+  return fetchApi<{ ref: string; content: string }>(
+    `/api/context/doc?ref=${encodeURIComponent(ref)}`,
+  );
+}
+
+/** The workspace corpus + its decisions, or null before the first scan. */
+export async function getContextCorpus(): Promise<SpecCorpusResponse | null> {
+  try {
+    return await fetchApi<SpecCorpusResponse>('/api/context/corpus');
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/** Has the workspace's Context moved since the corpus was built? */
+export function getContextStaleness(): Promise<{
+  changedAt: string | null;
+  corpusAt: string | null;
+  stale: boolean;
+}> {
+  return fetchApi<{ changedAt: string | null; corpusAt: string | null; stale: boolean }>(
+    '/api/context/staleness',
+  );
+}
+
+/** What a scope WOULD yield, before anything is stored. */
+export function previewContextSource(body: {
+  kind: string;
+  config: Record<string, unknown>;
+}): Promise<ContextSourceCheck> {
+  return fetchApi<ContextSourceCheck>('/api/context/sources/preview', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/** Add a source, link the repositories named, and sync it. */
+export function addContextSource(body: {
+  kind: string;
+  config: Record<string, unknown>;
+  repoIds: string[];
+}): Promise<{ source: ContextSourceView; jobId?: string }> {
+  return fetchApi<{ source: ContextSourceView; jobId?: string }>('/api/context/sources', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function syncContextSource(sourceId: string): Promise<{ jobId: string }> {
+  return fetchApi<{ jobId: string }>(
+    `/api/context/sources/${encodeURIComponent(sourceId)}/sync`,
+    { method: 'POST' },
+  );
+}
+
+export function pauseContextSource(
+  sourceId: string,
+  paused: boolean,
+): Promise<{ source: ContextSourceView }> {
+  return fetchApi<{ source: ContextSourceView }>(
+    `/api/context/sources/${encodeURIComponent(sourceId)}/pause`,
+    { method: 'POST', body: JSON.stringify({ paused }) },
+  );
+}
+
+/** Drop a source; the answer names the repositories that just stopped reading it. */
+export function removeContextSource(
+  sourceId: string,
+): Promise<{ removed: ContextSource; repositories: string[]; jobId?: string }> {
+  return fetchApi<{ removed: ContextSource; repositories: string[]; jobId?: string }>(
+    `/api/context/sources/${encodeURIComponent(sourceId)}`,
+    { method: 'DELETE' },
+  );
+}
+
+/** Which workspace sources one repository reads. */
+export function getRepoContextBindings(repoId: string): Promise<ContextBindingsResponse> {
+  return fetchApi<ContextBindingsResponse>(`/api/repos/${repoId}/context/bindings`);
+}
+
+/** Replace the set a repository reads — the toggles are one state, saved whole. */
+export function putRepoContextBindings(
+  repoId: string,
+  sourceIds: string[],
+): Promise<ContextBindingsResponse & { jobId?: string }> {
+  return fetchApi<ContextBindingsResponse & { jobId?: string }>(
+    `/api/repos/${repoId}/context/bindings`,
+    { method: 'PUT', body: JSON.stringify({ sourceIds }) },
+  );
+}
+
+// The workspace's own decisions: a force-include, a force-exclude and a
+// conflict verdict are settled ONCE for the workspace, not per repository.
+
+export function addContextInclude(ref: string): Promise<SpecDecisionAck> {
+  return fetchApi<SpecDecisionAck>('/api/context/includes', {
+    method: 'POST',
+    body: JSON.stringify({ ref }),
+  });
+}
+
+export function removeContextInclude(ref: string): Promise<SpecDecisionAck> {
+  return fetchApi<SpecDecisionAck>('/api/context/includes', {
+    method: 'DELETE',
+    body: JSON.stringify({ ref }),
+  });
+}
+
+export function addContextExclude(ref: string): Promise<SpecDecisionAck> {
+  return fetchApi<SpecDecisionAck>('/api/context/excludes', {
+    method: 'POST',
+    body: JSON.stringify({ ref }),
+  });
+}
+
+export function removeContextExclude(ref: string): Promise<SpecDecisionAck> {
+  return fetchApi<SpecDecisionAck>('/api/context/excludes', {
+    method: 'DELETE',
+    body: JSON.stringify({ ref }),
+  });
+}
+
+export function postContextConflictResolution(payload: {
+  docA: string;
+  anchorA: string | null;
+  quoteA?: string;
+  docB: string;
+  anchorB: string | null;
+  quoteB?: string;
+  verdict: 'a' | 'b' | 'dismissed';
+  note?: string;
+}): Promise<SpecConflictAck> {
+  return fetchApi<SpecConflictAck>('/api/context/conflict-resolution', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteContextConflictResolution(payload: {
+  docA: string;
+  anchorA: string | null;
+  docB: string;
+  anchorB: string | null;
+}): Promise<SpecConflictAck> {
+  return fetchApi<SpecConflictAck>('/api/context/conflict-resolution', {
+    method: 'DELETE',
+    body: JSON.stringify(payload),
+  });
 }

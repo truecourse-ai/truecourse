@@ -112,9 +112,6 @@ interface PreviewStateValue {
   llmProvider: LlmProviderState;
   /** Re-read it. Called once the Models tab saves one. */
   refreshLlmProvider: () => Promise<void>;
-  /** Coverage versions regenerated in this session (a PR version that got its scenarios). */
-  generatedVersions: ReadonlySet<string>;
-  regenerateVersion: (repo: Repo, versionId: string, label: string) => void;
 }
 
 export type LlmProviderState = 'unknown' | 'configured' | 'missing';
@@ -148,25 +145,7 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
   const [connections, setConnections] = useState<ProviderConnection[]>(PROVIDER_CONNECTIONS);
   const [notifications, setNotifications] = useState<PreviewNotification[]>(NOTIFICATIONS);
   const [jobs, setJobs] = useState<JobChain[]>(JOBS_IN_FLIGHT);
-  const [generatedVersions, setGeneratedVersions] = useState<ReadonlySet<string>>(() => new Set());
   const [llmProvider, setLlmProvider] = useState<LlmProviderState>('unknown');
-
-  const regenerateVersion = useCallback((repo: Repo, versionId: string, label: string) => {
-    setGeneratedVersions((prev) => new Set([...prev, versionId]));
-    setJobs((prev) => [
-      ...prev,
-      {
-        id: `job-regen-${versionId}`,
-        title: `Regenerating ${repo.fullName} ${label}`,
-        repoFullName: repo.fullName,
-        steps: [
-          { key: 'scan', label: 'Scan the changed documents', state: 'done' },
-          { key: 'generate', label: 'Generate scenarios', state: 'active', counter: 'generating 2 of 9 flows' },
-          { key: 'gate', label: 'Re-gate the pull request', state: 'pending' },
-        ],
-      },
-    ]);
-  }, []);
 
   useEffect(() => {
     const timer = setInterval(() => setJobs((prev) => tickJobs(prev)), 4000);
@@ -378,8 +357,6 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
       runFailures: realRuns.failures,
       llmProvider,
       refreshLlmProvider,
-      generatedVersions,
-      regenerateVersion,
     };
   }, [
     workspaceId,
@@ -392,8 +369,6 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
     jobs,
     llmProvider,
     refreshLlmProvider,
-    generatedVersions,
-    regenerateVersion,
     updateRepo,
     unlinkRepo,
     refreshRealRepos,

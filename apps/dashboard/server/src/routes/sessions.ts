@@ -16,8 +16,15 @@
  * /api/sessions) is the same surface across every repository the caller's
  * workspace connected:
  *
- *   GET /runs         ?repo=&kind=&status=&limit=&before=, newest first
- *   GET /runs/:runId  one run, whichever repository holds it
+ *   GET /runs                             ?repo=&kind=&status=&limit=&before=, newest first
+ *   GET /runs/:runId                      one run, whichever key of the workspace holds it
+ *   GET /runs/:runId/activity             one history page, ?after=&limit=
+ *   GET /runs/:runId/stream               replay + live, ?after=<cursor>
+ *   GET /runs/:runId/transcript/:sessionId  one piece of work's transcript, ?since=<seq>
+ *
+ * It spans the workspace's REPOSITORIES and the workspace ITSELF: a Document
+ * scan belongs to no repository, and its runs are recorded under
+ * `workspace:<org>`. Such a run answers with `repo: null`.
  *
  * Every serialized record goes through `toPublicRunRecord` — `endpoint` holds
  * the session-API token and MUST never reach a browser.
@@ -37,6 +44,7 @@ import {
   listStoredSessionRuns,
   listStoredSessionRunsForRepos,
   openStoredSessionRun,
+  workspaceSessionsKey,
   readStoredActivityPage,
   sessionRunCursor,
   parseSessionRunCursor,
@@ -236,9 +244,13 @@ export interface WorkspaceSessionsDeps {
   githubLinks?: WorkspaceRepoLinks | null;
 }
 
-/** A run as the workspace index reads it: the public record plus which
- *  repository it belongs to (`id` addresses `/api/repos/:id`). */
-export type WorkspaceRun = PublicRunRecord & { repo: { id: string; fullName: string } };
+/**
+ * A run as the workspace index reads it: the public record plus which
+ * repository it belongs to (`id` addresses `/api/repos/:id`). NULL for a run
+ * that belongs to the workspace itself rather than to any repository — the
+ * Document scan, which reads every source of the workspace and clones nothing.
+ */
+export type WorkspaceRun = PublicRunRecord & { repo: { id: string; fullName: string } | null };
 
 /**
  * The repositories this caller's runs may come from. With a link store the
@@ -256,14 +268,42 @@ async function workspaceRepos(deps: WorkspaceSessionsDeps, req: Request): Promis
   return entries.filter((e) => mine.has(e.name));
 }
 
+/**
+ * The keys a workspace's runs live under: every repository it connected, and
+ * the WORKSPACE ITSELF. The Document scan belongs to no repository (it reads
+ * the workspace's sources and clones nothing), so its runs are recorded under
+ * `workspace:<org>` and would otherwise be invisible to every index.
+ */
+function workspaceRunKeys(entries: RegistryEntry[], req: Request): string[] {
+  const org = req.user?.organizationId;
+  return [...entries.map((e) => e.path), ...(org ? [workspaceSessionsKey(org)] : [])];
+}
+
 function toWorkspaceRun(run: RepoRunRecord, repos: Map<string, RegistryEntry>): WorkspaceRun {
   const { repoKey, ...record } = run;
-  const repo = repos.get(repoKey)!;
-  return { ...toPublicRunRecord(record), repo: { id: repo.slug, fullName: repo.name } };
+  const repo = repos.get(repoKey);
+  return {
+    ...toPublicRunRecord(record),
+    repo: repo ? { id: repo.slug, fullName: repo.name } : null,
+  };
 }
 
 export function createWorkspaceSessionsRouter(deps: WorkspaceSessionsDeps = {}): Router {
   const workspaceRouter: Router = Router();
+
+  /**
+   * The run this address names, whichever key of the workspace holds it — a
+   * repository's, or the workspace's own. Null when the workspace has nothing
+   * at that address, which is what every route below answers 404 for.
+   */
+  async function findRun(req: Request): Promise<RepoRunRecord | null> {
+    const entries = await workspaceRepos(deps, req);
+    const [run] = await listStoredSessionRunsForRepos(workspaceRunKeys(entries, req), {
+      runId: req.params.runId as string,
+      limit: 1,
+    });
+    return run ?? null;
+  }
 
   workspaceRouter.get('/runs', async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -288,14 +328,16 @@ export function createWorkspaceSessionsRouter(deps: WorkspaceSessionsDeps = {}):
         query.before = before;
       }
       // A repository the workspace never connected reads as absent, the same
-      // way `/api/repos/:id` answers for one another workspace owns.
-      let scope = entries;
+      // way `/api/repos/:id` answers for one another workspace owns. Narrowing
+      // to one repository leaves the workspace's own runs out: they are not
+      // that repository's work.
+      let keys = workspaceRunKeys(entries, req);
       if (req.query.repo !== undefined) {
         const entry = entries.find((e) => e.slug === String(req.query.repo));
         if (!entry) { res.status(404).json({ error: `Project "${req.query.repo}" not found` }); return; }
-        scope = [entry];
+        keys = [entry.path];
       }
-      const runs = await listStoredSessionRunsForRepos(scope.map((e) => e.path), query);
+      const runs = await listStoredSessionRunsForRepos(keys, query);
       const repos = new Map(entries.map((e) => [e.path, e]));
       const last = runs[runs.length - 1];
       res.json({
@@ -310,15 +352,94 @@ export function createWorkspaceSessionsRouter(deps: WorkspaceSessionsDeps = {}):
   workspaceRouter.get('/runs/:runId', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const entries = await workspaceRepos(deps, req);
-      const [run] = await listStoredSessionRunsForRepos(
-        entries.map((e) => e.path),
-        { runId: req.params.runId as string, limit: 1 },
-      );
+      const run = await findRun(req);
       if (!run) { res.status(404).json({ error: 'Session run not found.' }); return; }
       res.json({ run: toWorkspaceRun(run, new Map(entries.map((e) => [e.path, e]))) });
     } catch (e) {
       next(e);
     }
+  });
+
+  // --- One conversation, by run id alone -----------------------------------
+  //
+  // The per-repository routes above address a run by its repository; a run of
+  // the WORKSPACE has none, so the conversation is read by run id and the key
+  // it lives under is resolved here. The refusals are the repository routes'
+  // word for word — the same store, read the same way.
+
+  workspaceRouter.get('/runs/:runId/activity', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const after = parseAfter(req.query.after);
+      if (after === null) { res.status(400).json({ error: 'after must be a journal cursor' }); return; }
+      const limit = parseLimit(req.query.limit, 500, 1000);
+      if (limit === null) { res.status(400).json({ error: 'limit must be between 1 and 1000' }); return; }
+      const found = await findRun(req);
+      if (!found) { res.status(404).json({ error: 'Session run not found.' }); return; }
+      const run = await openStoredSessionRun(found.repoKey, found.command, found.runId);
+      if (run.record().activityStream !== 'ai-sdk-v1') {
+        res.status(409).json({ error: 'This run uses the legacy session transport' }); return;
+      }
+      if (!run.readActivity) recoverSessionActivity(run);
+      try {
+        res.json(await readStoredActivityPage(run, after, limit));
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith('Activity cursor')) {
+          res.status(400).json({ error: error.message }); return;
+        }
+        throw error;
+      }
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  workspaceRouter.get('/runs/:runId/transcript/:sessionId', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const since = req.query.since !== undefined ? Number(req.query.since) : -1;
+      if (!Number.isFinite(since)) {
+        res.status(400).json({ error: '?since must be a number (a seq cursor).' }); return;
+      }
+      const found = await findRun(req);
+      if (!found) { res.status(404).json({ error: 'Session run not found.' }); return; }
+      const run = await openStoredSessionRun(found.repoKey, found.command, found.runId);
+      res.json({ events: await readStoredTranscript(run, req.params.sessionId as string, since) });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  workspaceRouter.get('/runs/:runId/stream', async (req: Request, res: Response, next: NextFunction) => {
+    const after = req.query.after === undefined ? -1 : Number(req.query.after);
+    if (!Number.isSafeInteger(after) || after < -1 || (req.query.after !== undefined && !/^-?\d+$/.test(String(req.query.after)))) {
+      res.status(400).json({ error: 'after must be a journal cursor' }); return;
+    }
+    const controller = new AbortController();
+    const detach = () => controller.abort();
+    res.once('close', detach);
+    try {
+      const found = await findRun(req);
+      if (!found) { res.status(404).json({ error: 'Session run not found.' }); return; }
+      const run = await openStoredSessionRun(found.repoKey, found.command, found.runId);
+      if (run.record().activityStream !== 'ai-sdk-v1') {
+        res.status(409).json({ error: 'This run uses the legacy session transport' }); return;
+      }
+      if (!run.readActivity) recoverSessionActivity(run);
+      try { await validateStoredActivityCursor(run, after); }
+      catch (error) {
+        if (error instanceof Error && error.message.startsWith('Activity cursor')) {
+          res.status(400).json({ error: error.message }); return;
+        }
+        throw error;
+      }
+      const response = createUIMessageStreamResponse({
+        stream: createActivityStream(run, after, controller.signal),
+        headers: { 'X-Accel-Buffering': 'no', 'Cache-Control': 'no-cache, no-transform' },
+      });
+      response.headers.forEach((value, name) => res.setHeader(name, value));
+      res.flushHeaders();
+      await pipeline(Readable.fromWeb(response.body!), res, { signal: controller.signal });
+    } catch (error) { if (!controller.signal.aborted) next(error); }
+    finally { controller.abort(); res.removeListener('close', detach); }
   });
 
   return workspaceRouter;

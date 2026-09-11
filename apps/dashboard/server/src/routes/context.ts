@@ -9,6 +9,7 @@
  *   DELETE /api/context/sources/:id           drop the source, its documents and every link
  *   GET    /api/context/sources/:id/documents its ledger
  *   GET    /api/context/doc?ref=              one document's body, by its corpus ref
+ *   GET    /api/context/documents             the rows of the Documents view, status folded
  *   POST   /api/context/scan                  the workspace Document scan; 202 { jobId }
  *   GET    /api/context/staleness             has the context moved since the corpus?
  *   GET    /api/context/corpus                the workspace corpus + its decisions
@@ -45,8 +46,11 @@ import {
   updateContextSource,
 } from '@truecourse/core/lib/context-store';
 import {
+  composeContextDocumentRows,
+  corpusDocSourceId,
   ContextConfigError,
   ContextKindUnsupportedError,
+  filterContextDocumentRows,
   isImplementedContextKind,
   repositoryConfig,
   repositorySourceId,
@@ -74,6 +78,10 @@ import {
   listStoredSessionRuns,
   toPublicRunRecord,
 } from '@truecourse/core/lib/sessions-store';
+import {
+  docCoveragePlainStatus,
+  readGuardCoverageSources,
+} from '@truecourse/core/commands/guard-read';
 import { workspaceSessionsKey } from '@truecourse/core/commands/context-scan';
 import { LlmNotConfiguredError, LlmProbeFailedError, startWorkspaceLlm } from '../services/workspace-llm.service.js';
 import {
@@ -83,6 +91,7 @@ import {
 import {
   CONTEXT_SOURCE_KINDS,
   type ContextSource,
+  type GuardCoveragePlainStatus,
   type ContextSourceConfig,
   type ContextSourceKind,
   type ContextSourceView,
@@ -169,6 +178,12 @@ function titleFor(scope: NormalizedConfig): string {
   return scope.kind === 'repository'
     ? scope.config.repoFullName
     : new URL(scope.config.llmsTxtUrl).host;
+}
+
+/** One query parameter's values — `?repo=a&repo=b` and `?repo=a` read alike. */
+function queryValues(raw: unknown): string[] {
+  const list = Array.isArray(raw) ? raw : [raw];
+  return list.map((value) => String(value).trim()).filter((value) => value !== '');
 }
 
 /** The verdicts a conflict resolution may carry — the repository route's set. */
@@ -315,6 +330,105 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
         manualIncludes: decisions.manualIncludes ?? [],
         manualExcludes: decisions.manualExcludes ?? [],
         conflictResolutions: decisions.conflictResolutions ?? [],
+      });
+    } catch (e) {
+      respond(res, next, e);
+    }
+  });
+
+  /**
+   * THE Documents view (plan §5): one row per document of the workspace
+   * corpus, composed here rather than in the browser — the row's status is a
+   * join over every repository that reads it, and no client may be asked to
+   * fan that out.
+   *
+   * The reads are per REPOSITORY, never per document: each repository's guard
+   * state is read once and every document it reads is composed against it, and
+   * each document's body is read once for the workspace however many
+   * repositories read it. A document no repository reads is answered without
+   * reading its body at all.
+   *
+   * `?area=&status=&source=&repo=` narrow the answer, repeatable, AND across
+   * dimensions and OR within one — the same reading the page's filter row has.
+   */
+  router.get('/documents', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const org = orgOf(req);
+      const corpus = await loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId: org }, 'corpus');
+      if (!corpus) {
+        res.json({ documents: [], corpusAt: null });
+        return;
+      }
+      const [sources, documents, bindings] = await Promise.all([
+        listContextSources(org),
+        listContextDocuments(org),
+        listContextBindings(org),
+      ]);
+
+      // The repositories a row may name: the ones this caller can see, by the
+      // `owner/repo` the bindings key on and the store key guard reads by.
+      const visible = new Map<string, RegistryEntry>();
+      for (const entry of (await linkableRepos(req)).values()) visible.set(entry.name, entry);
+
+      // Which documents each visible repository reads: its linked sources' docs.
+      const docsBySource = new Map<string, string[]>();
+      for (const doc of corpus.docs) {
+        const sourceId = corpusDocSourceId(doc);
+        if (!sourceId) continue;
+        docsBySource.set(sourceId, [...(docsBySource.get(sourceId) ?? []), doc.ref]);
+      }
+      const refsByRepo = new Map<string, string[]>();
+      for (const binding of bindings) {
+        if (!visible.has(binding.repoFullName)) continue;
+        const refs = docsBySource.get(binding.sourceId) ?? [];
+        if (refs.length === 0) continue;
+        refsByRepo.set(binding.repoFullName, [
+          ...(refsByRepo.get(binding.repoFullName) ?? []),
+          ...refs,
+        ]);
+      }
+
+      // One body read per document, for the documents somebody reads.
+      const bodies = new Map<string, string>();
+      for (const ref of new Set([...refsByRepo.values()].flat())) {
+        const body = await readContextDocByRef(org, ref);
+        if (body !== null) bodies.set(ref, body);
+      }
+
+      // One guard-state read per repository, then every document it reads
+      // composed against it. The externals index is deliberately not read: it
+      // never changes which of the five words a section wears.
+      const coverage = new Map<string, Map<string, GuardCoveragePlainStatus>>();
+      for (const [repoFullName, refs] of refsByRepo) {
+        const guard = await readGuardCoverageSources(visible.get(repoFullName)!.path, undefined, {
+          externals: false,
+        });
+        const words = new Map<string, GuardCoveragePlainStatus>();
+        for (const ref of new Set(refs)) {
+          const body = bodies.get(ref);
+          if (body === undefined) continue;
+          const word = docCoveragePlainStatus(ref, body, guard);
+          if (word) words.set(ref, word);
+        }
+        coverage.set(repoFullName, words);
+      }
+
+      const rows = composeContextDocumentRows({
+        corpus,
+        sources,
+        documents,
+        bindings,
+        coverage,
+        visibleRepos: new Set(visible.keys()),
+      });
+      res.json({
+        documents: filterContextDocumentRows(rows, {
+          area: req.query.area === undefined ? [] : queryValues(req.query.area),
+          status: req.query.status === undefined ? [] : queryValues(req.query.status),
+          source: req.query.source === undefined ? [] : queryValues(req.query.source),
+          repo: req.query.repo === undefined ? [] : queryValues(req.query.repo),
+        }),
+        corpusAt: corpus.generatedAt ?? null,
       });
     } catch (e) {
       respond(res, next, e);

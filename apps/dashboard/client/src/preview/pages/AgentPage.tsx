@@ -104,10 +104,10 @@ function AgentIndex() {
       (run) =>
         (kinds.length === 0 || kinds.includes(run.command)) &&
         (statuses.length === 0 || statuses.includes(run.status)) &&
-        (pickedRepos.length === 0 || pickedRepos.includes(run.repo.id)) &&
+        (pickedRepos.length === 0 || (run.repo !== null && pickedRepos.includes(run.repo.id))) &&
         (q === '' ||
           commandLabel(run.command).toLowerCase().includes(q) ||
-          run.repo.fullName.toLowerCase().includes(q) ||
+          (run.repo?.fullName.toLowerCase().includes(q) ?? false) ||
           run.gitRef.toLowerCase().includes(q)),
     );
   }, [runs, query, selected]);
@@ -140,7 +140,7 @@ function AgentIndex() {
         options: connected.map((repo) => ({
           key: filterKey('repo', repo.id),
           label: repo.fullName,
-          count: all.filter((r) => r.repo.id === repo.id).length,
+          count: all.filter((r) => r.repo?.id === repo.id).length,
         })),
       },
     ];
@@ -157,7 +157,9 @@ function AgentIndex() {
         key: 'repository',
         label: 'Repository',
         className: 'font-mono text-[12px] text-muted-foreground',
-        cell: (run) => run.repo.fullName,
+        // The workspace's own work (a Document scan reads every source and
+        // clones nothing) belongs to no repository, and says so.
+        cell: (run) => run.repo?.fullName ?? '—',
       },
       { key: 'status', label: 'Status', cell: (run) => <RunStatusWord run={run} /> },
       {
@@ -221,7 +223,7 @@ function RunStatusWord({ run }: { run: WorkspaceRun }) {
 function ConversationRoute({ runId }: { runId: string }) {
   const [run, setRun] = useState<WorkspaceRun | null>(null);
   const [missing, setMissing] = useState(false);
-  const starter = useRunTrigger(run?.repo.id ?? '');
+  const starter = useRunTrigger(run?.repo?.id ?? '');
 
   const read = useCallback(async () => {
     try {
@@ -239,7 +241,7 @@ function ConversationRoute({ runId }: { runId: string }) {
 
   // The header's own facts (status, how long it has been going) follow the
   // repository's store writes; the flow below tails its own stream.
-  const repoId = run?.repo.id;
+  const repoId = run?.repo?.id;
   useEffect(() => {
     if (!repoId) return;
     const socket = connectSocket();
@@ -272,7 +274,9 @@ function ConversationRoute({ runId }: { runId: string }) {
 
   if (!run) return null;
 
-  const canRerun = run.status === 'failed' || run.status === 'interrupted';
+  // Only a repository's work can be started again from here: the workspace's
+  // own runs start on Context, which is where their subject lives.
+  const canRerun = run.repo !== null && (run.status === 'failed' || run.status === 'interrupted');
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
@@ -281,7 +285,9 @@ function ConversationRoute({ runId }: { runId: string }) {
         title={commandLabel(run.command)}
         right={
           <span className="flex items-center gap-3 text-[11px]">
-            <span className="font-mono text-muted-foreground">{run.repo.fullName}</span>
+            {run.repo && (
+              <span className="font-mono text-muted-foreground">{run.repo.fullName}</span>
+            )}
             <RunStatusWord run={run} />
             <span className="font-mono text-muted-foreground">{shortRef(run.gitRef)}</span>
             <span className="tabular-nums text-muted-foreground">{runDuration(run)}</span>
@@ -299,7 +305,7 @@ function ConversationRoute({ runId }: { runId: string }) {
         }
       />
       <div className="flex min-h-0 flex-1">
-        <RunConversationPage run={run} repoId={run.repo.id} />
+        <RunConversationPage run={run} repoId={run.repo?.id ?? null} />
       </div>
     </div>
   );

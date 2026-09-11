@@ -1,22 +1,26 @@
 // PREVIEW (UI mock, fake data) with exceptions: on a REAL (provider-connected)
 // repository the Interfaces tab reads the server's own
 // interface catalog for that repository, the Dependencies tab reads and
-// registers against its stored dependency catalog, the Corpus tab reads the
-// corpus its scan stored, the Coverage tab reads the stored coverage summary
-// over it, the Sources tab reads and edits its stored web sources, and the
-// Tests and Runs tabs read what its generate and runs stored.
+// registers against its stored dependency catalog, the Coverage tab reads the
+// stored coverage summary over its slice of the workspace corpus, the Context
+// tab reads and edits which workspace sources it is linked to, and the Tests
+// and Runs tabs read what its generate and runs stored.
 
 /**
  * The repository console: one header, ONE menu, no toggle.
  *
  * The section switcher is gone with Code Analysis, so the left menu here is not
  * a switcher between products, it is the tabs of the one thing this repository
- * has: Coverage first (how much of the spec is proven), then Corpus (the
- * documents and conflicts, by version), Sources, Tests, Interfaces, Runs, Dependencies, and the
- * repository's Settings last. The agent's own work is not a tab here: it lives
- * on the Agent page, narrowed to this repository. There is no pull request page: a PR is seen
- * through its runs (the Pull request filter in Runs) and, when it changed spec
- * documents, through its coverage version in Coverage.
+ * has: Tests first (what is proven, and by what), then Coverage and Runs, then
+ * the setup group — Context (which workspace sources this repository reads),
+ * Interfaces, Dependencies and the repository's Settings.
+ *
+ * DOCUMENTATION IS NOT A TAB HERE any more: a source is a workspace object and
+ * the corpus is the workspace's, so the documents, their conflicts and the scan
+ * that curates them live on Context. This tab only says which of them this
+ * repository reads. The agent's own work is not a tab either: it lives on the
+ * Agent page, narrowed to this repository. There is no pull request page: a PR
+ * is seen through its runs (the Pull request filter in Runs).
  *
  * The tab is in the URL, so a tab is a place: it can be linked, and Runs can
  * hand a test to Tests without either of them owning the other's pane.
@@ -31,8 +35,7 @@ import { guardForRepo } from '@/preview/data';
 import { usePreviewState } from '@/preview/shell/preview-state';
 import { activityHref } from '@/preview/shell/real-runs';
 import { PREVIEW_BASE } from '@/preview/shell/PreviewShell';
-import { CorpusPage } from './CorpusPage';
-import { CorpusTab } from './CorpusTab';
+import { ContextTab } from './ContextTab';
 import { CoverageTab } from './CoverageTab';
 import { DependenciesTab } from './DependenciesTab';
 import { DependencyPage } from './DependencyPage';
@@ -41,17 +44,14 @@ import { InterfacesTab } from './InterfacesTab';
 import { RunPage } from './RunPage';
 import { RunsTab } from './RunsTab';
 import { SettingsTab } from './SettingsTab';
-import { SourcePage } from './SourcePage';
-import { SourcesTab } from './SourcesTab';
 import { TestPage } from './TestPage';
 import { TestsTab } from './TestsTab';
 
 const TABS = [
-  { id: 'coverage', label: 'Coverage', group: 'work' },
-  { id: 'corpus', label: 'Corpus', group: 'work' },
   { id: 'tests', label: 'Tests', group: 'work' },
+  { id: 'coverage', label: 'Coverage', group: 'work' },
   { id: 'runs', label: 'Runs', group: 'work' },
-  { id: 'sources', label: 'Sources', group: 'setup' },
+  { id: 'context', label: 'Context', group: 'setup' },
   { id: 'interfaces', label: 'Interfaces', group: 'setup' },
   { id: 'dependencies', label: 'Dependencies', group: 'setup' },
   { id: 'settings', label: 'Settings', group: 'setup' },
@@ -60,16 +60,13 @@ const TABS = [
 type TabId = (typeof TABS)[number]['id'];
 
 export default function RepoConsole() {
-  const { slug, tab, runId, flowId, sourceId, interfaceId, dependencyName, docRef, conflictId } = useParams<{
+  const { slug, tab, runId, flowId, interfaceId, dependencyName } = useParams<{
     slug: string;
     tab?: string;
     runId?: string;
     flowId?: string;
-    sourceId?: string;
     interfaceId?: string;
     dependencyName?: string;
-    docRef?: string;
-    conflictId?: string;
   }>();
   const { repos, llmProvider } = usePreviewState();
   const repo = repos.find((r) => r.id === slug);
@@ -78,16 +75,12 @@ export default function RepoConsole() {
     ? 'runs'
     : flowId
       ? 'tests'
-      : sourceId
-        ? 'sources'
-        : interfaceId
-          ? 'interfaces'
-          : dependencyName
-            ? 'dependencies'
-            : docRef || conflictId
-              ? 'corpus'
-              : undefined;
-  const active = (TABS.find((t) => t.id === (tab ?? implied))?.id ?? 'coverage') as TabId;
+      : interfaceId
+        ? 'interfaces'
+        : dependencyName
+          ? 'dependencies'
+          : undefined;
+  const active = (TABS.find((t) => t.id === (tab ?? implied))?.id ?? 'tests') as TabId;
 
   if (!repo) {
     return (
@@ -131,7 +124,7 @@ export default function RepoConsole() {
           tab below it is waiting on a scan. Said once, where the work is. */}
       {repo.real && llmProvider === 'missing' && (
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-amber-500/30 px-6 py-1.5 text-[11px] text-amber-500">
-          No LLM provider configured. Spec scans cannot run until one is set.
+          No LLM provider configured. The agent cannot run until one is set.
           <Link to={`${PREVIEW_BASE}/settings/models`} className="font-medium underline">
             Set one in Settings
           </Link>
@@ -156,6 +149,11 @@ export default function RepoConsole() {
         <div className="min-h-0 min-w-0 flex-1">
           {active === 'settings' ? (
             <SettingsTab repo={repo} />
+          ) : active === 'context' ? (
+            // REAL, not mock: the sources are the WORKSPACE's, read over
+            // `/api/context/sources`, and the switches save this repository's
+            // links over `/api/repos/<id>/context/bindings`.
+            <ContextTab repo={repo} />
           ) : active === 'coverage' && repo.real ? (
             // REAL, not mock: the coverage of a connected repository is the
             // server's summary over what its scan, generate and runs stored,
@@ -204,28 +202,6 @@ export default function RepoConsole() {
             ) : (
               <RunsTab repo={repo} />
             )
-          ) : active === 'sources' && repo.real ? (
-            // REAL, not mock: the documentation sites of a connected repository
-            // are its stored web sources, read and edited over
-            // `/api/repos/<id>/spec/sources*` — the same two views the fixture
-            // repositories get, the table and one site as its own page.
-            sourceId ? (
-              <SourcePage repo={repo} sourceId={decodeURIComponent(sourceId)} />
-            ) : (
-              <SourcesTab repo={repo} />
-            )
-          ) : active === 'corpus' && repo.real ? (
-            // REAL, not mock: the corpus of a connected repository is what its
-            // scan stored on the server, read over `/api/repos/<id>/spec/*`,
-            // with the same two views the fixture repositories get — the table,
-            // and one document or conflict as its own page.
-            docRef ? (
-              <CorpusPage repo={repo} kind="doc" itemId={decodeURIComponent(docRef)} />
-            ) : conflictId ? (
-              <CorpusPage repo={repo} kind="conflict" itemId={decodeURIComponent(conflictId)} />
-            ) : (
-              <CorpusTab repo={repo} />
-            )
           ) : !guard ? (
             // A real repository with nothing in flight has not started, rather
             // than not finished: promising a run that is not running would be
@@ -240,12 +216,9 @@ export default function RepoConsole() {
               body={
                 repo.real && !repo.onboarding ? (
                   <>
-                    Start the first scan from{' '}
-                    <Link
-                      to={`${PREVIEW_BASE}/repos/${repo.id}/corpus`}
-                      className="text-primary hover:underline"
-                    >
-                      Corpus
+                    Documentation is the workspace's: add a source and scan it on{' '}
+                    <Link to={`${PREVIEW_BASE}/context`} className="text-primary hover:underline">
+                      Context
                     </Link>
                     .
                   </>
@@ -262,14 +235,6 @@ export default function RepoConsole() {
             />
           ) : active === 'coverage' ? (
             <CoverageTab repo={repo} />
-          ) : active === 'corpus' ? (
-            docRef ? (
-              <CorpusPage repo={repo} kind="doc" itemId={decodeURIComponent(docRef)} />
-            ) : conflictId ? (
-              <CorpusPage repo={repo} kind="conflict" itemId={decodeURIComponent(conflictId)} />
-            ) : (
-              <CorpusTab repo={repo} />
-            )
           ) : active === 'tests' ? (
             flowId ? (
               <TestPage repo={repo} flowId={decodeURIComponent(flowId)} />
@@ -287,12 +252,6 @@ export default function RepoConsole() {
               <RunPage repo={repo} runId={decodeURIComponent(runId)} />
             ) : (
               <RunsTab repo={repo} />
-            )
-          ) : active === 'sources' ? (
-            sourceId ? (
-              <SourcePage repo={repo} sourceId={decodeURIComponent(sourceId)} />
-            ) : (
-              <SourcesTab repo={repo} />
             )
           ) : dependencyName ? (
             <DependencyPage repo={repo} name={decodeURIComponent(dependencyName)} />

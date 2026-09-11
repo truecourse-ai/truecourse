@@ -7,10 +7,10 @@
  * status code, so the helper reads the body's own error CODE rather than the
  * number.
  *
- * Above it sit the two affordances: a connected repository with no corpus is
- * offered its first scan on Corpus, and a conversation that ended badly is
- * offered another go on the Agent page. A command with no entry in the trigger
- * map has no button, which is how guard's steps stay quiet until they have one.
+ * Above it sit the two affordances: the workspace's Document scan starts on
+ * CONTEXT and nowhere else, and a conversation that ended badly is offered
+ * another go on the Agent page. A command with no entry in the trigger map has
+ * no button, which is how guard's steps stay quiet until they have one.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -41,7 +41,12 @@ vi.mock('@/components/sessions/RunConversationPage', () => ({
 }));
 
 import PreviewApp from '@/preview/PreviewApp';
-import { startGuardGenerate, startGuardSetup, startSpecScan } from '@/preview/data/scan';
+import {
+  startContextScan,
+  startGuardGenerate,
+  startGuardSetup,
+  startSpecScan,
+} from '@/preview/data/scan';
 import { triggerFor } from '@/preview/data/run-triggers';
 import type { PublicSessionRun } from '@/lib/api';
 
@@ -80,6 +85,7 @@ function serve(options: {
   runs?: PublicSessionRun[];
   config?: unknown;
   scan?: () => Response;
+  contextScan?: () => Response;
   setup?: () => Response;
   generate?: () => Response;
 }) {
@@ -108,6 +114,12 @@ function serve(options: {
         : json({ error: 'run not found' }, 404);
     }
     if (url.pathname === `/api/repos/${REAL.id}/spec/corpus/scan`) return scan();
+    if (url.pathname === '/api/context/scan') return (options.contextScan ?? scan)();
+    if (url.pathname === '/api/context/documents') return json({ documents: [], corpusAt: null });
+    if (url.pathname === '/api/context/sources') return json({ sources: [], changedAt: null });
+    if (url.pathname === '/api/context/staleness') {
+      return json({ changedAt: null, corpusAt: null, stale: false });
+    }
     if (url.pathname === `/api/repos/${REAL.id}/guard/setup`) return setup();
     if (url.pathname === `/api/repos/${REAL.id}/guard/generate`) return generate();
     return json({ error: 'not found' }, 404);
@@ -127,8 +139,11 @@ function renderAt(path: string) {
   );
 }
 
-/** Where the first scan is started from: the repository's Corpus. */
-const CORPUS = `/preview/repos/${REAL.id}/corpus`;
+/** Where the Document scan is started from: Context, and nowhere else. */
+const CONTEXT = '/preview/context';
+
+/** A console tab, for the things the console itself says. */
+const CONSOLE = `/preview/repos/${REAL.id}/tests`;
 
 /** One conversation, where another go at it is offered. */
 const conversation = (runId: string) => `/preview/agent/${encodeURIComponent(runId)}`;
@@ -179,6 +194,23 @@ describe('starting a run', () => {
     expect(calls).toContain('POST /api/repos/linkwarden/spec/corpus/scan');
   });
 
+  it('starts the workspace Document scan at the workspace address', async () => {
+    const calls = serve({ contextScan: () => json({ jobId: 'job_ctx' }, 202) });
+    expect(await startContextScan()).toEqual({ kind: 'started' });
+    expect(calls).toContain('POST /api/context/scan');
+  });
+
+  it('reads the workspace scan\'s refusals apart the same way', async () => {
+    serve({ contextScan: () => json({ error: 'llm-not-configured', message: 'No provider.' }, 409) });
+    expect(await startContextScan()).toEqual({ kind: 'not-configured', message: 'No provider.' });
+
+    serve({ contextScan: () => json({ error: 'A document scan is already running.' }, 409) });
+    expect(await startContextScan()).toEqual({
+      kind: 'busy',
+      message: 'A document scan is already running.',
+    });
+  });
+
   it('starts guard setup through the same route shape', async () => {
     const calls = serve({ setup: () => json({ jobId: 'job_2' }, 202) });
     expect(await startGuardSetup('linkwarden')).toEqual({ kind: 'started' });
@@ -204,15 +236,13 @@ describe('starting a run', () => {
 // ---------------------------------------------------------------------------
 
 describe('the surfaces of a connected repository', () => {
-  it('offers the first scan on Corpus, and starts it', async () => {
+  it('offers the Document scan on Context, and starts it', async () => {
     const calls = serve({ runs: [], config: { provider: 'anthropic' } });
-    renderAt(CORPUS);
+    renderAt(CONTEXT);
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole('button', { name: 'Scan' }));
-    await waitFor(() =>
-      expect(calls).toContain(`POST /api/repos/${REAL.id}/spec/corpus/scan`),
-    );
+    await waitFor(() => expect(calls).toContain('POST /api/context/scan'));
   });
 
   it('offers another go at a conversation that ended badly', async () => {
@@ -239,9 +269,9 @@ describe('the surfaces of a connected repository', () => {
   it('names the remedy when the workspace has no provider', async () => {
     serve({
       runs: [],
-      scan: () => json({ error: 'llm-not-configured', message: 'Set one in Settings.' }, 409),
+      contextScan: () => json({ error: 'llm-not-configured', message: 'Set one in Settings.' }, 409),
     });
-    renderAt(CORPUS);
+    renderAt(CONTEXT);
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole('button', { name: 'Scan' }));
@@ -253,9 +283,9 @@ describe('the surfaces of a connected repository', () => {
     serve({
       runs: [],
       config: { provider: 'anthropic' },
-      scan: () => json({ error: 'llm-probe-failed', message: '401 invalid x-api-key' }, 502),
+      contextScan: () => json({ error: 'llm-probe-failed', message: '401 invalid x-api-key' }, 502),
     });
-    renderAt(CORPUS);
+    renderAt(CONTEXT);
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole('button', { name: 'Scan' }));
@@ -264,17 +294,17 @@ describe('the surfaces of a connected repository', () => {
     ).toBeInTheDocument();
   });
 
-  it('says so when the repository is already scanning', async () => {
+  it('says so when a document scan is already running', async () => {
     serve({
       runs: [],
       config: { provider: 'anthropic' },
-      scan: () => json({ error: 'A spec scan is already running for this repository.' }, 409),
+      contextScan: () => json({ error: 'A document scan is already running.' }, 409),
     });
-    renderAt(CORPUS);
+    renderAt(CONTEXT);
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole('button', { name: 'Scan' }));
-    expect(await screen.findByText('A run is already in progress')).toBeInTheDocument();
+    expect(await screen.findByText('A document scan is already running')).toBeInTheDocument();
   });
 });
 
@@ -285,10 +315,10 @@ describe('the surfaces of a connected repository', () => {
 describe('a workspace with no provider', () => {
   it('says so on a connected repository, with the way to set one', async () => {
     serve({ runs: [], config: null });
-    renderAt(CORPUS);
+    renderAt(CONSOLE);
 
     expect(
-      await screen.findByText(/No LLM provider configured\. Spec scans cannot run/),
+      await screen.findByText(/No LLM provider configured\. The agent cannot run/),
     ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Set one in Settings' })).toHaveAttribute(
       'href',
@@ -298,10 +328,10 @@ describe('a workspace with no provider', () => {
 
   it('stays quiet once one is set', async () => {
     serve({ runs: [], config: { provider: 'anthropic' } });
-    renderAt(CORPUS);
+    renderAt(CONSOLE);
 
-    await screen.findByRole('button', { name: 'Scan' });
-    expect(screen.queryByText(/No LLM provider configured\./)).toBeNull();
+    await screen.findByRole('navigation', { name: 'Repository sections' });
+    await waitFor(() => expect(screen.queryByText(/No LLM provider configured\./)).toBeNull());
   });
 
   it('stays quiet when the read never answered, which is not the same claim', async () => {
@@ -313,9 +343,9 @@ describe('a workspace with no provider', () => {
       if (pathname === '/api/sessions/runs') return json({ runs: [] });
       return json({ error: 'no session' }, 403);
     }) as unknown as typeof window.fetch;
-    renderAt(CORPUS);
+    renderAt(CONSOLE);
 
-    await screen.findByRole('button', { name: 'Scan' });
-    expect(screen.queryByText(/No LLM provider configured\./)).toBeNull();
+    await screen.findByRole('navigation', { name: 'Repository sections' });
+    await waitFor(() => expect(screen.queryByText(/No LLM provider configured\./)).toBeNull());
   });
 });

@@ -52,6 +52,15 @@ export {
 export { diffAgainstLedger, type ContextDiff } from './diff.js';
 export { corpusDocSourceId, corpusSourceIds, sliceCorpus } from './slice.js';
 export {
+  composeContextDocumentRows,
+  filterContextDocumentRows,
+  worstContextStatus,
+  type ContextDocumentFilter,
+  type ContextDocumentRowInput,
+  type ContextRowDocument,
+  type ContextRowSource,
+} from './documents.js';
+export {
   foldRepoDecisions,
   fullDecisions,
   mapDecisionDocRef,

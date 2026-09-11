@@ -45,6 +45,8 @@ function renderAt(path: string) {
 
 const ROUTES: { path: string; heading: RegExp }[] = [
   { path: '/preview', heading: /^Acme Payments$/ },
+  { path: '/preview/context', heading: /^Context$/ },
+  { path: '/preview/context/conflicts', heading: /^Conflicts$/ },
   { path: '/preview/repos/orders-api/settings', heading: /Gate policy/i },
   { path: '/preview/settings', heading: /^Settings$/ },
   { path: '/preview/settings/plan', heading: /^Current plan$/ },
@@ -68,30 +70,11 @@ describe('one-product preview', () => {
     expect(screen.getAllByText('#482').length).toBeGreaterThan(0);
   });
 
-  it('opens coverage on a pull request version with its change markers', async () => {
-    renderAt('/preview/repos/orders-api/corpus?version=v-oa-pr486-a19c204');
-    expect((await screen.findAllByText('#486')).length).toBeGreaterThan(0);
-    expect((await screen.findAllByText('edited')).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('added').length).toBeGreaterThan(0);
-  });
-
   it('renders /preview/repos/orders-api/coverage', async () => {
     renderAt('/preview/repos/orders-api/coverage');
     // The overview only: GuardCoverageOverview draws the composition bars.
     expect(await screen.findByText('Coverage overview')).toBeInTheDocument();
     expect((await screen.findAllByLabelText('Statements')).length).toBeGreaterThan(0);
-  });
-
-  it('renders /preview/repos/orders-api/corpus', async () => {
-    renderAt('/preview/repos/orders-api/corpus');
-    // The corpus table: the documents arrive async through the preview SpecSource.
-    expect((await screen.findAllByText(/lifecycle\.md/)).length).toBeGreaterThan(0);
-  });
-
-  it('opens a document as its own page from the corpus table', async () => {
-    renderAt('/preview/repos/orders-api/corpus/doc/docs%2Fpayments%2Frefunds.md');
-    expect((await screen.findAllByRole('link', { name: 'Corpus' })).length).toBeGreaterThan(1);
-    expect((await screen.findAllByText('Refunding a partially captured order')).length).toBeGreaterThan(0);
   });
 
   // The five guard tabs render the vendored components (the current dashboard
@@ -134,18 +117,6 @@ describe('one-product preview', () => {
     expect(await screen.findByRole('textbox', { name: 'Search runs' })).toBeInTheDocument();
   });
 
-  it('renders /preview/repos/orders-api/sources', async () => {
-    renderAt('/preview/repos/orders-api/sources');
-    // The sites table: one row per registered llms.txt site.
-    expect((await screen.findAllByText('Stripe API reference')).length).toBeGreaterThan(0);
-  });
-
-  it('opens a site as its own page from the sources table', async () => {
-    renderAt('/preview/repos/orders-api/sources/stripe');
-    expect((await screen.findAllByRole('link', { name: 'Sources' })).length).toBeGreaterThan(1);
-    expect((await screen.findAllByText('Stripe API reference')).length).toBeGreaterThan(0);
-  });
-
   it('renders /preview/repos/orders-api/dependencies', async () => {
     renderAt('/preview/repos/orders-api/dependencies');
     expect((await screen.findAllByText('Postmark sandbox')).length).toBeGreaterThan(0);
@@ -171,6 +142,23 @@ describe('one-product preview', () => {
     // GuardFlowDetail + GuardTestView: the merged detail, its failing step's
     // expectation and the actual the run recorded.
     expect((await screen.findAllByText(/409 Conflict/)).length).toBeGreaterThan(0);
+  });
+
+  it('lands a repository address with no tab on Tests', async () => {
+    renderAt('/preview/repos/orders-api');
+    const menu = await screen.findByRole('navigation', { name: 'Repository sections' });
+    expect(within(menu).getByRole('link', { name: 'Tests' })).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('has no Corpus and no Sources tab: documentation is the workspace\'s', async () => {
+    renderAt('/preview/repos/orders-api/tests');
+    const menu = await screen.findByRole('navigation', { name: 'Repository sections' });
+    expect(within(menu).queryByRole('link', { name: 'Corpus' })).toBeNull();
+    expect(within(menu).queryByRole('link', { name: 'Sources' })).toBeNull();
+    expect(within(menu).getByRole('link', { name: 'Context' })).toHaveAttribute(
+      'href',
+      '/preview/repos/orders-api/context',
+    );
   });
 
   it("carries a cross-tab jump's destination into the address", async () => {
@@ -218,6 +206,7 @@ describe('one-product preview', () => {
   it('keeps the workspace shell around every route', () => {
     renderAt('/preview/notifications');
     expect(screen.getByRole('link', { name: 'Home' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Context' })).toHaveAttribute('href', '/preview/context');
     // Knowledge is parked: shown in the menu, not a link.
     expect(screen.getByText('Knowledge')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Knowledge' })).toBeNull();
