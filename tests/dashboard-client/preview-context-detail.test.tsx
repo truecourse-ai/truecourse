@@ -295,12 +295,12 @@ describe('one document of Context', () => {
     );
   });
 
-  it('is reached from a source page address, which is Context narrowed to it', async () => {
+  it('resolves the older singular source address to the source’s page', async () => {
     serve();
     renderAt('/preview/context/source/site-docs-acme');
     await waitFor(() =>
-      expect(screen.getByTestId('address')).toHaveTextContent(
-        '/preview/context/documents?source=site-docs-acme',
+      expect(screen.getByTestId('address').textContent).toBe(
+        '/preview/context/sources/site-docs-acme',
       ),
     );
   });

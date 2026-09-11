@@ -185,6 +185,24 @@ export interface ContextDocumentsResponse {
   documents: ContextDocument[];
 }
 
+/** ONE source, as its own page reads it: the source, and how it has synced. */
+export interface ContextSourceDetailResponse {
+  source: ContextSourceView;
+  /** Newest first, bounded to the last 50. */
+  syncs: ContextSyncRecord[];
+}
+
+/**
+ * What an edit of a source's scope answers with. Exactly one of `jobId` and
+ * `note` is present: the sync the edit started, or the server's own words for
+ * why it started none (a paused source is synced when it is resumed).
+ */
+export interface ContextSourceUpdateResponse {
+  source: ContextSourceView;
+  jobId?: string;
+  note?: string;
+}
+
 export interface ContextBindingsResponse {
   repoFullName: string;
   sourceIds: string[];

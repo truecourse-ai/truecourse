@@ -12,6 +12,11 @@ export const CONTEXT_BASE = `${PREVIEW_BASE}/context`;
 export const DOCUMENTS_BASE = `${CONTEXT_BASE}/documents`;
 export const CONFLICTS_BASE = `${CONTEXT_BASE}/conflicts`;
 
+/** ONE source: its scope, the repositories that read it, and how it has synced. */
+export function sourceHref(sourceId: string): string {
+  return `${CONTEXT_BASE}/sources/${encodeURIComponent(sourceId)}`;
+}
+
 /** The documents, narrowed as asked — every dimension of the filter row is a parameter. */
 export function documentsHref(narrow: {
   area?: string;

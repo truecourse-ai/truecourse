@@ -1,7 +1,8 @@
 /**
  * The workspace Context routes, over the real app: the listing, the add (with
- * its two refusals), Check, Sync now, Pause / Resume, Remove, the ledger, the
- * document read by its corpus ref, and the per-repository links.
+ * its two refusals), Check, one source with its syncs, a new scope for one,
+ * Sync now, Pause / Resume, Remove, the ledger, the document read by its corpus
+ * ref, and the per-repository links.
  *
  * The store is in memory and the drivers are scripted, so nothing here reaches
  * a network or a clone — what is pinned is the HTTP contract and what each
@@ -259,6 +260,233 @@ describe('POST /api/context/sources/preview', () => {
       .send({ kind: 'site', config: { llmsTxtUrl: 'not a url' } })
       .expect(400);
     expect(await store.listSources(TEST_ORG)).toEqual([]);
+  });
+});
+
+describe('GET /api/context/sources/:id', () => {
+  it('answers with the source, its counts and its syncs, newest first', async () => {
+    const created = await addSite('https://docs.acme.com/llms.txt', [fixture.project.slug]).expect(202);
+    const id = created.body.source.id;
+    await store.writeDocuments(TEST_ORG, id, {
+      documents: [
+        { docId: 'a', docPath: 'a.md', title: 'A', url: null, contentHash: 'h1', updatedAt: 'x', body: 'A' },
+      ],
+      removed: [],
+    });
+    await store.recordSync(TEST_ORG, {
+      sourceId: id,
+      at: '2026-09-03T10:00:00.000Z',
+      parentAt: null,
+      added: 3,
+      changed: 0,
+      removed: 0,
+      unchanged: 0,
+    });
+    await store.recordSync(TEST_ORG, {
+      sourceId: id,
+      at: '2026-09-10T10:00:00.000Z',
+      parentAt: '2026-09-03T10:00:00.000Z',
+      added: 1,
+      changed: 2,
+      removed: 0,
+      unchanged: 2,
+    });
+
+    const res = await request(app).get(`/api/context/sources/${id}`).expect(200);
+    expect(res.body.source).toMatchObject({
+      id,
+      kind: 'site',
+      docCount: 1,
+      repositories: [fixture.project.name],
+    });
+    expect(res.body.syncs.map((sync: { at: string }) => sync.at)).toEqual([
+      '2026-09-10T10:00:00.000Z',
+      '2026-09-03T10:00:00.000Z',
+    ]);
+    expect(res.body.syncs[0]).toMatchObject({ added: 1, changed: 2, removed: 0, unchanged: 2 });
+  });
+
+  it('answers with no sync for a source nothing has synced', async () => {
+    const created = await addSite().expect(202);
+    const res = await request(app).get(`/api/context/sources/${created.body.source.id}`).expect(200);
+    expect(res.body.syncs).toEqual([]);
+  });
+
+  it('is a 404 for a source that does not exist', async () => {
+    await request(app).get('/api/context/sources/ghost').expect(404);
+  });
+});
+
+describe('PATCH /api/context/sources/:id', () => {
+  /** A repository source of the fixture repository, to edit the scope of. */
+  async function addRepoSource(): Promise<string> {
+    const res = await request(app)
+      .post('/api/context/sources')
+      .send({ kind: 'repository', config: { repoFullName: fixture.project.name } })
+      .expect(202);
+    syncs.length = 0;
+    return res.body.source.id as string;
+  }
+
+  it('stores a repository’s new branch and patterns, and syncs the new scope', async () => {
+    const id = await addRepoSource();
+    const res = await request(app)
+      .patch(`/api/context/sources/${id}`)
+      .send({
+        config: {
+          repoFullName: fixture.project.name,
+          branch: 'develop',
+          include: ['docs/**'],
+          exclude: [],
+        },
+      })
+      .expect(202);
+
+    expect(res.body.source.config).toEqual({
+      repoFullName: fixture.project.name,
+      branch: 'develop',
+      include: ['docs/**'],
+      exclude: [],
+    });
+    expect(res.body.jobId).toBe('job_test');
+    expect(syncs).toEqual([{ workspaceOrgId: TEST_ORG, sourceId: id, source: 'manual' }]);
+    const stored = await store.getSource(TEST_ORG, id);
+    expect(stored?.config).toMatchObject({ branch: 'develop', include: ['docs/**'] });
+  });
+
+  it('reads an empty branch as the default branch, and fills in the default patterns', async () => {
+    const id = await addRepoSource();
+    const res = await request(app)
+      .patch(`/api/context/sources/${id}`)
+      .send({ config: { branch: '' } })
+      .expect(202);
+    expect(res.body.source.config).toEqual({
+      repoFullName: fixture.project.name,
+      branch: '',
+      include: ['docs/**', '**/*.md'],
+      exclude: [
+        '**/CHANGELOG*',
+        '**/changelog*',
+        '**/LICENSE*',
+        '**/license*',
+        '**/LICENCE*',
+        '**/licence*',
+      ],
+    });
+  });
+
+  it('refuses to move a repository source to another repository', async () => {
+    const id = await addRepoSource();
+    const res = await request(app)
+      .patch(`/api/context/sources/${id}`)
+      .send({ config: { repoFullName: 'someone/else' } })
+      .expect(400);
+    expect(res.body.error).toContain('cannot be changed');
+    expect(syncs).toEqual([]);
+  });
+
+  it('refuses patterns that are not a list', async () => {
+    const id = await addRepoSource();
+    await request(app)
+      .patch(`/api/context/sources/${id}`)
+      .send({ config: { include: 'docs/**' } })
+      .expect(400);
+  });
+
+  it('stores a site’s new llms.txt URL and syncs it', async () => {
+    const created = await addSite().expect(202);
+    const id = created.body.source.id;
+    syncs.length = 0;
+    const res = await request(app)
+      .patch(`/api/context/sources/${id}`)
+      .send({ config: { llmsTxtUrl: 'https://docs.acme.com/v2/llms.txt' } })
+      .expect(202);
+    expect(res.body.source.config).toEqual({ llmsTxtUrl: 'https://docs.acme.com/v2/llms.txt' });
+    expect(syncs).toEqual([{ workspaceOrgId: TEST_ORG, sourceId: id, source: 'manual' }]);
+  });
+
+  it('refuses a URL that is not an llms.txt', async () => {
+    const created = await addSite().expect(202);
+    await request(app)
+      .patch(`/api/context/sources/${created.body.source.id}`)
+      .send({ config: { llmsTxtUrl: 'https://docs.acme.com/' } })
+      .expect(400);
+  });
+
+  it('refuses a URL another site of the workspace already has', async () => {
+    const first = await addSite('https://a.example/llms.txt').expect(202);
+    const second = await addSite('https://b.example/llms.txt').expect(202);
+    const res = await request(app)
+      .patch(`/api/context/sources/${second.body.source.id}`)
+      .send({ config: { llmsTxtUrl: 'https://a.example/llms.txt' } })
+      .expect(409);
+    expect(res.body.error).toContain(first.body.source.id);
+    expect((await store.getSource(TEST_ORG, second.body.source.id))?.config).toEqual({
+      llmsTxtUrl: 'https://b.example/llms.txt',
+    });
+  });
+
+  it('stores a paused source’s scope without syncing, and says why', async () => {
+    const created = await addSite().expect(202);
+    const id = created.body.source.id;
+    await request(app).post(`/api/context/sources/${id}/pause`).send({ paused: true }).expect(200);
+    syncs.length = 0;
+
+    const res = await request(app)
+      .patch(`/api/context/sources/${id}`)
+      .send({ config: { llmsTxtUrl: 'https://docs.acme.com/v2/llms.txt' } })
+      .expect(202);
+    expect(res.body.jobId).toBeUndefined();
+    expect(res.body.note).toContain('Resume');
+    expect(syncs).toEqual([]);
+    expect((await store.getSource(TEST_ORG, id))?.config).toEqual({
+      llmsTxtUrl: 'https://docs.acme.com/v2/llms.txt',
+    });
+  });
+
+  it('refuses the edit while the source is syncing, and stores nothing', async () => {
+    const created = await addSite().expect(202);
+    const id = created.body.source.id;
+    await store.updateSource(TEST_ORG, id, { status: 'syncing' });
+    syncs.length = 0;
+
+    const res = await request(app)
+      .patch(`/api/context/sources/${id}`)
+      .send({ config: { llmsTxtUrl: 'https://docs.acme.com/v2/llms.txt' } })
+      .expect(409);
+    expect(res.body.error).toContain('already syncing');
+    expect(syncs).toEqual([]);
+    expect((await store.getSource(TEST_ORG, id))?.config).toEqual({
+      llmsTxtUrl: 'https://docs.acme.com/llms.txt',
+    });
+  });
+
+  it('refuses the edit when a sync is already queued', async () => {
+    const created = await addSite().expect(202);
+    jobs.answer = { status: 'busy' };
+    const res = await request(app)
+      .patch(`/api/context/sources/${created.body.source.id}`)
+      .send({ config: { llmsTxtUrl: 'https://docs.acme.com/v2/llms.txt' } })
+      .expect(409);
+    expect(res.body.error).toContain('already syncing');
+  });
+
+  it('tells the workspace the source changed', async () => {
+    const created = await addSite().expect(202);
+    published.length = 0;
+    await request(app)
+      .patch(`/api/context/sources/${created.body.source.id}`)
+      .send({ config: { llmsTxtUrl: 'https://docs.acme.com/v2/llms.txt' } })
+      .expect(202);
+    expect(changes()).toContainEqual({
+      change: 'sources',
+      sourceId: created.body.source.id,
+      repoFullName: undefined,
+    });
+  });
+
+  it('is a 404 for a source that does not exist', async () => {
+    await request(app).patch('/api/context/sources/ghost').send({ config: {} }).expect(404);
   });
 });
 

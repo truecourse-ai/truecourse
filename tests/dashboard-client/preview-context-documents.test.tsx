@@ -272,7 +272,7 @@ describe('Context, the documents', () => {
 });
 
 describe('narrowed to one source', () => {
-  it('becomes that source: the crumb and its sync status, and nothing to press', async () => {
+  it('sits under that source, carries its sync status, and has nothing to press', async () => {
     serve();
     renderAt(`/preview/context/documents?source=${SITE.id}`);
 
@@ -281,20 +281,29 @@ describe('narrowed to one source', () => {
       'href',
       '/preview/context',
     );
-    expect(await screen.findByRole('heading', { name: 'docs.acme.com' })).toBeInTheDocument();
+    // The trail leads back through the source's own page.
+    expect(within(crumbs).getByRole('link', { name: 'docs.acme.com' })).toHaveAttribute(
+      'href',
+      `/preview/context/sources/${SITE.id}`,
+    );
+    expect(await screen.findByRole('heading', { name: 'Documents' })).toBeInTheDocument();
     expect(screen.getByText('Synced')).toBeInTheDocument();
 
-    // What can be done to a source is on the Sources list, in the row's menu.
+    // What can be done to a source is on the source's own page.
     expect(screen.queryByRole('button', { name: 'Sync now' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Pause' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull();
   });
 
-  it('names a repository source and its sync status, and spells out no scope in the header', async () => {
+  it('names a repository source in its trail, and spells out no scope in the header', async () => {
     serve();
     renderAt(`/preview/context/documents?source=${REPO_SOURCE.id}`);
 
-    expect(await screen.findByRole('heading', { name: 'acme/web' })).toBeInTheDocument();
+    const crumbs = await screen.findByRole('navigation', { name: 'Breadcrumb' });
+    expect(within(crumbs).getByRole('link', { name: 'acme/web' })).toHaveAttribute(
+      'href',
+      `/preview/context/sources/${REPO_SOURCE.id}`,
+    );
     expect(screen.getByText('Never synced')).toBeInTheDocument();
     expect(screen.queryByText('the default branch')).toBeNull();
     expect(screen.queryByText(/docs\/\*\*/)).toBeNull();

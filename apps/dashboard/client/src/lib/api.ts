@@ -22,7 +22,9 @@ import type {
   ContextDocumentsViewResponse,
   ContextSource,
   ContextSourceCheck,
+  ContextSourceDetailResponse,
   ContextSourcesResponse,
+  ContextSourceUpdateResponse,
   ContextSourceView,
 } from '@truecourse/shared';
 import type { GuardExternalPatch, GuardExternalsView } from '@/types/guard-externals';
@@ -1581,6 +1583,24 @@ export function addContextSource(body: {
     method: 'POST',
     body: JSON.stringify(body),
   });
+}
+
+/** One source and its syncs — what the source's own page reads. */
+export function getContextSource(sourceId: string): Promise<ContextSourceDetailResponse> {
+  return fetchApi<ContextSourceDetailResponse>(
+    `/api/context/sources/${encodeURIComponent(sourceId)}`,
+  );
+}
+
+/** Replace a source's scope; the answer says which sync it started, or why none. */
+export function updateContextSourceConfig(
+  sourceId: string,
+  config: Record<string, unknown>,
+): Promise<ContextSourceUpdateResponse> {
+  return fetchApi<ContextSourceUpdateResponse>(
+    `/api/context/sources/${encodeURIComponent(sourceId)}`,
+    { method: 'PATCH', body: JSON.stringify({ config }) },
+  );
 }
 
 export function syncContextSource(sourceId: string): Promise<{ jobId: string }> {

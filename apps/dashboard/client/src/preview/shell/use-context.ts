@@ -15,8 +15,13 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ContextDocumentRow, ContextSourceView } from '@truecourse/shared';
-import { getContextStaleness, listContextDocuments, listContextSources } from '@/lib/api';
+import type { ContextDocumentRow, ContextSourceView, ContextSyncRecord } from '@truecourse/shared';
+import {
+  getContextSource,
+  getContextStaleness,
+  listContextDocuments,
+  listContextSources,
+} from '@/lib/api';
 import { getServerUrl } from '@/lib/server-url';
 
 /** How long a signal waits for its neighbours before the reads run. */
@@ -86,8 +91,12 @@ interface Read<T> {
   refetch: () => Promise<void>;
 }
 
-/** The shared body of every reader below: read, re-read on the signal, forget on unmount. */
-function useRead<T>(read: () => Promise<T>, signal: number): Read<T> {
+/**
+ * The shared body of every reader below: read, re-read on the signal, forget on
+ * unmount. `key` is what the read is ABOUT (a source id) when a page reads one
+ * thing at a time: changing it re-reads, the way changing the signal does.
+ */
+function useRead<T>(read: () => Promise<T>, signal: number, key = ''): Read<T> {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const alive = useRef(true);
@@ -115,7 +124,7 @@ function useRead<T>(read: () => Promise<T>, signal: number): Read<T> {
 
   useEffect(() => {
     void run();
-  }, [run, signal]);
+  }, [run, signal, key]);
 
   return { data, error, refetch: run };
 }
@@ -130,6 +139,26 @@ export interface ContextSourcesState {
 export function useContextSources(signal: number): ContextSourcesState {
   const read = useRead(async () => (await listContextSources()).sources, signal);
   return { sources: read.data, error: read.error, refetch: read.refetch };
+}
+
+export interface ContextSourceState {
+  /** null until the first read lands, and for a source this workspace has not. */
+  source: ContextSourceView | null;
+  /** The source's syncs, newest first; empty until the read lands. */
+  syncs: ContextSyncRecord[];
+  error: string | null;
+  refetch: () => Promise<void>;
+}
+
+/** ONE source, with the syncs behind it — the source page's whole read. */
+export function useContextSource(sourceId: string, signal: number): ContextSourceState {
+  const read = useRead(() => getContextSource(sourceId), signal, sourceId);
+  return {
+    source: read.data?.source ?? null,
+    syncs: read.data?.syncs ?? [],
+    error: read.error,
+    refetch: read.refetch,
+  };
 }
 
 export interface ContextDocumentsState {

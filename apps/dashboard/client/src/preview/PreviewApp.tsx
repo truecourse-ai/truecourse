@@ -11,10 +11,11 @@
  * address without a sub-tab lands on Members: the two defaults are expressed as
  * routes rather than redirects, so a bare address is a place, not a bounce.
  *
- * Context LANDS on its sources (`/context`), and its documents are a place of
- * their own (`/context/documents`, narrowed by the query the filter row writes).
- * `/context/source/:id` is the one REDIRECT here: a source is not a page of its
- * own — it is the documents narrowed to it — so the address resolves to that.
+ * Context LANDS on its sources (`/context`), each source is a page of its own
+ * (`/context/sources/:id`), and their documents are a place of their own
+ * (`/context/documents`, narrowed by the query the filter row writes). The one
+ * REDIRECT here is the older singular address, `/context/source/:id`, which
+ * resolves to the source's page.
  */
 
 import { Navigate, Route, Routes, useParams } from 'react-router-dom';
@@ -27,6 +28,7 @@ import DocumentsPage from './pages/DocumentsPage';
 import HomePage from './pages/HomePage';
 import NotificationsPage from './pages/NotificationsPage';
 import SettingsPage from './pages/SettingsPage';
+import SourcePage from './pages/SourcePage';
 import SourcesPage from './pages/SourcesPage';
 import RepoConsole from './repo/RepoConsole';
 import { JobToasts } from './shell/JobToasts';
@@ -53,15 +55,16 @@ function ContextConflictRoute() {
   return <ContextConflictPage conflictId={conflictId ? decodeURIComponent(conflictId) : ''} />;
 }
 
-/** A source is not a page: it is the documents narrowed to it. */
+/** ONE source of the workspace's context: its scope, its readers, its syncs. */
+function ContextSourceRoute() {
+  const { sourceId } = useParams<{ sourceId: string }>();
+  return <SourcePage sourceId={sourceId ? decodeURIComponent(sourceId) : ''} />;
+}
+
+/** The older singular address of a source, now that a source has a page. */
 function ContextSourceRedirect() {
   const { sourceId } = useParams<{ sourceId: string }>();
-  return (
-    <Navigate
-      replace
-      to={`/preview/context/documents?source=${encodeURIComponent(sourceId ?? '')}`}
-    />
-  );
+  return <Navigate replace to={`/preview/context/sources/${encodeURIComponent(sourceId ?? '')}`} />;
 }
 
 export function PreviewRoutes() {
@@ -71,6 +74,7 @@ export function PreviewRoutes() {
       <Route path="agent" element={<AgentPage />} />
       <Route path="agent/:runId" element={<AgentRunRoute />} />
       <Route path="context" element={<SourcesPage />} />
+      <Route path="context/sources/:sourceId" element={<ContextSourceRoute />} />
       <Route path="context/documents" element={<DocumentsPage />} />
       <Route path="context/conflicts" element={<ConflictsPage />} />
       <Route path="context/conflicts/:conflictId" element={<ContextConflictRoute />} />

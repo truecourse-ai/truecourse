@@ -4,6 +4,8 @@
  *   GET    /api/context/sources               every source, with its document count and readers
  *   POST   /api/context/sources               add one (kind, config, repoIds) and sync it
  *   POST   /api/context/sources/preview       what a scope WOULD yield — reads, stores nothing
+ *   GET    /api/context/sources/:id           one source and its syncs — the source's page
+ *   PATCH  /api/context/sources/:id           { config } — a new scope, and the sync it starts
  *   POST   /api/context/sources/:id/sync      Sync now
  *   POST   /api/context/sources/:id/pause     { paused: boolean }
  *   DELETE /api/context/sources/:id           drop the source, its documents and every link
@@ -34,11 +36,13 @@ import { getProjectBySlug, readRegistry, type RegistryEntry } from '@truecourse/
 import {
   contextBindings,
   contextChangedAt,
+  contextReposForSource,
   createContextSource,
   getContextSource,
   listContextBindings,
   listContextDocuments,
   listContextSources,
+  listContextSyncs,
   readContextDocByRef,
   removeContextSource,
   setContextBindings,
@@ -136,6 +140,19 @@ function toView(
     docCount: docCounts.get(source.id) ?? 0,
     repositories: readers.get(source.id) ?? [],
   };
+}
+
+/** The same view for ONE source: its documents counted, its readers named. */
+async function oneView(org: string, source: ContextSource): Promise<ContextSourceView> {
+  const [documents, readers] = await Promise.all([
+    listContextDocuments(org, source.id),
+    contextReposForSource(org, source.id),
+  ]);
+  return toView(
+    source,
+    new Map([[source.id, documents.length]]),
+    new Map([[source.id, readers]]),
+  );
 }
 
 /** Compose the whole listing from three reads, not one per source. */
@@ -252,6 +269,27 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
       const org = orgOf(req);
       const [sources, changedAt] = await Promise.all([listViews(org), contextChangedAt(org)]);
       res.json({ sources, changedAt });
+    } catch (e) {
+      respond(res, next, e);
+    }
+  });
+
+  // ONE source, with the syncs that made it what it is — the source's own page
+  // reads exactly this, and says nothing it does not carry.
+  router.get('/sources/:id', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const org = orgOf(req);
+      const sourceId = req.params.id as string;
+      const source = await getContextSource(org, sourceId);
+      if (!source) {
+        res.status(404).json({ error: `Context source "${sourceId}" not found` });
+        return;
+      }
+      const [view, syncs] = await Promise.all([
+        oneView(org, source),
+        listContextSyncs(org, sourceId, 50),
+      ]);
+      res.json({ source: view, syncs });
     } catch (e) {
       respond(res, next, e);
     }
@@ -703,6 +741,96 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
     }
     return siteSourceId(config.llmsTxtUrl, new Set(existing.map((source) => source.id)));
   }
+
+  // --- Edit the scope ------------------------------------------------------
+
+  /**
+   * A new scope for a source that already exists, validated exactly as the add
+   * validates one. A repository source keeps the repository it was created for
+   * — everything else about its scope (the branch, the patterns) is editable.
+   */
+  function editedConfig(source: ContextSource, raw: unknown): NormalizedConfig {
+    if (!isImplementedContextKind(source.kind)) throw new ContextKindUnsupportedError(source.kind);
+    if (source.kind !== 'repository') return normalizeConfig(source.kind, raw);
+    const stored = (source.config as Partial<RepositorySourceConfig>).repoFullName ?? '';
+    const asked = (raw ?? {}) as Partial<RepositorySourceConfig>;
+    const named = typeof asked.repoFullName === 'string' ? asked.repoFullName.trim() : '';
+    if (named !== '' && named !== stored) {
+      throw new ContextConfigError(
+        `A repository source always reads ${stored}; its repository cannot be changed.`,
+      );
+    }
+    return normalizeConfig('repository', { ...asked, repoFullName: stored });
+  }
+
+  /**
+   * The scope a source reads, replaced. The new documents are the old ones'
+   * replacement, so the edit SYNCS — a paused source is the one exception, and
+   * its answer says so rather than leaving the reader to guess.
+   */
+  router.patch('/sources/:id', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const org = orgOf(req);
+      const sourceId = req.params.id as string;
+      const source = await getContextSource(org, sourceId);
+      if (!source) {
+        res.status(404).json({ error: `Context source "${sourceId}" not found` });
+        return;
+      }
+      // A sync already reading the old scope would store documents the new one
+      // does not name, so the edit waits for it rather than racing it.
+      if (source.status === 'syncing') {
+        res.status(409).json({ error: `${source.title} is already syncing.` });
+        return;
+      }
+      const body = (req.body ?? {}) as { config?: unknown };
+      const scope = editedConfig(source, body.config);
+      if (scope.kind === 'site') {
+        const clash = (await listContextSources(org)).find(
+          (other) =>
+            other.id !== sourceId &&
+            other.kind === 'site' &&
+            (other.config as SiteSourceConfig).llmsTxtUrl === scope.config.llmsTxtUrl,
+        );
+        if (clash) {
+          throw createAppError(
+            `${scope.config.llmsTxtUrl} is already a source of this workspace ("${clash.id}").`,
+            409,
+          );
+        }
+      }
+
+      const updated = await updateContextSource(org, sourceId, { config: scope.config });
+      if (!updated) {
+        res.status(404).json({ error: `Context source "${sourceId}" not found` });
+        return;
+      }
+      await emitContextChanged(org, { change: 'sources', sourceId });
+      const view = await oneView(org, updated);
+
+      // Pausing is the user's own stop, and every trigger honors it — including
+      // this one. Resuming is what syncs the scope just stored.
+      if (updated.status === 'paused') {
+        res.status(202).json({
+          source: view,
+          note: `${updated.title} is paused. Resume it to sync this scope.`,
+        });
+        return;
+      }
+      const outcome = await requireJobs().enqueueContextSync({
+        workspaceOrgId: org,
+        sourceId,
+        source: 'manual',
+      });
+      if (outcome.status === 'busy') {
+        res.status(409).json({ error: `${updated.title} is already syncing.` });
+        return;
+      }
+      res.status(202).json({ source: view, jobId: outcome.jobId });
+    } catch (e) {
+      respond(res, next, e);
+    }
+  });
 
   // --- Sync now ------------------------------------------------------------
 

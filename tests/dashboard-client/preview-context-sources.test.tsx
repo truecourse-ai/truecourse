@@ -5,8 +5,10 @@
  * not carry — the title, the kind, the repositories that read it, the counts
  * and, when a sync failed, the source's own note. What is asserted here is what
  * the page DOES with that answer: the row it draws, the order it draws them in
- * (worst first), the failure it puts on the row, and the narrowed Documents
- * view a row opens. Context LANDS here, so its address is `/preview/context`.
+ * (worst first), the failure it puts on the row, and the source page a row
+ * opens. Context LANDS here, so its address is `/preview/context`.
+ *
+ * A row has no menu: what can be done to a source lives on the source's page.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -133,15 +135,6 @@ function serve(over: Partial<World> = {}) {
       return json({ changedAt: null, corpusAt: null, stale: false });
     }
     if (url.pathname === '/api/context/scan') return json({ jobId: 'job-scan' }, 202);
-    if (/^\/api\/context\/sources\/[^/]+\/sync$/.test(url.pathname)) {
-      return json({ jobId: 'job-sync' }, 202);
-    }
-    if (/^\/api\/context\/sources\/[^/]+\/pause$/.test(url.pathname)) {
-      return json({ source: PAUSED });
-    }
-    if (/^\/api\/context\/sources\/[^/]+$/.test(url.pathname)) {
-      return json({ removed: FAILED, repositories: FAILED.repositories });
-    }
     return json({ error: `not found: ${url.pathname}` }, 404);
   }) as unknown as typeof window.fetch;
   return state;
@@ -245,7 +238,7 @@ describe('Context, the sources', () => {
     expect(within(rows()[0]!).getByText('docs.paused.com')).toBeInTheDocument();
   });
 
-  it('opens the documents of the source a row names', async () => {
+  it('opens the page of the source a row names, on a single click', async () => {
     serve();
     renderAt('/preview/context');
     const user = userEvent.setup();
@@ -254,9 +247,20 @@ describe('Context, the sources', () => {
     await user.click(rows()[0]!);
     await waitFor(() =>
       expect(screen.getByTestId('address')).toHaveTextContent(
-        `/preview/context/documents?source=${FAILED.id}`,
+        `/preview/context/sources/${FAILED.id}`,
       ),
     );
+  });
+
+  it('offers nothing else on a row: a source is acted on from its page', async () => {
+    serve();
+    renderAt('/preview/context');
+    await waitFor(() => expect(rows()).toHaveLength(5));
+
+    for (const row of rows()) {
+      expect(within(row).queryByRole('button')).toBeNull();
+    }
+    expect(screen.queryByRole('menu')).toBeNull();
   });
 
   it('says what to do when the workspace has no source at all', async () => {
@@ -278,83 +282,5 @@ describe('Context, the sources', () => {
 
     await user.click(screen.getByRole('button', { name: 'Add context' }));
     expect(await screen.findByRole('list', { name: 'Kinds of source' })).toBeInTheDocument();
-  });
-});
-
-describe('what a source row can do', () => {
-  /** Opens the menu of the row a source is on. */
-  async function openMenu(user: ReturnType<typeof userEvent.setup>, title: string) {
-    await user.click(await screen.findByRole('button', { name: `Actions for ${title}` }));
-    return screen.getByRole('menu', { name: `Actions for ${title}` });
-  }
-
-  it('syncs a source from its menu', async () => {
-    const state = serve();
-    renderAt('/preview/context');
-    const user = userEvent.setup();
-    await waitFor(() => expect(rows()).toHaveLength(5));
-
-    const menu = await openMenu(user, SYNCED.title);
-    await user.click(within(menu).getByRole('menuitem', { name: 'Sync now' }));
-    await waitFor(() => expect(state.calls).toContain(`POST /api/context/sources/${SYNCED.id}/sync`));
-  });
-
-  it('pauses a source, and offers the paused one Resume', async () => {
-    const state = serve();
-    renderAt('/preview/context');
-    const user = userEvent.setup();
-    await waitFor(() => expect(rows()).toHaveLength(5));
-
-    const menu = await openMenu(user, SYNCED.title);
-    await user.click(within(menu).getByRole('menuitem', { name: 'Pause' }));
-    await waitFor(() =>
-      expect(state.calls).toContain(`POST /api/context/sources/${SYNCED.id}/pause`),
-    );
-
-    const paused = await openMenu(user, PAUSED.title);
-    expect(within(paused).getByRole('menuitem', { name: 'Resume' })).toBeInTheDocument();
-    // Nothing to sync while it is stopped.
-    expect(within(paused).getByRole('menuitem', { name: 'Sync now' })).toBeDisabled();
-  });
-
-  it('names the repositories a removal stops, removes on confirmation and re-reads', async () => {
-    const state = serve();
-    renderAt('/preview/context');
-    const user = userEvent.setup();
-    await waitFor(() => expect(rows()).toHaveLength(5));
-    const before = state.calls.filter((c) => c === '/api/context/sources').length;
-
-    const menu = await openMenu(user, FAILED.title);
-    await user.click(within(menu).getByRole('menuitem', { name: 'Remove' }));
-    expect(await screen.findByText(/acme\/api reads this source/)).toBeInTheDocument();
-
-    const dialog = screen.getByRole('dialog');
-    await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
-    await waitFor(() => expect(state.calls).toContain(`DELETE /api/context/sources/${FAILED.id}`));
-    await waitFor(() =>
-      expect(state.calls.filter((c) => c === '/api/context/sources').length).toBeGreaterThan(before),
-    );
-  });
-
-  it('offers no Remove on a repository source — it goes with its repository', async () => {
-    serve();
-    renderAt('/preview/context');
-    const user = userEvent.setup();
-    await waitFor(() => expect(rows()).toHaveLength(5));
-
-    const menu = await openMenu(user, NEVER.title);
-    expect(within(menu).getByRole('menuitem', { name: 'Sync now' })).toBeInTheDocument();
-    expect(within(menu).queryByRole('menuitem', { name: 'Remove' })).toBeNull();
-  });
-
-  it('opens the menu without opening the row', async () => {
-    serve();
-    renderAt('/preview/context');
-    const user = userEvent.setup();
-    await waitFor(() => expect(rows()).toHaveLength(5));
-
-    await openMenu(user, SYNCED.title);
-    expect(screen.getByTestId('address')).toHaveTextContent('/preview/context');
-    expect(screen.getByTestId('address')).not.toHaveTextContent('/preview/context/documents');
   });
 });

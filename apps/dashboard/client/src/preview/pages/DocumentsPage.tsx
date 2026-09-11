@@ -13,8 +13,8 @@
  * the repository's Context tab link straight to `?source=<id>`.
  *
  * Narrowed to exactly ONE source, the header carries that source's sync status
- * word and, for a repository source, the branch and patterns it reads. What can
- * be DONE to a source is on the Sources list, in the row's own menu.
+ * word and the crumb trail leads back through the source's own page — which is
+ * where its scope is read and what can be DONE to it lives.
  *
  * The page actions — Scan and Add context — belong to the workspace, so they
  * are {@link ContextFrame}'s and every section of Context carries them.
@@ -45,7 +45,7 @@ import {
 import { formatRelativeTime } from '@/preview/vendor/shared/format/relative-time';
 import { useContextDocuments, useContextSignal, useContextSources } from '@/preview/shell/use-context';
 import { ContextFrame } from './ContextFrame';
-import { docHref } from './context-hrefs';
+import { CONTEXT_BASE, docHref, sourceHref } from './context-hrefs';
 
 /** The dimensions the one filter row narrows along, each its own address parameter. */
 const DIMENSIONS = ['area', 'status', 'source', 'repo'] as const;
@@ -93,8 +93,8 @@ function repositoriesLabel(row: ContextDocumentRow): string {
 
 /**
  * The one source the view is narrowed to, as a header: its sync status word.
- * What can be DONE to a source lives on the Sources list, one menu per row — a
- * header is not a place to hide actions, nor to spell out a scope.
+ * What can be DONE to a source lives on the source's own page — a header is not
+ * a place to hide actions, nor to spell out a scope.
  */
 function SourceHeader({ source }: { source: ContextSourceView }) {
   return <StatusWord tone={CONTEXT_SYNC_TONE[source.status]} word={CONTEXT_SYNC_WORD[source.status]} />;
@@ -206,7 +206,15 @@ export default function DocumentsPage() {
     <ContextFrame
       section="documents"
       signal={signal}
-      crumbs={[{ label: onlySource ? onlySource.title : 'Documents' }]}
+      crumbs={
+        onlySource
+          ? [
+              { label: 'Sources', to: CONTEXT_BASE },
+              { label: onlySource.title, to: sourceHref(onlySource.id) },
+              { label: 'Documents' },
+            ]
+          : [{ label: 'Documents' }]
+      }
       {...(onlySource ? { right: <SourceHeader source={onlySource} /> } : {})}
     >
       <IndexTable<ContextDocumentRow>
