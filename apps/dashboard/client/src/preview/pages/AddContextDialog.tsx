@@ -229,11 +229,11 @@ export function AddContextDialog({
               <div>
                 <p className="text-[11px] text-muted-foreground">No repository connected yet.</p>
                 <Link
-                  to={`${PREVIEW_BASE}/code?connect=1`}
+                  to={`${PREVIEW_BASE}/settings/repositories`}
                   onClick={() => onOpenChange(false)}
                   className="mt-1 inline-block text-[11px] text-primary hover:underline"
                 >
-                  Connect a repository
+                  Connect a repository in Settings
                 </Link>
               </div>
             ) : (
@@ -261,6 +261,13 @@ export function AddContextDialog({
                     );
                   })}
                 </select>
+                <Link
+                  to={`${PREVIEW_BASE}/settings/repositories`}
+                  onClick={() => onOpenChange(false)}
+                  className="mt-1 inline-block text-[11px] text-primary hover:underline"
+                >
+                  Connect another repository in Settings
+                </Link>
               </div>
             )}
             {connected.length === 0 ? null : already ? (

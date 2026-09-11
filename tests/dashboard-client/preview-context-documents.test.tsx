@@ -447,7 +447,7 @@ describe('Add context', () => {
     ).toBeInTheDocument();
   });
 
-  it('sends the user to Code when no repository is connected', async () => {
+  it('sends the user to Settings when no repository is connected', async () => {
     serve({ repos: [] });
     renderAt('/preview/context/documents');
     const user = userEvent.setup();
@@ -456,9 +456,24 @@ describe('Add context', () => {
     await user.click(await screen.findByRole('button', { name: /Repository/ }));
 
     expect(await screen.findByText('No repository connected yet.')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Connect a repository' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Connect a repository in Settings' })).toHaveAttribute(
       'href',
-      '/preview/code?connect=1',
+      '/preview/settings/repositories',
+    );
+  });
+
+  it('offers Settings under the repository picker when repositories are connected', async () => {
+    serve();
+    renderAt('/preview/context/documents');
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole('button', { name: 'Add context' }));
+    await user.click(await screen.findByRole('button', { name: /Repository/ }));
+
+    expect(await screen.findByRole('combobox', { name: 'Repository' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Connect another repository in Settings' })).toHaveAttribute(
+      'href',
+      '/preview/settings/repositories',
     );
   });
 });

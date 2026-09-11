@@ -101,7 +101,7 @@ export default function SourcesPage() {
           {
             key: 'status',
             label: 'Status',
-            width: '8rem',
+            width: '7rem',
             cell: (source) => (
               <span className="flex min-w-0 flex-col gap-0.5">
                 <StatusWord
@@ -121,14 +121,14 @@ export default function SourcesPage() {
           {
             key: 'documents',
             label: 'Documents',
-            width: '6rem',
+            width: '7rem',
             className: 'tabular-nums text-muted-foreground',
             cell: (source) => source.docCount,
           },
           {
             key: 'lastSync',
             label: 'Last sync',
-            width: '7rem',
+            width: '7.5rem',
             className: 'text-muted-foreground',
             cell: (source) => (source.lastSyncAt ? formatRelativeTime(source.lastSyncAt) : '—'),
           },
