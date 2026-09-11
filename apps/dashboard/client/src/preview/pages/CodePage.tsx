@@ -17,7 +17,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import type { GuardCoveragePlainStatus, GuardLastRunSummary } from '@/preview/vendor/shared';
 import type { Repo } from '@/preview/data/types';
 import { GUARD_COVERAGE_PLAIN_ORDER } from '@/preview/vendor/shared';
-import { CompositionBar, fiveWordSegments } from '@/preview/vendor/components/guard/GuardCoverageOverview';
+import { fiveWordSegments } from '@/preview/vendor/components/guard/GuardCoverageOverview';
 import { PageHeader, ProviderIcon } from '@/preview/ui/bits';
 import { StatusWord, CONCLUSION_TONE } from '@/preview/ui/status-word';
 import { statusSummary } from '@/preview/data/corpus-fixtures';
@@ -86,17 +86,6 @@ export default function CodePage() {
     [repos, summaries],
   );
 
-  const totals = useMemo(() => {
-    const sections = zero();
-    const flows = zero();
-    let sectionTotal = 0;
-    for (const r of perRepo) {
-      add(sections, r.sections);
-      add(flows, r.flows);
-      sectionTotal += r.sectionTotal;
-    }
-    return { sections, flows, sectionTotal };
-  }, [perRepo]);
   const loading = perRepo.some(({ repo, loaded }) => repo.real && !loaded);
   const incomplete = perRepo.some(({ loaded }) => loaded?.statusError);
 
@@ -115,12 +104,11 @@ export default function CodePage() {
         }
       />
       <div className="min-h-0 flex-1 overflow-auto">
-        <div className="grid grid-cols-1 gap-x-10 gap-y-5 border-b border-border px-6 py-5 lg:grid-cols-2">
-          <CompositionBar label="Requirements" segments={fiveWordSegments(totals.sections)} totalLabel={`${totals.sectionTotal} sections · ${proven(totals.sections)} proven`} />
-          <CompositionBar label="Flows" segments={fiveWordSegments(totals.flows)} />
-          {!loading && !incomplete && totals.sectionTotal === 0 && <p className="text-xs text-muted-foreground">No requirements yet.</p>}
-          {(loading || incomplete) && <p role="status" className="text-xs text-muted-foreground lg:col-span-2">{loading ? 'Loading repository summaries…' : 'Totals exclude repositories whose coverage could not be loaded.'}</p>}
-        </div>
+        {(loading || incomplete) && (
+          <p role="status" className="border-b border-border px-6 py-3 text-xs text-muted-foreground">
+            {loading ? 'Loading repository summaries…' : 'Some repositories\' coverage could not be loaded.'}
+          </p>
+        )}
 
         <table className="w-full border-collapse text-[13px]" aria-label="Repositories by coverage">
           <thead className="sticky top-0 z-10 bg-card">

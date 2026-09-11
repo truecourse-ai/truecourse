@@ -76,12 +76,12 @@ beforeEach(() => { state.repos = [repo]; listeners.clear(); });
 afterEach(() => vi.unstubAllGlobals());
 
 describe('Code, the repositories and their stored summaries', () => {
-  it('loads requirements, flow totals, proven percentage, verdict and baseline from the server', async () => {
+  it('loads each repository’s proven percentage, verdict and baseline from the server, and no workspace bars', async () => {
     serve();
     renderCode();
-    expect(await screen.findByText('6 sections · 50% proven')).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: 'Flows: 1 failed, 1 succeeded' })).toBeInTheDocument();
-    expect(row().getByText('50%')).toBeInTheDocument();
+    expect(await screen.findByText('50%')).toBeInTheDocument();
+    expect(screen.queryByText(/sections · /)).toBeNull();
+    expect(screen.queryByRole('img', { name: /^Flows:/ })).toBeNull();
     expect(row().getByText('Failing')).toBeInTheDocument();
     expect(row().getByText('58899f7')).toHaveAttribute('title', corpus.corpusCommit);
     expect(row().queryByText('no corpus yet')).toBeNull();
@@ -89,7 +89,7 @@ describe('Code, the repositories and their stored summaries', () => {
     expect(screen.getByText('Runs destination')).toBeInTheDocument();
   });
 
-  it('refreshes only the changed repository and updates totals after a scan or run completes', async () => {
+  it('refreshes only the changed repository after a scan or run completes', async () => {
     const server = serve();
     const { unmount } = renderCode();
     await screen.findByText('50%');
@@ -98,7 +98,7 @@ describe('Code, the repositories and their stored summaries', () => {
     expect(vi.mocked(fetch).mock.calls.length).toBe(calls);
     server.summary = { ...summary(), sections: { total: 6, byStatus: { ...counts, failed: 0, succeeded: 4 } }, lastRun: { ...summary().lastRun!, summary: { total: 2, pass: 2, fail: 0, error: 0, blocked: 0, stale: 0, orphaned: 0 } } };
     complete();
-    expect(await screen.findByText('6 sections · 67% proven')).toBeInTheDocument();
+    expect(await row().findByText('67%')).toBeInTheDocument();
     expect(row().getByText('Passing')).toBeInTheDocument();
     unmount();
     expect(listeners.get('spec:complete')?.size).toBe(0);
@@ -124,7 +124,7 @@ describe('Code, the repositories and their stored summaries', () => {
     renderCode();
     expect(await screen.findByText('Coverage unavailable')).toBeInTheDocument();
     expect(row().getByText('Baseline unavailable')).toBeInTheDocument();
-    expect(screen.getByText('Totals exclude repositories whose coverage could not be loaded.')).toBeInTheDocument();
+    expect(screen.getByText("Some repositories' coverage could not be loaded.")).toBeInTheDocument();
     server.statusCode = 200;
     server.corpusCode = 200;
     act(() => { for (const handler of listeners.get('connect') ?? []) handler(undefined); });
@@ -142,15 +142,12 @@ describe('Code, the repositories and their stored summaries', () => {
     expect(row().getByText('Neutral')).toBeInTheDocument();
   });
 
-  it('includes fixture coverage in workspace totals without fetching fixture repositories', async () => {
+  it('lists a fixture repository from its fixtures without fetching it', async () => {
     serve();
     state.repos = [repo, REPOS[0]!];
     renderCode();
     await screen.findByText('50%');
-    const fixtureSections = statusSummary(REPOS[0]!.id).sections!;
-    const total = 6 + fixtureSections.total;
-    const percentage = Math.round((3 + fixtureSections.byStatus.succeeded) / total * 100);
-    expect(screen.getByText(`${total} sections · ${percentage}% proven`)).toBeInTheDocument();
+    expect(screen.getByText(REPOS[0]!.fullName)).toBeInTheDocument();
     expect(vi.mocked(fetch).mock.calls.every(([input]) => String(input).includes(`/repos/${repo.id}/`))).toBe(true);
   });
 
@@ -158,7 +155,7 @@ describe('Code, the repositories and their stored summaries', () => {
     const server = serve({ ...summary(), sections: null });
     server.corpusCode = 500;
     renderCode();
-    expect(await screen.findByText('4 sections · 50% proven')).toBeInTheDocument();
+    expect(await row().findByText('50%')).toBeInTheDocument();
     expect(row().getByText('Baseline unavailable')).toBeInTheDocument();
     expect(row().getByText('Failing')).toBeInTheDocument();
   });

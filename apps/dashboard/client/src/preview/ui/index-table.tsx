@@ -69,14 +69,16 @@ export function IndexTable<T>({
       {dimensions.length > 0 && (
         <FilterBuilder label={filterLabel} ariaLabel={filterAriaLabel ?? label} dimensions={dimensions} selected={selected} onChange={onSelect} />
       )}
-      <div className="min-h-0 flex-1 overflow-auto">
+      {/* The first column takes what the others leave and truncates; the rest
+          keep their words on one line. The page never scrolls sideways. */}
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
         <table className="w-full border-collapse text-[13px]" aria-label={label}>
           <thead className="sticky top-0 z-10 bg-card">
             <tr className="border-b border-border text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               {columns.map((c, i) => (
                 <th
                   key={c.key}
-                  className={`py-2 font-semibold ${c.align === 'right' ? 'text-right' : 'text-left'} ${i === 0 ? 'pl-6 pr-3' : i === columns.length - 1 ? 'pl-3 pr-6' : 'px-3'}`}
+                  className={`py-2 font-semibold ${c.align === 'right' ? 'text-right' : 'text-left'} ${i === 0 ? 'w-full max-w-0 pl-6 pr-3' : i === columns.length - 1 ? 'whitespace-nowrap pl-3 pr-6' : 'whitespace-nowrap px-3'}`}
                 >
                   {c.label}
                 </th>
@@ -97,7 +99,7 @@ export function IndexTable<T>({
                 {columns.map((c, i) => (
                   <td
                     key={c.key}
-                    className={`py-2.5 ${c.align === 'right' ? 'text-right tabular-nums' : ''} ${i === 0 ? 'pl-6 pr-3' : i === columns.length - 1 ? 'pl-3 pr-6' : 'px-3'} ${c.className ?? ''}`}
+                    className={`py-2.5 ${c.align === 'right' ? 'text-right tabular-nums' : ''} ${i === 0 ? 'w-full max-w-0 pl-6 pr-3' : i === columns.length - 1 ? 'whitespace-nowrap pl-3 pr-6' : 'whitespace-nowrap px-3'} ${c.className ?? ''}`}
                   >
                     {c.cell(row)}
                   </td>
