@@ -288,6 +288,20 @@ function toWorkspaceRun(run: RepoRunRecord, repos: Map<string, RegistryEntry>): 
   };
 }
 
+/**
+ * A run as the INDEX lists it. A running run travels whole: the list is what
+ * follows its checklist and its waiting sessions live. A settled run travels
+ * without its checklist and without its session index — the index reads its
+ * status, its times and its reason, and a busy workspace's finished checklists
+ * and session indexes made the listing close to a megabyte. The conversation
+ * page reads the whole record by its own address.
+ */
+function toIndexedRun(run: WorkspaceRun): WorkspaceRun {
+  if (run.status === 'running') return run;
+  const { display: _display, ...rest } = run;
+  return { ...rest, sessions: [] };
+}
+
 export function createWorkspaceSessionsRouter(deps: WorkspaceSessionsDeps = {}): Router {
   const workspaceRouter: Router = Router();
 
@@ -341,7 +355,7 @@ export function createWorkspaceSessionsRouter(deps: WorkspaceSessionsDeps = {}):
       const repos = new Map(entries.map((e) => [e.path, e]));
       const last = runs[runs.length - 1];
       res.json({
-        runs: runs.map((run) => toWorkspaceRun(run, repos)),
+        runs: runs.map((run) => toIndexedRun(toWorkspaceRun(run, repos))),
         ...(last && runs.length === limit ? { nextCursor: sessionRunCursor(last) } : {}),
       });
     } catch (e) {
