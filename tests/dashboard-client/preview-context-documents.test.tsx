@@ -290,14 +290,14 @@ describe('narrowed to one source', () => {
     expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull();
   });
 
-  it('shows a repository source its branch and its patterns', async () => {
+  it('names a repository source and its sync status, and spells out no scope in the header', async () => {
     serve();
     renderAt(`/preview/context/documents?source=${REPO_SOURCE.id}`);
 
     expect(await screen.findByRole('heading', { name: 'acme/web' })).toBeInTheDocument();
     expect(screen.getByText('Never synced')).toBeInTheDocument();
-    expect(screen.getByText('the default branch')).toBeInTheDocument();
-    expect(screen.getByText('docs/** !**/CHANGELOG*')).toBeInTheDocument();
+    expect(screen.queryByText('the default branch')).toBeNull();
+    expect(screen.queryByText(/docs\/\*\*/)).toBeNull();
   });
 });
 

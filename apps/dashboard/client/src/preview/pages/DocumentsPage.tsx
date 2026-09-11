@@ -28,7 +28,6 @@ import {
   type ContextDocumentRow,
   type ContextDocumentStatus,
   type ContextSourceView,
-  type RepositorySourceConfig,
 } from '@truecourse/shared';
 import { IndexTable } from '@/preview/ui/index-table';
 import {
@@ -92,33 +91,13 @@ function repositoriesLabel(row: ContextDocumentRow): string {
   return `${row.repositories.length} repositories`;
 }
 
-/** A repository source's scope, in its own words: the patterns and the branch. */
-function RepositoryScope({ source }: { source: ContextSourceView }) {
-  const config = source.config as Partial<RepositorySourceConfig>;
-  const patterns = [
-    ...(config.include ?? []),
-    ...(config.exclude ?? []).map((glob) => `!${glob}`),
-  ];
-  return (
-    <span className="flex items-center gap-3 text-[11px] text-muted-foreground">
-      <span className="font-mono">{config.branch || 'the default branch'}</span>
-      {patterns.length > 0 && <span className="font-mono">{patterns.join(' ')}</span>}
-    </span>
-  );
-}
-
 /**
- * The one source the view is narrowed to, as a header: its scope when it is a
- * repository's, and the sync status word. What can be DONE to a source lives on
- * the Sources list, one menu per row — a header is not a place to hide actions.
+ * The one source the view is narrowed to, as a header: its sync status word.
+ * What can be DONE to a source lives on the Sources list, one menu per row — a
+ * header is not a place to hide actions, nor to spell out a scope.
  */
 function SourceHeader({ source }: { source: ContextSourceView }) {
-  return (
-    <span className="flex shrink-0 items-center gap-3">
-      {source.kind === 'repository' && <RepositoryScope source={source} />}
-      <StatusWord tone={CONTEXT_SYNC_TONE[source.status]} word={CONTEXT_SYNC_WORD[source.status]} />
-    </span>
-  );
+  return <StatusWord tone={CONTEXT_SYNC_TONE[source.status]} word={CONTEXT_SYNC_WORD[source.status]} />;
 }
 
 export default function DocumentsPage() {
