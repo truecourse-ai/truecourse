@@ -129,9 +129,9 @@ function useScanStaleness(repo: Repo): { decisionsPending: boolean; docsChanged:
 }
 
 /**
- * The Scan / Rescan action of a connected repository: the same start the
- * Activity tab offers (a refusal is announced there with its remedy), spinning
- * while a scan of this repository runs, dotted while the corpus is behind.
+ * The Scan / Rescan action of a connected repository: a refusal is announced
+ * with its remedy, the button spins while a scan of this repository runs and is
+ * dotted while the corpus is behind.
  */
 function RealScanButton({ repo, hasCorpus }: { repo: Repo; hasCorpus: boolean }) {
   const starter = useRunTrigger(repo.id);
@@ -351,7 +351,7 @@ function CorpusBody({ repo, versions }: { repo: Repo; versions: ReturnType<typeo
                     : corpus.error
                       ? `The corpus could not be read: ${corpus.error}`
                       : !corpus.data
-                        ? 'No corpus yet. The spec scan writes it; start one from Activity.'
+                        ? 'No corpus yet. The spec scan writes it; Scan starts one.'
                         : 'Nothing matches.'}
                 </td>
               </tr>

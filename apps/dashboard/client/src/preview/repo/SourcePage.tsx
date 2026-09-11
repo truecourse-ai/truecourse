@@ -7,10 +7,11 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { ChevronRight, Globe, Loader2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Globe, Loader2 } from 'lucide-react';
 import { SpecSourceProvider, createRepoSpecSource } from '@/components/spec/spec-source';
 import { EmptyState } from '@/components/ui/empty-state';
+import { PageHeader } from '@/preview/ui/bits';
 import { SpecSourceDetail } from '@/preview/vendor/components/spec/SpecSourceDetail';
 import { useSpecCorpus } from '@/preview/vendor/components/spec/SpecCorpusView';
 import { useGuardTabs } from '@/preview/vendor/hooks/useGuardTabs';
@@ -83,15 +84,10 @@ function SourceBody({ repo, sourceId }: { repo: Repo; sourceId: string }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-6 py-3">
-        <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-sm">
-          <Link to={`/preview/repos/${repo.id}/sources`} className="shrink-0 font-semibold text-foreground hover:underline">
-            Sources
-          </Link>
-          <ChevronRight aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <h1 className="min-w-0 truncate font-semibold text-foreground">{site?.title ?? sourceId}</h1>
-        </nav>
-      </header>
+      <PageHeader
+        crumbs={[{ label: 'Sources', to: `/preview/repos/${repo.id}/sources` }]}
+        title={site?.title ?? sourceId}
+      />
       <div className="min-h-0 flex-1">
         {site ? (
           <SpecSourceDetail

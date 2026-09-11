@@ -1,0 +1,135 @@
+{
+  "llm": {
+    "mode": "api",
+    "model": "gpt-5.6-sol",
+    "provider": "openai"
+  },
+  "runId": "ae1457b7-6cea-4d12-85df-fe8cbee9ca7a",
+  "gitRef": "f363ebe67741a3000c8737d735c25cb3efb90a8f",
+  "status": "completed",
+  "command": "guard-setup",
+  "display": {
+    "blocks": [
+      {
+        "kind": "checklist",
+        "items": [
+          {
+            "key": "clone",
+            "label": "Preparing repository",
+            "status": "done"
+          },
+          {
+            "key": "recipe",
+            "label": "Deriving the recipe",
+            "detail": "wrote .truecourse/scenarios/recipe.json (llm) · default /api/expenses → 200",
+            "status": "done",
+            "sessionKinds": [
+              "guard-setup.recipe-repair"
+            ]
+          },
+          {
+            "key": "detect",
+            "label": "Detecting dependencies",
+            "detail": "1 external service · node:sqlite (2 tables)",
+            "status": "done",
+            "sessionKinds": []
+          },
+          {
+            "key": "catalog",
+            "label": "Cataloguing dependencies",
+            "detail": "1 declared · 1 awaiting an account · 1 catalog entry",
+            "status": "done",
+            "sessionKinds": [
+              "guard-setup.dependency-catalog"
+            ]
+          },
+          {
+            "key": "interfaces",
+            "label": "Authoring the interface catalog",
+            "detail": "authored 22 task(s) across 2 place(s)",
+            "status": "done",
+            "sessionKinds": [
+              "guard-setup.reconcile-interfaces"
+            ]
+          },
+          {
+            "key": "seed",
+            "label": "Preparing data + principals",
+            "detail": "the api surface requires an authenticated principal (2 corpus doc(s) describe an API token/bearer header, e.g. README.md), but the seed declares no credential with a api probe",
+            "status": "done",
+            "sessionKinds": [
+              "guard-setup.seed"
+            ]
+          },
+          {
+            "key": "preparations",
+            "label": "Verifying private starting states",
+            "detail": "SQLITE_PATH selects the complete single-user ledger, so a distinct ${directory}/expenses.sqlite provides real instance isolation.; Unfiltered GET /api/expenses exposes global totalCount and totalSpentCents independently of its paginated expenses array.; The seeded profile uses the existing idempotent 12-expense seed; its independently calculated total is 31,854 cents.; CurrencyBeacon credentials are not required for ledger setup, reads, CRUD mutation, or isolation verification; optional dependency configuration remains unchanged.",
+            "status": "done",
+            "sessionKinds": [
+              "guard-setup.preparations"
+            ]
+          },
+          {
+            "key": "auth",
+            "label": "Verifying supplied auth",
+            "detail": "the catalog declares no supplied dependencies to verify",
+            "status": "done",
+            "sessionKinds": [
+              "guard-setup.auth-proof"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "sessions": [
+    {
+      "kind": "guard-setup.recipe-repair",
+      "spent": {
+        "turns": 6,
+        "tokens": 49158,
+        "costUsd": 0.11007600000000001
+      },
+      "status": "completed",
+      "workItem": "recipe-repair",
+      "sessionId": "26356f92-1e71-46fe-a74a-d1eba5d1c020"
+    },
+    {
+      "kind": "guard-setup.dependency-catalog",
+      "spent": {
+        "turns": 4,
+        "tokens": 24945,
+        "costUsd": 0.055714
+      },
+      "status": "completed",
+      "workItem": "dependency-catalog",
+      "sessionId": "0737fe88-5438-409d-bf2c-c88177855a29"
+    },
+    {
+      "kind": "guard-setup.seed",
+      "spent": {
+        "turns": 12,
+        "tokens": 103791,
+        "costUsd": 0.23308600000000002
+      },
+      "status": "completed",
+      "workItem": "seed",
+      "sessionId": "c53ac079-8a47-451c-b630-bff4aff9891b"
+    },
+    {
+      "kind": "guard-setup.preparations",
+      "spent": {
+        "turns": 11,
+        "tokens": 171475,
+        "costUsd": 0.495166
+      },
+      "status": "completed",
+      "workItem": "preparations",
+      "sessionId": "f8c000b1-3a51-4da0-a1a6-1ce664249e73"
+    }
+  ],
+  "startedAt": "2026-09-09T16:17:50.934Z",
+  "finishedAt": "2026-09-09T16:30:25.473Z",
+  "activityStream": "ai-sdk-v1"
+}

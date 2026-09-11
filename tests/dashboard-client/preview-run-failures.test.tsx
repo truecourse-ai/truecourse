@@ -2,9 +2,9 @@
  * A run that ended badly, told in the three places a user could be standing.
  *
  * The run record carries its own reason, and that reason beats every derived
- * sentence: the index row prefers it to the checklist's "how far it got", the
- * run's own page states it outright, and the shell announces it once as it
- * happens — with a link to the run rather than to the tab it lives in.
+ * sentence: the conversation opens with it rather than with how far the
+ * checklist got, and the shell announces it once as it happens, with a link to
+ * the conversation itself rather than to the page it is listed on.
  *
  * Announcing once matters: the runs are re-read on every store write, so the
  * surface tracks run ids, not renders. A run that was already failed when the
@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { Toaster } from 'sonner';
@@ -46,7 +46,6 @@ vi.mock('@/lib/socket', () => {
 
 import PreviewApp from '@/preview/PreviewApp';
 import { toFailure, toNotifications } from '@/preview/shell/real-runs';
-import { runStory } from '@/components/sessions/run-model';
 import type { PublicSessionRun } from '@/lib/api';
 
 if (!Element.prototype.scrollTo) {
@@ -104,6 +103,16 @@ function serve(runs: PublicSessionRun[]) {
     if (pathname === '/api/repos') return json([REAL]);
     if (pathname === '/api/llm/config') return json({ config: { provider: 'anthropic' }, providers: ['anthropic'] });
     if (pathname === `/api/repos/${REAL.id}/sessions/runs`) return json({ runs: state.runs });
+    if (pathname === '/api/sessions/runs') {
+      return json({ runs: state.runs.map((run) => ({ ...run, repo: { id: REAL.id, fullName: REAL.name } })) });
+    }
+    const one = /^\/api\/sessions\/runs\/(.+)$/.exec(pathname);
+    if (one) {
+      const found = state.runs.find((run) => run.runId === decodeURIComponent(one[1]));
+      return found
+        ? json({ run: { ...found, repo: { id: REAL.id, fullName: REAL.name } } })
+        : json({ error: 'not found' }, 404);
+    }
     return json({ error: 'not found' }, 404);
   }) as unknown as typeof window.fetch;
   return state;
@@ -129,7 +138,7 @@ function renderAt(path: string) {
   );
 }
 
-const ACTIVITY = `/preview/repos/${REAL.id}/activity`;
+const AGENT = '/preview/agent';
 
 beforeEach(() => {
   listeners.clear();
@@ -141,24 +150,40 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// the model
+// the conversation
 // ---------------------------------------------------------------------------
 
 describe('what a failed run says about itself', () => {
-  it('prefers its own reason to the step the checklist stopped on', () => {
-    const steps = [{ key: 'tag', label: 'Curate documents', status: 'active' as const, detail: '3/12 docs' }];
-    expect(runStory(failed(), steps)).toBe(REASON);
-    // Without one, the checklist is still the story.
-    expect(runStory(scan(), steps)).toBe('curate documents · 3/12 docs');
+  it('opens the conversation with its own reason under the step it died in', async () => {
+    serve([failed()]);
+    renderAt(`${AGENT}/${encodeURIComponent(failed().runId)}`);
+
+    const reason = await screen.findByText(REASON);
+    // The step that was open when the run died carries the reason; the one it
+    // got through stays as it was.
+    const done = screen.getByRole('heading', { name: 'Discover documents' });
+    const dying = screen.getByRole('heading', { name: 'Curate documents' });
+    expect(done.compareDocumentPosition(dying) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(dying.compareDocumentPosition(reason) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('says nothing of the sort when the run has no reason to give', async () => {
+    serve([scan()]);
+    renderAt(`${AGENT}/${encodeURIComponent(scan().runId)}`);
+
+    // The checklist is the whole story: the steps, and their own counters.
+    await screen.findByRole('heading', { name: 'Curate documents' });
+    expect(screen.getByText('3/12 docs')).toBeInTheDocument();
+    expect(screen.queryByText(REASON)).toBeNull();
   });
 
   it('is announced with the reason and an address that opens the run itself', () => {
     const repo = { id: REAL.id, fullName: REAL.name };
     expect(toFailure(repo, failed())).toEqual({
       id: `real-${REAL.id}-${failed().runId}`,
-      title: 'Spec scan failed on linkwarden/linkwarden',
+      title: 'Document scan failed on linkwarden/linkwarden',
       body: REASON,
-      href: `/preview/repos/${REAL.id}/activity?run=${encodeURIComponent(failed().runId)}`,
+      href: `/preview/agent/${encodeURIComponent(failed().runId)}`,
     });
     // A run that is merely finished is not an announcement.
     expect(toFailure(repo, scan({ status: 'completed' }))).toBeNull();
@@ -169,26 +194,24 @@ describe('what a failed run says about itself', () => {
 // the surfaces
 // ---------------------------------------------------------------------------
 
-describe('the Activity surface', () => {
-  it('tells the reason on the row and again on the run', async () => {
+describe('the Agent index', () => {
+  it('says a conversation failed, and opens at its own address', async () => {
     serve([failed()]);
-    renderAt(ACTIVITY);
-    const user = userEvent.setup();
+    renderAt(AGENT);
 
-    const row = await screen.findByRole('button', { name: /Open spec scan run/ });
-    expect(row).toHaveTextContent(REASON);
-
-    await user.click(row);
-    expect(await screen.findByText(`Failed · ${REASON}`)).toBeInTheDocument();
+    const table = await screen.findByRole('table', { name: 'Agent conversations' });
+    const row = within(table).getAllByRole('row')[1]!;
+    expect(within(row).getByText('Failed')).toBeInTheDocument();
+    // The reason is the conversation's to tell; the row carries the status.
+    expect(row).not.toHaveTextContent(REASON);
   });
 
-  it('leaves a run with nothing to confess alone', async () => {
+  it('leaves a conversation with nothing to confess alone', async () => {
     serve([scan({ status: 'completed', finishedAt: '2026-08-30T10:05:00.000Z' })]);
-    renderAt(ACTIVITY);
+    renderAt(AGENT);
 
-    const row = await screen.findByRole('button', { name: /Open spec scan run/ });
-    // The checklist's own sentence, not a reason it does not have.
-    expect(row).toHaveTextContent('stopped at curate documents');
+    const table = await screen.findByRole('table', { name: 'Agent conversations' });
+    expect(within(table).getByText('Finished')).toBeInTheDocument();
   });
 });
 
@@ -203,15 +226,15 @@ describe('the failure toast', () => {
     state.runs = [failed()];
     fireSocket('session:runs-changed', { repoId: REAL.id });
 
-    expect(await screen.findByText('Spec scan failed on linkwarden/linkwarden')).toBeInTheDocument();
+    expect(await screen.findByText('Document scan failed on linkwarden/linkwarden')).toBeInTheDocument();
     expect(screen.getByText(REASON)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Open run/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Open conversation/ })).toBeInTheDocument();
 
     // Every store write re-reads the runs; the announcement is per run, not per read.
     fireSocket('session:runs-changed', { repoId: REAL.id });
     fireSocket('session:runs-changed', { repoId: REAL.id });
     await waitFor(() =>
-      expect(screen.getAllByText('Spec scan failed on linkwarden/linkwarden')).toHaveLength(1),
+      expect(screen.getAllByText('Document scan failed on linkwarden/linkwarden')).toHaveLength(1),
     );
   });
 
@@ -221,15 +244,15 @@ describe('the failure toast', () => {
 
     await screen.findByText('linkwarden/linkwarden');
     // The row knows; the shell does not shout about it.
-    await waitFor(() => expect(screen.queryByRole('button', { name: /Open run/ })).toBeNull());
-    expect(screen.queryByText('Spec scan failed on linkwarden/linkwarden')).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Open conversation/ })).toBeNull());
+    expect(screen.queryByText('Document scan failed on linkwarden/linkwarden')).toBeNull();
   });
 
   it('files the failure in the feed as well, still holding the reason', async () => {
     serve([failed()]);
     renderAt('/preview/notifications');
 
-    expect(await screen.findByText('Spec scan failed on linkwarden/linkwarden')).toBeInTheDocument();
+    expect(await screen.findByText('Document scan failed on linkwarden/linkwarden')).toBeInTheDocument();
     // The feed row shows the title only, so the reason is asserted on the
     // notification itself: it is what a reader searches and what the bell body
     // renders.

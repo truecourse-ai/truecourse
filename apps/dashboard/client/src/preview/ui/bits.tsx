@@ -12,7 +12,7 @@
 
 import { useCallback, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { Cloud, Github, Gitlab, Pin, type LucideIcon } from 'lucide-react';
+import { ChevronRight, Cloud, Github, Gitlab, Pin, type LucideIcon } from 'lucide-react';
 import type { InterfaceOrigin, ProviderId, RunOrigin, StepDriver } from '@/preview/data/types';
 
 const PROVIDER_ICON: Record<ProviderId, LucideIcon> = {
@@ -148,25 +148,61 @@ export function usePreviewSelection(initialId: string | null) {
   return { activeId, setActiveId, open, isPinned };
 }
 
+/** One step of the trail before a page's title: a link, with an optional mark before its words. */
+export interface Crumb {
+  label: ReactNode;
+  to: string;
+  icon?: ReactNode;
+}
+
 /**
- * THE page header: one compact full-width row (title, a muted subtitle, the
- * page's actions at the right edge), never a centered hero. Every top-level page
- * and the repository console wear it, so a page never looks like a different
- * product from the page beside it.
+ * THE page header: one row, never a second. The trail (`crumbs`) walks from the
+ * page's own section to the title, never from the workspace; the title is the
+ * page's name; a muted subtitle and the page's actions sit to the right. Every
+ * top-level page, the repository console and every page opened from a list
+ * wear it, so a page never looks like a different product from the page
+ * beside it.
  */
 export function PageHeader({
   title,
+  crumbs = [],
+  icon,
   subtitle,
   right,
 }: {
   title: ReactNode;
+  /** The trail before the title, outermost first. */
+  crumbs?: readonly Crumb[];
+  /** A mark before the title itself (a provider's logo before a repository). */
+  icon?: ReactNode;
   subtitle?: ReactNode;
   right?: ReactNode;
 }) {
+  const heading = (
+    <h1 className="min-w-0 truncate text-sm font-semibold text-foreground">
+      {icon}
+      {title}
+    </h1>
+  );
   return (
-    <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-6 py-3">
-      <h1 className="text-sm font-semibold text-foreground">{title}</h1>
-      {subtitle && <span className="text-xs text-muted-foreground">{subtitle}</span>}
+    <header className="flex shrink-0 items-center gap-3 border-b border-border px-6 py-3">
+      {crumbs.length === 0 ? (
+        heading
+      ) : (
+        <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-sm">
+          {crumbs.map((crumb, i) => (
+            <span key={i} className="flex shrink-0 items-center gap-1.5">
+              <Link to={crumb.to} className="flex items-center gap-1.5 font-semibold text-foreground hover:underline">
+                {crumb.icon}
+                {crumb.label}
+              </Link>
+              <ChevronRight aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            </span>
+          ))}
+          {heading}
+        </nav>
+      )}
+      {subtitle && <span className="shrink-0 text-xs text-muted-foreground">{subtitle}</span>}
       {right && <span className="ml-auto flex shrink-0 items-center gap-3">{right}</span>}
     </header>
   );

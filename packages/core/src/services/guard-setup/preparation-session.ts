@@ -173,6 +173,7 @@ export function buildPreparationSession(
       const { driver, persistence } = await context.acquire();
       const def: SessionDef<PreparationDraft> = {
         kind: PREPARATION_SESSION_KIND,
+        display: { title: 'Preparations' },
         systemPrompt: PREPARATION_PROMPT,
         budget: PREPARATION_SESSION_BUDGET,
         tools: [
@@ -256,6 +257,7 @@ export function buildPreparationSession(
       return {
         status: result.output.profiles.length ? 'ok' : 'skipped',
         reason: result.output.findings.join('; ') || undefined,
+        findings: result.output.findings,
         ...(context.runId() ? { sessionRunId: context.runId() } : {}),
       };
     } catch (error) {

@@ -25,6 +25,7 @@ import { createPreviewSpecSource } from '@/preview/data/fake-api';
 import { stalenessFor } from '@/preview/data/corpus-fixtures';
 import type { Repo } from '@/preview/data/types';
 import { PREVIEW_BASE } from '@/preview/shell/base';
+import { activityHref } from '@/preview/shell/real-runs';
 import { useGuardTabJump } from './tab-jump';
 import { useGuardRefresh } from './use-guard-refresh';
 
@@ -66,12 +67,18 @@ function CoverageBody({ repo }: { repo: Repo }) {
         title={repo.onboarding ? 'Onboarding has not produced anything yet' : 'Nothing has run on this repository yet'}
         body={
           repo.onboarding ? (
-            'The first scan, setup and generation are still running. Watch them in Activity.'
+            <>
+              The first scan, setup and generation are still running. Follow them on{' '}
+              <Link to={activityHref(repo.id)} className="text-primary hover:underline">
+                Agent
+              </Link>
+              .
+            </>
           ) : (
             <>
               Start the first scan from{' '}
-              <Link to={`${PREVIEW_BASE}/repos/${repo.id}/activity`} className="text-primary hover:underline">
-                Activity
+              <Link to={`${PREVIEW_BASE}/repos/${repo.id}/corpus`} className="text-primary hover:underline">
+                Corpus
               </Link>
               .
             </>

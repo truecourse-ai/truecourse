@@ -143,6 +143,7 @@ export function authProofSessionDef(input: {
   return {
     kind: AUTH_PROOF_SESSION_KIND,
     display: {
+      title: 'Auth proof',
       intro: `I'm proving that the supplied dependency \`${input.item.dependency.name}\` actually authenticates on this machine.`,
     },
     systemPrompt: AUTH_PROOF_SYSTEM_PROMPT,
@@ -308,6 +309,16 @@ export function buildAuthProof(
         (d) => `${d.name}: not registered — ${d.requirement} (register in ${resolved.localPath})`,
       );
 
+      // One verdict per supplied entry, for the step's facts. Composed here
+      // because only this seam sees a single dependency's outcome.
+      const verdicts = new Map<string, string>();
+      for (const dependency of unregistered) {
+        verdicts.set(
+          dependency.name,
+          `not proved, no instance is registered (register in ${resolved.localPath})`,
+        );
+      }
+
       let proved = 0;
       let failedSessions = 0;
       if (items.length > 0) {
@@ -331,15 +342,18 @@ export function buildAuthProof(
             if (outcome.status !== 'completed') {
               failedSessions++;
               blockedReasons.push(`${item.dependency.name}: ${describeSessionFailure(outcome.failure)}`);
+              verdicts.set(item.dependency.name, `not proved, ${describeSessionFailure(outcome.failure)}`);
               return;
             }
             if (outcome.output.verdict === 'proved') {
               proved++;
+              verdicts.set(item.dependency.name, 'proved against the registered instance');
             } else {
               // The schema's superRefine pairs `blocked` with the verdict, and
               // the loop parses every outcome before completing the session —
               // the half is present here.
               blockedReasons.push(`${item.dependency.name}: ${outcome.output.blocked!.registration}`);
+              verdicts.set(item.dependency.name, `not proved, ${outcome.output.blocked!.registration}`);
             }
           },
         });
@@ -347,10 +361,19 @@ export function buildAuthProof(
       }
 
       const sessionRunId = context.runId();
+      const facts = [
+        ...(items.length > 0
+          ? [
+              `${items.length} registered supplied dependenc${items.length === 1 ? 'y was' : 'ies were'} proved by running the program; an auth proof is never cached`,
+            ]
+          : []),
+        ...supplied.map((d) => `${d.name}: ${verdicts.get(d.name) ?? 'not proved, no proof session ran'}`),
+      ];
       if (failedSessions > 0 && proved === 0 && blockedReasons.length === failedSessions) {
         return {
           status: 'failed',
           reason: blockedReasons.join('; '),
+          facts,
           ...(sessionRunId ? { sessionRunId } : {}),
         };
       }
@@ -358,12 +381,14 @@ export function buildAuthProof(
         return {
           status: 'blocked',
           reason: `${proved > 0 ? `${proved} proved · ` : ''}${blockedReasons.join('; ')}`,
+          facts,
           ...(sessionRunId ? { sessionRunId } : {}),
         };
       }
       return {
         status: 'ok',
         reason: `${proved} supplied dependenc${proved === 1 ? 'y' : 'ies'} proved against the registered state`,
+        facts,
         ...(sessionRunId ? { sessionRunId } : {}),
       };
     } catch (error) {

@@ -177,7 +177,7 @@ describe('the Tests tab of a connected repository', () => {
     await userEvent.click(generate);
     await waitFor(() => expect(calls).toContain(`POST /api/repos/${REAL.id}/guard/generate`));
     expect(calls.some((call) => call.includes('/api/ee/'))).toBe(false);
-    expect(screen.getByRole('link', { name: 'View activity' })).toHaveAttribute('href', `/preview/repos/${REAL.id}/activity`);
+    expect(screen.getByRole('link', { name: 'Open Agent' })).toHaveAttribute('href', `/preview/agent?repo=${REAL.id}`);
   });
 
   it('lists the stored flows and opens one as its own page', async () => {

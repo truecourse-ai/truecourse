@@ -267,6 +267,7 @@ export interface AdjudicationSessionInput {
 export function adjudicationSessionDef(input: AdjudicationSessionInput): SessionDef<GuardAdjudication> {
   return {
     kind: ADJUDICATE_SESSION_KIND,
+    display: { title: 'Failure adjudication' },
     systemPrompt: ADJUDICATE_SYSTEM_PROMPT,
     tools: buildAdjudicationTools(input),
     outcomeSchema: GuardAdjudicationSchema,

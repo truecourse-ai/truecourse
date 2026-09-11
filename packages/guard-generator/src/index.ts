@@ -17,6 +17,8 @@ export {
   GENERATE_SESSION_STEPS,
   type GenerateStep,
   type GenerateGuardsOptions,
+  // One line per thing a run did, filed under the phase that did it.
+  type GuardGenerateFactStep,
   type GuardGenerateResult,
   type GuardGenerateModels,
   type GeneratedScenarioInfo,

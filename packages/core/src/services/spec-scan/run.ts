@@ -165,6 +165,15 @@ export const SCAN_STEPS = ['orchestrate', 'curate', 'settle', 'overlap'] as cons
 export type ScanStep = (typeof SCAN_STEPS)[number]
 
 /**
+ * The phase a fact is filed under. These are the scan CHECKLIST's step keys
+ * (`spec-in-process`'s `CURATE_STEPS`), which group the session steps above:
+ * discovery and the prefilter under `discover`, curation and settling under
+ * `tag`, the cluster reviews under `overlap`, and the deterministic fold
+ * (re-anchoring, dedup, auto-apply) under `verify`.
+ */
+export type ScanFactStep = 'discover' | 'tag' | 'overlap' | 'verify'
+
+/**
  * A single-step run (`only`) found a PRIOR step's artifact missing: the prior
  * step's outcome cache has no entry for `missing`, so replaying it would spend
  * sessions that belong to that step's own flag. Deliberately loud — a silent
@@ -245,6 +254,12 @@ export interface SpecScanSessionsOptions {
    */
   signal?: AbortSignal
   // --- progress hooks -------------------------------------------------------
+  /**
+   * One thing a phase DID, in the scan's own words: which doc, which subtree,
+   * which cluster, and whether a cache answered instead of a session. Appended
+   * in the order it happened; the counters stay on the hooks below.
+   */
+  onFact?: (step: ScanFactStep, line: string) => void
   onDiscover?: (docs: number, toCurate: number) => void
   /**
    * The scope orchestration's outcome: `covered` = the deterministic pre-pass
@@ -526,6 +541,8 @@ export async function runSpecScanSessions(
   /** Single-step mode: is `step` PRIOR to the chosen one (replay, never spend)? */
   const replayOnly = (step: ScanStep): boolean =>
     only !== undefined && SCAN_STEPS.indexOf(step) < SCAN_STEPS.indexOf(only)
+  /** One line of what a phase did, for the run record's checklist. */
+  const fact = (step: ScanFactStep, line: string): void => opts.onFact?.(step, line)
   let decisions = opts.decisions ?? readCorpusDecisions(repoRoot)
 
   // ---- Discover (det) ------------------------------------------------------
@@ -534,12 +551,19 @@ export async function runSpecScanSessions(
   let outOfScopeManualIncludes: string[] = []
   if (opts.docSource) {
     allDocs = await opts.docSource()
+    fact('discover', 'docs supplied by the caller, no repository walk')
   } else {
     const scope = loadSpecScope(repoRoot)
     allDocs = discoverDocs(repoRoot, { skipGit: opts.skipGit, scope })
     scopeGlobs = scope.globs
     if (scope.active) {
+      fact('discover', `walked the repository under ${scope.globs.join(', ')}`)
       outOfScopeManualIncludes = (decisions.manualIncludes ?? []).filter((p) => !scope.includes(p))
+      for (const pinned of outOfScopeManualIncludes) {
+        fact('discover', `${pinned}: pinned by a decision but outside the configured globs`)
+      }
+    } else {
+      fact('discover', 'walked the repository for documentation files')
     }
   }
 
@@ -557,6 +581,10 @@ export async function runSpecScanSessions(
   // pins (`manualIncludes`) never land here: applyScopeVerdicts keeps them.
   const scopeExcluded: Array<{ path: string; reason: string; category?: string }> = []
   const applyScope = (docs: DocCandidate[], sources: ScopeSourceView[]): DocCandidate[] => {
+    for (const verdict of decisions.scopeVerdicts ?? []) {
+      const who = verdict.resolvedBy === 'auto' ? 'the scope session' : 'a decision'
+      fact('discover', `${verdict.path}: ${verdict.verdict === 'exclude' ? 'excluded' : 'kept'} by ${who}, ${verdict.reason}`)
+    }
     const kept = applyScopeVerdicts(docs, decisions.scopeVerdicts ?? [], sources, decisions.manualIncludes ?? [])
     if (kept.length !== docs.length) {
       const keptSet = new Set(kept.map((d) => d.path))
@@ -574,17 +602,20 @@ export async function runSpecScanSessions(
   let orchestrateSummary: (ScanSessionKindSummary & { firstError?: string; allTransport: boolean }) | null =
     null
   if (opts.docSource || opts.disableScopeOrchestration) {
+    fact('discover', 'scope session skipped, the stored verdicts still apply')
     allDocs = applyScope(allDocs, [])
     opts.onScope?.('skipped')
   } else {
     const scanScope = buildScanScopeUniverse(buildScanUniverse(allDocs), readSourcesFile(repoRoot).sources)
     const coverage = scopeCoverage(scanScope, decisions.scopeVerdicts ?? [])
     if (coverage.covered) {
+      fact('discover', 'every subtree already carries a scope verdict, no scope session')
       opts.onScope?.('covered')
     } else if (replayOnly('orchestrate')) {
       // Single-step mode, a later step: the scope session belongs to
       // `--only-orchestrate`. Proceed on the stored verdicts — uncovered
       // subtrees stay kept, the same fail-open a lost session leaves.
+      fact('discover', 'scope session belongs to another step, the stored verdicts still apply')
       opts.onScope?.('skipped')
     } else {
       const summary = {
@@ -637,6 +668,12 @@ export async function runSpecScanSessions(
       // same channel every decisions write uses) — user rows untouched by the
       // merge, so this never loses a human's call.
       if (settled && !opts.skipCorpusWrite) writeDecisions(repoRoot, decisions)
+      fact(
+        'discover',
+        settled
+          ? 'a scope session decided which subtrees the scan covers'
+          : 'the scope session failed, the stored verdicts were kept',
+      )
       opts.onScope?.(settled ? 'ran' : 'failed')
     }
     allDocs = applyScope(allDocs, scanScope.sources)
@@ -721,6 +758,16 @@ export async function runSpecScanSessions(
   // prose session; a force-exclude drops a doc entirely, session unspent.
   const structuralKept = allDocs.filter((d) => isStructuralSpecDoc(d) && !manualExcludes.has(d.path))
   const curateItems = toClassify.filter((d) => !manualExcludes.has(d.path))
+  for (const skip of prefilterSkipped) {
+    fact('discover', `${skip.path}: dropped before curation, ${skip.reason}`)
+  }
+  for (const doc of structuralKept) {
+    fact('discover', `${doc.path}: structural spec, kept without a session`)
+  }
+  for (const doc of allDocs) {
+    if (manualExcludes.has(doc.path)) fact('discover', `${doc.path}: force-excluded by a decision`)
+    else if (manualSet.has(doc.path)) fact('discover', `${doc.path}: force-included by a decision`)
+  }
   opts.onDiscover?.(allDocs.length, curateItems.length)
 
   // ---- Curate-doc sessions (one per doc) -----------------------------------
@@ -807,6 +854,12 @@ export async function runSpecScanSessions(
     tagsByPath.set(doc.path, { tags, ...(status ? { status } : {}) })
   }
 
+  /** Who answered for this doc: its curation session, or the outcome cache. */
+  const curatedBy = (path: string): string =>
+    verdictByPath.get(path)?.outcome.fromCache === true ? 'from cache' : 'by a session'
+  const areaLabel = (tags: readonly AreaTag[]): string =>
+    tags.length > 0 ? tags.map((t) => `${t.product}/${t.concern}`).join(', ') : 'no areas'
+
   for (const doc of allDocs) {
     if (isStructuralSpecDoc(doc)) continue // appended at assembly, never sessioned
     if (manualExcludes.has(doc.path)) continue // dropped whole — not even skippedDocs
@@ -819,6 +872,7 @@ export async function runSpecScanSessions(
     if (!result || result.outcome.status === 'failed') {
       // Fail-open per doc, mirroring the one-shot: {include: true, tags: []},
       // status from the deterministic header parse. Counted in classifyFailed.
+      fact('tag', `${doc.path}: kept with no areas, its curation session failed`)
       keepDoc(doc, [], undefined)
       continue
     }
@@ -831,6 +885,7 @@ export async function runSpecScanSessions(
       category: v.category,
     })
     if (attributed.include || manualSet.has(doc.path)) {
+      fact('tag', `${doc.path}: kept, ${areaLabel(v.areas)}, ${curatedBy(doc.path)}`)
       keepDoc(doc, v.areas, v.status)
       continue
     }
@@ -839,10 +894,15 @@ export async function runSpecScanSessions(
       if (namesOurProduct(doc, ours)) {
         // The alias backstop: the doc's prose names our own product — reinstate.
         reinstatedCount.value++
+        fact(
+          'tag',
+          `${doc.path}: read as third-party but its prose names our product, kept, ${areaLabel(v.areas)}`,
+        )
         keepDoc(doc, v.areas, v.status)
         continue
       }
     }
+    fact('tag', `${doc.path}: skipped, ${attributed.reason}, ${curatedBy(doc.path)}`)
     skippedDocs.push({ path: doc.path, reason: attributed.reason, category: attributed.category })
   }
 
@@ -893,10 +953,19 @@ export async function runSpecScanSessions(
     if (settlement) {
       const applied = applySettlement(settlement, vocabView)
       vocabMap = applied.vocab
+      const settledBy = settleSummary.fromCache > 0 ? 'from cache' : 'by a session'
+      fact('tag', `area labels settled ${settledBy}`)
+      for (const [from, to] of Object.entries(applied.vocab.products)) {
+        if (from !== to) fact('tag', `product "${from}" merged into "${to}"`)
+      }
+      for (const [from, to] of Object.entries(applied.vocab.concerns)) {
+        if (from !== to) fact('tag', `concern "${from}" merged into "${to}"`)
+      }
       // Subdivision reassignments rewrite the CANONICAL concern per doc; the
       // merges ride the vocab map through the grouper, exactly as the old
       // normalizer's map did.
       for (const [ref, perDoc] of applied.reassignments) {
+        for (const [from, to] of perDoc) fact('tag', `${ref}: concern "${from}" reassigned to "${to}"`)
         const tags = canonicalByPath.get(ref)
         if (!tags) continue
         canonicalByPath.set(
@@ -906,9 +975,11 @@ export async function runSpecScanSessions(
       }
       opts.onSettle?.(settleSummary.fromCache > 0 ? 'cached' : 'ran')
     } else {
+      fact('tag', 'the area settling session failed, the labels were kept as curated')
       opts.onSettle?.('failed')
     }
   } else {
+    fact('tag', 'the area labels needed no settling')
     opts.onSettle?.('skipped')
   }
 
@@ -948,6 +1019,8 @@ export async function runSpecScanSessions(
   // per area — a doc with no candidate collision costs no session at all.
   const overlapItems: OverlapWorkItem[] =
     opts.disableOverlapDetection === true ? [] : deriveOverlapWorkItems(grouped.areas, keptProse, vocabMap)
+  if (opts.disableOverlapDetection === true) fact('overlap', 'overlap detection is off for this run')
+  else if (overlapItems.length === 0) fact('overlap', 'no two docs collide, no cluster to review')
 
   // Which areas each doc landed in — the SPAN a flagged pair still records
   // (`overlap.areas`) even though the pair is judged in one area only.
@@ -1032,6 +1105,10 @@ export async function runSpecScanSessions(
         // too (a failure has a transcript even though it has no outcome), so
         // the corpus separates "opened 45 sections and still ran out" from
         // "never really read".
+        fact(
+          'overlap',
+          `${overlapWorkItem(item.areaId, item.cluster)}: session failed, ${item.pairs.length} candidate pair${item.pairs.length === 1 ? '' : 's'} left unchecked`,
+        )
         addNotReached(item.areaId, item.docs.map((d) => d.path))
         addUnchecked(item.areaId, item.pairs.map(pairRecord))
         if (result.sessionId !== undefined) {
@@ -1040,6 +1117,11 @@ export async function runSpecScanSessions(
         return
       }
       const briefed = new Set(item.docs.map((d) => d.path))
+      const reviewedBy = result.outcome.fromCache === true ? ', from cache' : ''
+      fact(
+        'overlap',
+        `${overlapWorkItem(item.areaId, item.cluster)}: ${item.pairs.length} candidate pair${item.pairs.length === 1 ? '' : 's'} compared, ${result.outcome.output.overlaps.length} disagreement${result.outcome.output.overlaps.length === 1 ? '' : 's'}${reviewedBy}`,
+      )
       for (const flagged of result.outcome.output.overlaps) {
         // The fold's own validation — never trust the transcript: a pointer to
         // a doc the session was not briefed on is dropped; every kept pointer
@@ -1048,6 +1130,16 @@ export async function runSpecScanSessions(
         if (a === b || !briefed.has(a) || !briefed.has(b)) continue
         const sections = flagged.sections.filter((s) => s.doc === a || s.doc === b)
         const verified = verifyOverlapSections({ docs: [a, b], note: flagged.note, sections, bodyOf })
+        fact('overlap', `${a} vs ${b}: ${flagged.note}`)
+        verified.forEach((ptr, i) => {
+          const claimed = sections[i]
+          if (claimed && claimed.heading !== ptr.heading) {
+            fact(
+              'verify',
+              `${ptr.doc}: pointer re-anchored from ${claimed.heading ?? 'the lead'} to ${ptr.heading ?? 'the lead'}`,
+            )
+          }
+        })
         overlapEntries.push({
           area: item.areaId,
           overlap: {
@@ -1077,6 +1169,12 @@ export async function runSpecScanSessions(
   // under a representative area, every spanned area listed.
   const overlapsByArea = new Map<string, Overlap[]>()
   for (const merged of dedupeCrossAreaOverlaps(overlapEntries)) {
+    if (merged.areas.length > 1) {
+      fact(
+        'verify',
+        `${merged.overlap.docs[0]} vs ${merged.overlap.docs[1]}: one disagreement across ${merged.areas.join(', ')}`,
+      )
+    }
     const list = overlapsByArea.get(merged.area) ?? []
     list.push({ ...merged.overlap, areas: merged.areas })
     overlapsByArea.set(merged.area, list)
@@ -1125,10 +1223,19 @@ export async function runSpecScanSessions(
       skippedDocs: corpus.skippedDocs,
       generatedAt: corpus.generatedAt,
     })
+    fact('verify', 'corpus.json written')
     effectiveDecisions = pruneOrphanedConflictResolutions(repoRoot, corpus, decisions)
     const auto = autoApplyHighConfidenceRecommendations(repoRoot, corpus, effectiveDecisions)
     effectiveDecisions = auto.decisions
     autoResolvedConflicts = auto.applied
+    for (const applied of auto.applied) {
+      fact(
+        'verify',
+        applied.verdict === 'dismissed'
+          ? `${applied.a} vs ${applied.b}: auto-dismissed in ${applied.area}`
+          : `${applied.a} vs ${applied.b}: auto-resolved in favour of ${applied.verdict === 'a' ? applied.a : applied.b}`,
+      )
+    }
   }
 
   // ---- Stats ----------------------------------------------------------------

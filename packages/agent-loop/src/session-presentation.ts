@@ -28,8 +28,14 @@ import { z } from 'zod';
 export const ToolDisplaySchema = z.object({ one: z.string(), many: z.string() });
 export type ToolDisplay = z.infer<typeof ToolDisplaySchema>;
 
-/** What a session says about itself: its opening line and its tool wording. */
+/**
+ * What a session says about itself: the short name of the kind of work it is
+ * ("Scenario author", "Document curation"), its opening line and its tool
+ * wording. `title` names the KIND, never the work item: the item is the
+ * session's `workItem`.
+ */
 export const SessionDisplaySchema = z.object({
+  title: z.string().optional(),
   intro: z.string().optional(),
   tools: z.record(ToolDisplaySchema).optional(),
 });
@@ -53,7 +59,10 @@ export type DisplayDispute = z.infer<typeof DisplayDisputeSchema>;
 /**
  * One line of a checklist block. `key` is the stable id its writer updates in
  * place across rewrites; `sessionKinds` is the item's own claim of which
- * session kinds did its work, so no reader needs a phase-to-kind table.
+ * session kinds did its work, so no reader needs a phase-to-kind table;
+ * `facts` is what the step DID, one line per thing, in the engine's own words
+ * and in the order it happened. Counts stay in `detail`; a fact says which
+ * doc, which flow, which interface, and whether a cache answered.
  */
 export const ChecklistItemSchema = z.object({
   key: z.string(),
@@ -61,6 +70,7 @@ export const ChecklistItemSchema = z.object({
   status: z.enum(['pending', 'active', 'done', 'error']),
   detail: z.string().optional(),
   sessionKinds: z.array(z.string()).optional(),
+  facts: z.array(z.string()).optional(),
 });
 export type ChecklistItem = z.infer<typeof ChecklistItemSchema>;
 

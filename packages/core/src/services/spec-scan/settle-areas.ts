@@ -499,6 +499,7 @@ export function settleAreasSessionDef(input: SettleAreasSessionInput): SessionDe
     outcomeSchema: AreaSettlementSchema,
     budget: SETTLE_AREAS_BUDGET,
     display: {
+      title: 'Area settling',
       intro: "I'm settling the area labels, merging synonyms so the corpus speaks one vocabulary.",
     },
     presentOutcome: presentSettlement,

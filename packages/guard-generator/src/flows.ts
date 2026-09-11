@@ -849,6 +849,9 @@ export interface SynthesizeFlowsOptions {
   write?: boolean
   /** Progress hook, fired once per area as it settles. */
   onArea?: (areaId: string) => void
+  /** One line per area (and one for the epic pass) naming what synthesis
+   *  produced there and whether the session ran or a cache answered. */
+  onFact?: (line: string) => void
   /** Clock seam for `generatedAt` (tests pin it). */
   now?: () => Date
 }
@@ -936,16 +939,26 @@ export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<Flo
   sessionSummaries.push(summary)
   calls += summary.ran
   const outcomes: AreaOutcome[] = areas.map((area): AreaOutcome => {
-    const r = byArea.get(flowAreaKey(area))
-    if (!r) return { ok: false, reason: 'the flows session produced no result for this area' }
-    if (!r.ok) return { ok: false, reason: r.reason }
+    const key = flowAreaKey(area)
+    const r = byArea.get(key)
+    if (!r) {
+      const reason = 'the flows session produced no result for this area'
+      opts.onFact?.(`${key}: no flows, ${reason}`)
+      return { ok: false, reason }
+    }
+    if (!r.ok) {
+      opts.onFact?.(`${key}: no flows, ${r.reason}`)
+      return { ok: false, reason: r.reason }
+    }
     const v = validateAreaSynthesis(area, r.value, buildClaimIndex(area.claims), r.inputsKey)
     if (v.unknownReferences.length > 0 || v.uncoveredClaims.length > 0) {
       const parts: string[] = []
       if (v.unknownReferences.length > 0) parts.push(`${v.unknownReferences.length} milestone(s) matched no claim (${v.unknownReferences[0]})`)
       if (v.uncoveredClaims.length > 0) parts.push(`${v.uncoveredClaims.length} claim(s) left unaccounted (${v.uncoveredClaims[0]})`)
+      opts.onFact?.(`${key}: refused, ${parts.join('; ')}`)
       return { ok: false, reason: `flow synthesis refused: ${parts.join('; ')}` }
     }
+    opts.onFact?.(`${key}: ${v.flows.length} flow${v.flows.length === 1 ? '' : 's'}, ${r.fromCache ? 'from cache' : 'synthesized'}`)
     return { ok: true, flows: v.flows, noFlowClaims: v.noFlowClaims }
   })
 
@@ -987,16 +1000,23 @@ export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<Flo
     calls += summary.ran
     if (!epicResult.ok) {
       unsettled.push({ areaId: '(epic)', reason: epicResult.reason })
+      opts.onFact?.(`(epic): no epics, ${epicResult.reason}`)
     } else {
       const built = buildEpicDrafts(epicResult.value, drafts, buildClaimIndex(claims), epicResult.inputsKey)
       if (built.unknownReferences.length > 0) {
         unsettled.push({ areaId: '(epic)', reason: `epic pass refused: ${built.unknownReferences[0]}` })
+        opts.onFact?.(`(epic): refused, ${built.unknownReferences[0]}`)
       } else {
         const epicPass = applySubsumption(built.epics)
         subsumed.push(...epicPass.dropped)
         drafts = [...drafts, ...epicPass.kept]
+        opts.onFact?.(
+          `(epic): ${epicPass.kept.length} epic${epicPass.kept.length === 1 ? '' : 's'}, ${epicResult.fromCache ? 'from cache' : 'composed'}`,
+        )
       }
     }
+  } else {
+    opts.onFact?.('(epic): skipped, fewer than two areas produced flows')
   }
 
   // Bindings + fingerprints, then identity against the committed corpus.

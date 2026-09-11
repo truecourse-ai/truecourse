@@ -447,15 +447,28 @@ export async function guardGenerateInProcess(
 
     transport = resolveTransport(options);
   } catch (e) {
-    untap?.();
-    // A stop the user asked for is not a failure; a gate that refused is, and
-    // the record carries its reason under the gate's own kind.
-    if (e instanceof EstimateDeclined) finishRun('interrupted');
-    else if (e instanceof OpenConflictsError) {
-      finishRun('failed', { error: { message: firstLine(e.message) ?? e.message, kind: 'open-conflicts' } });
-    } else {
-      finishRun('failed', { error: { message: (e as Error).message, kind: 'llm-config' } });
+    // The gates run before the first step opens, so they stop on `index`, the
+    // step a reader is looking at when the run ends there: a refusal takes the
+    // step the way a mid-run abort does (the reason as its error, "stopped:"
+    // as its fact), and a decline is a stop the user asked for, not a failure.
+    // The tap stays on until the step has said so, or the record never hears it.
+    if (e instanceof EstimateDeclined) {
+      tracker?.fact('index', 'stopped: the cost estimate was declined');
+      untap?.();
+      finishRun('interrupted');
+      throw e;
     }
+    const reason =
+      e instanceof OpenConflictsError
+        ? (firstLine(e.message) ?? e.message)
+        : `the LLM provider is unusable (${(e as Error).message})`;
+    tracker?.fact('index', `stopped: ${reason}`);
+    tracker?.error('index', reason);
+    untap?.();
+    // The record carries the reason under the gate's own kind.
+    finishRun('failed', {
+      error: { message: reason, kind: e instanceof OpenConflictsError ? 'open-conflicts' : 'llm-config' },
+    });
     throw e;
   }
 
@@ -696,6 +709,9 @@ export async function guardGenerateInProcess(
         building = phase === 'build';
         renderValidate();
       },
+      // One line per THING the run did, filed under the step that did it. The
+      // engine's phase names ARE this checklist's keys, so they line up.
+      onFact: (step, line) => tracker?.fact(step, line),
       onFlowSettled: (settled, total) => {
         throwIfAborted();
         building = false;
@@ -714,6 +730,7 @@ export async function guardGenerateInProcess(
     // "Birth-validating — 0/0 flows settled" for work that never happened, and the
     // dashboard popup (same steps payload) would tick them green.
     if (guard.status === 'no-docs' || guard.status === 'recipe-failed' || guard.status === 'llm-failed') {
+      tracker?.fact(STEPS[cur], `stopped: ${firstLine(guard.reason) ?? `the run ended ${guard.status}`}`);
       tracker?.error(STEPS[cur], firstLine(guard.reason) ?? 'aborted');
       // Single-step mode, before the final step: the same write gate as a clean
       // stop. This run could never have produced a whole generate's report, so

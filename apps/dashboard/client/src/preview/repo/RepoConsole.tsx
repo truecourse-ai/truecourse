@@ -1,6 +1,5 @@
 // PREVIEW (UI mock, fake data) with exceptions: on a REAL (provider-connected)
-// repository the Activity tab is the real thing, reading and live-tailing the
-// repository's sessions store, the Interfaces tab reads the server's own
+// repository the Interfaces tab reads the server's own
 // interface catalog for that repository, the Dependencies tab reads and
 // registers against its stored dependency catalog, the Corpus tab reads the
 // corpus its scan stored, the Coverage tab reads the stored coverage summary
@@ -13,8 +12,9 @@
  * The section switcher is gone with Code Analysis, so the left menu here is not
  * a switcher between products, it is the tabs of the one thing this repository
  * has: Coverage first (how much of the spec is proven), then Corpus (the
- * documents and conflicts, by version), Sources, Tests, Interfaces, Runs, Activity, Dependencies, and the
- * repository's Settings last. There is no pull request page: a PR is seen
+ * documents and conflicts, by version), Sources, Tests, Interfaces, Runs, Dependencies, and the
+ * repository's Settings last. The agent's own work is not a tab here: it lives
+ * on the Agent page, narrowed to this repository. There is no pull request page: a PR is seen
  * through its runs (the Pull request filter in Runs) and, when it changed spec
  * documents, through its coverage version in Coverage.
  *
@@ -23,15 +23,13 @@
  */
 
 import { Link, useParams } from 'react-router-dom';
-import { ChevronRight, FolderGit2 } from 'lucide-react';
+import { FolderGit2 } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
-import { SessionsActivityView as RealSessionsActivityView } from '@/components/sessions/SessionsActivityView';
-import { SessionPage, SessionsActivityView } from '@/preview/activity/SessionsActivityView';
-import { ProviderIcon, SideMenu } from '@/preview/ui/bits';
+import { PageHeader, ProviderIcon, SideMenu } from '@/preview/ui/bits';
 import { StatusWord, CONCLUSION_TONE } from '@/preview/ui/status-word';
 import { guardForRepo } from '@/preview/data';
 import { usePreviewState } from '@/preview/shell/preview-state';
-import { useRunTrigger } from '@/preview/shell/use-run-trigger';
+import { activityHref } from '@/preview/shell/real-runs';
 import { PREVIEW_BASE } from '@/preview/shell/PreviewShell';
 import { CorpusPage } from './CorpusPage';
 import { CorpusTab } from './CorpusTab';
@@ -56,14 +54,13 @@ const TABS = [
   { id: 'sources', label: 'Sources', group: 'setup' },
   { id: 'interfaces', label: 'Interfaces', group: 'setup' },
   { id: 'dependencies', label: 'Dependencies', group: 'setup' },
-  { id: 'activity', label: 'Activity', group: 'setup' },
   { id: 'settings', label: 'Settings', group: 'setup' },
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
 
 export default function RepoConsole() {
-  const { slug, tab, runId, flowId, sourceId, interfaceId, dependencyName, sessionId, docRef, conflictId } = useParams<{
+  const { slug, tab, runId, flowId, sourceId, interfaceId, dependencyName, docRef, conflictId } = useParams<{
     slug: string;
     tab?: string;
     runId?: string;
@@ -71,15 +68,11 @@ export default function RepoConsole() {
     sourceId?: string;
     interfaceId?: string;
     dependencyName?: string;
-    sessionId?: string;
     docRef?: string;
     conflictId?: string;
   }>();
-  const { repos, workspace, llmProvider } = usePreviewState();
+  const { repos, llmProvider } = usePreviewState();
   const repo = repos.find((r) => r.id === slug);
-  // Built for every repository, used only by a real one: a fixture repository's
-  // Activity is a mock and has nothing to start.
-  const starter = useRunTrigger(slug ?? '');
   const guard = guardForRepo(slug);
   const implied = runId
     ? 'runs'
@@ -91,11 +84,9 @@ export default function RepoConsole() {
           ? 'interfaces'
           : dependencyName
             ? 'dependencies'
-            : sessionId
-              ? 'activity'
-              : docRef || conflictId
-                ? 'corpus'
-                : undefined;
+            : docRef || conflictId
+              ? 'corpus'
+              : undefined;
   const active = (TABS.find((t) => t.id === (tab ?? implied))?.id ?? 'coverage') as TabId;
 
   if (!repo) {
@@ -118,25 +109,23 @@ export default function RepoConsole() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-6 py-3">
-        <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-sm">
-          <Link
-            to={PREVIEW_BASE}
-            className="font-semibold text-foreground hover:underline"
-          >
-            {workspace.name}
-          </Link>
-          <ChevronRight aria-hidden className="h-3.5 w-3.5 text-muted-foreground" />
-          <ProviderIcon provider={repo.provider} className="h-4 w-4" />
-          <h1 className="font-semibold text-foreground">{repo.fullName}</h1>
-        </nav>
-        <span className="font-mono text-[11px] text-muted-foreground">{repo.defaultBranch}</span>
-        {repo.onboarding && <span className="text-[11px] text-sky-600 dark:text-sky-400">onboarding in flight</span>}
-        <span className="ml-auto flex shrink-0 items-center gap-3">
-          <span className="text-[11px] text-muted-foreground">{repo.lastCheck.at}</span>
-          <StatusWord tone={CONCLUSION_TONE[repo.lastCheck.conclusion]} word={repo.lastCheck.word} />
-        </span>
-      </header>
+      <PageHeader
+        crumbs={[{ label: 'Home', to: PREVIEW_BASE }]}
+        icon={<ProviderIcon provider={repo.provider} className="mr-1.5 inline-block h-4 w-4 align-text-bottom" />}
+        title={repo.fullName}
+        subtitle={
+          <span className="flex items-center gap-3">
+            <span className="font-mono">{repo.defaultBranch}</span>
+            {repo.onboarding && <span className="text-sky-600 dark:text-sky-400">onboarding in flight</span>}
+          </span>
+        }
+        right={
+          <>
+            <span className="text-[11px] text-muted-foreground">{repo.lastCheck.at}</span>
+            <StatusWord tone={CONCLUSION_TONE[repo.lastCheck.conclusion]} word={repo.lastCheck.word} />
+          </>
+        }
+      />
 
       {/* A real repository with no provider set cannot scan at all, and every
           tab below it is waiting on a scan. Said once, where the work is. */}
@@ -174,13 +163,6 @@ export default function RepoConsole() {
             // owns its own empty state, so a repository nothing ran on says so
             // here rather than through the fixture gate below.
             <CoverageTab repo={repo} />
-          ) : active === 'activity' && repo.real ? (
-            // REAL, not mock: a provider-connected repository is a real registry
-            // entry, so its Activity reads the real sessions store over
-            // `/api/repos/<id>/sessions/*` and live-tails it over the socket.
-            // A `truecourse spec scan` in that clone shows up here as it runs.
-            // The fixture repositories keep the mock below.
-            <RealSessionsActivityView repoId={repo.id} starter={starter} />
           ) : active === 'interfaces' && repo.real ? (
             // REAL, not mock: the interface catalog of a connected repository is
             // derived from that repository's own tree, so this surface reads the
@@ -260,15 +242,21 @@ export default function RepoConsole() {
                   <>
                     Start the first scan from{' '}
                     <Link
-                      to={`${PREVIEW_BASE}/repos/${repo.id}/activity`}
+                      to={`${PREVIEW_BASE}/repos/${repo.id}/corpus`}
                       className="text-primary hover:underline"
                     >
-                      Activity
+                      Corpus
                     </Link>
                     .
                   </>
                 ) : (
-                  'The first scan, setup and generation are still running. Watch them in Activity.'
+                  <>
+                    The first scan, setup and generation are still running. Follow them on{' '}
+                    <Link to={activityHref(repo.id)} className="text-primary hover:underline">
+                      Agent
+                    </Link>
+                    .
+                  </>
                 )
               }
             />
@@ -299,12 +287,6 @@ export default function RepoConsole() {
               <RunPage repo={repo} runId={decodeURIComponent(runId)} />
             ) : (
               <RunsTab repo={repo} />
-            )
-          ) : active === 'activity' ? (
-            sessionId ? (
-              <SessionPage repoId={repo.id} sessionId={decodeURIComponent(sessionId)} />
-            ) : (
-              <SessionsActivityView repoId={repo.id} />
             )
           ) : active === 'sources' ? (
             sourceId ? (

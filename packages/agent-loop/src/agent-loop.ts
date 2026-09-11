@@ -606,10 +606,15 @@ function startSession<TOutcome>(
 function sessionDisplay<T>(def: SessionDef<T>): SessionDisplay | undefined {
   const tools: Record<string, ToolDisplay> = {};
   for (const tool of def.tools) if (tool.display) tools[tool.name] = tool.display;
+  const title = def.display?.title;
   const intro = def.display?.intro;
   const hasTools = Object.keys(tools).length > 0;
-  if (intro === undefined && !hasTools) return undefined;
-  return { ...(intro === undefined ? {} : { intro }), ...(hasTools ? { tools } : {}) };
+  if (title === undefined && intro === undefined && !hasTools) return undefined;
+  return {
+    ...(title === undefined ? {} : { title }),
+    ...(intro === undefined ? {} : { intro }),
+    ...(hasTools ? { tools } : {}),
+  };
 }
 
 /**

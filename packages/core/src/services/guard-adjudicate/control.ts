@@ -150,6 +150,7 @@ export function controlSessionDef(exec: AdjudicationExecution): SessionDef<Guard
   const state = { executions: 0 };
   return {
     kind: CONTROL_SESSION_KIND,
+    display: { title: 'Board adjudication' },
     systemPrompt: CONTROL_SYSTEM_PROMPT,
     tools: [runControlTool(exec, state)],
     outcomeSchema: GuardControlOutcomeSchema,

@@ -5,7 +5,7 @@ class ActivityAccessError extends Error {}
 
 /** SDK owns SSE decoding. This adapter only owns the run cursor and connection lifetime. */
 export async function followActivity({
-  url, runId, signal, onEvent, onProgress, onConnection, fetcher = fetch,
+  url, runId, signal, onEvent, onProgress, onConnection, fetcher = fetch, from = -1,
 }: {
   url: string;
   runId: string;
@@ -14,8 +14,11 @@ export async function followActivity({
   onProgress?: (progress: ActivityProgress) => void;
   onConnection: (error: string | null) => void;
   fetcher?: typeof fetch;
+  /** Where to open the replay. A caller that already read the history by page
+   *  passes the cursor it reached, so the tail is a tail and not a re-read. */
+  from?: number;
 }): Promise<void> {
-  let after = -1;
+  let after = from;
   let retry = 0;
   while (!signal.aborted) {
     let reader: ReadableStreamDefaultReader<import('ai').UIMessageChunk> | undefined;

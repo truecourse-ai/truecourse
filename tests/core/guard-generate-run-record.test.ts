@@ -130,15 +130,21 @@ describe('a generate the gates stop is on record too', () => {
       }),
     );
 
+    const tracker = new StepTracker(() => {}, GUARD_GENERATE_STEPS.map((s) => ({ ...s })));
     await expect(
-      guardGenerateInProcess(repo, { transport, transportMode: 'api', sessionsKey }),
+      guardGenerateInProcess(repo, { tracker, transport, transportMode: 'api', sessionsKey }),
     ).rejects.toBeInstanceOf(OpenConflictsError);
 
     const [run] = listSessionRuns(sessionsKey, 'guard-generate');
-    expect(run).toMatchObject({
-      status: 'failed',
-      error: { kind: 'open-conflicts', message: expect.stringContaining('1 open spec conflict') },
-    });
+    const reason = '1 open spec conflict must be resolved before guard generate.';
+    expect(run).toMatchObject({ status: 'failed', error: { kind: 'open-conflicts', message: reason } });
+    // The gate stops the run on `index`, the way a mid-run abort would: the
+    // step errors on the reason and says it as its fact; the rest never open.
+    const checklist = run.display?.blocks.find((b) => b.kind === 'checklist') as
+      | { items: { key: string; status: string; detail?: string; facts?: string[] }[] }
+      | undefined;
+    expect(checklist?.items[0]).toMatchObject({ key: 'index', status: 'error', detail: reason, facts: [`stopped: ${reason}`] });
+    expect(checklist?.items.slice(1).every((i) => i.status === 'pending')).toBe(true);
   });
 
   it('records a declined estimate as interrupted', async () => {

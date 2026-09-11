@@ -70,6 +70,7 @@ export function recipeRepairSessionDef(input: RecipeRepairSessionInput): Session
   return {
     kind: RECIPE_REPAIR_SESSION_KIND,
     display: {
+      title: 'Recipe repair',
       intro: 'I\'m repairing the recipe proposal the engine rejected, verifying each fix by really installing, building and booting it.',
     },
     systemPrompt: SYSTEM_PROMPT,

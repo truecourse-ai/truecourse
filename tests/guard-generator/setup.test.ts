@@ -293,6 +293,39 @@ describe('runGuardSetup — the step spine (plan 03 step 8)', () => {
     ])
   })
 
+  it('counts the preparation session’s findings in the step and leaves them to the session’s outcome', async () => {
+    const r = fixtureRepo()
+    writeRecipe(r)
+    const findings = [
+      'filecli is a stateless CLI, not a stateful service.',
+      'No datastore of any kind exists.',
+      'The application reads no configuration.',
+    ]
+    const facts: string[] = []
+    const details: string[] = []
+
+    const { report } = await runGuardSetup(
+      baseOpts(r, {
+        seedSession: seedSeam().seam,
+        preparationSession: async () => ({ status: 'skipped', reason: findings.join('; '), findings }),
+        onStepFact: (step, line) => {
+          if (step === 'preparations') facts.push(line)
+        },
+        onStepDone: (step, detail) => {
+          if (step === 'preparations') details.push(detail ?? '')
+        },
+      }),
+    )
+
+    expect(report.status).toBe('ok')
+    const summary = 'no private starting state was authored, 3 findings'
+    expect(facts[0]).toBe(summary)
+    expect(facts.some((line) => findings.some((finding) => line.includes(finding)))).toBe(false)
+    expect(details).toEqual([summary])
+    // The record keeps the findings as the one line the spine stores.
+    expect(report.steps.find((s) => s.key === 'preparations')?.reason).toBe(findings.join('; '))
+  })
+
   // `blocked` is the auth step's alone — a supplied credential waiting on a user
   // registration. Every other step is ok/skipped/failed.
   it('the shared schema allows `blocked` on auth and refuses it anywhere else', () => {

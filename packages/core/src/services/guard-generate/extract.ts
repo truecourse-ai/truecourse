@@ -302,6 +302,7 @@ export interface ExtractSessionInput {
 export function extractSessionDef(input: ExtractSessionInput): SessionDef<ExtractOutcome> {
   return {
     kind: EXTRACT_SESSION_KIND,
+    display: { title: 'Claim extraction' },
     systemPrompt: EXTRACT_SESSION_SYSTEM_PROMPT,
     tools: [
       readOwnChunkTool(input.doc),

@@ -50,7 +50,7 @@ vi.mock('@/lib/socket', () => {
 });
 
 import PreviewApp from '@/preview/PreviewApp';
-import { relativeTime, repoRunState, toJobChain } from '@/preview/shell/real-runs';
+import { relativeTime, repoRunState, toJobChain, toNotifications } from '@/preview/shell/real-runs';
 import type { PublicSessionRun } from '@/lib/api';
 
 function fireSocket(event: string, payload: unknown): void {
@@ -148,7 +148,7 @@ describe('a run record as the shell reads it', () => {
   it('is an onboarding job whose steps are the run checklist', () => {
     const job = toJobChain(repo, runningScan(), true);
     expect(job.title).toBe('Onboarding linkwarden/linkwarden');
-    expect(job.href).toBe('/preview/repos/linkwarden/activity');
+    expect(job.href).toBe(`/preview/agent/${encodeURIComponent(runningScan().runId)}`);
     expect(job.steps).toEqual([
       { key: 'discover', label: 'Discover documents', state: 'done', counter: '41 docs · 12 to curate' },
       { key: 'tag', label: 'Curate documents', state: 'active', counter: '3/12 docs' },
@@ -157,8 +157,17 @@ describe('a run record as the shell reads it', () => {
     ]);
   });
 
+  it('opens the run’s own conversation from its job and from both of its notifications', () => {
+    const run = runningScan();
+    const href = `/preview/agent/${encodeURIComponent(run.runId)}`;
+    expect(toJobChain(repo, run, true).href).toBe(href);
+    expect(toNotifications(repo, run, Date.now()).map((n) => n.href)).toEqual([href]);
+    const settled = runningScan({ status: 'failed', finishedAt: '2026-08-25T10:05:00Z' });
+    expect(toNotifications(repo, settled, Date.now()).map((n) => n.href)).toEqual([href, href]);
+  });
+
   it('names the command instead of onboarding on a re-scan', () => {
-    expect(toJobChain(repo, runningScan(), false).title).toBe('Spec scan linkwarden/linkwarden');
+    expect(toJobChain(repo, runningScan(), false).title).toBe('Document scan linkwarden/linkwarden');
   });
 
   it('has one honest step before the run publishes a checklist', () => {
@@ -183,12 +192,12 @@ describe('a run record as the shell reads it', () => {
     expect(state.lastCheck).toEqual({
       conclusion: 'neutral',
       word: 'Neutral',
-      summary: 'Spec scan completed',
+      summary: 'Document scan completed',
       at: '5 minutes ago',
     });
 
     const failed = runningScan({ status: 'failed', finishedAt: '2026-08-25T10:09:00Z' });
-    expect(repoRunState([failed], now).lastCheck?.summary).toBe('Spec scan failed');
+    expect(repoRunState([failed], now).lastCheck?.summary).toBe('Document scan failed');
   });
 
   it('says just now inside a minute, and counts up from there', () => {
@@ -219,9 +228,9 @@ describe('a real run in the shell', () => {
     state.runs = [runningScan()];
     fireSocket('session:runs-changed', { repoId: 'linkwarden' });
 
-    // The toast: one announcement, pointing at the preview's own Activity.
+    // The toast: one announcement, pointing at the run's own conversation.
     expect(await screen.findByText('Onboarding linkwarden/linkwarden')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Open Activity/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Open conversation/ })).toBeInTheDocument();
 
     // The row says onboarding while the first scan is up.
     await waitFor(() => expect(within(row).getByText('onboarding')).toBeInTheDocument());
@@ -242,29 +251,29 @@ describe('a real run in the shell', () => {
     // announce snapshot has to wait out.
     const row = (await screen.findByText('linkwarden/linkwarden')).closest('tr')!;
     await waitFor(() => expect(within(row).getByText('onboarding')).toBeInTheDocument());
-    expect(screen.queryByRole('button', { name: /Open Activity/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Open conversation/ })).toBeNull();
   });
 
   it('files a notification when the run starts and another when it settles', async () => {
     const state = serve([runningScan()]);
     renderAt('/preview/notifications');
 
-    const started = await screen.findByText('Spec scan started on linkwarden/linkwarden');
+    const started = await screen.findByText('Document scan started on linkwarden/linkwarden');
     // Newest first: the real row sits ahead of the fixture feed.
     const newestFixture = screen.getByText('Gate failed on acme/orders-api #482');
     expect(
       started.compareDocumentPosition(newestFixture) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-    expect(screen.queryByText(/Spec scan completed on/)).toBeNull();
+    expect(screen.queryByText(/Document scan completed on/)).toBeNull();
 
     state.runs = [runningScan({ status: 'completed', finishedAt: new Date().toISOString() })];
     fireSocket('session:runs-changed', { repoId: 'linkwarden' });
 
     expect(
-      await screen.findByText('Spec scan completed on linkwarden/linkwarden'),
+      await screen.findByText('Document scan completed on linkwarden/linkwarden'),
     ).toBeInTheDocument();
     // The start stays: the feed is a history, not a status line.
-    expect(screen.getByText('Spec scan started on linkwarden/linkwarden')).toBeInTheDocument();
+    expect(screen.getByText('Document scan started on linkwarden/linkwarden')).toBeInTheDocument();
     // The fixtures are still there, below it.
     expect(screen.getByText('Gate failed on acme/orders-api #482')).toBeInTheDocument();
   });
@@ -272,12 +281,12 @@ describe('a real run in the shell', () => {
   it('files a failure when the run fails', async () => {
     const state = serve([runningScan()]);
     renderAt('/preview/notifications');
-    await screen.findByText('Spec scan started on linkwarden/linkwarden');
+    await screen.findByText('Document scan started on linkwarden/linkwarden');
 
     state.runs = [runningScan({ status: 'failed', finishedAt: new Date().toISOString() })];
     fireSocket('session:runs-changed', { repoId: 'linkwarden' });
 
-    expect(await screen.findByText('Spec scan failed on linkwarden/linkwarden')).toBeInTheDocument();
+    expect(await screen.findByText('Document scan failed on linkwarden/linkwarden')).toBeInTheDocument();
   });
 
   it('leaves the fixtures exactly as they were', async () => {
@@ -293,7 +302,7 @@ describe('a real run in the shell', () => {
 
     // The fixture feed, unchanged and still first.
     expect(await screen.findByText('Gate failed on acme/orders-api #482')).toBeInTheDocument();
-    expect(screen.queryByText(/Spec scan started on/)).toBeNull();
+    expect(screen.queryByText(/Document scan started on/)).toBeNull();
     // And no repository's sessions store was ever asked about.
     const calls = (window.fetch as unknown as { mock: { calls: [RequestInfo | URL][] } }).mock.calls;
     expect(calls.some(([input]) => String(input).includes('/sessions/runs'))).toBe(false);

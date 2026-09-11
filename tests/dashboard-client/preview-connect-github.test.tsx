@@ -7,9 +7,9 @@
  * re-reads the real `/api/repos`. A repository that came back that way renders
  * on Home with none of the fixture coverage the mock repositories have.
  *
- * The seam widened with the Activity surface: a repository that is real gets
- * the REAL sessions view (`/api/repos/<id>/sessions/*`, live-tailed) on its
- * Activity tab, while the fixtures keep the mock — the last describe here.
+ * The seam widened with the agent's own page: its conversations are the real
+ * ones (`/api/sessions/runs`, over every connected repository), and a fixture
+ * repository contributes none — the last describe here.
  *
  * `window.fetch` is replaced wholesale rather than routed around the preview's
  * own shim: the shim is installed once when the preview chunk loads (it never
@@ -434,7 +434,7 @@ describe('connecting a repository through the GitHub App', () => {
   });
 });
 
-describe('Activity is real on a connected repository', () => {
+describe('the agent page is real, and the fixtures contribute nothing', () => {
   const CONNECTED: RegistryEntry = {
     id: 'linkwarden',
     name: 'linkwarden/linkwarden',
@@ -442,47 +442,39 @@ describe('Activity is real on a connected repository', () => {
     remoteUrl: 'https://github.com/linkwarden/linkwarden',
   };
 
-  it('reads the real sessions store and shows its empty state', async () => {
+  it('reads the workspace route and shows its empty line', async () => {
     const { fetchMock } = serve({ registry: [CONNECTED] });
-    // The registry read is served above; the sessions route is this test's point.
+    // The registry read is served above; the workspace runs route is the point.
     fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
       const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
       const { pathname } = new URL(href, window.location.origin);
       if (pathname === '/api/repos') return json([CONNECTED]);
+      if (pathname === '/api/sessions/runs') return json({ runs: [] });
       if (pathname === '/api/repos/linkwarden/sessions/runs') return json({ runs: [] });
       return json({ error: 'not found' }, 404);
     });
 
-    renderAt('/preview/repos/linkwarden/activity');
+    renderAt('/preview/agent');
 
-    // The real view's own empty state, which on this surface offers the first
-    // scan rather than naming a CLI command.
-    expect(await screen.findByText('No agentic runs yet.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Start scan' })).toBeInTheDocument();
+    expect(
+      await screen.findByText("Nothing yet. A repository's first scan starts the agent."),
+    ).toBeInTheDocument();
     await waitFor(() =>
       expect(
         fetchMock.mock.calls.some(([input]) =>
           String(typeof input === 'string' ? input : (input as Request).url).includes(
-            '/api/repos/linkwarden/sessions/runs',
+            '/api/sessions/runs',
           ),
         ),
       ).toBe(true),
     );
-    // Not the mock: its runs are hand-written, and none of them is here.
-    expect(screen.queryByText('spec scan')).toBeNull();
   });
 
-  it('leaves a fixture repository on the mock', async () => {
-    const { fetchMock } = serve();
-    renderAt('/preview/repos/orders-api/activity');
+  it('gives a fixture repository no conversations of its own', async () => {
+    serve();
+    renderAt('/preview/repos/orders-api/coverage');
 
-    // The mock opens on its newest hand-written run.
-    expect((await screen.findAllByText('spec scan')).length).toBeGreaterThan(0);
-    expect(screen.queryByText(/No agentic runs yet/)).toBeNull();
-    expect(
-      fetchMock.mock.calls.some(([input]) =>
-        String(typeof input === 'string' ? input : (input as Request).url).includes('/sessions/runs'),
-      ),
-    ).toBe(false);
+    const menu = await screen.findByRole('navigation', { name: 'Repository sections' });
+    expect(within(menu).queryByRole('link', { name: 'Activity' })).toBeNull();
   });
 });

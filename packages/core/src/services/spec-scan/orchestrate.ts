@@ -543,6 +543,7 @@ export function orchestrateSessionDef(scope: ScanScopeUniverse): SessionDef<Scan
     outcomeSchema: ScanScopeOutcomeSchema,
     budget: ORCHESTRATE_BUDGET,
     display: {
+      title: 'Scan scope',
       intro:
         "Before the scan reads anything, I'm working out what it should cover. I'll look over the doc tree, sample a few outlines, and decide which folders are in and which are out.",
     },

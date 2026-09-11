@@ -104,6 +104,7 @@ export const FidelityVerdictSchema = z
     verdict: z.enum(['faithful', 'flagged']),
     /** flagged: one sentence naming what the scenario fails to verify. */
     mismatch: z.string().min(1).optional(),
+    /** Required with `flagged`; a faithful verdict may carry it too. */
     confidence: z.enum(['high', 'medium', 'low']).optional(),
     // Parse numeric citations before validating their range/integrality against
     // the scenario so the child can repair them through validateOutcome. The
@@ -128,21 +129,16 @@ export const FidelityVerdictSchema = z
           message: 'verdict "flagged" requires `confidence`',
         })
       }
-    } else {
-      if (value.mismatch !== undefined) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['mismatch'],
-          message: 'verdict "faithful" must not carry `mismatch`',
-        })
-      }
-      if (value.confidence !== undefined) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['confidence'],
-          message: 'verdict "faithful" must not carry `confidence`',
-        })
-      }
+    } else if (value.mismatch !== undefined) {
+      // A faithful verdict may say how sure it is: the outcome's JSON schema
+      // offers `confidence` on every verdict and cannot say otherwise, so a
+      // model that fills it in is following the schema it was given. Only a
+      // `mismatch` contradicts a faithful verdict.
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['mismatch'],
+        message: 'verdict "faithful" must not carry `mismatch`',
+      })
     }
   })
 export type FidelityVerdict = z.infer<typeof FidelityVerdictSchema>
@@ -210,6 +206,7 @@ export function fidelitySessionDef(universe: GuardDocUniverse, proofContext?: Gu
   const context = proofContext ? structuredClone(proofContext) : undefined
   return {
     kind: FIDELITY_SESSION_KIND,
+    display: { title: 'Fidelity check' },
     systemPrompt: FIDELITY_SESSION_SYSTEM_PROMPT,
     tools: [readClaimSectionTool(universe)],
     outcomeSchema: FidelityVerdictSchema,

@@ -4,7 +4,7 @@
  * repository (the same bars, the same five words), then one row per repository
  * with its own split and its last check, opening the repository's Coverage;
  * Connect repository is the page action. No feed, no jobs: gate activity lives
- * on a repository's Runs, jobs in Activity.
+ * on a repository's Runs, the agent's work on Agent.
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -17,7 +17,7 @@ import { PageHeader, ProviderIcon } from '@/preview/ui/bits';
 import { StatusWord, CONCLUSION_TONE } from '@/preview/ui/status-word';
 import { statusSummary } from '@/preview/data/corpus-fixtures';
 import { usePreviewState } from '@/preview/shell/preview-state';
-import { relativeTime } from '@/preview/shell/real-runs';
+import { activityHref, relativeTime } from '@/preview/shell/real-runs';
 import { ConnectDialog } from './ConnectDialog';
 import { useHomeSummaries } from './use-home-summaries';
 
@@ -176,7 +176,7 @@ export default function HomePage() {
                   <td className="px-3 py-2.5 text-right tabular-nums text-foreground">{proven(sections)}</td>
                   <td className="px-3 py-2.5">
                     <Link
-                      to={`/preview/repos/${repo.id}/${!repo.real || lastRun ? 'runs' : 'activity'}`}
+                      to={!repo.real || lastRun ? `/preview/repos/${repo.id}/runs` : activityHref(repo.id)}
                       onClick={(event) => event.stopPropagation()}
                       title={lastCheck.summary}
                       className="flex items-center gap-2 hover:underline"

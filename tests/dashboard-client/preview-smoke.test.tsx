@@ -4,8 +4,7 @@
  * This is a SMOKE test, deliberately: the preview is a UI mock over fake data,
  * so what is worth asserting is that each route mounts without throwing and
  * lands on the thing that route is for, not how any of it looks. Each case
- * names one heading only that route produces (the Activity tab has no heading
- * of its own, so it names the run its surface opens on instead).
+ * names one heading only that route produces.
  *
  * The repo tabs are compositions of the CURRENT dashboard's components,
  * vendored under `src/preview/vendor`, so every
@@ -19,13 +18,13 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import PreviewApp from '@/preview/PreviewApp';
 
 // jsdom implements no layout, so an element has no scrollTo (the shared setup
-// polyfills scrollIntoView for the same reason). The Activity surface pins its
-// transcript to the bottom in an effect, which is that call.
+// polyfills scrollIntoView for the same reason). A conversation pins itself to
+// the bottom in an effect, which is that call.
 if (!Element.prototype.scrollTo) {
   Element.prototype.scrollTo = (() => {}) as Element['scrollTo'];
 }
@@ -49,6 +48,7 @@ const ROUTES: { path: string; heading: RegExp }[] = [
   { path: '/preview/repos/orders-api/settings', heading: /Gate policy/i },
   { path: '/preview/settings', heading: /^Settings$/ },
   { path: '/preview/settings/plan', heading: /^Current plan$/ },
+  { path: '/preview/agent', heading: /^Agent$/ },
   { path: '/preview/notifications', heading: /^Notifications$/ },
   { path: '/preview/admin', heading: /^Admin$/ },
 ];
@@ -207,11 +207,12 @@ describe('one-product preview', () => {
     expect((await screen.findAllByText(/Refund policy/)).length).toBeGreaterThan(0);
   });
 
-  it('renders /preview/repos/orders-api/activity', () => {
-    renderAt('/preview/repos/orders-api/activity');
-    // The Activity surface is the copied sessions view: it opens on the newest
-    // agentic run and carries no heading element of its own.
-    expect(screen.getAllByText('spec scan').length).toBeGreaterThan(0);
+  it('lists nothing on Agent, since no repository of the mock is connected', async () => {
+    renderAt('/preview/agent');
+    // No server behind the smoke test, so the table is there and empty: the
+    // conversations of a workspace are real, and the fixtures have none.
+    const table = await screen.findByRole('table', { name: 'Agent conversations' });
+    expect(within(table).getAllByRole('row')).toHaveLength(2);
   });
 
   it('keeps the workspace shell around every route', () => {

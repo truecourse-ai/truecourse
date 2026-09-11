@@ -714,7 +714,19 @@ export interface GenerateGuardsOptions {
   onBirthPhase?: (phase: 'build' | 'run' | 'confirm', total?: number) => void
   /** Per-FLOW settle progress: `total` = the flows this run had work for. */
   onFlowSettled?: (settled: number, total: number) => void
+  /**
+   * One line per THING the run did, filed under the phase that did it: the
+   * section that changed, the doc that was extracted, the interface that was
+   * mapped, the flow that settled. Counts stay in the progress hooks above; a
+   * fact names the subject and says "from cache" when a cache answered instead
+   * of a session or a computation.
+   */
+  onFact?: (step: GuardGenerateFactStep, line: string) => void
 }
+
+/** The generate phases a fact can be filed under; the core command maps them
+ *  onto its checklist step keys. */
+export type GuardGenerateFactStep = 'index' | 'extract' | 'interfaces' | 'flows' | 'match' | 'author' | 'validate'
 
 function defaultConcurrency(): number {
   const env = process.env.TRUECOURSE_MAX_CONCURRENCY
@@ -968,6 +980,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // model", nothing else.
   const audit = auditTransport(options.transport ?? cliTransport())
   const transport = audit.transport
+  /** File one line about a thing this run did, under the phase that did it. */
+  const fact = (step: GuardGenerateFactStep, line: string): void => options.onFact?.(step, line)
 
   if (!hasGuardUniverse(repoRoot)) {
     return emptyResult('no-docs', {
@@ -1025,6 +1039,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   }
   const recipe: Recipe = recipeResult.recipe
   const recipeFingerprint = recipeResult.fingerprint
+  fact(
+    'index',
+    recipeResult.status === 'exists'
+      ? `recipe: loaded ${path.relative(repoRoot, recipePath(repoRoot))}`
+      : `recipe: discovered from ${recipeResult.source}, written to ${recipeResult.wrotePath}`,
+  )
   const recipeMeta: NonNullable<GuardGenerateResult['recipe']> = {
     status: recipeResult.status,
     ...(recipe.entry ? { entry: recipe.entry } : {}),
@@ -1057,7 +1077,15 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // authoritative request-body schemas.
   const opIndex = buildOperationIndex(plan.sections, plan.basePaths)
   options.onPlan?.(plan.sections.length, plan.work.length)
+  for (const section of plan.work) fact('index', `${section.doc}#${section.anchor}: changed`)
+  const unchangedSections = plan.sections.length - plan.work.length
+  if (unchangedSections > 0) {
+    fact('index', `${unchangedSections} section${unchangedSections === 1 ? '' : 's'} unchanged`)
+  }
   const orphanedSections = plan.orphaned.map((e) => ({ doc: e.doc, anchor: e.anchor, scenarioIds: e.scenarioIds }))
+  for (const orphan of orphanedSections) {
+    fact('index', `${orphan.doc}#${orphan.anchor}: orphaned, the section no longer exists`)
+  }
 
   const limit = pLimit(Math.max(1, options.concurrency ?? defaultConcurrency()))
   const matchRunner =
@@ -1152,6 +1180,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       })
     : EMPTY_CLAIM_DIFF_GATE
   for (const message of claimDiff.errors) errors.push({ doc: '', anchor: '', message })
+  for (const doc of claimDiff.reusedDocs) {
+    fact('extract', `${doc}: the edits are cosmetic, prior claims reused from cache`)
+  }
 
   // A credential's `satisfies` naming a scheme NO OpenAPI doc in
   // the corpus declares can never bind — the matcher would silently fall through to
@@ -1198,6 +1229,23 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     doc,
     result: extractByDoc.get(doc.doc) ?? { ok: false, reason: 'the extraction session produced no result for this doc' },
   }))
+  // The pool reports its cache hits as a TALLY, not per doc, so a doc's line
+  // carries the attribution only when the tally is unanimous; a mixed pool
+  // files the tally as a line of its own.
+  const extractSource =
+    extractSummary.fromCache === 0 ? ', extracted' : extractSummary.fromCache >= docs.length ? ', from cache' : ''
+  for (const { doc, result } of extracted) {
+    if (!result.ok) {
+      fact('extract', `${doc.doc}: extraction failed, ${asLine(result.reason)}`)
+      continue
+    }
+    const claims = result.data.claims.length
+    fact('extract', `${doc.doc}: ${claims} claim${claims === 1 ? '' : 's'}${extractSource}`)
+    if (!result.complete) fact('extract', `${doc.doc}: ${result.failedViews} extraction view(s) failed`)
+  }
+  if (extractSource === '') {
+    fact('extract', `${extractSummary.fromCache} of ${docs.length} docs from cache`)
+  }
 
   // Claim inventory per document, plus the claim-level coverage gaps extraction
   // itself settles (dismissed, untestable, no-claim, awaiting-driver, prep-missing).
@@ -1385,6 +1433,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   )
 
   // 4. Interfaces — deterministic, free, and independent of everything spec-side.
+  // Recipe discovery ranks its health path over the same walk, so on a repo it
+  // derived a recipe for the pass is already memoized and this reads its result.
+  const interfacesReused = mappedInterfaces !== null
   const mapped = await interfacesOnce()
   const catalog = mapped.interfaces
   // The repo's own third-party dependencies, from the same pass. They name
@@ -1418,6 +1469,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const bySurface = [...catalogs].map(([surface, c]) => [surface, c.interfaces.length] as const)
   const total = bySurface.reduce((sum, [, count]) => sum + count, 0)
   options.onInterfaces?.(total, catalogs.size)
+  if (interfacesReused) fact('interfaces', 'mapping: the pass recipe discovery ran, reused')
+  for (const [surface, c] of catalogs) {
+    for (const iface of c.interfaces) fact('interfaces', `${iface.id}: ${surface}`)
+  }
   const interfacesReport: GuardInterfacesReport = {
     total,
     bySurface: Object.fromEntries(bySurface),
@@ -1455,6 +1510,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     // sessions that produced it, and leaves the committed file alone.
     ...(options.only !== undefined && options.only !== 'worker' ? { write: false } : {}),
     onArea: () => options.onFlowProgress?.(++areasDone, areas.length),
+    onFact: (line) => fact('flows', line),
   })
   const flowsSessionLoss = (synthesis.sessionSummaries ?? []).find(isSystemicSessionLoss)
   for (const summary of synthesis.sessionSummaries ?? []) recordSessionSummary(summary)
@@ -1619,6 +1675,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     matchCalls: number
     matchCallErrors: number
     firstMatchError: string | undefined
+    /** This flow's match lines, filed in flow order by the fold below. */
+    facts: string[]
   }
 
   const works: FlowWork[] = []
@@ -1639,9 +1697,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
    */
   const processFlow = async (flow: GuardFlow): Promise<FlowMatchResult> => {
     const localErrors: GuardGenerateError[] = []
+    const localFacts: string[] = []
     let localMatchCalls = 0
     let localMatchCallErrors = 0
     let localFirstMatchError: string | undefined
+    const noteSurface = (surface: GuardDriverId, line: string): void => {
+      localFacts.push(`${flow.id} x ${surface}: ${line}`)
+    }
 
     const primary = primarySection(flow, sectionByKey)
     if (!primary) {
@@ -1652,7 +1714,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         anchor: flow.milestones[0].anchor,
         message: `flow "${flow.id}" binds no live section — re-run generate after re-scanning the corpus`,
       })
-      return { errors: localErrors, matchCalls: localMatchCalls, matchCallErrors: localMatchCallErrors, firstMatchError: localFirstMatchError }
+      localFacts.push(`${flow.id}: skipped, it binds no live section`)
+      return { errors: localErrors, matchCalls: localMatchCalls, matchCallErrors: localMatchCallErrors, firstMatchError: localFirstMatchError, facts: localFacts }
     }
     const sections = new Map<number, SectionInput>()
     for (const m of flow.milestones) {
@@ -1677,6 +1740,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           driver: surface,
           reason: `the flow names ${surface} as a proof driver — ${guardDriver(surface)?.waitingLabel ?? `needs the ${surface} driver`}`,
         })
+        noteSurface(surface, 'not matched, the driver has not shipped')
         continue
       }
       if (!driverPrepared(recipe, surface)) {
@@ -1686,6 +1750,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           reason: composeBlockedOnReason([missingPrepNoun(surface)], oneLine(flow.title)),
           blocker: { kind: 'configuration', action: `Configure ${missingPrepNoun(surface)} in .truecourse/scenarios/recipe.json.` },
         })
+        noteSurface(surface, `not matched, the recipe prepares no ${missingPrepNoun(surface)}`)
         continue
       }
       if (!surfaceCatalog || interfaceCount === 0) {
@@ -1696,6 +1761,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           kind: 'no-interface',
           reason: `no ${surface} interface was mapped from this repository — the flow may be realizable, but nothing was found to realize it with`,
         })
+        noteSurface(surface, `not matched, no ${surface} interface was mapped`)
         continue
       }
       // GATE A (pre-match): the flow's own documented paths all belong to
@@ -1712,6 +1778,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             kind: 'blocked-on',
             reason: composeBlockedOnReason(missingServerBlockedOn(preMatch.app), oneLine(flow.title)),
           })
+          noteSurface(surface, `not matched, the recipe declares no server for ${preMatch.app}`)
           continue
         }
       }
@@ -1746,6 +1813,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               kind: 'blocked-on',
               reason: composeBlockedOnReason(missingServerBlockedOn(bound.app), oneLine(flow.title)),
             })
+            noteSurface(surface, `no match, the recipe declares no server for ${bound.app}`)
             continue
           }
           if (bound.kind === 'spans') {
@@ -1754,6 +1822,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               kind: 'blocked-on',
               reason: composeBlockedOnReason(multiServerBlockedOn(bound.apps), oneLine(flow.title)),
             })
+            noteSurface(surface, `no match, the plan spans ${bound.apps.join(', ')}`)
             continue
           }
           if (bound.kind === 'bound') serverBySurface.set(surface, bound.server)
@@ -1765,12 +1834,26 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           obligations: [{ milestone: row.milestone, caseId: row.caseId }],
           blocker: { kind: 'configuration', action: `Refresh Guard Setup preparations to provide a verified ${row.requirement} private starting state.` },
           reason: `Case ${row.milestone}/${row.caseId} needs a verified ${row.requirement} preparation profile.` })
-        if (prepared.plan && completeRealization(flow, prepared.plan)) plans.set(surface, prepared.plan)
+        const complete = prepared.plan !== null && completeRealization(flow, prepared.plan)
+        if (prepared.plan && complete) plans.set(surface, prepared.plan)
         else if (prepared.plan && !gaps.some(g => g.surface === surface)) gaps.push({ surface, kind: 'blocked-on', blocker: { kind: 'generation' }, reason: 'No single supported realization proves every milestone and selected case of this dependent flow.' })
+        // A cached verdict makes no call, which is what `calls: 0` says here.
+        const cacheTag = outcome.calls === 0 ? ', from cache' : ''
+        if (prepared.plan && complete) {
+          const walked = prepared.plan.interfaces.length
+          noteSurface(surface, `matched, ${walked} interface${walked === 1 ? '' : 's'}${cacheTag}`)
+        } else if (prepared.plan) {
+          noteSurface(surface, `no match, no single supported realization proves every milestone and selected case${cacheTag}`)
+        } else {
+          noteSurface(surface, `no match, every case needs a verified preparation profile${cacheTag}`)
+        }
+      } else if (outcome.kind === 'gap') {
+        noteSurface(surface, `no match${outcome.gaps[0] ? `, ${asLine(outcome.gaps[0].reason)}` : ''}${outcome.calls === 0 ? ' (from cache)' : ''}`)
       } else if (outcome.kind === 'error') {
         localMatchCallErrors++
         localFirstMatchError ??= outcome.reason
         localErrors.push({ flowId: flow.id, doc: primary.doc, anchor: primary.anchor, message: `matching (${surface}) ${outcome.reason}` })
+        noteSurface(surface, `match failed, ${asLine(outcome.reason)}`)
       }
     }
 
@@ -1854,6 +1937,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       matchCalls: localMatchCalls,
       matchCallErrors: localMatchCallErrors,
       firstMatchError: localFirstMatchError,
+      facts: localFacts,
     }
   }
 
@@ -1868,6 +1952,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     matchCalls += result.matchCalls
     matchCallErrors += result.matchCallErrors
     firstMatchError ??= result.firstMatchError
+    for (const line of result.facts) fact('match', line)
     if (result.work) works.push(result.work)
   }
 
@@ -2030,6 +2115,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           `the web surface cannot be driven: ${browser.reason} — ` +
           `${webTasks.length} web flow(s) skipped, left unsettled for the next generate`,
       })
+      for (const t of webTasks) {
+        fact('author', `${t.work.flow.id} x web: skipped, the browser cannot be driven (${asLine(browser.reason)})`)
+      }
     }
   }
 
@@ -2206,6 +2294,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       surface: task.surface,
       reason,
     })
+    fact('author', `${task.work.flow.id} x ${task.surface}: blocked, the route it drove is served by no declared server`)
     return true
   }
 
@@ -2272,6 +2361,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     const build = await awaitBuild()
     if (!build.ok) {
       const message = `build failed (\`${build.command}\`)${build.timedOut ? ' — timed out' : ''}`
+      fact('validate', `build \`${build.command}\`: failed${build.timedOut ? ', timed out' : ''}`)
       for (const task of authorTasks) {
         if (task.errored) continue // the browser preflight already reported it
         task.errored = true
@@ -2280,6 +2370,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           anchor: task.work.primary.anchor,
           message: `flow worker (${task.surface}) skipped: ${message}`,
         })
+        fact('author', `${task.work.flow.id} x ${task.surface}: skipped, the build failed`)
       }
     } else {
       // The entry-preflight short-circuit, unchanged in meaning: a dead built
@@ -2288,9 +2379,16 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       // was recorded by `deadEntry`) before a session is spent. Api tasks
       // proceed: the api server has its own preflight inside the runner.
       // `!t.errored` carries the browser preflight's web skips the same way.
+      fact('validate', `build \`${build.command}\`: ok`)
       const dead = authorTasks.some((t) => t.surface !== 'api' && !t.errored) && (await deadEntry())
       const runnable = authorTasks.filter((t) => !t.errored && (!dead || t.surface === 'api'))
-      if (dead) for (const t of authorTasks) if (t.surface !== 'api') t.errored = true
+      if (dead) {
+        for (const t of authorTasks) {
+          if (t.surface === 'api') continue
+          if (!t.errored) fact('author', `${t.work.flow.id} x ${t.surface}: skipped, the built entry does not start`)
+          t.errored = true
+        }
+      }
 
       // Latches. A C4 anomaly aborts AFTER the pool, before persist — nothing
       // corpus-side has been written, so the abort is still the rollback —
@@ -2856,6 +2954,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             proofContext: { milestones: task.work.flow.milestones, steps: candidate.scenario.steps },
             briefing: workerFidelityBriefing(task.work, candidate, condensed),
           })
+          fact('validate', fidelityVerdictLine(candidate.scenario.id, verdict))
           if (verdict.kind === 'faithful') {
             const defect = scenarioFullFlowDefect(task.work.flow.milestones, candidate.scenario.steps, verdict.evidence ?? [])
             if (defect) {
@@ -2941,6 +3040,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             proofContext: { milestones: task.work.flow.milestones, steps: candidate.scenario.steps },
             briefing: workerFidelityBriefing(task.work, candidate, condensed) +
               '\nDECLARED EXPECTED FAILURE: review the selected assertion contract, not a claim of passing execution.' })
+          fact('validate', fidelityVerdictLine(candidate.scenario.id, verdict))
           if (verdict.kind === 'unavailable') {
             rememberRejection(state, candidate, verdict.reason, 'review-unavailable')
             return acceptSubmission(state, candidate, result, expectedReds, true,
@@ -3428,6 +3528,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             // The one recorded refusal is the record; the flow stays
             // unsettled (task.errored) and nothing settles or gaps here.
             task.errored = true
+            fact('author', `${work.flow.id} x ${surface}: refused, the runner declined to execute in this world`)
             continue
           }
           const result = byTask.get(`flow:${work.flow.id}:${surface}`)
@@ -3441,6 +3542,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               surface,
               message: `flow worker (${surface}) never ran`,
             })
+            fact('author', `${work.flow.id} x ${surface}: the worker never ran`)
             continue
           }
           if (result.kind === 'failed') {
@@ -3453,6 +3555,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             // reason stays the message either way.
             const capture = lastExecutionErrorByRef.get(ref)
             const message = `flow worker (${surface}) ${result.reason}`
+            fact('author', `${work.flow.id} x ${surface}: failed, ${asLine(result.reason)}`)
             errors.push(
               capture
                 ? { ...errorFrom(capture), surface, message }
@@ -3493,6 +3596,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               task.errored = true
               errors.push({ doc: work.primary.doc, anchor: work.primary.anchor, kind: 'authoring',
                 flowId: work.flow.id, surface, message: incomplete })
+              fact('author', `${work.flow.id} x ${surface}: not settled, ${asLine(incomplete)}`)
               continue
             }
             // Every accepted scenario, primary first — one for a from-scratch
@@ -3511,6 +3615,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                 surface,
                 message: `flow worker (${surface}) settled with a sha the engine never accepted`,
               })
+              fact('author', `${work.flow.id} x ${surface}: not settled, it named a sha the engine never accepted`)
               continue
             }
             // The outcome may only list drops the engine recorded through
@@ -3527,10 +3632,16 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                 surface,
                 message: `flow worker (${surface}) reported dropping ${invented.map((d) => d.id).join(', ')} without a \`drop_scenario\` call the engine accepted`,
               })
+              fact('author', `${work.flow.id} x ${surface}: not settled, it reported drops the engine never accepted`)
               continue
             }
             const drops = states.get(ref)?.drops ?? []
             if (drops.length > 0) dropsByRef.set(ref, drops.map((d) => ({ ...d })))
+            fact(
+              'author',
+              `${work.flow.id} x ${surface}: settled, ${accepted.length} scenario${accepted.length === 1 ? '' : 's'} accepted${result.fromCache ? ', from cache' : ''}`,
+            )
+            for (const d of drops) fact('author', `${work.flow.id} x ${surface}: dropped ${d.id}, ${asLine(d.reason)}`)
             for (const { entry } of accepted) {
               if (entry!.result.outcome === 'pass') {
                 pushInto(persisted, ref, entry!.candidate)
@@ -3548,7 +3659,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             continue
           }
           if (outcome.kind === 'blocked') {
-            if (taskProgress(state).required.some(o => o.caseId)) continue
+            if (taskProgress(state).required.some(o => o.caseId)) {
+              fact('author', `${work.flow.id} x ${surface}: blocked, its case obligations stay open`)
+              continue
+            }
             const capabilities = [
               ...new Set(outcome.perMilestone!.map((m) => m.capability.trim().toLowerCase()).filter(Boolean)),
             ]
@@ -3557,6 +3671,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               externalServices,
             )
             const reason = composeBlockedOnReason(blockedOn, oneLine(work.flow.title))
+            fact('author', `${work.flow.id} x ${surface}: blocked, ${blockedOn.join('; ')}`)
             work.gaps.push({ surface, kind: 'blocked-on', reason, milestones: outcome.perMilestone!.map((m) => m.order) })
             coverageGaps.push({
               doc: work.primary.doc,
@@ -3579,6 +3694,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               surface,
               message: `flow worker (${surface}) reported a journey defect on interface "${outcome.report!.interfaceId}": ${oneLine(outcome.report!.detail)} — the flow stays unsettled until the catalog (or its derivation) is fixed`,
             })
+            fact('author', `${work.flow.id} x ${surface}: journey defect on interface "${outcome.report!.interfaceId}", ${asLine(outcome.report!.detail)}`)
             continue
           }
           // `retired` — the worker gave the flow up this run. A retirement the
@@ -3591,8 +3707,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           const remainder = reconcileRemaining(taskProgress(state).outstanding, state.repairIssues, outcome.remaining).current
           if (taskProgress(state).required.some(o => o.caseId) && !remainder.some(o => o.reasonKind === 'assertion')) {
             task.errored = true
+            fact('author', `${work.flow.id} x ${surface}: retired with ${remainder.length} obligation(s) still open`)
             continue
           }
+          fact('author', `${work.flow.id} x ${surface}: retired after ${outcome.attempts} attempt(s), ${asLine(outcome.lastEvidence!)}`)
           taintFlow(work.flow.id, surface, work.flow.title, oneLine(outcome.lastEvidence!))
           if (state.pendingFidelityFinding) {
             pushInto(fidelityRejections, ref, state.pendingFidelityFinding)
@@ -3766,8 +3884,16 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         work.flow.id,
         enforceSettleInvariant(manifestEntry(work, work.prior?.scenarios ?? [], work.inputsHash)),
       )
+      const carried = work.prior?.scenarios.length ?? 0
+      fact(
+        'validate',
+        `${work.flow.id}: unchanged, ${carried} committed ${carried === 1 ? 'scenario stands' : 'scenarios stand'}`,
+      )
       continue
     }
+    const writtenBefore = written.length
+    // Why this flow could not settle, in the order the surfaces reported it.
+    const unsettledReasons: string[] = []
     // The flow re-authored. Its survivors land first; its prior files are
     // deleted AFTER the commit loop, minus the ids re-written (an edited prior
     // keeps its id and is simply overwritten) and minus the priors CARRIED on
@@ -3853,6 +3979,19 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         task?.errored
       ) {
         unsettledFlow = true
+        unsettledReasons.push(
+          `${surface}: ${
+            rejections.length > 0
+              ? 'the fidelity judge rejected the scenario'
+              : withheld.length > 0
+                ? 'the worker retired the flow past its auto-resolve budget'
+                : autoRetiredRefs.has(ref)
+                  ? 'the worker retired the flow'
+                  : unadjudicatedRefs.has(ref)
+                    ? 'a green scenario went unreviewed'
+                    : 'the worker did not settle'
+          }`,
+        )
       }
       // Every surface carries the priors it did not explicitly replace or drop.
       // Their files stay and their rows re-list, so a blocked or
@@ -3892,6 +4031,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     const outstanding = guardCoverageProgress(work.flow.milestones, authoredProof).outstanding
     if (outstanding.length && (scenarios.length || work.flow.milestones.some(m => m.verification?.cases))) {
       unsettledFlow = true
+      unsettledReasons.push(`${outstanding.length} milestone obligation(s) unverified`)
       for (const o of outstanding) {
         if (work.gaps.some(g => g.obligations ? g.obligations.some(r => r.milestone === o.milestone && (!r.caseId || r.caseId === o.caseId)) : g.milestones?.includes(o.milestone))) continue
         const m = work.flow.milestones.find(m => m.order === o.milestone)!
@@ -3917,8 +4057,20 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     for (const r of retired) retiredReport.push({ flowId: work.flow.id, ...r })
     const entry = enforceSettleInvariant(manifestEntry(work, scenarios, unsettledFlow ? null : work.inputsHash, retired))
     workingManifest.set(work.flow.id, entry)
-    if (entry.generationInputsHash === null) flowsReport.unsettled++
-    else flowsReport.settled++
+    const wroteHere = written.length - writtenBefore
+    if (entry.generationInputsHash === null) {
+      flowsReport.unsettled++
+      fact(
+        'validate',
+        `${work.flow.id}: unsettled, ${unsettledReasons.length > 0 ? unsettledReasons.join('; ') : 'a planned surface accounted for nothing'}`,
+      )
+    } else {
+      flowsReport.settled++
+      fact('validate', `${work.flow.id}: settled, ${wroteHere} test${wroteHere === 1 ? '' : 's'} written`)
+    }
+    for (const gap of work.gaps) {
+      fact('validate', `${work.flow.id} x ${gap.surface}: ${gap.kind} gap, ${asLine(gap.reason)}`)
+    }
     options.onFlowSettled?.(++flowsSettled, settleTotal)
   }
   flowsReport.settled += flowsReport.skipped
@@ -3958,6 +4110,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       removedFlows++
       // Removed by intent — never counted among the orphans whose scenarios are kept.
       if (dismissedAway.has(flowId)) flowsReport.orphaned--
+      fact('validate', `${flowId}: dismissed, its ${prior.scenarios.length} scenario(s) deleted`)
       continue
     }
     if (synthesizedIds.has(flowId)) {
@@ -3968,6 +4121,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       prunedFlows++
       // The count means "orphans whose coverage was kept" — a pruned ghost kept none.
       if (orphanedThisRun.has(flowId)) flowsReport.orphaned--
+      fact('validate', `${flowId}: pruned, no flow derives it and it holds no test`)
       continue
     }
     const oldFlow = synthesis.orphaned.find(f => f.id === flowId) ?? (prior.milestones?.length ? { milestones: prior.milestones } : undefined)
@@ -3988,6 +4142,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       continue
     }
     workingManifest.set(flowId, { ...prior, orphaned: true })
+    fact('validate', `${flowId}: orphaned, its ${prior.scenarios.length} scenario(s) kept and marked stale`)
   }
   writeWorkingManifest()
 
@@ -4361,9 +4516,23 @@ function withResources(
 // Helpers
 // ---------------------------------------------------------------------------
 
+/** One fidelity child's verdict as a fact line, in the judge's own words. */
+function fidelityVerdictLine(scenarioId: string, verdict: WorkerFidelityVerdict): string {
+  if (verdict.kind === 'flagged') {
+    return `${scenarioId}: fidelity flagged (${verdict.confidence}), ${asLine(verdict.mismatch)}`
+  }
+  if (verdict.kind === 'unavailable') return `${scenarioId}: fidelity unavailable, ${asLine(verdict.reason)}`
+  return `${scenarioId}: fidelity faithful`
+}
+
 function oneLine(text: string): string {
-  const t = text.replace(/\s+/g, ' ').trim()
+  const t = asLine(text)
   return t.length > 120 ? `${t.slice(0, 120)}…` : t
+}
+
+/** The whole of a reason on one line: a fact keeps every word, and the page folds it. */
+function asLine(text: string): string {
+  return text.replace(/\s+/g, ' ').trim()
 }
 
 /** The first sentence of a runner failure message — its VERDICT, without the

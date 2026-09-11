@@ -19,6 +19,7 @@ import type {
 } from '@truecourse/shared';
 import type { GuardExternalPatch, GuardExternalsView } from '@/types/guard-externals';
 import type { RunRecord, SessionCommand, SessionEvent } from '@truecourse/agent-loop';
+import type { ActivityEvent } from '@truecourse/shared/activity-stream';
 import { getServerUrl } from './server-url';
 
 const BASE_URL = getServerUrl();
@@ -1519,5 +1520,57 @@ export function getSessionTranscript(
   const query = since !== undefined ? `?since=${since}` : '';
   return fetchApi<{ events: SessionEvent[] }>(
     `/api/repos/${repoId}/sessions/runs/${command}/${encodeURIComponent(runId)}/transcript/${encodeURIComponent(sessionId)}${query}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The workspace's agent runs (the Agent page) — every connected repository at once.
+// ---------------------------------------------------------------------------
+
+/** A run of the workspace, tagged with the repository it ran for. */
+export type WorkspaceRun = PublicSessionRun & { repo: { id: string; fullName: string } };
+
+/**
+ * Every run of the workspace, newest first, narrowed by the server. `before` is
+ * the cursor a previous page returned; `nextCursor` is absent on the last page.
+ */
+export function listWorkspaceRuns(query: {
+  repo?: string;
+  kind?: string;
+  status?: string;
+  limit?: number;
+  before?: string;
+} = {}): Promise<{ runs: WorkspaceRun[]; nextCursor?: string }> {
+  const params = new URLSearchParams();
+  if (query.repo) params.set('repo', query.repo);
+  if (query.kind) params.set('kind', query.kind);
+  if (query.status) params.set('status', query.status);
+  if (query.limit !== undefined) params.set('limit', String(query.limit));
+  if (query.before) params.set('before', query.before);
+  const search = params.toString();
+  return fetchApi<{ runs: WorkspaceRun[]; nextCursor?: string }>(
+    `/api/sessions/runs${search ? `?${search}` : ''}`,
+  );
+}
+
+/** One run by id, from whichever repository of the workspace owns it. */
+export function getWorkspaceRun(runId: string): Promise<{ run: WorkspaceRun }> {
+  return fetchApi<{ run: WorkspaceRun }>(`/api/sessions/runs/${encodeURIComponent(runId)}`);
+}
+
+/**
+ * One page of a run's activity journal, in cursor order. `after` is the cursor
+ * the previous page ended on (`-1` from the start); `done` says the journal has
+ * no more history, which is where the live tail takes over.
+ */
+export function readRunActivity(
+  repoId: string,
+  command: SessionCommand,
+  runId: string,
+  after: number,
+  limit: number,
+): Promise<{ events: ActivityEvent[]; nextCursor: number; done: boolean }> {
+  return fetchApi<{ events: ActivityEvent[]; nextCursor: number; done: boolean }>(
+    `/api/repos/${repoId}/sessions/runs/${command}/${encodeURIComponent(runId)}/activity?after=${after}&limit=${limit}`,
   );
 }

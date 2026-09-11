@@ -1398,7 +1398,7 @@ describe('runAgentLoop presentation', () => {
 
     await runAgentLoop({
       def: makeDef({
-        display: { intro: "I'm curating docs/a.md." },
+        display: { title: 'Document curation', intro: "I'm curating docs/a.md." },
         tools: [readDoc, unnamedTool],
       }),
       workItem: 'docs/a.md',
@@ -1411,10 +1411,31 @@ describe('runAgentLoop presentation', () => {
     const start = persistence.readEvents('s1')[0];
     if (start?.type !== 'session-start') throw new Error('unreachable');
     // Only the tools that declared wording appear; the rest fall back client-side.
+    // The title names the KIND of work, so a reader labels the session without
+    // a table of kinds of its own.
     expect(start.display).toEqual({
+      title: 'Document curation',
       intro: "I'm curating docs/a.md.",
       tools: { read_doc: { one: 'I read a doc.', many: 'I read {n} docs.' } },
     });
+  });
+
+  it('stamps a declared title even when nothing else is declared', async () => {
+    const { driver } = fakeDriver(async () => ({ kind: 'outcome', value: { verdict: 'keep' } }));
+    const { persistence } = memoryPersistence();
+
+    await runAgentLoop({
+      def: makeDef({ display: { title: 'Scenario author' }, tools: [unnamedTool] }),
+      workItem: 'docs/a.md',
+      initialMessages: ['go'],
+      driver,
+      persistence,
+      sessionId: 's1',
+    }).outcome;
+
+    const start = persistence.readEvents('s1')[0];
+    if (start?.type !== 'session-start') throw new Error('unreachable');
+    expect(start.display).toEqual({ title: 'Scenario author' });
   });
 
   it('omits display entirely when the def declares none', async () => {
@@ -1568,6 +1589,7 @@ describe('a run presents itself in the same block vocabulary its sessions do', (
                 label: 'Tag areas',
                 status: 'active',
                 sessionKinds: ['spec-scan.curate-doc', 'spec-scan.settle-areas'],
+                facts: ['docs/a.md: kept, core/orders, from cache'],
               },
             ],
           },
@@ -1588,6 +1610,8 @@ describe('a run presents itself in the same block vocabulary its sessions do', (
       'spec-scan.curate-doc',
       'spec-scan.settle-areas',
     ]);
+    // What the step DID, verbatim, beside the counter that says how much.
+    expect(block.items[1].facts).toEqual(['docs/a.md: kept, core/orders, from cache']);
   });
 
   it('takes one checklist item on its own, and rejects a status outside the vocabulary', () => {

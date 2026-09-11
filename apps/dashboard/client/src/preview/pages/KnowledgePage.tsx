@@ -9,8 +9,8 @@
  */
 
 import { useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { ChevronRight, FileText } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { FileText } from 'lucide-react';
 import { buildCorpusConflicts, resolveConflictId } from '@/preview/vendor/shared';
 import { SpecSourceProvider } from '@/components/spec/spec-source';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -174,15 +174,7 @@ function ItemPage({ kind, itemId }: { kind: 'doc' | 'conflict'; itemId: string }
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-6 py-3">
-        <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-sm">
-          <Link to={BASE} className="shrink-0 font-semibold text-foreground hover:underline">
-            Spec
-          </Link>
-          <ChevronRight aria-hidden className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <h1 className="min-w-0 truncate font-semibold text-foreground">{title}</h1>
-        </nav>
-      </header>
+      <PageHeader crumbs={[{ label: 'Spec', to: BASE }]} title={title} />
       <div className="min-h-0 flex-1 overflow-auto">
         {kind === 'conflict' && sel?.kind === 'overlap' && corpus.data ? (
           <SpecOverlapDetail

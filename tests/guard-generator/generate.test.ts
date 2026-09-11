@@ -2037,3 +2037,40 @@ describe('generateGuards — the committed flow corpus', () => {
     expect(scenario.flow!.fingerprint).toBe(flows.flows[0].fingerprint)
   }, 60_000)
 })
+
+// The progress counters say how much a phase did; the facts say WHAT it did,
+// and whether a session judged it or a cached verdict answered. They ride the
+// checklist into the run record, which is all a reader of a finished run has.
+describe('generateGuards: the step facts', () => {
+  it('names each thing a phase did, and says "from cache" when a cached verdict answered', async () => {
+    const r = seed()
+    const opts = {
+      repoRoot: r,
+      extractSession: versionCliBgUntestable,
+      flowWorkerSession: authorsEvery(raw('relkit --version', PASSING_STEPS)),
+    }
+
+    const fresh: string[] = []
+    await runGenerate({ ...opts, onFact: (step, line) => fresh.push(`${step} | ${line}`) })
+
+    expect(fresh).toContain('index | docs/cli.md#version: changed')
+    expect(fresh).toContain('extract | docs/cli.md: 1 claim, extracted')
+    expect(fresh).toContain('interfaces | cli/relkit: cli')
+    expect(fresh).toContain('flows | doc:docs/cli.md: 1 flow, synthesized')
+    expect(fresh).toContain('match | version x cli: matched, 1 interface')
+    expect(fresh).toContain('author | version x cli: settled, 1 scenario accepted')
+    expect(fresh).toContain('validate | version: settled, 1 test written')
+    // A cold run cached nothing, so nothing may claim it did.
+    expect(fresh.filter((line) => line.includes('from cache'))).toEqual([])
+
+    // Nothing moved since: the plan says so, the match verdict comes back
+    // cached, the committed scenarios stand, and no worker runs at all.
+    const cached: string[] = []
+    await runGenerate({ ...opts, onFact: (step, line) => cached.push(`${step} | ${line}`) })
+
+    expect(cached).toContain('index | 2 sections unchanged')
+    expect(cached).toContain('match | version x cli: matched, 1 interface, from cache')
+    expect(cached).toContain('validate | version: unchanged, 1 committed scenario stands')
+    expect(cached.some((line) => line.startsWith('author |'))).toBe(false)
+  }, 60_000)
+})

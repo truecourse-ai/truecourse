@@ -74,11 +74,19 @@ export function rotateLog(filePath: string): void {
 
 export class FileLogTransport implements LogTransport {
   private readonly stream: fs.WriteStream;
+  /** Set once the file sink failed (its directory removed mid-run, a full disk):
+   *  the failure is reported to stderr once and the sink is left alone after. */
+  private broken = false;
 
   constructor(private readonly config: LoggerConfig) {
     fs.mkdirSync(path.dirname(config.filePath), { recursive: true });
     rotateLog(config.filePath);
     this.stream = fs.createWriteStream(config.filePath, { flags: 'a' });
+    this.stream.on('error', (error: Error) => {
+      if (this.broken) return;
+      this.broken = true;
+      process.stderr.write(`[logger] log file ${config.filePath} unavailable: ${error.message}\n`);
+    });
     this.stream.write(`\n--- ${new Date().toISOString()} ---\n`);
   }
 
@@ -91,11 +99,12 @@ export class FileLogTransport implements LogTransport {
   }
 
   private emit(block: string): void {
-    this.stream.write(block);
-    if (this.config.tee) process.stderr.write(block);
+    if (!this.broken) this.stream.write(block);
+    if (this.config.tee || this.broken) process.stderr.write(block);
   }
 
   close(): Promise<void> {
+    if (this.broken) return Promise.resolve();
     return new Promise((resolve) => this.stream.end(resolve));
   }
 }

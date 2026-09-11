@@ -251,6 +251,7 @@ export interface FlowsSessionInput {
 export function flowsSessionDef(input: FlowsSessionInput): SessionDef<FlowSet> {
   return {
     kind: FLOWS_SESSION_KIND,
+    display: { title: 'Flow synthesis' },
     systemPrompt: FLOWS_SESSION_SYSTEM_PROMPT,
     tools: [readUniverseSectionTool(input.universe), checkFlowsTool(input.area, input.checker)],
     outcomeSchema: FlowSetSchema,
@@ -272,6 +273,7 @@ export interface FlowsEpicSessionInput {
 export function flowsEpicSessionDef(input: FlowsEpicSessionInput): SessionDef<EpicSynthesis> {
   return {
     kind: FLOWS_SESSION_KIND,
+    display: { title: 'Flow synthesis' },
     systemPrompt: FLOWS_EPIC_SESSION_SYSTEM_PROMPT,
     tools: [checkEpicsTool(input.digests, input.claims)],
     outcomeSchema: EpicSynthesisSchema,

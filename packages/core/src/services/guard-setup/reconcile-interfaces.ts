@@ -154,6 +154,7 @@ export function reconcileInterfacesSessionDef(
 ): SessionDef<ReconcileResolutions> {
   return {
     kind: RECONCILE_INTERFACES_SESSION_KIND,
+    display: { title: 'Interface reconcile' },
     systemPrompt: RECONCILE_INTERFACES_SYSTEM_PROMPT,
     tools: buildReconcileTools(input),
     outcomeSchema: ReconcileResolutionsSchema,

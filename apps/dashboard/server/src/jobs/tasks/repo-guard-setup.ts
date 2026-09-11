@@ -81,21 +81,30 @@ export function createRepoGuardSetupTask(
         try {
           const commitSha = await resolveCommitSha(tree.dir);
           activityRun.setGitRef?.(commitSha);
-          activityTracker.done('clone');
+          activityTracker.fact('clone', `cloned ${repoFullName} at ${commitSha.slice(0, 8)}`);
           const ref = { repoKey: repoFullName, commitSha };
           if (!(await materializeStoredSpec(ref, tree.dir))) {
             throw new Error(
               `${repoFullName} has no scanned spec yet — run the spec scan before guard setup.`,
             );
           }
+          activityTracker.fact('clone', 'the stored spec corpus and decisions written into the clone');
           // The NEWEST bundle, not this commit's: what carries the settle spine
           // forward is the last setup that ran, whatever commit it ran on.
           const stored = await loadGuardSetupBundle(repoFullName);
-          if (stored) materializeGuardSetupBundle(tree.dir, stored);
+          if (stored) {
+            materializeGuardSetupBundle(tree.dir, stored);
+            activityTracker.fact('clone', `the newest setup bundle written into the clone: ${Object.keys(stored).join(', ')}`);
+          } else {
+            activityTracker.fact('clone', 'no setup bundle stored yet: this is the first setup');
+          }
           // The registered instances go in beside it, as the two gitignored files
           // the engine reads them from. The bundle collected below never carries
           // them: a secret enters only through the dashboard, never out of a clone.
-          await materializeGuardOverlays(repoFullName, tree.dir);
+          if (await materializeGuardOverlays(repoFullName, tree.dir)) {
+            activityTracker.fact('clone', 'the registered instances written into the clone');
+          }
+          activityTracker.done('clone');
 
           const { report } = await runSetup(tree.dir, {
             driver: llm.driver(),

@@ -10,7 +10,7 @@ import { eq, sql } from 'drizzle-orm';
 import { schema, activityRuns, activityEvents, MIGRATIONS_DIR, type Db, type Pool } from '@truecourse/db';
 import { PgSessionRunStore } from '../../packages/data-store/src/session-run-store';
 import { purgeRepoData } from '../../packages/data-store/src/repo-purge';
-import { createSessionRun, readStoredTranscript, validateStoredActivityCursor, setSessionRunBackend, setSessionsRootResolver, resetSessionsRootResolver, type SessionRunStore } from '@truecourse/core/lib/sessions-store';
+import { createSessionRun, readStoredActivityPage, readStoredTranscript, sessionRunCursor, validateStoredActivityCursor, setSessionRunBackend, setSessionsRootResolver, resetSessionsRootResolver, type SessionRunStore } from '@truecourse/core/lib/sessions-store';
 import { subscribeActivity, readActivityEvents } from '@truecourse/core/lib/activity-journal';
 import { acquireRunsWatch, releaseRunsWatch } from '../../apps/dashboard/server/src/services/session-tailer.service';
 import { createActivityStream } from '../../apps/dashboard/server/src/services/activity-stream.service';
@@ -263,4 +263,87 @@ it('updates the existing run-list watch without creating a file watcher or direc
     expect(fs.existsSync(run.dir)).toBe(false);
     expect((await store.list(REPO)).map(r => r.runId)).toEqual([run.runId]);
   } finally { releaseRunsWatch(REPO); }
+});
+
+
+describe('workspace listing and journal pages', () => {
+  const at = (seconds: number) => () => new Date(Date.UTC(2026, 0, 1, 0, 0, seconds));
+  const createAt = async (repoKey: string, command: 'spec-scan' | 'guard-setup' | 'guard-generate', seconds: number) => {
+    const run = await store.create(repoKey, { command, gitRef: 'abc', activityStream: true, now: at(seconds) });
+    live.push(run); return run;
+  };
+
+  it('lists every named repository newest first, narrowed, and paged by cursor', async () => {
+    const keys = ['acme/one', 'acme/two'];
+    const setup = await createAt('acme/one', 'guard-setup', 1);
+    const generate = await createAt('acme/two', 'guard-generate', 2);
+    const scan = await createAt('acme/one', 'spec-scan', 3);
+    scan.finish('completed'); await scan.flush!();
+    await createAt('acme/three', 'spec-scan', 4);
+
+    const all = await store.listForRepos(keys, { limit: 10 });
+    expect(all.map(r => [r.runId, r.repoKey])).toEqual([
+      [scan.runId, 'acme/one'], [generate.runId, 'acme/two'], [setup.runId, 'acme/one'],
+    ]);
+    expect(await store.listForRepos([], { limit: 10 })).toEqual([]);
+    expect((await store.listForRepos(['acme/one'], { limit: 10 })).map(r => r.runId)).toEqual([scan.runId, setup.runId]);
+    expect((await store.listForRepos(keys, { limit: 10, command: 'guard-setup' })).map(r => r.runId)).toEqual([setup.runId]);
+    expect((await store.listForRepos(keys, { limit: 10, status: 'completed' })).map(r => r.runId)).toEqual([scan.runId]);
+    expect((await store.listForRepos(keys, { limit: 10, runId: generate.runId })).map(r => r.repoKey)).toEqual(['acme/two']);
+    expect(await store.listForRepos(keys, { limit: 10, runId: 'no-such-run' })).toEqual([]);
+
+    const page = await store.listForRepos(keys, { limit: 2 });
+    expect(page.map(r => r.runId)).toEqual([scan.runId, generate.runId]);
+    const rest = await store.listForRepos(keys, { limit: 2, before: sessionRunCursor(page[1]!) });
+    expect(rest.map(r => r.runId)).toEqual([setup.runId]);
+    expect(await store.listForRepos(keys, { limit: 2, before: sessionRunCursor(rest[0]!) })).toEqual([]);
+    await expect(store.listForRepos(keys, { limit: 2, before: 'not-a-cursor' })).rejects.toThrow('cursor');
+  });
+
+  it('breaks a start-time tie by run id, in the order the cursor pages', async () => {
+    const first = await createAt('acme/one', 'spec-scan', 5);
+    const second = await createAt('acme/two', 'spec-scan', 5);
+    const [earlier, later] = [first.runId, second.runId].sort();
+    const keys = ['acme/one', 'acme/two'];
+    expect((await store.listForRepos(keys, { limit: 10 })).map(r => r.runId)).toEqual([earlier, later]);
+    const page = await store.listForRepos(keys, { limit: 1 });
+    expect((await store.listForRepos(keys, { limit: 10, before: sessionRunCursor(page[0]!) })).map(r => r.runId)).toEqual([later]);
+  });
+
+  it('recovers a dead run in every repository in one sweep', async () => {
+    const one = await createAt('acme/one', 'guard-setup', 1);
+    const two = await createAt('acme/two', 'spec-scan', 2);
+    for (const run of [one, two]) {
+      run.persistence.updateIndex({ sessionId: 's', kind: 'test', workItem: 'doc', status: 'running', spent: { turns: 0, tokens: 0, costUsd: 0 } });
+      await run.flush!();
+    }
+    await db.update(activityRuns).set({ leaseUntil: '2000-01-01T00:00:00Z' });
+
+    queries.length = 0;
+    const listed = await new PgSessionRunStore(db).listForRepos(['acme/one', 'acme/two'], { limit: 10 });
+    expect(listed.map(r => [r.repoKey, r.status, r.sessions[0]!.status])).toEqual([
+      ['acme/two', 'interrupted', 'parked'],
+      ['acme/one', 'interrupted', 'parked'],
+    ]);
+    expect(queries.filter(q => /for update/i.test(q.query))).toHaveLength(1);
+  });
+
+  it('reads the journal in bounded pages that stop at the end', async () => {
+    const run = await createAt('acme/one', 'spec-scan', 1);
+    for (let seq = 0; seq < 4; seq++) run.persistence.appendEvent('s', event(seq));
+    run.finish('completed');
+    await run.flush!();
+    const whole = await run.readActivity!(-1);
+    expect(whole.map(e => e.cursor)).toEqual([0, 1, 2, 3, 4, 5]);
+
+    queries.length = 0;
+    const first = await readStoredActivityPage(run, -1, 4);
+    expect(first).toEqual({ events: whole.slice(0, 4), nextCursor: 3, done: false });
+    expect(queries.some(q => q.query.includes('"activity_events"') && q.query.includes('limit'))).toBe(true);
+
+    const second = await readStoredActivityPage(run, first.nextCursor, 4);
+    expect(second).toEqual({ events: whole.slice(4), nextCursor: 5, done: true });
+    expect(await readStoredActivityPage(run, second.nextCursor, 4)).toEqual({ events: [], nextCursor: 5, done: true });
+    await expect(readStoredActivityPage(run, 900, 4)).rejects.toThrow('boundary');
+  });
 });

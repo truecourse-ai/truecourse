@@ -10,8 +10,12 @@ import path from 'node:path';
 import {
   createSessionRun,
   listSessionRuns,
+  listStoredSessionRunsForRepos,
   openSessionRun,
+  readStoredActivity,
+  readStoredActivityPage,
   reconcileSessionsStore,
+  sessionRunCursor,
   sessionRunDir,
   toPublicRunRecord,
 } from '../../packages/core/src/lib/sessions-store.js';
@@ -346,5 +350,63 @@ describe('reconciliation sweep', () => {
     const { interrupted } = reconcileSessionsStore(repo, { isProcessAlive: () => true });
     expect(interrupted).toEqual([]);
     expect(openSessionRun(repo, 'spec-scan', run.runId).record().status).toBe('running');
+  });
+});
+
+describe('workspace listing and journal pages', () => {
+  let other: string;
+
+  beforeEach(() => {
+    other = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-sessions-store-other-'));
+    fs.mkdirSync(path.join(other, '.truecourse'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(other, { recursive: true, force: true });
+  });
+
+  const seed = (repoDir: string, command: 'spec-scan' | 'guard-setup' | 'guard-generate', seconds: number) =>
+    createSessionRun(repoDir, { command, gitRef: 'main', now: () => new Date(Date.UTC(2026, 0, 1, 0, 0, seconds)) });
+
+  it('merges both repositories newest first, tagged, narrowed and paged', async () => {
+    const setup = seed(repo, 'guard-setup', 1);
+    setup.finish('failed');
+    const generate = seed(other, 'guard-generate', 2);
+    const scan = seed(repo, 'spec-scan', 3);
+    const repos = [repo, other];
+
+    const all = await listStoredSessionRunsForRepos(repos, { limit: 10 });
+    expect(all.map((run) => [run.runId, run.repoKey])).toEqual([
+      [scan.runId, repo],
+      [generate.runId, other],
+      [setup.runId, repo],
+    ]);
+    expect((await listStoredSessionRunsForRepos([other], { limit: 10 })).map((r) => r.runId)).toEqual([generate.runId]);
+    expect((await listStoredSessionRunsForRepos(repos, { limit: 10, command: 'spec-scan' })).map((r) => r.runId)).toEqual([scan.runId]);
+    expect((await listStoredSessionRunsForRepos(repos, { limit: 10, status: 'failed' })).map((r) => r.runId)).toEqual([setup.runId]);
+    expect((await listStoredSessionRunsForRepos(repos, { limit: 10, runId: generate.runId })).map((r) => r.repoKey)).toEqual([other]);
+
+    const page = await listStoredSessionRunsForRepos(repos, { limit: 2 });
+    expect(page.map((r) => r.runId)).toEqual([scan.runId, generate.runId]);
+    const rest = await listStoredSessionRunsForRepos(repos, { limit: 2, before: sessionRunCursor(page[1]!) });
+    expect(rest.map((r) => r.runId)).toEqual([setup.runId]);
+    await expect(listStoredSessionRunsForRepos(repos, { limit: 2, before: 'not-a-cursor' })).rejects.toThrow('cursor');
+  });
+
+  it('pages the journal of a run, stopping at its end', async () => {
+    const run = createSessionRun(repo, { command: 'spec-scan', gitRef: 'main', activityStream: true });
+    for (let seq = 0; seq < 4; seq++) run.persistence.appendEvent('s', event(seq));
+    run.finish('completed');
+    const whole = await readStoredActivity(run);
+    expect(whole).toHaveLength(6);
+
+    const first = await readStoredActivityPage(run, -1, 4);
+    expect(first).toEqual({ events: whole.slice(0, 4), nextCursor: whole[3]!.cursor, done: false });
+    const second = await readStoredActivityPage(run, first.nextCursor, 4);
+    expect(second).toEqual({ events: whole.slice(4), nextCursor: whole[5]!.cursor, done: true });
+    expect(await readStoredActivityPage(run, second.nextCursor, 4)).toEqual({
+      events: [], nextCursor: whole[5]!.cursor, done: true,
+    });
+    await expect(readStoredActivityPage(run, 1, 4)).rejects.toThrow('boundary');
   });
 });
