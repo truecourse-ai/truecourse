@@ -12,6 +12,17 @@
  * session runs stops one in ANOTHER workspace, since two workspaces can connect
  * the same `owner/repo` and the durable stores it writes have no workspace
  * column. Either way the answer is `busy`, and nothing is enqueued.
+ *
+ * AND THE HEAVY JOBS RUN ONE AT A TIME PER WORKSPACE. Test setup, generation
+ * and the run each clone the repository, install and build it, map its
+ * interfaces and spend the model's sessions; several of them side by side
+ * starve the process that is also serving HTTP. So all three are enqueued into
+ * ONE graphile queue per workspace ({@link heavyJobQueue}): a workspace's
+ * second heavy job waits IN THE QUEUE as a `queued` row — visible as such on
+ * the Agent page and in `/api/jobs` — and starts when the running one settles,
+ * in enqueue order. Nothing waits in this process, so the gate survives a
+ * restart and holds across replicas; `context.sync` and `context.scan` name no
+ * queue and keep running beside a heavy job.
  */
 
 import {
@@ -112,6 +123,8 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
   // over a runner that exists a line later.
   let jobs!: Jobs;
 
+  // The three heavy jobs all enqueue through here, which is what puts every one
+  // of them in the workspace's single heavy queue.
   const enqueue = async (
     task: string,
     command: RepoCommand,
@@ -124,6 +137,7 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
       request.workspaceOrgId,
       jobKey(task, request.repoFullName),
       payload,
+      { queue: heavyJobQueue(request.workspaceOrgId) },
     );
     return jobId ? { status: 'queued', jobId } : { status: 'busy' };
   };
@@ -272,6 +286,11 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
     ...(opts.hub ? { hub: opts.hub } : {}),
   });
 
+  // Every heavy job of the repository goes, RUNNING OR QUEUED: the workspace's
+  // heavy lane means a disconnected repository can easily have one waiting its
+  // turn, and `getActiveByKey` covers both states (`jobs.cancel` settles a
+  // queued row outright — the worker that later claims its graphile job finds
+  // the row unclaimable and skips the body, freeing the lane immediately).
   const cancelRepoJobs = async (
     repoFullName: string,
     orgId: string,
@@ -304,6 +323,14 @@ type RepoCommand = 'guard-setup' | 'guard-generate' | 'guard-run';
 
 /** One active job per (workspace, repo, task) — the queue's single-flight key. */
 const jobKey = (task: string, repoFullName: string): string => `${task}:${repoFullName}`;
+
+/**
+ * The workspace's heavy lane: setup, generation and the run of EVERY repository
+ * of a workspace share one graphile queue, so graphile runs them one at a time,
+ * in enqueue order. Per workspace rather than per repository — the cost being
+ * rationed is this process's, and a workspace is who pays for it.
+ */
+const heavyJobQueue = (org: string): string => `heavy:${org}`;
 
 /**
  * Is this repository already running this command — in ANY workspace? The

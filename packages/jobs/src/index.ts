@@ -13,6 +13,9 @@
  * duplicate. A cancel stops the run when it is happening in this process and
  * settles the row `cancelled`; cancellation is a normal outcome, not a failure,
  * so it records no error and posts no notification.
+ *
+ * An enqueue can also name a QUEUE (see {@link EnqueueOptions}), which is how a
+ * caller says "these jobs must not run at the same time as each other".
  */
 
 import type { Db } from '@truecourse/db';
@@ -28,6 +31,7 @@ import type { Router } from 'express';
 import type { Runner } from 'graphile-worker';
 import { EventHub, publishEvent, type EventBackplane } from './events.js';
 import type { JobRuntime } from './harness.js';
+import { releaseAbandonedQueueLocks } from './queue-locks.js';
 import {
   cancelLocalJob,
   isJobRunningLocally,
@@ -70,6 +74,20 @@ export interface CreateJobsOptions<M = Record<string, unknown>> {
  *  (row cancelled, work keeps going there), or there was nothing active. */
 export type CancelResult = 'cancelled' | 'not-here' | 'absent';
 
+/** How an enqueue lands on the queue, beyond its single-flight key. */
+export interface EnqueueOptions {
+  /**
+   * graphile's named QUEUE: every job enqueued under the same name runs ONE AT
+   * A TIME, in enqueue order (graphile claims a job only while its queue is
+   * free). The waiting is done IN THE QUEUE, not in this process — so the
+   * tracked row stays `queued` and says so on every surface that reads it, the
+   * order survives a restart, and the gate holds across replicas, which an
+   * in-process semaphore could not. Jobs with no queue name are unaffected: the
+   * worker's own concurrency still runs them beside a queued one.
+   */
+  queue?: string;
+}
+
 export interface Jobs {
   jobStore: JobStore;
   notifications: NotificationStore;
@@ -83,9 +101,15 @@ export interface Jobs {
     org: string,
     key: string,
     payload: Record<string, unknown>,
+    opts?: EnqueueOptions,
   ): Promise<string | null>;
   /** Enqueue without the tracked-row bookkeeping (the row must already exist). */
-  addJob(task: string, payload: Record<string, unknown>, jobKey: string): Promise<void>;
+  addJob(
+    task: string,
+    payload: Record<string, unknown>,
+    jobKey: string,
+    opts?: EnqueueOptions,
+  ): Promise<void>;
   /** Stop an active job: abort it if it runs here, and settle the row cancelled. */
   cancel(jobId: string): Promise<CancelResult>;
   /** Whether the worker actually came up (jobs don't process until it does). */
@@ -127,8 +151,13 @@ export function createJobs<M = Record<string, unknown>>(opts: CreateJobsOptions<
     task: string,
     payload: Record<string, unknown>,
     jobKey: string,
+    opts?: EnqueueOptions,
   ): Promise<void> => {
-    await requireRunner().addJob(task, payload, { jobKey, maxAttempts: 1 });
+    await requireRunner().addJob(task, payload, {
+      jobKey,
+      maxAttempts: 1,
+      ...(opts?.queue ? { queueName: opts.queue } : {}),
+    });
   };
 
   const singleFlightEnqueue = async (
@@ -136,6 +165,7 @@ export function createJobs<M = Record<string, unknown>>(opts: CreateJobsOptions<
     org: string,
     key: string,
     payload: Record<string, unknown>,
+    opts?: EnqueueOptions,
   ): Promise<string | null> => {
     requireRunner();
     let job;
@@ -149,7 +179,7 @@ export function createJobs<M = Record<string, unknown>>(opts: CreateJobsOptions<
       // The row id is stamped LAST: a caller that forwards another job's payload
       // (a chain built from the settling job's own) must never address this
       // job at that row — the task would find it settled and skip the body.
-      await addJob(task, { ...payload, jobId: job.id }, key);
+      await addJob(task, { ...payload, jobId: job.id }, key, opts);
     } catch (err) {
       // No graphile job exists to run (or settle) the row we just created — a
       // 'queued' row would hold the single-flight key until the next restart's
@@ -200,6 +230,10 @@ export function createJobs<M = Record<string, unknown>>(opts: CreateJobsOptions<
         log.info(`[jobs] reaped ${reaped.length} orphaned job(s) from a prior run`);
         await opts.onReaped?.(reaped);
       }
+      // The same reap on graphile's side: a dead run still holds the QUEUE it
+      // was claimed from, and graphile would not free it for four hours — long
+      // enough to strand every job enqueued behind it.
+      await releaseAbandonedQueueLocks(opts.db);
       await hub.start();
       runner = await startWorker({
         rt,
@@ -254,6 +288,7 @@ export {
   type OrgIdOf,
 } from './routes.js';
 export { createSemaphore, type Semaphore } from './semaphore.js';
+export { releaseAbandonedQueueLocks } from './queue-locks.js';
 export {
   drainCoalesced,
   enqueueOrPendCoalesced,
