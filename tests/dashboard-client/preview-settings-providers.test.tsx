@@ -152,6 +152,9 @@ describe('Settings › Repositories', () => {
       expect(within(row).queryByRole('link')).toBeNull();
       // The word replaced the lock: no icon carries the meaning.
       expect(within(row).queryByText('Team plan')).toBeNull();
+      // GitHub's accounts are GitHub's: a provider with nothing connected lists none.
+      expect(within(row).queryByRole('list', { name: 'GitHub installations' })).toBeNull();
+      expect(within(row).queryByText(/repositor(y|ies) linked/)).toBeNull();
     }
   });
 });

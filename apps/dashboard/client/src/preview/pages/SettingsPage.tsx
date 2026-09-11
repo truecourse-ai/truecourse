@@ -180,7 +180,7 @@ function RepositoriesTab() {
               {live && github?.reason && (
                 <p className="mt-1 text-[11px] text-destructive">{github.reason}</p>
               )}
-              {installations.length > 0 && (
+              {live && installations.length > 0 && (
                 <ul className="mt-1 space-y-1" aria-label="GitHub installations">
                   {installations.map((i) => {
                     const linked = (github?.linked ?? []).filter(
