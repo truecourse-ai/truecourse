@@ -1,5 +1,3 @@
-// PREVIEW: REAL — starting an agentic run on a connected repository.
-
 /**
  * Ask the server to start a run, and say what happened in words a surface can
  * act on.

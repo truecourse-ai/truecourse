@@ -1,13 +1,9 @@
-// PREVIEW: the REAL seam, widened — the agent-session runs of the URL-connected
-// repositories, read from the server and followed live over the one socket the
-// shell holds.
-
 /**
- * Real runs, streaming into every page.
+ * The runs of the connected repositories, streaming into every page.
  *
  * §3.5: "Jobs and sessions stream live into every page through the one event
- * connection the shell already holds." This is that connection for the real
- * repositories. The shell joins each real repo's room once; every write to that
+ * connection the shell already holds." This is that connection. The shell joins
+ * each repo's room once; every write to that
  * repo's `run.json` — a phase ticking over, a session appearing, the run
  * finishing — arrives as `session:runs-changed` and re-reads that repo's run
  * list, with the room's `spec:progress` as a second prompt for the same read
@@ -26,11 +22,10 @@
  *
  * NOTIFICATIONS ARE DERIVED, NOT STORED. There is no server-side notification
  * store and this does not invent one: the feed is what this session watched
- * happen, so a reload starts it over, and read state is session-local — exactly
- * like the rest of the preview.
+ * happen, so a reload starts it over, and read state is session-local.
  *
- * Degrades to nothing. With no server to ask (a static preview, a jsdom test)
- * the reads fail quietly, no run is known, and the shell has its fixtures only.
+ * Degrades to nothing. With no server to ask (a static page, a jsdom test)
+ * the reads fail quietly, no run is known, and the shell shows an empty feed.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -233,7 +228,7 @@ export interface RealRunStream {
 }
 
 /**
- * Follow the runs of every real repository. Re-subscribes when the real repo
+ * Follow the runs of every connected repository. Re-subscribes when the repo
  * list changes (a connect adds a row) and never throws: the reads are guarded
  * and the socket calls are inert when there is nothing to connect to.
  *
@@ -256,7 +251,6 @@ export function useRealRunStream(repos: Repo[], reposLoaded = true): RealRunStre
   // The repositories as a STRING, so every derivation below is stable while the
   // real list is unchanged — `repos` is a fresh array on every shell render.
   const repoKey = repos
-    .filter((r) => r.real)
     .map((r) => `${r.id} ${r.fullName}`)
     .join('|');
 

@@ -1,5 +1,3 @@
-// PREVIEW: REAL. One conflict of the workspace corpus, with its resolver.
-
 /**
  * One conflict of Context: the two sections that disagree, side by side, with
  * the resolver the corpus has always had — pointed at the WORKSPACE corpus and

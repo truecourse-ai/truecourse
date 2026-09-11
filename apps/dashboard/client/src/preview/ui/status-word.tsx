@@ -15,7 +15,7 @@
 
 import type { ContextDocumentStatus, ContextSourceStatus } from '@truecourse/shared';
 import { HoverPopover } from '@/preview/ui/hover-popover';
-import type { CheckConclusion, RunOrigin, StepDriver, TestStatus } from '@/preview/data/types';
+import type { CheckConclusion } from '@/preview/data/types';
 
 export type StatusTone = 'success' | 'failure' | 'blocked' | 'attention' | 'neutral' | 'running';
 
@@ -67,22 +67,6 @@ export const CONCLUSION_WORD: Record<CheckConclusion, string> = {
   neutral: 'Neutral',
 };
 
-export const TEST_TONE: Record<TestStatus, StatusTone> = {
-  passing: 'success',
-  failing: 'failure',
-  blocked: 'blocked',
-  'not-testable': 'neutral',
-  'never-run': 'neutral',
-};
-
-export const TEST_WORD: Record<TestStatus, string> = {
-  passing: 'Passing',
-  failing: 'Failing',
-  blocked: 'Blocked',
-  'not-testable': 'Not testable',
-  'never-run': 'Never run',
-};
-
 /**
  * A document of Context, in the product owner's six words. Not linked is grey
  * with Not testable: neither is anybody's to-do. The WORDS live in
@@ -124,35 +108,6 @@ export const VERDICT_WORD: Record<'passed' | 'failed' | 'blocked', string> = {
   passed: 'Passed',
   failed: 'Failed',
   blocked: 'Blocked',
-};
-
-export const JOB_TONE: Record<'queued' | 'running' | 'succeeded' | 'failed', StatusTone> = {
-  queued: 'neutral',
-  running: 'running',
-  succeeded: 'success',
-  failed: 'failure',
-};
-
-export const JOB_WORD: Record<'queued' | 'running' | 'succeeded' | 'failed', string> = {
-  queued: 'Queued',
-  running: 'Running',
-  succeeded: 'Succeeded',
-  failed: 'Failed',
-};
-
-/**
- * The neutral bounded labels: a capsule's job. They are facts about a row, not
- * judgements of it, which is exactly why they are allowed to be capsules.
- */
-export const ORIGIN_LABEL: Record<RunOrigin, string> = {
-  hosted: 'hosted',
-  local: 'local',
-};
-
-export const DRIVER_LABEL: Record<StepDriver, string> = {
-  cli: 'cli',
-  api: 'api',
-  web: 'web',
 };
 
 /**

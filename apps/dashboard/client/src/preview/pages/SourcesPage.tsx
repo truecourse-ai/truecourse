@@ -1,5 +1,3 @@
-// PREVIEW: REAL. Every source of the workspace's context, from the server.
-
 /**
  * Context › Sources: ONE table, one row per source the workspace has, worst
  * first (failed, never synced, syncing, paused, synced), then by title. A

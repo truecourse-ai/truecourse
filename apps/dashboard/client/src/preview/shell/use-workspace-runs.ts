@@ -1,6 +1,3 @@
-// PREVIEW: REAL. The workspace's agent runs, read across every connected
-// repository and kept current without polling.
-
 /**
  * The Agent page's read: `GET /api/sessions/runs`, newest first, plus the two
  * live signals that make it move.

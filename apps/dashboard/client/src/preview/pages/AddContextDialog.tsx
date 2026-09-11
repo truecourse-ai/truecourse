@@ -1,5 +1,3 @@
-// PREVIEW: REAL. Adding a source to the workspace's context.
-
 /**
  * Add context, in three steps that each fit one screen (plan §5): the KIND, the
  * SCOPE (with a Check that lists what the scope would yield before anything is
@@ -18,7 +16,7 @@
  * narrowed to the new source, which reads Syncing until its first sync lands.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { GitBranch, Globe } from 'lucide-react';
 import {
@@ -122,8 +120,8 @@ export function AddContextDialog({
     setAdding(false);
   }, [open]);
 
-  // Only a connected repository can be a source: a fixture has no tree to walk.
-  const connected = useMemo(() => repos.filter((repo) => repo.real), [repos]);
+  // A repository source is a connected repository's own tree.
+  const connected = repos;
 
   /** The Repository source a repository already has, if it has one. */
   const existingFor = (repoFullName: string) =>

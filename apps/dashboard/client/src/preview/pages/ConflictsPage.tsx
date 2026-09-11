@@ -1,5 +1,3 @@
-// PREVIEW: REAL. The workspace corpus's conflicts, from the server.
-
 /**
  * Context › Conflicts: every conflict the scan found between two documents'
  * sections, open first. A conflict is a property of the WORKSPACE's documents,

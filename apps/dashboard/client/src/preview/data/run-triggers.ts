@@ -1,5 +1,3 @@
-// PREVIEW: REAL — which agentic commands the shell can start for itself.
-
 /**
  * The command → start-it map.
  *
@@ -22,6 +20,3 @@ const RUN_TRIGGERS: Record<string, RunTrigger> = {
 
 export const triggerFor = (command: string): RunTrigger | null =>
   RUN_TRIGGERS[command] ?? null;
-
-/** The command a repository with no runs at all starts with. */
-export const FIRST_RUN_COMMAND = 'spec-scan';

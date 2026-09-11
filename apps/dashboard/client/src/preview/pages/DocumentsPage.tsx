@@ -1,5 +1,3 @@
-// PREVIEW: REAL. Every document of the workspace's context, from the server.
-
 /**
  * Context › Documents: ONE table, one row per document of the workspace
  * corpus, worst first. A source is a filter over it, a repository is a reading

@@ -1,5 +1,3 @@
-// PREVIEW: REAL. One source of the workspace's context, from the server.
-
 /**
  * Context › Sources › <source>: the page a source row opens, and the only
  * place a source can be acted on.
@@ -179,9 +177,8 @@ export default function SourcePage({ sourceId }: { sourceId: string }) {
     [refetch],
   );
 
-  // Only a repository that really exists can read a source: a fixture has no
-  // corpus to read it into.
-  const connected = useMemo(() => repos.filter((repo) => repo.real), [repos]);
+  // Every connected repository can read a source, so the list is the registry.
+  const connected = repos;
 
   const toggleLink = async (repo: Repo, next: boolean): Promise<void> => {
     setPending((prev) => ({ ...prev, [repo.id]: next }));

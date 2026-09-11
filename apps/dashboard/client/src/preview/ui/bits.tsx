@@ -1,8 +1,7 @@
 /**
- * The small shared pieces every preview screen reaches for: the provider mark,
- * the neutral capsules (origin, driver, interface source), the pin mark a
- * pinned detail wears, a detail pane's header and its footer facts, and the
- * preview/pin selection hook the panels share.
+ * The small shared pieces every screen reaches for: the provider mark, the
+ * neutral capsule, the pin mark a pinned detail wears, a detail pane's header
+ * and its footer facts, and the preview/pin selection hook the panels share.
  *
  * They live together because each is three lines and none of them is a
  * decision: the decisions are in {@link StatusWord} (a status is a dot plus a
@@ -13,7 +12,7 @@
 import { useCallback, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronRight, Cloud, Github, Gitlab, Pin, type LucideIcon } from 'lucide-react';
-import type { InterfaceOrigin, ProviderId, RunOrigin, StepDriver } from '@/preview/data/types';
+import type { ProviderId } from '@/preview/data/types';
 
 const PROVIDER_ICON: Record<ProviderId, LucideIcon> = {
   github: Github,
@@ -38,24 +37,6 @@ export const CHIP_CLASS = 'inline-flex shrink-0 items-center rounded bg-muted px
 
 export function Capsule({ children, className = '' }: { children: ReactNode; className?: string }) {
   return <span className={`${CHIP_CLASS} ${className}`}>{children}</span>;
-}
-
-export function OriginChip({ origin }: { origin: RunOrigin }) {
-  return <Capsule>{origin}</Capsule>;
-}
-
-export function DriverChips({ drivers }: { drivers: readonly StepDriver[] }) {
-  return (
-    <>
-      {drivers.map((d) => (
-        <Capsule key={d}>{d}</Capsule>
-      ))}
-    </>
-  );
-}
-
-export function SourceChip({ origin }: { origin: InterfaceOrigin }) {
-  return <Capsule>{origin}</Capsule>;
 }
 
 /** The mark a pinned detail wears in its header, so a pin is visible, not remembered. */

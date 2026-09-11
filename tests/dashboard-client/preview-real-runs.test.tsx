@@ -1,7 +1,7 @@
 /**
- * The runs of a REAL (URL-connected) repository, streaming into the shell.
+ * The runs of a connected repository, streaming into the shell.
  *
- * The shell follows every real repository's agent runs over the one socket it
+ * The shell follows every repository's agent runs over the one socket it
  * holds, so a run that starts anywhere shows up on whatever page the user is
  * on: a toast, a job chain, the `onboarding` marker on the repository's row,
  * and a notification when it starts and again when it settles.
@@ -10,8 +10,8 @@
  * what the shell does with a `session:runs-changed` event, so the test fires
  * them and lets the shell re-read the runs the fake server holds.
  *
- * The fixtures are the control group. A fixture repository has no real runs, so
- * its rows, its jobs and its notifications must come out exactly as before.
+ * The control group is a workspace with NOTHING connected: no repository is
+ * asked about its runs, no room is joined, and the feed stays empty.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -97,7 +97,7 @@ function runningScan(overrides: Partial<PublicSessionRun> = {}): PublicSessionRu
 
 const realFetch = window.fetch;
 
-/** A server holding one real repository and a mutable run list for it. */
+/** A server holding one connected repository and a mutable run list for it. */
 function serve(runs: PublicSessionRun[]) {
   const state = { runs };
   window.fetch = vi.fn(async (input: RequestInfo | URL) => {
@@ -213,7 +213,7 @@ describe('a run record as the shell reads it', () => {
 // The shell
 // ---------------------------------------------------------------------------
 
-describe('a real run in the shell', () => {
+describe('a run in the shell', () => {
   it('announces a run that starts while the page is open, and marks the row onboarding', async () => {
     const state = serve([]);
     // Home is not where the subscription lives — the shell is — so any address
@@ -258,12 +258,7 @@ describe('a real run in the shell', () => {
     const state = serve([runningScan()]);
     renderAt('/preview/notifications');
 
-    const started = await screen.findByText('Document scan started on linkwarden/linkwarden');
-    // Newest first: the real row sits ahead of the fixture feed.
-    const newestFixture = screen.getByText('Gate failed on acme/orders-api #482');
-    expect(
-      started.compareDocumentPosition(newestFixture) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    await screen.findByText('Document scan started on linkwarden/linkwarden');
     expect(screen.queryByText(/Document scan completed on/)).toBeNull();
 
     state.runs = [runningScan({ status: 'completed', finishedAt: new Date().toISOString() })];
@@ -274,8 +269,6 @@ describe('a real run in the shell', () => {
     ).toBeInTheDocument();
     // The start stays: the feed is a history, not a status line.
     expect(screen.getByText('Document scan started on linkwarden/linkwarden')).toBeInTheDocument();
-    // The fixtures are still there, below it.
-    expect(screen.getByText('Gate failed on acme/orders-api #482')).toBeInTheDocument();
   });
 
   it('files a failure when the run fails', async () => {
@@ -289,8 +282,7 @@ describe('a real run in the shell', () => {
     expect(await screen.findByText('Document scan failed on linkwarden/linkwarden')).toBeInTheDocument();
   });
 
-  it('leaves the fixtures exactly as they were', async () => {
-    // No real repositories at all: the mock is the whole preview again.
+  it('asks nothing and joins nothing when no repository is connected', async () => {
     window.fetch = vi.fn(async (input: RequestInfo | URL) => {
       const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
       const { pathname } = new URL(href, window.location.origin);
@@ -300,8 +292,8 @@ describe('a real run in the shell', () => {
 
     renderAt('/preview/notifications');
 
-    // The fixture feed, unchanged and still first.
-    expect(await screen.findByText('Gate failed on acme/orders-api #482')).toBeInTheDocument();
+    // The feed is empty, in its own words, and nothing was invented to fill it.
+    expect(await screen.findByText('Nothing has happened yet.')).toBeInTheDocument();
     expect(screen.queryByText(/Document scan started on/)).toBeNull();
     // And no repository's sessions store was ever asked about.
     const calls = (window.fetch as unknown as { mock: { calls: [RequestInfo | URL][] } }).mock.calls;
@@ -309,13 +301,13 @@ describe('a real run in the shell', () => {
     expect(socketMock.joins).toEqual([]);
   });
 
-  it('renders the fixtures and nothing throws when there is no server', async () => {
+  it('renders an empty Code and nothing throws when there is no server', async () => {
     window.fetch = vi.fn(async () => {
       throw new TypeError('Failed to fetch');
     }) as unknown as typeof window.fetch;
 
     renderAt('/preview/code');
-    expect(await screen.findByText('acme/orders-api')).toBeInTheDocument();
+    expect(await screen.findByText('No repository connected yet.')).toBeInTheDocument();
     expect(screen.queryByText(/Onboarding linkwarden/)).toBeNull();
   });
 });

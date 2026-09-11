@@ -25,7 +25,7 @@ vi.mock('@/lib/socket', () => ({
 
 import { GenerateTestsAction } from '@/preview/repo/GenerateTestsAction';
 
-const repo = { id: 'expense-tracker', fullName: 'owner/expense-tracker', real: true } as Repo;
+const repo = { id: 'expense-tracker', fullName: 'owner/expense-tracker' } as Repo;
 function serve(options: { status?: number; error?: string; pending?: Promise<void> } = {}) {
   const calls: { method: string }[] = [];
   vi.stubGlobal('fetch', vi.fn(async (_input: string, init?: RequestInit) => {
@@ -61,6 +61,7 @@ describe('the flow generation action', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Starting generation…' }));
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
     mocks.jobs = [{ id: 'live', title: 'Scenario generation', repoFullName: repo.fullName,
+      href: '/preview/agent/live',
       steps: [{ key: 'worker', label: 'Authoring tests', state: 'active' }] }];
     await act(async () => release());
     rendered.rerender(page());
@@ -77,7 +78,7 @@ describe('the flow generation action', () => {
     const rendered = render(page());
     expect(await screen.findByRole('button', { name: 'Generate flows' })).toBeDisabled();
     mocks.jobsReady = true;
-    mocks.jobs = [{ id: 'other', title: 'Other run', repoFullName: 'owner/other', steps: [] }];
+    mocks.jobs = [{ id: 'other', title: 'Other run', repoFullName: 'owner/other', href: '/preview/agent/other', steps: [] }];
     rendered.rerender(page());
     expect(screen.getByRole('button', { name: 'Generate flows' })).toBeEnabled();
   });

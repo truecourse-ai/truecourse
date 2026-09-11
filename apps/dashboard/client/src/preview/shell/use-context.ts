@@ -1,5 +1,3 @@
-// PREVIEW: REAL. The workspace's Context, read from the server and kept current.
-
 /**
  * What every Context surface reads, and the one signal that makes it move.
  *

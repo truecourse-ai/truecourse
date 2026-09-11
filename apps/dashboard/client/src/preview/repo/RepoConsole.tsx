@@ -1,18 +1,13 @@
-// PREVIEW (UI mock, fake data) with exceptions: on a REAL (provider-connected)
-// repository the Interfaces tab reads the server's own
-// interface catalog for that repository, the Dependencies tab reads and
-// registers against its stored dependency catalog, the Context tab reads and
-// edits which workspace sources it is linked to, and the Runs tab reads what
-// its runs stored.
-
 /**
  * The repository console: one header, ONE menu, no toggle.
  *
  * The section switcher is gone with Code Analysis, so the left menu here is not
  * a switcher between products, it is the tabs of the one thing this repository
  * has: Runs first (what this repository's tests did, and when), then the setup
- * group — Context (which workspace sources this repository reads), Interfaces,
- * Dependencies and the repository's Settings.
+ * group, Context (which workspace sources this repository reads), Interfaces,
+ * Dependencies and the repository's Settings. Every tab reads the server: the
+ * runs it stored, the interface catalog derived from its tree, the dependency
+ * catalog its setup wrote and the sources it is linked to.
  *
  * FLOWS ARE NOT A TAB HERE any more: a flow is the workspace's, listed across
  * every repository on the Flows page, and one flow is a page of its own
@@ -21,7 +16,7 @@
  *
  * DOCUMENTATION IS NOT A TAB HERE any more: a source is a workspace object and
  * the corpus is the workspace's, so the documents, their coverage, their
- * conflicts and the scan that curates them live on Context — a document's
+ * conflicts and the scan that curates them live on Context, and a document's
  * coverage page is `/preview/context/doc/<ref>?repo=<id>`. This tab only says
  * which of them this repository reads. The agent's own work is not a tab
  * either: it lives on the Agent page, narrowed to this repository. There is no
@@ -37,9 +32,7 @@ import { FolderGit2 } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PageHeader, ProviderIcon, SideMenu } from '@/preview/ui/bits';
 import { StatusWord, CONCLUSION_TONE } from '@/preview/ui/status-word';
-import { guardForRepo } from '@/preview/data';
 import { usePreviewState } from '@/preview/shell/preview-state';
-import { activityHref } from '@/preview/shell/real-runs';
 import { PREVIEW_BASE } from '@/preview/shell/PreviewShell';
 import { ContextTab } from './ContextTab';
 import { DependenciesTab } from './DependenciesTab';
@@ -70,7 +63,6 @@ export default function RepoConsole() {
   }>();
   const { repos, llmProvider } = usePreviewState();
   const repo = repos.find((r) => r.id === slug);
-  const guard = guardForRepo(slug);
   const implied = runId
     ? 'runs'
     : interfaceId
@@ -118,9 +110,9 @@ export default function RepoConsole() {
         }
       />
 
-      {/* A real repository with no provider set cannot scan at all, and every
-          tab below it is waiting on a scan. Said once, where the work is. */}
-      {repo.real && llmProvider === 'missing' && (
+      {/* A repository with no provider set cannot scan at all, and every tab
+          below it is waiting on a scan. Said once, where the work is. */}
+      {llmProvider === 'missing' && (
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-amber-500/30 px-6 py-1.5 text-[11px] text-amber-500">
           No LLM provider configured. The agent cannot run until one is set.
           <Link to={`${PREVIEW_BASE}/settings/models`} className="font-medium underline">
@@ -148,88 +140,39 @@ export default function RepoConsole() {
           {active === 'settings' ? (
             <SettingsTab repo={repo} />
           ) : active === 'context' ? (
-            // REAL, not mock: the sources are the WORKSPACE's, read over
-            // `/api/context/sources`, and the switches save this repository's
-            // links over `/api/repos/<id>/context/bindings`.
+            // The sources are the WORKSPACE's, read over `/api/context/sources`,
+            // and the switches save this repository's links over
+            // `/api/repos/<id>/context/bindings`.
             <ContextTab repo={repo} />
-          ) : active === 'interfaces' && repo.real ? (
-            // REAL, not mock: the interface catalog of a connected repository is
-            // derived from that repository's own tree, so this surface reads the
-            // server's catalog over `/api/repos/<id>/guard/interfaces`. Same two
-            // views as the fixture repositories get: the full-width catalog
-            // of screens, operations and commands, and each row as its own page.
+          ) : active === 'interfaces' ? (
+            // The interface catalog is derived from this repository's own tree,
+            // read over `/api/repos/<id>/guard/interfaces`: the full-width
+            // catalog of screens, operations and commands, and each row as its
+            // own page.
             interfaceId ? (
               <InterfacePage repo={repo} interfaceId={decodeURIComponent(interfaceId)} />
             ) : (
               <InterfacesTab repo={repo} />
             )
-          ) : active === 'dependencies' && repo.real ? (
-            // REAL, not mock: the dependency catalog of a connected repository
-            // is what its setup stored, joined with the instances registered
-            // through this page, over `/api/repos/<id>/guard/dependencies` —
-            // the same two views the fixture repositories get.
+          ) : active === 'dependencies' ? (
+            // The dependency catalog is what this repository's setup stored,
+            // joined with the instances registered through this page, over
+            // `/api/repos/<id>/guard/dependencies`.
             dependencyName ? (
               <DependencyPage repo={repo} name={decodeURIComponent(dependencyName)} />
             ) : (
               <DependenciesTab repo={repo} />
             )
-          ) : active === 'runs' && repo.real ? (
-            // REAL, not mock: every run the server stored for a connected
-            // repository — the baseline runs and the pull-request head runs the
-            // gate wrote — over `/api/repos/<id>/guard/history?all=1`, and one
-            // run's snapshot with its evidence as its own page.
-            runId ? (
-              <RunPage repo={repo} runId={decodeURIComponent(runId)} />
-            ) : (
-              <RunsTab repo={repo} />
-            )
-          ) : !guard ? (
-            // A real repository with nothing in flight has not started, rather
-            // than not finished: promising a run that is not running would be
-            // the one thing this page could get wrong.
-            <EmptyState
-              icon={FolderGit2}
-              title={
-                repo.real && !repo.onboarding
-                  ? 'Nothing has run on this repository yet'
-                  : 'Onboarding has not produced anything yet'
-              }
-              body={
-                repo.real && !repo.onboarding ? (
-                  <>
-                    Documentation is the workspace's: add a source and scan it on{' '}
-                    <Link to={`${PREVIEW_BASE}/context`} className="text-primary hover:underline">
-                      Context
-                    </Link>
-                    .
-                  </>
-                ) : (
-                  <>
-                    The first scan, setup and generation are still running. Follow them on{' '}
-                    <Link to={activityHref(repo.id)} className="text-primary hover:underline">
-                      Agent
-                    </Link>
-                    .
-                  </>
-                )
-              }
-            />
-          ) : active === 'interfaces' ? (
-            interfaceId ? (
-              <InterfacePage repo={repo} interfaceId={decodeURIComponent(interfaceId)} />
-            ) : (
-              <InterfacesTab repo={repo} />
-            )
-          ) : active === 'runs' ? (
-            runId ? (
-              <RunPage repo={repo} runId={decodeURIComponent(runId)} />
-            ) : (
-              <RunsTab repo={repo} />
-            )
-          ) : dependencyName ? (
-            <DependencyPage repo={repo} name={decodeURIComponent(dependencyName)} />
           ) : (
-            <DependenciesTab repo={repo} />
+            // Every run the server stored, the baseline runs and the
+            // pull-request head runs the gate wrote, over
+            // `/api/repos/<id>/guard/history?all=1`, and one run's snapshot with
+            // its evidence as its own page.
+            runId ? (
+              <RunPage repo={repo} runId={decodeURIComponent(runId)} />
+            ) : (
+              <RunsTab repo={repo} />
+            )
           )}
         </div>
       </div>

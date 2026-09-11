@@ -1,5 +1,3 @@
-// PREVIEW: REAL. The agent's own page, over the workspace's stored runs.
-
 /**
  * Agent: everything the agent did, is doing and needs you for, across every
  * connected repository.
@@ -71,7 +69,7 @@ function AgentIndex() {
   const [params, setParams] = useSearchParams();
   const [query, setQuery] = useState('');
 
-  const connected = useMemo(() => repos.filter((r) => r.real), [repos]);
+  const connected = repos;
   const repoIds = useMemo(() => connected.map((r) => r.id), [connected]);
   const { runs, error } = useWorkspaceRuns(repoIds);
 

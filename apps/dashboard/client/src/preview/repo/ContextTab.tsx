@@ -1,5 +1,3 @@
-// PREVIEW: REAL. Which of the workspace's sources this repository reads.
-
 /**
  * The repository's Context tab: a SELECTION over the workspace's sources, and
  * the one place a repository plugs context in. ONE list of every workspace

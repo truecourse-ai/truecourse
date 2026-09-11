@@ -1,16 +1,17 @@
 /**
- * Settings as a hub: members and SSO, provider connections, the LLM, the
- * connectors, and the plan. The sub-tab is in the URL, so a settings page is a
- * place a link can point at.
+ * Settings as a hub: the workspace's members, where its repositories are
+ * connected from, the document connectors, the LLM provider, and the
+ * integrations. The sub-tab is in the URL, so a settings page is a place a link
+ * can point at.
  *
- * Plan-gated features are SHOWN and locked, never hidden: a workspace on Team
- * can see that SSO and the connectors exist and what they would do, which is
- * the whole point of one edition with plan-gated features.
+ * Everything here is the server's. There is no plan and no entitlement read yet,
+ * so nothing is drawn as plan-gated: a feature that is not built says Coming
+ * soon, which is what it is, rather than wearing a lock that would claim a plan
+ * decides it.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { Lock } from 'lucide-react';
+import { useParams } from 'react-router-dom';
 import { CONTEXT_SOURCE_KIND_LABEL, LLM_PROVIDER_KINDS } from '@truecourse/shared';
 import type {
   ContextSourceKind,
@@ -20,16 +21,15 @@ import type {
   LlmConfigUpdate,
   LlmProviderKind,
 } from '@truecourse/shared';
-import { Badge } from '@/components/ui/badge';
 import { EntityList } from '@/preview/ui/entity-list';
 import { ConnectorLogo, type ConnectorTool } from '@/preview/ui/connector-logos';
 import { StatusWord } from '@/preview/ui/status-word';
-import { Capsule, Facts, ProviderIcon, PROVIDER_NAME, PageHeader, SideMenu } from '@/preview/ui/bits';
-import { ENTITLEMENTS, MEMBERS } from '@/preview/data';
+import { Facts, ProviderIcon, PROVIDER_NAME, PageHeader, SideMenu } from '@/preview/ui/bits';
 import { fetchLlmConfig, saveLlmConfig } from '@/preview/data/llm-config';
 import { fetchGithubStatus } from '@/preview/data/real-repos';
-import type { Member, ProviderId } from '@/preview/data/types';
+import type { PreviewUser, ProviderId } from '@/preview/data/types';
 import { usePreviewState } from '@/preview/shell/preview-state';
+import { usePreviewUser } from '@/preview/shell/use-preview-user';
 import { PREVIEW_BASE } from '@/preview/shell/PreviewShell';
 
 const TABS = [
@@ -38,7 +38,6 @@ const TABS = [
   { id: 'connections', label: 'Connections' },
   { id: 'models', label: 'Models' },
   { id: 'integrations', label: 'Integrations' },
-  { id: 'plan', label: 'Plan' },
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
@@ -46,24 +45,20 @@ type TabId = (typeof TABS)[number]['id'];
 function Card({
   title,
   description,
-  locked = false,
+  note,
   children,
 }: {
   title: string;
   description?: string;
-  locked?: boolean;
+  /** A short word about the state of the thing, e.g. that it is not built yet. */
+  note?: string;
   children?: React.ReactNode;
 }) {
   return (
     <section className="rounded-md border border-border bg-card px-4 py-3">
       <div className="flex items-center gap-2">
         <h3 className="text-xs font-semibold text-foreground">{title}</h3>
-        {locked && (
-          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-            <Lock className="h-3 w-3" />
-            Enterprise plan
-          </span>
-        )}
+        {note && <span className="text-[11px] text-muted-foreground">{note}</span>}
       </div>
       {description && <p className="mt-1 text-[11px] text-muted-foreground">{description}</p>}
       {children && <div className="mt-2">{children}</div>}
@@ -71,74 +66,38 @@ function Card({
   );
 }
 
+/**
+ * Members: who is signed in. The server has no member directory yet — only the
+ * session's own user — so this lists exactly that one person and offers no
+ * invitation, rather than showing a roster nobody wrote.
+ */
 function MembersTab() {
-  const [invite, setInvite] = useState(false);
+  const user = usePreviewUser();
   return (
-    <div className="space-y-4">
-      <div className="border-t border-border">
-        <EntityList<Member>
-          label="Workspace members"
-          variant="embedded"
-          items={MEMBERS}
-          itemId={(m) => m.id}
-          renderRow={(m) => (
-            <>
-              <div className="flex w-full min-w-0 items-center gap-2">
-                <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{m.name}</span>
-                <Capsule>{m.role}</Capsule>
-              </div>
-              <div className="flex w-full min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
-                <span className="min-w-0 truncate">{m.email}</span>
-                <span className="ml-auto shrink-0">joined {m.joined}</span>
-              </div>
-            </>
-          )}
-          search={{
-            placeholder: 'Search members',
-            ariaLabel: 'Search members',
-            match: (m, q) => m.name.toLowerCase().includes(q) || m.email.toLowerCase().includes(q),
-          }}
-          noun={{ one: 'member', many: 'members' }}
-          toolbar={
-            <button
-              type="button"
-              onClick={() => setInvite((v) => !v)}
-              className="rounded bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground hover:opacity-90"
-            >
-              Invite member
-            </button>
-          }
-        />
-      </div>
-
-      {invite && (
-        <Card title="Invite a member" description="An invitation expires after seven days.">
-          <div className="flex items-center gap-2">
-            <input
-              placeholder="name@acme.dev"
-              aria-label="Invitation e-mail"
-              className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-            />
-            <button
-              type="button"
-              onClick={() => setInvite(false)}
-              className="shrink-0 rounded border border-border px-2 py-1 text-[11px] font-medium text-foreground hover:bg-muted/60"
-            >
-              Send
-            </button>
-          </div>
-        </Card>
-      )}
-
-      <Card
-        title="Single sign-on"
-        locked
-        description="SAML and SCIM provisioning, with the workspace role mapped from a directory group. Available on the Enterprise plan."
-      >
-        <Link to={`${PREVIEW_BASE}/settings/plan`} className="text-[11px] text-primary hover:underline">
-          See the plan
-        </Link>
-      </Card>
+    <div className="border-t border-border">
+      <EntityList<PreviewUser>
+        label="Workspace members"
+        variant="embedded"
+        items={user ? [user] : []}
+        itemId={(m) => m.email}
+        renderRow={(m) => (
+          <>
+            <div className="flex w-full min-w-0 items-center gap-2">
+              <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{m.name}</span>
+            </div>
+            <div className="flex w-full min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
+              <span className="min-w-0 truncate">{m.email}</span>
+            </div>
+          </>
+        )}
+        search={{
+          placeholder: 'Search members',
+          ariaLabel: 'Search members',
+          match: (m, q) => m.name.toLowerCase().includes(q) || m.email.toLowerCase().includes(q),
+        }}
+        noun={{ one: 'member', many: 'members' }}
+        emptyText="Nobody is signed in."
+      />
     </div>
   );
 }
@@ -537,62 +496,14 @@ function IntegrationsTab() {
     <div className="space-y-3">
       <Card
         title="Jira"
-        locked
+        note="Coming soon"
         description="Open a Jira issue from a gate failure, with the failing step, its evidence and the claim it breaks."
-      >
-        <button type="button" className="text-[11px] text-primary hover:underline">
-          Upgrade to Enterprise
-        </button>
-      </Card>
+      />
       <Card
         title="Confluence"
-        locked
+        note="Coming soon"
         description="Read Confluence spaces as spec sources, the way an llms.txt site is read today."
-      >
-        <button type="button" className="text-[11px] text-primary hover:underline">
-          Upgrade to Enterprise
-        </button>
-      </Card>
-    </div>
-  );
-}
-
-function PlanTab() {
-  const { workspace } = usePreviewState();
-  return (
-    <div className="space-y-4">
-      <Card title="Current plan" description="Plans decide which features are on. Nothing is hidden, only locked.">
-        <Badge variant="outline" className="h-5 px-2 text-[11px]">
-          {workspace.plan}
-        </Badge>
-      </Card>
-
-      <div className="overflow-hidden rounded-md border border-border">
-        <Facts
-          rows={ENTITLEMENTS.map((e) => ({
-            label: e.label,
-            value: (
-              <span className="inline-flex items-center gap-1.5">
-                {e.locked && <Lock className="h-3 w-3 text-muted-foreground" />}
-                {e.value}
-              </span>
-            ),
-          }))}
-        />
-      </div>
-
-      <Card
-        title="Self-hosted license key"
-        locked
-        description="A self-hosted deployment runs the same product against your own store and your own runner."
-      >
-        <input
-          disabled
-          placeholder="TC-XXXX-XXXX-XXXX"
-          aria-label="Self-hosted license key"
-          className="w-full cursor-not-allowed rounded border border-border bg-muted/40 px-2 py-1 font-mono text-xs text-muted-foreground"
-        />
-      </Card>
+      />
     </div>
   );
 }
@@ -621,7 +532,6 @@ export default function SettingsPage() {
             {active === 'connections' && <ConnectionsTab />}
             {active === 'models' && <ModelsTab />}
             {active === 'integrations' && <IntegrationsTab />}
-            {active === 'plan' && <PlanTab />}
           </div>
         </div>
       </div>

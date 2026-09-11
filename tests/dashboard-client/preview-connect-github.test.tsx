@@ -228,12 +228,8 @@ describe('a remote URL as a preview repository', () => {
       id: 'orders-api',
       fullName: 'acme/orders-api',
       provider: 'github',
-      visibility: 'public',
       defaultBranch: 'trunk',
-      policy: 'advisory',
-      baselineSha: 'no baseline yet',
       onboarding: false,
-      real: true,
     });
     expect(repo.lastCheck).toEqual({
       conclusion: 'neutral',
@@ -590,16 +586,16 @@ describe('connecting a repository through the GitHub App', () => {
     await waitFor(() => expect(bound).toEqual([{ repoId: 'linkwarden', sourceIds: [] }]));
   });
 
-  it('is a mock with no server behind it: the fixtures render and nothing throws', async () => {
+  it('renders an empty Code and nothing throws with no server behind it', async () => {
     window.fetch = vi.fn(async () => {
       throw new TypeError('Failed to fetch');
     }) as unknown as typeof window.fetch;
     renderAt('/preview/code');
-    expect(await screen.findByText('acme/orders-api')).toBeInTheDocument();
+    expect(await screen.findByText('No repository connected yet.')).toBeInTheDocument();
   });
 });
 
-describe('the agent page is real, and the fixtures contribute nothing', () => {
+describe('the agent page reads the workspace route', () => {
   const CONNECTED: RegistryEntry = {
     id: 'linkwarden',
     name: 'linkwarden/linkwarden',
@@ -635,9 +631,9 @@ describe('the agent page is real, and the fixtures contribute nothing', () => {
     );
   });
 
-  it('gives a fixture repository no conversations of its own', async () => {
-    serve();
-    renderAt('/preview/repos/orders-api/coverage');
+  it('gives a connected repository no Activity tab of its own', async () => {
+    serve({ registry: [CONNECTED] });
+    renderAt(`/preview/repos/${CONNECTED.id}/runs`);
 
     const menu = await screen.findByRole('navigation', { name: 'Repository sections' });
     expect(within(menu).queryByRole('link', { name: 'Activity' })).toBeNull();

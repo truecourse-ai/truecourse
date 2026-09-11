@@ -1,5 +1,3 @@
-// PREVIEW: REAL. One document of the workspace's context.
-
 /**
  * One document of Context: the EXISTING coverage page, the same one everywhere
  * a document opens. The document is painted by section status, a totals strip
@@ -38,7 +36,7 @@ import { CorpusItemPane } from './CorpusItemPane';
 /** The repositories this document could be read through, that do not read it yet. */
 function Linkable({ row }: { row: ContextDocumentRow }) {
   const { repos } = usePreviewState();
-  const could = repos.filter((repo) => repo.real && !row.repositories.includes(repo.fullName));
+  const could = repos.filter((repo) => !row.repositories.includes(repo.fullName));
   if (could.length === 0) return null;
   return (
     <p className="text-[11px] text-muted-foreground">

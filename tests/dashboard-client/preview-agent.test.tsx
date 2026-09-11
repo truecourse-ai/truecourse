@@ -383,7 +383,7 @@ describe('the way in', () => {
 
   it('is no longer a tab of the repository console', async () => {
     serve([SCAN]);
-    renderAt('/preview/repos/orders-api/runs');
+    renderAt(`/preview/repos/${REPO_A.id}/runs`);
 
     const menu = await screen.findByRole('navigation', { name: 'Repository sections' });
     expect(within(menu).queryByRole('link', { name: 'Activity' })).toBeNull();

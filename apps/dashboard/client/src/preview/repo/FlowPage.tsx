@@ -2,8 +2,8 @@
  * One flow, as its own page (`/preview/flows/:flowId?repo=`): the breadcrumb
  * back to Flows, then the vendored flow workspace (`GuardFlowsPane`), pinned to
  * this one flow. A scenario or finding the workspace opens rides the same URL
- * tabs it always did. A connected repository's reads are the server's, re-read
- * when a generate or a run lands; a fixture repository's are its fixtures.
+ * tabs it always did. The reads are the server's, re-read
+ * when a generate or a run lands.
  *
  * The flows of every repository are ONE list now, so this page belongs to the
  * Flows page rather than to a repository tab: the repository it is read through

@@ -38,9 +38,6 @@ import SourcePage from './pages/SourcePage';
 import SourcesPage from './pages/SourcesPage';
 import RepoConsole from './repo/RepoConsole';
 import { JobToasts } from './shell/JobToasts';
-import { installPreviewFetch } from './data/fake-api';
-
-installPreviewFetch();
 import { PreviewShell } from './shell/PreviewShell';
 import { PreviewStateProvider } from './shell/preview-state';
 

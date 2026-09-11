@@ -122,6 +122,4 @@ export interface RunStarter {
   start: (command: string) => void;
   /** A start is in flight. */
   pending: boolean;
-  /** What a repository with no runs at all is offered, when there is an offer. */
-  first: { command: string; label: string } | null;
 }

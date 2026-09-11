@@ -10,8 +10,6 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { toPreviewRepo } from '@/preview/data/real-repos';
-import { REPOS } from '@/preview/data/repos';
-import { statusSummary } from '@/preview/data/corpus-fixtures';
 import type { GuardStatusSummary } from '@/preview/vendor/shared';
 import CodePage from '@/preview/pages/CodePage';
 
@@ -141,13 +139,12 @@ describe('Code, the repositories and their stored summaries', () => {
     expect(row().getByText('Neutral')).toBeInTheDocument();
   });
 
-  it('lists a fixture repository from its fixtures without fetching it', async () => {
+  it('says so when nothing is connected, rather than showing an empty table', async () => {
     serve();
-    state.repos = [repo, REPOS[0]!];
+    state.repos = [];
     renderCode();
-    await screen.findByText('50%');
-    expect(screen.getByText(REPOS[0]!.fullName)).toBeInTheDocument();
-    expect(vi.mocked(fetch).mock.calls.every(([input]) => String(input).includes(`/repos/${repo.id}/`))).toBe(true);
+    expect(await screen.findByText('No repository connected yet.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Connect repository' })).toBeInTheDocument();
   });
 
   it('retains coverage when the baseline read fails and uses manifest totals before whole-corpus totals exist', async () => {

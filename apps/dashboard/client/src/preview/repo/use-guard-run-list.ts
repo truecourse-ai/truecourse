@@ -2,8 +2,7 @@
  * Every run of a repository, for the Runs table: the baseline runs and the
  * pull-request head runs the gate stored, each naming its pull request and
  * where it ran. One read (`guard/history?all=1`); `reloadKey` re-reads it when
- * a run lands on the socket. A fixture repository's fake history answers the
- * same call.
+ * a run lands on the socket.
  */
 
 import { useEffect, useState } from 'react';

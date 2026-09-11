@@ -12,9 +12,9 @@ export interface RepoSummary {
   corpusError: boolean;
 }
 
-/** Read each connected repository independently. The shell owns socket rooms. */
+/** Read each repository independently. The shell owns socket rooms. */
 export function useRepoSummaries(repos: readonly Repo[]): ReadonlyMap<string, RepoSummary> {
-  const idsKey = JSON.stringify(repos.filter((repo) => repo.real).map((repo) => repo.id).sort());
+  const idsKey = JSON.stringify(repos.map((repo) => repo.id).sort());
   const [summaries, setSummaries] = useState<ReadonlyMap<string, RepoSummary>>(new Map());
 
   useEffect(() => {

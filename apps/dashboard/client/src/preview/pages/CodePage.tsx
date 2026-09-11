@@ -6,10 +6,9 @@
  * the page action. No feed, no jobs: gate activity lives on a repository's
  * Runs, the agent's work on Agent.
  *
- * A connected repository's row reads its STORED summary from the server (the
- * coverage split, the last run's verdict, the corpus commit as its baseline),
- * re-read when a run of it completes; a fixture repository's row reads its
- * fixtures.
+ * Every row reads its STORED summary from the server (the coverage split, the
+ * last run's verdict, the corpus commit as its baseline), re-read when a run of
+ * that repository completes.
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -20,7 +19,6 @@ import { GUARD_COVERAGE_PLAIN_ORDER } from '@/preview/vendor/shared';
 import { fiveWordSegments } from '@/preview/vendor/components/guard/GuardCoverageOverview';
 import { PageHeader, ProviderIcon } from '@/preview/ui/bits';
 import { StatusWord, CONCLUSION_TONE } from '@/preview/ui/status-word';
-import { statusSummary } from '@/preview/data/corpus-fixtures';
 import { usePreviewState } from '@/preview/shell/preview-state';
 import { activityHref, relativeTime } from '@/preview/shell/real-runs';
 import { ConnectDialog } from './ConnectDialog';
@@ -30,11 +28,6 @@ type ByStatus = Record<GuardCoveragePlainStatus, number>;
 
 function zero(): ByStatus {
   return Object.fromEntries(GUARD_COVERAGE_PLAIN_ORDER.map((k) => [k, 0])) as ByStatus;
-}
-
-function add(into: ByStatus, from: ByStatus | undefined): void {
-  if (!from) return;
-  for (const k of GUARD_COVERAGE_PLAIN_ORDER) into[k] += from[k] ?? 0;
 }
 
 function proven(by: ByStatus): string {
@@ -70,17 +63,17 @@ export default function CodePage() {
   const perRepo = useMemo(
     () =>
       repos.map((repo) => {
-        const loaded = repo.real ? summaries.get(repo.id) : undefined;
-        const summary = repo.real ? loaded?.status : statusSummary(repo.id);
+        const loaded = summaries.get(repo.id);
+        const summary = loaded?.status;
         const sections = summary?.sections?.byStatus ?? summary?.coverage?.byStatus ?? zero();
         const flows = summary?.coverage?.flows.byStatus ?? zero();
         const sectionTotal = summary?.sections?.total ?? summary?.coverage?.totalSections ?? 0;
-        const lastRun = repo.real ? summary?.lastRun : null;
+        const lastRun = summary?.lastRun ?? null;
         const lastCheck = lastRun ? checkForRun(lastRun) : repo.lastCheck;
-        const requirementsEmpty = repo.real && !loaded ? 'Loading…'
-          : loaded?.statusError ? 'Coverage unavailable'
-          : loaded?.corpus || summary?.sections ? 'No requirements yet'
-          : loaded?.corpusError ? 'Requirements unavailable' : 'no corpus yet';
+        const requirementsEmpty = !loaded ? 'Loading…'
+          : loaded.statusError ? 'Coverage unavailable'
+          : loaded.corpus || summary?.sections ? 'No requirements yet'
+          : loaded.corpusError ? 'Requirements unavailable' : 'no corpus yet';
         return { repo, loaded, sections, flows, sectionTotal, lastCheck, lastRun, requirementsEmpty };
       }),
     [repos, summaries],
@@ -160,7 +153,7 @@ export default function CodePage() {
                   <td className="px-3 py-2.5 text-right tabular-nums text-foreground">{proven(sections)}</td>
                   <td className="px-3 py-2.5">
                     <Link
-                      to={!repo.real || lastRun ? `/preview/repos/${repo.id}/runs` : activityHref(repo.id)}
+                      to={lastRun ? `/preview/repos/${repo.id}/runs` : activityHref(repo.id)}
                       onClick={(event) => event.stopPropagation()}
                       title={lastCheck.summary}
                       className="flex items-center gap-2 hover:underline"
@@ -170,20 +163,23 @@ export default function CodePage() {
                     </Link>
                   </td>
                   <td className="px-6 py-2.5 text-muted-foreground">
-                    {repo.real ? (
-                      !loaded ? 'Loading…' : loaded.corpusError ? 'Baseline unavailable' : loaded.corpus ? (
-                        <>
-                          <span title={loaded.corpus.corpusCommit} className="font-mono text-[12px] text-foreground">{loaded.corpus.corpusCommit?.slice(0, 7) ?? repo.defaultBranch}</span>
-                          {' · '}{relativeTime(loaded.corpus.corpus.generatedAt)}
-                        </>
-                      ) : 'no baseline yet'
-                    ) : (
-                      <><span className="font-mono text-[12px] text-foreground">{repo.baselineSha}</span> · {repo.baselineAt}</>
-                    )}
+                    {!loaded ? 'Loading…' : loaded.corpusError ? 'Baseline unavailable' : loaded.corpus ? (
+                      <>
+                        <span title={loaded.corpus.corpusCommit} className="font-mono text-[12px] text-foreground">{loaded.corpus.corpusCommit?.slice(0, 7) ?? repo.defaultBranch}</span>
+                        {' · '}{relativeTime(loaded.corpus.corpus.generatedAt)}
+                      </>
+                    ) : 'no baseline yet'}
                   </td>
                 </tr>
               );
             })}
+            {perRepo.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-6 py-8 text-center text-muted-foreground">
+                  No repository connected yet.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

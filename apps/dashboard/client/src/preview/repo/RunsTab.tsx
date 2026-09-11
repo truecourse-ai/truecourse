@@ -5,11 +5,9 @@
  * narrows by pull request number, commit or branch; there is no filter row,
  * because a list with one dimension does not earn one — Origin is a column.
  *
- * The rows are EVERY run the store holds — the baseline runs and the
- * pull-request head runs the gate wrote — and a connected repository re-reads
- * them when a run of it lands on the socket. The Coverage column names the
- * coverage version a run executed and shows only when a run names one: a
- * connected repository's runs do not yet, so it stays out of their table.
+ * The rows are EVERY run the store holds, the baseline runs and the
+ * pull-request head runs the gate wrote, re-read when a run of this repository
+ * lands on the socket.
  */
 
 import { useMemo, useState } from 'react';
@@ -19,7 +17,6 @@ import { CHIP_CLASS, PageHeader } from '@/preview/ui/bits';
 import { HoverPopover } from '@/preview/ui/hover-popover';
 import { GUARD_OUTCOMES, formatGuardTime } from '@/preview/vendor/lib/guard-drifts';
 import { guardStatusMeta } from '@/preview/vendor/lib/guard-status';
-import { coverageVersionById, type CoverageVersion } from '@/preview/data/corpus';
 import type { Repo } from '@/preview/data/types';
 import { GenerateTestsAction } from './GenerateTestsAction';
 import { useGuardTabJump } from './tab-jump';
@@ -50,17 +47,6 @@ export function RunsTab({ repo }: { repo: Repo }) {
       );
   }, [history, query]);
 
-  // The coverage version each run names, when the picker knows it (fixtures only, today).
-  const versions = useMemo(() => {
-    const out = new Map<string, CoverageVersion>();
-    for (const h of history) {
-      const version = h.coverageVersion ? coverageVersionById(repo.id, h.coverageVersion) : undefined;
-      if (version) out.set(h.runId, version);
-    }
-    return out;
-  }, [history, repo.id]);
-  const showCoverage = versions.size > 0;
-
   const openRun = (runId: string) => navigate(`/preview/repos/${repo.id}/runs/${encodeURIComponent(runId)}`);
 
   return (
@@ -68,7 +54,7 @@ export function RunsTab({ repo }: { repo: Repo }) {
       <PageHeader
         title="Runs"
         subtitle={rows.length === history.length ? `${history.length}` : `${rows.length} of ${history.length}`}
-        right={repo.real ? <GenerateTestsAction repo={repo} /> : undefined}
+        right={<GenerateTestsAction repo={repo} />}
       />
       <div className="min-w-0 shrink-0 border-b border-border px-6 py-2">
         <input
@@ -81,14 +67,13 @@ export function RunsTab({ repo }: { repo: Repo }) {
       </div>
 
       <div className="min-h-0 min-w-0 flex-1 overflow-auto">
-        <table className={`w-full table-fixed border-collapse text-[13px] ${showCoverage ? 'min-w-6xl' : 'min-w-4xl'}`} aria-label="Runs">
+        <table className="w-full min-w-4xl table-fixed border-collapse text-[13px]" aria-label="Runs">
           <colgroup>
             <col className="w-32" />
             <col />
             <col className="w-28" />
             <col className="w-20" />
             <col className="w-64" />
-            {showCoverage && <col className="w-44" />}
             <col className="w-52" />
           </colgroup>
           <thead className="sticky top-0 z-10 bg-card">
@@ -98,14 +83,12 @@ export function RunsTab({ repo }: { repo: Repo }) {
               <th className="px-3 py-2 text-left font-semibold">Pull request</th>
               <th className="px-3 py-2 text-left font-semibold">Origin</th>
               <th className="px-3 py-2 text-left font-semibold">Result</th>
-              {showCoverage && <th className="px-3 py-2 text-left font-semibold">Coverage</th>}
               <th className="px-6 py-2 text-left font-semibold">When</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((h) => {
               const verdict = verdictOf(h);
-              const version = versions.get(h.runId);
               return (
                 <tr
                   key={h.runId}
@@ -144,20 +127,13 @@ export function RunsTab({ repo }: { repo: Repo }) {
                       </span>
                     </span>
                   </td>
-                  {showCoverage && (
-                    <td className="px-3 py-2.5 text-muted-foreground">
-                      <span className="block truncate" title={version ? `${version.label} · ${version.sha}` : ''}>
-                        {version ? `${version.label} · ${version.sha}` : ''}
-                      </span>
-                    </td>
-                  )}
                   <td className="whitespace-nowrap px-6 py-2.5 text-muted-foreground">{formatGuardTime(h.ranAt)}</td>
                 </tr>
               );
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={showCoverage ? 7 : 6} className="px-6 py-8 text-center text-muted-foreground">
+                <td colSpan={6} className="px-6 py-8 text-center text-muted-foreground">
                   {loading ? 'Loading runs.' : error ? error : history.length === 0 ? 'No run yet.' : 'No run matches.'}
                 </td>
               </tr>

@@ -1,9 +1,6 @@
-// PREVIEW: REAL for a connected repository — the flows its generate stored,
-// read over `/api/repos/:id/guard/flows`. A fixture repository contributes its
-// fixtures through the preview's fetch shim, exactly as the console's table did.
-
 /**
- * Flows: every flow of every repository of the workspace, in one place.
+ * Flows: every flow of every repository of the workspace, in one place, read
+ * over `/api/repos/:id/guard/flows`.
  *
  * A flow is what the product proves, and it stopped being a tab of one
  * repository: the index is the platform's index shape (search full width, ONE

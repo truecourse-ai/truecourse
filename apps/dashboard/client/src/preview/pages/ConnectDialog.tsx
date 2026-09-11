@@ -1,5 +1,3 @@
-// PREVIEW: REAL. Connecting a repository through the GitHub App.
-
 /**
  * Connect a repository, in four steps: pick the connected INSTANCE, pick the
  * repositories it can see, pick the CONTEXT each of them reads, confirm. The
