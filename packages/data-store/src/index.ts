@@ -15,9 +15,9 @@ export { GhReposRegistryStore } from './gh-repos-registry-store.js';
 export { PgSpecStore } from './spec-store.js';
 export {
   PgContextStore,
-  listDueContextSites,
+  listDueContextSources,
   touchContextWorkspace,
-  type DueContextSite,
+  type DueContextSource,
 } from './context-store.js';
 export { migrateWorkspaceContext, type ContextMigrationSummary } from './context-migration.js';
 export {

@@ -1,5 +1,5 @@
 /**
- * Context: every document of the workspace, in one table.
+ * Context › Documents: every document of the workspace, in one table.
  *
  * The page is real all the way down — it reads `GET /api/context/documents`,
  * whose rows the server composed and whose status the server folded — so what
@@ -156,8 +156,10 @@ function serve(over: Partial<World> = {}) {
       return json({ changedAt: null, corpusAt: null, stale: state.stale });
     }
     if (url.pathname === '/api/context/scan') return json({ jobId: 'job-scan' }, 202);
-    if (url.pathname === `/api/context/sources/${SITE.id}/sync`) return json({ jobId: 'job-sync' }, 202);
-    if (url.pathname === `/api/context/sources/${SITE.id}/pause`) return json({ source: SITE });
+    if (/^\/api\/context\/sources\/[^/]+\/sync$/.test(url.pathname)) {
+      return json({ jobId: 'job-sync' }, 202);
+    }
+    if (/^\/api\/context\/sources\/[^/]+\/pause$/.test(url.pathname)) return json({ source: SITE });
     if (url.pathname === `/api/context/sources/${SITE.id}`) {
       return json({ removed: SITE, repositories: SITE.repositories });
     }
@@ -202,7 +204,7 @@ afterEach(() => {
 describe('Context, the documents', () => {
   it('draws one row per document, in the words the server folded', async () => {
     serve();
-    renderAt('/preview/context');
+    renderAt('/preview/context/documents');
 
     await waitFor(() => expect(rows()).toHaveLength(2));
     const [refunds, onboarding] = rows();
@@ -220,14 +222,14 @@ describe('Context, the documents', () => {
 
   it('names the one repository that reads a document', async () => {
     serve({ documents: [{ ...REFUNDS, repositories: [REPO_A.name] }] });
-    renderAt('/preview/context');
+    renderAt('/preview/context/documents');
     await waitFor(() => expect(rows()).toHaveLength(1));
     expect(within(rows()[0]!).getByText('acme/web')).toBeInTheDocument();
   });
 
   it('searches the title and puts a picked filter in the address', async () => {
     serve();
-    renderAt('/preview/context');
+    renderAt('/preview/context/documents');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(2));
 
@@ -241,20 +243,22 @@ describe('Context, the documents', () => {
     await user.click(await screen.findByRole('option', { name: /Not linked/ }));
 
     await waitFor(() => expect(rows()).toHaveLength(1));
-    expect(screen.getByTestId('address')).toHaveTextContent('/preview/context?status=not-linked');
+    expect(screen.getByTestId('address')).toHaveTextContent(
+      '/preview/context/documents?status=not-linked',
+    );
     expect(within(rows()[0]!).getByText('Onboarding')).toBeInTheDocument();
   });
 
   it('narrows to a repository the address names', async () => {
     serve();
-    renderAt(`/preview/context?repo=${encodeURIComponent(REPO_A.name)}`);
+    renderAt(`/preview/context/documents?repo=${encodeURIComponent(REPO_A.name)}`);
     await waitFor(() => expect(rows()).toHaveLength(1));
     expect(within(rows()[0]!).getByText('Refunds')).toBeInTheDocument();
   });
 
   it('opens a document from its row', async () => {
     serve();
-    renderAt('/preview/context');
+    renderAt('/preview/context/documents');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(2));
 
@@ -268,10 +272,9 @@ describe('Context, the documents', () => {
 });
 
 describe('narrowed to one source', () => {
-  it('becomes that source: the crumb, its sync status and its actions', async () => {
-    const state = serve();
-    renderAt(`/preview/context?source=${SITE.id}`);
-    const user = userEvent.setup();
+  it('becomes that source: the crumb and its sync status, and nothing to press', async () => {
+    serve();
+    renderAt(`/preview/context/documents?source=${SITE.id}`);
 
     const crumbs = await screen.findByRole('navigation', { name: 'Breadcrumb' });
     expect(within(crumbs).getByRole('link', { name: 'Context' })).toHaveAttribute(
@@ -281,42 +284,27 @@ describe('narrowed to one source', () => {
     expect(await screen.findByRole('heading', { name: 'docs.acme.com' })).toBeInTheDocument();
     expect(screen.getByText('Synced')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Sync now' }));
-    await waitFor(() => expect(state.calls).toContain(`POST /api/context/sources/${SITE.id}/sync`));
-
-    await user.click(screen.getByRole('button', { name: 'Pause' }));
-    await waitFor(() => expect(state.calls).toContain(`POST /api/context/sources/${SITE.id}/pause`));
+    // What can be done to a source is on the Sources list, in the row's menu.
+    expect(screen.queryByRole('button', { name: 'Sync now' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Pause' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull();
   });
 
-  it('names the repositories a removal stops, and removes on confirmation', async () => {
-    const state = serve();
-    renderAt(`/preview/context?source=${SITE.id}`);
-    const user = userEvent.setup();
-
-    await user.click(await screen.findByRole('button', { name: 'Remove' }));
-    expect(await screen.findByText(/acme\/web, acme\/api read this source/)).toBeInTheDocument();
-
-    const dialog = screen.getByRole('dialog');
-    await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
-    await waitFor(() => expect(state.calls).toContain(`DELETE /api/context/sources/${SITE.id}`));
-  });
-
-  it('shows a repository source its branch and its patterns, and offers it no sync', async () => {
+  it('shows a repository source its branch and its patterns', async () => {
     serve();
-    renderAt(`/preview/context?source=${REPO_SOURCE.id}`);
+    renderAt(`/preview/context/documents?source=${REPO_SOURCE.id}`);
 
     expect(await screen.findByRole('heading', { name: 'acme/web' })).toBeInTheDocument();
     expect(screen.getByText('Never synced')).toBeInTheDocument();
     expect(screen.getByText('the default branch')).toBeInTheDocument();
     expect(screen.getByText('docs/** !**/CHANGELOG*')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Sync now' })).toBeNull();
   });
 });
 
 describe('the workspace scan', () => {
   it('starts the one Document scan the workspace has', async () => {
     const state = serve();
-    renderAt('/preview/context');
+    renderAt('/preview/context/documents');
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole('button', { name: 'Scan' }));
@@ -325,7 +313,7 @@ describe('the workspace scan', () => {
 
   it('carries an amber dot while the context has moved since the corpus', async () => {
     serve({ stale: true });
-    renderAt('/preview/context');
+    renderAt('/preview/context/documents');
     expect(await screen.findByLabelText('scan pending')).toBeInTheDocument();
   });
 
@@ -344,7 +332,7 @@ describe('the workspace scan', () => {
         },
       ],
     });
-    renderAt('/preview/context');
+    renderAt('/preview/context/documents');
 
     const button = await screen.findByRole('button', { name: 'Scanning…' });
     expect(button).toBeDisabled();
@@ -355,7 +343,7 @@ describe('the workspace scan', () => {
 describe('Add context', () => {
   it('offers the two kinds that work and locks the rest', async () => {
     serve();
-    renderAt('/preview/context');
+    renderAt('/preview/context/documents');
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole('button', { name: 'Add context' }));
@@ -368,7 +356,7 @@ describe('Add context', () => {
 
   it('checks a scope before anything is stored, then links and adds', async () => {
     const state = serve();
-    renderAt('/preview/context');
+    renderAt('/preview/context/documents');
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole('button', { name: 'Add context' }));
@@ -392,14 +380,14 @@ describe('Add context', () => {
     await waitFor(() => expect(state.calls).toContain('POST /api/context/sources'));
     await waitFor(() =>
       expect(screen.getByTestId('address')).toHaveTextContent(
-        '/preview/context?source=site-docs-other',
+        '/preview/context/documents?source=site-docs-other',
       ),
     );
   });
 
   it('refuses a second source for a repository that already has one', async () => {
     serve();
-    renderAt('/preview/context');
+    renderAt('/preview/context/documents');
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole('button', { name: 'Add context' }));

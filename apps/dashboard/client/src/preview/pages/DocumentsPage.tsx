@@ -1,7 +1,7 @@
 // PREVIEW: REAL. Every document of the workspace's context, from the server.
 
 /**
- * Context IS the documents: ONE table, one row per document of the workspace
+ * Context › Documents: ONE table, one row per document of the workspace
  * corpus, worst first. A source is a filter over it, a repository is a reading
  * of it, and the status a row wears is the server's fold across every
  * repository that reads the document (`GET /api/context/documents`) — nothing
@@ -9,21 +9,19 @@
  *
  * ONE filter row narrows it along four dimensions — Area, Status, Source and
  * Repository — and every narrowing rides the address (`?area=`, `?status=`,
- * `?source=`, `?repo=`), so a narrowed page is a place: the repository's
- * Context tab links straight to `?source=<id>`.
+ * `?source=`, `?repo=`), so a narrowed page is a place: the Sources list and
+ * the repository's Context tab link straight to `?source=<id>`.
  *
- * Narrowed to exactly ONE source, the header becomes that source's: its sync
- * status, and its actions (Sync now, Pause / Resume, Remove for a site; the
- * patterns and the branch for a repository source).
+ * Narrowed to exactly ONE source, the header carries that source's sync status
+ * word and, for a repository source, the branch and patterns it reads. What can
+ * be DONE to a source is on the Sources list, in the row's own menu.
  *
- * The page actions are the workspace's own: Scan (the Document scan, dotted
- * while the context has moved since the corpus) and Add context. The scan
- * starts HERE and nowhere else.
+ * The page actions — Scan and Add context — belong to the workspace, so they
+ * are {@link ContextFrame}'s and every section of Context carries them.
  */
 
 import { useCallback, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { toast } from 'sonner';
 import {
   CONTEXT_DOCUMENT_STATUS_ORDER,
   CONTEXT_DOCUMENT_STATUS_WORD,
@@ -32,15 +30,6 @@ import {
   type ContextSourceView,
   type RepositorySourceConfig,
 } from '@truecourse/shared';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { pauseContextSource, removeContextSource, syncContextSource } from '@/lib/api';
 import { IndexTable } from '@/preview/ui/index-table';
 import {
   filterKey,
@@ -55,21 +44,9 @@ import {
   StatusWord,
 } from '@/preview/ui/status-word';
 import { formatRelativeTime } from '@/preview/vendor/shared/format/relative-time';
-import { startContextScan } from '@/preview/data/scan';
-import { toastNoLlmProvider } from '@/preview/shell/use-run-trigger';
-import { useWorkspaceRuns } from '@/preview/shell/use-workspace-runs';
-import {
-  useContextDocuments,
-  useContextSignal,
-  useContextSources,
-  useContextStaleness,
-} from '@/preview/shell/use-context';
-import { AddContextDialog } from './AddContextDialog';
+import { useContextDocuments, useContextSignal, useContextSources } from '@/preview/shell/use-context';
 import { ContextFrame } from './ContextFrame';
-import { CONTEXT_BASE, docHref } from './context-hrefs';
-
-const ACTION =
-  'rounded border border-border px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted/60 disabled:opacity-50';
+import { docHref } from './context-hrefs';
 
 /** The dimensions the one filter row narrows along, each its own address parameter. */
 const DIMENSIONS = ['area', 'status', 'source', 'repo'] as const;
@@ -130,135 +107,17 @@ function RepositoryScope({ source }: { source: ContextSourceView }) {
   );
 }
 
-/** The one source the view is narrowed to: its status, and what can be done to it. */
-function SourceActions({ source, onChanged }: { source: ContextSourceView; onChanged: () => void }) {
-  const navigate = useNavigate();
-  const [removing, setRemoving] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const readers = source.repositories;
-
-  const act = async (run: () => Promise<unknown>): Promise<void> => {
-    setBusy(true);
-    try {
-      await run();
-      onChanged();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
+/**
+ * The one source the view is narrowed to, as a header: its scope when it is a
+ * repository's, and the sync status word. What can be DONE to a source lives on
+ * the Sources list, one menu per row — a header is not a place to hide actions.
+ */
+function SourceHeader({ source }: { source: ContextSourceView }) {
   return (
     <span className="flex shrink-0 items-center gap-3">
       {source.kind === 'repository' && <RepositoryScope source={source} />}
       <StatusWord tone={CONTEXT_SYNC_TONE[source.status]} word={CONTEXT_SYNC_WORD[source.status]} />
-      {source.kind === 'site' && (
-        <>
-          <button
-            type="button"
-            onClick={() => void act(() => syncContextSource(source.id))}
-            disabled={busy || source.status === 'syncing' || source.status === 'paused'}
-            className={ACTION}
-          >
-            Sync now
-          </button>
-          <button
-            type="button"
-            onClick={() => void act(() => pauseContextSource(source.id, source.status !== 'paused'))}
-            disabled={busy}
-            className={ACTION}
-          >
-            {source.status === 'paused' ? 'Resume' : 'Pause'}
-          </button>
-          <button
-            type="button"
-            onClick={() => setRemoving(true)}
-            className="rounded border border-destructive/40 px-2.5 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10"
-          >
-            Remove
-          </button>
-        </>
-      )}
-      <Dialog open={removing} onOpenChange={setRemoving}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Remove {source.title}?</DialogTitle>
-            <DialogDescription>
-              {readers.length > 0
-                ? `${readers.join(', ')} ${readers.length === 1 ? 'reads' : 'read'} this source. Removing it re-scans the workspace without its documents.`
-                : 'No repository reads this source; removing it changes no corpus.'}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <button type="button" onClick={() => setRemoving(false)} className={ACTION}>
-              Keep it
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() =>
-                void act(async () => {
-                  await removeContextSource(source.id);
-                  setRemoving(false);
-                  navigate(CONTEXT_BASE);
-                })
-              }
-              className="rounded bg-destructive px-2.5 py-1.5 text-xs font-medium text-destructive-foreground hover:opacity-90 disabled:opacity-50"
-            >
-              Remove
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </span>
-  );
-}
-
-/**
- * The workspace Document scan. Amber-dotted while the context has moved since
- * the corpus was built; disabled and saying so while one is running, which is
- * read from the workspace's own runs, not guessed at.
- */
-function ScanButton({ stale, scanning }: { stale: boolean; scanning: boolean }) {
-  const navigate = useNavigate();
-  const [pending, setPending] = useState(false);
-  const running = pending || scanning;
-
-  const start = useCallback(() => {
-    if (running) return;
-    setPending(true);
-    void startContextScan()
-      .then((outcome) => {
-        switch (outcome.kind) {
-          case 'started':
-            return;
-          case 'not-configured':
-            toastNoLlmProvider(navigate, outcome.message);
-            return;
-          case 'probe-failed':
-            toast.error(`Provider check failed: ${outcome.message}`);
-            return;
-          case 'busy':
-            toast.error('A document scan is already running');
-            return;
-          default:
-            toast.error('Could not start the document scan', { description: outcome.message });
-        }
-      })
-      .finally(() => setPending(false));
-  }, [navigate, running]);
-
-  return (
-    <button type="button" onClick={start} disabled={running} className={`${ACTION} relative`}>
-      {running ? 'Scanning…' : 'Scan'}
-      {stale && !running && (
-        <span
-          aria-label="scan pending"
-          className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-background"
-        />
-      )}
-    </button>
   );
 }
 
@@ -266,18 +125,9 @@ export default function DocumentsPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const signal = useContextSignal();
-  const { documents, error, refetch } = useContextDocuments(signal);
-  const { sources, refetch: refetchSources } = useContextSources(signal);
-  const stale = useContextStaleness(signal);
-  const { runs } = useWorkspaceRuns([]);
-  const [adding, setAdding] = useState(false);
+  const { documents, error } = useContextDocuments(signal);
+  const { sources } = useContextSources(signal);
   const [query, setQuery] = useState('');
-
-  // A Document scan belongs to the workspace, so it is the run with no
-  // repository — the one fact that says the button is busy.
-  const scanning = (runs ?? []).some(
-    (run) => run.repo === null && run.command === 'spec-scan' && run.status === 'running',
-  );
 
   const rowsAll = useMemo(() => documents ?? [], [documents]);
 
@@ -364,11 +214,6 @@ export default function DocumentsPage() {
     return picked.length === 1 ? (sources ?? []).find((s) => s.id === picked[0]) : undefined;
   }, [selected, sources]);
 
-  const reread = useCallback(() => {
-    void refetch();
-    void refetchSources();
-  }, [refetch, refetchSources]);
-
   const empty =
     documents === null
       ? 'Loading…'
@@ -381,20 +226,9 @@ export default function DocumentsPage() {
   return (
     <ContextFrame
       section="documents"
-      crumbs={onlySource ? [{ label: onlySource.title }] : []}
-      right={
-        <>
-          {onlySource && <SourceActions source={onlySource} onChanged={reread} />}
-          <ScanButton stale={stale} scanning={scanning} />
-          <button
-            type="button"
-            onClick={() => setAdding(true)}
-            className="rounded bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
-          >
-            Add context
-          </button>
-        </>
-      }
+      signal={signal}
+      crumbs={[{ label: onlySource ? onlySource.title : 'Documents' }]}
+      {...(onlySource ? { right: <SourceHeader source={onlySource} /> } : {})}
     >
       <IndexTable<ContextDocumentRow>
         label="Documents"
@@ -445,12 +279,6 @@ export default function DocumentsPage() {
             cell: (row) => (row.updatedAt ? formatRelativeTime(row.updatedAt) : ''),
           },
         ]}
-      />
-      <AddContextDialog
-        open={adding}
-        onOpenChange={setAdding}
-        sources={sources}
-        onAdded={reread}
       />
     </ContextFrame>
   );

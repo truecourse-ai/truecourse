@@ -19,7 +19,7 @@ import { createHash } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { content, schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import type { ContextSyncRecord } from '@truecourse/shared';
-import { PgContextStore, listDueContextSites } from '../../packages/data-store/src/index';
+import { PgContextStore, listDueContextSources } from '../../packages/data-store/src/index';
 
 const ORG = 'org_A';
 const OTHER = 'org_B';
@@ -350,32 +350,52 @@ describe('changedAt', () => {
   });
 });
 
-describe('the daily sweep query', () => {
-  it('names every workspace site that is due, and no repository source', async () => {
+describe('the sweep query', () => {
+  /** A repository source of the given id, with `owner/repo` as its title. */
+  const repository = (id: string, repoFullName: string) => ({
+    id,
+    kind: 'repository' as const,
+    title: repoFullName,
+    config: { repoFullName, include: [], exclude: [], branch: 'main' },
+  });
+
+  it('names every workspace site that is older than the age given', async () => {
     await store.createSource(ORG, site('fresh'));
     await store.createSource(ORG, site('stale'));
     await store.createSource(OTHER, site('other-stale'));
-    await store.createSource(ORG, {
-      id: 'repo-acme-api',
-      kind: 'repository',
-      title: 'acme/api',
-      config: { repoFullName: 'acme/api', include: [], exclude: [], branch: 'main' },
-    });
     await store.updateSource(ORG, 'fresh', { lastSyncAt: '2026-09-10T10:00:00.000Z' });
     await store.updateSource(ORG, 'stale', { lastSyncAt: '2026-09-01T10:00:00.000Z' });
     await store.updateSource(OTHER, 'other-stale', { lastSyncAt: '2026-09-01T10:00:00.000Z' });
 
-    const due = await listDueContextSites(db, '2026-09-09T10:00:00.000Z');
-    expect(due).toEqual([
-      // A site that never synced is due too — `stale` and the untouched one.
+    expect(await listDueContextSources(db, '2026-09-09T10:00:00.000Z')).toEqual([
       { workspaceOrgId: ORG, sourceId: 'stale' },
       { workspaceOrgId: OTHER, sourceId: 'other-stale' },
     ]);
   });
 
-  it('skips a paused site', async () => {
+  it('names a source of ANY kind that has never synced', async () => {
+    await store.createSource(ORG, repository('repo-acme-api', 'acme/api'));
+    await store.createSource(ORG, site('never-site'));
+
+    expect(await listDueContextSources(db, '2026-09-09T10:00:00.000Z')).toEqual([
+      { workspaceOrgId: ORG, sourceId: 'never-site' },
+      { workspaceOrgId: ORG, sourceId: 'repo-acme-api' },
+    ]);
+  });
+
+  it('leaves a repository source alone once it has synced — its push refreshes it', async () => {
+    await store.createSource(ORG, repository('repo-acme-api', 'acme/api'));
+    await store.updateSource(ORG, 'repo-acme-api', { lastSyncAt: '2026-01-01T10:00:00.000Z' });
+
+    expect(await listDueContextSources(db, '2026-09-09T10:00:00.000Z')).toEqual([]);
+  });
+
+  it('skips a paused source, of either kind, however long it has waited', async () => {
     await store.createSource(ORG, site('paused'));
     await store.updateSource(ORG, 'paused', { status: 'paused' });
-    expect(await listDueContextSites(db, '2026-09-09T10:00:00.000Z')).toEqual([]);
+    await store.createSource(ORG, repository('repo-paused', 'acme/web'));
+    await store.updateSource(ORG, 'repo-paused', { status: 'paused' });
+
+    expect(await listDueContextSources(db, '2026-09-09T10:00:00.000Z')).toEqual([]);
   });
 });

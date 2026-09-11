@@ -187,7 +187,7 @@ export default function ConflictsPage() {
         : 'No conflict matches.';
 
   return (
-    <ContextFrame section="conflicts" crumbs={[{ label: 'Conflicts' }]}>
+    <ContextFrame section="conflicts" signal={signal} crumbs={[{ label: 'Conflicts' }]}>
       <IndexTable<ConflictRow>
         label="Conflicts"
         rows={rows}

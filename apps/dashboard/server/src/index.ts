@@ -143,6 +143,12 @@ async function main() {
   try {
     await jobs.start();
     log.info('[Server] background jobs running');
+    // One sweep now the queue can take it: a source that has never synced (a
+    // migrated one, or one whose first sync died with the process) gets its
+    // first sync here rather than waiting out the hour.
+    void contextSchedule.sweep().catch((err: unknown) => {
+      log.warn(`[context] the sweep failed: ${(err as Error).message}`);
+    });
   } catch (err) {
     log.error(
       `[Server] background jobs failed to start (jobs will not process): ${(err as Error).message}`,

@@ -30,12 +30,38 @@ export type ContextSourceKind = (typeof CONTEXT_SOURCE_KINDS)[number];
 /** The kinds that actually sync today. */
 export const IMPLEMENTED_CONTEXT_SOURCE_KINDS: readonly ContextSourceKind[] = ['repository', 'site'];
 
+/** The ONE word per kind: the add dialog offers it, and every list names it. */
+export const CONTEXT_SOURCE_KIND_LABEL: Record<ContextSourceKind, string> = {
+  repository: 'Repository',
+  site: 'Documentation site',
+  jira: 'Jira',
+  confluence: 'Confluence',
+  'google-drive': 'Google Drive',
+  onedrive: 'OneDrive',
+  notion: 'Notion',
+  slack: 'Slack',
+};
+
 /**
  * Where a source stands with its origin. `never` is a source nothing has synced
  * yet (it is created that way and the first sync moves it on); `paused` is the
  * user's own stop, and every trigger skips it.
  */
 export type ContextSourceStatus = 'synced' | 'syncing' | 'failed' | 'paused' | 'never';
+
+/**
+ * The five in SEVERITY order — worst first. A failure wants a reader, a source
+ * nothing has synced yet wants one next (the sweep is about to take it), then
+ * the one already working; a paused source and a synced one are nobody's to-do.
+ * The Sources list sorts by it.
+ */
+export const CONTEXT_SOURCE_STATUS_ORDER = [
+  'failed',
+  'never',
+  'syncing',
+  'paused',
+  'synced',
+] as const satisfies readonly ContextSourceStatus[];
 
 /** A repository source's scope: which branch, and which of its files. */
 export interface RepositorySourceConfig {

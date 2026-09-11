@@ -230,7 +230,7 @@ describe('one document of Context', () => {
     expect(within(crumbs).getByRole('link', { name: 'Context' })).toBeInTheDocument();
     expect(within(crumbs).getByRole('link', { name: 'docs.acme.com' })).toHaveAttribute(
       'href',
-      '/preview/context?source=site-docs-acme',
+      '/preview/context/documents?source=site-docs-acme',
     );
     expect(await screen.findByRole('heading', { name: 'Refunds' })).toBeInTheDocument();
 
@@ -300,7 +300,7 @@ describe('one document of Context', () => {
     renderAt('/preview/context/source/site-docs-acme');
     await waitFor(() =>
       expect(screen.getByTestId('address')).toHaveTextContent(
-        '/preview/context?source=site-docs-acme',
+        '/preview/context/documents?source=site-docs-acme',
       ),
     );
   });

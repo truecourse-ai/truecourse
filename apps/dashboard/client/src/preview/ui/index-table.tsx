@@ -4,6 +4,9 @@
  * the thing. Code, Tests and Sessions read this way; Context's lists do too.
  * A surface names its columns and renders its cells; the chrome, the row's
  * click and keyboard, the empty line are this component's.
+ *
+ * The filter row belongs to the surfaces that have dimensions to narrow along;
+ * a list that has none (Context's Sources) names none and gets no row.
  */
 
 import type { ReactNode } from 'react';
@@ -28,9 +31,9 @@ export function IndexTable<T>({
   query,
   onQuery,
   searchPlaceholder,
-  dimensions,
-  selected,
-  onSelect,
+  dimensions = [],
+  selected = [],
+  onSelect = () => {},
   filterLabel = 'Filter',
   filterAriaLabel,
   empty,
@@ -43,11 +46,12 @@ export function IndexTable<T>({
   query: string;
   onQuery: (next: string) => void;
   searchPlaceholder: string;
-  dimensions: FilterDimension[];
-  selected: string[];
-  onSelect: (next: string[]) => void;
+  /** The dimensions the filter row narrows along; none means no filter row. */
+  dimensions?: FilterDimension[];
+  selected?: string[];
+  onSelect?: (next: string[]) => void;
   filterLabel?: string;
-  filterAriaLabel: string;
+  filterAriaLabel?: string;
   /** The one line under an empty table: nothing at all, or nothing that matches. */
   empty: ReactNode;
 }) {
@@ -62,7 +66,9 @@ export function IndexTable<T>({
           className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
         />
       </div>
-      <FilterBuilder label={filterLabel} ariaLabel={filterAriaLabel} dimensions={dimensions} selected={selected} onChange={onSelect} />
+      {dimensions.length > 0 && (
+        <FilterBuilder label={filterLabel} ariaLabel={filterAriaLabel ?? label} dimensions={dimensions} selected={selected} onChange={onSelect} />
+      )}
       <div className="min-h-0 flex-1 overflow-auto">
         <table className="w-full border-collapse text-[13px]" aria-label={label}>
           <thead className="sticky top-0 z-10 bg-card">

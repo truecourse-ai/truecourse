@@ -136,8 +136,8 @@ function renderAt(path: string) {
   );
 }
 
-/** Where the Document scan is started from: Context, and nowhere else. */
-const CONTEXT = '/preview/context';
+/** Where the Document scan is started from: Context's documents, and nowhere else. */
+const CONTEXT = '/preview/context/documents';
 
 /** A console tab, for the things the console itself says. */
 const CONSOLE = `/preview/repos/${REAL.id}/tests`;

@@ -145,7 +145,7 @@ describe("the repository's Context tab", () => {
     const own = items[0]!;
     expect(within(own).getByRole('link', { name: 'acme/web' })).toHaveAttribute(
       'href',
-      '/preview/context?source=repo-acme-web',
+      '/preview/context/documents?source=repo-acme-web',
     );
     expect(within(own).getByText('Synced')).toBeInTheDocument();
     expect(within(own).getByText('repository')).toBeInTheDocument();

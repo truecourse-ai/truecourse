@@ -11,8 +11,10 @@
  * address without a sub-tab lands on Members: the two defaults are expressed as
  * routes rather than redirects, so a bare address is a place, not a bounce.
  *
+ * Context LANDS on its sources (`/context`), and its documents are a place of
+ * their own (`/context/documents`, narrowed by the query the filter row writes).
  * `/context/source/:id` is the one REDIRECT here: a source is not a page of its
- * own — it is Context narrowed to it — so the address resolves to that.
+ * own — it is the documents narrowed to it — so the address resolves to that.
  */
 
 import { Navigate, Route, Routes, useParams } from 'react-router-dom';
@@ -25,6 +27,7 @@ import DocumentsPage from './pages/DocumentsPage';
 import HomePage from './pages/HomePage';
 import NotificationsPage from './pages/NotificationsPage';
 import SettingsPage from './pages/SettingsPage';
+import SourcesPage from './pages/SourcesPage';
 import RepoConsole from './repo/RepoConsole';
 import { JobToasts } from './shell/JobToasts';
 import { installPreviewFetch } from './data/fake-api';
@@ -50,11 +53,14 @@ function ContextConflictRoute() {
   return <ContextConflictPage conflictId={conflictId ? decodeURIComponent(conflictId) : ''} />;
 }
 
-/** A source is not a page: it is Context narrowed to it. */
+/** A source is not a page: it is the documents narrowed to it. */
 function ContextSourceRedirect() {
   const { sourceId } = useParams<{ sourceId: string }>();
   return (
-    <Navigate replace to={`/preview/context?source=${encodeURIComponent(sourceId ?? '')}`} />
+    <Navigate
+      replace
+      to={`/preview/context/documents?source=${encodeURIComponent(sourceId ?? '')}`}
+    />
   );
 }
 
@@ -64,7 +70,8 @@ export function PreviewRoutes() {
       <Route index element={<HomePage />} />
       <Route path="agent" element={<AgentPage />} />
       <Route path="agent/:runId" element={<AgentRunRoute />} />
-      <Route path="context" element={<DocumentsPage />} />
+      <Route path="context" element={<SourcesPage />} />
+      <Route path="context/documents" element={<DocumentsPage />} />
       <Route path="context/conflicts" element={<ConflictsPage />} />
       <Route path="context/conflicts/:conflictId" element={<ContextConflictRoute />} />
       <Route path="context/doc/:docRef" element={<ContextDocRoute />} />

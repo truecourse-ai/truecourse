@@ -7,10 +7,12 @@
 
 import { PREVIEW_BASE } from '@/preview/shell/base';
 
+/** Context itself: the SOURCES, which is where the section lands. */
 export const CONTEXT_BASE = `${PREVIEW_BASE}/context`;
+export const DOCUMENTS_BASE = `${CONTEXT_BASE}/documents`;
 export const CONFLICTS_BASE = `${CONTEXT_BASE}/conflicts`;
 
-/** Context, narrowed as asked — every dimension of the filter row is a parameter. */
+/** The documents, narrowed as asked — every dimension of the filter row is a parameter. */
 export function documentsHref(narrow: {
   area?: string;
   status?: string;
@@ -20,7 +22,7 @@ export function documentsHref(narrow: {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(narrow)) if (value) params.set(key, value);
   const query = params.toString();
-  return query ? `${CONTEXT_BASE}?${query}` : CONTEXT_BASE;
+  return query ? `${DOCUMENTS_BASE}?${query}` : DOCUMENTS_BASE;
 }
 
 /** One document, by its corpus ref; `repo` picks which repository it is read through. */

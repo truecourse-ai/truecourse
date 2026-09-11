@@ -46,6 +46,7 @@ function renderAt(path: string) {
 const ROUTES: { path: string; heading: RegExp }[] = [
   { path: '/preview', heading: /^Acme Payments$/ },
   { path: '/preview/context', heading: /^Context$/ },
+  { path: '/preview/context/documents', heading: /^Documents$/ },
   { path: '/preview/context/conflicts', heading: /^Conflicts$/ },
   { path: '/preview/repos/orders-api/settings', heading: /Gate policy/i },
   { path: '/preview/settings', heading: /^Settings$/ },

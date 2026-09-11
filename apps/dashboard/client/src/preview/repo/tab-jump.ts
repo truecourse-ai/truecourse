@@ -24,7 +24,7 @@
 import { useEffect } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { PREVIEW_BASE } from '@/preview/shell/PreviewShell';
-import { CONTEXT_BASE, conflictHref, docHref } from '@/preview/pages/context-hrefs';
+import { DOCUMENTS_BASE, conflictHref, docHref } from '@/preview/pages/context-hrefs';
 
 /** The dashboard's guard tab ids, as the preview's path segments. */
 const TAB_PATH: Record<string, string> = {
@@ -67,7 +67,7 @@ export function useGuardTabJump(repoId?: string): void {
       // named a document, the within-document anchor it wrote over the switch.
       // Only the anchor survives.
       if (!doc) next.delete('section');
-      const to = doc ? docHref(doc, slug) : conflict ? conflictHref(conflict) : CONTEXT_BASE;
+      const to = doc ? docHref(doc, slug) : conflict ? conflictHref(conflict) : DOCUMENTS_BASE;
       const query = next.toString();
       navigate(query ? `${to}${to.includes('?') ? '&' : '?'}${query}` : to, { replace: true });
       return;

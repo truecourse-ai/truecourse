@@ -20,6 +20,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { GitBranch, Globe, Lock } from 'lucide-react';
 import {
+  CONTEXT_SOURCE_KIND_LABEL,
   DEFAULT_REPOSITORY_EXCLUDE,
   DEFAULT_REPOSITORY_INCLUDE,
   type ContextSourceCheck,
@@ -44,21 +45,24 @@ const FOOT_BUTTON = 'rounded px-3 py-1.5 text-xs font-medium';
 
 type AddableKind = 'repository' | 'site';
 
-/** Every kind the dialog offers, in the order it offers them. */
+/**
+ * Every kind the dialog offers, in the order it offers them. The name of a kind
+ * is the shared one ({@link CONTEXT_SOURCE_KIND_LABEL}), so the dialog and the
+ * Sources list call the same thing by the same word.
+ */
 const KINDS: {
   kind: ContextSourceKind;
-  label: string;
   about: string;
   tool?: ConnectorTool;
 }[] = [
-  { kind: 'repository', label: 'Repository', about: "A repository's own markdown, by path patterns" },
-  { kind: 'site', label: 'Documentation site', about: 'A public documentation site, through its llms.txt' },
-  { kind: 'jira', label: 'Jira', about: "A project's issues", tool: 'jira' },
-  { kind: 'confluence', label: 'Confluence', about: 'A space, optionally under one root page', tool: 'confluence' },
-  { kind: 'google-drive', label: 'Google Drive', about: 'A folder, recursive', tool: 'gdrive' },
-  { kind: 'onedrive', label: 'OneDrive', about: 'A folder, recursive', tool: 'onedrive' },
-  { kind: 'notion', label: 'Notion', about: 'The pages under a page or a database', tool: 'notion' },
-  { kind: 'slack', label: 'Slack', about: "A channel's canvases and pinned messages", tool: 'slack' },
+  { kind: 'repository', about: "A repository's own markdown, by path patterns" },
+  { kind: 'site', about: 'A public documentation site, through its llms.txt' },
+  { kind: 'jira', about: "A project's issues", tool: 'jira' },
+  { kind: 'confluence', about: 'A space, optionally under one root page', tool: 'confluence' },
+  { kind: 'google-drive', about: 'A folder, recursive', tool: 'gdrive' },
+  { kind: 'onedrive', about: 'A folder, recursive', tool: 'onedrive' },
+  { kind: 'notion', about: 'The pages under a page or a database', tool: 'notion' },
+  { kind: 'slack', about: "A channel's canvases and pinned messages", tool: 'slack' },
 ];
 
 const isAddable = (kind: ContextSourceKind): kind is AddableKind =>
@@ -207,7 +211,9 @@ export function AddContextDialog({
                       </span>
                     )}
                     <span className={`min-w-0 flex-1 ${locked ? 'opacity-50' : ''}`}>
-                      <span className="block truncate text-[13px] text-foreground">{row.label}</span>
+                      <span className="block truncate text-[13px] text-foreground">
+                        {CONTEXT_SOURCE_KIND_LABEL[row.kind]}
+                      </span>
                       <span className="block truncate text-[11px] text-muted-foreground">{row.about}</span>
                     </span>
                     {locked && (

@@ -117,7 +117,7 @@ export default function ContextDocPage({ docRef }: { docRef: string }) {
 
   if (!row) {
     return (
-      <ContextFrame section="documents" crumbs={[{ label: 'No such document' }]}>
+      <ContextFrame section="documents" signal={signal} crumbs={[{ label: 'No such document' }]}>
         <EmptyState
           icon={FileText}
           title={documents === null && !error ? 'Loading…' : 'No such document'}
@@ -138,6 +138,7 @@ export default function ContextDocPage({ docRef }: { docRef: string }) {
   return (
     <ContextFrame
       section="documents"
+      signal={signal}
       crumbs={[{ label: row.sourceTitle, to: sourceHref }, { label: row.title }]}
       right={
         readers.length > 1 && reading ? (

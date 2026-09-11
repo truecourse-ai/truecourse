@@ -32,6 +32,7 @@ export default function ContextConflictPage({ conflictId }: { conflictId: string
     return (
       <ContextFrame
         section="conflicts"
+        signal={signal}
         crumbs={[{ label: 'Conflicts', to: CONFLICTS_BASE }, { label: loaded ? 'No such conflict' : 'Loading…' }]}
       >
         {loaded && (
@@ -56,6 +57,7 @@ export default function ContextConflictPage({ conflictId }: { conflictId: string
   return (
     <ContextFrame
       section="conflicts"
+      signal={signal}
       crumbs={[{ label: 'Conflicts', to: CONFLICTS_BASE }, { label: row.title }]}
     >
       <CorpusItemPane repoId="" source={source} itemId={row.id} backTo={CONFLICTS_BASE} />

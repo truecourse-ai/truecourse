@@ -1,12 +1,13 @@
 /**
- * The daily refresh of documentation sites. A repository source is synced by
- * the push that changes it; a site has no such event, so it is swept on a
- * clock. The queue's single-flight key is what makes a duplicate enqueue
- * harmless, so the sweep just asks — repeatedly, on a timer.
+ * The sweep that syncs what no event will: a documentation site older than a
+ * day (nothing announces a change to one), and any source that has never
+ * synced (its first sync was never run, or was lost). The queue's single-flight
+ * key is what makes a duplicate enqueue harmless, so the sweep just asks —
+ * on the timer, and once at boot, which the server asks for by hand.
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import type { DueContextSite } from '@truecourse/data-store';
+import type { DueContextSource } from '@truecourse/data-store';
 import type { EnqueueResult } from '../../apps/dashboard/server/src/jobs/index';
 import {
   CONTEXT_SITE_MAX_AGE_MS,
@@ -22,7 +23,7 @@ interface Harness {
 }
 
 function harness(
-  due: DueContextSite[],
+  due: DueContextSource[],
   answer: EnqueueResult = { status: 'queued', jobId: 'job_1' },
   over: { intervalMs?: number; maxAgeMs?: number } = {},
 ): Harness {
@@ -43,15 +44,15 @@ function harness(
   return { asked, enqueued, schedule };
 }
 
-describe('the daily sweep', () => {
-  it('asks for sites older than a day', async () => {
+describe('the sweep', () => {
+  it('asks for what is older than a day', async () => {
     const h = harness([]);
     await h.schedule.sweep();
     h.schedule.stop();
     expect(h.asked).toEqual([new Date(NOW.getTime() - CONTEXT_SITE_MAX_AGE_MS).toISOString()]);
   });
 
-  it('enqueues one sync per due site, across workspaces', async () => {
+  it('enqueues one sync per due source, across workspaces', async () => {
     const h = harness([
       { workspaceOrgId: 'org_A', sourceId: 'site-a' },
       { workspaceOrgId: 'org_B', sourceId: 'site-b' },
@@ -64,14 +65,25 @@ describe('the daily sweep', () => {
     ]);
   });
 
-  it('counts a site already in flight as not queued, and carries on', async () => {
+  it('queues a repository source that has never synced — the boot sweep', async () => {
+    // What the server runs once the queue is up: a source no push will ever
+    // reach (a migrated one, or one whose first sync was lost) is synced here.
+    const h = harness([{ workspaceOrgId: 'org_A', sourceId: 'repo-acme-api' }]);
+    expect(await h.schedule.sweep()).toBe(1);
+    h.schedule.stop();
+    expect(h.enqueued).toEqual([
+      { workspaceOrgId: 'org_A', sourceId: 'repo-acme-api', source: 'schedule' },
+    ]);
+  });
+
+  it('counts a source already in flight as not queued, and carries on', async () => {
     const h = harness([{ workspaceOrgId: 'org_A', sourceId: 'site-a' }], { status: 'busy' });
     expect(await h.schedule.sweep()).toBe(0);
     h.schedule.stop();
     expect(h.enqueued).toHaveLength(1);
   });
 
-  it('runs on the timer, not at start', async () => {
+  it('runs on the timer, never on its own at start', async () => {
     vi.useFakeTimers();
     try {
       const h = harness([{ workspaceOrgId: 'org_A', sourceId: 'site-a' }], undefined, {

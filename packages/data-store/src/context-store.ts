@@ -83,19 +83,27 @@ function poolSha(contentHash: string): string {
   return `sha256-${contentHash}`;
 }
 
-/** One site source somewhere in the deployment that is due a refresh. */
-export interface DueContextSite {
+/** One source somewhere in the deployment that is due a sync. */
+export interface DueContextSource {
   workspaceOrgId: string;
   sourceId: string;
 }
 
 /**
- * Every site source of EVERY workspace whose last sync is older than `before`
- * (or that has never synced), excluding the ones the user paused. The daily
- * sweep's one query — cross-workspace by construction, which is why it is a
+ * Every source of EVERY workspace the sweep should sync, excluding the ones the
+ * user paused:
+ *
+ *  - a SITE whose last sync is older than `before` — a site has no event that
+ *    announces a change, so it is refreshed on the clock;
+ *  - a source of ANY KIND that has NEVER synced — a repository source is
+ *    normally synced by its push, but one the boot migration created, or one
+ *    whose first sync was lost with the process that ran it, would otherwise
+ *    wait for a commit that may never come.
+ *
+ * The sweep's one query — cross-workspace by construction, which is why it is a
  * function here rather than a method on the workspace-scoped store seam.
  */
-export async function listDueContextSites(db: Db, before: string): Promise<DueContextSite[]> {
+export async function listDueContextSources(db: Db, before: string): Promise<DueContextSource[]> {
   const rows = await db
     .select({
       workspaceOrgId: contextSources.workspaceOrgId,
@@ -104,9 +112,11 @@ export async function listDueContextSites(db: Db, before: string): Promise<DueCo
     .from(contextSources)
     .where(
       and(
-        eq(contextSources.kind, 'site'),
         ne(contextSources.status, 'paused'),
-        or(isNull(contextSources.lastSyncAt), lt(contextSources.lastSyncAt, before)),
+        or(
+          isNull(contextSources.lastSyncAt),
+          and(eq(contextSources.kind, 'site'), lt(contextSources.lastSyncAt, before)),
+        ),
       ),
     )
     .orderBy(asc(contextSources.workspaceOrgId), asc(contextSources.id));
