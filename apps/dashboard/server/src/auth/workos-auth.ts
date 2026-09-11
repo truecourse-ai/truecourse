@@ -11,6 +11,7 @@ import { Router } from 'express';
 import { WorkOS } from '@workos-inc/node';
 import type { User } from '@workos-inc/node';
 import type { AuthResult, AuthUser, AuthVerifier } from '@truecourse/shared';
+import { log } from '@truecourse/core/lib/logger';
 import type { WorkosConfig } from './config.js';
 import { parseCookies, serializeCookie } from './cookies.js';
 
@@ -204,6 +205,71 @@ export function createSessionVerifier(
 }
 
 /**
+ * The sealed session a Set-Cookie header carries. The verifier may have
+ * refreshed the session, and WorkOS rotates refresh tokens, so a second refresh
+ * has to chain onto the rotated cookie rather than the dead one the request
+ * arrived with.
+ */
+function sealedFromSetCookie(header: string | undefined): string | null {
+  if (!header) return null;
+  const first = header.split(';', 1)[0] ?? '';
+  const eq = first.indexOf('=');
+  if (eq < 0 || first.slice(0, eq).trim() !== SESSION_COOKIE) return null;
+  return decodeURIComponent(first.slice(eq + 1));
+}
+
+/** An org-less session moved into the organization the user already belongs to. */
+interface AdoptedOrganization {
+  organizationId: string;
+  organizationName: string;
+  /** The re-minted session, as a Set-Cookie header value. */
+  setCookie: string;
+  user: User;
+}
+
+/**
+ * Puts an org-less session INTO the organization its user already belongs to.
+ *
+ * Accepting an invitation creates the membership in WorkOS, but a session that
+ * signed in carries no organization until it is re-minted, so this is where
+ * that happens: the session probe and the workspace-naming route both ask,
+ * which is what keeps an invited person out of a second workspace of their own.
+ *
+ * Answers null when the user has no active membership, which is the signup that
+ * still has to name a workspace. A refused WorkOS call throws.
+ */
+async function adoptExistingOrganization(
+  workos: WorkOS,
+  cfg: WorkosConfig,
+  sealed: string,
+  userId: string,
+): Promise<AdoptedOrganization | null> {
+  const page = await workos.userManagement.listOrganizationMemberships({ userId });
+  const membership = (await page.autoPagination()).find((m) => m.status === 'active');
+  if (!membership) return null;
+  const session = workos.userManagement.loadSealedSession({
+    sessionData: sealed,
+    cookiePassword: cfg.cookiePassword,
+  });
+  const refreshed = await session.refresh({ organizationId: membership.organizationId });
+  if (!refreshed.authenticated || !refreshed.sealedSession) {
+    throw new Error('the session could not be moved into the workspace');
+  }
+  // The membership names its organization, so the shell's workspace name costs
+  // no second lookup here or on the next probe.
+  orgNameCache.set(membership.organizationId, membership.organizationName);
+  return {
+    organizationId: membership.organizationId,
+    organizationName: membership.organizationName,
+    setCookie: serializeCookie(SESSION_COOKIE, refreshed.sealedSession, {
+      maxAgeSeconds: SESSION_MAX_AGE,
+      secure: isSecure(cfg.appUrl),
+    }),
+    user: refreshed.user,
+  };
+}
+
+/**
  * A post-login destination is only honored when it is a path on our own app:
  * it must start with a single `/`. `//evil.test` (protocol-relative) and any
  * absolute URL are rejected, so `?next=` can't be turned into an open redirect.
@@ -289,14 +355,40 @@ export function createAuthRouter(
       res.status(401).json({ error: 'Not authenticated' });
       return;
     }
-    if (result.setCookie) res.append('Set-Cookie', result.setCookie);
+    let user = result.user;
+    let setCookie = result.setCookie;
+    // A session with no organization may already belong to one: accepting an
+    // invitation creates the membership, and this is the probe that moves the
+    // session into it. A session that already carries an organization asks
+    // WorkOS nothing, since this runs on every page load.
+    if (!user.organizationId) {
+      const sealed =
+        sealedFromSetCookie(result.setCookie) ?? parseCookies(req.headers.cookie)[SESSION_COOKIE];
+      if (sealed) {
+        try {
+          const adopted = await adoptExistingOrganization(workos, cfg, sealed, user.id);
+          if (adopted) {
+            setCookie = adopted.setCookie;
+            user = toAuthUser(adopted.user, adopted.organizationId, adopted.organizationName);
+            user.isOperator = result.user.isOperator;
+          }
+        } catch (err) {
+          // The identity is still good, so the probe answers with it; the
+          // session simply stays org-less until the next one.
+          log.warn(
+            `[Auth] could not move ${user.id} into their workspace: ${(err as Error).message}`,
+          );
+        }
+      }
+    }
+    if (setCookie) res.append('Set-Cookie', setCookie);
     // The session carries the org id only; the shell needs its name.
-    const organizationId = result.user.organizationId;
-    const organizationName = organizationId
-      ? await resolveOrgName(workos, organizationId)
-      : undefined;
+    const organizationId = user.organizationId;
+    const organizationName =
+      user.organizationName ??
+      (organizationId ? await resolveOrgName(workos, organizationId) : undefined);
     res.json({
-      user: organizationName ? { ...result.user, organizationName } : result.user,
+      user: organizationName ? { ...user, organizationName } : user,
     });
   });
 
@@ -331,6 +423,18 @@ export function createAuthRouter(
       // org or orphan a membership.
       if (authed.organizationId) {
         res.json({ user: toAuthUser(authed.user, authed.organizationId) });
+        return;
+      }
+
+      // Nor does an invited person get one of their own: a user who already has
+      // a membership is moved into it, and only a user with none names a new
+      // workspace.
+      const adopted = await adoptExistingOrganization(workos, cfg, sealed, authed.user.id);
+      if (adopted) {
+        res.setHeader('Set-Cookie', adopted.setCookie);
+        res.json({
+          user: toAuthUser(adopted.user, adopted.organizationId, adopted.organizationName),
+        });
         return;
       }
 

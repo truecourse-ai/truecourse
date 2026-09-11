@@ -27,6 +27,8 @@ import type {
   ContextSourceUpdateResponse,
   ContextSourceView,
   NotificationsResponse,
+  WorkspaceInvitation,
+  WorkspaceMembersResponse,
 } from '@truecourse/shared';
 import type { GuardExternalPatch, GuardExternalsView } from '@/types/guard-externals';
 import type { RunRecord, SessionCommand, SessionEvent } from '@truecourse/agent-loop';
@@ -1703,6 +1705,37 @@ export function deleteContextConflictResolution(payload: {
   return fetchApi<SpecConflictAck>('/api/context/conflict-resolution', {
     method: 'DELETE',
     body: JSON.stringify(payload),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Members: the workspace's people. Its WorkOS organization's memberships and
+// the invitations standing against it, read live on every request.
+// ---------------------------------------------------------------------------
+
+export function listWorkspaceMembers(): Promise<WorkspaceMembersResponse> {
+  return fetchApi<WorkspaceMembersResponse>('/api/workspace/members');
+}
+
+/** Invite one person. WorkOS mails the invitation; the row comes back. */
+export function inviteWorkspaceMember(
+  email: string,
+): Promise<{ invitation: WorkspaceInvitation }> {
+  return fetchApi<{ invitation: WorkspaceInvitation }>('/api/workspace/invitations', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  });
+}
+
+export function revokeWorkspaceInvitation(id: string): Promise<void> {
+  return fetchApi<void>(`/api/workspace/invitations/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
+
+export function removeWorkspaceMember(id: string): Promise<void> {
+  return fetchApi<void>(`/api/workspace/members/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
   });
 }
 

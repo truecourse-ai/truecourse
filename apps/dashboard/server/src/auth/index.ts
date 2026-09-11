@@ -11,6 +11,7 @@ import type { Router } from 'express';
 import type { AuthVerifier } from '@truecourse/shared';
 import { loadWorkosConfig, type WorkosConfig } from './config.js';
 import { createAuthRouter, createSessionVerifier } from './workos-auth.js';
+import { createWorkspaceMembersRouter } from './workspace-members.js';
 
 export { loadWorkosConfig, type WorkosConfig } from './config.js';
 export { parseCookies, serializeCookie } from './cookies.js';
@@ -19,6 +20,7 @@ export {
   createSessionVerifier,
   SESSION_COOKIE,
 } from './workos-auth.js';
+export { createWorkspaceMembersRouter } from './workspace-members.js';
 
 export interface Auth {
   config: WorkosConfig;
@@ -26,11 +28,22 @@ export interface Auth {
   verify: AuthVerifier;
   /** Public auth routes; mount at `/api/auth`, before the gate. */
   router: Router;
+  /**
+   * The workspace's people, read from the same WorkOS client. Mount at
+   * `/api/workspace`, BEHIND the gate: every route here is the session's
+   * organization's.
+   */
+  members: Router;
 }
 
 export function createAuth(): Auth {
   const config = loadWorkosConfig();
   const workos = new WorkOS(config.apiKey, { clientId: config.clientId });
   const verify = createSessionVerifier(workos, config);
-  return { config, verify, router: createAuthRouter(workos, config, verify) };
+  return {
+    config,
+    verify,
+    router: createAuthRouter(workos, config, verify),
+    members: createWorkspaceMembersRouter(workos),
+  };
 }

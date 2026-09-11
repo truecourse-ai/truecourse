@@ -20,15 +20,14 @@ import type {
   LlmConfigUpdate,
   LlmProviderKind,
 } from '@truecourse/shared';
-import { EntityList } from '@/preview/ui/entity-list';
 import { ConnectorLogo, type ConnectorTool } from '@/preview/ui/connector-logos';
 import { StatusWord } from '@/preview/ui/status-word';
 import { Facts, ProviderIcon, PROVIDER_NAME, PageHeader, SideMenu } from '@/preview/ui/bits';
 import { fetchLlmConfig, saveLlmConfig } from '@/preview/data/llm-config';
 import { fetchGithubStatus } from '@/preview/data/real-repos';
-import type { PreviewUser, ProviderId } from '@/preview/data/types';
+import type { ProviderId } from '@/preview/data/types';
+import { MembersTab } from '@/preview/pages/MembersTab';
 import { usePreviewState } from '@/preview/shell/preview-state';
-import { usePreviewUser } from '@/preview/shell/use-preview-user';
 import { PREVIEW_BASE } from '@/preview/shell/PreviewShell';
 
 const TABS = [
@@ -39,40 +38,6 @@ const TABS = [
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
-
-/**
- * Members: who is signed in. The server has no member directory yet — only the
- * session's own user — so this lists exactly that one person and offers no
- * invitation, rather than showing a roster nobody wrote.
- */
-function MembersTab() {
-  const user = usePreviewUser();
-  return (
-    <EntityList<PreviewUser>
-      label="Workspace members"
-      variant="embedded"
-      items={user ? [user] : []}
-      itemId={(m) => m.email}
-      renderRow={(m) => (
-        <>
-          <div className="flex w-full min-w-0 items-center gap-2">
-            <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{m.name}</span>
-          </div>
-          <div className="flex w-full min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
-            <span className="min-w-0 truncate">{m.email}</span>
-          </div>
-        </>
-      )}
-      search={{
-        placeholder: 'Search members',
-        ariaLabel: 'Search members',
-        match: (m, q) => m.name.toLowerCase().includes(q) || m.email.toLowerCase().includes(q),
-      }}
-      noun={{ one: 'member', many: 'members' }}
-      emptyText="Nobody is signed in."
-    />
-  );
-}
 
 /** What `/api/github/status` said; null while the read is in flight. */
 type GithubProviderState = {
@@ -470,9 +435,24 @@ export default function SettingsPage() {
     [tab],
   );
 
+  const [inviteOpen, setInviteOpen] = useState(false);
+
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <PageHeader title="Settings" />
+      <PageHeader
+        title="Settings"
+        right={
+          active === 'members' && (
+            <button
+              type="button"
+              onClick={() => setInviteOpen(true)}
+              className="rounded bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
+            >
+              Invite member
+            </button>
+          )
+        }
+      />
       <div className="flex min-h-0 flex-1">
         <SideMenu
           label="Settings sections"
@@ -480,7 +460,9 @@ export default function SettingsPage() {
           items={TABS.map((t) => ({ id: t.id, label: t.label, to: `${PREVIEW_BASE}/settings/${t.id}` }))}
         />
         <div className="min-h-0 min-w-0 flex-1 overflow-auto">
-          {active === 'members' && <MembersTab />}
+          {active === 'members' && (
+            <MembersTab inviteOpen={inviteOpen} onInviteOpenChange={setInviteOpen} />
+          )}
           {active === 'repositories' && <RepositoriesTab />}
           {active === 'connections' && <ConnectionsTab />}
           {active === 'models' && <ModelsTab />}

@@ -189,15 +189,20 @@ export interface SsoStatusResponse {
   connections: SsoConnectionInfo[]
 }
 
-export interface WorkspaceMember {
+/**
+ * The users of a workspace, as the enterprise Workspace page lists them
+ * (`/api/ee/workspace/members`). Settings › Members reads the organization's
+ * memberships and invitations instead: `WorkspaceMember` in `workspace.ts`.
+ */
+export interface EeWorkspaceMember {
   id: string
   email: string
   firstName?: string | null
   lastName?: string | null
 }
 
-export interface WorkspaceMembersResponse {
-  members: WorkspaceMember[]
+export interface EeWorkspaceMembersResponse {
+  members: EeWorkspaceMember[]
 }
 
 /** Per-workspace feature settings (GET/PATCH /api/ee/workspace/settings). */

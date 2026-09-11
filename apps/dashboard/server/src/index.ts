@@ -12,6 +12,7 @@ import { setContextEventPublisher } from './services/context.service.js';
 import { startContextSyncSchedule, type ContextSchedule } from './services/context-schedule.service.js';
 import { operatorClaudeCode } from './services/workspace-llm.service.js';
 import { sweepStaleRunClones } from './services/run-clone.service.js';
+import { backfillGuardRunSections } from './services/guard-sections.service.js';
 import { setRepoJobsCanceller } from './services/repo-removal.service.js';
 import { stopAllWatchers } from './services/watcher.service.js';
 import { stopAllRunTails } from './services/session-tailer.service.js';
@@ -132,6 +133,14 @@ async function main() {
     log.info('[Server] GitHub connect disabled — set GITHUB_APP_* to enable');
   }
 
+  // The section history of the runs stored before summaries existed, derived
+  // once. It runs after the doc reader knows which workspace a repository reads
+  // (the link store above), and in the background: nothing about serving the
+  // dashboard waits on history.
+  void backfillGuardRunSections().catch((err: unknown) => {
+    log.warn(`[Guard] the section backfill failed: ${(err as Error).message}`);
+  });
+
   // A site has no push to refresh it, so it is swept on a clock: every site
   // older than a day gets a sync enqueued (single-flight collapses duplicates).
   const contextSchedule: ContextSchedule = startContextSyncSchedule(getDb(), {
@@ -156,7 +165,13 @@ async function main() {
   }
 
   // 6. Setup Express app + socket.io
-  const app = createApp({ authVerifier: auth.verify, authRouter: auth.router, github, jobs });
+  const app = createApp({
+    authVerifier: auth.verify,
+    authRouter: auth.router,
+    workspaceRouter: auth.members,
+    github,
+    jobs,
+  });
   const httpServer = createServer(app);
   setupSocket(httpServer);
 

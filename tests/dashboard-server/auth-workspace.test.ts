@@ -25,16 +25,35 @@ interface Calls {
   refresh: Array<{ organizationId?: string }>;
   authorizationUrl: Array<Record<string, unknown>>;
   getOrg: string[];
+  listMemberships: Array<Record<string, unknown>>;
 }
 
-function makeWorkos(opts: { existingOrg?: string | null; sealedSession?: string | null } = {}) {
+/** One membership the signed-in user already has, as WorkOS answers it. */
+type Membership = {
+  id: string;
+  organizationId: string;
+  organizationName: string;
+  status: 'active' | 'inactive' | 'pending';
+  userId: string;
+};
+
+function makeWorkos(
+  opts: {
+    existingOrg?: string | null;
+    sealedSession?: string | null;
+    /** What the user already belongs to, which an org-less session is moved into. */
+    memberships?: Membership[];
+  } = {},
+) {
   const calls: Calls = {
     createOrg: [],
     membership: [],
     refresh: [],
     authorizationUrl: [],
     getOrg: [],
+    listMemberships: [],
   };
+  const memberships = opts.memberships ?? [];
   const user = { id: 'user_1', email: 'u@acme.test' };
   const workos = {
     userManagement: {
@@ -65,6 +84,10 @@ function makeWorkos(opts: { existingOrg?: string | null; sealedSession?: string 
       createOrganizationMembership: async (o: { organizationId: string; userId: string }) => {
         calls.membership.push(o);
         return { id: 'om_1' };
+      },
+      listOrganizationMemberships: async (o: Record<string, unknown>) => {
+        calls.listMemberships.push(o);
+        return { data: memberships, autoPagination: async () => memberships };
       },
     },
     organizations: {
@@ -134,6 +157,55 @@ describe('POST /api/auth/workspace', () => {
     expect(res.body.user.organizationId).toBe('org_existing');
   });
 
+  it('moves a user who already has a membership into it instead of creating a second one', async () => {
+    const m = makeWorkos({
+      memberships: [
+        {
+          id: 'om_invited',
+          organizationId: 'org_invited',
+          organizationName: 'Northwind Labs',
+          status: 'active',
+          userId: 'user_1',
+        },
+      ],
+    });
+    const res = await request(makeApp(m.workos))
+      .post('/api/auth/workspace')
+      .set('Cookie', 'tc_session=sealed-no-org')
+      .send({ name: 'Acme' })
+      .expect(200);
+
+    expect(m.calls.createOrg).toEqual([]);
+    expect(m.calls.membership).toEqual([]);
+    expect(m.calls.listMemberships).toEqual([{ userId: 'user_1' }]);
+    expect(m.calls.refresh).toEqual([{ organizationId: 'org_invited' }]);
+    expect(res.body.user.organizationId).toBe('org_invited');
+    expect(res.body.user.organizationName).toBe('Northwind Labs');
+    expect(res.headers['set-cookie']?.[0]).toContain('tc_session=sealed%3Aorg_invited');
+  });
+
+  it('creates a workspace for a user whose only membership is inactive', async () => {
+    const m = makeWorkos({
+      memberships: [
+        {
+          id: 'om_dead',
+          organizationId: 'org_dead',
+          organizationName: 'Gone',
+          status: 'inactive',
+          userId: 'user_1',
+        },
+      ],
+    });
+    const res = await request(makeApp(m.workos))
+      .post('/api/auth/workspace')
+      .set('Cookie', 'tc_session=sealed-no-org')
+      .send({ name: 'Acme' })
+      .expect(200);
+
+    expect(m.calls.createOrg).toEqual([{ name: 'Acme' }]);
+    expect(res.body.user.organizationId).toBe('org_new');
+  });
+
   it('rejects a missing/blank name with 400 (no WorkOS calls)', async () => {
     await request(app)
       .post('/api/auth/workspace')
@@ -192,6 +264,90 @@ describe('GET /api/auth/me', () => {
     expect(second.body.user.organizationName).toBe('Org org_me_1');
     // Cached for the life of the process: one lookup, two requests.
     expect(m.calls.getOrg).toEqual(['org_me_1']);
+  });
+
+  it('moves an org-less session into the workspace its user already belongs to', async () => {
+    const m = makeWorkos({
+      memberships: [
+        {
+          id: 'om_invited',
+          organizationId: 'org_accepted',
+          organizationName: 'Northwind Labs',
+          status: 'active',
+          userId: 'user_1',
+        },
+      ],
+    });
+    verify.mockResolvedValue({ user: { id: 'user_1', email: 'u@acme.test' } });
+
+    const res = await request(makeApp(m.workos))
+      .get('/api/auth/me')
+      .set('Cookie', 'tc_session=sealed-no-org')
+      .expect(200);
+
+    expect(m.calls.listMemberships).toEqual([{ userId: 'user_1' }]);
+    expect(m.calls.refresh).toEqual([{ organizationId: 'org_accepted' }]);
+    expect(res.body.user.organizationId).toBe('org_accepted');
+    // The membership names its organization, so nothing is looked up for it.
+    expect(res.body.user.organizationName).toBe('Northwind Labs');
+    expect(m.calls.getOrg).toEqual([]);
+    // The re-minted session is written back as the session cookie.
+    expect(res.headers['set-cookie']?.[0]).toContain('tc_session=sealed%3Aorg_accepted');
+  });
+
+  it('asks WorkOS nothing about memberships when the session already has an organization', async () => {
+    const m = makeWorkos({
+      memberships: [
+        {
+          id: 'om_other',
+          organizationId: 'org_other',
+          organizationName: 'Other',
+          status: 'active',
+          userId: 'user_1',
+        },
+      ],
+    });
+    verify.mockResolvedValue({
+      user: { id: 'user_1', email: 'u@acme.test', organizationId: 'org_me_3' },
+    });
+
+    const res = await request(makeApp(m.workos))
+      .get('/api/auth/me')
+      .set('Cookie', 'tc_session=sealed')
+      .expect(200);
+
+    expect(m.calls.listMemberships).toEqual([]);
+    expect(m.calls.refresh).toEqual([]);
+    expect(res.body.user.organizationId).toBe('org_me_3');
+  });
+
+  it('answers the session as it stands when the move into the workspace fails', async () => {
+    const m = makeWorkos({
+      memberships: [
+        {
+          id: 'om_invited',
+          organizationId: 'org_unreachable',
+          organizationName: 'Northwind Labs',
+          status: 'active',
+          userId: 'user_1',
+        },
+      ],
+    });
+    m.workos.userManagement.loadSealedSession = () => ({
+      authenticate: async () => ({ authenticated: true, user: { id: 'user_1', email: 'u@acme.test' }, organizationId: null }),
+      refresh: async () => {
+        throw new Error('workos down');
+      },
+    });
+    verify.mockResolvedValue({ user: { id: 'user_1', email: 'u@acme.test' } });
+
+    const res = await request(makeApp(m.workos))
+      .get('/api/auth/me')
+      .set('Cookie', 'tc_session=sealed-no-org')
+      .expect(200);
+
+    expect(res.body.user.id).toBe('user_1');
+    expect(res.body.user.organizationId).toBeFalsy();
   });
 
   it('still answers when the organization lookup fails', async () => {

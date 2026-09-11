@@ -49,6 +49,11 @@ export interface CreateAppOptions {
   /** Public auth routes, mounted at /api/auth above the gate. */
   authRouter?: express.Router;
   /**
+   * The workspace's people, mounted at /api/workspace BEHIND the gate: every
+   * route there reads the session's organization off the request.
+   */
+  workspaceRouter?: express.Router;
+  /**
    * The GitHub App connection. REQUIRED for the same reason as `authVerifier`:
    * whether this server can connect repositories is a deployment decision, not
    * a default. `null` means the App isn't configured — /api/github then answers
@@ -139,6 +144,11 @@ export function createApp(opts: CreateAppOptions): express.Express {
   // Which workspace owns a connected repository — the one thing every
   // slug-resolving route needs, so another workspace's repo reads as absent.
   const githubLinks = opts.github?.store ?? null;
+
+  // The workspace's people: its WorkOS organization's memberships and the
+  // invitations standing against it. Scoped to the session's organization, so
+  // it needs the gate above it and nothing else.
+  if (opts.workspaceRouter) app.use('/api/workspace', opts.workspaceRouter);
 
   // The workspace's Models settings — workspace-scoped, not repo-scoped, so it
   // sits beside the registry routes rather than behind the project resolver.
