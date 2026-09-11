@@ -19,7 +19,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom';
 import {
   Bell,
-  FlaskConical,
+  Waypoints,
   GitBranch,
   Home,
   Layers,
@@ -50,7 +50,7 @@ const NAV: { to: string; label: string; icon: LucideIcon; disabled?: boolean }[]
   { to: PREVIEW_BASE, label: 'Home', icon: Home },
   { to: `${PREVIEW_BASE}/context`, label: 'Context', icon: Layers },
   { to: `${PREVIEW_BASE}/code`, label: 'Code', icon: GitBranch },
-  { to: `${PREVIEW_BASE}/flows`, label: 'Flows', icon: FlaskConical },
+  { to: `${PREVIEW_BASE}/flows`, label: 'Flows', icon: Waypoints },
   { to: `${PREVIEW_BASE}/agent`, label: 'Agent', icon: MousePointer2 },
   { to: `${PREVIEW_BASE}/notifications`, label: 'Notifications', icon: Bell },
   { to: `${PREVIEW_BASE}/settings`, label: 'Settings', icon: Settings },
