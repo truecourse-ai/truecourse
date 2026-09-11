@@ -40,24 +40,6 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]['id'];
 
-function Card({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description?: string;
-  children?: React.ReactNode;
-}) {
-  return (
-    <section className="rounded-md border border-border bg-card px-4 py-3">
-      <h3 className="text-xs font-semibold text-foreground">{title}</h3>
-      {description && <p className="mt-1 text-[11px] text-muted-foreground">{description}</p>}
-      {children && <div className="mt-2">{children}</div>}
-    </section>
-  );
-}
-
 /**
  * Members: who is signed in. The server has no member directory yet — only the
  * session's own user — so this lists exactly that one person and offers no
@@ -310,17 +292,15 @@ function ModelsTab() {
   // no run ever reads, so there is none — only what the runs use.
   if (data?.operator) {
     return (
-      <div className="max-w-3xl px-6 py-5">
-        <Card title="Active provider">
-          <Facts
-            rows={[
-              { label: 'Provider', value: 'Claude Code (operator)' },
-              { label: 'Model', value: <span className="font-mono">{data.operator.model}</span> },
-              { label: 'Set by', value: <span className="font-mono">TRUECOURSE_LLM_TRANSPORT=claude-code</span> },
-            ]}
-          />
-        </Card>
-      </div>
+      <Facts
+        className="border-b border-border"
+        rowClassName="px-6"
+        rows={[
+          { label: 'Provider', value: 'Claude Code (operator)' },
+          { label: 'Model', value: <span className="font-mono">{data.operator.model}</span> },
+          { label: 'Set by', value: <span className="font-mono">TRUECOURSE_LLM_TRANSPORT=claude-code</span> },
+        ]}
+      />
     );
   }
 
@@ -360,25 +340,21 @@ function ModelsTab() {
   };
 
   return (
-    <div className="max-w-3xl space-y-4 px-6 py-5">
+    <div>
       {current && (
-        <Card title="Active provider">
-          <Facts
-            rows={[
-              { label: 'Provider', value: PROVIDER_LABEL[current.provider] },
-              { label: 'Model', value: <span className="font-mono">{current.model}</span> },
-              { label: 'Key', value: current.hasKey ? (current.keyMask ?? 'stored') : 'no stored key' },
-              { label: 'Updated', value: new Date(current.updatedAt).toLocaleString() },
-            ]}
-          />
-        </Card>
+        <Facts
+          className="border-b border-border"
+          rowClassName="px-6"
+          rows={[
+            { label: 'Provider', value: PROVIDER_LABEL[current.provider] },
+            { label: 'Model', value: <span className="font-mono">{current.model}</span> },
+            { label: 'Key', value: current.hasKey ? (current.keyMask ?? 'stored') : 'no stored key' },
+            { label: 'Updated', value: new Date(current.updatedAt).toLocaleString() },
+          ]}
+        />
       )}
 
-      <Card
-        title="LLM provider"
-        description="The engine calls the model from the hosted product only. The CLI never makes an LLM call."
-      >
-        <form onSubmit={submit} className="space-y-2">
+        <form onSubmit={submit} className="max-w-xl space-y-2 px-6 py-5">
           <label className="block text-[11px] font-medium text-muted-foreground">
             Provider
             <select
@@ -464,6 +440,10 @@ function ModelsTab() {
             </label>
           )}
 
+          <p className="pt-1 text-[11px] text-muted-foreground">
+            The engine calls the model from the hosted product only. The CLI never makes an LLM call.
+          </p>
+
           <div className="flex flex-wrap items-center gap-3 pt-1">
             <button
               type="submit"
@@ -478,7 +458,6 @@ function ModelsTab() {
             {error && <span className="text-[11px] text-destructive">{error}</span>}
           </div>
         </form>
-      </Card>
     </div>
   );
 }

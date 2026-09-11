@@ -76,11 +76,21 @@ export function DetailHeader({
 }
 
 /** Footer facts: one per line, label left, value right, no table. */
-export function Facts({ rows }: { rows: readonly { label: string; value: ReactNode }[] }) {
+export function Facts({
+  rows,
+  /** The list's own classes: a border when nothing around it draws one. */
+  className = '',
+  /** The rows' horizontal inset: `px-4` inside a box, `px-6` flush with a pane. */
+  rowClassName = 'px-4',
+}: {
+  rows: readonly { label: string; value: ReactNode }[];
+  className?: string;
+  rowClassName?: string;
+}) {
   return (
-    <dl className="divide-y divide-border/60 border-t border-border">
+    <dl className={`divide-y divide-border/60 ${className}`}>
       {rows.map((r) => (
-        <div key={r.label} className="flex items-baseline gap-4 px-4 py-1.5 text-xs">
+        <div key={r.label} className={`flex items-baseline gap-4 py-1.5 text-xs ${rowClassName}`}>
           <dt className="w-44 shrink-0 text-muted-foreground">{r.label}</dt>
           <dd className="min-w-0 flex-1 break-words text-foreground">{r.value}</dd>
         </div>
