@@ -20,6 +20,7 @@ import { setRepoDocReader, type RepoDocReader } from '@truecourse/core/lib/repo-
 import { setGuardStore } from '@truecourse/core/lib/guard-store';
 import { setGuardOverlayStore } from '@truecourse/core/lib/guard-overlays';
 import { readSpecSourceDoc, setSpecSourcesStore } from '@truecourse/core/lib/spec-sources';
+import { setContextStore } from '@truecourse/core/lib/context-store';
 import { setInferredActionStore } from '@truecourse/core/lib/inferred-action-store';
 import { setRepoConfigStore } from '@truecourse/core/config/project-config';
 import { setUiStateStore } from '@truecourse/core/config/ui-state';
@@ -33,6 +34,7 @@ import {
   PgAnalysisStore,
   PgSpecStore,
   PgSpecSourcesStore,
+  PgContextStore,
   PgGuardStore,
   PgGuardOverlayStore,
   PgInferredActionStore,
@@ -69,6 +71,11 @@ export function installDbStores(
   // The registered web spec sources: one registry row per repo, the page
   // bodies in the spec content scope, materialized into the scan's clone.
   setSpecSourcesStore(new PgSpecSourcesStore(db));
+  // The workspace's CONTEXT: its documentation sources, the documents they
+  // yielded (bodies content-addressed under `context:ws:<org>`), the syncs and
+  // the repositories that read them. Hosted only — a CLI checkout is one
+  // repository with a tree of its own and reaches no workspace store.
+  setContextStore(new PgContextStore(db));
   // A document body is read from the scan's snapshot, never from a tree: the
   // doc page, the coverage join and the spec reads all go through this seam,
   // and a connected repository has no working tree to read from. The commit

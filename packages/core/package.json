@@ -169,6 +169,21 @@
       "types": "./dist/lib/guard-overlays.d.ts",
       "import": "./dist/lib/guard-overlays.js"
     },
+    "./lib/context-store": {
+      "truecourse-source": "./src/lib/context-store.ts",
+      "types": "./dist/lib/context-store.d.ts",
+      "import": "./dist/lib/context-store.js"
+    },
+    "./lib/context-ref": {
+      "truecourse-source": "./src/lib/context-ref.ts",
+      "types": "./dist/lib/context-ref.d.ts",
+      "import": "./dist/lib/context-ref.js"
+    },
+    "./services/context": {
+      "truecourse-source": "./src/services/context/index.ts",
+      "types": "./dist/services/context/index.d.ts",
+      "import": "./dist/services/context/index.js"
+    },
     "./lib/spec-sources": {
       "truecourse-source": "./src/lib/spec-sources.ts",
       "types": "./dist/lib/spec-sources.d.ts",

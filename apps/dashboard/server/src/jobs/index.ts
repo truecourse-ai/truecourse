@@ -47,6 +47,13 @@ import {
   type GuardRunJobRequest,
   type RepoGuardRunTaskDeps,
 } from './tasks/repo-guard-run.js';
+import {
+  createContextSyncTask,
+  contextSyncJobKey,
+  CONTEXT_SYNC_TASK,
+  type ContextSyncJobRequest,
+  type ContextSyncTaskDeps,
+} from './tasks/context-sync.js';
 import type { OnboardingJobRequest } from './tasks/onboarding.js';
 
 /** What an enqueue did: it queued a job, or the repo is already working. */
@@ -58,6 +65,11 @@ export interface JobsMount extends Jobs {
   enqueueGuardSetup(request: GuardSetupJobRequest): Promise<EnqueueResult>;
   enqueueGuardGenerate(request: GuardGenerateJobRequest): Promise<EnqueueResult>;
   enqueueGuardRun(request: GuardRunJobRequest): Promise<EnqueueResult>;
+  /**
+   * Refresh ONE workspace context source. Keyed by the source, not the repo:
+   * a source belongs to the workspace and several repositories may read it.
+   */
+  enqueueContextSync(request: ContextSyncJobRequest): Promise<EnqueueResult>;
   /**
    * Stop everything this repository has in flight, for a disconnect. `not-here`
    * means one of its jobs is running on another replica, which is not ours to
@@ -74,6 +86,7 @@ export interface CreateServerJobsOptions {
   guardSetup?: Omit<RepoGuardSetupTaskDeps, 'chainGuardGenerate'>;
   guardGenerate?: Omit<RepoGuardGenerateTaskDeps, 'chainGuardRun'>;
   guardRun?: RepoGuardRunTaskDeps;
+  contextSync?: ContextSyncTaskDeps;
   /** How the worker runner is started. Substituted in tests. */
   startWorker?: StartWorker<Record<string, unknown>>;
   /** The live backplane. Defaults to the queue's Postgres LISTEN/NOTIFY hub. */
@@ -114,6 +127,18 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
   const enqueueGuardRun = (request: GuardRunJobRequest): Promise<EnqueueResult> =>
     enqueue(REPO_GUARD_RUN_TASK, 'guard-run', request, { ...request });
 
+  // A context source is not a repository: nothing about it is visible in the
+  // session-run store, so the queue's single-flight key is the whole guard.
+  const enqueueContextSync = async (request: ContextSyncJobRequest): Promise<EnqueueResult> => {
+    const jobId = await jobs.singleFlightEnqueue(
+      CONTEXT_SYNC_TASK,
+      request.workspaceOrgId,
+      contextSyncJobKey(request.sourceId),
+      { ...request },
+    );
+    return jobId ? { status: 'queued', jobId } : { status: 'busy' };
+  };
+
   const tasks: readonly JobTask[] = [
     createRepoScanTask({
       ...opts.scan,
@@ -143,6 +168,7 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
       },
     }),
     createRepoGuardRunTask(opts.guardRun),
+    createContextSyncTask(opts.contextSync),
   ];
 
   jobs = createJobs({
@@ -175,6 +201,7 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
     enqueueGuardSetup,
     enqueueGuardGenerate,
     enqueueGuardRun,
+    enqueueContextSync,
     cancelRepoJobs,
   });
 }

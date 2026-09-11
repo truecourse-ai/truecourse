@@ -38,12 +38,24 @@ import { getDb } from '../db.js';
 import { createRunClone } from '../services/run-clone.service.js';
 import { setWorkTreeProvider, type WorkTreeProvider } from '../services/work-tree.service.js';
 import { removeRepoRunState } from '../services/repo-removal.service.js';
+import {
+  ensureRepositoryContextSource,
+  removeRepositoryContext,
+  repositoryContextSource,
+} from '../services/context-lifecycle.service.js';
 
 /** How connecting a repository starts its onboarding: enqueue, or say why not. */
 export type OnboardingScanStart = (
   repoId: string,
   repoKey: string,
   orgId: string,
+) => Promise<'queued' | 'busy' | 'failed'>;
+
+/** How a repository's Repository source is refreshed (on connect, and on a push). */
+export type ContextSyncStart = (
+  orgId: string,
+  sourceId: string,
+  source: 'add' | 'push',
 ) => Promise<'queued' | 'busy' | 'failed'>;
 
 /** The routers app.ts mounts, plus the store the repo list scopes itself with. */
@@ -72,11 +84,21 @@ export interface GithubConnectionOverrides {
    * connect writes the link row and starts nothing.
    */
   scan?: OnboardingScanStart;
+  /**
+   * Sync a context source. Boot passes the job enqueue; without one the source
+   * is created and left for a Sync now.
+   */
+  contextSync?: ContextSyncStart;
 }
 
 /** No runner installed (a server whose job queue never came up). */
 const noScanRunner: OnboardingScanStart = async (_repoId, repoKey) => {
   log.warn(`[github] background jobs are not running — ${repoKey} was connected without a scan`);
+  return 'failed';
+};
+
+const noContextSyncRunner: ContextSyncStart = async (_orgId, sourceId) => {
+  log.warn(`[github] background jobs are not running — ${sourceId} was not synced`);
   return 'failed';
 };
 
@@ -90,6 +112,7 @@ export function createGithubConnection(
   const octokitFor =
     overrides.octokitFor ?? ((installationId: number) => installationOctokit(cfg, installationId));
   const scan = overrides.scan ?? noScanRunner;
+  const contextSync = overrides.contextSync ?? noContextSyncRunner;
 
   // App auth is built on first use: the private key is only parsed when a token
   // is actually minted, so a test that injects `workTree` never needs a real one.
@@ -113,13 +136,33 @@ export function createGithubConnection(
   const webhook = createWebhookRouter({
     secret: cfg.webhookSecret,
     store,
-    // Push-triggered baseline refresh arrives with the PR gate; until then a
-    // repo re-scans when someone asks it to, not when its default branch moves.
-    onBaseline: () => {},
+    // A push to the default branch is what re-reads a repository's own
+    // documentation: its Repository source syncs, and the workspace corpus goes
+    // stale from there. (The gate's baseline refresh arrives separately.)
+    onBaseline: (trigger) => {
+      void (async () => {
+        try {
+          const source = await repositoryContextSource(
+            trigger.workspaceOrgId,
+            trigger.repoFullName,
+          );
+          if (!source) return;
+          const outcome = await contextSync(trigger.workspaceOrgId, source.id, 'push');
+          if (outcome !== 'queued') {
+            log.info(`[github] ${trigger.repoFullName} pushed — context sync ${outcome}`);
+          }
+        } catch (err) {
+          log.warn(
+            `[github] could not sync ${trigger.repoFullName}'s context after a push: ${(err as Error).message}`,
+          );
+        }
+      })();
+    },
     // GitHub taking a repo away (app uninstall, repo removed from the
     // installation) disconnects it exactly like an explicit unlink does.
     onRepoRemoved: async (link: RepoLinkRecord) => {
       await removeRepoRunState(link.repoFullName, link.workspaceOrgId);
+      await removeRepositoryContext(link.workspaceOrgId, link.repoFullName);
       log.info(`[github] ${link.repoFullName} disconnected by GitHub`);
     },
   });
@@ -135,6 +178,23 @@ export function createGithubConnection(
       overrides.lookupInstallationAccount ??
       ((installationId: number) => fetchInstallationAccount(cfg, installationId)),
     onRepoLinked: async (link: RepoLinkRecord) => {
+      // Context first: the repository's own documentation is a workspace source
+      // from the moment it is connected, and its sync is enqueued before the
+      // onboarding scan so nothing reads the workspace before it knows the docs.
+      try {
+        const sourceId = await ensureRepositoryContextSource({
+          repoFullName: link.repoFullName,
+          workspaceOrgId: link.workspaceOrgId,
+          defaultBranch: link.defaultBranch,
+        });
+        if (sourceId) await contextSync(link.workspaceOrgId, sourceId, 'add');
+      } catch (err) {
+        // A context source that could not be created is not a reason to refuse
+        // the connection — the repository is linked, and Sync now still works.
+        log.error(
+          `[github] could not create ${link.repoFullName}'s context source: ${(err as Error).message}`,
+        );
+      }
       // The row is the connection — no clone, no registration. Onboarding is a
       // queued job that acquires (and disposes) its own ephemeral work tree and
       // spends on the provider of the workspace that just connected the repo,
@@ -155,6 +215,7 @@ export function createGithubConnection(
     },
     onRepoUnlinked: async (link: RepoLinkRecord) => {
       await removeRepoRunState(link.repoFullName, link.workspaceOrgId);
+      await removeRepositoryContext(link.workspaceOrgId, link.repoFullName);
       log.info(`[github] ${link.repoFullName} disconnected`);
     },
   });

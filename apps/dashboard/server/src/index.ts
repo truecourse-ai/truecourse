@@ -8,6 +8,8 @@ import { createGithubConnection } from './github/index.js';
 import { createServerJobs } from './jobs/index.js';
 import { closeDb, getDb, getDbHandle, initDb } from './db.js';
 import { installDbStores } from './stores.js';
+import { setContextEventPublisher } from './services/context.service.js';
+import { startContextSyncSchedule, type ContextSchedule } from './services/context-schedule.service.js';
 import { operatorClaudeCode } from './services/workspace-llm.service.js';
 import { sweepStaleRunClones } from './services/run-clone.service.js';
 import { setRepoJobsCanceller } from './services/repo-removal.service.js';
@@ -17,6 +19,8 @@ import { wipeLegacyPostgresData, getLogDir } from '@truecourse/core/config/paths
 import { getProjectByPath } from '@truecourse/core/config/registry';
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { closeLogger, configureLogger, log } from '@truecourse/core/lib/logger';
+import { migrateWorkspaceContext } from '@truecourse/data-store';
+import { publishEvent } from '@truecourse/jobs';
 
 const port = parseInt(process.env.PORT || '3001', 10);
 
@@ -64,6 +68,10 @@ async function main() {
   // Swap the file storage seams for Postgres before anything reads or writes
   // repo state, and clear run-clone debris a crashed process left behind.
   installDbStores(getDbHandle(), { masterSecret });
+  // Bring the workspaces that already exist into Context: a Repository source
+  // per connected repository, and the old per-repository llms.txt registries as
+  // workspace site sources. Idempotent — a second boot changes nothing.
+  await migrateWorkspaceContext(getDb());
   sweepStaleRunClones();
   if (operatorClaudeCode()) {
     log.info("[LLM] operator mode — every workspace runs on this process's Claude Code login");
@@ -80,10 +88,19 @@ async function main() {
   const jobs = createServerJobs({ db: getDb(), connectionString: databaseUrl });
   // Disconnecting a repository stops whatever it has in flight.
   setRepoJobsCanceller(jobs.cancelRepoJobs);
+  // A Context mutation is workspace-wide, so it rides the SSE stream the
+  // workspace already holds open rather than a repository's socket room.
+  setContextEventPublisher((org, event) => publishEvent(getDb(), org, event));
 
   // 5. GitHub App connection. Optional: without GITHUB_APP_* the server still
   //    boots, and /api/github answers 503 with the vars to set.
   const github = createGithubConnection({
+    // Connecting a repository creates its Repository source and syncs it,
+    // before the onboarding scan is enqueued.
+    contextSync: async (orgId, sourceId, source) => {
+      const outcome = await jobs.enqueueContextSync({ workspaceOrgId: orgId, sourceId, source });
+      return outcome.status;
+    },
     scan: async (repoId, repoKey, orgId) => {
       const outcome = await jobs.enqueueScan({
         repoId,
@@ -114,6 +131,12 @@ async function main() {
   } else {
     log.info('[Server] GitHub connect disabled — set GITHUB_APP_* to enable');
   }
+
+  // A site has no push to refresh it, so it is swept on a clock: every site
+  // older than a day gets a sync enqueued (single-flight collapses duplicates).
+  const contextSchedule: ContextSchedule = startContextSyncSchedule(getDb(), {
+    enqueue: (request) => jobs.enqueueContextSync(request),
+  });
 
   // A failure to start must not stop the server coming up — the routes then
   // answer honestly that jobs aren't running.
@@ -172,6 +195,7 @@ async function main() {
     log.info('[Server] Shutting down...');
     stopAllWatchers();
     stopAllRunTails();
+    contextSchedule.stop();
     httpServer.closeAllConnections();
     httpServer.close();
     // Stop the queue before the pool it runs on.

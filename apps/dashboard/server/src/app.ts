@@ -16,6 +16,7 @@ import flowsRouter from './routes/flows.js';
 import analyticsRouter from './routes/analytics.js';
 import specRouter from './routes/spec.js';
 import specSourcesRouter from './routes/spec-sources.js';
+import { createContextRouter, createContextBindingsRouter } from './routes/context.js';
 import guardRouter from './routes/guard.js';
 import guardActionsRouter from './routes/guard-actions.js';
 import sessionsRouter, { createWorkspaceSessionsRouter } from './routes/sessions.js';
@@ -158,6 +159,11 @@ export function createApp(opts: CreateAppOptions): express.Express {
     }
   }
 
+  // The workspace's CONTEXT: its documentation sources and what they yielded.
+  // A source belongs to the workspace, not to a repository, so this mounts
+  // above the repository routers and behind the gate alone — no slug to resolve.
+  app.use('/api/context', createContextRouter({ githubLinks }));
+
   // Home page / registry routes run without a project.
   app.use('/api/repos', createReposRouter({ githubLinks }));
   // The workspace's agent runs across every repository it connected, scoped by
@@ -177,6 +183,7 @@ export function createApp(opts: CreateAppOptions): express.Express {
   app.use('/api/repos', projectResolver, analyticsRouter);
   app.use('/api/repos', projectResolver, specRouter);
   app.use('/api/repos', projectResolver, specSourcesRouter);
+  app.use('/api/repos', projectResolver, createContextBindingsRouter());
   app.use('/api/repos', projectResolver, guardRouter);
   app.use('/api/repos', projectResolver, guardActionsRouter);
   app.use('/api/repos', projectResolver, sessionsRouter);
