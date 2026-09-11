@@ -248,10 +248,10 @@ function FlowsIndex() {
           </span>
         ),
       },
-      { key: 'status', label: 'Status', cell: ({ flow }) => <GuardFlowStatusChip status={guardFlowPlainStatus(flow)} /> },
+      { key: 'status', label: 'Status', width: '7rem', cell: ({ flow }) => <GuardFlowStatusChip status={guardFlowPlainStatus(flow)} /> },
       {
         key: 'drivers',
-        label: 'Drivers',
+        label: 'Drivers', width: '8rem', wrap: true,
         cell: ({ flow }) => (
           <span className="flex flex-wrap gap-1">
             {(flow.drivers ?? []).map((d) => (
@@ -264,13 +264,13 @@ function FlowsIndex() {
       },
       {
         key: 'repository',
-        label: 'Repository',
+        label: 'Repository', width: '14rem',
         className: 'font-mono text-[12px] text-muted-foreground',
         cell: ({ repo }) => repo.fullName,
       },
       {
         key: 'sections',
-        label: 'Sections',
+        label: 'Sections', width: '7.5rem',
         align: 'right',
         className: 'text-foreground',
         // The sections this flow covers, when it binds any: a flow bound to

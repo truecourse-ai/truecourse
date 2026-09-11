@@ -236,22 +236,25 @@ export default function DocumentsPage() {
             label: 'Document',
             cell: (row) => <span className="text-foreground">{row.title}</span>,
           },
-          { key: 'area', label: 'Area', className: 'text-muted-foreground', cell: (row) => row.area },
+          { key: 'area', label: 'Area', width: '14rem', className: 'text-muted-foreground', cell: (row) => row.area },
           {
             key: 'source',
             label: 'Source',
+            width: '12rem',
             className: 'text-muted-foreground',
             cell: (row) => row.sourceTitle,
           },
           {
             key: 'repos',
             label: 'Repositories',
+            width: '14rem',
             className: 'font-mono text-[12px] text-muted-foreground',
             cell: repositoriesLabel,
           },
           {
             key: 'status',
             label: 'Status',
+            width: '8rem',
             cell: (row) => (
               <StatusWord
                 tone={CONTEXT_DOC_TONE[row.status]}
@@ -262,6 +265,7 @@ export default function DocumentsPage() {
           {
             key: 'updated',
             label: 'Updated',
+            width: '6rem',
             className: 'text-muted-foreground',
             cell: (row) => (row.updatedAt ? formatRelativeTime(row.updatedAt) : ''),
           },

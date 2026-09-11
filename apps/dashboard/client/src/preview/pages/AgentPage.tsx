@@ -155,22 +155,22 @@ function AgentIndex() {
       },
       {
         key: 'repository',
-        label: 'Repository',
+        label: 'Repository', width: '14rem',
         className: 'font-mono text-[12px] text-muted-foreground',
         // The workspace's own work (a Document scan reads every source and
         // clones nothing) belongs to no repository, and says so.
         cell: (run) => run.repo?.fullName ?? '—',
       },
-      { key: 'status', label: 'Status', cell: (run) => <RunStatusWord run={run} /> },
+      { key: 'status', label: 'Status', width: '8rem', cell: (run) => <RunStatusWord run={run} /> },
       {
         key: 'started',
-        label: 'Started',
+        label: 'Started', width: '10rem',
         className: 'text-muted-foreground',
         cell: (run) => startedLabel(run.startedAt),
       },
       {
         key: 'took',
-        label: 'Took',
+        label: 'Took', width: '5rem',
         align: 'right',
         className: 'text-muted-foreground',
         cell: (run) => runDuration(run),

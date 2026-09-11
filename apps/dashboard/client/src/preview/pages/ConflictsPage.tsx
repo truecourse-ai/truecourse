@@ -207,10 +207,11 @@ export default function ConflictsPage() {
             label: 'Conflict',
             cell: (row) => <span className="text-foreground">{row.title}</span>,
           },
-          { key: 'area', label: 'Area', className: 'text-muted-foreground', cell: (row) => row.area },
+          { key: 'area', label: 'Area', width: '14rem', className: 'text-muted-foreground', cell: (row) => row.area },
           {
             key: 'status',
             label: 'Status',
+            width: '8rem',
             cell: (row) => (
               <StatusWord
                 tone={row.resolved ? 'success' : 'blocked'}

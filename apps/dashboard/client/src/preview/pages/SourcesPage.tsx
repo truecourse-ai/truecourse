@@ -89,18 +89,21 @@ export default function SourcesPage() {
           {
             key: 'kind',
             label: 'Kind',
+            width: '9rem',
             className: 'text-muted-foreground',
             cell: (source) => CONTEXT_SOURCE_KIND_LABEL[source.kind],
           },
           {
             key: 'repos',
             label: 'Repositories',
+            width: '14rem',
             className: 'font-mono text-[12px] text-muted-foreground',
             cell: repositoriesLabel,
           },
           {
             key: 'status',
             label: 'Status',
+            width: '8rem',
             cell: (source) => (
               <span className="flex min-w-0 flex-col gap-0.5">
                 <StatusWord
@@ -120,12 +123,14 @@ export default function SourcesPage() {
           {
             key: 'documents',
             label: 'Documents',
+            width: '6rem',
             className: 'tabular-nums text-muted-foreground',
             cell: (source) => source.docCount,
           },
           {
             key: 'lastSync',
             label: 'Last sync',
+            width: '7rem',
             className: 'text-muted-foreground',
             cell: (source) => (source.lastSyncAt ? formatRelativeTime(source.lastSyncAt) : '—'),
           },
