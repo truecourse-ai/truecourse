@@ -109,7 +109,7 @@ describe('Code, the repositories and their stored summaries', () => {
     const server = serve(empty);
     server.corpus = null;
     renderCode();
-    expect(screen.getByText('Loading repository summaries…')).toBeInTheDocument();
+    expect(screen.queryByText('Loading repository summaries…')).toBeNull();
     expect(row().queryByText('no corpus yet')).toBeNull();
     expect(await screen.findByText('no corpus yet')).toBeInTheDocument();
     expect(row().getAllByText('no baseline yet')).toHaveLength(1);
@@ -124,7 +124,6 @@ describe('Code, the repositories and their stored summaries', () => {
     renderCode();
     expect(await screen.findByText('Coverage unavailable')).toBeInTheDocument();
     expect(row().getByText('Baseline unavailable')).toBeInTheDocument();
-    expect(screen.getByText("Some repositories' coverage could not be loaded.")).toBeInTheDocument();
     server.statusCode = 200;
     server.corpusCode = 200;
     act(() => { for (const handler of listeners.get('connect') ?? []) handler(undefined); });

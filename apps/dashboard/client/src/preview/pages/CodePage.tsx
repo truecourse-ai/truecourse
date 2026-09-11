@@ -86,8 +86,6 @@ export default function CodePage() {
     [repos, summaries],
   );
 
-  const loading = perRepo.some(({ repo, loaded }) => repo.real && !loaded);
-  const incomplete = perRepo.some(({ loaded }) => loaded?.statusError);
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
@@ -104,12 +102,6 @@ export default function CodePage() {
         }
       />
       <div className="min-h-0 flex-1 overflow-auto">
-        {(loading || incomplete) && (
-          <p role="status" className="border-b border-border px-6 py-3 text-xs text-muted-foreground">
-            {loading ? 'Loading repository summaries…' : 'Some repositories\' coverage could not be loaded.'}
-          </p>
-        )}
-
         <table className="w-full border-collapse text-[13px]" aria-label="Repositories by coverage">
           <thead className="sticky top-0 z-10 bg-card">
             <tr className="border-b border-border text-xs font-semibold uppercase tracking-wider text-muted-foreground">
