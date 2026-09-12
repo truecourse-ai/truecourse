@@ -239,8 +239,8 @@ export default function HomePage() {
   const today = home?.today ?? null;
 
   // The chart's points are the baseline runs; its right edge is today's
-  // composition, so the trend and the current tally are one picture and the
-  // readout at rest is today's.
+  // composition, so the trend and the strip above it are one picture. The
+  // readout shows numbers only under the pointer: today's are in the strip.
   const points = useMemo(() => {
     const trend = home?.trend ?? [];
     return trend.map((point, index) => ({
@@ -276,10 +276,42 @@ export default function HomePage() {
     );
   }
 
+  const provenShare = today && today.total > 0 ? Math.round((today.byStatus.proved / today.total) * 100) : 0;
+
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <PageHeader title="Home" />
       <div className="min-h-0 flex-1 overflow-y-auto">
+        {/* Today's numbers, once: the proved share, then every status of
+            today's sections, each a door into Documents narrowed to it. */}
+        {today && (
+          <div
+            className="grid grid-cols-2 border-b border-border sm:grid-cols-3 lg:grid-cols-6 [&>*]:border-b [&>*]:border-r [&>*]:border-border lg:[&>*]:border-b-0 [&>*:nth-child(2n)]:border-r-0 sm:[&>*:nth-child(2n)]:border-r sm:[&>*:nth-child(3n)]:border-r-0 lg:[&>*:nth-child(3n)]:border-r lg:[&>*:last-child]:border-r-0"
+            role="list"
+            aria-label="Today"
+          >
+            <div role="listitem" className="bg-background px-6 py-4">
+              <span className="block text-2xl font-semibold tabular-nums text-foreground">{provenShare}%</span>
+              <span className="mt-0.5 block text-[11px] text-muted-foreground">proved</span>
+            </div>
+            {HOME_STATUS_ORDER.map((status) => (
+              <button
+                key={status}
+                type="button"
+                role="listitem"
+                aria-label={`${today.byStatus[status]} ${HOME_STATUS_WORD[status]}`}
+                onClick={() => navigate(documentsHref({ status }))}
+                className="bg-background px-6 py-4 text-left transition-colors hover:bg-muted/30"
+              >
+                <span className="block text-2xl font-semibold tabular-nums text-foreground">{today.byStatus[status]}</span>
+                <span className="mt-0.5 inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${FILL[status].dot}`} />
+                  {HOME_STATUS_WORD[status]}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
         <div className="border-b border-border px-6 py-5">
           {points.length === 0 ? (
             <p className="py-6 text-center text-xs text-muted-foreground">
@@ -290,6 +322,7 @@ export default function HomePage() {
               label="Sections over time"
               series={SERIES}
               points={points}
+              numbersAtRest={false}
               onPickSeries={(status) => navigate(documentsHref({ status }))}
               controls={
                 <span role="group" aria-label="Period" className="flex items-center gap-1">

@@ -225,17 +225,32 @@ afterEach(() => {
 });
 
 describe('Home', () => {
-  it('draws the chart with today’s tally on its readout', async () => {
+  it('draws today’s numbers in the strip above the chart, the proved share first', async () => {
     serve();
     renderHome();
 
+    const strip = await screen.findByRole('list', { name: 'Today' });
+    expect(within(strip).getByText('40%')).toBeInTheDocument();
+    expect(within(strip).getByText('proved')).toBeInTheDocument();
+    expect(within(strip).getByRole('listitem', { name: '2 Proved' })).toBeInTheDocument();
+    expect(within(strip).getByRole('listitem', { name: '1 Failed' })).toBeInTheDocument();
+    expect(within(strip).getByRole('listitem', { name: '1 Blocked' })).toBeInTheDocument();
+    expect(within(strip).getByRole('listitem', { name: '0 Not testable' })).toBeInTheDocument();
+    expect(within(strip).getByRole('listitem', { name: '1 Not run' })).toBeInTheDocument();
+    // The chart's readout is the legend; its numbers appear under the pointer only.
     await waitFor(() => expect(chart()).toBeInTheDocument());
-    // The readout is the legend and the current tally at once.
-    expect(within(chart()).getByRole('button', { name: '2 Proved' })).toBeInTheDocument();
-    expect(within(chart()).getByRole('button', { name: '1 Failed' })).toBeInTheDocument();
-    expect(within(chart()).getByRole('button', { name: '1 Blocked' })).toBeInTheDocument();
-    expect(within(chart()).getByRole('button', { name: '0 Not testable' })).toBeInTheDocument();
-    expect(within(chart()).getByRole('button', { name: '1 Not run' })).toBeInTheDocument();
+    expect(within(chart()).getByRole('button', { name: 'Proved' })).toBeInTheDocument();
+    expect(within(chart()).queryByRole('button', { name: '2 Proved' })).toBeNull();
+  });
+
+  it('opens Documents narrowed to a status from the strip', async () => {
+    serve();
+    renderHome();
+
+    const strip = await screen.findByRole('list', { name: 'Today' });
+    await userEvent.click(within(strip).getByRole('listitem', { name: '1 Failed' }));
+
+    expect(address()).toBe('/preview/context/documents?status=failed');
   });
 
   it('opens Documents narrowed to a status from the readout', async () => {
@@ -243,9 +258,9 @@ describe('Home', () => {
     renderHome();
 
     await waitFor(() => expect(chart()).toBeInTheDocument());
-    await userEvent.click(within(chart()).getByRole('button', { name: '1 Failed' }));
+    await userEvent.click(within(chart()).getByRole('button', { name: 'Blocked' }));
 
-    expect(address()).toBe('/preview/context/documents?status=failed');
+    expect(address()).toBe('/preview/context/documents?status=blocked');
   });
 
   it('reads the period the chips ask for', async () => {
