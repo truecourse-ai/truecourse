@@ -68,6 +68,22 @@ function toJobView(r: JobRow): JobView {
 export class JobStore {
   constructor(private readonly db: Db) {}
 
+  /** One bounded aggregate query also proves that the application database is reachable. */
+  async operationalStats(): Promise<{
+    queued: number;
+    running: number;
+    failedLast15Minutes: number;
+    oldestActiveAgeSeconds: number;
+  }> {
+    const [stats] = await this.db.select({
+      queued: sql<number>`count(*) filter (where ${jobs.status} = 'queued')::int`,
+      running: sql<number>`count(*) filter (where ${jobs.status} = 'running')::int`,
+      failedLast15Minutes: sql<number>`count(*) filter (where ${jobs.status} = 'failed' and ${jobs.finishedAt} >= now() - interval '15 minutes')::int`,
+      oldestActiveAgeSeconds: sql<number>`coalesce(greatest(0, extract(epoch from (now() - min(${jobs.createdAt}) filter (where ${jobs.status} in ('queued', 'running'))))), 0)::float8`,
+    }).from(jobs).where(sql`${jobs.status} in ('queued', 'running') or (${jobs.status} = 'failed' and ${jobs.finishedAt} >= now() - interval '15 minutes')`);
+    return stats;
+  }
+
   /**
    * Create a `queued` job. Throws `ActiveJobExistsError` (carrying the existing
    * active job) when `key` is already held by a `queued|running` job — the

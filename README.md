@@ -1273,7 +1273,23 @@ pnpm test               # Run tests
 
 The full test suite requires the C# Roslyn host to be built (same requirement as [analyzing C#](#prerequisites)): the C# e2e test fails without it, and the Roslyn semantic-rule tests silently skip. It also needs Playwright's Chromium (`playwright-core install chromium` above): the guard web-driver suites fail rather than skip without it. CI installs both before running tests (`.github/actions/setup`); do the same locally, once per checkout/worktree.
 
-Azure hosting uses 4 vCPU / 8 GiB Consumption apps. See the [Azure setup and manual migration notes](infra/azure/README.md).
+Azure VM releases use a PR's `deploy-dev` label for staging and stable `vX.Y.Z`
+tags for production, with no npm publishing in the new workflows. Initial setup
+uses two Bicep templates and reuses the existing PostgreSQL, Key Vault, ACR and
+Log Analytics services. Alert recipients are configured only in Azure Monitor.
+See the [VM setup and release guide](infra/azure/vm/DEPLOYMENT.md).
+
+Staging is live at [its Azure hostname](https://truecourse-staging-k7m2x9q4.westus3.cloudapp.azure.com).
+The old Container App is stopped. Its legacy GitHub deployment workflow remains
+disabled until the VM workflow is merged and `AZURE_VM_DEPLOYMENT_ENABLED=true`
+is configured in the `dev` environment. Production has not been deployed to a VM.
+
+The VM manager supplies `TRUECOURSE_OPS_PORT`, `TRUECOURSE_OPS_TOKEN_FILE` and
+`TRUECOURSE_START_DRAINED` for private readiness and draining. Optional
+`SENTRY_DSN`, `SENTRY_ENVIRONMENT` and `SENTRY_RELEASE` configure error reporting
+alongside file logs. Local development does not require these settings.
+Run `bash tests/infra/azure/check-vm.sh` for local script checks; set `BICEP_BIN`
+to include compilation with a standalone Bicep compiler.
 
 ## Community
 

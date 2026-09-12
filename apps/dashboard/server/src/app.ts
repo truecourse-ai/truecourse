@@ -26,6 +26,7 @@ import type { GithubMount } from './github/index.js';
 import type { JobsMount } from './jobs/index.js';
 import { setCurrentJobs } from './jobs/current.js';
 import type { AuthVerifier } from '@truecourse/shared';
+import type { Operations } from './operations.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -61,6 +62,7 @@ export interface CreateAppOptions {
    * pass it) makes the three job routes answer 503.
    */
   jobs: JobsMount | null;
+  operations?: Operations;
 }
 
 export function createApp(opts: CreateAppOptions): express.Express {
@@ -74,6 +76,7 @@ export function createApp(opts: CreateAppOptions): express.Express {
   // flows on cross-origin dev requests (client :3000 → server :3001).
   // Same-origin in production, where this is a no-op.
   app.use(cors({ origin: true, credentials: true }));
+  if (opts.operations) app.use('/api', opts.operations.admission);
   // Capture the raw body alongside JSON parsing so a webhook receiver can
   // verify an HMAC signature over the exact bytes.
   app.use(
@@ -94,7 +97,18 @@ export function createApp(opts: CreateAppOptions): express.Express {
   // Capabilities + health stay public so the client can discover the
   // feature gates and liveness before authenticating.
   app.use('/api/capabilities', capabilitiesRouter);
-  app.get('/api/health', (_req, res) => {
+  app.get('/api/health', async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (opts.operations) {
+      const health = await opts.operations.health();
+      // Counts and operational controls are available only on the private port.
+      res.status(health.healthy && !health.draining ? 200 : 503).json({
+        status: health.status,
+        release: health.release,
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
   });
 
