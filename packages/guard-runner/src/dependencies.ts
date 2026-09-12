@@ -383,7 +383,7 @@ export function externalServiceStates(
  * a token the author wrote without listing the name is still a real binding and
  * must gate the run rather than land on disk verbatim.
  */
-export function scenarioDependencyNames(scenario: GuardScenario): string[] {
+export function scenarioDependencyNames(scenario: GuardScenario | Pick<GuardScenario, 'needs' | 'prerequisites'>): string[] {
   // DECLARED order first, then the token-discovered rest: the author's ordering is
   // the meaningful one when a scenario binds several (it decides which dependency a
   // blocked result names), and only deduplication is imposed on top of it.

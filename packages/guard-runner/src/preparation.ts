@@ -1,5 +1,6 @@
 /** Runner-owned private data lifetimes, independent of shared service ownership. */
 import fs from 'node:fs';
+import { resolvePreparationDependencies } from './preparation-dependencies.js';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -7,6 +8,9 @@ import type {
   GuardScenario,
   GuardPreparationEvidence,
 } from '@truecourse/shared';
+import { preparationOwnedEnvKeys, bindPreparationPostgres } from './preparation-postgres.js';
+import { PREPARATION_VERIFY_ENV } from './preparation-contract.js';
+import { buildCredentialRedactor } from './api/redact.js';
 import { runSeed, type SeedResult } from './api/seed.js';
 import { runBuild } from './build.js';
 import { resolveApiServers, resolveWebSurface, resolveEntry, credentialServers, type Recipe, type RecipePreparation } from './recipe.js';
@@ -17,6 +21,8 @@ import { constructChildEnv, BUILD_PASSTHROUGH } from './child-env.js';
 export interface PreparedScenarioWorld extends SeedResult {
   env: Record<string, string>;
   evidence: GuardPreparationEvidence;
+  /** Runtime-only values used to redact database diagnostics during execution. */
+  secrets: ReadonlyMap<string, string>;
   close(): Promise<void>;
 }
 
@@ -26,6 +32,7 @@ export function preparationCatalog(recipe: Recipe) {
     name,
     baseline: p.baseline,
     scope: p.scope,
+    needs: p.needs ?? [],
     baselineChecks: p.baselineChecks,
     fixtures: p.seed.provides.fixtures ?? {},
     credentials: p.seed.provides.credentials ?? {},
@@ -55,7 +62,7 @@ export function validateScenarioPreparation(
   const invalidBaseline = baselineDefect(name, profile);
   if (invalidBaseline) return invalidBaseline;
   const owned = new Set([
-    ...Object.keys(profile.env),
+    ...preparationOwnedEnvKeys(profile),
     'GUARD_PREPARATION_DIRECTORY',
     'GUARD_PREPARATION_NAMESPACE',
     'GUARD_PREPARATION_BASELINE',
@@ -101,6 +108,7 @@ interface Allocation {
   directory: string;
   namespace: string;
   env: Record<string, string>;
+  provisioningEnv: Record<string, string>;
 }
 
 /** A fresh namespace for EVERY call. Polls/restarts inside the caller retain the returned world. */
@@ -118,7 +126,11 @@ export async function prepareScenario(opts: {
     throw new Error(`Unknown preparation profile "${opts.profile}"`);
   const invalidBaseline = baselineDefect(opts.profile, profile);
   if (invalidBaseline) throw new Error(invalidBaseline);
+  const account = resolvePreparationDependencies(opts.repoRoot, opts.recipe, profile.needs ?? []);
+  const accountEnv = { ...account.env, ...opts.accountEnv };
+  const externalSecrets = new Map([...(opts.externalSecrets ?? []), ...account.secrets]);
   const checks = profile.baselineChecks!;
+  const ownedKeys = preparationOwnedEnvKeys(profile);
   const seedScript = scriptPath(opts.repoRoot, profile.seed.script);
   const verifyScript = scriptPath(opts.repoRoot, profile.verify.script);
   const cleanupScript =
@@ -133,7 +145,7 @@ export async function prepareScenario(opts: {
         const result = await runBuild(
           opts.repoRoot,
           nodeScript(cleanupScript),
-          allocation.env,
+          allocation.provisioningEnv,
           timeoutMs,
         );
         if (!result.ok)
@@ -161,12 +173,15 @@ export async function prepareScenario(opts: {
       );
   };
   const allocate = (): Allocation => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-world-'));
     const namespace = `guard_${crypto.randomUUID().replaceAll('-', '')}`;
+    const baseEnv = { ...opts.recipe.env, ...opts.recipe.api?.env, ...accountEnv };
+    // Resolve URLs before allocating files or running any provisioning script.
+    const postgres = bindPreparationPostgres(profile, baseEnv, namespace);
+    for (const [name, value] of postgres.secrets) secrets.set(`allocation${allocations.length}.${name}`, value);
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-world-'));
     const env = {
-      ...(opts.recipe.env ?? {}),
-      ...(opts.recipe.api?.env ?? {}),
-      ...opts.accountEnv,
+      ...baseEnv,
+      ...postgres.env,
       ...Object.fromEntries(
         Object.entries(profile.env).map(([key, value]) => [
           key,
@@ -180,7 +195,7 @@ export async function prepareScenario(opts: {
       GUARD_PREPARATION_NAMESPACE: namespace,
       GUARD_PREPARATION_BASELINE: profile.baseline,
     };
-    const allocation = { directory, namespace, env };
+    const allocation = { directory, namespace, env, provisioningEnv: { ...env, ...postgres.provisioningEnv } };
     allocations.push(allocation);
     return allocation;
   };
@@ -188,11 +203,11 @@ export async function prepareScenario(opts: {
     const result = await runSeed({
       repoRoot: opts.repoRoot,
       seed: { ...profile.seed, command: nodeScript(seedScript) },
-      env: allocation.env,
+      env: allocation.provisioningEnv,
       signal: opts.signal,
       timeoutMs,
       knownCredentials: secrets,
-      externalSecrets: opts.externalSecrets,
+      externalSecrets,
     });
     for (const [name, credential] of result.credentials)
       secrets.set(`${allocation.namespace}.${name}`, credential.value);
@@ -216,14 +231,19 @@ export async function prepareScenario(opts: {
       const started = await startApiServer({
         resolvedServe: resolveEntry(opts.repoRoot, server.serve),
         cwd: server.cwd === 'repo' ? opts.repoRoot : allocation.directory,
-        env: constructChildEnv({ passthrough: BUILD_PASSTHROUGH, recipeEnv: { ...server.env, ...opts.accountEnv,
-          ...Object.fromEntries(Object.entries(allocation.env).filter(([key]) => key in profile.env || key.startsWith('GUARD_'))) } }),
+        env: constructChildEnv({ passthrough: BUILD_PASSTHROUGH, recipeEnv: { ...server.env, ...accountEnv,
+          ...Object.fromEntries(Object.entries(allocation.env).filter(([key]) => ownedKeys.has(key) || key.startsWith('GUARD_'))) } }),
         healthPath: server.healthPath, readyTimeoutMs: server.readyTimeoutMs, signal: opts.signal,
       });
-      if (!started.ok) throw new Error(`Preparation "${opts.profile}" baseline server failed: ${started.reason}`);
+      if (!started.ok) throw new Error(buildCredentialRedactor(secrets, externalSecrets)(
+        `Preparation "${opts.profile}" baseline server failed: ${started.reason}${started.stderr ? '\n' + started.stderr.slice(-2_000) : ''}`,
+      ));
       try {
         const signal = opts.signal ? AbortSignal.any([opts.signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
-        const response = await fetch(started.server.baseUrl + check.path, { headers, signal, redirect: 'error' });
+        const url = new URL(check.path, started.server.baseUrl);
+        if (url.origin !== new URL(started.server.baseUrl).origin) throw new Error('Preparation baseline must stay on its declared server.');
+        for (const [key, value] of Object.entries(check.query ?? {})) url.searchParams.set(key, value);
+        const response = await fetch(url, { headers, signal, redirect: 'error' });
         if (!response.ok) throw new Error(`Preparation "${opts.profile}" baseline read ${check.path} returned ${response.status}.`);
         const body: unknown = await response.json();
         for (const [key, expected] of Object.entries({ ...check.counts, ...check.totals })) {
@@ -244,6 +264,7 @@ export async function prepareScenario(opts: {
     // This is an executable app-level verifier, not a persisted boolean capability.
     // It sees two independently seeded worlds mutates the peer and proves primary remains at its baseline.
     const verification = await runSeed({
+      preservePortTemplates: true,
       repoRoot: opts.repoRoot,
       seed: {
         command: nodeScript(verifyScript),
@@ -252,24 +273,24 @@ export async function prepareScenario(opts: {
       env: {
         ...primary.env,
         GUARD_PREPARATION_BASELINE: profile.baseline,
-        GUARD_PREPARATION_PEER_ENV: JSON.stringify(peer.env),
-        GUARD_PREPARATION_FIXTURES: JSON.stringify(
+        [PREPARATION_VERIFY_ENV.peer]: JSON.stringify(peer.env),
+        [PREPARATION_VERIFY_ENV.fixtures]: JSON.stringify(
           Object.fromEntries(primarySeed.fixtures),
         ),
-        GUARD_PREPARATION_PEER_FIXTURES: JSON.stringify(
+        [PREPARATION_VERIFY_ENV.peerFixtures]: JSON.stringify(
           Object.fromEntries(peerSeed.fixtures),
         ),
-        GUARD_PREPARATION_CREDENTIALS: JSON.stringify(
+        [PREPARATION_VERIFY_ENV.credentials]: JSON.stringify(
           Object.fromEntries(primarySeed.credentials),
         ),
-        GUARD_PREPARATION_PEER_CREDENTIALS: JSON.stringify(
+        [PREPARATION_VERIFY_ENV.peerCredentials]: JSON.stringify(
           Object.fromEntries(peerSeed.credentials),
         ),
       },
       signal: opts.signal,
       timeoutMs,
       knownCredentials: secrets,
-      externalSecrets: opts.externalSecrets,
+      externalSecrets,
     });
     const proof = verification.fixtures.get('verification');
     if (proof?.baseline !== profile.baseline || proof?.isolated !== true) {
@@ -284,7 +305,7 @@ export async function prepareScenario(opts: {
       ...primarySeed,
       env: Object.fromEntries(
         Object.entries(primary.env).filter(
-          ([key]) => key in profile.env || key.startsWith('GUARD_PREPARATION_'),
+          ([key]) => ownedKeys.has(key) || key.startsWith('GUARD_PREPARATION_'),
         ),
       ),
       evidence: {
@@ -292,6 +313,7 @@ export async function prepareScenario(opts: {
         baseline: profile.baseline,
         scope: 'instance',
       },
+      secrets: new Map([...externalSecrets, ...secrets]),
       close,
     };
   } catch (error) {

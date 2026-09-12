@@ -1290,6 +1290,7 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
     lines.push('', 'PRIVATE PREPARATIONS — select one with setup.preparation:',
       ...ctx.preparations.map(p => JSON.stringify(p)),
       'Each run gets a fresh private allocation, provisioned and checked before the app starts. Runtime paths and values are never authored.',
+      'Stateful flows may select a profile whose fixtures and credentials establish their documented starting state. Do not pick an arbitrary seeded profile or rediscover database provisioning in scenario steps.',
       'An empty case requires baseline empty. Exact global totals/counts and pagination boundaries require controlled private state.',
       'baselineChecks lists independently known counts and totals that the runner has checked through the real app. Use these expected values when calculating totals after your own writes; never derive the expected baseline from the aggregate response under test.',
       'Only the selected profile’s fixture/credential catalog is available inside that world. The global catalogs below apply only without setup.preparation.',

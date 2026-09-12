@@ -43,6 +43,20 @@ const SEED: RecipeApiSeed = {
 }
 
 describe('runSeed', () => {
+  it('keeps port-bearing primary and peer configuration only for verifiers that allocate ports', async () => {
+    const r = repo();
+    writeSeedScript(r, `import fs from 'node:fs';
+      fs.writeFileSync(process.env.GUARD_SEED_OUT, JSON.stringify({fixtures:{env:{
+        port:process.env.PORT ?? null, peer:process.env.GUARD_PREPARATION_PEER_ENV ?? null
+      }}}));`);
+    const seed = { command: 'node seed.mjs', provides: { fixtures: { env: ['port', 'peer'] } } };
+    const env = { PORT: '${PORT}', GUARD_PREPARATION_PEER_ENV: JSON.stringify({ ORIGIN: 'http://localhost:${PORT}' }) };
+    const ordinary = await runSeed({ repoRoot: r, seed, env });
+    expect(ordinary.fixtures.get('env')).toEqual({ port: null, peer: null });
+    const verifier = await runSeed({ repoRoot: r, seed, env, preservePortTemplates: true });
+    expect(verifier.fixtures.get('env')).toEqual({ port: env.PORT, peer: env.GUARD_PREPARATION_PEER_ENV });
+  });
+
   it('runs the command, resolves declared credentials (header from provides, value from manifest) and keeps fixtures native', async () => {
     const r = repo()
     writeSeedScript(

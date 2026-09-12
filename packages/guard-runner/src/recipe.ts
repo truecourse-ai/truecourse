@@ -199,7 +199,8 @@ export const RecipePreparationScriptSchema = z.object({
 /** Runner-executed, unfiltered collection reads. Expected values are known inputs,
  * not values captured from the application response being checked. */
 export const RecipePreparationBaselineCheckSchema = z.object({
-  path: z.string().regex(/^\/(?!\/)/).refine(p => !p.includes('?') && !p.includes('#'), 'baseline reads must be unfiltered collection paths'),
+  path: z.string().regex(/^\/(?!\/)/).refine(p => !/[?#[\]\\\s]/.test(p), 'baseline paths must omit query/fragment; use query for transport parameters'),
+  query: z.record(z.string().min(1), z.string()).optional(),
   server: z.string().min(1).optional(),
   credential: z.string().min(1).optional(),
   counts: z.record(z.string().min(1), z.number().int().nonnegative()).refine(v => Object.keys(v).length > 0, 'declare at least one global record count'),
@@ -207,11 +208,18 @@ export const RecipePreparationBaselineCheckSchema = z.object({
 }).strict()
 export const RecipePreparationSchema = z.object({
   baseline: GuardPreparationBaselineSchema,
+  /** Catalog dependencies required by seed, baseline reads, verifier mutations, or cleanup. */
+  needs: z.array(z.string().min(1)).refine(names => new Set(names).size === names.length, 'Preparation dependencies must be unique').optional(),
   scope: z.literal('instance'),
   // Optional only to read older recipes. Execution refuses profiles without checks.
   baselineChecks: z.array(RecipePreparationBaselineCheckSchema).min(1).optional(),
+  postgres: z.object({
+    isolation: z.literal('database'),
+    urlEnvs: z.array(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/)
+      .refine(key => !key.startsWith('GUARD_'), 'GUARD_ bindings are runner-owned')).min(1)
+      .refine(keys => new Set(keys).size === keys.length, 'Postgres URL bindings must be unique'),
+  }).strict().optional(),
   env: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).refine((key) => !key.startsWith('GUARD_'), 'GUARD_ bindings are runner-owned'), z.string().min(1))
-    .refine((env) => Object.keys(env).length > 0, 'a profile must own datastore bindings')
     .refine((env) => Object.values(env).every((v) => /\$\{(?:directory|namespace)\}/.test(v) &&
       !/\$\{(?!directory\}|namespace\})/.test(v)), 'every binding must use ${directory} or ${namespace}, with no other references'),
   seed: RecipeApiSeedSchema.omit({ command: true }).extend({ script: RecipePreparationScriptSchema.shape.script }),
@@ -220,7 +228,15 @@ export const RecipePreparationSchema = z.object({
   verify: RecipePreparationScriptSchema,
   /** Optional namespace cleanup. Receives only the owned allocation, even after failed seeding. */
   cleanup: RecipePreparationScriptSchema.optional(),
-}).strict()
+}).strict().superRefine((profile, ctx) => {
+  if (!profile.postgres && !Object.keys(profile.env).length)
+    ctx.addIssue({ code: 'custom', path: ['env'], message: 'a profile must own datastore bindings' });
+  if (profile.postgres) {
+    if (!profile.cleanup) ctx.addIssue({ code: 'custom', path: ['cleanup'], message: 'Postgres preparation requires owned database cleanup' });
+    if (profile.postgres.urlEnvs.some(key => Object.hasOwn(profile.env, key)))
+      ctx.addIssue({ code: 'custom', path: ['postgres', 'urlEnvs'], message: 'Postgres URL bindings cannot also be owned by env' });
+  }
+})
 export type RecipePreparation = z.infer<typeof RecipePreparationSchema>
 
 /**
@@ -1045,6 +1061,12 @@ export function loadRecipe(repoRoot: string, recipeFile: string): LoadedRecipe |
     throw new RecipeError(`recipe.json is invalid: ${result.error.issues.map((i) => `${i.path.join('.')} ${i.message}`).join('; ')}`)
   }
   return { recipe: result.data, fingerprint: computeRecipeFingerprint(repoRoot) }
+}
+
+/** Version preparation semantics independently so cached unsupported outcomes can be retried once. */
+export function computePreparationFingerprint(repoRoot: string): string {
+  return crypto.createHash('sha256').update('guard-preparations:4-dependency-availability\n')
+    .update(computeRecipeFingerprint(repoRoot)).digest('hex');
 }
 
 /** Hash the present discovery-input files (sorted, path-tagged) into one digest. */

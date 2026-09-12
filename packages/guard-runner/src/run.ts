@@ -585,6 +585,16 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   }[] = []
   const currentFlows = readGuardFlowsCorpus(repoRoot)?.flows ?? []
   const runnable = prepared.filter((p) => {
+    const preparation = p.scenario.setup?.preparation;
+    const preparationNeeds = preparation ? loaded.recipe.preparations?.[preparation]?.needs ?? [] : [];
+    if (preparationNeeds.length) {
+      const suppliedNeeds = preparationNeeds.filter(name => !resolvedDependencies.dependencies.some(d => d.name === name && d.state === null))
+      p.scenario = {
+        ...p.scenario,
+        needs: [...new Set([...(p.scenario.needs ?? []), ...preparationNeeds])],
+        prerequisites: [...(p.scenario.prerequisites ?? []), ...suppliedNeeds.map(dependency => ({ dependency, mode: 'provided' as const }))],
+      }
+    }
     const flow = currentFlows.find(flow => flow.id === p.scenario.flow?.id)
     if (flow) {
       const prerequisites = scenarioMilestoneProof(p.scenario.steps).flatMap(proof => flow.milestones.find(m => m.order === proof.milestone)?.verification?.cases?.filter(c => !proof.checks || proof.checks.includes(c.id)).flatMap(c => c.prerequisites ?? []) ?? [])
@@ -1228,6 +1238,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
         accountEnv: account.env,
         signal: cancel.signal, timeoutMs: opts.buildTimeoutMs,
       })
+      const executionSecrets = new Map([...account.secrets, ...(privateWorld?.secrets ?? [])]);
       const privateCredentials = privateWorld && new Map([...privateWorld.credentials].map(([name, c]) => [name, c.value]))
       const privateCredentialView = (serverName: string) => {
         const credentials = new Map<string, string>()
@@ -1257,7 +1268,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               credentials: scenarioCredentialsFor(boundServerById.get(scenario.id)!.name).credentials,
               foreignCredentials: scenarioCredentialsFor(boundServerById.get(scenario.id)!.name).foreign,
               servesPath: servesPathFor(boundServerById.get(scenario.id)!),
-              externalSecrets: account.secrets,
+              externalSecrets: executionSecrets,
               externalTargets,
               fixtures: privateWorld?.fixtures ?? apiFixtures,
               responseSchemas: resolveScenarioResponseSchemas(
@@ -1275,7 +1286,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               runId,
               unique: scenarioUnique(runNonce, scenario.id),
               resolvedEntry: resolvedEntry!,
-              externalSecrets: account.secrets,
+              externalSecrets: executionSecrets,
               recipeEnv: { ...loaded.recipe.env, ...account.env, ...(privateWorld?.env ?? {}) },
               ...(loaded.recipe.expose ? { expose: loaded.recipe.expose } : {}),
               // Every binding is `provided` by construction — the gate above kept the
@@ -1305,7 +1316,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
           preparationFailure: { profile: scenario.setup!.preparation!, stage: 'prepare' },
           durationMs: Date.now() - startedAt,
           failure: { step: 0, expected: 'the selected preparation to provide a verified private baseline',
-            actual: buildCredentialRedactor(new Map(), account.secrets)(error instanceof Error ? error.message : String(error)) } }
+            actual: buildCredentialRedactor(privateWorld?.secrets ?? new Map(), account.secrets)(error instanceof Error ? error.message : String(error)) } }
       } finally {
         // Driver routines close browsers and servers before returning; data cleanup runs last.
         try { await privateWorld?.close() } catch {

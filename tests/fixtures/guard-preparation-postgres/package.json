@@ -1,0 +1,7 @@
+{
+  "name": "guard-preparation-postgres-fixture",
+  "private": true,
+  "type": "module",
+  "scripts": { "generate": "prisma generate" },
+  "dependencies": { "@prisma/client": "6.19.0", "prisma": "6.19.0", "pg": "8.13.1" }
+}

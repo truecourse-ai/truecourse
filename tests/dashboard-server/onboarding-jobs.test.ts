@@ -317,6 +317,7 @@ describe('the guard setup job', () => {
   const catalogCalls: string[] = [];
   /** Whether the clone held the dependencies overlay when the engine looked. */
   const overlaysSeen: boolean[] = [];
+  let preparationError: string | undefined;
 
   /** A fresh clone of the fixture at a stable path, as a run really gets one. */
   function installWorkTree(): void {
@@ -358,6 +359,7 @@ describe('the guard setup job', () => {
   beforeEach(async () => {
     catalogCalls.length = 0;
     overlaysSeen.length = 0;
+    preparationError = undefined;
     installWorkTree();
     // The scan's output, as the store holds it: setup reads the curated doc
     // universe, and the job materializes it into the clone.
@@ -418,7 +420,9 @@ describe('the guard setup job', () => {
             },
             authorInterfaces: async () => ({ status: 'skipped', reason: 'stubbed in this suite' }),
             seedSession: async () => ({ status: 'skipped', reason: 'stubbed in this suite' }),
-            preparationSession: async () => ({ status: 'skipped', reason: 'stubbed in this suite' }),
+            preparationSession: async () => preparationError
+              ? { status: 'failed', reason: preparationError }
+              : { status: 'skipped', reason: 'stubbed in this suite' },
             verifyAuth: async () => ({ status: 'skipped', reason: 'stubbed in this suite' }),
           }),
       },
@@ -516,6 +520,27 @@ describe('the guard setup job', () => {
     expect(enqueuedPayloads[1]).toMatchObject({ jobId: generate?.id, repoFullName: REPO, source: 'chain' });
   }, 60_000);
 
+  it.each(['file', 'postgres'])('persists a preparation failure, fails the job and Activity, and chains nothing with %s history', async storage => {
+    if (storage === 'postgres') setSessionRunBackend(new PgSessionRunStore(db));
+    preparationError = 'Application install failed before private preparation verification (exit 7):\nfixture dependency missing';
+    await jobs.enqueueGuardSetup(request);
+    await Promise.all(running);
+    const [job] = await jobsOfType('repo.guard-setup');
+    expect(job).toMatchObject({ status: 'failed', error: preparationError });
+    expect(enqueued).toEqual(['repo.guard-setup']);
+    const bundle = (await loadGuardSetupBundle(REPO))!;
+    const report = JSON.parse(bundle['.truecourse/guard/setup.json']);
+    expect(report).toMatchObject({ status: 'failed', reason: preparationError });
+    expect(report.steps.find((step: { key: string }) => step.key === 'preparations')).toMatchObject({ status: 'failed', reason: preparationError });
+    expect(report.steps.some((step: { key: string }) => step.key === 'auth')).toBe(false);
+    const [run] = await listStoredSessionRuns(REPO, 'guard-setup');
+    expect(run).toMatchObject({ status: 'failed', error: { message: preparationError } });
+    const checklist = run.display?.blocks.find(block => block.kind === 'checklist') as { items: { key: string; status: string }[] };
+    expect(checklist.items.find(item => item.key === 'preparations')?.status).toBe('error');
+    expect(checklist.items.find(item => item.key === 'auth')?.status).toBe('pending');
+    expect(disposed).toEqual([clone]);
+  }, 60_000);
+
   it('chains nothing when setup was refused', async () => {
     await jobs.stop();
     jobs = createServerJobs({
@@ -525,8 +550,7 @@ describe('the guard setup job', () => {
       startWorker: fakeWorker(['repo.guard-setup']),
       guardSetup: {
         startLlm: async () => testLlm,
-        // A setup whose recipe gate failed: the job itself succeeds (the refusal
-        // is the report), but there is no recipe to generate against.
+        // A setup whose recipe gate failed must also fail the queued job.
         runSetup: async () =>
           ({
             report: { ranAt: '2026-01-01T00:00:00Z', status: 'failed', reason: 'no recipe', steps: [] },
@@ -542,7 +566,7 @@ describe('the guard setup job', () => {
 
     expect(enqueued).toEqual(['repo.guard-setup']);
     const [setup] = await jobsOfType('repo.guard-setup');
-    expect(setup).toMatchObject({ status: 'succeeded', result: { status: 'failed' } });
+    expect(setup).toMatchObject({ status: 'failed', error: 'no recipe' });
     expect(await jobsOfType('repo.guard-generate')).toEqual([]);
   });
 

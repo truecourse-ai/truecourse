@@ -161,6 +161,7 @@ import {
 } from '@truecourse/shared';
 import {
   computeRecipeFingerprint,
+  computePreparationFingerprint,
   resolvePrerequisites,
   buildRouteManifest,
   loadDependencyCatalog,
@@ -1104,7 +1105,7 @@ export async function estimateGuardSetup(
   // ---- private preparations: one authoring session per changed recipe --------
   // A profile is not evidence that this setup step already settled. The runtime
   // skips only its current recorded fingerprint; old setups must run this step.
-  const preparationSettled = recipe !== undefined && settled('preparations') === computeRecipeFingerprint(repoRoot) &&
+  const preparationSettled = recipe !== undefined && settled('preparations') === computePreparationFingerprint(repoRoot) &&
     preparationCatalog(recipe).length === Object.keys(recipe.preparations ?? {}).length;
   const preparationItems = preparationSettled ? 0 : 1;
   // Upstream recipe/seed work can move the fingerprint before this step starts.
@@ -1187,7 +1188,7 @@ export async function estimateGuardSetup(
       budget: PREPARATION_SESSION_BUDGET,
       items: preparationItems,
       maxItems: preparationMax,
-      bound: 'one private preparation authoring session; skipped only when its recipe fingerprint is unchanged',
+      bound: 'one private preparation authoring session; skipped only when its recipe and preparation contract are unchanged',
     }),
     setupStage({
       kind: AUTH_PROOF_SESSION_KIND,
