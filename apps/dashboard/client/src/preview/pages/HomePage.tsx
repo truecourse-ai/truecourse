@@ -348,8 +348,10 @@ export default function HomePage() {
         </div>
 
         {/* The widgets sit in the strip's grid: cells parted by the same lines,
-            no card chrome, edge to edge. */}
-        <div className="grid grid-cols-1 border-b border-border lg:grid-cols-3 [&>*]:border-b [&>*]:border-border lg:[&>*]:border-b-0 lg:[&>*]:border-r lg:[&>*:last-child]:border-r-0">
+            no card chrome, edge to edge. Needs attention takes the full width,
+            since its rows carry the longest titles and a reason; the other two
+            share the row under it. */}
+        <div className="border-b border-border">
           <Widget title="Needs attention" to={`${PREVIEW_BASE}/agent`} toWord="Agent">
             {attention.length === 0 ? (
               <Nothing>Nothing is waiting on you.</Nothing>
@@ -368,7 +370,8 @@ export default function HomePage() {
               </ul>
             )}
           </Widget>
-
+        </div>
+        <div className="grid grid-cols-1 border-b border-border lg:grid-cols-2 [&>*]:border-b [&>*]:border-border lg:[&>*]:border-b-0 lg:[&>*]:border-r lg:[&>*:last-child]:border-r-0">
           <Widget title="Areas" to={documentsHref({})} toWord="Documents">
             {(home?.areas ?? []).length === 0 ? (
               <Nothing>No document is read by a repository yet.</Nothing>
