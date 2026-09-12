@@ -485,8 +485,14 @@ function Onboarding({ hasContext, hasRepo }: { hasContext: boolean; hasRepo: boo
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <PageHeader title="Home" />
       <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="px-8 pb-6 pt-10">
+          <h2 className="text-xl font-semibold text-foreground">Set up your workspace</h2>
+          <p className="mt-1.5 text-[13px] text-muted-foreground">
+            Connect the documentation that says what the product promises, and the code that has to keep it.
+          </p>
+        </div>
         <ul
-          className="grid grid-cols-1 border-b border-border lg:grid-cols-2 [&>*]:border-b [&>*]:border-border lg:[&>*]:border-b-0 lg:[&>*]:border-r lg:[&>*:last-child]:border-r-0"
+          className="grid grid-cols-1 border-y border-border lg:grid-cols-2 [&>*]:border-b [&>*]:border-border lg:[&>*]:border-b-0 lg:[&>*]:border-r lg:[&>*:last-child]:border-r-0"
           aria-label="Getting started"
         >
           <Checkpoint
