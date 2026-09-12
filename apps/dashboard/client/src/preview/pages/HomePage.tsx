@@ -16,11 +16,17 @@
  * Nothing is composed here: the server folded every number and computed every
  * address, so this page draws what it was told and invents no row. It re-reads
  * on the workspace's change signal, which a settled job bumps too.
+ *
+ * Before any of that, ONBOARDING: a workspace without both a context source and
+ * a connected repository has no dashboard to draw, so Home is two checkpoints
+ * instead, each with its own action, and the dashboard read is not made at all.
+ * The decision waits for both reads, so the checkpoints never flash on a
+ * workspace that already has everything.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ClipboardList } from 'lucide-react';
+import { Check, ClipboardList } from 'lucide-react';
 import {
   HOME_STATUS_ORDER,
   HOME_STATUS_WORD,
@@ -36,7 +42,8 @@ import { PageHeader, SectionTitle } from '@/preview/ui/bits';
 import { EntityList, type EntityListGroup } from '@/preview/ui/entity-list';
 import { StackedArea, type StackedSeries } from '@/preview/ui/stacked-area';
 import { CONTEXT_DOC_TONE, StatusWord, type StatusTone } from '@/preview/ui/status-word';
-import { useContextSignal } from '@/preview/shell/use-context';
+import { useContextSignal, useContextSources } from '@/preview/shell/use-context';
+import { usePreviewState } from '@/preview/shell/preview-state';
 import { PREVIEW_BASE } from '@/preview/shell/base';
 import { documentsHref } from './context-hrefs';
 
@@ -230,9 +237,9 @@ function dayOf(iso: string): 'today' | 'yesterday' | 'earlier' {
   return hours < 24 ? 'today' : hours < 48 ? 'yesterday' : 'earlier';
 }
 
-export default function HomePage() {
+/** The dashboard itself, drawn once the workspace has both of its halves. */
+function Dashboard({ signal }: { signal: number }) {
   const navigate = useNavigate();
-  const signal = useContextSignal();
   const [period, setPeriod] = useState<HomePeriod>('30d');
   const { home, error } = useHome(period, signal);
 
@@ -418,4 +425,115 @@ export default function HomePage() {
       </div>
     </div>
   );
+}
+
+const PRIMARY_ACTION =
+  'rounded bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90';
+const BORDERED_ACTION =
+  'rounded border border-border px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted/60';
+
+/**
+ * One checkpoint: its mark (a check once done, its number until then), what it
+ * gives the workspace, and either its action or the word Done.
+ */
+function Checkpoint({
+  step,
+  done,
+  title,
+  line,
+  action,
+  to,
+  primary,
+}: {
+  step: number;
+  done: boolean;
+  title: string;
+  line: string;
+  action: string;
+  to: string;
+  primary: boolean;
+}) {
+  return (
+    <li className="flex items-center gap-4 px-6 py-3">
+      <span
+        aria-hidden
+        className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-medium ${
+          done ? 'bg-emerald-500 text-white' : 'border border-border text-foreground'
+        }`}
+      >
+        {done ? <Check className="h-3.5 w-3.5" /> : step}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[13px] font-medium text-foreground">{title}</span>
+        <span className="block truncate text-[11px] text-muted-foreground">{line}</span>
+      </span>
+      {done ? (
+        <StatusWord tone="success" word="Done" />
+      ) : (
+        <Link to={to} className={`shrink-0 ${primary ? PRIMARY_ACTION : BORDERED_ACTION}`}>
+          {action}
+        </Link>
+      )}
+    </li>
+  );
+}
+
+/**
+ * The two checkpoints, in order. The next one to do carries the primary action;
+ * the other carries the bordered one, since either order is allowed.
+ */
+function Onboarding({ hasContext, hasRepo }: { hasContext: boolean; hasRepo: boolean }) {
+  return (
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
+      <PageHeader title="Home" />
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <p className="px-6 py-4 text-[13px] text-muted-foreground">
+          Two things make a workspace: what the product promises, and the code that keeps the
+          promise.
+        </p>
+        <ul className="divide-y divide-border border-b border-border" aria-label="Getting started">
+          <Checkpoint
+            step={1}
+            done={hasContext}
+            title="Connect your first context"
+            line="The documentation that says what the product promises."
+            action="Add context"
+            to={`${PREVIEW_BASE}/context?add=1`}
+            primary={!hasContext}
+          />
+          <Checkpoint
+            step={2}
+            done={hasRepo}
+            title="Connect your first repository"
+            line="The code that has to keep the promise."
+            action="Connect repository"
+            to={`${PREVIEW_BASE}/code?connect=1`}
+            primary={hasContext}
+          />
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+export default function HomePage() {
+  const signal = useContextSignal();
+  const { sources } = useContextSources(signal);
+  const { repos, reposLoaded } = usePreviewState();
+
+  // Until both reads have landed there is nothing honest to draw: an empty
+  // list in flight is not a workspace with nothing in it.
+  if (sources === null || !reposLoaded) {
+    return (
+      <div className="flex h-full min-h-0 min-w-0 flex-col">
+        <PageHeader title="Home" />
+      </div>
+    );
+  }
+
+  const hasContext = sources.length > 0;
+  const hasRepo = repos.length > 0;
+  if (!hasContext || !hasRepo) return <Onboarding hasContext={hasContext} hasRepo={hasRepo} />;
+
+  return <Dashboard signal={signal} />;
 }

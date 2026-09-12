@@ -5,14 +5,20 @@
  * the server folded and whose addresses the server computed. What is asserted
  * here is what the page DOES with that answer: the chart it draws and the
  * doors its words open, the three widgets and their rows, the period in the
- * address of the next read, and the re-read a moved workspace earns.
+ * address of the next read, and the re-read a moved workspace earns. The
+ * dashboard is only reached by a workspace that has both a context source and a
+ * connected repository, so the world here has one of each.
+ *
+ * The second describe is the other Home: the two checkpoints a workspace sees
+ * until it has both, which are decided from the sources and the registry alone
+ * and never read the dashboard.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
-import type { HomeResponse } from '@truecourse/shared';
+import type { ContextSourceView, HomeResponse } from '@truecourse/shared';
 
 vi.mock('@/lib/socket', () => {
   const socket = {
@@ -145,6 +151,28 @@ const HOME: HomeResponse = {
   ],
 };
 
+/** What makes the workspace a dashboard: one source and one repository. */
+const SOURCE: ContextSourceView = {
+  id: 'site-docs-acme',
+  kind: 'site',
+  title: 'docs.acme.com',
+  config: { llmsTxtUrl: 'https://docs.acme.com/llms.txt' },
+  status: 'synced',
+  statusNote: null,
+  lastSyncAt: '2026-09-01T10:00:00.000Z',
+  createdAt: '2026-08-01T10:00:00.000Z',
+  updatedAt: '2026-09-01T10:00:00.000Z',
+  docCount: 12,
+  repositories: ['acme/web'],
+};
+
+const REPO = {
+  id: 'web',
+  name: 'acme/web',
+  path: 'acme/web',
+  remoteUrl: 'https://github.com/acme/web',
+};
+
 const EMPTY: HomeResponse = {
   period: '30d',
   today: { total: 0, byStatus: { proved: 0, failed: 0, blocked: 0, 'not-testable': 0, 'not-run': 0 } },
@@ -163,23 +191,29 @@ function json(body: unknown, status = 200): Response {
 
 interface World {
   home: HomeResponse;
+  /** The registry, as `/api/repos` answers it. */
+  repos: unknown[];
+  /** The workspace's context sources. */
+  sources: ContextSourceView[];
   calls: string[];
 }
 
 function serve(over: Partial<World> = {}) {
-  const state: World = { home: HOME, calls: [], ...over };
+  const state: World = { home: HOME, repos: [REPO], sources: [SOURCE], calls: [], ...over };
   window.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const url = new URL(href, window.location.origin);
     const method = (init?.method ?? 'GET').toUpperCase();
     state.calls.push(method === 'GET' ? `${url.pathname}${url.search}` : `${method} ${url.pathname}`);
     if (url.pathname === '/api/home') return json(state.home);
-    if (url.pathname === '/api/repos') return json([]);
+    if (url.pathname === '/api/repos') return json(state.repos);
     if (url.pathname === '/api/llm/config') {
       return json({ config: { provider: 'anthropic' }, providers: ['anthropic'] });
     }
     if (url.pathname === '/api/sessions/runs') return json({ runs: [] });
-    if (url.pathname === '/api/context/sources') return json({ sources: [], changedAt: null });
+    if (url.pathname === '/api/context/sources') {
+      return json({ sources: state.sources, changedAt: null });
+    }
     if (url.pathname === '/api/context/documents') return json({ documents: [], corpusAt: null });
     if (url.pathname === '/api/context/staleness') {
       return json({ changedAt: null, corpusAt: null, stale: false });
@@ -302,7 +336,7 @@ describe('Home', () => {
     renderHome();
 
     const attention = await screen.findByRole('region', { name: 'Needs attention' });
-    await userEvent.click(within(attention).getByText('Flow generation'));
+    await userEvent.click(await within(attention).findByText('Flow generation'));
 
     expect(address()).toBe('/preview/agent/run-1');
   });
@@ -312,7 +346,7 @@ describe('Home', () => {
     renderHome();
 
     const changed = await screen.findByRole('region', { name: 'Recently changed' });
-    await userEvent.click(within(changed).getByText('Refunds'));
+    await userEvent.click(await within(changed).findByText('Refunds'));
 
     expect(address()).toBe(`/preview/context/doc/${encodeURIComponent(REFUNDS)}`);
   });
@@ -322,7 +356,7 @@ describe('Home', () => {
     renderHome();
 
     const areas = await screen.findByRole('region', { name: 'Areas' });
-    await userEvent.click(within(areas).getByText('acme/payments'));
+    await userEvent.click(await within(areas).findByText('acme/payments'));
 
     expect(address()).toBe('/preview/context/documents?area=acme%2Fpayments');
   });
@@ -348,3 +382,90 @@ describe('Home', () => {
     await waitFor(() => expect(homeCalls(state).length).toBeGreaterThan(1), { timeout: 2000 });
   });
 });
+
+describe('Home onboarding', () => {
+  const list = () => screen.getByRole('list', { name: 'Getting started' });
+  const rows = () => within(list()).getAllByRole('listitem');
+  const action = (name: string) => screen.getByRole('link', { name });
+
+  it('asks for both when the workspace has neither, Add context first', async () => {
+    serve({ repos: [], sources: [] });
+    renderHome();
+
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    expect(within(rows()[0]!).getByText('Connect your first context')).toBeInTheDocument();
+    expect(within(rows()[1]!).getByText('Connect your first repository')).toBeInTheDocument();
+    expect(screen.queryByText('Done')).toBeNull();
+    // The next thing to do carries the primary action, the other the bordered one.
+    expect(action('Add context')).toHaveClass('bg-primary');
+    expect(action('Connect repository')).toHaveClass('border-border');
+    expect(screen.queryByRole('list', { name: 'Today' })).toBeNull();
+  });
+
+  it('marks the context checkpoint Done and asks for the repository next', async () => {
+    serve({ repos: [] });
+    renderHome();
+
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    expect(within(rows()[0]!).getByText('Done')).toBeInTheDocument();
+    expect(within(rows()[1]!).queryByText('Done')).toBeNull();
+    expect(action('Connect repository')).toHaveClass('bg-primary');
+    expect(screen.queryByRole('link', { name: 'Add context' })).toBeNull();
+  });
+
+  it('marks the repository checkpoint Done when that half came first', async () => {
+    serve({ sources: [] });
+    renderHome();
+
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    expect(within(rows()[1]!).getByText('Done')).toBeInTheDocument();
+    expect(within(rows()[0]!).queryByText('Done')).toBeNull();
+    expect(action('Add context')).toHaveClass('bg-primary');
+    expect(screen.queryByRole('link', { name: 'Connect repository' })).toBeNull();
+  });
+
+  it('is the dashboard once the workspace has both', async () => {
+    const state = serve();
+    renderHome();
+
+    expect(await screen.findByRole('list', { name: 'Today' })).toBeInTheDocument();
+    expect(screen.queryByRole('list', { name: 'Getting started' })).toBeNull();
+    expect(homeCalls(state)).toEqual(['/api/home?period=30d']);
+  });
+
+  it('never reads the dashboard while a checkpoint is open', async () => {
+    const state = serve({ repos: [], sources: [] });
+    renderHome();
+
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    expect(homeCalls(state)).toEqual([]);
+  });
+
+  it('opens Add context on Context and the connect dialog on Code', async () => {
+    serve({ repos: [], sources: [] });
+    renderHome();
+
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    expect(action('Add context')).toHaveAttribute('href', '/preview/context?add=1');
+    expect(action('Connect repository')).toHaveAttribute('href', '/preview/code?connect=1');
+
+    await userEvent.click(action('Add context'));
+    expect(await screen.findByRole('dialog', { name: 'Add context' })).toBeInTheDocument();
+  });
+
+  it('flips the context checkpoint when a source appears, with no reload', async () => {
+    const state = serve({ repos: [], sources: [] });
+    renderHome();
+
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    expect(screen.queryByText('Done')).toBeNull();
+
+    state.sources = [SOURCE];
+    fireFrame({ type: 'context.changed' });
+
+    await waitFor(() => expect(within(rows()[0]!).getByText('Done')).toBeInTheDocument(), {
+      timeout: 2000,
+    });
+  });
+});
+

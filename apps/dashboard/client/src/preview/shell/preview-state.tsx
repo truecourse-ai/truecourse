@@ -66,6 +66,12 @@ interface PreviewStateValue {
    * while its first scan is up, and the settled run's own words afterwards.
    */
   repos: Repo[];
+  /**
+   * Whether the registry read has landed. Until it has, an empty `repos` is a
+   * read in flight and not a workspace with nothing connected, so nothing may
+   * conclude anything from it.
+   */
+  reposLoaded: boolean;
   unlinkRepo: (id: string) => void;
   /**
    * Re-read the registry, and ANSWER with what it holds now. Called once a
@@ -250,6 +256,7 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
       switchWorkspace,
       createWorkspace,
       repos: allRepos,
+      reposLoaded,
       unlinkRepo,
       refreshRealRepos,
       notifications: feed.notifications,
@@ -269,6 +276,7 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
     switchWorkspace,
     createWorkspace,
     repos,
+    reposLoaded,
     realRuns,
     feed,
     llmProvider,

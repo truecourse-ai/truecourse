@@ -100,16 +100,19 @@ export function ContextFrame({
   const { sources, refetch } = useContextSources(signal);
   const stale = useContextStaleness(signal);
   const { runs } = useWorkspaceRuns([]);
-  // `?add=repository` is the install's return address: Add context reopens at
-  // its Repository step with the account just connected, and the address is
-  // cleaned so a reload does not reopen it.
+  // Add context opens by address: `?add=repository` is the install's return
+  // (the Repository step, with the account just connected), `?add=1` is the
+  // plain open at the kind step, which is how Home's checkpoint gets here.
+  // Either way the address is cleaned so a reload does not reopen the dialog.
   const [searchParams, setSearchParams] = useSearchParams();
-  const [adding, setAdding] = useState(searchParams.get('add') === 'repository');
+  const asked = searchParams.get('add');
+  const [adding, setAdding] = useState(asked === 'repository' || asked === '1');
   const [addKind, setAddKind] = useState<'repository' | null>(
-    searchParams.get('add') === 'repository' ? 'repository' : null,
+    asked === 'repository' ? 'repository' : null,
   );
   useEffect(() => {
-    if (searchParams.get('add') !== 'repository') return;
+    const value = searchParams.get('add');
+    if (value !== 'repository' && value !== '1') return;
     const next = new URLSearchParams(searchParams);
     next.delete('add');
     setSearchParams(next, { replace: true });

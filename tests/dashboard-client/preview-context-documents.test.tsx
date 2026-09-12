@@ -546,6 +546,18 @@ describe('Add context', () => {
     expect(screen.queryByRole('button', { name: /Documentation site/ })).toBeNull();
   });
 
+  it('opens at the kind step when the address says ?add=1', async () => {
+    serve();
+    renderAt('/preview/context/documents?add=1');
+
+    // No click: Home's checkpoint sends the reader here with the dialog open on
+    // the first step, both kinds offered and none chosen.
+    expect(await screen.findByRole('dialog', { name: 'Add context' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Documentation site/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Repository/ })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Repository')).toBeNull();
+  });
+
   it('offers Settings under the repository picker', async () => {
     serve();
     renderAt('/preview/context/documents');
