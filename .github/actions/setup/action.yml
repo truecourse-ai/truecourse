@@ -1,16 +1,8 @@
 name: Set up the build
 description: >-
   Toolchain, caches, dependencies and the builds every CI job needs before it can
-  run the test suite. Shared by test.yml and publish.yml so the two can never
+  run the test suite. Shared by test.yml and deploy-prod.yml so the two can never
   drift apart.
-
-inputs:
-  registry-url:
-    description: >-
-      npm registry to write into `.npmrc`. Only the publish job needs it; leaving
-      it empty keeps the runner's default registry configuration.
-    required: false
-    default: ''
 
 runs:
   using: composite
@@ -25,7 +17,6 @@ runs:
     - uses: actions/setup-node@v4
       with:
         node-version-file: .node-version
-        registry-url: ${{ inputs.registry-url }}
         cache: pnpm
 
     # The C# semantic rules run in an out-of-process .NET Roslyn host. Without

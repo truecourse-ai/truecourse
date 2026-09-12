@@ -43,6 +43,12 @@ interface LocalRun {
 }
 
 const localRuns = new Map<string, LocalRun>();
+let activityVersion = 0;
+
+/** Includes settled hooks: a terminal database row can still be enqueueing its successor. */
+export function localJobActivity(): { count: number; version: number } {
+  return { count: localRuns.size, version: activityVersion };
+}
 
 function jobTrace(
   org: string,
@@ -92,8 +98,12 @@ export function registerJob<M>(
       () => undefined,
     );
     localRuns.set(payload.jobId, { controller, settled });
+    activityVersion += 1;
     void settled.then(() => {
-      if (localRuns.get(payload.jobId)?.controller === controller) localRuns.delete(payload.jobId);
+      if (localRuns.get(payload.jobId)?.controller === controller) {
+        localRuns.delete(payload.jobId);
+        activityVersion += 1;
+      }
     });
     return running;
   };

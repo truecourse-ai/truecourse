@@ -1,6 +1,12 @@
 # Azure infra — TrueCourse hosted deployment
 
-Provisions our hosted environment on **Azure Container Apps + Azure DB for
+The new [staging and production VM runbook](vm/DEPLOYMENT.md) replaces application
+compute with native Ubuntu + Docker while reusing the managed services below.
+Staging is deployed; production remains pending. Start with that runbook for VM
+provisioning, first cutover, releases, rollback and monitoring. The isolated
+[VM experiment](vm/README.md) remains a separate deployment with a local database.
+
+The existing foundation provisions **Azure Container Apps + Azure DB for
 PostgreSQL**. GitHub runs **only** Actions; everything in the runtime path is
 Azure.
 
@@ -21,6 +27,9 @@ Files:
 - `environment.bicep` — workload-profiles environment using an existing Log Analytics workspace
 - `containerapp.bicep` — one Container App, 4 vCPU / 8 GiB on Consumption
 - `set-secrets.sh` — write that env's secrets into *its* Key Vault
+- `vm-test.bicep` + `deploy-vm-test.sh` — isolated 16 GiB staging VM with Docker,
+  its own Postgres, and HTTPS. Reuses dev Key Vault and ACR. See the
+  [VM experiment runbook](vm/README.md) for provisioning, copying dev, and sign-in.
 
 > **Region:** examples use `westus3` (open for our subscription, at the cheapest
 > price tier — same as the restricted `eastus`).
@@ -161,47 +170,34 @@ secret, they're IDs:
 | `AZURE_TENANT_ID` | `az account show --query tenantId -o tsv` |
 | `AZURE_SUBSCRIPTION_ID` | `az account show --query id -o tsv` |
 
-**Per-environment** — set the *same two variable names* under BOTH the `dev` and
-`prod` Environments, each with that env's values. The workflow **discovers** the
-ACR, identity, and Key Vault from the RG at runtime. Dev resolves its new
-environment by name, `truecourse-dev-cae-v2`; prod retains its existing discovery:
+For VM releases, environment resource names live in `vm.bicep`; GitHub reads the
+provisioned deployment's outputs. `AZURE_RG` and `APP_NAME` are no longer used by
+the deployment workflows. Keep the existing `dev` and `prod` GitHub environments
+and OIDC variables. Set `AZURE_VM_DEPLOYMENT_ENABLED=true` once an environment's
+manual VM setup and old-app shutdown are complete. Before that, releases fail
+before Azure login. Keep a required reviewer on `prod` if desired.
 
-| Variable | dev | prod |
-|---|---|---|
-| `AZURE_RG` | `rg-truecourse-dev` | `rg-truecourse-prod` |
-| `APP_NAME` | `truecourse-dev` | `truecourse-prod` |
+## Deployment triggers
 
-Create the `dev` and `prod` **Environments** (Settings → Environments) — the
-federated subjects above point at them. Add a required reviewer on `prod` for a
-manual gate before production rolls.
+- Add `deploy-dev` to a same-repository PR to deploy staging. Further pushes while
+  labeled redeploy it. Manual **Deploy (dev)** dispatch is also available.
+- Push a stable version tag such as `v1.2.3` to run the existing release tests,
+  then deploy that exact commit to production. Prerelease tags do not deploy.
+  npm publication is disabled. Production waits for all release tests to pass.
 
-> The workflows run `containerapp.bicep` (create-or-update), so the **first
-> deploy creates** the Container App and later runs roll the image — the manual
-> step 4 above is only needed if you'd rather create the app by hand.
+Both use the shared `.github/actions/deploy-vm` action. GitHub builds the image,
+resolves its digest, drains the old application, releases it, checks HTTPS and
+enables alerts. No separate deployment commands, image promotion or migration
+flags are required for normal releases. Initial VM provisioning remains manual. Configure alert recipients only in Azure
+Monitor action groups; the templates and workflows never contain the addresses.
 
-## Deploy triggers (both manual — nothing auto-deploys)
+See the [short VM setup and release guide](vm/DEPLOYMENT.md). The commands earlier
+in this file describe the existing Container Apps foundation; do not run them to
+create replacement VMs.
 
-Neither environment deploys on open or merge. You opt in each time:
+## Historical Container Apps dev migration
 
-- **Dev (`deploy-dev.yml`)** — two opt-in ways:
-  - **Label** a PR **`deploy-dev`** → builds that PR's branch and rolls the
-    shared Dev Container App. Pushing more commits while the label is on
-    re-deploys; remove the label to stop. (Create the label once under the
-    repo's Labels, or just type it when adding it to a PR.)
-  - **Manual:** Actions → Deploy (dev) → **Run workflow** → pick a branch
-    (usually `main`) → builds that branch's HEAD. Use this to roll merged main
-    onto Dev. Dev allows any branch and has no reviewer gate.
-- **Prod (`deploy-prod.yml`)** — **Actions → Deploy (prod) → Run workflow**, on
-  the **`main`** branch. It builds main's current HEAD; a `main`-only guard
-  refuses any other branch, and the `prod` Environment's required reviewer still
-  gates the rollout. Prod only ever ships merged code, never a PR branch.
-
-> If dev and prod live in **different subscriptions**, make `AZURE_SUBSCRIPTION_ID`
-> environment-scoped too.
-
-## Manual dev migration
-
-Migration is pending. Keep the app name `truecourse-dev`: after pausing producers
+The earlier Container Apps migration procedure below is retained for reference; the VM cutover now follows its own runbook. Keep the app name `truecourse-dev`: after pausing producers
 and draining all queued/running jobs and follow-ups, delete the old app and wait
 for deletion to finish before recreating it in the new environment. Startup fails
 orphaned queued/running jobs, so the two workers must never run together.

@@ -175,3 +175,27 @@ describe('NotificationStore', () => {
     expect(reloaded?.body).toBe('Synced 4 documents.');
   });
 });
+
+describe('JobStore operational health', () => {
+  it('counts all workspaces and recent failures, excluding old terminal work', async () => {
+    await client.exec(`
+      INSERT INTO jobs (id, workspace_org_id, type, status, created_at, finished_at)
+      VALUES
+        ('queued-health', 'org_A', 'scan', 'queued', now() - interval '2 hours', null),
+        ('running-health', 'org_B', 'scan', 'running', now() - interval '1 hour', null),
+        ('failed-health', 'org_B', 'scan', 'failed', now() - interval '20 minutes', now() - interval '2 minutes'),
+        ('old-failed-health', 'org_A', 'scan', 'failed', now() - interval '3 hours', now() - interval '2 hours'),
+        ('success-health', 'org_A', 'scan', 'succeeded', now() - interval '4 hours', now());
+    `);
+    const health = await new JobStore(db).operationalStats();
+    expect(health).toMatchObject({ queued: 1, running: 1, failedLast15Minutes: 1 });
+    expect(health.oldestActiveAgeSeconds).toBeGreaterThanOrEqual(7200);
+    expect(health.oldestActiveAgeSeconds).toBeLessThan(7210);
+  });
+
+  it('reports zeros for an empty queue', async () => {
+    expect(await new JobStore(db).operationalStats()).toEqual({
+      queued: 0, running: 0, failedLast15Minutes: 0, oldestActiveAgeSeconds: 0,
+    });
+  });
+});

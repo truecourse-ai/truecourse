@@ -117,9 +117,10 @@ export function createJobs<M = Record<string, unknown>>(opts: CreateJobsOptions<
   };
 
   let runner: Runner | null = null;
+  let workerAlive = false;
 
   const requireRunner = (): Runner => {
-    if (!runner) throw new Error('the background job worker is not running');
+    if (!runner || !workerAlive) throw new Error('the background job worker is not running');
     return runner;
   };
 
@@ -189,7 +190,7 @@ export function createJobs<M = Record<string, unknown>>(opts: CreateJobsOptions<
     singleFlightEnqueue,
     cancel,
     get workerStarted() {
-      return runner !== null;
+      return runner !== null && workerAlive;
     },
     async start() {
       // Boot recovery: the in-process worker means a restart abandoned any
@@ -207,9 +208,21 @@ export function createJobs<M = Record<string, unknown>>(opts: CreateJobsOptions<
         concurrency: opts.concurrency,
         tasks: opts.tasks,
       });
+      const started = runner;
+      // Graphile's runner can terminate after startup. Readiness must not keep
+      // reporting a worker that stopped polling. Retain the handle for stop().
+      workerAlive = true;
+      void started.promise?.then(
+        () => { if (runner === started) workerAlive = false; },
+        (err: unknown) => {
+          if (runner === started) workerAlive = false;
+          log.error('[jobs] worker runner stopped unexpectedly', err);
+        },
+      );
     },
     async stop() {
       const stopping = runner;
+      workerAlive = false;
       runner = null;
       await stopping?.stop().catch(() => undefined);
       await hub.stop().catch(() => undefined);
@@ -238,6 +251,7 @@ export {
 export {
   cancelLocalJob,
   isJobRunningLocally,
+  localJobActivity,
   registerJob,
   startWorker,
   stepBridge,

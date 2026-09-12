@@ -12,6 +12,7 @@
  */
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
+import { holdRequestWork } from '../operations.js';
 import path from 'node:path';
 import { AnalyzeRepoSchema } from '@truecourse/shared';
 import { createAppError } from '@truecourse/core/lib/errors';
@@ -123,11 +124,9 @@ router.post('/:id/analyses', async (req: Request, res: Response, next: NextFunct
 
     // Register before the 202 so POST /analyses/cancel can find this run.
     const abortController = registerAnalysis(id, 'pending');
+    const releaseOperationalWork = holdRequestWork(res);
 
     res.status(202).json({ message: `${mode === 'diff' ? 'Diff check' : 'Analysis'} started`, repoId: id, mode });
-
-    const trackerSteps = buildAnalysisSteps(effectiveCategories, effectiveLlmRules);
-    const tracker = createSocketTracker(id, trackerSteps);
 
     // A repo identity has no checkout: clone it for this run (storage stays
     // keyed by `repo.path`, the code is read from the clone via `codeDir`).
@@ -135,6 +134,8 @@ router.post('/:id/analyses', async (req: Request, res: Response, next: NextFunct
     let workTree: RunClone | null = null;
     let loggerPushed = false;
     try {
+      const trackerSteps = buildAnalysisSteps(effectiveCategories, effectiveLlmRules);
+      const tracker = createSocketTracker(id, trackerSteps);
       if (isRepoIdentity) workTree = await acquireWorkTree(repo.path);
       pushLogger({
         filePath: path.join(workTree?.dir ?? repo.path, '.truecourse/logs/analyze.log'),
@@ -173,9 +174,13 @@ router.post('/:id/analyses', async (req: Request, res: Response, next: NextFunct
         });
       }
     } finally {
-      unregisterAnalysis(id);
-      if (loggerPushed) popLogger();
-      workTree?.dispose();
+      try {
+        unregisterAnalysis(id);
+        if (loggerPushed) popLogger();
+        workTree?.dispose();
+      } finally {
+        releaseOperationalWork();
+      }
     }
   } catch (error) {
     next(error);

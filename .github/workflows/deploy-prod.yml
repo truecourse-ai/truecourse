@@ -1,62 +1,68 @@
 name: Deploy (prod)
-
-# Manual only: Actions → Deploy (prod) → Run workflow (on main). Builds main's
-# current HEAD and create-or-updates the Prod Container App. Never deploys on
-# merge, and the main-only guard refuses any other branch. Resolves to the `prod`
-# Environment's variables (AZURE_RG, APP_NAME) + its required-reviewer gate.
-# Provision the prod RG + configure the prod Environment first (see infra/azure/README.md).
+# Stable version tags deploy the tested commit. No npm publication.
 on:
-  workflow_dispatch:
+  push:
+    tags: ['v*']
 
 permissions:
-  id-token: write
   contents: read
-
 concurrency:
   group: deploy-prod
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    if: github.ref == 'refs/heads/main'
+  release:
+    if: github.event.deleted != true
     runs-on: ubuntu-latest
-    environment: prod
+    outputs:
+      stable: ${{ steps.version.outputs.stable }}
+      commit: ${{ steps.version.outputs.commit }}
     steps:
       - uses: actions/checkout@v4
+      - name: Resolve stable release commit
+        id: version
+        run: |
+          if [[ "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "stable=true" >> "$GITHUB_OUTPUT"
+            echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          else
+            echo "stable=false" >> "$GITHUB_OUTPUT"
+            echo 'Not a stable version tag; production deployment skipped.'
+          fi
 
-      - uses: azure/login@v2
+  test:
+    needs: release
+    if: needs.release.outputs.stable == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          ref: ${{ needs.release.outputs.commit }}
+      - uses: ./.github/actions/setup
+      - name: Test release (shard ${{ matrix.shard }})
+        run: pnpm exec vitest run --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
-      - name: Discover foundation resources in the RG
-        id: infra
-        run: |
-          RG="${{ vars.AZURE_RG }}"
-          {
-            echo "acr_name=$(az acr list -g "$RG" --query '[0].name' -o tsv)"
-            echo "acr_login=$(az acr list -g "$RG" --query '[0].loginServer' -o tsv)"
-            echo "env_id=$(az containerapp env list -g "$RG" --query '[0].id' -o tsv)"
-            echo "identity_id=$(az identity list -g "$RG" --query '[0].id' -o tsv)"
-            echo "kv_uri=$(az keyvault list -g "$RG" --query '[0].properties.vaultUri' -o tsv)"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Build & push image
-        id: build
-        run: |
-          TAG="main-${GITHUB_SHA::7}"
-          az acr build --registry "${{ steps.infra.outputs.acr_name }}" \
-            --image "truecourse:${TAG}" --image "truecourse:latest" --file Dockerfile .
-          echo "image=${{ steps.infra.outputs.acr_login }}/truecourse:${TAG}" >> "$GITHUB_OUTPUT"
-
-      - name: Create-or-update the Prod Container App
-        run: |
-          az deployment group create -g "${{ vars.AZURE_RG }}" -n containerapp-prod \
-            -f infra/azure/containerapp.bicep \
-            -p name="${{ vars.APP_NAME }}" \
-               image="${{ steps.build.outputs.image }}" \
-               environmentId="${{ steps.infra.outputs.env_id }}" \
-               identityId="${{ steps.infra.outputs.identity_id }}" \
-               acrLoginServer="${{ steps.infra.outputs.acr_login }}" \
-               keyVaultUri="${{ steps.infra.outputs.kv_uri }}"
+  deploy:
+    needs: [release, test]
+    if: needs.release.outputs.stable == 'true'
+    runs-on: ubuntu-latest
+    environment: prod
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_VM_DEPLOYMENT_ENABLED: ${{ vars.AZURE_VM_DEPLOYMENT_ENABLED }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.commit }}
+      - uses: ./.github/actions/deploy-vm
+        with:
+          environment: prod

@@ -11,6 +11,9 @@ importers:
       '@electric-sql/pglite':
         specifier: ^0.2.0
         version: 0.2.17
+      '@sentry/node':
+        specifier: ^10.0.0
+        version: 10.56.0
       '@testing-library/jest-dom':
         specifier: ^6.6.3
         version: 6.9.1
@@ -306,6 +309,9 @@ importers:
 
   apps/dashboard/server:
     dependencies:
+      '@sentry/node':
+        specifier: ^10.0.0
+        version: 10.56.0
       '@truecourse/agent-loop':
         specifier: workspace:*
         version: link:../../../packages/agent-loop
