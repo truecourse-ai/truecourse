@@ -27,6 +27,7 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { createUIMessageStreamResponse } from 'ai';
+import { readActivityProgress } from '@truecourse/core/lib/activity-journal';
 import { createActivityStream } from '../services/activity-stream.service.js';
 import { RunStatusSchema, SessionCommandSchema } from '@truecourse/agent-loop';
 import { createAppError } from '@truecourse/core/lib/errors';
@@ -38,6 +39,7 @@ import {
   listStoredSessionRunsForRepos,
   openStoredSessionRun,
   readStoredActivityPage,
+  readStoredTranscriptPage,
   sessionRunCursor,
   parseSessionRunCursor,
   toPublicRunRecord,
@@ -211,8 +213,24 @@ router.get(
         // Resolve the run before reading its session. File reads sanitize the
         // session ID; Postgres reads filter by session and sequence in the query.
         const run = await openStoredSessionRun(repo.path, command, req.params.runId as string);
-        const events = await readStoredTranscript(run, req.params.sessionId as string, since);
-        res.json({ events });
+        if (req.query.limit !== undefined) {
+          const limit = parseLimit(req.query.limit, 100, 100);
+          const before = req.query.before === undefined ? undefined : Number(req.query.before);
+          if (limit === null || !Number.isSafeInteger(since) || since < -1 ||
+              (before !== undefined && (!Number.isSafeInteger(before) || before < 0)) ||
+              (before !== undefined && req.query.since !== undefined)) {
+            res.status(400).json({ error: 'Invalid transcript page: limit 1–100; use before or since with integer sequence cursors.' }); return;
+          }
+          const sessionId = req.params.sessionId as string;
+          const page = await readStoredTranscriptPage(run, sessionId, {
+            limit, ...(before === undefined ? {} : { before }),
+            ...(req.query.since === undefined ? {} : { since }),
+          });
+          res.json({ ...page, progress: readActivityProgress(run.dir)[sessionId] ?? null });
+        } else {
+          const events = await readStoredTranscript(run, req.params.sessionId as string, since);
+          res.json({ events });
+        }
       } catch (error) {
         if (!(error instanceof SessionRunNotFoundError)) throw error;
         res.status(404).json({ error: 'Session run not found.' });

@@ -2,7 +2,7 @@
  * The conversation as a page: the run's work as a list on the left (steps as
  * headings, one row per piece of work with its status dot and title), and the
  * selected work's transcript on the right, verbatim, with the history behind
- * it read by page off the activity route.
+ * it read by page from the selected session transcript.
  *
  * The run under test is the real guard setup of `spiderhands/expense-tracker`,
  * served from the fixture journal exactly as the route would page it. What is
@@ -14,10 +14,9 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import { createUIMessageStreamResponse, type UIMessageChunk } from 'ai';
 import type { SessionEvent } from '@truecourse/agent-loop';
 import type { ActivityEvent } from '@truecourse/shared/activity-stream';
 
@@ -47,14 +46,16 @@ function serve(journal: ActivityEvent[], pageSize = 1000) {
   window.fetch = vi.fn(async (input: RequestInfo | URL) => {
     const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const url = new URL(href, window.location.origin);
-    if (url.pathname.endsWith('/activity')) {
-      const after = Number(url.searchParams.get('after'));
-      const rest = journal.filter((e) => e.cursor > after);
-      const events = rest.slice(0, pageSize);
-      const last = events[events.length - 1];
-      return json({ events, nextCursor: last ? last.cursor : after, done: rest.length <= pageSize });
+    if (url.pathname.includes('/transcript/')) {
+      const id = decodeURIComponent(url.pathname.split('/transcript/')[1]);
+      let events = journal.filter((e): e is Extract<ActivityEvent, { kind: 'session-event' }> => e.kind === 'session-event' && e.sessionId === id).map(e => e.event);
+      const since = url.searchParams.get('since'), before = url.searchParams.get('before');
+      if (since !== null) events = events.filter(e => e.seq > Number(since));
+      if (before !== null) events = events.filter(e => e.seq < Number(before));
+      const limit = Math.min(pageSize, Number(url.searchParams.get('limit')));
+      return json({ events: since === null ? events.slice(-limit) : events.slice(0, limit), hasMore: events.length > limit });
     }
-    return json({ error: 'not found' }, 404);
+    throw new Error(`Unexpected request ${href}`);
   }) as unknown as typeof window.fetch;
 }
 
@@ -106,7 +107,7 @@ const pane = () => screen.getByRole('complementary', { name: 'Work' });
 const rx = (text: string) => new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
 
 describe('one conversation, as a page', () => {
-  it('requests compact history and aborts its pending download when closed', async () => {
+  it('fetches only the opened agent and aborts its pending download when closed', async () => {
     let signal: AbortSignal | undefined;
     let requested: URL | undefined;
     window.fetch = vi.fn((input, init) => {
@@ -117,12 +118,35 @@ describe('one conversation, as a page', () => {
       });
     }) as typeof window.fetch;
     const view = renderPage(SETUP_RUN);
-    await waitFor(() => expect(requested?.searchParams.get('compact')).toBe('1'));
+    expect(window.fetch).not.toHaveBeenCalled();
+    await userEvent.click(row(rx(SETUP_RUN.sessions[0].workItem)));
+    await waitFor(() => expect(requested?.pathname).toContain(`/transcript/${RECIPE}`));
+    expect(requested?.searchParams.get('limit')).toBe('100');
     expect(signal?.aborted).toBe(false);
     view.unmount();
     expect(signal?.aborted).toBe(true);
     await Promise.resolve();
     expect(window.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores a late response from the previously selected agent', async () => {
+    let release!: (response: Response) => void;
+    let previousSignal: AbortSignal | null | undefined;
+    window.fetch = vi.fn(async (input, init) => {
+      if (String(input).includes(`/transcript/${RECIPE}?`)) {
+        previousSignal = init?.signal;
+        return new Promise<Response>(resolve => { release = resolve; });
+      }
+      return json({ events: [{ type: 'user-message', seq: 0, ts: new Date().toISOString(), content: 'Selected agent message' }], hasMore: false });
+    }) as typeof window.fetch;
+    renderPage(SETUP_RUN);
+    await userEvent.click(row(rx(SETUP_RUN.sessions[0].workItem)));
+    await userEvent.click(row(rx(SETUP_RUN.sessions[1].workItem)));
+    expect(previousSignal?.aborted).toBe(true);
+    await screen.findByText('Selected agent message');
+    await act(async () => { release(json({ events: [{ type: 'user-message', seq: 0, ts: new Date().toISOString(), content: 'Stale agent message' }], hasMore: false })); });
+    expect(screen.queryByText('Stale agent message')).toBeNull();
+    expect(screen.getByText('Selected agent message')).toBeInTheDocument();
   });
 
   it('lists the run’s steps in order, each with the work that happened under it as rows', async () => {
@@ -406,111 +430,53 @@ describe('one conversation, as a page', () => {
     expect(screen.queryAllByRole('heading', { level: 2 })).toHaveLength(0);
   });
 
-  it('waits for the whole history, then paints it', async () => {
-    serve(SETUP_JOURNAL, 20);
+  it('renders the summary without fetching transcripts and loads older messages only on request', async () => {
+    serve(SETUP_JOURNAL, 10);
     renderPage(SETUP_RUN);
-
-    // Nothing half-read is painted: the list appears with the whole of it.
-    expect(screen.queryAllByRole('heading', { level: 2 })).toHaveLength(0);
-    expect(screen.getByRole('status')).toHaveTextContent('Reading the conversation…');
-    await screen.findByRole('heading', { level: 2, name: /Deriving the recipe/ });
     expect(screen.getAllByRole('heading', { level: 2 })).toHaveLength(8);
+    expect(window.fetch).not.toHaveBeenCalled();
+    await userEvent.click(row(rx(SETUP_RUN.sessions[0].workItem)));
+    await screen.findByRole('button', { name: 'Load older messages' });
+    expect(window.fetch).toHaveBeenCalledTimes(1);
+    await userEvent.click(screen.getByRole('button', { name: 'Load older messages' }));
+    await waitFor(() => expect(window.fetch).toHaveBeenCalledTimes(2));
+    expect(String(vi.mocked(window.fetch).mock.calls[1][0])).toContain('before=');
+    await userEvent.click(row(rx(SETUP_RUN.sessions[1].workItem)));
+    await waitFor(() => expect(window.fetch).toHaveBeenCalledTimes(3));
+    expect(String(vi.mocked(window.fetch).mock.calls[2][0])).toContain(`/transcript/${SETUP_RUN.sessions[1].sessionId}`);
   });
 
-  it('reads the history in pages, then tails what is still happening into the open work', async () => {
-    const live: PublicSessionRun = {
-      ...SETUP_RUN,
-      status: 'running',
-      finishedAt: undefined,
-      sessions: [{ ...SETUP_RUN.sessions[0], status: 'running' }],
-    } as PublicSessionRun;
-    // No record snapshots: this one is still going, and the journal's would say
-    // otherwise.
-    const history = SETUP_JOURNAL.filter(
-      (e) => e.kind === 'session-event' && e.sessionId === RECIPE,
-    );
-    serve(history, 20);
-    const paged = window.fetch;
-
-    let sink!: ReadableStreamDefaultController<UIMessageChunk>;
-    const stream = new ReadableStream<UIMessageChunk>({ start: (c) => (sink = c) });
-    window.fetch = vi.fn(async (input, init) => {
-      if (String(input).includes('/stream?')) return createUIMessageStreamResponse({ stream });
-      return paged(input, init);
-    }) as unknown as typeof window.fetch;
-
+  it('fetches only new events for the opened live agent', async () => {
+    const live = { ...SETUP_RUN, status: 'running', finishedAt: undefined, sessions: SETUP_RUN.sessions.map(s => s.sessionId === RECIPE ? { ...s, status: 'running' } : s) } as PublicSessionRun;
+    const history = [...SETUP_JOURNAL];
+    serve(history);
     const view = renderPage(live);
-    await screen.findByRole('heading', { level: 2, name: /Deriving the recipe/ });
-    const last = history[history.length - 1].cursor;
-    await waitFor(() =>
-      expect(window.fetch).toHaveBeenCalledWith(
-        expect.stringContaining(`/stream?after=${last}`),
-        expect.objectContaining({ method: 'GET' }),
-      ),
-    );
-    expect(paged).toHaveBeenCalledTimes(Math.ceil(history.length / 20));
-
-    // The running piece of work wears the pulsing dot in the list.
-    const [running] = screen.getAllByRole('button', { pressed: false });
-    expect(running.querySelector('.animate-pulse')).not.toBeNull();
-    await userEvent.click(running);
-    const work = within(pane());
-
-    sink.enqueue({ type: 'start', messageId: live.runId });
-    // A partial turn stands as the live line until its finished form lands.
-    sink.enqueue({
-      type: 'data-progress',
-      transient: true,
-      data: { [RECIPE]: { kind: 'text', turnId: 'm1', text: 'Reading the recipe live' } },
-    });
-    await work.findByText('Reading the recipe live');
-
-    sink.enqueue({
-      type: 'data-activity',
-      id: 'live-1',
-      data: {
-        kind: 'session-event',
-        cursor: last + 1,
-        sessionId: RECIPE,
-        event: {
-          type: 'assistant-turn',
-          seq: 9999,
-          ts: '2026-09-09T16:31:00.000Z',
-          text: 'The recipe boots cleanly now.',
-          usage: {
-            inputTokens: 1,
-            outputTokens: 1,
-            cacheReadTokens: 0,
-            cacheCreateTokens: 0,
-            costUsd: 0,
-            costSource: 'unpriced',
-          },
-        },
-      },
-    });
-    expect(await work.findByText('The recipe boots cleanly now.')).toBeInTheDocument();
-    expect(work.getAllByText('The recipe boots cleanly now.')).toHaveLength(1);
-    expect(work.queryByText('Reading the recipe live')).toBeNull();
-
-    sink.enqueue({ type: 'finish', finishReason: 'stop' });
-    sink.close();
-    view.unmount();
+    await userEvent.click(row(rx(SETUP_RUN.sessions[0].workItem)));
+    await waitFor(() => expect(window.fetch).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByText('Loading messages…')).toBeNull());
+    vi.useFakeTimers();
+    try {
+      history.push({ cursor: 9999, kind: 'session-event', sessionId: RECIPE,
+        event: { type: 'user-message', seq: 9999, ts: '2026-09-09T16:31:00.000Z', content: 'A newly recorded message' } });
+      // The first timer was created before fake timers; trigger after mounting afresh.
+      view.unmount();
+      const fresh = render(<MemoryRouter initialEntries={[`/?work=${RECIPE}`]}><RunConversationPage run={live} repoId="r1" /></MemoryRouter>);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+      expect(String(vi.mocked(window.fetch).mock.calls.at(-1)![0])).toContain('since=9999');
+      expect(within(pane()).getAllByText('A newly recorded message')).toHaveLength(1);
+      fresh.unmount();
+    } finally { vi.useRealTimers(); }
   });
 
-  it('says the connection dropped at the bottom of the list, never as a strip on top', async () => {
-    const live = { ...SETUP_RUN, status: 'running', finishedAt: undefined } as PublicSessionRun;
-    serve(SETUP_JOURNAL);
-    const paged = window.fetch;
-    window.fetch = vi.fn(async (input, init) => {
-      if (String(input).includes('/stream?')) return json({ error: 'gone' }, 403);
-      return paged(input, init);
-    }) as unknown as typeof window.fetch;
-
-    const view = renderPage(live);
-    const notice = await screen.findByText(/Activity access was denied/);
-    expect(notice).toHaveAttribute('role', 'status');
-    view.unmount();
+  it('shows a selected transcript error without downloading other agents', async () => {
+    window.fetch = vi.fn(async () => json({ error: 'Transcript unavailable' }, 500)) as typeof window.fetch;
+    renderPage(SETUP_RUN);
+    await userEvent.click(row(rx(SETUP_RUN.sessions[0].workItem)));
+    expect(await screen.findByText(/Transcript unavailable/)).toBeInTheDocument();
+    expect(window.fetch).toHaveBeenCalledTimes(1);
   });
+
 });
 
 describe('the words the page is allowed to use', () => {

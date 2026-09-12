@@ -103,6 +103,7 @@ export interface SessionRunStore {
   validateActivityCursor?(after: number): Promise<void>;
   /** Dashboard reads load only this session; synchronous persistence reads belong to live writers. */
   readTranscript?(sessionId: string, since: number): Promise<SessionEvent[]>;
+  readTranscriptPage?(sessionId: string, options: TranscriptPageOptions): Promise<TranscriptPage>;
   setGitRef?(gitRef: string): void;
   /** What `runAgentLoop` persists through. */
   readonly persistence: SessionPersistence;
@@ -535,4 +536,14 @@ export async function readStoredTranscript(run: SessionRunStore, sessionId: stri
 /** undefined means the caller should watch the file store. */
 export function subscribeStoredSessionRuns(repoKey: string, notify: () => void): (() => void) | undefined {
   return backend && !path.isAbsolute(repoKey) ? backend.subscribeRepo(repoKey, notify) : undefined;
+}
+
+/** Initial/older pages read backwards; live catch-up reads forwards after since. */
+export interface TranscriptPageOptions { limit: number; before?: number; since?: number }
+export interface TranscriptPage { events: SessionEvent[]; hasMore: boolean }
+export async function readStoredTranscriptPage(run: SessionRunStore, sessionId: string, options: TranscriptPageOptions): Promise<TranscriptPage> {
+  if (run.readTranscriptPage) return run.readTranscriptPage(sessionId, options);
+  const events = (await readStoredTranscript(run, sessionId, options.since ?? -1))
+    .filter(e => options.before === undefined || e.seq < options.before).sort((a, b) => a.seq - b.seq);
+  return { events: options.since === undefined ? events.slice(-options.limit) : events.slice(0, options.limit), hasMore: events.length > options.limit };
 }

@@ -1,11 +1,11 @@
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { and, asc, eq, gt, inArray, sql, getTableColumns } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, sql, getTableColumns } from 'drizzle-orm';
 import { activityRuns, activityEvents, type Db, type Pool, type PoolClient } from '@truecourse/db';
 import {
   SessionRunNotFoundError, createSessionRun, listSessionRuns, openSessionRun, parseSessionRunCursor,
   sessionRunDir, toPublicRunRecord,
-  type ActivityPage, type RepoRunRecord, type SessionRunBackend, type SessionRunQuery, type SessionRunStore,
+  type TranscriptPageOptions, type TranscriptPage, type ActivityPage, type RepoRunRecord, type SessionRunBackend, type SessionRunQuery, type SessionRunStore,
 } from '@truecourse/core/lib/sessions-store';
 import { publishActivityProgress, publishCommittedActivity, readActivityEvents } from '@truecourse/core/lib/activity-journal';
 import { ActivityEventSchema, type ActivityEvent, type ActivityEventBody } from '@truecourse/shared/activity-stream';
@@ -277,6 +277,23 @@ export class PgSessionRunStore implements SessionRunBackend {
     });
   }
 
+  private async readTranscriptPage(runId: string, sessionId: string, options: TranscriptPageOptions): Promise<TranscriptPage> {
+    const seq = sql`(${activityEvents.body}->'event'->>'seq')::bigint`;
+    const rows = await this.db.select().from(activityEvents).where(and(
+      eq(activityEvents.runId, runId),
+      sql`${activityEvents.body}->>'kind' = 'session-event'`,
+      sql`${activityEvents.body}->>'sessionId' = ${sessionId}`,
+      options.before === undefined ? undefined : sql`${seq} < ${options.before}`,
+      options.since === undefined ? undefined : sql`${seq} > ${options.since}`,
+    )).orderBy(options.since === undefined ? desc(activityEvents.cursor) : asc(activityEvents.cursor)).limit(options.limit + 1);
+    const events = rows.slice(0, options.limit).map(row => {
+      const decoded = decodeActivityEvent(row.body, row.cursor);
+      if (decoded.kind !== 'session-event') throw new Error('Expected transcript event');
+      return decoded.event;
+    });
+    return { events: events.sort((a, b) => a.seq - b.seq), hasMore: rows.length > options.limit };
+  }
+
   private async readCompactPage(runId: string, after: number, limit: number): Promise<ActivityPage> {
     await this.validateCursor(runId, after);
     // Select the cursor window first. Only fetch bodies that the conversation
@@ -362,6 +379,7 @@ export class PgSessionRunStore implements SessionRunBackend {
       readCompactActivityPage: async (after, limit) => { await flush(); await this.reconcile([repoKey]); return this.readCompactPage(record.runId, after, limit); },
       validateActivityCursor: async after => { await flush(); await this.validateCursor(record.runId, after); },
       readTranscript: async (sessionId, since) => { await flush(); return this.readTranscript(record.runId, sessionId, since); },
+      readTranscriptPage: async (sessionId, options) => { await flush(); return this.readTranscriptPage(record.runId, sessionId, options); },
       setGitRef(gitRef) { record.gitRef = gitRef; write(); },
       setEndpoint(endpoint) { record.endpoint = endpoint; write(); },
       setLlm(llm) { record.llm = llm; write(); },

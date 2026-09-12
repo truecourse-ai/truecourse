@@ -48,6 +48,29 @@ async function create(command: 'spec-scan' | 'guard-setup' | 'guard-generate' | 
 }
 
 describe('Postgres activity storage', () => {
+  it('pages only the selected session in both directions with a SQL limit', async () => {
+    const run = await create();
+    for (let seq = 0; seq < 7; seq++) {
+      run.persistence.appendEvent('selected', event(seq));
+      run.persistence.appendEvent('sibling', { ...event(seq), content: 'Not requested' });
+    }
+    await run.flush!();
+    queries.length = 0;
+    const recent = await run.readTranscriptPage!('selected', { limit: 3 });
+    expect(recent.events.map(e => e.seq)).toEqual([4, 5, 6]);
+    expect(recent.hasMore).toBe(true);
+    expect(queries.some(q => q.query.includes('limit') && q.params.includes('selected') && q.params.includes(4))).toBe(true);
+    const older = await run.readTranscriptPage!('selected', { limit: 3, before: 4 });
+    expect(older.events.map(e => e.seq)).toEqual([1, 2, 3]);
+    const first = await run.readTranscriptPage!('selected', { limit: 3, before: 1 });
+    expect(first.events.map(e => e.seq)).toEqual([0]);
+    expect(first.hasMore).toBe(false);
+    const newer = await run.readTranscriptPage!('selected', { limit: 3, since: 1 });
+    expect(newer.events.map(e => e.seq)).toEqual([2, 3, 4]);
+    expect(newer.hasMore).toBe(true);
+    expect(await run.readTranscriptPage!('missing', { limit: 3 })).toEqual({ events: [], hasMore: false });
+  });
+
   it('coalesces a settlement burst while retaining facts and transcript ordering', async () => {
     const run = await create();
     const facts: string[] = [];

@@ -165,6 +165,26 @@ describe('Sessions routes', () => {
     expect(res.status).toBe(400);
   });
 
+  it('serves bounded newest, older, and live transcript pages', async () => {
+    const run = seedRun();
+    run.persistence.appendEvent('sibling', EVENT(0, { text: 'Not requested' }) as never);
+    const base = url(`runs/spec-scan/${run.runId}/transcript/ses-1`);
+    const latest = await request(app).get(`${base}?limit=2`);
+    expect(latest.status).toBe(200);
+    expect(latest.body.events.map((e: { seq: number }) => e.seq)).toEqual([1, 2]);
+    expect(latest.body.hasMore).toBe(true);
+    expect(latest.text).not.toContain('Not requested');
+    const older = await request(app).get(`${base}?limit=2&before=1`);
+    expect(older.body.events.map((e: { seq: number }) => e.seq)).toEqual([0]);
+    expect(older.body.hasMore).toBe(false);
+    const newer = await request(app).get(`${base}?limit=1&since=0`);
+    expect(newer.body.events.map((e: { seq: number }) => e.seq)).toEqual([1]);
+    expect(newer.body.hasMore).toBe(true);
+    for (const query of ['limit=101', 'limit=0', 'limit=2&before=-1', 'limit=2&since=0.5', 'limit=2&before=2&since=0']) {
+      expect((await request(app).get(`${base}?${query}`)).status).toBe(400);
+    }
+  });
+
   it('serves a transcript, and only past the ?since cursor', async () => {
     const run = seedRun();
     const all = await request(app).get(url(`runs/spec-scan/${run.runId}/transcript/ses-1`));

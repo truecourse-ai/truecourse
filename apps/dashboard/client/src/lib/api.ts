@@ -1576,3 +1576,11 @@ export function readRunActivity(
     { signal },
   );
 }
+
+export function getSessionTranscriptPage(repoId: string, command: SessionCommand, runId: string, sessionId: string,
+  options: { before?: number; since?: number }, signal?: AbortSignal): Promise<{ events: SessionEvent[]; hasMore: boolean; progress?: import("@truecourse/agent-loop").SessionProgress | null }> {
+  const query = new URLSearchParams({ limit: '100' });
+  if (options.before !== undefined) query.set('before', String(options.before));
+  if (options.since !== undefined) query.set('since', String(options.since));
+  return fetchApi(`/api/repos/${encodeURIComponent(repoId)}/sessions/runs/${command}/${encodeURIComponent(runId)}/transcript/${encodeURIComponent(sessionId)}?${query}`, { signal });
+}
