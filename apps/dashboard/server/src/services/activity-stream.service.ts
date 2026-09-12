@@ -1,7 +1,7 @@
 import type { UIMessageChunk } from 'ai';
 import type { ActivityEvent } from '@truecourse/shared/activity-stream';
 import { readActivityProgress, subscribeActivity } from '@truecourse/core/lib/activity-journal';
-import { readStoredActivity, type SessionRunStore } from '@truecourse/core/lib/sessions-store';
+import { readStoredActivityPage, type SessionRunStore } from '@truecourse/core/lib/sessions-store';
 
 /** Replay once, then deliver published events directly, independently of the job. */
 export function createActivityStream(
@@ -63,7 +63,9 @@ async function* chunks(run: SessionRunStore, after: number, signal: AbortSignal)
         // Enable live queuing before awaiting storage, so a commit during the
         // history query is either replayed or queued, never dropped.
         replay = false;
-        batch = await readStoredActivity(run, after);
+        const page = await readStoredActivityPage(run, after, 128, true);
+        batch = page.events;
+        if (!page.done) replay = true;
       } else { batch = pending; pending = []; }
       for (const event of batch) {
         if (signal.aborted) return;

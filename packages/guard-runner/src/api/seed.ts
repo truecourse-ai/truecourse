@@ -69,6 +69,8 @@ export interface RunSeedOptions {
   env?: Record<string, string>
   /** Wall-clock budget; defaults to the build timeout. */
   timeoutMs?: number
+  /** A verifier owns app ports and must receive the complete primary/peer configuration. */
+  preservePortTemplates?: boolean
   signal?: AbortSignal
   /**
    * Already-resolved recipe credential values (Phase 1 `api.credentials`), name → value.
@@ -105,9 +107,11 @@ export async function runSeed(opts: RunSeedOptions): Promise<SeedResult> {
     // dotenv-expand over the process env, and `PORT=${PORT}` expands into
     // itself forever (documenso 2026-08-30: every seed draft spun at 100% CPU
     // to its timeout before the script started). Entries carrying the
-    // placeholder are dropped — absent is truer than a fake port.
+    // placeholder are dropped — absent is truer than a fake port. A preparation
+    // verifier allocates ports itself and must retain these templates, including
+    // the serialized peer env that contains them.
     const env = Object.fromEntries(
-      Object.entries(opts.env ?? {}).filter(([, value]) => !value.includes(PORT_PLACEHOLDER)),
+      Object.entries(opts.env ?? {}).filter(([, value]) => opts.preservePortTemplates || !value.includes(PORT_PLACEHOLDER)),
     )
     const run = await spawnSeed(
       repoRoot,

@@ -124,7 +124,7 @@ export function resolvePrerequisites(
 export type ResolvedPrerequisites = ReturnType<typeof resolvePrerequisites>
 
 /** The same selected accounts feed preparation, execution, and evidence redaction. */
-export function scenarioAccountEnvironment(scenario: GuardScenario, resolved: ResolvedPrerequisites) {
+export function scenarioAccountEnvironment(scenario: GuardScenario | Pick<GuardScenario, 'needs' | 'prerequisites' | 'setup'>, resolved: ResolvedPrerequisites) {
   const env = externalsInjectEnv(resolved.externals)
   const secrets = externalsSecrets(resolved.externals)
   const names = new Set(scenarioDependencyNames(scenario).map(name => {

@@ -124,24 +124,18 @@ export function createRepoGuardSetupTask(
           const files = collectGuardSetupBundle(tree.dir);
           if (Object.keys(files).length > 0) await saveGuardSetupBundle(ref, files);
 
+          // Preserve the failed bundle above, then fail the job so its status
+          // agrees with Activity and it cannot chain into generation.
+          if (report.status !== 'ok') throw new Error(report.reason || 'Setup did not complete');
           const reason = firstLine(report.reason);
-          if (report.status !== 'ok') activityRun.setError({ message: reason || 'Setup did not complete' });
           return {
             result: { repoFullName, status: report.status, ...(reason ? { reason } : {}) },
-            notification:
-              report.status === 'ok'
-                ? {
-                    level: 'success',
-                    title: 'Guard setup complete',
-                    body: `${repoFullName} — the recipe and its dependencies are ready.`,
-                    data: { repoFullName },
-                  }
-                : {
-                    level: 'error',
-                    title: 'Guard setup did not complete',
-                    body: `${repoFullName} — ${reason || 'setup was refused.'}`,
-                    data: { repoFullName },
-                  },
+            notification: {
+              level: 'success',
+              title: 'Guard setup complete',
+              body: `${repoFullName} — the recipe and its dependencies are ready.`,
+              data: { repoFullName },
+            },
           };
         } finally {
           tree.dispose();

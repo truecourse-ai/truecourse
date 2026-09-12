@@ -273,6 +273,7 @@ function ConversationRoute({ runId }: { runId: string }) {
   if (!run) return null;
 
   const canRerun = run.status === 'failed' || run.status === 'interrupted';
+  const canResume = run.command === 'guard-generate';
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
@@ -289,10 +290,10 @@ function ConversationRoute({ runId }: { runId: string }) {
               <button
                 type="button"
                 disabled={starter.pending}
-                onClick={() => starter.start(run.command)}
+                onClick={() => starter.start(run.command, canResume ? run.runId : undefined)}
                 className="rounded border border-border px-2 py-0.5 font-medium text-foreground hover:bg-muted/60 disabled:opacity-50"
               >
-                {starter.pending ? 'Starting…' : 'Run again'}
+                {starter.pending ? 'Starting…' : canResume ? 'Resume' : 'Run again'}
               </button>
             )}
           </span>

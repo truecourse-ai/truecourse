@@ -25,7 +25,7 @@ import {
   type SessionIndexEntry,
   type SessionPersistence,
 } from '@truecourse/agent-loop';
-import type { ActivityEvent } from '@truecourse/shared/activity-stream';
+import { compactRunSnapshots, type ActivityEvent } from '@truecourse/shared/activity-stream';
 import { getRepoTruecourseDir } from '../config/paths.js';
 import { atomicWriteJson } from './atomic-write.js';
 import { appendActivityEvent, publishActivityProgress, readActivityEvents, validateActivityCursor } from './activity-journal.js';
@@ -98,9 +98,12 @@ export interface SessionRunStore {
   /** One bounded slice of the journal, so a reader pages a long run instead of
    *  loading every event to show its first screen. */
   readActivityPage?(after: number, limit: number): Promise<ActivityEvent[]>;
+  /** The same cursor window, omitting superseded run snapshots before transfer. */
+  readCompactActivityPage?(after: number, limit: number): Promise<ActivityPage>;
   validateActivityCursor?(after: number): Promise<void>;
   /** Dashboard reads load only this session; synchronous persistence reads belong to live writers. */
   readTranscript?(sessionId: string, since: number): Promise<SessionEvent[]>;
+  readTranscriptPage?(sessionId: string, options: TranscriptPageOptions): Promise<TranscriptPage>;
   setGitRef?(gitRef: string): void;
   /** What `runAgentLoop` persists through. */
   readonly persistence: SessionPersistence;
@@ -505,12 +508,18 @@ export async function readStoredActivityPage(
   run: SessionRunStore,
   after: number,
   limit: number,
+  compact = false,
 ): Promise<ActivityPage> {
+  if (compact && run.readCompactActivityPage) return run.readCompactActivityPage(after, limit);
   const events = run.readActivityPage
     ? await run.readActivityPage(after, limit)
     : (await readStoredActivity(run, after)).slice(0, limit);
   const last = events[events.length - 1];
-  return { events, nextCursor: last ? last.cursor : after, done: events.length < limit };
+  return {
+    events: compact ? compactRunSnapshots(events) : events,
+    nextCursor: last ? last.cursor : after,
+    done: events.length < limit,
+  };
 }
 
 export async function validateStoredActivityCursor(run: SessionRunStore, after: number): Promise<void> {
@@ -527,4 +536,14 @@ export async function readStoredTranscript(run: SessionRunStore, sessionId: stri
 /** undefined means the caller should watch the file store. */
 export function subscribeStoredSessionRuns(repoKey: string, notify: () => void): (() => void) | undefined {
   return backend && !path.isAbsolute(repoKey) ? backend.subscribeRepo(repoKey, notify) : undefined;
+}
+
+/** Initial/older pages read backwards; live catch-up reads forwards after since. */
+export interface TranscriptPageOptions { limit: number; before?: number; since?: number }
+export interface TranscriptPage { events: SessionEvent[]; hasMore: boolean }
+export async function readStoredTranscriptPage(run: SessionRunStore, sessionId: string, options: TranscriptPageOptions): Promise<TranscriptPage> {
+  if (run.readTranscriptPage) return run.readTranscriptPage(sessionId, options);
+  const events = (await readStoredTranscript(run, sessionId, options.since ?? -1))
+    .filter(e => options.before === undefined || e.seq < options.before).sort((a, b) => a.seq - b.seq);
+  return { events: options.since === undefined ? events.slice(-options.limit) : events.slice(0, options.limit), hasMore: events.length > options.limit };
 }

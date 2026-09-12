@@ -1569,8 +1569,18 @@ export function readRunActivity(
   runId: string,
   after: number,
   limit: number,
+  signal?: AbortSignal,
 ): Promise<{ events: ActivityEvent[]; nextCursor: number; done: boolean }> {
   return fetchApi<{ events: ActivityEvent[]; nextCursor: number; done: boolean }>(
-    `/api/repos/${repoId}/sessions/runs/${command}/${encodeURIComponent(runId)}/activity?after=${after}&limit=${limit}`,
+    `/api/repos/${repoId}/sessions/runs/${command}/${encodeURIComponent(runId)}/activity?after=${after}&limit=${limit}&compact=1`,
+    { signal },
   );
+}
+
+export function getSessionTranscriptPage(repoId: string, command: SessionCommand, runId: string, sessionId: string,
+  options: { before?: number; since?: number }, signal?: AbortSignal): Promise<{ events: SessionEvent[]; hasMore: boolean; progress?: import("@truecourse/agent-loop").SessionProgress | null }> {
+  const query = new URLSearchParams({ limit: '100' });
+  if (options.before !== undefined) query.set('before', String(options.before));
+  if (options.since !== undefined) query.set('since', String(options.since));
+  return fetchApi(`/api/repos/${encodeURIComponent(repoId)}/sessions/runs/${command}/${encodeURIComponent(runId)}/transcript/${encodeURIComponent(sessionId)}?${query}`, { signal });
 }

@@ -1,3 +1,4 @@
+import { GuardFailureObservationSchema } from './failure-observation.js'
 import { GuardPreparationEvidenceSchema } from './preparation.js'
 /**
  * Guard run result types — the materialized current state a `guard run` writes to
@@ -145,6 +146,9 @@ export const GuardFailureDetailSchema = z
     step: z.number().int().positive(),
     expected: z.string(),
     actual: z.string(),
+    observation: GuardFailureObservationSchema.optional(),
+    /** Supported evidence could not be captured safely; never use prose as proof. */
+    observationUnavailable: z.string().min(1).optional(),
     /**
      * The failing step's RAW program output (see {@link OutputExcerptsSchema}),
      * attached on EVERY expect-mismatch so the retry/finding sees the usage error

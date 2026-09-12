@@ -1,11 +1,11 @@
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { and, asc, eq, gt, inArray, sql, getTableColumns } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, sql, getTableColumns } from 'drizzle-orm';
 import { activityRuns, activityEvents, type Db, type Pool, type PoolClient } from '@truecourse/db';
 import {
   SessionRunNotFoundError, createSessionRun, listSessionRuns, openSessionRun, parseSessionRunCursor,
   sessionRunDir, toPublicRunRecord,
-  type RepoRunRecord, type SessionRunBackend, type SessionRunQuery, type SessionRunStore,
+  type TranscriptPageOptions, type TranscriptPage, type ActivityPage, type RepoRunRecord, type SessionRunBackend, type SessionRunQuery, type SessionRunStore,
 } from '@truecourse/core/lib/sessions-store';
 import { publishActivityProgress, publishCommittedActivity, readActivityEvents } from '@truecourse/core/lib/activity-journal';
 import { ActivityEventSchema, type ActivityEvent, type ActivityEventBody } from '@truecourse/shared/activity-stream';
@@ -277,18 +277,71 @@ export class PgSessionRunStore implements SessionRunBackend {
     });
   }
 
+  private async readTranscriptPage(runId: string, sessionId: string, options: TranscriptPageOptions): Promise<TranscriptPage> {
+    const seq = sql`(${activityEvents.body}->'event'->>'seq')::bigint`;
+    const rows = await this.db.select().from(activityEvents).where(and(
+      eq(activityEvents.runId, runId),
+      sql`${activityEvents.body}->>'kind' = 'session-event'`,
+      sql`${activityEvents.body}->>'sessionId' = ${sessionId}`,
+      options.before === undefined ? undefined : sql`${seq} < ${options.before}`,
+      options.since === undefined ? undefined : sql`${seq} > ${options.since}`,
+    )).orderBy(options.since === undefined ? desc(activityEvents.cursor) : asc(activityEvents.cursor)).limit(options.limit + 1);
+    const events = rows.slice(0, options.limit).map(row => {
+      const decoded = decodeActivityEvent(row.body, row.cursor);
+      if (decoded.kind !== 'session-event') throw new Error('Expected transcript event');
+      return decoded.event;
+    });
+    return { events: events.sort((a, b) => a.seq - b.seq), hasMore: rows.length > options.limit };
+  }
+
+  private async readCompactPage(runId: string, after: number, limit: number): Promise<ActivityPage> {
+    await this.validateCursor(runId, after);
+    // Select the cursor window first. Only fetch bodies that the conversation
+    // uses: thousands of run snapshots can dwarf the entire transcript.
+    const result = await this.db.execute(sql`
+      WITH page AS MATERIALIZED (
+        SELECT cursor, body->>'kind' AS kind FROM ${activityEvents}
+        WHERE run_id = ${runId} AND cursor > ${after} ORDER BY cursor LIMIT ${limit}
+      )
+      SELECT e.cursor, e.body, (SELECT count(*) FROM page) AS page_count
+      FROM ${activityEvents} e JOIN page p ON e.cursor = p.cursor
+      WHERE e.run_id = ${runId}
+        AND (p.kind IS DISTINCT FROM 'run' OR p.cursor = (SELECT max(cursor) FROM page WHERE kind = 'run'))
+      ORDER BY e.cursor
+    `);
+    const rows = result.rows as { cursor: string | number; body: { [key: string]: unknown }; page_count: string | number }[];
+    const events = rows.map(row => decodeActivityEvent(row.body, Number(row.cursor)));
+    return {
+      events,
+      nextCursor: events.at(-1)?.cursor ?? after,
+      done: Number(rows[0]?.page_count ?? 0) < limit,
+    };
+  }
+
   private handle(repoKey: string, record: Record, owned = true): SessionRunStore {
     const dir = sessionRunDir(repoKey, record.command, record.runId);
     const transcripts = new Map<string, Event[]>();
     let pending = Promise.resolve();
     let failure: unknown;
     const flush = async () => { await pending; if (failure) throw failure; };
-    const enqueue = (body: ActivityEventBody, snapshot?: Record) => {
+    // Only adjacent checklist updates can replace one another. Transcript and
+    // lifecycle events are ordering barriers and are always persisted.
+    let checklistTail: { value: ActivityEventBody; state?: Record } | undefined;
+    const enqueue = (body: ActivityEventBody, snapshot?: Record, coalesce = false) => {
       if (failure) throw failure;
       const value = clone(body);
-      const state = snapshot ? clone(toPublicRunRecord(snapshot)) : undefined;
+      const state = snapshot && value.kind === 'run' ? value.run as Record : undefined;
+      if (coalesce && checklistTail) {
+        checklistTail.value = value;
+        checklistTail.state = state;
+        return;
+      }
+      const queued = { value, state };
+      checklistTail = coalesce ? queued : undefined;
       pending = pending.then(async () => {
+        if (checklistTail === queued) checklistTail = undefined;
         if (failure) return;
+        const { value, state } = queued;
         const event = await this.db.transaction(async tx => {
           const [row] = await tx.select({ ...getTableColumns(activityRuns), leaseActive: sql<boolean>`${activityRuns.leaseUntil} > CURRENT_TIMESTAMP` }).from(activityRuns).where(and(eq(activityRuns.runId, record.runId), eq(activityRuns.repoKey, repoKey))).for('update');
           if (!row) throw new Error('Session run was removed');
@@ -317,14 +370,16 @@ export class PgSessionRunStore implements SessionRunBackend {
     }, 20_000);
     heartbeat.unref();
     if (!owned) clearInterval(heartbeat);
-    const write = () => enqueue({ kind: 'run', run: toPublicRunRecord(record) }, record);
+    const write = (coalesce = false) => enqueue({ kind: 'run', run: toPublicRunRecord(record) }, record, coalesce);
     return {
       runId: record.runId, dir, record: () => record, flush,
       subscribeActivity: notify => this.subscribe(`run:${record.runId}`, notify),
       readActivity: async after => { await flush(); await this.reconcile([repoKey]); return this.readEvents(record.runId, after); },
       readActivityPage: async (after, limit) => { await flush(); await this.reconcile([repoKey]); return this.readEvents(record.runId, after, limit); },
+      readCompactActivityPage: async (after, limit) => { await flush(); await this.reconcile([repoKey]); return this.readCompactPage(record.runId, after, limit); },
       validateActivityCursor: async after => { await flush(); await this.validateCursor(record.runId, after); },
       readTranscript: async (sessionId, since) => { await flush(); return this.readTranscript(record.runId, sessionId, since); },
+      readTranscriptPage: async (sessionId, options) => { await flush(); return this.readTranscriptPage(record.runId, sessionId, options); },
       setGitRef(gitRef) { record.gitRef = gitRef; write(); },
       setEndpoint(endpoint) { record.endpoint = endpoint; write(); },
       setLlm(llm) { record.llm = llm; write(); },
@@ -333,7 +388,7 @@ export class PgSessionRunStore implements SessionRunBackend {
         const at = blocks.findIndex(block => block.kind === 'checklist');
         const checklist = { kind: 'checklist' as const, items };
         record.display = { blocks: at < 0 ? [checklist, ...blocks] : blocks.map((block, i) => i === at ? checklist : block) };
-        write();
+        write(true);
       },
       setError(error) { record.error = error; write(); },
       finish(status, options) {

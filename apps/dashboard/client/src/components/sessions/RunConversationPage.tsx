@@ -32,7 +32,6 @@ import { STEP_DOT, formatDuration } from './run-model';
 import { useRunConversation } from './useRunConversation';
 import type { ConversationLine, DataField, SessionBlock, StepBlock } from './conversation-model';
 
-const EMPTY_STEPS: readonly StepBlock[] = [];
 
 /** The reading column: wide enough for a quoted diff, narrow enough to read. */
 const COLUMN = 'mx-auto w-[780px] max-w-full';
@@ -47,18 +46,17 @@ const WORK_DOT: Record<SessionStatus, string> = {
 };
 
 export function RunConversationPage({ run, repoId }: { run: PublicSessionRun; repoId: string }) {
-  const { conversation, loading, error, connectionError } = useRunConversation(run, repoId);
-  // History lands page by page; painting it as it comes shows every row before
-  // its lines, so the page waits for the whole of it and paints once.
-  const steps = loading ? EMPTY_STEPS : conversation.steps;
+  const [params, setParams] = useSearchParams();
+  const selectedId = params.get('work');
+  const { conversation, loading, error, connectionError, hasOlder, loadingOlder, loadOlder } = useRunConversation(run, repoId, selectedId);
+  // Session metadata is sufficient to show the work list immediately.
+  const steps = conversation.steps;
   // The step the run stopped on, which is where its reason belongs: the one
   // that errored, else the one still open when the run died.
   const stoppedAt = conversation.error
     ? (steps.find((step) => step.status === 'error') ?? steps.find((step) => step.status === 'active'))?.key
     : undefined;
 
-  const [params, setParams] = useSearchParams();
-  const selectedId = params.get('work');
   const blocks = useMemo(() => {
     const map = new Map<string, SessionBlock>();
     for (const step of steps) for (const block of step.sessions) map.set(block.sessionId, block);
@@ -176,7 +174,7 @@ export function RunConversationPage({ run, repoId }: { run: PublicSessionRun; re
       </div>
       {selected && (
         <FindingResolveProvider repoId={repoId} active={hasDispute}>
-          <WorkPane block={selected} onClose={() => select(null)} />
+          <WorkPane block={selected} onClose={() => select(null)} loading={loading} hasOlder={hasOlder} loadingOlder={loadingOlder} loadOlder={loadOlder} />
         </FindingResolveProvider>
       )}
     </div>
@@ -425,7 +423,9 @@ function WorkDot({ status, className = '' }: { status: SessionStatus; className?
  * its own scroll, following the end while it runs unless the reader scrolled
  * up.
  */
-function WorkPane({ block, onClose }: { block: SessionBlock; onClose: () => void }) {
+function WorkPane({ block, onClose, loading, hasOlder, loadingOlder, loadOlder }: {
+  block: SessionBlock; onClose: () => void; loading: boolean; hasOlder: boolean; loadingOlder: boolean; loadOlder: () => void;
+}) {
   const scroller = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
   const toEnd = useCallback(() => {
@@ -471,6 +471,11 @@ function WorkPane({ block, onClose }: { block: SessionBlock; onClose: () => void
         }}
         className="min-h-0 flex-1 overflow-y-auto px-5 pb-6"
       >
+        {hasOlder && <button type="button" disabled={loadingOlder} onClick={loadOlder}
+          className="my-3 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50">
+          {loadingOlder ? 'Loading older messages…' : 'Load older messages'}
+        </button>}
+        {loading && <p role="status" className="my-3 text-sm text-muted-foreground">Loading messages…</p>}
         <Transcript block={block} />
       </div>
     </aside>

@@ -22,10 +22,11 @@ import type { GuardSetupPreparationSession } from '@truecourse/guard-generator';
 
 import { describe, it, expect, afterEach, afterAll, beforeAll, beforeEach } from 'vitest';
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { recipePath, readGuardSetup } from '@truecourse/guard-runner';
+import { recipePath, readGuardSetup, writeGuardSetup, computeRecipeFingerprint, computePreparationFingerprint } from '@truecourse/guard-runner';
 import { setDefaultTransport } from '@truecourse/shared/llm';
 import type {
   GuardSetupAuthStep,
@@ -160,7 +161,7 @@ function seams(): {
 const stepKeys = (r: string): string[] => (readGuardSetup(r)?.steps ?? []).map((s) => s.key);
 
 /** A real checklist tracker, plus a reader for the facts each step appended. */
-function factTracker(): { tracker: StepTracker; facts: (key: string) => string[] } {
+function factTracker(): { tracker: StepTracker; facts: (key: string) => string[]; steps: () => AnalysisStep[] } {
   let latest: AnalysisStep[] = [];
   const tracker = new StepTracker(
     (payload) => {
@@ -168,7 +169,7 @@ function factTracker(): { tracker: StepTracker; facts: (key: string) => string[]
     },
     GUARD_SETUP_STEPS.map((s) => ({ key: s.key, label: s.label })),
   );
-  return { tracker, facts: (key) => latest.find((s) => s.key === key)?.facts ?? [] };
+  return { tracker, facts: (key) => latest.find((s) => s.key === key)?.facts ?? [], steps: () => latest };
 }
 
 // ---------------------------------------------------------------------------
@@ -356,6 +357,28 @@ describe('estimateGuardSetupCost({ only })', () => {
 });
 
 describe('--only-preparations', () => {
+  it('fails the run and checklist, preserves other setup results, and retries the failed preparation', async () => {
+    const r = fixtureRepo(); writeRecipe(r);
+    await guardSetupInProcess(r, { interfaces: interfaces(), recipeRunner: neverCalled, ...seams() });
+    const before = readGuardSetup(r)!;
+    const track = factTracker();
+    const reason = 'Application build failed before private preparation verification (exit 7):\nmissing dependency';
+    const { report } = await guardSetupInProcess(r, {
+      only: 'preparations', refresh: true, interfaces: interfaces(), recipeRunner: neverCalled,
+      ...seams(), tracker: track.tracker, preparationSession: async () => ({ status: 'failed', reason }),
+    });
+    expect(report).toMatchObject({ status: 'failed', reason });
+    expect(readGuardSetup(r)).toMatchObject({ status: 'failed', reason });
+    expect(track.steps().find(step => step.key === 'preparations')?.status).toBe('error');
+    expect(track.steps().find(step => step.key === 'auth')?.status).toBe('pending');
+    for (const key of ['recipe', 'catalog', 'interfaces', 'seed', 'auth']) {
+      expect(report.steps.find(step => step.key === key)).toEqual(before.steps.find(step => step.key === key));
+    }
+    const retry = seams();
+    const recovered = await guardSetupInProcess(r, { only: 'preparations', interfaces: interfaces(), recipeRunner: neverCalled, ...retry });
+    expect(retry.reached).toEqual(['preparations']);
+    expect(recovered.report.status).toBe('ok');
+  });
   it('reauthors legacy profiles and estimates that work even when their old fingerprint is settled', async () => {
     const r = fixtureRepo();
     writeRecipe(r);
@@ -371,6 +394,28 @@ describe('--only-preparations', () => {
     const selected = seams();
     await guardSetupInProcess(r, { only: 'preparations', interfaces: interfaces(), recipeRunner: neverCalled, ...selected });
     expect(selected.reached).toEqual(['preparations']);
+  });
+  it.each(['legacy', 'postgres-v2', 'verifier-v3'])('refreshes a %s empty-profile skip once and gives the same answer to the estimator', async version => {
+    const r = fixtureRepo(); writeRecipe(r);
+    await guardSetupInProcess(r, { interfaces: interfaces(), recipeRunner: neverCalled, ...seams() });
+    const old = readGuardSetup(r)!;
+    old.steps.find(row => row.key === 'preparations')!.inputFingerprint = version === 'legacy'
+      ? computeRecipeFingerprint(r)
+      : createHash('sha256').update(version === 'postgres-v2' ? 'guard-preparations:2-postgres-database\n' : 'guard-preparations:3-verifier-inputs\n').update(computeRecipeFingerprint(r)).digest('hex');
+    writeGuardSetup(r, old);
+    const before = fs.readFileSync(recipePath(r), 'utf8');
+    const estimate = await estimateGuardSetupCost(r, { only: 'preparations' });
+    expect(estimate.stages?.find(stage => stage.stage === 'guard-setup.preparations')?.calls).toBeGreaterThan(0);
+    const refreshed = seams();
+    await guardSetupInProcess(r, { only: 'preparations', interfaces: interfaces(), recipeRunner: neverCalled, ...refreshed });
+    expect(refreshed.reached).toEqual(['preparations']);
+    expect(readGuardSetup(r)!.steps.find(row => row.key === 'preparations')!.inputFingerprint).toBe(computePreparationFingerprint(r));
+    const cached = seams();
+    await guardSetupInProcess(r, { only: 'preparations', interfaces: interfaces(), recipeRunner: neverCalled, ...cached });
+    expect(cached.reached).toEqual([]);
+    const cachedEstimate = await estimateGuardSetupCost(r, { only: 'preparations' });
+    expect(cachedEstimate.stages?.find(stage => stage.stage === 'guard-setup.preparations')?.calls ?? 0).toBe(0);
+    expect(fs.readFileSync(recipePath(r), 'utf8')).toBe(before);
   });
   it('refreshes private profiles without rerunning or replacing the existing seed and interfaces', async () => {
     const r = fixtureRepo();

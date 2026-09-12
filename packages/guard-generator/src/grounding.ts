@@ -113,10 +113,10 @@ export function buildResourceHints(
   const hints: InterfaceResource[] = []
   const seen = new Set<string>()
   const add = (area: string, id: string | undefined): void => {
-    if (!id || seen.has(id)) return
+    if (!id || seen.has(`${area}:${id}`)) return
     const resource = (resources[area] ?? []).find((r) => r.id === id)
     if (!resource) return
-    seen.add(id)
+    seen.add(`${area}:${id}`)
     hints.push(resource)
     add(area, resource.of)
   }

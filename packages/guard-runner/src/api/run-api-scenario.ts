@@ -1,3 +1,4 @@
+import type { GuardFailureObservation } from '@truecourse/shared'
 /**
  * Run one api scenario end-to-end: seed a sandbox, boot the recipe's server IN
  * that sandbox (fresh state + fresh port per scenario — the api analog of the
@@ -1100,7 +1101,7 @@ function failResult(
   /** The failing step's flow milestone, when it realizes one. */
   milestone: number | undefined,
   start: number,
-  mismatch: { expected: string; actual: string; subject?: string; detail?: string[] },
+  mismatch: { expected: string; actual: string; subject?: string; detail?: string[]; observation?: GuardFailureObservation; observationUnavailable?: string },
   capture: ApiStepCapture | null,
   redact: (t: string) => string,
   bootAttempts: number | undefined,
@@ -1140,6 +1141,8 @@ function failResult(
       step: stepIndex,
       expected: redact(mismatch.expected),
       actual: redact(mismatch.actual),
+      ...(mismatch.observation ? { observation: mismatch.observation } : {}),
+      ...(mismatch.observationUnavailable ? { observationUnavailable: mismatch.observationUnavailable } : {}),
       ...apiExcerpts(capture, serverLogs, redact),
     },
     evidencePath,

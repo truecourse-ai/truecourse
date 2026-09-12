@@ -48,6 +48,70 @@ async function create(command: 'spec-scan' | 'guard-setup' | 'guard-generate' | 
 }
 
 describe('Postgres activity storage', () => {
+  it('pages only the selected session in both directions with a SQL limit', async () => {
+    const run = await create();
+    for (let seq = 0; seq < 7; seq++) {
+      run.persistence.appendEvent('selected', event(seq));
+      run.persistence.appendEvent('sibling', { ...event(seq), content: 'Not requested' });
+    }
+    await run.flush!();
+    queries.length = 0;
+    const recent = await run.readTranscriptPage!('selected', { limit: 3 });
+    expect(recent.events.map(e => e.seq)).toEqual([4, 5, 6]);
+    expect(recent.hasMore).toBe(true);
+    expect(queries.some(q => q.query.includes('limit') && q.params.includes('selected') && q.params.includes(4))).toBe(true);
+    const older = await run.readTranscriptPage!('selected', { limit: 3, before: 4 });
+    expect(older.events.map(e => e.seq)).toEqual([1, 2, 3]);
+    const first = await run.readTranscriptPage!('selected', { limit: 3, before: 1 });
+    expect(first.events.map(e => e.seq)).toEqual([0]);
+    expect(first.hasMore).toBe(false);
+    const newer = await run.readTranscriptPage!('selected', { limit: 3, since: 1 });
+    expect(newer.events.map(e => e.seq)).toEqual([2, 3, 4]);
+    expect(newer.hasMore).toBe(true);
+    expect(await run.readTranscriptPage!('missing', { limit: 3 })).toEqual({ events: [], hasMore: false });
+  });
+
+  it('coalesces a settlement burst while retaining facts and transcript ordering', async () => {
+    const run = await create();
+    const facts: string[] = [];
+    for (let i = 0; i < 687; i++) {
+      facts.push(`flow ${i}: ${'x'.repeat(500)}`);
+      run.setChecklist([{ key: 'validate', label: 'Settling', status: 'active', facts: [...facts] }]);
+    }
+    run.persistence.appendEvent('worker', event(0));
+    run.setChecklist([{ key: 'validate', label: 'Settling', status: 'done', facts: [...facts] }]);
+    run.finish('completed');
+    await run.flush!();
+    const history = await run.readActivity!(-1);
+    // Initial, one coalesced burst, transcript, final checklist, terminal.
+    expect(history).toHaveLength(5);
+    expect(history[1]).toMatchObject({ kind: 'run', run: { display: { blocks: [{ items: [{ status: 'active', facts }] }] } } });
+    expect(history[2]).toMatchObject({ kind: 'session-event', event: { type: 'user-message', seq: 0 } });
+    expect(history[3]).toMatchObject({ kind: 'run', run: { display: { blocks: [{ items: [{ status: 'done', facts }] }] } } });
+    expect(history[4]).toMatchObject({ kind: 'run', run: { status: 'completed' } });
+  });
+
+  it('compacts snapshot-heavy pages without skipping transcripts or altering stored history', async () => {
+    const run = await create();
+    for (let i = 0; i < 100; i++) run.setGitRef!(`${i}-${'x'.repeat(10_000)}`);
+    run.persistence.appendEvent('s', event(0));
+    run.setGitRef!('latest');
+    run.persistence.appendEvent('s', event(1));
+    run.finish('completed');
+    await run.flush!();
+    const whole = await run.readActivity!(-1);
+    const first = await readStoredActivityPage(run, -1, 100, true);
+    expect(first).toEqual({ events: [whole[99]], nextCursor: 99, done: false });
+    expect(JSON.stringify(first).length).toBeLessThan(JSON.stringify(whole).length / 50);
+    const second = await readStoredActivityPage(run, first.nextCursor, 100, true);
+    expect(second.events).toEqual(whole.slice(100).filter(e => e.kind !== 'run' || e.cursor === whole.at(-1)!.cursor));
+    expect(second.nextCursor).toBe(whole.at(-1)!.cursor);
+    expect(second.done).toBe(true);
+    expect(await readStoredActivityPage(run, second.nextCursor, 100, true)).toEqual({ events: [], nextCursor: second.nextCursor, done: true });
+    expect(await run.readActivity!(-1)).toEqual(whole);
+    await expect(readStoredActivityPage(run, 900, 100, true)).rejects.toThrow('boundary');
+  });
+
   const arbitraryText = 'before\u0000after \\u0000 lone \ud800 emoji 🎉';
 
   it.each([false, true])('imports transcripts losslessly, with activity journal=%s', async activityStream => {
@@ -166,6 +230,7 @@ describe('Postgres activity storage', () => {
       })());
     });
     run.setChecklist([{ key: 'a', label: 'Read documents', status: 'active' }]);
+    await run.flush!(); // Already-published snapshots must never be coalesced.
     run.setChecklist([{ key: 'a', label: 'Read documents', status: 'done' }]);
     await run.flush!(); await Promise.all(observations); unsubscribe();
     const events = await run.readActivity!(-1);

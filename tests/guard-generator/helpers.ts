@@ -452,14 +452,13 @@ export function flowWorkerSessionOf(
   handler: (task: FlowWorkerTask) => Promise<FlowWorkerSessionResult | undefined>,
   over: { summary?: Partial<GuardSessionSummary>; fidelitySummary?: GuardSessionSummary } = {},
 ): FlowWorkerSessionSeam {
-  return async ({ tasks, epicTasks, mutatorTasks, onTask }) => {
+  return async ({ tasks, epicTasks, preparedMutatorTasks = [], mutatorTasks, onTask }) => {
     const byTask = new Map<string, FlowWorkerSessionResult>()
-    const all = [...tasks, ...epicTasks, ...mutatorTasks]
+    const all = [...tasks, ...epicTasks, ...preparedMutatorTasks, ...mutatorTasks]
     let done = 0
     onTask?.(0, all.length)
-    // Three WAVES, like the real seam: non-epics, then epics, then the
-    // serialized world-mutator tail.
-    for (const wave of [tasks, epicTasks, mutatorTasks]) {
+    // Same wave order as the real seam; concurrency is tested at the core seam.
+    for (const wave of [tasks, epicTasks, preparedMutatorTasks, mutatorTasks]) {
       for (const task of wave) {
         const result = await handler(task)
         if (result) byTask.set(task.workItem, result)
@@ -619,10 +618,11 @@ export function submitWorkerSessions(
     if ('red' in spec) {
       const yamlText = scenarioYaml(stampMilestones(spec.red, opts.milestones?.(task) ?? task.milestoneCount))
       // Round 1 observes the failure; round 2 declares it, as the gate requires.
-      const probe = await task.submitScenario(yamlText, [], judge, keepsPriorId(task))
+      const probe = await task.runScenario(yamlText)
       const expectedReds: GuardExpectedRed[] = [
         {
           step: observedStep(probe),
+          ...(/observationId: ([^\s]+)/.exec(probe.content)?.[1] ? { observationId: /observationId: ([^\s]+)/.exec(probe.content)![1] } : {}),
           predictedActual: observedActual(probe),
           verdict: spec.verdict ?? 'code-drift',
           brief: spec.brief ?? 'the doc and the code disagree',
@@ -632,7 +632,8 @@ export function submitWorkerSessions(
       opts.onSubmit?.(task, report)
       const sha = acceptedSha(report)
       if (sha === null) return refused(`the red submission was not accepted: ${report.content}`)
-      return { kind: 'outcome', outcome: { kind: 'settled', scenarioYamlSha: sha, expectedReds } }
+      const canonical = /Finish with: (.*)/.exec(report.content)?.[1]
+      return { kind: 'outcome', outcome: canonical ? JSON.parse(canonical) : { kind: 'settled', scenarioYamlSha: sha, expectedReds } }
     }
     const raw = 'scenario' in spec ? spec.scenario : spec
     const expectedReds = 'expectedReds' in spec ? spec.expectedReds : []

@@ -12,7 +12,7 @@
  *                                                    above this package); the adapter
  *                                                    fails before calling in.
  *   0.5  a corpus must exist                       — HARD: setup runs after scan.
- *   1    the recipe                                — THE ONLY HARD GATE. Discovery
+ *   1    the recipe                                — HARD. Discovery
  *                                                    (deterministic → the repair
  *                                                    session or the one-shot LLM →
  *                                                    verify by running) plus a live
@@ -27,6 +27,8 @@
  *                                                    (both behind `authorInterfaces`).
  *   5    the one seed (data AND auth)              — SOFT, never blocks. The seed
  *                                                    authoring session (`seedSession`).
+ *   5.5  private preparations                      — HARD on execution failure;
+ *                                                    unsupported profiles may skip.
  *   6    auth                                      — SOFT; the one step that may end
  *                                                    `blocked`. The auth-proof
  *                                                    session (`verifyAuth`).
@@ -58,6 +60,7 @@ import {
   buildRouteManifest,
   loadResolvedExternals,
   computeRecipeFingerprint,
+  computePreparationFingerprint,
   preparationCatalog,
   dependenciesPath,
   loadDependencyCatalog,
@@ -175,8 +178,7 @@ export interface GuardSetupOptions {
    * AFTER it never start, `detect` always runs, and the persisted report merges
    * over the previous one so the untouched steps keep their record.
    *
-   * The one exception to the merge is a HARD failure, which only `--only-recipe`
-   * can reach (every other step replays the recipe rather than re-deriving it):
+   * The exception to the merge is a recipe failure in `--only-recipe`:
    * a failed run reports the rows it reached and nothing else, exactly as a
    * whole run does — a recipe that no longer holds is no basis for calling the
    * steps that were computed against it settled.
@@ -394,6 +396,7 @@ export interface GuardSetupPreparationSessionInput {
   recipe: Recipe
   specExcerpts: { doc: string; text: string }[]
   fingerprint: string
+  onPhase?: (running: string, done: string) => void
 }
 export type GuardSetupPreparationSession = (input: GuardSetupPreparationSessionInput) => Promise<{
   status: 'ok' | 'skipped' | 'failed'
@@ -436,7 +439,7 @@ export interface GuardSetupResult {
 
 /**
  * Run the whole stage. Never throws for a repo-shaped problem: step 0.5 and the
- * recipe gate come back as `status: 'failed'` with a reason, and every soft step
+ * recipe/preparation failures come back as `status: 'failed'` with a reason, and every soft step
  * records its own outcome without demoting the run.
  *
  * SKIP-WHEN-SETTLED (plan 03 step 8): every taxonomy step records an input
@@ -493,7 +496,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     return mappedOnce
   }
 
-  // ---- Step 1: the recipe. THE ONLY HARD GATE. -----------------------------
+  // ---- Step 1: the recipe. A failure prevents later setup. -----------------
   opts.onStep?.('recipe')
   phases.step('recipe')
   // The recipe step's fingerprint is the SUBJECT (the ecosystem manifests), never
@@ -999,8 +1002,9 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   }
 
   // Private state is its own targeted setup step; it never replaces the main seed.
+  let preparationFailure: string | undefined
   if (enter('preparations')) {
-    const preparationFp = computeRecipeFingerprint(repoRoot)
+    const preparationFp = computePreparationFingerprint(repoRoot)
     const preparationRecipe = reloadRecipe(repoRoot) ?? current
     if (replayed('preparations')) {
       fact('preparations', 'replayed: the existing private preparation profiles stand as they are')
@@ -1015,10 +1019,11 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     } else {
       const result = opts.preparationSession
         ? await opts.preparationSession({ repoRoot, recipe: preparationRecipe,
-            specExcerpts: readSpecExcerpts(repoRoot), fingerprint: preparationFp })
+            specExcerpts: readSpecExcerpts(repoRoot), fingerprint: preparationFp,
+            onPhase: (running, done) => phases.enter({ running, done }) })
         : { status: 'skipped' as const, reason: 'private preparation authoring is unavailable; only profiles with runner-verified baseline checks are usable' }
       steps.push({ key: 'preparations', status: result.status, ...(result.reason ? { reason: result.reason } : {}),
-        inputFingerprint: computeRecipeFingerprint(repoRoot), ...('sessionRunId' in result && result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}) })
+        inputFingerprint: opts.preparationSession ? computePreparationFingerprint(repoRoot) : 'authoring-unavailable', ...('sessionRunId' in result && result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}) })
       // The session's findings are its outcome, read in the session itself;
       // the step only counts them.
       const findings = result.findings ?? []
@@ -1030,14 +1035,15 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
             : `no private starting state was authored: ${firstReasonLine(result.reason ?? result.status)}`
       fact('preparations', summary)
       for (const line of preparationFacts(reloadRecipe(repoRoot) ?? preparationRecipe)) fact('preparations', line)
-      opts.onStepDone?.('preparations', findings.length > 0 ? summary : (result.reason ?? result.status))
+      if (result.status === 'failed') preparationFailure = result.reason || 'Private preparation failed'
+      else opts.onStepDone?.('preparations', findings.length > 0 ? summary : (result.reason ?? result.status))
     }
   }
 
   // ---- Step 6: auth. Framework row only until plan step 14 wires it. -------
   // The ONE step that may end `blocked` (a supplied credential waiting on a user
   // registration) without demoting the run.
-  if (enter('auth')) {
+  if (!preparationFailure && enter('auth')) {
     const authFp = authFingerprint(repoRoot)
     if (settled('auth') === authFp) {
       steps.push({ key: 'auth', status: 'skipped', reason: 'unchanged', inputFingerprint: authFp })
@@ -1078,7 +1084,8 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     recipe: reloadRecipe(repoRoot) ?? current,
     report: {
       ranAt: new Date().toISOString(),
-      status: 'ok',
+      status: preparationFailure ? 'failed' : 'ok',
+      ...(preparationFailure ? { reason: preparationFailure } : {}),
       steps: only ? mergeStepSpine(steps, prior) : steps,
       recipe: recipeStep,
       ...(externals ? { externals } : {}),
@@ -1258,7 +1265,7 @@ export function settledFingerprints(
   const prior = readGuardSetup(repoRoot)
   const byKey = new Map<GuardSetupTaxonomyKey, string>()
   for (const row of prior?.steps ?? []) {
-    if (row.status === 'ok' || (row.status === 'skipped' && row.reason === 'unchanged')) {
+    if (row.status === 'ok' || (row.status === 'skipped' && (row.reason === 'unchanged' || row.key === 'preparations'))) {
       byKey.set(row.key, row.inputFingerprint)
     }
   }

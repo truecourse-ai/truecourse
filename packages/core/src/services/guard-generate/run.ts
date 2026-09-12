@@ -1,3 +1,4 @@
+import { log } from '../../lib/logger.js'
 /**
  * THE GUARD-GENERATE SESSION SEAMS — the implementations `@truecourse/core`
  * injects into `generateGuards` for plan 04 steps 15 (claim extraction) and 16
@@ -66,6 +67,7 @@ import {
   type GuardDoc,
   type GuardSessionSummary,
   flowAreaKey,
+  AUTHOR_INITIAL_BYTES,
 } from '@truecourse/guard-generator'
 import { createSessionRun, type SessionRunStartedInfo, type SessionRunStore } from '../../lib/sessions-store.js'
 import { resolveCommitSha } from '../../lib/repo-ref.js'
@@ -106,6 +108,7 @@ import {
   cacheableWorkerOutcome,
   flowWorkerCacheKey,
   flowWorkerSessionDef,
+  flowWorkerSystemPrompt,
   type CachedWorkerEntry,
 } from './flow-worker.js'
 import { FIDELITY_SESSION_KIND, emptyFidelityTally, judgeWorkerFidelity } from './fidelity.js'
@@ -188,6 +191,8 @@ export interface CreateGuardGenerateSeamsOptions {
    * (`generateGuards({ only })`) returns before calling their seams.
    */
   only?: GenerateStep
+  /** Completed steps of an interrupted run: cache replay only, with no stop after. */
+  replaySteps?: readonly GenerateStep[]
   /**
    * Test seam: a lazy thunk overriding the internal
    * `createConfiguredSessionDriver` path — the spec-scan analog's shape, plus
@@ -443,7 +448,8 @@ export function createGuardGenerateSessionSeams(
   }
   /** Single-step mode: is `step` PRIOR to the chosen one (replay, never spend)? */
   const replayOnly = (step: GenerateStep): boolean =>
-    opts.only !== undefined && GENERATE_SESSION_STEPS.indexOf(step) < GENERATE_SESSION_STEPS.indexOf(opts.only)
+    opts.replaySteps?.includes(step) === true ||
+    (opts.only !== undefined && GENERATE_SESSION_STEPS.indexOf(step) < GENERATE_SESSION_STEPS.indexOf(opts.only))
 
   const extractSession: ExtractSessionSeam = async (input) => {
     const universe = buildGuardDocUniverse(input.docs)
@@ -597,7 +603,7 @@ export function createGuardGenerateSessionSeams(
     }
     const fidelityTally = emptyFidelityTally()
     const byTask = new Map<string, FlowWorkerSessionResult>()
-    const total = input.tasks.length + input.epicTasks.length + input.mutatorTasks.length
+    const total = input.tasks.length + input.epicTasks.length + (input.preparedMutatorTasks?.length ?? 0) + input.mutatorTasks.length
     let done = 0
     input.onTask?.(0, total)
     // Each tick carries the task's outcome kind so the engine can render a live
@@ -659,7 +665,24 @@ export function createGuardGenerateSessionSeams(
       // purpose — cli briefings spawn probe sandboxes, and a stampede of them
       // is exactly what the probe cache exists to avoid paying twice.
       const briefings = new Map<string, string>()
-      for (const task of misses) briefings.set(task.workItem, await task.prepare())
+      const ready: FlowWorkerTask[] = []
+      for (const task of misses) {
+        const briefing = await task.prepare()
+        const initialBytes = Buffer.byteLength(flowWorkerSystemPrompt(task.surface), 'utf8') + Buffer.byteLength(briefing, 'utf8')
+        log.info(`[Guard author] ${task.workItem}: initialInputBytes=${initialBytes}`)
+        if (task.surface === 'web' && initialBytes > AUTHOR_INITIAL_BYTES) {
+          const reason = `author-initial-context-oversize: ${initialBytes} UTF-8 bytes exceeds ${AUTHOR_INITIAL_BYTES}; required obligations were retained. Split the flow or reduce its authoritative input before retrying.`
+          summary.failed++
+          summary.allTransport = false
+          summary.firstError ??= reason
+          byTask.set(task.workItem, { kind: 'failed', reason })
+          tick('failed')
+          continue
+        }
+        briefings.set(task.workItem, briefing)
+        ready.push(task)
+      }
+      if (ready.length === 0) return
       // The same construction guard `runCachedGuardPool` applies: an
       // unconstructible driver fails every miss of the wave transport-class
       // instead of crashing the generate.
@@ -669,7 +692,7 @@ export function createGuardGenerateSessionSeams(
       } catch (e) {
         const outcome = driverConstructionFailure(e)
         const reason = describeSessionFailure(outcome.failure)
-        for (const task of misses) {
+        for (const task of ready) {
           summary.ran++
           summary.failed++
           summary.firstError ??= reason
@@ -680,7 +703,7 @@ export function createGuardGenerateSessionSeams(
       }
       const { driver, persistence } = acquiredCtx
       await runSessionPool<FlowWorkerTask, GuardFlowWorkerOutcome>({
-        items: misses,
+        items: ready,
         workItem: (t) => t.workItem,
         session: (t) =>
           flowWorkerSessionDef({
@@ -774,6 +797,9 @@ export function createGuardGenerateSessionSeams(
     // The epic wave starts only after the first has fully folded — the barrier
     // that lets epic briefings carry members' settled scenarios read-only.
     await runWave(input.epicTasks)
+    // These tasks enforce private database ownership at every execution. Keep
+    // their DB/server provisioning bounded independently of the general pool.
+    await runWave(input.preparedMutatorTasks ?? [], Math.min(6, Math.max(1, opts.concurrency ?? 6)))
     // The mutator wave runs LAST and SERIALIZED: a destructive draft (a
     // password change, an account deletion) executes only against a world no
     // sibling is still reading, one session at a time.
