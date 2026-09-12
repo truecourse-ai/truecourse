@@ -603,7 +603,7 @@ export function createGuardGenerateSessionSeams(
     }
     const fidelityTally = emptyFidelityTally()
     const byTask = new Map<string, FlowWorkerSessionResult>()
-    const total = input.tasks.length + input.epicTasks.length + input.mutatorTasks.length
+    const total = input.tasks.length + input.epicTasks.length + (input.preparedMutatorTasks?.length ?? 0) + input.mutatorTasks.length
     let done = 0
     input.onTask?.(0, total)
     // Each tick carries the task's outcome kind so the engine can render a live
@@ -797,6 +797,9 @@ export function createGuardGenerateSessionSeams(
     // The epic wave starts only after the first has fully folded — the barrier
     // that lets epic briefings carry members' settled scenarios read-only.
     await runWave(input.epicTasks)
+    // These tasks enforce private database ownership at every execution. Keep
+    // their DB/server provisioning bounded independently of the general pool.
+    await runWave(input.preparedMutatorTasks ?? [], Math.min(6, Math.max(1, opts.concurrency ?? 6)))
     // The mutator wave runs LAST and SERIALIZED: a destructive draft (a
     // password change, an account deletion) executes only against a world no
     // sibling is still reading, one session at a time.

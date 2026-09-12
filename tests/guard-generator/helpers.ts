@@ -452,14 +452,13 @@ export function flowWorkerSessionOf(
   handler: (task: FlowWorkerTask) => Promise<FlowWorkerSessionResult | undefined>,
   over: { summary?: Partial<GuardSessionSummary>; fidelitySummary?: GuardSessionSummary } = {},
 ): FlowWorkerSessionSeam {
-  return async ({ tasks, epicTasks, mutatorTasks, onTask }) => {
+  return async ({ tasks, epicTasks, preparedMutatorTasks = [], mutatorTasks, onTask }) => {
     const byTask = new Map<string, FlowWorkerSessionResult>()
-    const all = [...tasks, ...epicTasks, ...mutatorTasks]
+    const all = [...tasks, ...epicTasks, ...preparedMutatorTasks, ...mutatorTasks]
     let done = 0
     onTask?.(0, all.length)
-    // Three WAVES, like the real seam: non-epics, then epics, then the
-    // serialized world-mutator tail.
-    for (const wave of [tasks, epicTasks, mutatorTasks]) {
+    // Same wave order as the real seam; concurrency is tested at the core seam.
+    for (const wave of [tasks, epicTasks, preparedMutatorTasks, mutatorTasks]) {
       for (const task of wave) {
         const result = await handler(task)
         if (result) byTask.set(task.workItem, result)

@@ -684,6 +684,54 @@ describe('the flow-worker pool’s cache', () => {
 })
 
 describe('the flow-worker pool’s waves and progress', () => {
+  it('reuses a settled cache when a mutator moves into the private pool on Resume', async () => {
+    const r = docRepo()
+    sessionScript = settleScript
+    const first = fakeTask()
+    await workerSeam(r)({ tasks: [], epicTasks: [], mutatorTasks: [first.task], docs: docsOf(r) })
+    const priorConstructions = constructions
+    const resumed = fakeTask()
+    sessionScript = () => { throw new Error('a compatible settled cache must not be reauthored') }
+    const result = await workerSeam(r)({ tasks: [], epicTasks: [], preparedMutatorTasks: [resumed.task],
+      mutatorTasks: [], docs: docsOf(r) })
+    expect(result.summary).toMatchObject({ ran: 0, fromCache: 1, failed: 0 })
+    expect(resumed.calls.confirm).toHaveLength(1)
+    expect(resumed.calls.prepare).toBe(0)
+    expect(constructions).toBe(priorConstructions)
+  })
+
+  it.each([20, 2])('bounds private authoring and keeps shared mutations serial with configured concurrency %i', async concurrency => {
+    const r = docRepo()
+    let active = 0
+    let peak = 0
+    let privateDone = 0
+    let sharedActive = 0
+    const prepared = Array.from({ length: 8 }, (_, i) => fakeTask({}, `private-${i}`).task)
+    const shared = Array.from({ length: 2 }, (_, i) => fakeTask({}, `shared-${i}`).task)
+    sessionScript = async call => {
+      if (call.briefing.includes('private-')) {
+        active++
+        peak = Math.max(peak, active)
+        await new Promise(resolve => setTimeout(resolve, 20))
+        active--
+        privateDone++
+      } else {
+        expect(privateDone).toBe(8)
+        expect(++sharedActive).toBe(1)
+        await new Promise(resolve => setTimeout(resolve, 5))
+        sharedActive--
+      }
+      return outcome({ kind: 'blocked', perMilestone: [{ order: 1, capability: 'test fixture' }] })
+    }
+    const seams = createGuardGenerateSessionSeams({ repoRoot: r, concurrency })
+    const ticks: number[] = []
+    const result = await seams.flowWorkerSession({ tasks: [], epicTasks: [], preparedMutatorTasks: prepared,
+      mutatorTasks: shared, docs: docsOf(r), onTask: (_done, total) => ticks.push(total) })
+    expect(peak).toBe(Math.min(6, concurrency))
+    expect(result.summary.ran).toBe(10)
+    expect(new Set(ticks)).toEqual(new Set([10]))
+  })
+
   it('runs non-epics, then epics, then the serialized mutator wave — ticking per settled task', async () => {
     const r = docRepo()
     const order: string[] = []

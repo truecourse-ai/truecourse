@@ -55,6 +55,7 @@ import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { WorkerObservations, redObservationMismatch } from './worker-observations.js'
+import { privateAuthoringProfiles, privateAuthoringDefect } from './private-authoring.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import pLimit from 'p-limit'
@@ -939,8 +940,11 @@ export type FlowWorkerSessionResult =
 export type FlowWorkerSessionSeam = (input: {
   tasks: readonly FlowWorkerTask[]
   epicTasks: readonly FlowWorkerTask[]
+  /** After members/epics, author up to six private-preparation mutators together.
+   * Engine execution gates refuse any draft that touches shared dependencies. */
+  preparedMutatorTasks?: readonly FlowWorkerTask[]
   /**
-   * Wave 3: the flows the world classifier judged WORLD-MUTATING (credential
+   * Final wave: the flows the world classifier judged WORLD-MUTATING (credential
    * changes, account deletion, session revocation, global config). Run LAST and
    * SERIALIZED — one session at a time — so a destructive draft executes only
    * after every shared-world sibling has settled; the engine restores the world
@@ -2551,6 +2555,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       // waves finish (unless the session settled anyway with a rewrite that
       // does not mutate).
       const deferredMutatorRefs = new Set<string>()
+      const privateMutatorRefs = new Set<string>()
+      const localDependencies = new Set(prerequisiteResolution.dependencies.dependencies
+        .filter(d => d.state === null && d.entry.class !== 'supplied').map(d => d.name))
+      const privateProfiles = privateAuthoringProfiles(recipe, localDependencies)
 
       /**
        * The DETERMINISTIC mutator gate, enforced where execution happens — the
@@ -2706,6 +2714,16 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         candidate: BirthCandidate,
         task: AuthorTask,
       ): Promise<{ report: FlowWorkerToolReport } | { result: GuardScenarioResult }> => {
+        if (privateMutatorRefs.has(taskKey(task))) {
+          const defect = privateAuthoringDefect(candidate.scenario, privateProfiles, localDependencies)
+          if (defect) {
+            deferredMutatorRefs.add(taskKey(task))
+            return { report: {
+              content: `not executed — private authoring requires you to ${defect}. Use an eligible preparation for every trial and submission, or end blocked with capability "deferred to the serialized mutator wave". The engine will retry unfinished deferred flows serially.`,
+              isError: true,
+            } }
+          }
+        }
         // Nothing executes against a world under repair: the verdict decides
         // whether this execution runs against a repaired world or short-circuits.
         if (worldRepair) await worldRepair
@@ -3176,6 +3194,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               'Work the loop: draft the scenario as YAML, `run_scenario` it, revise on the evidence, then `submit_scenario`; end the session with the outcome object.',
             )
             lines.push('', 'OUTSTANDING ASSIGNED OBLIGATIONS:', outstandingFeedback(state))
+            if (privateMutatorRefs.has(ref)) lines.push('',
+              `PRIVATE AUTHORING: every trial and submission must select one of these private Postgres preparations: ${[...privateProfiles].join(', ')}. Supplied accounts and shared services are not isolated. If your required starting state cannot use these profiles, end blocked with capability "deferred to the serialized mutator wave"; the engine will retry serially.`)
             return lines.join('\n')
           },
           runScenario: async (yamlText) => {
@@ -3401,12 +3421,17 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       const epicTasks = workerStates
         .filter((s) => s.task.work.flow.composedOf.length > 0 && !isMutatorState(s))
         .map(makeWorkerTask)
-      // The serialized third wave: destructive flows (epics included — their
-      // members settled in the earlier waves). The dirty marker outlives a
-      // crash mid-wave so the next world boot resets before building on the
-      // damage; the reset after persist clears it.
-      const mutatorTasks = workerStates.filter(isMutatorState).map(makeWorkerTask)
-      if (mutatorTasks.length > 0) {
+      // The final waves: private HTTP/browser mutations first, then serialized
+      // shared mutations. Keep epics in the tail so their members finish first.
+      // The shared world's dirty marker survives a crash; its next boot resets
+      // the damage, and the reset after persistence clears the marker.
+      const mutatorStates = workerStates.filter(isMutatorState)
+      const preparedStates = mutatorStates.filter(s => privateProfiles.size > 0 &&
+        s.task.work.flow.composedOf.length === 0 && (s.task.surface === 'api' || s.task.surface === 'web'))
+      for (const state of preparedStates) privateMutatorRefs.add(taskKey(state.task))
+      const preparedMutatorTasks = preparedStates.map(makeWorkerTask)
+      const sharedMutatorTasks = mutatorStates.filter(s => !privateMutatorRefs.has(taskKey(s.task))).map(makeWorkerTask)
+      if (sharedMutatorTasks.length > 0) {
         mutatorPhasePlanned = true
         fs.mkdirSync(path.dirname(guardWorldDirtyMarkerPath(repoRoot)), { recursive: true })
         fs.writeFileSync(guardWorldDirtyMarkerPath(repoRoot), 'guard-generate\n')
@@ -3429,7 +3454,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       const phaseA = await options.flowWorkerSession({
         tasks: waveTasks,
         epicTasks,
-        mutatorTasks,
+        preparedMutatorTasks,
+        mutatorTasks: sharedMutatorTasks,
         docs,
         onTask: (done, total, outcome) => {
           if (outcome === 'settled') workerSettledCount++
@@ -3448,12 +3474,17 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       // a rewrite that does not mutate. The gate opens for them by adding
       // their flow ids to `destructiveFlowIds` first.
       const deferredStates = [...states.values()].filter((s) => {
-        if (!deferredMutatorRefs.has(taskKey(s.task))) return false
         const result = byTask.get(`flow:${s.task.work.flow.id}:${s.task.surface}`)
+        const explicitlyDeferred = result?.kind === 'outcome' && result.outcome.kind === 'blocked' &&
+          result.outcome.perMilestone?.some(m => m.capability.includes('deferred to the serialized mutator wave'))
+        if (!deferredMutatorRefs.has(taskKey(s.task)) && !(privateMutatorRefs.has(taskKey(s.task)) && explicitlyDeferred)) return false
         return !(result?.kind === 'outcome' && result.outcome.kind === 'settled')
       })
       if (deferredStates.length > 0 && !anomalyLatch && !runRefusal) {
-        for (const s of deferredStates) destructiveFlowIds.add(s.task.work.flow.id)
+        for (const s of deferredStates) {
+          destructiveFlowIds.add(s.task.work.flow.id)
+          privateMutatorRefs.delete(taskKey(s.task))
+        }
         if (!mutatorPhasePlanned) {
           mutatorPhasePlanned = true
           fs.mkdirSync(path.dirname(guardWorldDirtyMarkerPath(repoRoot)), { recursive: true })
