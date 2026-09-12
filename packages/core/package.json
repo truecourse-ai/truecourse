@@ -189,6 +189,11 @@
       "types": "./dist/services/context/index.d.ts",
       "import": "./dist/services/context/index.js"
     },
+    "./services/home": {
+      "truecourse-source": "./src/services/home/index.ts",
+      "types": "./dist/services/home/index.d.ts",
+      "import": "./dist/services/home/index.js"
+    },
     "./lib/guard-read-tree": {
       "truecourse-source": "./src/lib/guard-read-tree.ts",
       "types": "./dist/lib/guard-read-tree.d.ts",

@@ -9,6 +9,7 @@
  * `conversation-model`, which reads the checklist through here.
  */
 
+import { runKindWord } from '@truecourse/shared';
 import type { ChecklistItem, DisplayBlock } from '@truecourse/agent-loop';
 import type { PublicSessionRun } from '@/lib/api';
 
@@ -47,18 +48,9 @@ export const STEP_DOT: Record<StepStatus, string> = {
   error: 'bg-red-500',
 };
 
-/** What each kind of run is called, in the product's words rather than the store's ids. */
-const COMMAND_LABEL: Record<string, string> = {
-  'spec-scan': 'Document scan',
-  'guard-setup': 'Flow setup',
-  'guard-generate': 'Flow generation',
-  'guard-run': 'Flow run',
-  'guard-interfaces': 'Interface authoring',
-  'guard-adjudicate': 'Failure adjudication',
-};
-
-/** `spec-scan` → `Document scan`; a command with no name of its own reads as its id, spaced. */
-export const commandLabel = (command: string): string => COMMAND_LABEL[command] ?? command.replace(/-/g, ' ');
+/** `spec-scan` reads `Document scan`; a command with no name of its own reads as its id, spaced.
+ *  The words live in `@truecourse/shared`, where the server names a run too. */
+export const commandLabel = (command: string): string => runKindWord(command);
 
 export const startedLabel = (iso: string): string =>
   new Date(iso).toLocaleString(undefined, {

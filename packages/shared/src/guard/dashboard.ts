@@ -1395,3 +1395,26 @@ export const GuardClaimsViewSchema = z
   })
   .strict()
 export type GuardClaimsView = z.infer<typeof GuardClaimsViewSchema>
+
+/**
+ * A stored run's SECTION SUMMARY: the coverage word every document section the
+ * run's scenario set covers wore at that moment, keyed by {@link guardSectionRef}.
+ * Statuses only, so a run's history costs a handful of bytes per section.
+ *
+ * It is what makes history readable: a run snapshot says which SCENARIOS passed,
+ * and turning that back into sections needs the scenario set, the report and the
+ * documents as they were. Written when the run is persisted, never guessed
+ * afterwards. A run without one is simply absent from the trend.
+ */
+export type GuardRunSectionSummary = Record<string, GuardCoveragePlainStatus>
+
+/** The address of ONE section of ONE document: `<docRef>#<anchor>`. */
+export function guardSectionRef(doc: string, anchor: string): string {
+  return `${doc}#${anchor}`
+}
+
+/** The document half of a {@link guardSectionRef} (a ref with no `#` is the doc). */
+export function guardSectionRefDoc(sectionRef: string): string {
+  const cut = sectionRef.lastIndexOf('#')
+  return cut === -1 ? sectionRef : sectionRef.slice(0, cut)
+}

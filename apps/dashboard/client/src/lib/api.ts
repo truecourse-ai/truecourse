@@ -27,6 +27,8 @@ import type {
   ContextSourcesResponse,
   ContextSourceUpdateResponse,
   ContextSourceView,
+  HomePeriod,
+  HomeResponse,
   NotificationsResponse,
   WorkspaceInvitation,
   WorkspaceMembersResponse,
@@ -1783,4 +1785,13 @@ export function markNotificationsRead(
     method: 'POST',
     body: JSON.stringify(what),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Home: the whole dashboard in one read, today's sections, the trend, the
+// areas, what waits on a person and what changed.
+// ---------------------------------------------------------------------------
+
+export function fetchHome(period: HomePeriod): Promise<HomeResponse> {
+  return fetchApi<HomeResponse>(`/api/home?period=${encodeURIComponent(period)}`);
 }

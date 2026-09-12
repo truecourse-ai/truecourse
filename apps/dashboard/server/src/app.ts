@@ -16,6 +16,7 @@ import flowsRouter from './routes/flows.js';
 import analyticsRouter from './routes/analytics.js';
 import specRouter from './routes/spec.js';
 import { createContextRouter, createContextBindingsRouter } from './routes/context.js';
+import { createHomeRouter } from './routes/home.js';
 import guardRouter from './routes/guard.js';
 import guardActionsRouter from './routes/guard-actions.js';
 import sessionsRouter, { createWorkspaceSessionsRouter } from './routes/sessions.js';
@@ -172,6 +173,10 @@ export function createApp(opts: CreateAppOptions): express.Express {
   // A source belongs to the workspace, not to a repository, so this mounts
   // above the repository routers and behind the gate alone — no slug to resolve.
   app.use('/api/context', createContextRouter({ githubLinks }));
+
+  // Home: the workspace's sections today and over time, what waits on a person
+  // and what changed. Workspace-scoped like Context, and read-only.
+  app.use('/api/home', createHomeRouter({ githubLinks }));
 
   // Home page / registry routes run without a project.
   app.use('/api/repos', createReposRouter({ githubLinks }));

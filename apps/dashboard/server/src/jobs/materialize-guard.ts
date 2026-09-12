@@ -54,8 +54,11 @@ import {
   writeGuardLatest,
   writeGuardResult,
   writeGuardResultEvidence,
+  writeGuardRunSections,
   type RepoRef,
 } from '@truecourse/core/lib/guard-store';
+import { readGuardRunSectionSummary } from '@truecourse/core/commands/guard-read';
+import { log } from '@truecourse/core/lib/logger';
 import { assertSafeRel, safeJoin } from '@truecourse/core/lib/safe-path';
 
 function writeFile(file: string, body: string): void {
@@ -143,9 +146,10 @@ async function persistBirthEvidence(
 
 /**
  * Lift a completed run out of `treeDir` into the store: the snapshot the runner
- * left as the repo's BASELINE run (keyed by the clone's commit), then every
- * scenario's evidence bundle, which attaches to that run row. The snapshot is
- * written first — the evidence manifest lives on it.
+ * left as the repo's BASELINE run (keyed by the clone's commit), its SECTION
+ * SUMMARY, then every scenario's evidence bundle, which attaches to that run
+ * row. The snapshot is written first, since the evidence manifest lives on it, and
+ * the summary is derived against the run that is now stored.
  */
 export async function persistGuardRun(
   ref: RepoRef,
@@ -155,12 +159,47 @@ export async function persistGuardRun(
   // The stored record says where it ran: this is the hosted runner's run.
   const latest: GuardLatest = { ...run, run: { ...run.run, origin: 'hosted' } };
   await writeGuardLatest(ref.repoKey, latest);
+  await recordGuardRunSections(ref.repoKey, latest);
   const runId = latest.run.runId;
   for (const scenario of latest.scenarios) {
     if (!scenario.evidencePath) continue;
     const files = collectEvidenceFiles(treeDir, scenario.evidencePath);
     if (!files) continue;
     await writeGuardEvidence(ref.repoKey, runId, scenario.id, files);
+  }
+}
+
+/**
+ * Derive and store ONE run's section summary, which is what Home's trend reads a run
+ * as. A run whose summary cannot be derived (no document body to join, nothing
+ * the scenario set names) is left without one and said so: history simply does
+ * not carry it, and nothing is guessed in its place. Never fails the run that
+ * produced it.
+ */
+export async function recordGuardRunSections(
+  repoKey: string,
+  latest: GuardLatest,
+): Promise<boolean> {
+  try {
+    const sections = await readGuardRunSectionSummary(repoKey, latest);
+    if (!sections) {
+      log.warn(
+        `[Guard] no section summary could be derived for ${repoKey} run ${latest.run.runId}; it stays out of the trend`,
+      );
+      return false;
+    }
+    await writeGuardRunSections(repoKey, {
+      runId: latest.run.runId,
+      ranAt: latest.run.ranAt,
+      commit: latest.run.commit,
+      sections,
+    });
+    return true;
+  } catch (err) {
+    log.warn(
+      `[Guard] the section summary for ${repoKey} run ${latest.run.runId} failed: ${(err as Error).message}`,
+    );
+    return false;
   }
 }
 
