@@ -295,7 +295,7 @@ beforeEach(async () => {
     id: SOURCE,
     kind: 'repository',
     title: REPO,
-    config: { repoFullName: REPO, include: [], exclude: [], branch: 'main' },
+    config: { repoFullName: REPO, installationId: 11, include: [], exclude: [], branch: 'main' },
   });
   await setContextBindings(ORG, REPO, [SOURCE]);
 });

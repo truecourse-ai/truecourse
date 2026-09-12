@@ -75,8 +75,12 @@ const driver = () =>
     }),
   });
 
+/** The installation the source reads the repository through. */
+const INSTALLATION = 4242;
+
 const config = (over: Record<string, unknown> = {}) => ({
   repoFullName: REPO,
+  installationId: INSTALLATION,
   include: [...DEFAULT_REPOSITORY_INCLUDE],
   exclude: [...DEFAULT_REPOSITORY_EXCLUDE],
   branch: 'main',
@@ -158,9 +162,17 @@ describe('repository driver — scope', () => {
   });
 
   it('refuses a config with no repository', async () => {
-    await expect(driver().sync({ include: [], exclude: [], branch: '' }, [])).rejects.toThrow(
-      /repoFullName/,
-    );
+    await expect(
+      driver().sync({ installationId: INSTALLATION, include: [], exclude: [], branch: '' }, []),
+    ).rejects.toThrow(/repoFullName/);
+  });
+
+  // A source reads its repository through an installation, and there is no
+  // second way in, so a scope without one is refused rather than guessed at.
+  it('refuses a config with no installation', async () => {
+    await expect(
+      driver().sync({ repoFullName: REPO, include: [], exclude: [], branch: '' }, []),
+    ).rejects.toThrow(/installationId/);
   });
 });
 

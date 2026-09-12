@@ -100,9 +100,32 @@ import { requireJobs } from '../jobs/current.js';
 import { emitContextChanged, serverContextDrivers } from '../services/context.service.js';
 import { isVisibleTo, type RepoOwnershipLookup } from '../middleware/project.js';
 
+/**
+ * What Context needs of GitHub to store a source for a repository, whether or
+ * not Code has connected it. A source may read ANY repository one of the
+ * workspace's installations can reach, so the installation is what is
+ * validated, and reaching the repository through it is also where its default
+ * branch comes from.
+ */
+export interface ContextGithubAccess {
+  /** The ids of the installations this workspace connected. */
+  listInstallations(workspaceOrgId: string): Promise<number[]>;
+  /** The Code link of a connected repository, or null when it has none. */
+  linkFor(
+    repoFullName: string,
+  ): Promise<{ installationId: number; defaultBranch: string } | null>;
+  /** The repository as one installation sees it, or null when it cannot reach it. */
+  reachRepository(
+    installationId: number,
+    repoFullName: string,
+  ): Promise<{ defaultBranch: string } | null>;
+}
+
 export interface ContextRouterDeps {
   /** Present when the server has a GitHub App configured; null otherwise. */
   githubLinks?: RepoOwnershipLookup | null;
+  /** The same connection's installation access. Absent when GitHub is unconfigured. */
+  github?: ContextGithubAccess | null;
 }
 
 /** The workspace the caller is acting in, or a refusal. */
@@ -636,24 +659,79 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   // titles. Runs the real driver — no source exists yet, so nothing is written.
   router.post('/sources/preview', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      orgOf(req);
-      const body = (req.body ?? {}) as { kind?: unknown; config?: unknown };
+      const org = orgOf(req);
+      const body = (req.body ?? {}) as { kind?: unknown; config?: unknown; installationId?: unknown };
       const kind = readKind(body);
-      const scope = normalizeConfig(kind, body.config);
-      if (scope.kind === 'repository') await requireLinkable(req, scope.config.repoFullName);
-      const driver = serverContextDrivers().get(kind)!;
+      const scope = await scopeFor(req, kind, body.config, body.installationId);
+      const driver = serverContextDrivers(org).get(kind)!;
       res.json(await driver.check(scope.config));
     } catch (e) {
       respond(res, next, e);
     }
   });
 
-  /** A repository source may only scope a repository this workspace connected. */
-  async function requireLinkable(req: Request, repoFullName: string): Promise<void> {
-    const linkable = await linkableRepos(req);
-    if (!linkable.has(repoFullName)) {
+  /** Is this repository one this workspace connected in Code? */
+  async function isLinkable(req: Request, repoFullName: string): Promise<boolean> {
+    return (await linkableRepos(req)).has(repoFullName);
+  }
+
+  /**
+   * WHICH installation reads a repository source, and on which branch. Two ways
+   * in, and no third: the request names an installation of this workspace that
+   * can reach the repository, or the repository is one this workspace connected
+   * in Code and its link says both. Nothing is resolved for a repository that is
+   * neither, and the scope it yields is refused for want of an installation.
+   */
+  async function repositoryAccess(
+    req: Request,
+    repoFullName: string,
+    asked: unknown,
+  ): Promise<{ installationId?: number; defaultBranch?: string }> {
+    const access = deps.github ?? null;
+    if (asked === undefined || asked === null) {
+      // The link is only read for a repository this workspace can see, so
+      // naming another workspace's repository resolves nothing.
+      if (!(await isLinkable(req, repoFullName))) return {};
+      const link = await access?.linkFor(repoFullName);
+      return link
+        ? { installationId: link.installationId, defaultBranch: link.defaultBranch }
+        : {};
+    }
+    const installationId =
+      typeof asked === 'number' && Number.isInteger(asked) && asked > 0 ? asked : 0;
+    const installations =
+      access && installationId > 0 ? await access.listInstallations(orgOf(req)) : [];
+    if (!installations.includes(installationId)) {
+      throw createAppError('That GitHub account is not connected to this workspace.', 400);
+    }
+    const reached = await access!.reachRepository(installationId, repoFullName);
+    if (!reached) {
       throw createAppError(`Repository "${repoFullName}" not found`, 404);
     }
+    return { installationId, defaultBranch: reached.defaultBranch };
+  }
+
+  /**
+   * The scope a source is stored and checked with. A repository scope is
+   * completed first: the installation it reads through and, when the request
+   * named no branch, the branch that installation resolved.
+   */
+  async function scopeFor(
+    req: Request,
+    kind: ContextSourceKind,
+    rawConfig: unknown,
+    installationId: unknown,
+  ): Promise<NormalizedConfig> {
+    if (kind !== 'repository') return normalizeConfig(kind, rawConfig);
+    const raw = (rawConfig ?? {}) as Partial<RepositorySourceConfig>;
+    const repoFullName = typeof raw.repoFullName === 'string' ? raw.repoFullName.trim() : '';
+    const resolved = await repositoryAccess(req, repoFullName, installationId);
+    const branch = typeof raw.branch === 'string' ? raw.branch.trim() : '';
+    return normalizeConfig('repository', {
+      ...raw,
+      ...(resolved.installationId === undefined ? {} : { installationId: resolved.installationId }),
+      branch: branch || resolved.defaultBranch || '',
+    });
   }
 
   // --- Add -----------------------------------------------------------------
@@ -661,15 +739,20 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   router.post('/sources', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);
-      const body = (req.body ?? {}) as { kind?: unknown; config?: unknown; repoIds?: unknown };
+      const body = (req.body ?? {}) as {
+        kind?: unknown;
+        config?: unknown;
+        repoIds?: unknown;
+        installationId?: unknown;
+      };
       const kind = readKind(body);
-      const scope = normalizeConfig(kind, body.config);
+      const scope = await scopeFor(req, kind, body.config, body.installationId);
       const repoKeys = await readRepoIds(req, body.repoIds);
 
       const existing = await listContextSources(org);
       const id =
         scope.kind === 'repository'
-          ? await newRepositorySourceId(req, existing, scope.config.repoFullName)
+          ? newRepositorySourceId(existing, scope.config.repoFullName)
           : newSiteSourceId(existing, scope.config);
 
       const source = await createContextSource(org, {
@@ -678,10 +761,12 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
         title: titleFor(scope),
         config: scope.config,
       });
-      // A Repository source is always read by the repository it scopes; a site
-      // is read by whoever the caller named, which may be nobody.
+      // A Repository source is read by the repository it scopes, when Code has
+      // connected that repository; a source for one Code has not is read by
+      // nobody until somebody links it. A site is read by whoever the caller
+      // named, which may be nobody.
       const links =
-        scope.kind === 'repository'
+        scope.kind === 'repository' && (await isLinkable(req, scope.config.repoFullName))
           ? [...new Set([scope.config.repoFullName, ...repoKeys])]
           : repoKeys;
       for (const repoKey of links) {
@@ -706,12 +791,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   });
 
   /** The id a new Repository source takes, refusing a second one for a repository. */
-  async function newRepositorySourceId(
-    req: Request,
-    existing: ContextSource[],
-    repoFullName: string,
-  ): Promise<string> {
-    await requireLinkable(req, repoFullName);
+  function newRepositorySourceId(existing: ContextSource[], repoFullName: string): string {
     const already = existing.find(
       (source) =>
         source.kind === 'repository' &&
@@ -752,7 +832,8 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   function editedConfig(source: ContextSource, raw: unknown): NormalizedConfig {
     if (!isImplementedContextKind(source.kind)) throw new ContextKindUnsupportedError(source.kind);
     if (source.kind !== 'repository') return normalizeConfig(source.kind, raw);
-    const stored = (source.config as Partial<RepositorySourceConfig>).repoFullName ?? '';
+    const current = source.config as Partial<RepositorySourceConfig>;
+    const stored = current.repoFullName ?? '';
     const asked = (raw ?? {}) as Partial<RepositorySourceConfig>;
     const named = typeof asked.repoFullName === 'string' ? asked.repoFullName.trim() : '';
     if (named !== '' && named !== stored) {
@@ -760,7 +841,13 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
         `A repository source always reads ${stored}; its repository cannot be changed.`,
       );
     }
-    return normalizeConfig('repository', { ...asked, repoFullName: stored });
+    // The repository and the installation that reads it are what the source was
+    // created with; an edit replaces the branch and the patterns around them.
+    return normalizeConfig('repository', {
+      ...asked,
+      repoFullName: stored,
+      installationId: current.installationId,
+    });
   }
 
   /**

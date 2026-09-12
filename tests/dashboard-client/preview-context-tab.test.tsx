@@ -48,7 +48,7 @@ const OWN: ContextSourceView = {
   id: 'repo-acme-web',
   kind: 'repository',
   title: 'acme/web',
-  config: { repoFullName: 'acme/web', include: ['docs/**'], exclude: [], branch: '' },
+  config: { repoFullName: 'acme/web', installationId: 11, include: ['docs/**'], exclude: [], branch: '' },
   status: 'synced',
   statusNote: null,
   lastSyncAt: '2026-09-01T10:00:00.000Z',

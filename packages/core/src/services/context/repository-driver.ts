@@ -96,8 +96,7 @@ export function createRepositoryDriver(deps: RepositoryDriverDeps): ContextSourc
     config: ContextSourceConfig,
     fn: (dir: string) => T,
   ): Promise<T> {
-    const { repoFullName } = repositoryConfig(config);
-    const tree = await deps.acquireTree(repoFullName);
+    const tree = await deps.acquireTree(repositoryConfig(config));
     try {
       return fn(tree.dir);
     } finally {

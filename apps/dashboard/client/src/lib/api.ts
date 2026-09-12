@@ -1573,6 +1573,8 @@ export function getContextStaleness(): Promise<{
 export function previewContextSource(body: {
   kind: string;
   config: Record<string, unknown>;
+  /** The GitHub installation a repository scope is read through. */
+  installationId?: number;
 }): Promise<ContextSourceCheck> {
   return fetchApi<ContextSourceCheck>('/api/context/sources/preview', {
     method: 'POST',
@@ -1585,6 +1587,8 @@ export function addContextSource(body: {
   kind: string;
   config: Record<string, unknown>;
   repoIds: string[];
+  /** The GitHub installation a repository source syncs through. */
+  installationId?: number;
 }): Promise<{ source: ContextSourceView; jobId?: string }> {
   return fetchApi<{ source: ContextSourceView; jobId?: string }>('/api/context/sources', {
     method: 'POST',

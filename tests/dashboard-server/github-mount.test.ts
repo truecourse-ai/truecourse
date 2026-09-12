@@ -72,6 +72,7 @@ import {
   type GitRunner,
 } from '../../apps/dashboard/server/src/services/run-clone.service';
 import {
+  acquireWorkTree,
   setWorkTreeProvider,
   type WorkTreeProvider,
 } from '../../apps/dashboard/server/src/services/work-tree.service';
@@ -193,6 +194,8 @@ interface MountOptions {
 }
 
 let store: MemoryGateStore;
+/** The workspace's Context, so a test can plant a source and read it back. */
+let contextStore: ReturnType<typeof memoryContextStore>;
 
 function buildApp(opts: MountOptions = {}): Express {
   const github = createGithubConnection({
@@ -202,6 +205,15 @@ function buildApp(opts: MountOptions = {}): Express {
   });
   if (!github) throw new Error('expected a configured GitHub connection');
   return createApp({ serveStatic: false, authVerifier: verify, github, jobs: null });
+}
+
+/** Poll until a fire-and-forget handler has landed. */
+async function waitFor(done: () => boolean, ms = 2000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!done()) {
+    if (Date.now() > deadline) throw new Error('timed out waiting for the handler');
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }
 
 function signed(body: unknown): { payload: string; signature: string } {
@@ -227,7 +239,8 @@ beforeEach(async () => {
   store = new MemoryGateStore();
   // Connecting a repository creates its workspace Context source, so the
   // workspace store has to exist for the connect hook to do anything.
-  setContextStore(memoryContextStore());
+  contextStore = memoryContextStore();
+  setContextStore(contextStore);
   setRegistryStore(derivedRegistry(store));
   await store.saveInstallation({
     installationId: INSTALLATION_ID,
@@ -336,6 +349,113 @@ describe('mount order', () => {
 });
 
 // ---------------------------------------------------------------------------
+// A push
+// ---------------------------------------------------------------------------
+
+/** The push GitHub delivers for a repository's default branch. */
+const pushWebhook = (app: Express, repoFullName: string) => {
+  const { payload, signature } = signed({
+    ref: 'refs/heads/main',
+    after: 'abc123',
+    repository: { full_name: repoFullName, default_branch: 'main' },
+    installation: { id: INSTALLATION_ID },
+  });
+  return request(app)
+    .post('/api/github/webhook')
+    .set('Content-Type', 'application/json')
+    .set('X-GitHub-Event', 'push')
+    .set('X-Hub-Signature-256', signature)
+    .send(payload);
+};
+
+describe('a push to the default branch', () => {
+  it('syncs a connected repository’s source', async () => {
+    const started: Array<[string, string, string]> = [];
+    const app = buildApp({
+      contextSync: async (orgId, sourceId, source) => {
+        started.push([orgId, sourceId, source]);
+        return 'queued';
+      },
+    });
+    await linkRepo(app).expect(201);
+    started.length = 0;
+
+    await pushWebhook(app, REPO).expect(202);
+    await waitFor(() => started.length > 0);
+    expect(started).toEqual([[ORG, 'repo-acme-widgets', 'push']]);
+  });
+
+  // A source may read a repository Code never connected. The push still tells
+  // the workspace its documents moved, through the installation's own workspace.
+  it('syncs the source of a repository nothing connected', async () => {
+    const started: Array<[string, string, string]> = [];
+    const app = buildApp({
+      contextSync: async (orgId, sourceId, source) => {
+        started.push([orgId, sourceId, source]);
+        return 'queued';
+      },
+    });
+    await contextStore.createSource(ORG, {
+      id: 'repo-acme-handbook',
+      kind: 'repository',
+      title: 'acme/handbook',
+      config: { repoFullName: 'acme/handbook', installationId: INSTALLATION_ID, include: [], exclude: [], branch: 'main' },
+    });
+
+    await pushWebhook(app, 'acme/handbook').expect(202);
+    await waitFor(() => started.length > 0);
+    expect(started).toEqual([[ORG, 'repo-acme-handbook', 'push']]);
+    // Still not connected: a push creates no link and no repository.
+    expect(await store.getRepo('acme/handbook')).toBeNull();
+  });
+
+  it('does nothing for an unconnected repository with no source', async () => {
+    const started: string[] = [];
+    const app = buildApp({
+      contextSync: async (_orgId, sourceId) => {
+        started.push(sourceId);
+        return 'queued';
+      },
+    });
+
+    await pushWebhook(app, 'acme/unknown').expect(202);
+    // Give the fire-and-forget handler the beat it would need to do something.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(started).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The work tree
+// ---------------------------------------------------------------------------
+
+describe('the work-tree provider', () => {
+  it('clones through the installation it is handed, reading no link', async () => {
+    buildApp();
+    const reads: string[] = [];
+    const real = store.getRepo.bind(store);
+    store.getRepo = async (repoFullName: string) => {
+      reads.push(repoFullName);
+      return real(repoFullName);
+    };
+
+    // Nothing is linked, so a link lookup would refuse by name alone. Given the
+    // installation the clone goes straight for its token instead, which this
+    // suite's fake private key cannot mint, and that is where it fails.
+    const failure = await acquireWorkTree('acme/handbook', {
+      installationId: INSTALLATION_ID,
+      workspaceOrgId: ORG,
+    }).then(
+      () => null,
+      (err: unknown) => (err as Error).message,
+    );
+    expect(failure).not.toBeNull();
+    expect(failure).not.toMatch(/not a connected repository/);
+    expect(reads).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Naming an installation
 // ---------------------------------------------------------------------------
 
@@ -410,6 +530,45 @@ describe('linking a repository', () => {
     // The work happens on the queue, on the connecting workspace's provider.
     expect(started).toEqual([[ORG, 'repo-acme-widgets', 'add']]);
     expect(fs.existsSync(getRunClonesDir())).toBe(false);
+  });
+
+  // Context may add a repository's source before Code ever connects it, so
+  // connecting reuses the source it finds rather than making a second one, and
+  // leaves its scope (patterns, branch, account) exactly as the user set it.
+  it('reuses the Context source a repository already has', async () => {
+    const started: Array<[string, string, string]> = [];
+    const app = buildApp({
+      contextSync: async (orgId, sourceId, source) => {
+        started.push([orgId, sourceId, source]);
+        return 'queued';
+      },
+    });
+    await contextStore.createSource(ORG, {
+      id: 'repo-acme-widgets',
+      kind: 'repository',
+      title: REPO,
+      config: {
+        repoFullName: REPO,
+        installationId: INSTALLATION_ID,
+        include: ['handbook/**'],
+        exclude: [],
+        branch: 'trunk',
+      },
+    });
+
+    await linkRepo(app).expect(201);
+
+    expect((await contextStore.listSources(ORG)).map((s) => s.id)).toEqual(['repo-acme-widgets']);
+    expect((await contextStore.listSources(ORG))[0]!.config).toEqual({
+      repoFullName: REPO,
+      installationId: INSTALLATION_ID,
+      include: ['handbook/**'],
+      exclude: [],
+      branch: 'trunk',
+    });
+    // The repository now READS it, and the connect still starts its sync.
+    expect(await contextStore.bindings(ORG, REPO)).toEqual(['repo-acme-widgets']);
+    expect(started).toEqual([[ORG, 'repo-acme-widgets', 'add']]);
   });
 
   it('refuses to connect the same repository twice', async () => {

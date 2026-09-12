@@ -29,6 +29,7 @@ import {
   installationOctokit,
   loadGithubAppConfig,
   PostgresGateStore,
+  splitRepo,
   type GateStore,
   type GithubAuth,
   type OctokitClient,
@@ -37,6 +38,7 @@ import {
 import { getDb } from '../db.js';
 import { createRunClone } from '../services/run-clone.service.js';
 import { setWorkTreeProvider, type WorkTreeProvider } from '../services/work-tree.service.js';
+import type { ContextGithubAccess } from '../routes/context.js';
 import { removeRepoRunState } from '../services/repo-removal.service.js';
 import {
   ensureRepositoryContextSource,
@@ -59,6 +61,8 @@ export interface GithubMount {
   connect: Router;
   /** The repo→workspace links, so `GET /api/repos` can hide other workspaces' repos. */
   store: GateStore;
+  /** How Context resolves the installation a repository source reads through. */
+  access: ContextGithubAccess;
 }
 
 export interface GithubConnectionOverrides {
@@ -98,46 +102,98 @@ export function createGithubConnection(
   // App auth is built on first use: the private key is only parsed when a token
   // is actually minted, so a test that injects `workTree` never needs a real one.
   let auth: GithubAuth | null = null;
+  const tokenFor = async (installationId: number): Promise<string> => {
+    auth ??= createGithubAuth(cfg);
+    return getInstallationToken(auth, installationId);
+  };
   const workTree: WorkTreeProvider =
     overrides.workTree ??
-    (async (repoKey: string) => {
+    (async (repoKey, via) => {
+      // A caller that already knows its installation is cloned through it, with
+      // no link read at all: this is how a context source reads a repository
+      // Code has not connected.
+      if (via) {
+        return createRunClone(repoKey, await tokenFor(via.installationId), {
+          workspaceOrgId: via.workspaceOrgId,
+          defaultBranch: via.defaultBranch ?? null,
+        });
+      }
       const link = await store.getRepo(repoKey);
       if (!link) {
         throw new Error(`${repoKey} is not a connected repository`);
       }
-      auth ??= createGithubAuth(cfg);
-      const token = await getInstallationToken(auth, link.installationId);
-      return createRunClone(repoKey, token, {
+      return createRunClone(repoKey, await tokenFor(link.installationId), {
         workspaceOrgId: link.workspaceOrgId,
         defaultBranch: link.defaultBranch,
       });
     });
   setWorkTreeProvider(workTree);
 
+  /**
+   * What Context needs of GitHub to store a source for a repository Code has
+   * not connected: which installations this workspace has, which installation a
+   * connected repository already syncs through, and whether one installation
+   * can actually reach a repository (which is also where its default branch
+   * comes from).
+   */
+  const access: ContextGithubAccess = {
+    listInstallations: async (workspaceOrgId) =>
+      (await store.listInstallationsForWorkspace(workspaceOrgId)).map(
+        (installation) => installation.installationId,
+      ),
+    linkFor: async (repoFullName) => {
+      const link = await store.getRepo(repoFullName);
+      return link
+        ? { installationId: link.installationId, defaultBranch: link.defaultBranch }
+        : null;
+    },
+    reachRepository: async (installationId, repoFullName) => {
+      const { owner, repo } = splitRepo(repoFullName);
+      try {
+        const { data } = await octokitFor(installationId).repos.get({ owner, repo });
+        return { defaultBranch: data.default_branch };
+      } catch {
+        return null;
+      }
+    },
+  };
+
+  /**
+   * A push to the default branch is what re-reads a repository's own
+   * documentation: its Repository source syncs, and the workspace corpus goes
+   * stale from there. A repository with no source of its own has nothing to do
+   * here.
+   */
+  const syncSourceAfterPush = (workspaceOrgId: string, repoFullName: string): void => {
+    void (async () => {
+      try {
+        const source = await repositoryContextSource(workspaceOrgId, repoFullName);
+        if (!source) return;
+        const outcome = await contextSync(workspaceOrgId, source.id, 'push');
+        if (outcome !== 'queued') {
+          log.info(`[github] ${repoFullName} pushed, context sync ${outcome}`);
+        }
+      } catch (err) {
+        log.warn(
+          `[github] could not sync ${repoFullName}'s context after a push: ${(err as Error).message}`,
+        );
+      }
+    })();
+  };
+
   const webhook = createWebhookRouter({
     secret: cfg.webhookSecret,
     store,
-    // A push to the default branch is what re-reads a repository's own
-    // documentation: its Repository source syncs, and the workspace corpus goes
-    // stale from there. (The gate's baseline refresh arrives separately.)
+    // A connected repository's push. (The gate's baseline refresh arrives
+    // separately.)
     onBaseline: (trigger) => {
-      void (async () => {
-        try {
-          const source = await repositoryContextSource(
-            trigger.workspaceOrgId,
-            trigger.repoFullName,
-          );
-          if (!source) return;
-          const outcome = await contextSync(trigger.workspaceOrgId, source.id, 'push');
-          if (outcome !== 'queued') {
-            log.info(`[github] ${trigger.repoFullName} pushed — context sync ${outcome}`);
-          }
-        } catch (err) {
-          log.warn(
-            `[github] could not sync ${trigger.repoFullName}'s context after a push: ${(err as Error).message}`,
-          );
-        }
-      })();
+      syncSourceAfterPush(trigger.workspaceOrgId, trigger.repoFullName);
+    },
+    // A push to a repository this installation reaches that Code has NOT
+    // connected. It has no baseline and no repository page, but the workspace
+    // may read it as a context source, and that source just moved.
+    onSourcePush: (trigger) => {
+      syncSourceAfterPush(trigger.workspaceOrgId, trigger.repoFullName);
     },
     // GitHub taking a repo away (app uninstall, repo removed from the
     // installation) disconnects it exactly like an explicit unlink does.
@@ -169,6 +225,7 @@ export function createGithubConnection(
         const sourceId = await ensureRepositoryContextSource({
           repoFullName: link.repoFullName,
           workspaceOrgId: link.workspaceOrgId,
+          installationId: link.installationId,
           defaultBranch: link.defaultBranch,
         });
         if (!sourceId) {
@@ -196,5 +253,5 @@ export function createGithubConnection(
     },
   });
 
-  return { webhook, connect, store };
+  return { webhook, connect, store, access };
 }

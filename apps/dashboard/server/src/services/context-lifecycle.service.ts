@@ -16,12 +16,10 @@
 import { log } from '@truecourse/core/lib/logger';
 import {
   contextBindings,
-  contextReposForSource,
   contextStoreInstalled,
   createContextSource,
   getContextSource,
   listContextSources,
-  removeContextSource,
   setContextBindings,
 } from '@truecourse/core/lib/context-store';
 import { repositoryConfig, repositorySourceId } from '@truecourse/core/services/context';
@@ -35,6 +33,8 @@ import { emitContextChanged } from './context.service.js';
 export interface RepositoryContextInput {
   repoFullName: string;
   workspaceOrgId: string;
+  /** The GitHub App installation the source reads through, from the Code link. */
+  installationId: number;
   /** The branch the source follows — the repository's default branch. */
   defaultBranch: string;
 }
@@ -70,7 +70,7 @@ export async function ensureRepositoryContextSource(
   input: RepositoryContextInput,
 ): Promise<string | null> {
   if (!contextStoreInstalled()) return null;
-  const { repoFullName, workspaceOrgId: org, defaultBranch } = input;
+  const { repoFullName, workspaceOrgId: org, installationId, defaultBranch } = input;
   const existing = await repositoryContextSource(org, repoFullName);
   const sourceId = existing?.id ?? repositorySourceId(repoFullName);
   if (!existing) {
@@ -80,6 +80,7 @@ export async function ensureRepositoryContextSource(
       title: repoFullName,
       config: repositoryConfig({
         repoFullName,
+        installationId,
         include: [...DEFAULT_REPOSITORY_INCLUDE],
         exclude: [...DEFAULT_REPOSITORY_EXCLUDE],
         branch: defaultBranch,
@@ -95,8 +96,10 @@ export async function ensureRepositoryContextSource(
 }
 
 /**
- * Drop the repository's links, and its own Repository source when nothing else
- * reads it. Best-effort by contract — a disconnect must not fail on this.
+ * Drop the repository's links. Its sources are the workspace's and stay: a
+ * disconnect in Code says nothing about what Context reads, and a source is
+ * removed in Context. Best-effort by contract, a disconnect must not fail on
+ * this.
  */
 export async function removeRepositoryContext(
   org: string,
@@ -104,13 +107,8 @@ export async function removeRepositoryContext(
 ): Promise<void> {
   if (!contextStoreInstalled()) return;
   try {
-    const own = await repositoryContextSource(org, repoFullName);
     await setContextBindings(org, repoFullName, []);
-    if (own) {
-      const readers = await contextReposForSource(org, own.id);
-      if (readers.length === 0) await removeContextSource(org, own.id);
-    }
-    await emitContextChanged(org, { change: 'sources', repoFullName });
+    await emitContextChanged(org, { change: 'bindings', repoFullName });
   } catch (err) {
     log.warn(
       `[context] could not clear ${repoFullName}'s context on disconnect: ${(err as Error).message}`,

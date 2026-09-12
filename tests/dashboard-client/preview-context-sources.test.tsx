@@ -91,7 +91,7 @@ const NEVER = source({
   id: 'repo-acme-web',
   kind: 'repository',
   title: 'acme/web',
-  config: { repoFullName: 'acme/web', include: ['docs/**'], exclude: [], branch: '' },
+  config: { repoFullName: 'acme/web', installationId: 11, include: ['docs/**'], exclude: [], branch: '' },
   status: 'never',
   lastSyncAt: null,
   repositories: [REPO_A.name],

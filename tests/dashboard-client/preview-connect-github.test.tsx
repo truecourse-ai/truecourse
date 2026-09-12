@@ -523,7 +523,7 @@ describe('connecting a repository through the GitHub App', () => {
       id: 'repo-linkwarden-linkwarden',
       kind: 'repository',
       title: 'linkwarden/linkwarden',
-      config: { repoFullName: 'linkwarden/linkwarden', include: ['docs/**'], exclude: [], branch: '' },
+      config: { repoFullName: 'linkwarden/linkwarden', installationId: 11, include: ['docs/**'], exclude: [], branch: '' },
     });
     const sources: ContextSourceView[] = [source({ id: 'site-docs', kind: 'site', title: 'docs.acme.com' })];
     const { bound } = serve({

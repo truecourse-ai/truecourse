@@ -37,8 +37,17 @@ export function repositoryConfig(config: ContextSourceConfig): RepositorySourceC
   if (repoFullName === '' || /\s/.test(repoFullName)) {
     throw new ContextConfigError('A repository source needs the repository it reads (repoFullName).');
   }
+  // The installation is WHICH App install the clone is minted through. Which
+  // installations a caller may name is the route's check (they must belong to
+  // this workspace, and reach this repository); all that is read here is a
+  // usable id.
+  const installationId = raw.installationId;
+  if (typeof installationId !== 'number' || !Number.isInteger(installationId) || installationId <= 0) {
+    throw new ContextConfigError('A repository source needs the installation it reads through (installationId).');
+  }
   return {
     repoFullName,
+    installationId,
     include: globs(raw.include, DEFAULT_REPOSITORY_INCLUDE),
     exclude: globs(raw.exclude, DEFAULT_REPOSITORY_EXCLUDE),
     branch: typeof raw.branch === 'string' ? raw.branch.trim() : '',

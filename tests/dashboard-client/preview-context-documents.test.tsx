@@ -13,7 +13,12 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { Toaster } from 'sonner';
-import type { ContextDocumentRow, ContextSourceView } from '@truecourse/shared';
+import type {
+  ContextDocumentRow,
+  ContextSourceView,
+  GithubInstallableRepo,
+  GithubInstallationSummary,
+} from '@truecourse/shared';
 
 vi.mock('@/lib/socket', () => {
   const socket = {
@@ -71,7 +76,7 @@ const REPO_SOURCE: ContextSourceView = {
   id: 'repo-acme-web',
   kind: 'repository',
   title: 'acme/web',
-  config: { repoFullName: 'acme/web', include: ['docs/**'], exclude: ['**/CHANGELOG*'], branch: '' },
+  config: { repoFullName: 'acme/web', installationId: 11, include: ['docs/**'], exclude: ['**/CHANGELOG*'], branch: '' },
   status: 'never',
   statusNote: null,
   lastSyncAt: null,
@@ -117,14 +122,41 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
+/** The two accounts the workspace can read repositories through. */
+const ACME_ACCOUNT: GithubInstallationSummary = {
+  installationId: 11,
+  accountLogin: 'acme',
+  accountType: 'Organization',
+};
+const OTHER_ACCOUNT: GithubInstallationSummary = {
+  installationId: 22,
+  accountLogin: 'contoso',
+  accountType: 'Organization',
+};
+
+/** What each account can see, including a repository Code has NOT connected. */
+const ACME_REPOS: GithubInstallableRepo[] = [
+  { fullName: 'acme/web', defaultBranch: 'main', private: true },
+  { fullName: 'acme/handbook', defaultBranch: 'trunk', private: false },
+];
+const OTHER_REPOS: GithubInstallableRepo[] = [
+  { fullName: 'contoso/docs', defaultBranch: 'main', private: false },
+];
+
 interface World {
   documents: ContextDocumentRow[];
   sources: ContextSourceView[];
   /** The registry, as `/api/repos` answers it. */
   repos: unknown[];
+  /** The workspace's GitHub accounts, as `/api/github/status` answers them. */
+  installations: GithubInstallationSummary[];
+  /** What each account can see, by installation id. */
+  installationRepos: Record<number, GithubInstallableRepo[]>;
   stale: boolean;
   runs: unknown[];
   calls: string[];
+  /** Every write, with the body it carried. */
+  posts: { path: string; body: Record<string, unknown> }[];
   check: { title: string; count: number; titles: string[]; skipped: [] };
 }
 
@@ -133,9 +165,12 @@ function serve(over: Partial<World> = {}) {
     documents: [REFUNDS, ONBOARDING],
     sources: [REPO_SOURCE, SITE],
     repos: [REPO_A, REPO_B],
+    installations: [ACME_ACCOUNT],
+    installationRepos: { [ACME_ACCOUNT.installationId]: ACME_REPOS, [OTHER_ACCOUNT.installationId]: OTHER_REPOS },
     stale: false,
     runs: [],
     calls: [],
+    posts: [],
     check: { title: 'docs.other.com', count: 3, titles: ['Getting started', 'Webhooks'], skipped: [] },
     ...over,
   };
@@ -144,7 +179,20 @@ function serve(over: Partial<World> = {}) {
     const url = new URL(href, window.location.origin);
     const method = (init?.method ?? 'GET').toUpperCase();
     state.calls.push(method === 'GET' ? `${url.pathname}${url.search}` : `${method} ${url.pathname}`);
+    if (method !== 'GET') {
+      state.posts.push({
+        path: url.pathname,
+        body: typeof init?.body === 'string' ? JSON.parse(init.body) : {},
+      });
+    }
     if (url.pathname === '/api/repos') return json(state.repos);
+    if (url.pathname === '/api/github/status') {
+      return json({ configured: true, installUrl: '', installations: state.installations, repos: [] });
+    }
+    const installationRepos = /^\/api\/github\/installations\/(\d+)\/repos$/.exec(url.pathname);
+    if (installationRepos) {
+      return json({ repos: state.installationRepos[Number(installationRepos[1])] ?? [] });
+    }
     if (url.pathname === '/api/llm/config') {
       return json({ config: { provider: 'anthropic' }, providers: ['anthropic'] });
     }
@@ -425,7 +473,7 @@ describe('Add context', () => {
     ).toBeInTheDocument();
   });
 
-  it('lists a repository that already has a source, disabled, and refuses a second one', async () => {
+  it('lists what the account can see, disabling a repository that already has a source', async () => {
     serve();
     renderAt('/preview/context/documents');
     const user = userEvent.setup();
@@ -436,9 +484,14 @@ describe('Add context', () => {
     // The repository is a select, never a row of chips.
     const select = await screen.findByLabelText('Repository');
     expect(select.tagName).toBe('SELECT');
+    // A repository Code has NOT connected is offered: a source reads through
+    // the account, not through the Code link.
+    expect(await within(select).findByRole('option', { name: 'acme/handbook' })).toBeInTheDocument();
     const taken = await within(select).findByRole('option', { name: 'acme/web · already a source' });
     expect(taken).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Check' })).toBeDisabled();
+    // One account needs no picking, so no account select is drawn.
+    expect(screen.queryByLabelText('Account')).toBeNull();
     // The scope copy is the repository's, not one generic line for both kinds.
     expect(
       screen.getByText(
@@ -447,22 +500,43 @@ describe('Add context', () => {
     ).toBeInTheDocument();
   });
 
-  it('sends the user to Settings when no repository is connected', async () => {
-    serve({ repos: [] });
+  it('picks the account first when the workspace has more than one', async () => {
+    const state = serve({ installations: [ACME_ACCOUNT, OTHER_ACCOUNT] });
     renderAt('/preview/context/documents');
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole('button', { name: 'Add context' }));
     await user.click(await screen.findByRole('button', { name: /Repository/ }));
 
-    expect(await screen.findByText('No repository connected yet.')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Connect a repository in Settings' })).toHaveAttribute(
+    const account = await screen.findByLabelText('Account');
+    expect(within(account).getByRole('option', { name: 'acme' })).toBeInTheDocument();
+    expect(within(account).getByRole('option', { name: 'contoso' })).toBeInTheDocument();
+
+    // The first account's repositories are read; picking the other reads its own.
+    const select = await screen.findByLabelText('Repository');
+    expect(await within(select).findByRole('option', { name: 'acme/handbook' })).toBeInTheDocument();
+    await user.selectOptions(account, String(OTHER_ACCOUNT.installationId));
+    expect(await within(select).findByRole('option', { name: 'contoso/docs' })).toBeInTheDocument();
+    expect(state.calls).toContain(`/api/github/installations/${OTHER_ACCOUNT.installationId}/repos`);
+  });
+
+  it('sends the user to Settings when no account is connected', async () => {
+    serve({ installations: [] });
+    renderAt('/preview/context/documents');
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole('button', { name: 'Add context' }));
+    await user.click(await screen.findByRole('button', { name: /Repository/ }));
+
+    expect(await screen.findByText('No GitHub account connected yet.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Connect an account in Settings' })).toHaveAttribute(
       'href',
       '/preview/settings/repositories',
     );
+    expect(screen.queryByLabelText('Repository')).toBeNull();
   });
 
-  it('offers Settings under the repository picker when repositories are connected', async () => {
+  it('offers Settings under the repository picker', async () => {
     serve();
     renderAt('/preview/context/documents');
     const user = userEvent.setup();
@@ -471,9 +545,68 @@ describe('Add context', () => {
     await user.click(await screen.findByRole('button', { name: /Repository/ }));
 
     expect(await screen.findByRole('combobox', { name: 'Repository' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Connect another repository in Settings' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Connect another account in Settings' })).toHaveAttribute(
       'href',
       '/preview/settings/repositories',
     );
+  });
+
+  it('checks and adds an unconnected repository through its account', async () => {
+    const state = serve();
+    renderAt('/preview/context/documents');
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole('button', { name: 'Add context' }));
+    await user.click(await screen.findByRole('button', { name: /Repository/ }));
+    const select = await screen.findByLabelText('Repository');
+    await within(select).findByRole('option', { name: 'acme/handbook' });
+    await user.selectOptions(select, 'acme/handbook');
+    await user.click(screen.getByRole('button', { name: 'Check' }));
+
+    await waitFor(() =>
+      expect(state.posts.some((p) => p.path === '/api/context/sources/preview')).toBe(true),
+    );
+    expect(state.posts.find((p) => p.path === '/api/context/sources/preview')?.body).toMatchObject({
+      kind: 'repository',
+      installationId: ACME_ACCOUNT.installationId,
+      config: { repoFullName: 'acme/handbook' },
+    });
+
+    await user.click(await screen.findByRole('button', { name: 'Add and sync' }));
+    await waitFor(() =>
+      expect(state.posts.some((p) => p.path === '/api/context/sources')).toBe(true),
+    );
+    expect(state.posts.find((p) => p.path === '/api/context/sources')?.body).toMatchObject({
+      kind: 'repository',
+      installationId: ACME_ACCOUNT.installationId,
+      repoIds: [],
+    });
+  });
+
+  it('adds with no links at all when nothing is connected in Code', async () => {
+    const state = serve({ repos: [] });
+    renderAt('/preview/context/documents');
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole('button', { name: 'Add context' }));
+    await user.click(await screen.findByRole('button', { name: /Repository/ }));
+    const select = await screen.findByLabelText('Repository');
+    await within(select).findByRole('option', { name: 'acme/handbook' });
+    await user.selectOptions(select, 'acme/handbook');
+    await user.click(screen.getByRole('button', { name: 'Check' }));
+
+    expect(
+      await screen.findByText(
+        'No repository reads it yet. Link one from the source page once it is connected.',
+      ),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Add and sync' }));
+    await waitFor(() =>
+      expect(state.posts.some((p) => p.path === '/api/context/sources')).toBe(true),
+    );
+    expect(state.posts.find((p) => p.path === '/api/context/sources')?.body).toMatchObject({
+      repoIds: [],
+    });
   });
 });

@@ -76,7 +76,7 @@ async function seedTwoSources(): Promise<void> {
     id: REPO_SOURCE,
     kind: 'repository',
     title: 'acme/widgets',
-    config: { repoFullName: 'acme/widgets', include: [], exclude: [], branch: 'main' },
+    config: { repoFullName: 'acme/widgets', installationId: 11, include: [], exclude: [], branch: 'main' },
   });
   await context.createSource(ORG, {
     id: SITE_SOURCE,

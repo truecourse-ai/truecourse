@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   createWebhookRouter,
   type BaselineTrigger,
+  type SourcePushTrigger,
   type RepoLinkRecord,
 } from '../../packages/github-app/src/index';
 import { MemoryGateStore } from './memory-store';
@@ -17,6 +18,7 @@ function sign(body: string, secret = SECRET): string {
 
 let store: MemoryGateStore;
 let baselineCalls: BaselineTrigger[];
+let sourcePushCalls: SourcePushTrigger[];
 let prCalls: unknown[];
 let commentCalls: unknown[];
 let removedCalls: RepoLinkRecord[];
@@ -25,6 +27,7 @@ let app: Express;
 beforeEach(() => {
   store = new MemoryGateStore();
   baselineCalls = [];
+  sourcePushCalls = [];
   prCalls = [];
   commentCalls = [];
   removedCalls = [];
@@ -42,6 +45,7 @@ beforeEach(() => {
       secret: SECRET,
       store,
       onBaseline: (t) => baselineCalls.push(t),
+      onSourcePush: (t) => sourcePushCalls.push(t),
       onRepoRemoved: async (link) => {
         removedCalls.push(link);
       },
@@ -197,6 +201,39 @@ describe('webhook router', () => {
     }).expect(202);
 
     expect(baselineCalls).toHaveLength(0);
+    // The installation belongs to no workspace, so nobody could be reading it.
+    expect(sourcePushCalls).toHaveLength(0);
+  });
+
+  // Nothing is baselined for a repository Code has not connected, but the
+  // workspace that installed the App may read it as a context source.
+  it('reports a push to an unconnected repo of a workspace’s installation', async () => {
+    await store.saveInstallation({
+      installationId: 9,
+      accountLogin: 'acme',
+      accountType: 'Organization',
+      workspaceOrgId: 'org_A',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    await post('push', {
+      ref: 'refs/heads/main',
+      after: 'sha-after',
+      repository: { full_name: 'acme/handbook', default_branch: 'main' },
+      installation: { id: 9 },
+    }).expect(202);
+
+    expect(baselineCalls).toHaveLength(0);
+    expect(sourcePushCalls).toEqual([
+      {
+        repoFullName: 'acme/handbook',
+        installationId: 9,
+        defaultBranch: 'main',
+        commitSha: 'sha-after',
+        workspaceOrgId: 'org_A',
+      },
+    ]);
   });
 
   it('routes pull_request to onPullRequest', async () => {

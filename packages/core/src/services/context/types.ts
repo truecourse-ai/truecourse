@@ -20,6 +20,7 @@ import type {
   ContextSourceCheck,
   ContextSourceConfig,
   ContextSourceKind,
+  RepositorySourceConfig,
 } from '@truecourse/shared';
 
 /** One document a driver read, body included. */
@@ -87,10 +88,15 @@ export interface ContextWorkTree {
 }
 
 /**
- * How a repository source gets a checkout of its branch. The hosted server
- * installs the run-clone provider; a test hands back a fixture directory.
+ * How a repository source gets a checkout of its branch. The WHOLE scope is
+ * handed over, not just the name: a hosted clone is minted through the
+ * installation the source records, which is what lets a source read a
+ * repository Code has not connected. The hosted server installs the run-clone
+ * provider; a test hands back a fixture directory.
  */
-export type ContextWorkTreeProvider = (repoFullName: string) => Promise<ContextWorkTree>;
+export type ContextWorkTreeProvider = (
+  config: RepositorySourceConfig,
+) => Promise<ContextWorkTree>;
 
 /** The configuration a source carries is unusable (a caller's bug or bad input). */
 export class ContextConfigError extends Error {

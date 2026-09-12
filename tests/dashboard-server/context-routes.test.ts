@@ -19,7 +19,15 @@ import {
   resetContextStore,
   setContextStore,
 } from '@truecourse/core/lib/context-store';
-import { createTestApp, stubJobs, TEST_ORG, type StubJobs } from '../helpers/test-app';
+import {
+  createTestApp,
+  stubJobs,
+  testGithubMount,
+  TEST_ORG,
+  type StubJobs,
+} from '../helpers/test-app';
+import type { GithubMount } from '../../apps/dashboard/server/src/github/index';
+import type { RepositorySourceConfig } from '@truecourse/shared';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 import { memoryContextStore, type MemoryContextStore } from '../helpers/memory-context-store';
 import {
@@ -35,6 +43,8 @@ let jobs: StubJobs;
 let published: { org: string; event: ServerEvent }[];
 /** Every `enqueueContextSync` the routes made, in order. */
 let syncs: { workspaceOrgId: string; sourceId: string; source: string }[];
+/** Every repository scope a driver asked for a checkout of, in order. */
+let trees: RepositorySourceConfig[];
 
 beforeEach(async () => {
   fixture = await setupTestFixture();
@@ -45,9 +55,13 @@ beforeEach(async () => {
   setContextEventPublisher((org, event) => {
     published.push({ org, event });
   });
+  trees = [];
   setContextDriverDeps({
     publicOnly: false,
-    acquireTree: async () => ({ dir: fixture.repoPath, dispose: () => {} }),
+    acquireTree: async (config) => {
+      trees.push(config);
+      return { dir: fixture.repoPath, dispose: () => {} };
+    },
   });
   jobs = stubJobs();
   (jobs.mount as unknown as { enqueueContextSync: unknown }).enqueueContextSync = async (
@@ -58,6 +72,35 @@ beforeEach(async () => {
   };
   app = createTestApp({ jobs: jobs.mount });
 });
+
+/** The one installation this workspace has, and what it can reach. */
+const INSTALLATION = 4242;
+const REACHABLE = new Map<string, string>([['other/handbook', 'trunk']]);
+
+/**
+ * The workspace's GitHub, as a source that reads a repository Code has NOT
+ * connected needs it: which installations this workspace has, the link a
+ * connected repository already carries, and what each installation can reach.
+ */
+function githubAccess(over: Partial<GithubMount['access']> = {}): GithubMount['access'] {
+  return {
+    listInstallations: async () => [INSTALLATION],
+    linkFor: async (repoFullName) =>
+      repoFullName === fixture.project.name
+        ? { installationId: INSTALLATION, defaultBranch: 'main' }
+        : null,
+    reachRepository: async (installationId, repoFullName) =>
+      installationId === INSTALLATION && REACHABLE.has(repoFullName)
+        ? { defaultBranch: REACHABLE.get(repoFullName)! }
+        : null,
+    ...over,
+  };
+}
+
+/** Rebuild the app with a GitHub the workspace actually has. */
+function appWithGithub(access: GithubMount['access'] = githubAccess()): void {
+  app = createTestApp({ jobs: jobs.mount, github: testGithubMount(TEST_ORG, access) });
+}
 
 afterEach(async () => {
   resetContextStore();
@@ -148,6 +191,7 @@ describe('POST /api/context/sources', () => {
   });
 
   it('creates a repository source, always linked to the repository it scopes', async () => {
+    appWithGithub();
     const res = await request(app)
       .post('/api/context/sources')
       .send({ kind: 'repository', config: { repoFullName: fixture.project.name } })
@@ -155,12 +199,14 @@ describe('POST /api/context/sources', () => {
     expect(res.body.source).toMatchObject({ kind: 'repository', title: fixture.project.name });
     expect(res.body.source.config).toMatchObject({
       repoFullName: fixture.project.name,
+      installationId: INSTALLATION,
       include: ['docs/**', '**/*.md'],
     });
     expect(await store.bindings(TEST_ORG, fixture.project.name)).toEqual([res.body.source.id]);
   });
 
   it('refuses a second repository source for the same repository', async () => {
+    appWithGithub();
     await request(app)
       .post('/api/context/sources')
       .send({ kind: 'repository', config: { repoFullName: fixture.project.name } })
@@ -172,11 +218,86 @@ describe('POST /api/context/sources', () => {
     expect(again.body.error).toContain('already has a Repository source');
   });
 
-  it('refuses a repository this workspace has not connected', async () => {
-    await request(app)
+  // A repository this workspace has not connected resolves no installation from
+  // a link, and there is no other way to read one, so the scope is refused.
+  it('refuses a repository this workspace has not connected and named no account for', async () => {
+    appWithGithub();
+    const res = await request(app)
       .post('/api/context/sources')
       .send({ kind: 'repository', config: { repoFullName: 'someone/else' } })
+      .expect(400);
+    expect(res.body.error).toContain('installationId');
+    expect(await store.listSources(TEST_ORG)).toHaveLength(0);
+  });
+
+  // A source may read a repository Code has NOT connected: it names the GitHub
+  // account it reads through, and syncs through that account on its own.
+  it('stores a source for an unconnected repository, with the branch the account resolved', async () => {
+    appWithGithub();
+    const res = await request(app)
+      .post('/api/context/sources')
+      .send({
+        kind: 'repository',
+        config: { repoFullName: 'other/handbook' },
+        installationId: INSTALLATION,
+      })
+      .expect(202);
+
+    expect(res.body.source.config).toMatchObject({
+      repoFullName: 'other/handbook',
+      installationId: INSTALLATION,
+      // Resolved through the installation, so the sync never has to ask.
+      branch: 'trunk',
+    });
+    // Nothing in Code reads it yet, so it is linked to nothing.
+    expect(res.body.source.repositories).toEqual([]);
+    expect(await store.reposForSource(TEST_ORG, res.body.source.id)).toEqual([]);
+    expect(syncs).toEqual([
+      { workspaceOrgId: TEST_ORG, sourceId: res.body.source.id, source: 'add' },
+    ]);
+  });
+
+  it('refuses an installation this workspace does not have', async () => {
+    appWithGithub();
+    const res = await request(app)
+      .post('/api/context/sources')
+      .send({
+        kind: 'repository',
+        config: { repoFullName: 'other/handbook' },
+        installationId: 99,
+      })
+      .expect(400);
+    expect(res.body.error).toContain('not connected to this workspace');
+    expect(await store.listSources(TEST_ORG)).toHaveLength(0);
+  });
+
+  it('is a 404 for a repository the installation cannot reach', async () => {
+    appWithGithub();
+    const res = await request(app)
+      .post('/api/context/sources')
+      .send({
+        kind: 'repository',
+        config: { repoFullName: 'other/private' },
+        installationId: INSTALLATION,
+      })
       .expect(404);
+    expect(res.body.error).toContain('other/private');
+    expect(await store.listSources(TEST_ORG)).toHaveLength(0);
+  });
+
+  it('takes the link’s installation when a connected repository names none', async () => {
+    appWithGithub();
+    const res = await request(app)
+      .post('/api/context/sources')
+      .send({ kind: 'repository', config: { repoFullName: fixture.project.name } })
+      .expect(202);
+    expect(res.body.source.config).toMatchObject({
+      repoFullName: fixture.project.name,
+      installationId: INSTALLATION,
+      branch: 'main',
+    });
+    // Connected in Code, so it reads its own source from the start.
+    expect(res.body.source.repositories).toEqual([fixture.project.name]);
   });
 
   it('refuses a repoId that names nothing', async () => {
@@ -215,6 +336,7 @@ describe('POST /api/context/sources', () => {
 
 describe('POST /api/context/sources/preview', () => {
   it('reports what a repository scope would yield, without storing it', async () => {
+    appWithGithub();
     fs.mkdirSync(path.join(fixture.repoPath, 'docs'), { recursive: true });
     fs.writeFileSync(path.join(fixture.repoPath, 'docs/guide.md'), '# Getting started\n', 'utf-8');
     const res = await request(app)
@@ -227,6 +349,7 @@ describe('POST /api/context/sources/preview', () => {
   });
 
   it('honors the include patterns it was given', async () => {
+    appWithGithub();
     fs.mkdirSync(path.join(fixture.repoPath, 'docs'), { recursive: true });
     fs.writeFileSync(path.join(fixture.repoPath, 'docs/guide.md'), '# Guide\n', 'utf-8');
     fs.writeFileSync(path.join(fixture.repoPath, 'NOTES.md'), '# Notes\n', 'utf-8');
@@ -247,11 +370,48 @@ describe('POST /api/context/sources/preview', () => {
       .expect(400);
   });
 
-  it('refuses to check a repository this workspace has not connected', async () => {
-    await request(app)
+  it('refuses to check a repository this workspace has not connected and named no account for', async () => {
+    appWithGithub();
+    const res = await request(app)
       .post('/api/context/sources/preview')
       .send({ kind: 'repository', config: { repoFullName: 'someone/else' } })
-      .expect(404);
+      .expect(400);
+    expect(res.body.error).toContain('installationId');
+    expect(trees).toEqual([]);
+  });
+
+  it('checks an unconnected repository through the account it names', async () => {
+    appWithGithub();
+    await request(app)
+      .post('/api/context/sources/preview')
+      .send({
+        kind: 'repository',
+        config: { repoFullName: 'other/handbook' },
+        installationId: INSTALLATION,
+      })
+      .expect(200);
+    // The checkout was asked for through that installation, on its branch.
+    expect(trees).toEqual([
+      expect.objectContaining({
+        repoFullName: 'other/handbook',
+        installationId: INSTALLATION,
+        branch: 'trunk',
+      }),
+    ]);
+    expect(await store.listSources(TEST_ORG)).toEqual([]);
+  });
+
+  it('refuses to check through an installation this workspace does not have', async () => {
+    appWithGithub();
+    await request(app)
+      .post('/api/context/sources/preview')
+      .send({
+        kind: 'repository',
+        config: { repoFullName: 'other/handbook' },
+        installationId: 99,
+      })
+      .expect(400);
+    expect(trees).toEqual([]);
   });
 
   it('stores nothing', async () => {
@@ -320,6 +480,7 @@ describe('GET /api/context/sources/:id', () => {
 describe('PATCH /api/context/sources/:id', () => {
   /** A repository source of the fixture repository, to edit the scope of. */
   async function addRepoSource(): Promise<string> {
+    appWithGithub();
     const res = await request(app)
       .post('/api/context/sources')
       .send({ kind: 'repository', config: { repoFullName: fixture.project.name } })
@@ -342,8 +503,11 @@ describe('PATCH /api/context/sources/:id', () => {
       })
       .expect(202);
 
+    // The repository and the account it reads through are what the source was
+    // created with; the edit replaces the branch and the patterns around them.
     expect(res.body.source.config).toEqual({
       repoFullName: fixture.project.name,
+      installationId: INSTALLATION,
       branch: 'develop',
       include: ['docs/**'],
       exclude: [],
@@ -362,6 +526,7 @@ describe('PATCH /api/context/sources/:id', () => {
       .expect(202);
     expect(res.body.source.config).toEqual({
       repoFullName: fixture.project.name,
+      installationId: INSTALLATION,
       branch: '',
       include: ['docs/**', '**/*.md'],
       exclude: [

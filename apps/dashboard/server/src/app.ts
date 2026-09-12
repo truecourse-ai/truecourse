@@ -172,7 +172,7 @@ export function createApp(opts: CreateAppOptions): express.Express {
   // The workspace's CONTEXT: its documentation sources and what they yielded.
   // A source belongs to the workspace, not to a repository, so this mounts
   // above the repository routers and behind the gate alone — no slug to resolve.
-  app.use('/api/context', createContextRouter({ githubLinks }));
+  app.use('/api/context', createContextRouter({ githubLinks, github: opts.github?.access ?? null }));
 
   // Home: the workspace's sections today and over time, what waits on a person
   // and what changed. Workspace-scoped like Context, and read-only.

@@ -74,6 +74,7 @@ const REPO_SOURCE: ContextSourceView = {
   title: 'acme/web',
   config: {
     repoFullName: 'acme/web',
+    installationId: 11,
     include: ['docs/**', '**/*.md'],
     exclude: ['**/CHANGELOG*'],
     branch: '',

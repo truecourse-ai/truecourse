@@ -36,12 +36,25 @@ export const testAuthVerifier =
   });
 
 /**
+ * A workspace with no GitHub account at all: nothing to install through, no
+ * links, nothing reachable. A test about installations passes its own.
+ */
+export const noGithubAccess: GithubMount['access'] = {
+  listInstallations: async () => [],
+  linkFor: async () => null,
+  reachRepository: async () => null,
+};
+
+/**
  * A GithubMount whose store links every registered repo to `orgId`. Unlinking
  * unregisters the entry, mirroring the derived registry (where deleting the
  * row IS the unregistration). Only the fields app.ts consumes are real; the
  * cast is confined to this helper.
  */
-export function testGithubMount(orgId: string = TEST_ORG): GithubMount {
+export function testGithubMount(
+  orgId: string = TEST_ORG,
+  access: GithubMount['access'] = noGithubAccess,
+): GithubMount {
   const store = {
     getRepo: async () => ({ workspaceOrgId: orgId }),
     listReposForWorkspace: async () =>
@@ -51,7 +64,12 @@ export function testGithubMount(orgId: string = TEST_ORG): GithubMount {
       if (entry) await unregisterProject(entry.slug);
     },
   };
-  return { webhook: Router(), connect: Router(), store: store as unknown as GithubMount['store'] };
+  return {
+    webhook: Router(),
+    connect: Router(),
+    store: store as unknown as GithubMount['store'],
+    access,
+  };
 }
 
 /** A job runner that RECORDS enqueues instead of running anything — what a route

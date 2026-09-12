@@ -67,6 +67,11 @@ export const CONTEXT_SOURCE_STATUS_ORDER = [
 export interface RepositorySourceConfig {
   /** `owner/repo` — the identity every store, clone and link keys by. */
   repoFullName: string;
+  /**
+   * The GitHub App installation the sync reads the repository through, which is
+   * what lets a source read a repository Code has not connected.
+   */
+  installationId: number;
   /** Gitignore-style globs a file must match to enter the source. */
   include: string[];
   /** Gitignore-style globs that subtract after the include selects. */

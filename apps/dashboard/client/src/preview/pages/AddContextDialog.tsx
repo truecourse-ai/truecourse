@@ -11,6 +11,12 @@
  * the whole row being the button. Connecting a tool is Settings' job, so the
  * list ends with the one link that goes there.
  *
+ * THE REPOSITORY SCOPE reads the workspace's GitHub accounts and then the
+ * repositories one of them can see, not the repositories Code has connected: a
+ * source may read any repository the account reaches, and it syncs through that
+ * account on its own. The account rides Check and Add, and the Link step is
+ * about the connected repositories that will READ the source, which may be none.
+ *
  * Nothing is stored until Add and sync: Check runs the real driver against the
  * real scope and stores nothing, and the add closes on the Documents view
  * narrowed to the new source, which reads Syncing until its first sync lands.
@@ -25,6 +31,8 @@ import {
   DEFAULT_REPOSITORY_INCLUDE,
   type ContextSourceCheck,
   type ContextSourceView,
+  type GithubInstallableRepo,
+  type GithubInstallationSummary,
   type RepositorySourceConfig,
 } from '@truecourse/shared';
 import {
@@ -36,6 +44,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { addContextSource, previewContextSource } from '@/lib/api';
+import { fetchGithubStatus, fetchInstallationRepos } from '@/preview/data/real-repos';
 import { usePreviewState } from '@/preview/shell/preview-state';
 import { Stepper } from '@/preview/ui/stepper';
 import { PREVIEW_BASE } from '@/preview/shell/base';
@@ -96,6 +105,11 @@ export function AddContextDialog({
   const { repos } = usePreviewState();
 
   const [kind, setKind] = useState<AddableKind | null>(null);
+  const [installations, setInstallations] = useState<GithubInstallationSummary[] | null>(null);
+  const [accountId, setAccountId] = useState<number | null>(null);
+  /** The chosen account's repositories; null while they are being read. */
+  const [accountRepos, setAccountRepos] = useState<GithubInstallableRepo[] | null>(null);
+  const [reposError, setReposError] = useState<string | null>(null);
   const [repoScope, setRepoScope] = useState<string | null>(null);
   const [include, setInclude] = useState(DEFAULT_REPOSITORY_INCLUDE.join('\n'));
   const [exclude, setExclude] = useState(DEFAULT_REPOSITORY_EXCLUDE.join('\n'));
@@ -109,6 +123,10 @@ export function AddContextDialog({
   useEffect(() => {
     if (open) return;
     setKind(null);
+    setInstallations(null);
+    setAccountId(null);
+    setAccountRepos(null);
+    setReposError(null);
     setRepoScope(null);
     setInclude(DEFAULT_REPOSITORY_INCLUDE.join('\n'));
     setExclude(DEFAULT_REPOSITORY_EXCLUDE.join('\n'));
@@ -120,7 +138,51 @@ export function AddContextDialog({
     setAdding(false);
   }, [open]);
 
-  // A repository source is a connected repository's own tree.
+  // The accounts a Repository source can read through, read on entering the
+  // scope step: a source may read any repository they can reach, connected in
+  // Code or not. With no account there is nothing to pick and the step says so.
+  useEffect(() => {
+    if (kind !== 'repository' || installations !== null) return;
+    let live = true;
+    void fetchGithubStatus()
+      .then((status) => {
+        if (!live) return;
+        setInstallations(status.installations);
+        if (status.installations.length > 0) {
+          setAccountId(status.installations[0]!.installationId);
+        }
+      })
+      .catch((e: unknown) => {
+        if (!live) return;
+        setInstallations([]);
+        setReposError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      live = false;
+    };
+  }, [kind, installations]);
+
+  // What the chosen account can see.
+  useEffect(() => {
+    if (accountId === null) return;
+    let live = true;
+    setAccountRepos(null);
+    setReposError(null);
+    void fetchInstallationRepos(accountId)
+      .then((found) => {
+        if (live) setAccountRepos(found);
+      })
+      .catch((e: unknown) => {
+        if (!live) return;
+        setAccountRepos([]);
+        setReposError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      live = false;
+    };
+  }, [accountId]);
+
+  // The repositories that could READ a source: the ones Code has connected.
   const connected = repos;
 
   /** The Repository source a repository already has, if it has one. */
@@ -131,20 +193,24 @@ export function AddContextDialog({
         (source.config as Partial<RepositorySourceConfig>).repoFullName === repoFullName,
     );
 
-  const chosenRepo = connected.find((repo) => repo.id === repoScope);
-  const already = chosenRepo ? existingFor(chosenRepo.fullName) : undefined;
+  const accounts = installations ?? [];
+  const already = repoScope ? existingFor(repoScope) : undefined;
 
   const config = (): Record<string, unknown> =>
     kind === 'repository'
       ? {
-          repoFullName: chosenRepo?.fullName ?? '',
+          repoFullName: repoScope ?? '',
           include: linesOf(include),
           exclude: linesOf(exclude),
         }
       : { llmsTxtUrl: url.trim() };
 
+  /** The account a repository source reads through, sent with every call. */
+  const account = (): { installationId?: number } =>
+    kind === 'repository' && accountId !== null ? { installationId: accountId } : {};
+
   const scopeReady =
-    kind === 'repository' ? Boolean(chosenRepo) && !already : url.trim() !== '';
+    kind === 'repository' ? Boolean(repoScope) && !already : url.trim() !== '';
 
   const step: 1 | 2 | 3 = !kind ? 1 : !checked ? 2 : 3;
 
@@ -152,7 +218,7 @@ export function AddContextDialog({
     if (!kind) return;
     setChecking(true);
     setFailure(null);
-    void previewContextSource({ kind, config: config() })
+    void previewContextSource({ kind, config: config(), ...account() })
       .then(setChecked)
       .catch((e: unknown) => setFailure(e instanceof Error ? e.message : String(e)))
       .finally(() => setChecking(false));
@@ -162,7 +228,7 @@ export function AddContextDialog({
     if (!kind) return;
     setAdding(true);
     setFailure(null);
-    void addContextSource({ kind, config: config(), repoIds: picked })
+    void addContextSource({ kind, config: config(), repoIds: picked, ...account() })
       .then((res) => {
         onAdded?.();
         onOpenChange(false);
@@ -225,54 +291,88 @@ export function AddContextDialog({
 
         {step >= 2 && kind === 'repository' && (
           <div className="space-y-3">
-            {connected.length === 0 ? (
+            {installations !== null && accounts.length === 0 ? (
               <div>
-                <p className="text-[11px] text-muted-foreground">No repository connected yet.</p>
+                <p className="text-[11px] text-muted-foreground">No GitHub account connected yet.</p>
                 <Link
                   to={`${PREVIEW_BASE}/settings/repositories`}
                   onClick={() => onOpenChange(false)}
                   className="mt-1 inline-block text-[11px] text-primary hover:underline"
                 >
-                  Connect a repository in Settings
+                  Connect an account in Settings
                 </Link>
               </div>
             ) : (
-              <div>
-                <label className="text-[11px] font-medium text-muted-foreground" htmlFor="ctx-repo">
-                  Repository
-                </label>
-                <select
-                  id="ctx-repo"
-                  value={repoScope ?? ''}
-                  onChange={(e) => {
-                    setRepoScope(e.target.value || null);
-                    setChecked(null);
-                  }}
-                  className="mt-1 w-full rounded border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                >
-                  <option value="">Pick a repository</option>
-                  {connected.map((repo) => {
-                    const has = existingFor(repo.fullName);
-                    return (
-                      <option key={repo.id} value={repo.id} disabled={Boolean(has)}>
-                        {repo.fullName}
-                        {has ? ' · already a source' : ''}
-                      </option>
-                    );
-                  })}
-                </select>
-                <Link
-                  to={`${PREVIEW_BASE}/settings/repositories`}
-                  onClick={() => onOpenChange(false)}
-                  className="mt-1 inline-block text-[11px] text-primary hover:underline"
-                >
-                  Connect another repository in Settings
-                </Link>
+              <div className="space-y-3">
+                {accounts.length > 1 && (
+                  <div>
+                    <label
+                      className="text-[11px] font-medium text-muted-foreground"
+                      htmlFor="ctx-account"
+                    >
+                      Account
+                    </label>
+                    <select
+                      id="ctx-account"
+                      value={accountId ?? ''}
+                      onChange={(e) => {
+                        setAccountId(e.target.value ? Number(e.target.value) : null);
+                        setRepoScope(null);
+                        setChecked(null);
+                      }}
+                      className="mt-1 w-full rounded border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                    >
+                      {accounts.map((installation) => (
+                        <option
+                          key={installation.installationId}
+                          value={installation.installationId}
+                        >
+                          {installation.accountLogin || `#${installation.installationId}`}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                <div>
+                  <label className="text-[11px] font-medium text-muted-foreground" htmlFor="ctx-repo">
+                    Repository
+                  </label>
+                  <select
+                    id="ctx-repo"
+                    value={repoScope ?? ''}
+                    onChange={(e) => {
+                      setRepoScope(e.target.value || null);
+                      setChecked(null);
+                    }}
+                    className="mt-1 w-full rounded border border-border bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  >
+                    <option value="">
+                      {accountRepos === null ? 'Reading repositories' : 'Pick a repository'}
+                    </option>
+                    {(accountRepos ?? []).map((repo) => {
+                      const has = existingFor(repo.fullName);
+                      return (
+                        <option key={repo.fullName} value={repo.fullName} disabled={Boolean(has)}>
+                          {repo.fullName}
+                          {has ? ' · already a source' : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  {reposError && <p className="mt-1 text-[11px] text-destructive">{reposError}</p>}
+                  <Link
+                    to={`${PREVIEW_BASE}/settings/repositories`}
+                    onClick={() => onOpenChange(false)}
+                    className="mt-1 inline-block text-[11px] text-primary hover:underline"
+                  >
+                    Connect another account in Settings
+                  </Link>
+                </div>
               </div>
             )}
-            {connected.length === 0 ? null : already ? (
+            {installations !== null && accounts.length === 0 ? null : already ? (
               <p className="text-[11px] text-muted-foreground">
-                {chosenRepo?.fullName} already has a source, “{already.title}”. Edit its patterns
+                {repoScope} already has a source, “{already.title}”. Edit its patterns
                 there rather than adding a second one.
               </p>
             ) : (
@@ -347,7 +447,7 @@ export function AddContextDialog({
                   ))}
                 </ul>
               </div>
-            ) : (
+            ) : kind === 'repository' && installations !== null && accounts.length === 0 ? null : (
               <p className="text-[11px] text-muted-foreground">{CHECK_WORDS[kind]}</p>
             )}
             {failure && <p className="text-[11px] text-destructive">{failure}</p>}
@@ -385,7 +485,7 @@ export function AddContextDialog({
               ))}
               {connected.length === 0 && (
                 <li className="px-3 py-2 text-[11px] text-muted-foreground">
-                  No repository is connected yet.
+                  No repository reads it yet. Link one from the source page once it is connected.
                 </li>
               )}
             </ul>

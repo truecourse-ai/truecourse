@@ -356,7 +356,7 @@ describe('the sweep query', () => {
     id,
     kind: 'repository' as const,
     title: repoFullName,
-    config: { repoFullName, include: [], exclude: [], branch: 'main' },
+    config: { repoFullName, installationId: 11, include: [], exclude: [], branch: 'main' },
   });
 
   it('names every workspace site that is older than the age given', async () => {

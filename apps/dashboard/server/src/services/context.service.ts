@@ -61,17 +61,25 @@ export function setContextDriverDeps(next: ContextDriverDeps | null): void {
  * The driver deps this server runs on: repositories are cloned through the
  * work-tree seam, and every site fetch is refused a non-public destination —
  * this process must never be talked into reaching its own network.
+ *
+ * A repository source names the installation it reads through, so the clone is
+ * minted from that installation and lands under this workspace.
  */
-export function contextDriverDeps(): ContextDriverDeps {
+export function contextDriverDeps(org: string): ContextDriverDeps {
   return (
     deps ?? {
       publicOnly: true,
-      acquireTree: async (repoFullName) => acquireWorkTree(repoFullName),
+      acquireTree: async (config) =>
+        acquireWorkTree(config.repoFullName, {
+          installationId: config.installationId,
+          workspaceOrgId: org,
+          ...(config.branch ? { defaultBranch: config.branch } : {}),
+        }),
     }
   );
 }
 
-/** The drivers, built from this server's deps. */
-export function serverContextDrivers(): Map<ContextSourceKind, ContextSourceDriver> {
-  return contextDrivers(contextDriverDeps());
+/** The drivers, built from this server's deps for one workspace. */
+export function serverContextDrivers(org: string): Map<ContextSourceKind, ContextSourceDriver> {
+  return contextDrivers(contextDriverDeps(org));
 }

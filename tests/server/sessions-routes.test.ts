@@ -4,7 +4,7 @@ import path from 'node:path';
 import request from 'supertest';
 import { type Express } from 'express';
 import { Router } from 'express';
-import { createTestApp, TEST_ORG } from '../helpers/test-app';
+import { createTestApp, noGithubAccess, TEST_ORG } from '../helpers/test-app';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 import { readRegistry, unregisterProject } from '../../packages/core/src/config/registry';
 import {
@@ -344,7 +344,12 @@ describe('Workspace sessions routes', () => {
       unlinkRepo: async () => {},
     };
     const scoped = createTestApp({
-      github: { webhook: Router(), connect: Router(), store: store as unknown as GithubMount['store'] },
+      github: {
+        webhook: Router(),
+        connect: Router(),
+        store: store as unknown as GithubMount['store'],
+        access: noGithubAccess,
+      },
     });
     const res = await request(scoped).get('/api/sessions/runs');
     expect(res.body.runs.map((r: { runId: string }) => r.runId)).toEqual([generate.runId]);
