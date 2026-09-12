@@ -73,6 +73,9 @@ function serve(registry: typeof REPO[] = []) {
     const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const { pathname } = new URL(href, window.location.origin);
     if (pathname === '/api/auth/me') return json({ user: USER });
+    if (pathname === '/api/auth/workspaces') {
+      return json({ workspaces: [{ id: 'org_1', name: 'Northwind Labs', current: true }] });
+    }
     if (pathname === '/api/repos') return json(registry);
     if (pathname === '/api/llm/config') return json({ config: null, providers: ['anthropic'] });
     if (pathname === '/api/github/status') return json({ installations: [], installUrl: '', repos: [] });

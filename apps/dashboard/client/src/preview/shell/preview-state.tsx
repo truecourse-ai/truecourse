@@ -29,15 +29,38 @@ import {
 import { toast } from 'sonner';
 import { disconnectRealRepo, fetchRealRepos } from '@/preview/data/real-repos';
 import { fetchLlmConfig } from '@/preview/data/llm-config';
+import {
+  createWorkspace as postWorkspace,
+  listWorkspaces,
+  switchWorkspace as postWorkspaceSwitch,
+} from '@/lib/api';
 import { useAuth } from '@/ee/AuthContext';
 import { useRealRunStream, type RunFailure } from './real-runs';
 import { useNotifications } from './use-notifications';
-import type { NotificationView } from '@truecourse/shared';
+import { PREVIEW_BASE } from './base';
+import type { NotificationView, WorkspaceSummary } from '@truecourse/shared';
 import type { JobChain, Repo, Workspace } from '@/preview/data/types';
 
 interface PreviewStateValue {
   /** The organization of the session. Null until the session probe answers. */
   workspace: Workspace | null;
+  /**
+   * Every workspace the signed-in user belongs to, the session's own among
+   * them. Empty until there is a session to ask about.
+   */
+  workspaces: WorkspaceSummary[];
+  /**
+   * Move the session into another workspace and start the shell over in it.
+   * Everything on every page is the organization's, so the app reloads rather
+   * than re-reading piece by piece. A refusal has nowhere of its own to appear,
+   * so it is said as a toast.
+   */
+  switchWorkspace: (organizationId: string) => Promise<void>;
+  /**
+   * Create a workspace and start the shell over in it. Throws what the server
+   * refused with, so the dialog can say it where the name was typed.
+   */
+  createWorkspace: (name: string) => Promise<void>;
   /**
    * The connected repositories. A row carries what its runs say: onboarding
    * while its first scan is up, and the settled run's own words afterwards.
@@ -88,6 +111,7 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
   const [repos, setRepos] = useState<Repo[]>([]);
   const [reposLoaded, setReposLoaded] = useState(false);
   const [llmProvider, setLlmProvider] = useState<LlmProviderState>('unknown');
+  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
 
   const refreshRealRepos = useCallback(async () => {
     const found = await fetchRealRepos();
@@ -137,6 +161,44 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
     void refreshLlmProvider();
   }, [refreshLlmProvider]);
 
+  // The user's workspaces, read once there is a session to ask about. A refused
+  // read leaves the list empty: the switcher still names the workspace the
+  // session is in, since that comes from the session and not from here.
+  useEffect(() => {
+    if (!orgName) return;
+    let live = true;
+    void listWorkspaces()
+      .then((answer) => {
+        if (live) setWorkspaces(answer.workspaces);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [orgName, orgId]);
+
+  /**
+   * Both moves end the same way: the session is in another organization now, so
+   * the shell starts over at the section root rather than re-reading every page
+   * it already drew.
+   */
+  const switchWorkspace = useCallback(async (organizationId: string) => {
+    try {
+      await postWorkspaceSwitch(organizationId);
+    } catch (e: unknown) {
+      toast.error('Could not switch workspace', {
+        description: e instanceof Error ? e.message : String(e),
+      });
+      return;
+    }
+    window.location.assign(PREVIEW_BASE);
+  }, []);
+
+  const createWorkspace = useCallback(async (name: string) => {
+    await postWorkspace(name);
+    window.location.assign(PREVIEW_BASE);
+  }, []);
+
   /**
    * The row goes optimistically and the refresh settles it either way — so a
    * refused disconnect (the server holds the repo while a scan it cannot stop
@@ -184,6 +246,9 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
     });
     return {
       workspace,
+      workspaces,
+      switchWorkspace,
+      createWorkspace,
       repos: allRepos,
       unlinkRepo,
       refreshRealRepos,
@@ -200,6 +265,9 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
   }, [
     orgId,
     orgName,
+    workspaces,
+    switchWorkspace,
+    createWorkspace,
     repos,
     realRuns,
     feed,

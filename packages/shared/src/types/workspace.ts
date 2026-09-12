@@ -38,3 +38,20 @@ export interface WorkspaceMembersResponse {
   members: WorkspaceMember[]
   invitations: WorkspaceInvitation[]
 }
+
+/**
+ * One workspace the signed-in user belongs to, as the side menu's switcher
+ * lists it. A workspace IS a WorkOS organization the user has an active
+ * membership in, and the session is minted into exactly one of them.
+ */
+export interface WorkspaceSummary {
+  /** The WorkOS organization id, which is what switching into it names. */
+  id: string
+  name: string
+  /** Whether the session is in this one. */
+  current: boolean
+}
+
+export interface WorkspacesResponse {
+  workspaces: WorkspaceSummary[]
+}

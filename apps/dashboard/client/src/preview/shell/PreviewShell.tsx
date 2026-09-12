@@ -1,7 +1,8 @@
 /**
  * The one-product shell: the sidebar the whole dashboard hangs off.
  *
- * Top to bottom: the workspace the session is in, then
+ * Top to bottom: the workspace the session is in and the switcher into the
+ * others, then
  * Home, Context, Code, Flows, Agent, Notifications (with the unread badge) and
  * Settings, then Admin
  * on its own, separated, when the signed-in user is an operator, then the
@@ -19,6 +20,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom';
 import {
   Bell,
+  ChevronsUpDown,
   Route,
   GitBranch,
   Home,
@@ -26,6 +28,7 @@ import {
   LogOut,
   MousePointer2,
   Moon,
+  Plus,
   Sun,
   PanelLeftClose,
   PanelLeftOpen,
@@ -35,6 +38,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/ee/AuthContext';
 import { useThemeToggle } from '@/hooks/useThemeToggle';
+import { CreateWorkspaceDialog } from './CreateWorkspaceDialog';
 import { usePreviewState } from './preview-state';
 import { usePreviewUser } from './use-preview-user';
 import { PREVIEW_BASE } from './base';
@@ -131,31 +135,89 @@ function useClickOutside(open: boolean, close: () => void) {
   return ref;
 }
 
-/** The workspace of the session: its initial, and its name when there is room. */
-function WorkspaceBadge({ collapsed }: { collapsed: boolean }) {
-  const { workspace } = usePreviewState();
+const initialOf = (name: string): string => name.trim().charAt(0).toUpperCase();
+
+/**
+ * The workspace of the session, and the way into the others: its initial and
+ * name, and a menu of every workspace the user belongs to plus Create
+ * workspace. Choosing one switches the session and starts the app over in it.
+ * Collapsed, the initial alone opens the same menu.
+ */
+function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
+  const { workspace, workspaces, switchWorkspace } = usePreviewState();
+  const [open, setOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const close = useCallback(() => setOpen(false), []);
+  const ref = useClickOutside(open, close);
+
+  // Nobody is signed in: there is no workspace to name.
   if (!workspace) return null;
 
-  if (collapsed) {
-    return (
-      <div className="flex justify-center px-0 py-1">
-        <span className="flex h-7 w-7 items-center justify-center rounded-md bg-muted text-xs font-semibold text-foreground">
-          {workspace.initial}
-        </span>
-      </div>
-    );
-  }
-
   return (
-    <div className="px-2 py-1">
-      <div className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5">
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-semibold text-foreground">
-          {workspace.initial}
-        </span>
-        <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-          {workspace.name}
-        </span>
-      </div>
+    <div ref={ref} className={`relative ${collapsed ? 'flex justify-center px-0 py-1' : 'px-2 py-1'}`}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-label="Switch workspace"
+        className={
+          collapsed
+            ? 'flex h-7 w-7 items-center justify-center rounded-md bg-muted text-xs font-semibold text-foreground transition-colors hover:bg-muted/60'
+            : 'flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left transition-colors hover:bg-muted/60'
+        }
+      >
+        {collapsed ? (
+          workspace.initial
+        ) : (
+          <>
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-semibold text-foreground">
+              {workspace.initial}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+              {workspace.name}
+            </span>
+            <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          </>
+        )}
+      </button>
+      {open && (
+        <div
+          className={`absolute top-full z-30 mt-1 overflow-hidden rounded-md border border-border bg-popover shadow-md ${
+            collapsed ? 'left-1 w-48' : 'left-2 right-2'
+          }`}
+        >
+          {workspaces.map((w) => (
+            <button
+              key={w.id}
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                void switchWorkspace(w.id);
+              }}
+              className={`flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs transition-colors hover:bg-muted/60 ${
+                w.current ? 'text-foreground' : 'text-muted-foreground'
+              }`}
+            >
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted text-[10px] font-semibold text-foreground">
+                {initialOf(w.name)}
+              </span>
+              <span className="min-w-0 flex-1 truncate">{w.name}</span>
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              setCreating(true);
+            }}
+            className="flex w-full items-center gap-2 border-t border-border px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+          >
+            <Plus className="h-3.5 w-3.5 shrink-0" />
+            Create workspace
+          </button>
+        </div>
+      )}
+      <CreateWorkspaceDialog open={creating} onOpenChange={setCreating} />
     </div>
   );
 }
@@ -266,7 +328,7 @@ export function PreviewShell({ children }: { children: ReactNode }) {
           </button>
         </div>
 
-        <WorkspaceBadge collapsed={collapsed} />
+        <WorkspaceSwitcher collapsed={collapsed} />
 
         <nav className="mt-2 flex-1 space-y-0.5 overflow-y-auto px-2 py-1" aria-label="Workspace">
           {NAV.map((item) => (
