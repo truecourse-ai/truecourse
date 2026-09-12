@@ -428,9 +428,7 @@ function Dashboard({ signal }: { signal: number }) {
 }
 
 const PRIMARY_ACTION =
-  'rounded bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90';
-const BORDERED_ACTION =
-  'rounded border border-border px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted/60';
+  'inline-block rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90';
 
 /**
  * One checkpoint: its mark (a check once done, its number until then), what it
@@ -443,7 +441,6 @@ function Checkpoint({
   line,
   action,
   to,
-  primary,
 }: {
   step: number;
   done: boolean;
@@ -451,47 +448,51 @@ function Checkpoint({
   line: string;
   action: string;
   to: string;
-  primary: boolean;
 }) {
   return (
-    <li className="flex items-center gap-4 px-6 py-3">
+    <li className="flex flex-col gap-4 px-8 py-8">
       <span
         aria-hidden
-        className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-medium ${
+        className={`inline-flex h-9 w-9 items-center justify-center rounded-full text-sm font-semibold ${
           done ? 'bg-emerald-500 text-white' : 'border border-border text-foreground'
         }`}
       >
-        {done ? <Check className="h-3.5 w-3.5" /> : step}
+        {done ? <Check className="h-4.5 w-4.5" /> : step}
       </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[13px] font-medium text-foreground">{title}</span>
-        <span className="block truncate text-[11px] text-muted-foreground">{line}</span>
+      <span className="min-w-0">
+        <span className="block text-base font-semibold text-foreground">{title}</span>
+        <span className="mt-1 block text-[13px] text-muted-foreground">{line}</span>
       </span>
-      {done ? (
-        <StatusWord tone="success" word="Done" />
-      ) : (
-        <Link to={to} className={`shrink-0 ${primary ? PRIMARY_ACTION : BORDERED_ACTION}`}>
-          {action}
-        </Link>
-      )}
+      <span className="mt-1">
+        {done ? (
+          <StatusWord tone="success" word="Done" />
+        ) : (
+          <Link to={to} className={PRIMARY_ACTION}>
+            {action}
+          </Link>
+        )}
+      </span>
     </li>
   );
 }
 
 /**
- * The two checkpoints, in order. The next one to do carries the primary action;
- * the other carries the bordered one, since either order is allowed.
+ * Home before the workspace has both halves: two checkpoints, side by side in
+ * the strip's grid, either order. Both done, and Home is the dashboard.
  */
 function Onboarding({ hasContext, hasRepo }: { hasContext: boolean; hasRepo: boolean }) {
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <PageHeader title="Home" />
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <p className="px-6 py-4 text-[13px] text-muted-foreground">
+        <p className="px-8 py-6 text-[13px] text-muted-foreground">
           Two things make a workspace: what the product promises, and the code that keeps the
           promise.
         </p>
-        <ul className="divide-y divide-border border-b border-border" aria-label="Getting started">
+        <ul
+          className="grid grid-cols-1 border-y border-border lg:grid-cols-2 [&>*]:border-b [&>*]:border-border lg:[&>*]:border-b-0 lg:[&>*]:border-r lg:[&>*:last-child]:border-r-0"
+          aria-label="Getting started"
+        >
           <Checkpoint
             step={1}
             done={hasContext}
@@ -499,7 +500,6 @@ function Onboarding({ hasContext, hasRepo }: { hasContext: boolean; hasRepo: boo
             line="The documentation that says what the product promises."
             action="Add context"
             to={`${PREVIEW_BASE}/context?add=1`}
-            primary={!hasContext}
           />
           <Checkpoint
             step={2}
@@ -508,7 +508,6 @@ function Onboarding({ hasContext, hasRepo }: { hasContext: boolean; hasRepo: boo
             line="The code that has to keep the promise."
             action="Connect repository"
             to={`${PREVIEW_BASE}/code?connect=1`}
-            primary={hasContext}
           />
         </ul>
       </div>

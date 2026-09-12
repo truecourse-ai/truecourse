@@ -312,7 +312,7 @@ describe('Home', () => {
     renderHome();
 
     const attention = await screen.findByRole('region', { name: 'Needs attention' });
-    expect(within(attention).getByText('Flow generation')).toBeInTheDocument();
+    expect(await within(attention).findByText('Flow generation')).toBeInTheDocument();
     expect(within(attention).getByText('Failed')).toBeInTheDocument();
     expect(within(attention).getByText('acme/web, the provider refused')).toBeInTheDocument();
     expect(within(attention).getByText('refund window disagrees')).toBeInTheDocument();
@@ -396,9 +396,9 @@ describe('Home onboarding', () => {
     expect(within(rows()[0]!).getByText('Connect your first context')).toBeInTheDocument();
     expect(within(rows()[1]!).getByText('Connect your first repository')).toBeInTheDocument();
     expect(screen.queryByText('Done')).toBeNull();
-    // The next thing to do carries the primary action, the other the bordered one.
+    // Either order works, so both actions read the same.
     expect(action('Add context')).toHaveClass('bg-primary');
-    expect(action('Connect repository')).toHaveClass('border-border');
+    expect(action('Connect repository')).toHaveClass('bg-primary');
     expect(screen.queryByRole('list', { name: 'Today' })).toBeNull();
   });
 
