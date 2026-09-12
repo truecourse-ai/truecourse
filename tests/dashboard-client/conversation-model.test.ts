@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it, expect } from 'vitest';
 import type { SessionEvent } from '@truecourse/agent-loop';
-import type { ActivityEvent } from '@truecourse/shared/activity-stream';
+import { compactRunSnapshots, type ActivityEvent } from '@truecourse/shared/activity-stream';
 import { foldConversation, latestRunRecord } from '@/components/sessions/conversation-model';
 import type { ConversationLine } from '@/components/sessions/conversation-model';
 import type { PublicSessionRun } from '@/lib/api';
@@ -24,6 +24,13 @@ const read = <T,>(name: string): T =>
 
 const SETUP_RUN = read<PublicSessionRun>('guard-setup-run.json');
 const SETUP_JOURNAL = read<ActivityEvent[]>('guard-setup-journal.json');
+
+it('renders the same conversation after discarding superseded snapshots', () => {
+  const compact = compactRunSnapshots(SETUP_JOURNAL);
+  expect(compact.filter(e => e.kind === 'run')).toHaveLength(1);
+  expect(compact.length).toBeLessThan(SETUP_JOURNAL.length);
+  expect(foldConversation(SETUP_RUN, compact)).toEqual(foldConversation(SETUP_RUN, SETUP_JOURNAL));
+});
 
 const RECIPE = '26356f92-1e71-46fe-a74a-d1eba5d1c020';
 const PREPARATIONS = 'f8c000b1-3a51-4da0-a1a6-1ce664249e73';

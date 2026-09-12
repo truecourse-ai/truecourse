@@ -139,8 +139,10 @@ export function createRepoGuardSetupTask(
           const files = collectGuardSetupBundle(tree.dir);
           if (Object.keys(files).length > 0) await saveGuardSetupBundle(ref, files);
 
+          // Preserve the failed bundle above, then fail the job so its status
+          // agrees with Activity and it cannot chain into generation.
+          if (report.status !== 'ok') throw new Error(report.reason || 'Setup did not complete');
           const reason = firstLine(report.reason);
-          if (report.status !== 'ok') activityRun.setError({ message: reason || 'Setup did not complete' });
           // What the repository reads as of NOW, not as of the clone: on a
           // connect the first Document scan runs beside this job, so the
           // materialized slice can be older than the answer.
@@ -152,23 +154,15 @@ export function createRepoGuardSetupTask(
               documents,
               ...(reason ? { reason } : {}),
             },
-            notification:
-              report.status === 'ok'
-                ? {
-                    level: 'success',
-                    title: 'Flow setup complete',
-                    body:
-                      documents === 0
-                        ? 'Set up. No documents linked yet.'
-                        : 'The recipe and its dependencies are ready.',
-                    data: { repoFullName, runId: activityRun.runId, documents },
-                  }
-                : {
-                    level: 'error',
-                    title: 'Flow setup did not complete',
-                    body: reason || 'Setup was refused.',
-                    data: { repoFullName, runId: activityRun.runId },
-                  },
+            notification: {
+              level: 'success',
+              title: 'Flow setup complete',
+              body:
+                documents === 0
+                  ? 'Set up. No documents linked yet.'
+                  : 'The recipe and its dependencies are ready.',
+              data: { repoFullName, runId: activityRun.runId, documents },
+            },
           };
         } finally {
           tree.dispose();

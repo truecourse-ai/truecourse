@@ -52,6 +52,8 @@ import {
   type CorpusConflict,
 } from '@truecourse/shared';
 import path from 'node:path';
+import { assertGuardGenerateResumeCommit, GuardGenerateResumeError, type GuardGenerateResume } from '../services/guard-generate/resume.js';
+import { GenerateStepNotReadyError } from '../services/guard-generate/run.js';
 import type { RunError, SessionDriver, SessionLlm } from '@truecourse/agent-loop';
 import { getGit } from '../lib/git.js';
 import { getGuardExecutor } from '../lib/guard-executor.js';
@@ -90,6 +92,7 @@ import {
 } from '../services/guard-generate/index.js';
 export { GenerateStepNotReadyError } from '../services/guard-generate/index.js';
 export { GENERATE_SESSION_STEPS, type GenerateStep } from '@truecourse/guard-generator';
+export { assertGuardGenerateResumeCommit, guardGenerateResume, GuardGenerateResumeError, type GuardGenerateResume } from '../services/guard-generate/resume.js';
 import { readGuardRecipeCard } from './guard-read.js';
 import { readCorpus, readDecisions } from '@truecourse/spec-consolidator';
 import type { LlmEstimate } from './analyze-core.js';
@@ -207,6 +210,8 @@ const GUARD_STEP_STAGES: Record<string, StageId[]> = {
 
 export interface GuardGenerateInProcessOptions {
   tracker?: StepTracker;
+  /** Restore this interrupted run's completed stages without repeating their LLM work. */
+  resume?: GuardGenerateResume;
   /**
    * LLM transport: `cli` (spawn `claude -p`), `agent` (mailbox under `io`), or
    * `api` (the provider configured in `~/.truecourse/config.json`). Unset
@@ -362,7 +367,7 @@ function resolveTransport(options: {
   llm?: 'cli' | 'agent' | 'api';
   io?: string;
   transport?: LlmTransport;
-}): LlmTransport | undefined {
+}): LlmTransport {
   // An explicit instance is the whole answer — it already carries the
   // credentials the caller chose for this run.
   if (options.transport) return options.transport;
@@ -392,6 +397,7 @@ export async function guardGenerateInProcess(
   options: GuardGenerateInProcessOptions = {},
 ): Promise<GuardGenerateInProcessResult> {
   const { tracker } = options;
+  const restored = new Set(options.resume?.completedSteps ?? []);
   // The transport this run actually uses decides the models — never the saved
   // selection a `--llm-transport` flag just overrode. An explicit transport IS
   // the selection, and its caller says which mode it runs in (a stored
@@ -427,6 +433,7 @@ export async function guardGenerateInProcess(
   };
 
   let transport: LlmTransport | undefined;
+  let resumeFailure: GuardGenerateResumeError | undefined;
   try {
     // Hard-fail on unresolved spec conflicts BEFORE the estimate — never ask to
     // spend, then fail. Extracting both sides of an open overlap births noise.
@@ -446,6 +453,19 @@ export async function guardGenerateInProcess(
     }
 
     transport = resolveTransport(options);
+    if (options.resume) {
+      assertGuardGenerateResumeCommit(options.resume, await resolveCommitSha(repoRoot));
+      const liveTransport = transport;
+      transport = async request => {
+        const completed = Object.entries(GUARD_STEP_STAGES).find(([step, stages]) =>
+          restored.has(step) && stages.some(stage => stage === request.stage));
+        if (completed) {
+          resumeFailure = new GuardGenerateResumeError(completed[0]);
+          throw resumeFailure;
+        }
+        return liveTransport(request);
+      };
+    }
   } catch (e) {
     // The gates run before the first step opens, so they stop on `index`, the
     // step a reader is looking at when the run ends there: a refusal takes the
@@ -459,7 +479,9 @@ export async function guardGenerateInProcess(
       throw e;
     }
     const reason =
-      e instanceof OpenConflictsError
+      e instanceof GuardGenerateResumeError
+        ? e.message
+        : e instanceof OpenConflictsError
         ? (firstLine(e.message) ?? e.message)
         : `the LLM provider is unusable (${(e as Error).message})`;
     tracker?.fact('index', `stopped: ${reason}`);
@@ -467,7 +489,7 @@ export async function guardGenerateInProcess(
     untap?.();
     // The record carries the reason under the gate's own kind.
     finishRun('failed', {
-      error: { message: reason, kind: e instanceof OpenConflictsError ? 'open-conflicts' : 'llm-config' },
+      error: { message: reason, kind: e instanceof GuardGenerateResumeError ? 'resume' : e instanceof OpenConflictsError ? 'open-conflicts' : 'llm-config' },
     });
     throw e;
   }
@@ -478,6 +500,7 @@ export async function guardGenerateInProcess(
   const startedAt = Date.now();
 
   const throwIfAborted = (): void => {
+    if (resumeFailure) throw resumeFailure;
     if (options.signal?.aborted) throw new GuardGenerateAborted();
   };
 
@@ -488,7 +511,7 @@ export async function guardGenerateInProcess(
     const ni = STEPS.indexOf(key);
     if (ni <= cur) return;
     for (let i = cur; i < ni; i++) tracker?.done(STEPS[i]);
-    tracker?.start(key);
+    if (!restored.has(key)) tracker?.start(key);
     cur = ni;
   };
 
@@ -583,6 +606,7 @@ export async function guardGenerateInProcess(
           // Single-step mode: the seams enforce the cache-only replay of every
           // step before the chosen one (the engine enforces the stop after it).
           ...(options.only ? { only: options.only } : {}),
+          ...(options.resume ? { replaySteps: (['extract', 'flows'] as const).filter(step => restored.has(step)) } : {}),
         });
   const extractSession = options.extractSession ?? sessionSeams!.extractSession;
   // An injected extraction seam owns no cache, so the production reuse seam
@@ -594,7 +618,11 @@ export async function guardGenerateInProcess(
   const flowsEpicSession = options.flowsEpicSession ?? sessionSeams!.flowsEpicSession;
   const flowWorkerSession = options.flowWorkerSession ?? sessionSeams!.flowWorkerSession;
 
-  tracker?.start('index');
+  if (options.resume) {
+    for (const key of restored) tracker?.done(key, `Restoring completed work from ${options.resume.runId}`);
+    tracker?.fact('index', `Resuming ${options.resume.runId}; completed authoring is replayed from saved results`);
+  }
+  if (!restored.has('index')) tracker?.start('index');
   try {
     // A stop asked for before the first step ends the run as interrupted, on
     // the record, like one asked for at any later boundary.
@@ -645,7 +673,7 @@ export async function guardGenerateInProcess(
         cur = STEPS.indexOf('extract');
         // No detail yet — the seam's initial onDoc(0, total) supplies the
         // "docs 0/N" counter the moment the pool is planned.
-        tracker?.start('extract');
+        if (!restored.has('extract')) tracker?.start('extract');
       },
       onExtractProgress: (done, total) => {
         advanceTo('extract');
@@ -712,7 +740,7 @@ export async function guardGenerateInProcess(
       // One line per THING the run did, filed under the step that did it. The
       // engine's phase names ARE this checklist's keys, so they line up.
       onFact: (step, line) => tracker?.fact(step, line),
-      onFlowSettled: (settled, total) => {
+      onFlowSettled: async (settled, total) => {
         throwIfAborted();
         building = false;
         flowsDone = settled;
@@ -720,8 +748,13 @@ export async function guardGenerateInProcess(
         // Gap-only flows settle without any worker running — only re-render a
         // LIVE validate line; never start the step early.
         if (validateStarted || settled > 0) renderValidate();
+        // Drain persistence before advancing: a synchronous settlement burst
+        // must not retain hundreds of complete progress snapshots.
+        await run.flush?.();
       },
     });
+
+    throwIfAborted();
 
     // An early abort (no corpus, an unusable recipe, a stage that lost every LLM
     // call) ran NO phase past the one it died in: the step it died in takes the
@@ -778,7 +811,10 @@ export async function guardGenerateInProcess(
     if (!options.sessionRun) finishRun('completed');
 
     return { guard, sessionsRunDir: run.dir };
-  } catch (e) {
+  } catch (caught) {
+    const e = options.resume && caught instanceof GenerateStepNotReadyError
+      ? new GuardGenerateResumeError(caught.step)
+      : caught;
     tracker?.error(STEPS[cur], (e as Error).message);
     // A stop the caller asked for is not a failure; anything else lands its
     // reason on the record, the only place a watcher can read it.

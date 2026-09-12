@@ -8,7 +8,7 @@
 
 import { startContextScan, startGuardGenerate, startGuardSetup, type RunStart } from './scan';
 
-export type RunTrigger = (repoId: string) => Promise<RunStart>;
+export type RunTrigger = (repoId: string, resumeRunId?: string) => Promise<RunStart>;
 
 const RUN_TRIGGERS: Record<string, RunTrigger> = {
   // The Document scan belongs to the workspace, not to a repository: whichever

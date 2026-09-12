@@ -326,6 +326,19 @@ describe('runGuardSetup — the step spine (plan 03 step 8)', () => {
     expect(report.steps.find((s) => s.key === 'preparations')?.reason).toBe(findings.join('; '))
   })
 
+  it('retries unavailable preparation authoring when a session becomes available', async () => {
+    const r = fixtureRepo(); writeRecipe(r);
+    writeGuardSetup(r, (await runGuardSetup(baseOpts(r, { seedSession: seedSeam().seam }))).report);
+    expect(readGuardSetup(r)!.steps.find(row => row.key === 'preparations')!.inputFingerprint).toBe('authoring-unavailable');
+    let calls = 0;
+    const options = baseOpts(r, { only: 'preparations', preparationSession: async () => {
+      calls++; return { status: 'skipped', reason: 'No supported datastore', findings: ['No supported datastore'] };
+    } });
+    writeGuardSetup(r, (await runGuardSetup(options)).report);
+    await runGuardSetup(options);
+    expect(calls).toBe(1);
+  });
+
   // `blocked` is the auth step's alone — a supplied credential waiting on a user
   // registration. Every other step is ok/skipped/failed.
   it('the shared schema allows `blocked` on auth and refuses it anywhere else', () => {

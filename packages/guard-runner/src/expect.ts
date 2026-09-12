@@ -8,6 +8,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type {
+  GuardFailureObservation,
   GuardComparand,
   GuardComparison,
   GuardExpect,
@@ -17,6 +18,10 @@ import type {
 import { describeOffset } from '@truecourse/shared'
 
 export interface ExpectMismatch {
+  observation?: GuardFailureObservation
+  observationUnavailable?: string
+  /** Producer-only identity of the first failing text operator. */
+  matcherOperator?: 'equals' | 'contains' | 'matches' | 'compare'
   /**
    * What disagreed. Two subjects no matcher produces: `prompt` — a scripted answer
    * whose question the command never asked (see `pty.ts`) — and `capture` — a
@@ -188,6 +193,7 @@ export function matchTextMatcher(
     const caseOnly = value.toLowerCase() === matcher.equals.toLowerCase()
     return {
       subject,
+      ...(subject === 'text' ? { matcherOperator: 'equals' as const } : {}),
       expected: `${label} equals ${JSON.stringify(truncate(matcher.equals))}`,
       actual: `${label} was ${JSON.stringify(truncate(value, limit))}${caseNote(caseOnly)}`,
       detail: [
@@ -203,6 +209,7 @@ export function matchTextMatcher(
     const caseOnly = value.toLowerCase().includes(matcher.contains.toLowerCase())
     return {
       subject,
+      ...(subject === 'text' ? { matcherOperator: 'contains' as const } : {}),
       expected: `${label} contains ${JSON.stringify(matcher.contains)}`,
       actual: `${label} was ${JSON.stringify(truncate(value, limit))}${caseNote(caseOnly)}`,
       detail: [
@@ -226,6 +233,7 @@ export function matchTextMatcher(
       const caseOnly = re !== null && new RegExp(matcher.matches, 'i').test(value)
       return {
         subject,
+        ...(subject === 'text' ? { matcherOperator: 'matches' as const } : {}),
         expected: `${label} matches /${matcher.matches}/${reError ? ` (invalid regex: ${reError})` : ''}`,
         actual: `${label} was ${JSON.stringify(truncate(value, limit))}${caseNote(caseOnly)}`,
         detail: [
@@ -239,7 +247,7 @@ export function matchTextMatcher(
   }
   if (matcher.compare) {
     const m = matchComparison(label, matcher.compare, value, limit)
-    if (m) return { ...m, subject }
+    if (m) return { ...m, subject, ...(subject === 'text' ? { matcherOperator: 'compare' as const } : {}) }
   }
   return null
 }

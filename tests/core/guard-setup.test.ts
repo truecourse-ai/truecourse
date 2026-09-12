@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url';
 import {
   recipePath,
   computeRecipeFingerprint,
+  computePreparationFingerprint,
   readGuardSetup,
   writeGuardSetup,
   dependenciesPath,
@@ -496,7 +497,7 @@ function settledRepo(): string {
       { key: 'catalog', status: 'ok', inputFingerprint: 'settled-catalog' },
       { key: 'interfaces', status: 'ok', inputFingerprint: interfacesFingerprint(r) },
       { key: 'seed', status: 'ok', inputFingerprint: computeSeedStepFingerprint(r) },
-      { key: 'preparations', status: 'ok', inputFingerprint: computeRecipeFingerprint(r) },
+      { key: 'preparations', status: 'ok', inputFingerprint: computePreparationFingerprint(r) },
       { key: 'auth', status: 'ok', inputFingerprint: authFingerprint(r) },
     ],
   };

@@ -24,8 +24,8 @@ export type RunStart =
   | { kind: 'busy'; message: string }
   | { kind: 'failed'; message: string };
 
-/** POST a repo-scoped start route (`guard/setup`, `guard/generate`, …). */
-export async function startRun(repoId: string, path: string): Promise<RunStart> {
+/** POST a repo-scoped start route (`spec/corpus/scan`, `guard/setup`, …). */
+export async function startRun(repoId: string, path: string, payload?: unknown): Promise<RunStart> {
   const url = `${getServerUrl()}/api/repos/${encodeURIComponent(repoId)}/${path}`;
   let res: Response;
   try {
@@ -33,6 +33,7 @@ export async function startRun(repoId: string, path: string): Promise<RunStart> 
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
+      ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
     });
   } catch (e) {
     return { kind: 'failed', message: e instanceof Error ? e.message : String(e) };
@@ -56,8 +57,8 @@ export async function startRun(repoId: string, path: string): Promise<RunStart> 
 export const startGuardSetup = (repoId: string): Promise<RunStart> =>
   startRun(repoId, 'guard/setup');
 
-export const startGuardGenerate = (repoId: string): Promise<RunStart> =>
-  startRun(repoId, 'guard/generate');
+export const startGuardGenerate = (repoId: string, resumeRunId?: string): Promise<RunStart> =>
+  startRun(repoId, 'guard/generate', resumeRunId ? { resumeRunId } : undefined);
 
 /**
  * The workspace Document scan — the one run that belongs to no repository, so

@@ -111,7 +111,7 @@ export interface RunStarter {
   /** Whether a run of this command can be started from here. */
   supports: (command: string) => boolean;
   /** Fire it. Refusals are announced by the starter, so there is nothing to catch. */
-  start: (command: string) => void;
+  start: (command: string, resumeRunId?: string) => void;
   /** A start is in flight. */
   pending: boolean;
 }

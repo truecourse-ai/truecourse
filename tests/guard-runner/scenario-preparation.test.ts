@@ -86,6 +86,40 @@ const rows = (count: number) =>
   }));
 
 describe('runner-owned preparation profiles', () => {
+  it('blocks a scenario whose preparation needs unavailable AWS before building or seeding', async () => {
+    const { root, recipe } = fixture();
+    recipe.preparations!.ledger.needs = ['aws'];
+    recipe.build = "node -e \"require('fs').writeFileSync('build-ran', 'yes')\"";
+    fs.writeFileSync(path.join(root, 'scripts/seed.mjs'), "throw new Error('seed must not run')");
+    writeSpecDoc(root);
+    fs.mkdirSync(path.join(root, '.truecourse/scenarios'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.truecourse/scenarios/dependencies.json'), JSON.stringify({ dependencies: [{
+      name: 'aws', class: 'supplied', summary: 'S3', services: ['s3'], needs: [],
+      registration: { kind: 'env', vars: [{ name: 'AWS_SECRET_ACCESS_KEY', description: 'Secret', secret: true }] },
+    }] }));
+    await expect(prepareScenario({ repoRoot: root, recipe, profile: 'ledger' })).rejects.toThrow('Preparation dependency "aws"');
+    writeScenario(root, 'requires-aws.yaml', GuardScenarioSchema.parse({
+      id: 'requires-aws', title: 'Preparation dependency gate', binds: specBinds('spec/section'),
+      setup: { preparation: 'ledger' }, steps: [{ request: { method: 'GET', path: '/rows' }, expect: { status: 200 } }],
+    }));
+    const result = await runGuard({ repoRoot: root, recipe });
+    expect(result.status).toBe('ok');
+    if (result.status === 'ok') expect(result.latest.summary).toMatchObject({ blocked: 1, error: 0, pass: 0 });
+    expect(fs.existsSync(path.join(root, 'build-ran'))).toBe(false);
+    // An absent-account scenario cannot override its preparation's provided-account requirement.
+    fs.writeFileSync(path.join(root, '.truecourse/scenarios/dependencies.local.json'), JSON.stringify({ aws: { env: { AWS_SECRET_ACCESS_KEY: 'registered-secret' } } }));
+    writeScenario(root, 'requires-aws.yaml', GuardScenarioSchema.parse({
+      id: 'requires-aws', title: 'Conflicting preparation dependency', binds: specBinds('spec/section'),
+      prerequisites: [{ dependency: 'aws', mode: 'absent' }],
+      setup: { preparation: 'ledger', env: { AWS_SECRET_ACCESS_KEY: '' } },
+      steps: [{ request: { method: 'GET', path: '/rows' }, expect: { status: 200 } }],
+    }));
+    const conflict = await runGuard({ repoRoot: root, recipe });
+    expect(conflict.status).toBe('ok');
+    if (conflict.status === 'ok') expect(conflict.latest.summary).toMatchObject({ blocked: 1, error: 0, pass: 0 });
+    expect(fs.existsSync(path.join(root, 'build-ran'))).toBe(false);
+  });
+
   it.each(['external', 'catalog'] as const)('injects the same provided %s account into private seed, baseline checks, and scenario execution', async (source) => {
     const { root, recipe } = fixture();
     if (source === 'external') recipe.api!.externals = { currencybeacon: { baseUrlEnv: 'CURRENCYBEACON_BASE_URL', baseUrl: 'http://provider.test', env: { CURRENCYBEACON_API_KEY: {} } } };
@@ -109,9 +143,12 @@ describe('runner-owned preparation profiles', () => {
         CURRENCYBEACON_API_KEY: 'private-fixture-key', CURRENCYBEACON_BASE_URL: 'http://provider.test',
       } } }));
     }
+    recipe.preparations!.ledger.needs = ['currencybeacon'];
+    const directWorld = await prepareScenario({ repoRoot: root, recipe, profile: 'ledger' });
+    await directWorld.close();
     writeScenario(root, 'private-account.yaml', GuardScenarioSchema.parse({
       id: 'private-account', title: 'Private account injection', binds: specBinds('spec/section'),
-      prerequisites: [{ dependency: 'currencybeacon', mode: 'provided' }], setup: { preparation: 'ledger' },
+      setup: { preparation: 'ledger' },
       steps: [{ request: { method: 'GET', path: '/rows', headers: { 'x-world-token': '{{cred:owner}}' } }, expect: { status: 200, json: { count: { equals: 8 } } } }],
     }));
     const result = await runGuard({ repoRoot: root, recipe, skipBuild: true });
@@ -166,10 +203,29 @@ describe('runner-owned preparation profiles', () => {
     const { root, recipe } = fixture();
     delete recipe.preparations!.ledger.baselineChecks;
     await expect(prepareScenario({ repoRoot: root, recipe, profile: 'ledger' })).rejects.toThrow('refresh Guard Setup');
-    for (const query of ['/rows?q=none', '//foreign/rows']) {
+    for (const query of ['/rows?q=none', '//foreign/rows', '/\\foreign/rows', '/rows#fragment', '/ rows']) {
       expect(RecipeSchema.safeParse({ ...recipe, preparations: { ledger: { ...recipe.preparations!.ledger,
         baselineChecks: [{ path: query, counts: { count: 0 } }] } } }).success).toBe(false);
     }
+  });
+  it('reads serialized transport queries but refuses filtered counts, redirects and missing auth', async () => {
+    const { root, recipe } = fixture();
+    const check = recipe.preparations!.ledger.baselineChecks![0];
+    check.path = '/rpc/rows';
+    await expect(prepareScenario({ repoRoot: root, recipe, profile: 'ledger' })).rejects.toThrow('returned 400');
+    check.query = { input: JSON.stringify({}) };
+    const world = await prepareScenario({ repoRoot: root, recipe, profile: 'ledger' });
+    await world.close();
+    for (const input of [{ tenant: 'a' }, { status: 'pending' }]) {
+      check.query = { input: JSON.stringify(input) };
+      await expect(prepareScenario({ repoRoot: root, recipe, profile: 'ledger' })).rejects.toThrow('count expected 8, observed 4');
+    }
+    check.query = { input: '{}' };
+    delete check.credential;
+    await expect(prepareScenario({ repoRoot: root, recipe, profile: 'ledger' })).rejects.toThrow('returned 401');
+    check.credential = 'owner';
+    check.path = '/redirect';
+    await expect(prepareScenario({ repoRoot: root, recipe, profile: 'ledger' })).rejects.toThrow();
   });
   it('checks the real baseline again after a verifier mutates the primary', async () => {
     const { root, recipe } = fixture();

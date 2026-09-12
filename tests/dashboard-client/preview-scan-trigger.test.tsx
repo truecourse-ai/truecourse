@@ -238,6 +238,18 @@ describe('the surfaces of a connected repository', () => {
     await waitFor(() => expect(calls).toContain('POST /api/context/scan'));
   });
 
+  it.each(['interrupted', 'failed'] as const)('resumes %s generation with its run ID', async status => {
+    const run = failedScan({ command: 'guard-generate', status });
+    serve({ runs: [run], config: { provider: 'anthropic' } });
+    renderAt(conversation(run.runId));
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Resume' }));
+    await waitFor(() => expect(window.fetch).toHaveBeenCalledWith(
+      expect.stringContaining(`/api/repos/${REAL.id}/guard/generate`),
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ resumeRunId: run.runId }) }),
+    ));
+    expect(screen.queryByRole('button', { name: 'Run again' })).toBeNull();
+  });
+
   it('leaves a finished one alone', async () => {
     const done = failedScan({ status: 'completed', error: undefined });
     serve({ runs: [done], config: { provider: 'anthropic' } });

@@ -204,7 +204,7 @@ function applyCapturedExpect<E extends GuardExpect | GuardFileExpect>(
 }
 
 export async function runScenario(scenario: GuardSandboxScenario, ctx: RunScenarioContext): Promise<GuardScenarioResult> {
-  const redact = buildCredentialRedactor(new Map(), ctx.externalSecrets)
+  const redact = buildCredentialRedactor(new Map([...(ctx.credentials ?? [])].map(([name, credential]) => [name, credential.value])), ctx.externalSecrets)
   return redactScenarioResult(await runScenarioInternal(scenario, ctx), redact)
 }
 
@@ -212,7 +212,7 @@ async function runScenarioInternal(
   scenario: GuardSandboxScenario,
   ctx: RunScenarioContext,
 ): Promise<GuardScenarioResult> {
-  const redact = buildCredentialRedactor(new Map(), ctx.externalSecrets)
+  const redact = buildCredentialRedactor(new Map([...(ctx.credentials ?? [])].map(([name, credential]) => [name, credential.value])), ctx.externalSecrets)
   const writeEvidence = (params: Parameters<typeof writeEvidenceFile>[0]) => writeEvidenceFile(redactEvidence(params, redact))
   const start = Date.now()
   // The result keys on the PRIMARY bind (the result schema carries one section);
@@ -390,6 +390,7 @@ async function runScenarioInternal(
       resolveExpect,
       resolveEnv,
       normText,
+      redact,
       publishCaptures: (values: Record<string, string>) => {
         for (const [name, value] of Object.entries(values)) captured.set(name, value)
       },
@@ -570,6 +571,8 @@ async function runScenarioInternal(
           step: stepIndex,
           expected: outcome.mismatch.expected,
           actual: outcome.mismatch.actual,
+          ...(outcome.mismatch.observation ? { observation: outcome.mismatch.observation } : {}),
+          ...(outcome.mismatch.observationUnavailable ? { observationUnavailable: outcome.mismatch.observationUnavailable } : {}),
           // The RAW output that produced this mismatch (NOT the normalized text
           // matched against) — head-truncated, empty streams omitted.
           ...(outcome.excerpts ?? {}),

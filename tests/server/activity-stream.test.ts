@@ -20,6 +20,26 @@ describe('dashboard activity journal and stream', () => {
   afterEach(() => { fs.rmSync(root, { recursive: true, force: true }); });
   const create = () => createSessionRun(root, { command: 'spec-scan', gitRef: 'abc', activityStream: true });
 
+  it('pages a large replay and preserves all transcript events through completion', async () => {
+    const run = create();
+    const history: import('@truecourse/shared/activity-stream').ActivityEvent[] =
+      Array.from({ length: 300 }, (_, cursor) => ({ cursor, kind: 'session-event', sessionId: 's', event: event(cursor) }));
+    history.push({ cursor: 300, kind: 'run', run: { ...run.record(), status: 'completed' } });
+    run.readActivity = vi.fn(async () => { throw new Error('Unbounded replay'); });
+    run.readActivityPage = vi.fn(async (after, limit) => history.filter(e => e.cursor > after).slice(0, limit));
+    const reader = createActivityStream(run, -1, new AbortController().signal).getReader();
+    const received: number[] = [];
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) break;
+      if (next.value.type === 'data-activity') received.push((next.value.data as { cursor: number }).cursor);
+    }
+    expect(received).toEqual(history.map(e => e.cursor));
+    expect(run.readActivity).not.toHaveBeenCalled();
+    expect(run.readActivityPage).toHaveBeenCalledTimes(3);
+    expect(run.readActivityPage).toHaveBeenLastCalledWith(255, 128);
+  });
+
   it('delivers local updates without replay and catches up periodically and on remote notification', async () => {
     vi.useFakeTimers();
     const run = create();
@@ -141,7 +161,8 @@ describe('dashboard activity journal and stream', () => {
     for await (const message of readUIMessageStream({ stream: createActivityStream(run, -1, new AbortController().signal), terminateOnError: true })) snapshots.push(message);
     const last = snapshots.at(-1)!;
     expect(last.id).toBe(run.runId);
-    expect(last.parts.filter(p => p.type === 'data-activity')).toHaveLength(3);
+    // The transcript and terminal snapshot survive; the initial snapshot is redundant.
+    expect(last.parts.filter(p => p.type === 'data-activity')).toHaveLength(2);
     expect(last.parts.some(p => p.type === 'data-progress' || p.type === 'data-heartbeat')).toBe(false);
   });
 

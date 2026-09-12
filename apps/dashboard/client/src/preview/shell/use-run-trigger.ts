@@ -42,12 +42,12 @@ export function useRunTrigger(repoId: string): RunStarter {
   const inFlight = useRef(false);
 
   const start = useCallback(
-    (command: string) => {
+    (command: string, resumeRunId?: string) => {
       const trigger = triggerFor(command);
       if (!trigger || inFlight.current) return;
       inFlight.current = true;
       setPending(true);
-      void trigger(repoId)
+      void trigger(repoId, resumeRunId)
         .then((outcome) => {
           switch (outcome.kind) {
             case 'started':

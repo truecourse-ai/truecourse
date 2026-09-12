@@ -34,3 +34,5 @@ export * from './coverage-progress.js'
 export * from './preparation.js'
 
 export * from './prerequisites.js'
+
+export * from './failure-observation.js'

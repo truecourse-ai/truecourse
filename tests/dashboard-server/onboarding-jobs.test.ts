@@ -263,6 +263,7 @@ describe('the guard setup job', () => {
   const catalogCalls: string[] = [];
   /** Whether the clone held the dependencies overlay when the engine looked. */
   const overlaysSeen: boolean[] = [];
+  let preparationError: string | undefined;
 
   /** A fresh clone of the fixture at a stable path, as a run really gets one. */
   function installWorkTree(): void {
@@ -304,6 +305,7 @@ describe('the guard setup job', () => {
   beforeEach(async () => {
     catalogCalls.length = 0;
     overlaysSeen.length = 0;
+    preparationError = undefined;
     installWorkTree();
     // Setup reads the curated doc universe, and the job materializes the
     // repository's slice of the workspace corpus into the clone.
@@ -357,7 +359,9 @@ describe('the guard setup job', () => {
             },
             authorInterfaces: async () => ({ status: 'skipped', reason: 'stubbed in this suite' }),
             seedSession: async () => ({ status: 'skipped', reason: 'stubbed in this suite' }),
-            preparationSession: async () => ({ status: 'skipped', reason: 'stubbed in this suite' }),
+            preparationSession: async () => preparationError
+              ? { status: 'failed', reason: preparationError }
+              : { status: 'skipped', reason: 'stubbed in this suite' },
             verifyAuth: async () => ({ status: 'skipped', reason: 'stubbed in this suite' }),
           }),
       },
@@ -477,6 +481,27 @@ describe('the guard setup job', () => {
     expect(note?.data).toMatchObject({ repoFullName: REPO, runId: setupRun!.runId });
   }, 60_000);
 
+  it.each(['file', 'postgres'])('persists a preparation failure, fails the job and Activity, and chains nothing with %s history', async storage => {
+    if (storage === 'postgres') setSessionRunBackend(new PgSessionRunStore(db));
+    preparationError = 'Application install failed before private preparation verification (exit 7):\nfixture dependency missing';
+    await jobs.enqueueGuardSetup(request);
+    await Promise.all(running);
+    const [job] = await jobsOfType('repo.guard-setup');
+    expect(job).toMatchObject({ status: 'failed', error: preparationError });
+    expect(enqueued).toEqual(['repo.guard-setup']);
+    const bundle = (await loadGuardSetupBundle(REPO))!;
+    const report = JSON.parse(bundle['.truecourse/guard/setup.json']);
+    expect(report).toMatchObject({ status: 'failed', reason: preparationError });
+    expect(report.steps.find((step: { key: string }) => step.key === 'preparations')).toMatchObject({ status: 'failed', reason: preparationError });
+    expect(report.steps.some((step: { key: string }) => step.key === 'auth')).toBe(false);
+    const [run] = await listStoredSessionRuns(REPO, 'guard-setup');
+    expect(run).toMatchObject({ status: 'failed', error: { message: preparationError } });
+    const checklist = run.display?.blocks.find(block => block.kind === 'checklist') as { items: { key: string; status: string }[] };
+    expect(checklist.items.find(item => item.key === 'preparations')?.status).toBe('error');
+    expect(checklist.items.find(item => item.key === 'auth')?.status).toBe('pending');
+    expect(disposed).toEqual([clone]);
+  }, 60_000);
+
   it('chains nothing when setup was refused', async () => {
     await jobs.stop();
     jobs = createServerJobs({
@@ -486,8 +511,7 @@ describe('the guard setup job', () => {
       startWorker: fakeWorker(['repo.guard-setup']),
       guardSetup: {
         startLlm: async () => testLlm,
-        // A setup whose recipe gate failed: the job itself succeeds (the refusal
-        // is the report), but there is no recipe to generate against.
+        // A setup whose recipe gate failed must also fail the queued job.
         runSetup: async () =>
           ({
             report: { ranAt: '2026-01-01T00:00:00Z', status: 'failed', reason: 'no recipe', steps: [] },
@@ -503,7 +527,7 @@ describe('the guard setup job', () => {
 
     expect(enqueued).toEqual(['repo.guard-setup']);
     const [setup] = await jobsOfType('repo.guard-setup');
-    expect(setup).toMatchObject({ status: 'succeeded', result: { status: 'failed' } });
+    expect(setup).toMatchObject({ status: 'failed', error: 'no recipe' });
     expect(await jobsOfType('repo.guard-generate')).toEqual([]);
   });
 
@@ -733,6 +757,61 @@ describe('the guard generate job', () => {
     expect(seen).toEqual([]);
     expect(await readGuardBaselineCommit(REPO)).toBeNull();
     expect(disposed).toEqual([clone]);
+  });
+
+  it('resumes from Postgres history after the original clone and backend instance are gone', async () => {
+    setSessionRunBackend(new PgSessionRunStore(db));
+    const savedTree = path.join(makeTmpDir('tc-resume-input-'), 'tree');
+    generateImpl = async (repoRoot, options) => {
+      fs.cpSync(repoRoot, savedTree, { recursive: true });
+      for (const key of ['index', 'extract', 'interfaces', 'flows', 'match']) options?.tracker?.done(key);
+      options?.tracker?.start('author');
+      options?.tracker?.start('validate');
+      throw new Error('worker interrupted');
+    };
+    await saveSetupBundle();
+    await jobs.enqueueGuardGenerate(request);
+    await Promise.all(running);
+    const [source] = await listStoredSessionRuns(REPO, 'guard-generate');
+    expect(source.status).toBe('failed');
+    expect(fs.existsSync(clone)).toBe(false);
+
+    setSessionRunBackend(new PgSessionRunStore(db));
+    setWorkTreeProvider(async () => {
+      fs.cpSync(savedTree, clone, { recursive: true });
+      return { dir: clone, dispose: () => fs.rmSync(clone, { recursive: true, force: true }) };
+    });
+    let resumed = false;
+    generateImpl = async (repoRoot, options) => {
+      expect(options?.resume).toEqual({
+        runId: source.runId, gitRef: source.gitRef,
+        completedSteps: ['index', 'extract', 'interfaces', 'flows', 'match'],
+      });
+      resumed = true;
+      return authoring(repoRoot, options);
+    };
+    await jobs.enqueueGuardGenerate({ ...request, resumeRunId: source.runId });
+    await Promise.all(running);
+    expect(resumed).toBe(true);
+    expect((await jobsOfType('repo.guard-generate')).map(job => job.status).sort()).toEqual(['failed', 'succeeded']);
+    expect((await openStoredSessionRun(REPO, 'guard-generate', source.runId)).record().status).toBe('failed');
+  });
+
+  it('refuses a resume at a different commit before generation runs', async () => {
+    await saveSetupBundle();
+    generateImpl = async (_root, options) => {
+      options?.sessionRun?.setGitRef?.('a'.repeat(40));
+      throw new Error('interrupted');
+    };
+    await jobs.enqueueGuardGenerate(request);
+    await Promise.all(running);
+    const [source] = await listStoredSessionRuns(REPO, 'guard-generate');
+    let calls = 0;
+    generateImpl = async (...args) => { calls++; return authoring(...args); };
+    await jobs.enqueueGuardGenerate({ ...request, resumeRunId: source.runId });
+    await Promise.all(running);
+    expect(calls).toBe(0);
+    expect((await jobsOfType('repo.guard-generate')).some(job => job.error?.includes('commit has changed'))).toBe(true);
   });
 
   it.each(['file', 'postgres'])('materializes and persists generated results with %s activity history', async storage => {

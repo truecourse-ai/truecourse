@@ -145,6 +145,8 @@ export function webStepDriver(opts: WebStepDriverOptions): StepDriver {
       const result = await executeWebStep({
         page: session.page,
         baseUrl: session.baseUrl,
+        originBinding: 'web',
+        ...(ctx.redact ? { redact: ctx.redact } : {}),
         step: resolved,
         stepIndex: ctx.stepIndex,
         evidenceDir: ctx.evidenceDir,

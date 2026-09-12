@@ -17,6 +17,7 @@
  */
 
 import path from 'node:path'
+import { createHash } from 'node:crypto'
 import type { Locator, Page } from 'playwright-core'
 import {
   describeWebAttribute,
@@ -33,6 +34,7 @@ import {
   isWebUploadStep,
   webStateAssertions,
   webVisibleTargets,
+  type GuardFailureObservation,
   type GuardWebCapture,
   type GuardWebCaptures,
   type GuardWebExpect,
@@ -43,6 +45,62 @@ import {
 import { describeTextMatcher, matchTextMatcher, truncate, type ExpectMismatch } from '../expect.js'
 import type { ArmedFileChooser } from './browser.js'
 import type { WebFilePayload } from './upload.js'
+
+type ObservationDraft =
+  | { kind: 'web-target'; operation: string; locator: GuardWebLocator; matchCount: number; visibility: 'visible' | 'hidden' | 'not-checked' | 'unknown'; reason: 'absent' | 'ambiguous' | 'hidden'; assertion?: string; page: string }
+  | { kind: 'web-text'; scope?: GuardWebLocator; matcher: NonNullable<GuardWebExpect['text']>; operator: 'equals' | 'contains' | 'matches' | 'compare'; text: string; assertion?: string; page: string }
+const observationDrafts = new WeakMap<ExpectMismatch, ObservationDraft>()
+
+/** Replace a URL's exact runner-owned origin only. Arbitrary text and external ports retain identity. */
+export function canonicalWebObservationUrl(raw: string, baseUrl: string, binding?: string): string {
+  if (!binding) return raw
+  try {
+    const url = new URL(raw)
+    const base = new URL(baseUrl)
+    if (url.origin !== base.origin || url.username || url.password) return raw
+    return `guard-server://${encodeURIComponent(binding)}${url.pathname}${url.search}${url.hash}`
+  } catch { return raw }
+}
+
+/** URL occurrences are parsed individually; a lookalike host or longer port is never replaced. */
+function canonicalObservationText(text: string, opts: ExecuteWebStepOptions): string {
+  return text.replace(/https?:\/\/[^\s"'<>]+/g, raw => canonicalWebObservationUrl(raw, opts.baseUrl, opts.originBinding))
+}
+
+function canonicalObservationValue<T>(value: T, opts: ExecuteWebStepOptions): T {
+  if (typeof value === 'string') return canonicalObservationText(value, opts) as T
+  if (Array.isArray(value)) return value.map(entry => canonicalObservationValue(entry, opts)) as T
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, canonicalObservationValue(entry, opts)])) as T
+  return value
+}
+
+function attachObservation(mismatch: ExpectMismatch, opts: ExecuteWebStepOptions): void {
+  const draft = observationDrafts.get(mismatch)
+  if (!draft) return
+  const redact = opts.redact ?? ((text: string) => text)
+  // Masking two different secrets to one label is not evidence of equivalence.
+  // Decline this observation rather than hashing secret bytes or equating masks.
+  if (redact(JSON.stringify(draft)) !== JSON.stringify(draft)) {
+    mismatch.observationUnavailable = 'failure evidence contains sensitive values'
+    return
+  }
+  if (draft.kind === 'web-target' && draft.visibility === 'unknown') {
+    mismatch.observationUnavailable = 'the browser could not observe target visibility'
+    return
+  }
+  const identity = {
+    version: 1 as const,
+    assertion: draft.assertion ?? 'action',
+    page: canonicalWebObservationUrl(draft.page, opts.baseUrl, opts.originBinding),
+  }
+  const observation: GuardFailureObservation = draft.kind === 'web-target'
+    ? { ...identity, kind: draft.kind, operation: draft.operation, locator: canonicalObservationValue(draft.locator, opts),
+        matchCount: draft.matchCount, visibility: draft.visibility, reason: draft.reason }
+    : { ...identity, kind: draft.kind, ...(draft.scope ? { scope: canonicalObservationValue(draft.scope, opts) } : {}),
+        matcher: canonicalObservationValue(draft.matcher, opts), operator: draft.operator, observed: false,
+        textDigest: `sha256:${createHash('sha256').update(canonicalObservationText(redact(draft.text), opts)).digest('hex')}` }
+  mismatch.observation = observation
+}
 
 /**
  * Default budget for one web step's observable state to arrive. Shorter than the
@@ -115,6 +173,10 @@ export interface ExecuteWebStepOptions {
   page: Page
   /** `http://127.0.0.1:<port>` — what a `navigate` path is appended to. */
   baseUrl: string
+  /** Runner-established server identity; absent callers get no origin normalization. */
+  originBinding?: string
+  /** Applied before evidence is hashed; sensitive semantic fields decline evidence. */
+  redact?: (text: string) => string
   /** The step, with every `${…}` token already resolved. */
   step: GuardWebStep
   /** 1-based step index — it names the screenshot. */
@@ -220,7 +282,24 @@ async function targetMismatch(
   target: GuardWebLocator,
   found: number,
   what: string,
+  visibility: 'visible' | 'hidden' | 'not-checked' | 'unknown' = found === 0 ? 'hidden' : found === 1 ? 'hidden' : 'not-checked',
 ): Promise<ExpectMismatch> {
+  // Role queries omit accessibility-hidden elements. Inspect them only after
+  // resolution failed, so evidence distinguishes hidden from absent without
+  // making hidden duplicates interfere with a visible action target.
+  if ('role' in target && found === 0 && visibility !== 'unknown') {
+    try {
+      const allMatches = webLocator(page, target, true)
+      found = await allMatches.count()
+      visibility = found === 1
+        ? (await allMatches.isVisible() ? 'unknown' : 'hidden')
+        : found === 0 ? 'hidden' : 'not-checked'
+      // A visible match excluded from the original role query may be aria-hidden
+      // or may have appeared between reads. Neither proves a hidden failure.
+    } catch {
+      visibility = 'unknown'
+    }
+  }
   const inventory = await roleInventory(page, target)
   const text = await readVisibleText(page)
   const missing =
@@ -228,10 +307,14 @@ async function targetMismatch(
       ? `no ${target.role}${target.name === undefined ? '' : ` named “${target.name}”`} is on the page`
       : `nothing on the page matches ${describeWebLocator(target)}`
   const actual =
-    found === 0
+    visibility === 'unknown'
+      ? `the browser could not establish the count and visibility of ${describeWebLocator(target)}`
+      : found === 0
       ? missing
-      : `${found} elements match ${describeWebLocator(target)} — a target must be unambiguous`
-  return {
+      : found === 1
+        ? `${describeWebLocator(target)} is on the page but not visible`
+        : `${found} elements match ${describeWebLocator(target)} — a target must be unambiguous`
+  const mismatch: ExpectMismatch = {
     subject: 'target',
     expected: `${what} ${describeWebLocator(target)}`,
     actual,
@@ -248,6 +331,9 @@ async function targetMismatch(
       truncate(text, WEB_TEXT_LIMIT),
     ],
   }
+  observationDrafts.set(mismatch, { kind: 'web-target', operation: what, locator: target,
+    matchCount: found, visibility, reason: found === 0 ? 'absent' : found > 1 ? 'ambiguous' : 'hidden', page: page.url() })
+  return mismatch
 }
 
 /** Sleep between polls — the only place a duration appears, and it waits on nothing. */
@@ -269,8 +355,9 @@ async function awaitTarget(
   signal?: AbortSignal,
 ): Promise<{ locator: Locator } | { mismatch: ExpectMismatch }> {
   let found = 0
+  let visibility: 'visible' | 'hidden' | 'not-checked' | 'unknown' = 'unknown'
   for (;;) {
-    if (signal?.aborted) return { mismatch: await targetMismatch(page, target, found, what) }
+    if (signal?.aborted) return { mismatch: await targetMismatch(page, target, found, what, visibility) }
     const locator = webLocator(page, target)
     try {
       if (target.within) {
@@ -282,12 +369,14 @@ async function awaitTarget(
         }
       }
       found = await locator.count()
-      if (found === 1 && (await locator.isVisible())) return { locator }
+      visibility = found === 1 ? (await locator.isVisible() ? 'visible' : 'hidden') : found === 0 ? 'hidden' : 'not-checked'
+      if (found === 1 && visibility === 'visible') return { locator }
     } catch {
       // A navigation mid-poll destroys the execution context; the next poll re-reads.
       found = 0
+      visibility = 'unknown'
     }
-    if (Date.now() >= deadline) return { mismatch: await targetMismatch(page, target, found, what) }
+    if (Date.now() >= deadline) return { mismatch: await targetMismatch(page, target, found, what, visibility) }
     await tick()
   }
 }
@@ -308,7 +397,7 @@ async function visibleMatchCount(
   } catch {
     const expected = `to count visible matches of ${describeWebLocator(target)}`
     const actual = 'the browser could not read the matching elements'
-    return { mismatch: { subject: 'target', expected, actual, detail: [expected, actual] } }
+    return { mismatch: { subject: 'target', expected, actual, detail: [expected, actual], observationUnavailable: 'the browser could not read the matching elements' } }
   }
 }
 
@@ -327,7 +416,8 @@ async function resolveOne(
     if ('mismatch' in scope) return scope
   }
   const locator = webLocator(page, target)
-  const found = await locator.count().catch(() => 0)
+  const found = await locator.count().catch(() => null)
+  if (found === null) return { mismatch: { subject: 'target', expected: what, actual: 'the browser could not read the target', detail: [], observationUnavailable: 'the browser could not read the target' } }
   if (found === 1) return { locator }
   return { mismatch: await targetMismatch(page, target, found, what) }
 }
@@ -474,7 +564,11 @@ async function evaluateWebExpect(page: Page, expect: GuardWebExpect): Promise<We
   let mismatch: ExpectMismatch | null = null
   /** Record one member. The FIRST miss becomes the failure; later ones only record. */
   const record = (check: Omit<WebCheck, 'ok'>, miss: ExpectMismatch | null): void => {
-    if (miss) mismatch ??= miss
+    if (miss) {
+      const draft = observationDrafts.get(miss)
+      if (draft) draft.assertion = `${check.subject}:${checks.length}`
+      mismatch ??= miss
+    }
     checks.push({ ...check, ok: miss === null })
   }
 
@@ -495,21 +589,31 @@ async function evaluateWebExpect(page: Page, expect: GuardWebExpect): Promise<We
     let scoped: { text: string } | { mismatch: ExpectMismatch }
     if (expect.within) {
       const scope = await resolveOne(page, expect.within, 'the text of')
-      scoped = 'mismatch' in scope ? scope : { text: await scope.locator.innerText().catch(() => '') }
+      if ('mismatch' in scope) scoped = scope
+      else {
+        try { scoped = { text: await scope.locator.innerText() } }
+        catch { scoped = { mismatch: { subject: 'text', expected, actual: 'the browser could not read text', detail: [], observationUnavailable: 'the browser could not read text' } } }
+      }
     } else {
-      scoped = { text: await readVisibleText(page) }
+      try { scoped = { text: await page.locator('body').innerText({ timeout: 1_000 }) } }
+      catch { scoped = { mismatch: { subject: 'text', expected, actual: 'the browser could not read text', detail: [], observationUnavailable: 'the browser could not read text' } } }
     }
     if ('mismatch' in scoped) {
       // The text could not be read at all — the scope is the miss, and its own
       // words are the honest actual for the text member.
       record({ subject: 'text', expected, actual: scoped.mismatch.actual }, scoped.mismatch)
     } else {
+      const textMiss = matchTextMatcher('text', label, expect.text, scoped.text, WEB_TEXT_LIMIT)
+      if (textMiss?.matcherOperator) observationDrafts.set(textMiss, {
+        kind: 'web-text', matcher: expect.text, operator: textMiss.matcherOperator,
+        ...(expect.within ? { scope: expect.within } : {}), text: scoped.text, page: page.url(),
+      })
       record(
         // The page-text channel carries WEB_TEXT_LIMIT chars, and the check's actual
         // carries the same width — a narrower cut here once hid the deciding content
         // from the very line that reported the miss.
         { subject: 'text', expected, actual: `${label} was ${JSON.stringify(truncate(scoped.text, WEB_TEXT_LIMIT))}` },
-        matchTextMatcher('text', label, expect.text, scoped.text, WEB_TEXT_LIMIT),
+        textMiss,
       )
     }
   }
@@ -524,11 +628,11 @@ async function evaluateWebExpect(page: Page, expect: GuardWebExpect): Promise<We
     }
     const locator = resolved.locator
     const found = 1
-    const visible = await locator.isVisible().catch(() => false)
+    const visible = await locator.isVisible().catch(() => null)
     if (visible) {
       record({ subject: 'visible', expected, actual: expected }, null)
     } else {
-      const miss = await targetMismatch(page, target, found === 1 ? 0 : found, 'to see')
+      const miss = await targetMismatch(page, target, found, 'to see', visible === null ? 'unknown' : 'hidden')
       record(
         {
           subject: 'visible',
@@ -997,6 +1101,7 @@ export async function executeWebStep(opts: ExecuteWebStepOptions): Promise<WebSt
     else captured = read.values
   }
 
+  if (mismatch) attachObservation(mismatch, opts)
   const shot = await screenshot(page, opts.evidenceDir, opts.stepIndex)
   return {
     url: pageAddress(page),

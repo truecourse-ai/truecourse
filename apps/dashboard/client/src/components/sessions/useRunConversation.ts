@@ -1,184 +1,131 @@
 /**
- * Reading one conversation: the journal by page, then the live tail.
- *
- * History is paged (1000 events a request, so a 3000-event journal is three
- * round trips) and the page grows as each one lands, which is why a long
- * conversation paints before it has finished loading. When the work is still
- * going, the stream opens FROM the cursor the last page reached and appends;
- * chunks merge into the one event array, deduped by cursor, so a replayed
- * overlap can never double a line.
- *
- * A repository whose store predates the journal (file mode) has no cursor to
- * page: its record names its work, and each piece of work has a transcript of
- * its own. Those are read and stitched into the same event shape, so the fold
- * below is the same fold.
+ * Reading one conversation: the run record supplies the work list, and only
+ * the opened piece of work loads its messages, one transcript page at a time
+ * (older pages on demand, newer ones by polling while it runs).
  *
  * A run of the WORKSPACE (a Document scan, which reads every source and clones
- * nothing) belongs to no repository: `repoId` is null and the same journal is
- * read by run id alone, under `/api/sessions`. One reader, two addresses.
+ * nothing) belongs to no repository: `repoId` is null and the same transcript
+ * is read by run id alone, under `/api/sessions`. One reader, two addresses.
  */
-
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ActivityEvent, ActivityProgress } from '@truecourse/shared/activity-stream';
+import type { ActivityEvent } from '@truecourse/shared/activity-stream';
+import type { SessionEvent, SessionProgress } from '@truecourse/agent-loop';
 import * as api from '@/lib/api';
 import type { PublicSessionRun } from '@/lib/api';
-import { followActivity } from '@/lib/activity-stream';
-import { getServerUrl } from '@/lib/server-url';
 import { foldConversation, type Conversation } from './conversation-model';
 
-const PAGE = 1000;
-
-/** Event types that end whatever the live line was saying about a turn. */
-const SETTLES_A_TURN = new Set(['assistant-turn', 'tool-result', 'outcome', 'failure']);
+/** One transcript page, at the repository's address or the workspace's. */
+function readPage(
+  repoId: string | null,
+  command: PublicSessionRun['command'],
+  runId: string,
+  sessionId: string,
+  options: { before?: number; since?: number },
+  signal: AbortSignal,
+) {
+  return repoId
+    ? api.getSessionTranscriptPage(repoId, command, runId, sessionId, options, signal)
+    : api.getWorkspaceSessionTranscriptPage(runId, sessionId, options, signal);
+}
 
 export interface RunConversationState {
   conversation: Conversation;
-  /** History is still arriving. Lines already read render underneath it. */
   loading: boolean;
   error: string | null;
-  /** The live tail dropped, in the words the reader gets at the bottom. */
   connectionError: string | null;
+  hasOlder: boolean;
+  loadingOlder: boolean;
+  loadOlder: () => void;
 }
 
 export function useRunConversation(
   run: PublicSessionRun,
   repoId: string | null,
+  sessionId: string | null,
 ): RunConversationState {
-  const [events, setEvents] = useState<ActivityEvent[]>([]);
-  const [progress, setProgress] = useState<ActivityProgress>({});
-  const [loading, setLoading] = useState(true);
+  const [history, setHistory] = useState<{ key: string; events: SessionEvent[] }>({ key: '', events: [] });
+  const [progress, setProgress] = useState<SessionProgress | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [hasOlder, setHasOlder] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [connectionError, setConnectionError] = useState<string | null>(null);
-
-  // The record moves while the reader watches (a step lands, a status flips).
-  // Held in a ref so a fresh record never restarts the read.
   const latest = useRef(run);
   latest.current = run;
+  const older = useRef<() => void>(() => {});
+  const { command, runId } = run;
+  const key = `${repoId}:${command}:${runId}:${sessionId ?? ''}`;
 
-  const { command, runId, activityStream } = run;
   useEffect(() => {
-    let cancelled = false;
     const controller = new AbortController();
-    setEvents([]);
-    setProgress({});
-    setLoading(true);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let events: SessionEvent[] = [];
+    let olderPending = false;
+    setHistory({ key, events });
+    setLoading(!!sessionId);
+    setLoadingOlder(false);
+    setHasOlder(false);
+    setProgress(null);
     setError(null);
-    setConnectionError(null);
+    older.current = () => {};
+    if (!sessionId) return () => controller.abort();
 
-    const absorb = (arriving: readonly ActivityEvent[]): void => {
-      if (arriving.length === 0) return;
-      // A partial turn is superseded the moment its finished form arrives, and
-      // a record that says the work is over ends every live line at once. The
-      // stream does not re-send an empty progress map to say so.
-      setProgress((prev) => {
-        let next = prev;
-        for (const event of arriving) {
-          if (event.kind === 'run') {
-            if (event.run.status !== 'running') next = {};
-          } else if (SETTLES_A_TURN.has(event.event.type)) {
-            if (next[event.sessionId]) {
-              next = { ...next };
-              delete next[event.sessionId];
-            }
-          }
+    const absorb = (incoming: SessionEvent[]) => {
+      const bySeq = new Map(events.map(e => [e.seq, e]));
+      for (const e of incoming) bySeq.set(e.seq, e);
+      events = [...bySeq.values()].sort((a, b) => a.seq - b.seq);
+      setHistory({ key, events });
+    };
+    const failed = (e: unknown) => {
+      if (!controller.signal.aborted) setError(e instanceof Error ? e.message : String(e));
+    };
+    const poll = async (initial = false) => {
+      try {
+        let since = initial ? undefined : events.at(-1)?.seq ?? -1;
+        for (;;) {
+          const page = await readPage(repoId, command, runId, sessionId,
+            since === undefined ? {} : { since }, controller.signal);
+          if (controller.signal.aborted) return;
+          absorb(page.events);
+          setProgress(page.progress ?? null);
+          setError(null);
+          if (initial) { setHasOlder(page.hasMore); break; }
+          if (!page.hasMore || !page.events.length) break;
+          since = page.events.at(-1)!.seq;
         }
-        return next;
-      });
-      setEvents((prev) => {
-        const seen = new Set(prev.map((e) => e.cursor));
-        const next = [...prev];
-        for (const event of arriving) {
-          if (seen.has(event.cursor)) continue;
-          seen.add(event.cursor);
-          next.push(event);
+      } catch (e) { failed(e); }
+      finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+          // Sequential incremental polling never transfers siblings or overlaps requests.
+          const entry = latest.current.sessions.find(s => s.sessionId === sessionId);
+          if (entry?.status === 'running' || entry?.status === 'waiting' || (!entry && latest.current.status === 'running'))
+            timer = setTimeout(() => { void poll(); }, 3000);
         }
-        return next.length === prev.length ? prev : next.sort((a, b) => a.cursor - b.cursor);
-      });
-    };
-
-    const read = async (): Promise<void> => {
-      if (!activityStream) {
-        absorb(await readTranscripts(repoId, latest.current));
-        return;
       }
-      let after = -1;
-      for (;;) {
-        const page = repoId
-          ? await api.readRunActivity(repoId, command, runId, after, PAGE)
-          : await api.readWorkspaceRunActivity(runId, after, PAGE);
-        if (cancelled) return;
-        absorb(page.events);
-        after = page.nextCursor;
-        if (page.done) break;
-      }
-      if (cancelled || latest.current.status !== 'running') return;
-      void followActivity({
-        url: repoId
-          ? `${getServerUrl()}/api/repos/${encodeURIComponent(repoId)}/sessions/runs/${command}/${encodeURIComponent(runId)}/stream`
-          : `${getServerUrl()}/api/sessions/runs/${encodeURIComponent(runId)}/stream`,
-        runId,
-        from: after,
-        signal: controller.signal,
-        onEvent: (event) => absorb([event]),
-        onProgress: (next) => setProgress(next),
-        onConnection: (message) => {
-          if (!controller.signal.aborted) setConnectionError(message);
-        },
-      });
     };
-
-    read()
-      .catch((e: unknown) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-      controller.abort();
+    older.current = () => {
+      if (olderPending || !events.length || controller.signal.aborted) return;
+      olderPending = true;
+      setLoadingOlder(true);
+      void readPage(repoId, command, runId, sessionId, { before: events[0].seq }, controller.signal)
+        .then(page => {
+          if (controller.signal.aborted) return;
+          absorb(page.events);
+          setHasOlder(page.hasMore);
+          setError(null);
+        }).catch(failed).finally(() => {
+          olderPending = false;
+          if (!controller.signal.aborted) setLoadingOlder(false);
+        });
     };
-    // The record itself is deliberately not a dependency: it changes on every
-    // write, and the journal it names does not.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [repoId, command, runId, activityStream]);
+    void poll(true);
+    return () => { controller.abort(); clearTimeout(timer); older.current = () => {}; };
+  }, [repoId, command, runId, sessionId, key]);
 
-  // Folded on the events array's identity: absorbing nothing new keeps the
-  // previous array, so a heartbeat re-render costs nothing.
-  const conversation = useMemo(
-    () => foldConversation(run, events, progress),
-    [run, events, progress],
-  );
-
-  return { conversation, loading, error, connectionError };
-}
-
-/**
- * A store with no journal, in journal shape: the record first, then each piece
- * of work's transcript in the order the record lists it. Cursors are minted
- * here and mean only "this came before that", which is all the fold reads.
- */
-async function readTranscripts(
-  repoId: string | null,
-  run: PublicSessionRun,
-): Promise<ActivityEvent[]> {
-  const events: ActivityEvent[] = [{ cursor: 0, kind: 'run', run }];
-  let cursor = 1;
-  const transcripts = await Promise.all(
-    run.sessions.map((entry) =>
-      (repoId
-        ? api.getSessionTranscript(repoId, run.command, run.runId, entry.sessionId)
-        : api.getWorkspaceRunTranscript(run.runId, entry.sessionId)
-      )
-        .then((res) => ({ sessionId: entry.sessionId, events: res.events }))
-        .catch(() => ({ sessionId: entry.sessionId, events: [] })),
-    ),
-  );
-  for (const transcript of transcripts) {
-    for (const event of transcript.events) {
-      events.push({ cursor: cursor++, kind: 'session-event', sessionId: transcript.sessionId, event });
-    }
-  }
-  return events;
+  const conversation = useMemo(() => {
+    const events: ActivityEvent[] = history.key === key && sessionId
+      ? history.events.map(e => ({ cursor: e.seq, kind: 'session-event', sessionId, event: e })) : [];
+    return foldConversation(run, events, history.key === key && sessionId && progress ? { [sessionId]: progress } : {});
+  }, [run, history, key, sessionId, progress]);
+  return { conversation, loading, error, connectionError: null, hasOlder, loadingOlder, loadOlder: () => older.current() };
 }

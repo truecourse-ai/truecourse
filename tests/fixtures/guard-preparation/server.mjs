@@ -5,6 +5,8 @@ export function app(env) {
   const file = env.DATA_FILE
   return http.createServer(async (req, res) => {
     if (req.url === '/health') return res.end('healthy')
+    const url = new URL(req.url, 'http://localhost')
+    if (url.pathname === '/redirect') { res.writeHead(302, { location: '/rows' }); return res.end() }
     let state = JSON.parse(fs.readFileSync(file, 'utf8'))
     if (req.headers['x-world-token'] !== state.token) { res.statusCode = 401; return res.end('unauthorized') }
     if (req.method === 'POST') {
@@ -12,6 +14,12 @@ export function app(env) {
       const rows = JSON.parse(raw)
       state.rows.push(...rows)
       fs.writeFileSync(file, JSON.stringify(state))
+    }
+    if (url.pathname === '/rpc/rows') {
+      if (!url.searchParams.has('input')) { res.statusCode = 400; return res.end('input required') }
+      const input = JSON.parse(url.searchParams.get('input'))
+      if (input.tenant) state.rows = state.rows.filter(row => row.tenant === input.tenant)
+      if (input.status) state.rows = state.rows.filter(row => row.status === input.status)
     }
     const ordered = [...state.rows].sort((a,b) => b.date.localeCompare(a.date) || b.id-a.id)
     if(env.BROKEN_ORDER==='yes')ordered.reverse()

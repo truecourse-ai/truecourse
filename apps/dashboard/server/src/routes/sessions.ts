@@ -34,6 +34,7 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { createUIMessageStreamResponse } from 'ai';
+import { readActivityProgress } from '@truecourse/core/lib/activity-journal';
 import { createActivityStream } from '../services/activity-stream.service.js';
 import { RunStatusSchema, SessionCommandSchema } from '@truecourse/agent-loop';
 import { createAppError } from '@truecourse/core/lib/errors';
@@ -46,6 +47,7 @@ import {
   openStoredSessionRun,
   workspaceSessionsKey,
   readStoredActivityPage,
+  readStoredTranscriptPage,
   sessionRunCursor,
   parseSessionRunCursor,
   toPublicRunRecord,
@@ -126,6 +128,38 @@ function parseLimit(raw: unknown, fallback: number, max: number): number | null 
   return limit >= 1 && limit <= max ? limit : null;
 }
 
+/**
+ * One piece of work's transcript, two ways: with `?limit=` a bounded page
+ * (`before` walks back, `since` walks forward) plus the session's progress; with
+ * no limit the whole transcript from `since`. The repository route and the
+ * workspace route answer identically, they differ only in how the run is found.
+ */
+async function answerTranscript(
+  req: Request,
+  res: Response,
+  run: Awaited<ReturnType<typeof openStoredSessionRun>>,
+  since: number,
+): Promise<void> {
+  const sessionId = req.params.sessionId as string;
+  if (req.query.limit === undefined) {
+    res.json({ events: await readStoredTranscript(run, sessionId, since) });
+    return;
+  }
+  const limit = parseLimit(req.query.limit, 100, 100);
+  const before = req.query.before === undefined ? undefined : Number(req.query.before);
+  if (limit === null || !Number.isSafeInteger(since) || since < -1 ||
+      (before !== undefined && (!Number.isSafeInteger(before) || before < 0)) ||
+      (before !== undefined && req.query.since !== undefined)) {
+    res.status(400).json({ error: 'Invalid transcript page: limit 1 to 100; use before or since with integer sequence cursors.' });
+    return;
+  }
+  const page = await readStoredTranscriptPage(run, sessionId, {
+    limit, ...(before === undefined ? {} : { before }),
+    ...(req.query.since === undefined ? {} : { since }),
+  });
+  res.json({ ...page, progress: readActivityProgress(run.dir)[sessionId] ?? null });
+}
+
 /** History in bounded pages: what a reader walks before tailing the stream from
  *  the cursor it reached. Same refusals as the stream, minus the SSE. */
 router.get('/:id/sessions/runs/:command/:runId/activity', async (req: Request, res: Response, next: NextFunction) => {
@@ -139,6 +173,9 @@ router.get('/:id/sessions/runs/:command/:runId/activity', async (req: Request, r
     if (after === null) { res.status(400).json({ error: 'after must be a journal cursor' }); return; }
     const limit = parseLimit(req.query.limit, 500, 1000);
     if (limit === null) { res.status(400).json({ error: 'limit must be between 1 and 1000' }); return; }
+    if (req.query.compact !== undefined && req.query.compact !== '1') {
+      res.status(400).json({ error: 'compact must be 1 when supplied' }); return;
+    }
     const repo = await resolveProjectForRequest(req.params.id as string);
     let run;
     try { run = await openStoredSessionRun(repo.path, command, req.params.runId as string); }
@@ -151,7 +188,7 @@ router.get('/:id/sessions/runs/:command/:runId/activity', async (req: Request, r
     }
     if (!run.readActivity) recoverSessionActivity(run);
     try {
-      res.json(await readStoredActivityPage(run, after, limit));
+      res.json(await readStoredActivityPage(run, after, limit, req.query.compact === '1'));
     } catch (error) {
       if (error instanceof Error && error.message.startsWith('Activity cursor')) {
         res.status(400).json({ error: error.message }); return;
@@ -216,8 +253,7 @@ router.get(
         // Resolve the run before reading its session. File reads sanitize the
         // session ID; Postgres reads filter by session and sequence in the query.
         const run = await openStoredSessionRun(repo.path, command, req.params.runId as string);
-        const events = await readStoredTranscript(run, req.params.sessionId as string, since);
-        res.json({ events });
+        await answerTranscript(req, res, run, since);
       } catch (error) {
         if (!(error instanceof SessionRunNotFoundError)) throw error;
         res.status(404).json({ error: 'Session run not found.' });
@@ -416,7 +452,7 @@ export function createWorkspaceSessionsRouter(deps: WorkspaceSessionsDeps = {}):
       const found = await findRun(req);
       if (!found) { res.status(404).json({ error: 'Session run not found.' }); return; }
       const run = await openStoredSessionRun(found.repoKey, found.command, found.runId);
-      res.json({ events: await readStoredTranscript(run, req.params.sessionId as string, since) });
+      await answerTranscript(req, res, run, since);
     } catch (e) {
       next(e);
     }
