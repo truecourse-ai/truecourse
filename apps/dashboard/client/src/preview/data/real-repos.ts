@@ -26,6 +26,7 @@ import type {
   GithubConnectStatusResponse,
   GithubInstallableRepo,
   GithubInstallationReposResponse,
+  GithubInstallOrigin,
 } from '@truecourse/shared';
 import type { ProviderId, Repo } from './types';
 
@@ -34,8 +35,13 @@ import type { ProviderId, Repo } from './types';
  * linked. `slim` because the dialog only needs the names: the full read walks
  * each repo's spec store, which the dialog would pay for on every open.
  */
-export function fetchGithubStatus(): Promise<GithubConnectStatusResponse> {
-  return fetchApi<GithubConnectStatusResponse>('/api/github/status?slim=1');
+/**
+ * The App's status for the connect surfaces. `from` names where an install
+ * started from this page would return to (it rides the install link's state).
+ */
+export function fetchGithubStatus(from?: GithubInstallOrigin): Promise<GithubConnectStatusResponse> {
+  const query = from ? `&from=${encodeURIComponent(from)}` : '';
+  return fetchApi<GithubConnectStatusResponse>(`/api/github/status?slim=1${query}`);
 }
 
 /** Everything one installation can see, linked or not. */

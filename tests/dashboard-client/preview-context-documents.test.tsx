@@ -531,9 +531,19 @@ describe('Add context', () => {
     expect(await screen.findByText('No GitHub account connected yet.')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Connect an account in Settings' })).toHaveAttribute(
       'href',
-      '/preview/settings/repositories',
+      '/preview/settings/repositories?from=context-add',
     );
     expect(screen.queryByLabelText('Repository')).toBeNull();
+  });
+
+  it('reopens at the Repository step when the install returns to ?add=repository', async () => {
+    serve();
+    renderAt('/preview/context/documents?add=repository');
+
+    // No click: the dialog is open on the repository step with the account read.
+    expect(await screen.findByRole('dialog', { name: 'Add context' })).toBeInTheDocument();
+    expect(await screen.findByLabelText('Repository')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Documentation site/ })).toBeNull();
   });
 
   it('offers Settings under the repository picker', async () => {
@@ -547,7 +557,7 @@ describe('Add context', () => {
     expect(await screen.findByRole('combobox', { name: 'Repository' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Connect another account in Settings' })).toHaveAttribute(
       'href',
-      '/preview/settings/repositories',
+      '/preview/settings/repositories?from=context-add',
     );
   });
 

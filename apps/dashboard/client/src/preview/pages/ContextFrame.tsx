@@ -19,8 +19,8 @@
  * than subscribed to twice.
  */
 
-import { useCallback, useState, type ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { PageHeader, SideMenu } from '@/preview/ui/bits';
 import { startContextScan } from '@/preview/data/scan';
@@ -100,7 +100,20 @@ export function ContextFrame({
   const { sources, refetch } = useContextSources(signal);
   const stale = useContextStaleness(signal);
   const { runs } = useWorkspaceRuns([]);
-  const [adding, setAdding] = useState(false);
+  // `?add=repository` is the install's return address: Add context reopens at
+  // its Repository step with the account just connected, and the address is
+  // cleaned so a reload does not reopen it.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [adding, setAdding] = useState(searchParams.get('add') === 'repository');
+  const [addKind, setAddKind] = useState<'repository' | null>(
+    searchParams.get('add') === 'repository' ? 'repository' : null,
+  );
+  useEffect(() => {
+    if (searchParams.get('add') !== 'repository') return;
+    const next = new URLSearchParams(searchParams);
+    next.delete('add');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   // A Document scan belongs to the workspace, so it is the run with no
   // repository — the one fact that says the button is busy.
@@ -146,7 +159,11 @@ export function ContextFrame({
       </div>
       <AddContextDialog
         open={adding}
-        onOpenChange={setAdding}
+        onOpenChange={(open) => {
+          setAdding(open);
+          if (!open) setAddKind(null);
+        }}
+        initialKind={addKind}
         sources={sources}
         onAdded={() => void refetch()}
       />

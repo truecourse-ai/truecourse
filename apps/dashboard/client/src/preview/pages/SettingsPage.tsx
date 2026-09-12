@@ -10,8 +10,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { CONTEXT_SOURCE_KIND_LABEL, LLM_PROVIDER_KINDS } from '@truecourse/shared';
+import { useParams, useSearchParams } from 'react-router-dom';
+import { CONTEXT_SOURCE_KIND_LABEL, GITHUB_INSTALL_ORIGINS, LLM_PROVIDER_KINDS } from '@truecourse/shared';
 import type {
   ContextSourceKind,
   GithubInstallationSummary,
@@ -19,6 +19,7 @@ import type {
   LlmConfigResponse,
   LlmConfigUpdate,
   LlmProviderKind,
+  GithubInstallOrigin,
 } from '@truecourse/shared';
 import { ConnectorLogo, type ConnectorTool } from '@/preview/ui/connector-logos';
 import { StatusWord } from '@/preview/ui/status-word';
@@ -65,12 +66,21 @@ const PROVIDERS: readonly ProviderId[] = ['github', 'gitlab', 'azure'];
  * say Coming soon: hiding them would make the page lie about where this is
  * going, and offering them would make it lie about what it does.
  */
+/** Where an install started here returns to: the place that sent the user here, else this tab. */
+function installOriginOf(raw: string | null): GithubInstallOrigin {
+  return raw && (GITHUB_INSTALL_ORIGINS as readonly string[]).includes(raw)
+    ? (raw as GithubInstallOrigin)
+    : 'settings';
+}
+
 function RepositoriesTab() {
   const [github, setGithub] = useState<GithubProviderState | null>(null);
+  const [params] = useSearchParams();
+  const from = installOriginOf(params.get('from'));
 
   useEffect(() => {
     let live = true;
-    void fetchGithubStatus()
+    void fetchGithubStatus(from)
       .then((status) => {
         if (!live) return;
         setGithub({
@@ -91,7 +101,7 @@ function RepositoriesTab() {
     return () => {
       live = false;
     };
-  }, []);
+  }, [from]);
 
   const installations = github?.installations ?? [];
 

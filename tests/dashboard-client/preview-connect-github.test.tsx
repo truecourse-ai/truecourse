@@ -384,7 +384,7 @@ describe('connecting a repository through the GitHub App', () => {
     const link = await within(dialog).findByRole('link', {
       name: 'Connect another provider in Settings',
     });
-    expect(link).toHaveAttribute('href', '/preview/settings/repositories');
+    expect(link).toHaveAttribute('href', '/preview/settings/repositories?from=code-connect');
     // Installing the App is Settings' business, not a control inside a step.
     expect(within(dialog).queryByRole('link', { name: 'Install' })).toBeNull();
     expect(within(dialog).queryByText('Add another')).toBeNull();

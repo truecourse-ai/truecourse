@@ -434,6 +434,14 @@ export interface GithubRunSummary {
 }
 
 /** Everything the Connect page needs in one call. */
+/**
+ * Where a GitHub App install was started from, carried through GitHub's
+ * `state` so the return lands there: Settings, Code's connect dialog, or Add
+ * context's repository step.
+ */
+export const GITHUB_INSTALL_ORIGINS = ['settings', 'code-connect', 'context-add'] as const;
+export type GithubInstallOrigin = (typeof GITHUB_INSTALL_ORIGINS)[number];
+
 export interface GithubConnectStatusResponse {
   /** Whether the GitHub App is configured server-side. */
   configured: boolean

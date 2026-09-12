@@ -120,6 +120,31 @@ describe('Settings › Repositories', () => {
     );
   });
 
+  it('asks for an install link that returns to where the user came from', async () => {
+    serve(() => json(status({ installations: [], repos: [] })));
+    renderAt('/preview/settings/repositories?from=context-add');
+
+    const github = providerRow('GitHub');
+    await within(github).findByText('Not connected');
+    const statusReads = vi.mocked(window.fetch).mock.calls
+      .map(([input]) => String(input))
+      .filter((href) => href.includes('/api/github/status'));
+    expect(statusReads).toHaveLength(1);
+    expect(statusReads[0]).toContain('from=context-add');
+  });
+
+  it('asks for a link that returns here when nobody sent the user', async () => {
+    serve(() => json(status({ installations: [], repos: [] })));
+    renderAt('/preview/settings/repositories');
+
+    const github = providerRow('GitHub');
+    await within(github).findByText('Not connected');
+    const statusReads = vi.mocked(window.fetch).mock.calls
+      .map(([input]) => String(input))
+      .filter((href) => href.includes('/api/github/status'));
+    expect(statusReads[0]).toContain('from=settings');
+  });
+
   it('offers Connect when the App is installed nowhere', async () => {
     serve(() => json(status({ installations: [], repos: [] })));
     renderAt('/preview/settings/repositories');

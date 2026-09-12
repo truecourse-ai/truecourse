@@ -91,11 +91,14 @@ const linesOf = (value: string): string[] =>
 export function AddContextDialog({
   open,
   onOpenChange,
+  initialKind = null,
   sources,
   onAdded,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Open straight on this kind's scope step (the install's return does). */
+  initialKind?: AddableKind | null;
   /** The workspace's sources, so the dialog can say a repository already has one. */
   sources: ContextSourceView[] | null;
   /** Re-read the page behind the dialog once the source is stored. */
@@ -121,7 +124,10 @@ export function AddContextDialog({
   const [adding, setAdding] = useState(false);
 
   useEffect(() => {
-    if (open) return;
+    if (open) {
+      if (initialKind) setKind(initialKind);
+      return;
+    }
     setKind(null);
     setInstallations(null);
     setAccountId(null);
@@ -136,7 +142,7 @@ export function AddContextDialog({
     setFailure(null);
     setPicked([]);
     setAdding(false);
-  }, [open]);
+  }, [open, initialKind]);
 
   // The accounts a Repository source can read through, read on entering the
   // scope step: a source may read any repository they can reach, connected in
@@ -295,7 +301,7 @@ export function AddContextDialog({
               <div>
                 <p className="text-[11px] text-muted-foreground">No GitHub account connected yet.</p>
                 <Link
-                  to={`${PREVIEW_BASE}/settings/repositories`}
+                  to={`${PREVIEW_BASE}/settings/repositories?from=context-add`}
                   onClick={() => onOpenChange(false)}
                   className="mt-1 inline-block text-[11px] text-primary hover:underline"
                 >
@@ -361,7 +367,7 @@ export function AddContextDialog({
                   </select>
                   {reposError && <p className="mt-1 text-[11px] text-destructive">{reposError}</p>}
                   <Link
-                    to={`${PREVIEW_BASE}/settings/repositories`}
+                    to={`${PREVIEW_BASE}/settings/repositories?from=context-add`}
                     onClick={() => onOpenChange(false)}
                     className="mt-1 inline-block text-[11px] text-primary hover:underline"
                   >

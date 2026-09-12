@@ -374,7 +374,7 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
             )}
             <li>
               <Link
-                to={`${PREVIEW_BASE}/settings/repositories`}
+                to={`${PREVIEW_BASE}/settings/repositories?from=code-connect`}
                 onClick={() => onOpenChange(false)}
                 className="block px-3 py-2.5 text-[13px] text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
               >
