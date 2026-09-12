@@ -68,7 +68,7 @@ const PERIODS: { key: HomePeriod; label: string }[] = [
 ];
 
 const CHIP = 'rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors';
-const ROW = 'flex w-full flex-col gap-0.5 px-4 py-2 text-left transition-colors hover:bg-muted/30';
+const ROW = 'flex w-full flex-col gap-0.5 px-6 py-2 text-left transition-colors hover:bg-muted/30';
 
 /** The tone a status word wears, in the vocabulary every Context surface uses. */
 function toneOf(word: string): StatusTone {
@@ -122,9 +122,9 @@ function Widget({
   return (
     <section
       aria-label={title}
-      className="flex h-80 min-w-0 flex-col overflow-hidden rounded-md border border-border bg-card"
+      className="flex h-80 min-w-0 flex-col overflow-hidden bg-background"
     >
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-2">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-6 py-2">
         <SectionTitle>{title}</SectionTitle>
         {to && (
           <Link to={to} className="text-[11px] font-medium text-primary hover:underline">
@@ -347,7 +347,9 @@ export default function HomePage() {
           )}
         </div>
 
-        <div className="grid grid-cols-1 gap-4 p-6 lg:grid-cols-3">
+        {/* The widgets sit in the strip's grid: cells parted by the same lines,
+            no card chrome, edge to edge. */}
+        <div className="grid grid-cols-1 border-b border-border lg:grid-cols-3 [&>*]:border-b [&>*]:border-border lg:[&>*]:border-b-0 lg:[&>*]:border-r lg:[&>*:last-child]:border-r-0">
           <Widget title="Needs attention" to={`${PREVIEW_BASE}/agent`} toWord="Agent">
             {attention.length === 0 ? (
               <Nothing>Nothing is waiting on you.</Nothing>
