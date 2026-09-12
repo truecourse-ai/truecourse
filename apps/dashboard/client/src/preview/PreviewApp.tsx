@@ -17,12 +17,10 @@
  *
  * Context LANDS on its sources (`/context`), each source is a page of its own
  * (`/context/sources/:id`), and their documents are a place of their own
- * (`/context/documents`, narrowed by the query the filter row writes). The one
- * REDIRECT here is the older singular address, `/context/source/:id`, which
- * resolves to the source's page.
+ * (`/context/documents`, narrowed by the query the filter row writes).
  */
 
-import { Navigate, Route, Routes, useParams } from 'react-router-dom';
+import { Route, Routes, useParams } from 'react-router-dom';
 import AdminPage from './pages/AdminPage';
 import AgentPage from './pages/AgentPage';
 import CodePage from './pages/CodePage';
@@ -70,12 +68,6 @@ function ContextSourceRoute() {
   return <SourcePage sourceId={sourceId ? decodeURIComponent(sourceId) : ''} />;
 }
 
-/** The older singular address of a source, now that a source has a page. */
-function ContextSourceRedirect() {
-  const { sourceId } = useParams<{ sourceId: string }>();
-  return <Navigate replace to={`/preview/context/sources/${encodeURIComponent(sourceId ?? '')}`} />;
-}
-
 export function PreviewRoutes() {
   return (
     <Routes>
@@ -91,7 +83,6 @@ export function PreviewRoutes() {
       <Route path="context/conflicts" element={<ConflictsPage />} />
       <Route path="context/conflicts/:conflictId" element={<ContextConflictRoute />} />
       <Route path="context/doc/:docRef" element={<ContextDocRoute />} />
-      <Route path="context/source/:sourceId" element={<ContextSourceRedirect />} />
       <Route path="repos/:slug" element={<RepoConsole />} />
       <Route path="repos/:slug/:tab" element={<RepoConsole />} />
       <Route path="repos/:slug/runs/:runId" element={<RepoConsole />} />

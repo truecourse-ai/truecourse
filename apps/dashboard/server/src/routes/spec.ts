@@ -307,9 +307,9 @@ router.get(
         }
       }
       // Hosted: the repository's corpus IS the workspace corpus cut down to
-      // the sources it reads. Its own stored corpus (a pre-Context scan's) is
-      // no longer what it runs against, so it is not what it shows either; a
-      // workspace that has never scanned answers like a never-scanned repository.
+      // the sources it reads, which is what it runs against and so what it
+      // shows; a workspace that has never scanned answers like a never-scanned
+      // repository.
       const payload = specsMaterializeInPlace()
         ? await corpusPayload(repo.path, ref, pr)
         : await workspaceSlicePayload(orgOf(req), repo.path);

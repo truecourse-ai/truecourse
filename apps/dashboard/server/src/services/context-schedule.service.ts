@@ -5,9 +5,8 @@
  * default branch); a site has no such event, so it is swept on a clock: every
  * site whose last sync is older than a day — and that the user has not paused —
  * gets a `context.sync` enqueued. A source of ANY kind that has NEVER synced is
- * swept too: a repository source the boot migration created, or one whose first
- * sync died with the process that ran it, would otherwise wait for a commit that
- * may never come.
+ * swept too: one whose first sync died with the process that ran it would
+ * otherwise wait for a commit that may never come.
  *
  * `@truecourse/jobs` has no scheduler of its own (graphile-worker's cron can
  * only insert graphile jobs, which would bypass the tracked row every job here
@@ -17,8 +16,8 @@
  * restarts — a second enqueue for a source already working is simply lost.
  *
  * The server also sweeps ONCE AT BOOT (`index.ts`, right after the queue
- * starts), which is what gives a migrated or lost source its first sync rather
- * than making it wait out an hour. A restart loop cannot turn that into a fetch
+ * starts), which is what gives a source whose first sync was lost another one
+ * rather than making it wait out an hour. A restart loop cannot turn that into a fetch
  * storm: the single-flight key collapses the duplicates, and a sync that lands
  * moves the source's `lastSyncAt`, which takes it out of the next sweep.
  */

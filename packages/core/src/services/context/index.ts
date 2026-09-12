@@ -61,18 +61,6 @@ export {
   type ContextRowSource,
 } from './documents.js';
 export {
-  foldRepoDecisions,
-  fullDecisions,
-  mapDecisionDocRef,
-  mapDecisionScopePath,
-  normalizeDecisionPath,
-  sameDispute,
-  type DecisionConflictNote,
-  type DecisionsFoldInput,
-  type DecisionsFoldResult,
-  type DroppedDecision,
-} from './decisions-fold.js';
-export {
   repositoryConfig,
   repositorySourceId,
   siteConfig,

@@ -1,26 +1,20 @@
 /**
  * A stored run's SECTION SUMMARY, the history Home's trend is drawn from.
  *
- * Two halves are pinned here: the summary is written when a run is persisted,
- * and the boot sweep backfills the runs stored before summaries existed. The
- * third is the rule that keeps history honest. A run whose summary cannot be
- * derived is logged and left without one, never guessed.
+ * Two things are pinned here: the summary is written when a run is persisted,
+ * and the rule that keeps history honest. A run whose summary cannot be derived
+ * is logged and left without one, never guessed.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { manifestPath } from '@truecourse/guard-runner';
-import { guardHistoryEntryOf, type GuardLatest } from '@truecourse/shared';
-import {
-  appendGuardHistory,
-  readGuardRunSections,
-  writeGuardRun,
-} from '@truecourse/core/lib/guard-store';
+import type { GuardLatest } from '@truecourse/shared';
+import { readGuardRunSections } from '@truecourse/core/lib/guard-store';
 import { log } from '@truecourse/core/lib/logger';
 import { readRegistry, unregisterProject } from '@truecourse/core/config/registry';
 import { persistGuardRun } from '../../apps/dashboard/server/src/jobs/materialize-guard';
-import { backfillGuardRunSections } from '../../apps/dashboard/server/src/services/guard-sections.service';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 
 const DOC = 'context/site-docs-acme/refunds.md';
@@ -107,44 +101,19 @@ describe('a run’s section summary', () => {
     });
   });
 
-  it('is backfilled onto a run stored without one', async () => {
-    writeManifest(repo.repoPath);
-    const latest = run('run-2', '2026-09-02T10:00:00.000Z');
-    await writeGuardRun(repo.repoPath, latest);
-    await appendGuardHistory(repo.repoPath, guardHistoryEntryOf(latest));
-    expect(await readGuardRunSections(repo.repoPath)).toEqual([]);
-
-    const outcome = await backfillGuardRunSections();
-
-    expect(outcome).toMatchObject({ missing: 1, written: 1, skipped: 0 });
-    const [stored] = await readGuardRunSections(repo.repoPath);
-    expect(stored!.runId).toBe('run-2');
-    expect(stored!.sections[`${DOC}#refunds`]).toBe('failed');
-  });
-
   it('leaves a run whose summary cannot be derived without one, and says so', async () => {
     // No scenario set, and the document the run names is not readable: there is
     // nothing to derive a section from.
     fs.rmSync(path.join(repo.repoPath, DOC));
     const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
-    const latest = run('run-3', '2026-09-03T10:00:00.000Z');
-    await writeGuardRun(repo.repoPath, latest);
-    await appendGuardHistory(repo.repoPath, guardHistoryEntryOf(latest));
 
-    const outcome = await backfillGuardRunSections();
+    await persistGuardRun(
+      { repoKey: repo.repoPath, commitSha: 'abcdef1234567890' },
+      repo.repoPath,
+      run('run-2', '2026-09-02T10:00:00.000Z'),
+    );
 
-    expect(outcome).toMatchObject({ missing: 1, written: 0, skipped: 1 });
     expect(await readGuardRunSections(repo.repoPath)).toEqual([]);
-    expect(warn.mock.calls.map((call) => String(call[0])).join('\n')).toContain('run-3');
-  });
-
-  it('backfills nothing twice', async () => {
-    writeManifest(repo.repoPath);
-    const latest = run('run-4', '2026-09-04T10:00:00.000Z');
-    await writeGuardRun(repo.repoPath, latest);
-    await appendGuardHistory(repo.repoPath, guardHistoryEntryOf(latest));
-
-    await backfillGuardRunSections();
-    expect(await backfillGuardRunSections()).toMatchObject({ missing: 0, written: 0 });
+    expect(warn.mock.calls.map((call) => String(call[0])).join('\n')).toContain('run-2');
   });
 });

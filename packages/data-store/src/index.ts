@@ -19,11 +19,6 @@ export {
   touchContextWorkspace,
   type DueContextSource,
 } from './context-store.js';
-export { migrateWorkspaceContext, type ContextMigrationSummary } from './context-migration.js';
-export {
-  migrateWorkspaceDecisions,
-  type DecisionsMigrationSummary,
-} from './context-decisions-migration.js';
 export { PgGuardStore } from './guard-store.js';
 export { PgGuardOverlayStore } from './guard-overlay-store.js';
 export { PgInferredActionStore } from './inferred-action-store.js';

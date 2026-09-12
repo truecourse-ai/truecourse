@@ -59,9 +59,8 @@ import { ContentStore, contentScope } from './content-store.js';
  * `changedAt`. Never backwards: two mutations settling out of order must not
  * make the corpus look current again, so an older stamp is ignored.
  *
- * Exported because two writers outside the store bump it: the boot migration,
- * which creates the first links, and the disconnect purge, which drops a
- * repository's links directly.
+ * Exported because one writer outside the store bumps it: the disconnect purge,
+ * which drops a repository's links directly.
  */
 export async function touchContextWorkspace(
   db: Db,
@@ -96,9 +95,8 @@ export interface DueContextSource {
  *  - a SITE whose last sync is older than `before` — a site has no event that
  *    announces a change, so it is refreshed on the clock;
  *  - a source of ANY KIND that has NEVER synced — a repository source is
- *    normally synced by its push, but one the boot migration created, or one
- *    whose first sync was lost with the process that ran it, would otherwise
- *    wait for a commit that may never come.
+ *    normally synced by its push, but one whose first sync was lost with the
+ *    process that ran it would otherwise wait for a commit that may never come.
  *
  * The sweep's one query — cross-workspace by construction, which is why it is a
  * function here rather than a method on the workspace-scoped store seam.

@@ -10,8 +10,7 @@
  *   context_documents — the ledger: one row per document a source currently
  *                       yields. The BODY is not here — it is content-addressed
  *                       in `content` under scope `context:ws:<org>`, keyed
- *                       `sha256-<content_hash>`, exactly as the per-repository
- *                       `spec_sources` registry keys its pages.
+ *                       `sha256-<content_hash>`.
  *   context_bindings  — a repository reads a source.
  *   context_workspaces — ONE stamp per workspace: when its Context last changed
  *                       in a way that makes the corpus stale. Every mutation

@@ -119,8 +119,7 @@ export interface GuardStore {
   appendGuardHistory(repoPath: string, entry: GuardHistoryEntry): Promise<void>;
   /**
    * Record a stored run's SECTION SUMMARY, written beside the run when it is
-   * persisted, and by the backfill for a run stored before summaries existed.
-   * Re-writing one replaces it.
+   * persisted. Re-writing one replaces it.
    */
   writeGuardRunSections(repoPath: string, run: GuardRunSections): Promise<void>;
   /**

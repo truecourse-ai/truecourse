@@ -67,7 +67,7 @@ describe('the sweep', () => {
 
   it('queues a repository source that has never synced — the boot sweep', async () => {
     // What the server runs once the queue is up: a source no push will ever
-    // reach (a migrated one, or one whose first sync was lost) is synced here.
+    // reach, because its first sync was lost, is synced here.
     const h = harness([{ workspaceOrgId: 'org_A', sourceId: 'repo-acme-api' }]);
     expect(await h.schedule.sweep()).toBe(1);
     h.schedule.stop();

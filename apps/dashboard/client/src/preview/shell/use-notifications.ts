@@ -40,11 +40,10 @@ export const notificationRepo = (n: NotificationView): string | null =>
   text(n.data, 'repoFullName');
 
 /**
- * Where a notification opens: the place the event happened. A row that names
- * its run opens that run's conversation; one that only names its repository
- * (a row stored before runs were named) opens that repository's runs on the
- * Agent page, and a scan with no run opens the Documents view. A row whose
- * payload names nothing has no address.
+ * Where a notification opens: the place the event happened. A setup, a
+ * generation and a scan open their run's own conversation, a flow run opens
+ * that run on the repository's Runs page, and a sync opens the source it
+ * refreshed. A row whose payload names none of those has no address.
  */
 export function notificationHref(n: NotificationView, repos: readonly Repo[]): string | null {
   const runId = text(n.data, 'runId');
@@ -52,19 +51,12 @@ export function notificationHref(n: NotificationView, repos: readonly Repo[]): s
   switch (n.kind) {
     case 'repo.guard-setup':
     case 'repo.guard-generate':
-      if (runId) return `${PREVIEW_BASE}/agent/${encodeURIComponent(runId)}`;
-      return repo ? `${PREVIEW_BASE}/agent?repo=${encodeURIComponent(repo.id)}` : null;
     case 'context.scan':
-      return runId
-        ? `${PREVIEW_BASE}/agent/${encodeURIComponent(runId)}`
-        : `${PREVIEW_BASE}/context/documents`;
+      return runId ? `${PREVIEW_BASE}/agent/${encodeURIComponent(runId)}` : null;
     case 'repo.guard-run': {
-      // A stored flow run named its guard run `runId` before the key said so.
-      const guardRunId = text(n.data, 'guardRunId') ?? runId;
-      if (!repo) return null;
-      return guardRunId
-        ? `${PREVIEW_BASE}/repos/${repo.id}/runs/${encodeURIComponent(guardRunId)}`
-        : `${PREVIEW_BASE}/repos/${repo.id}/runs`;
+      const guardRunId = text(n.data, 'guardRunId');
+      if (!repo || !guardRunId) return null;
+      return `${PREVIEW_BASE}/repos/${repo.id}/runs/${encodeURIComponent(guardRunId)}`;
     }
     case 'context.sync': {
       const sourceId = text(n.data, 'sourceId');

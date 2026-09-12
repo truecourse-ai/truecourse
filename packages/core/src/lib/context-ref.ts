@@ -50,7 +50,7 @@ export function contextDocRef(sourceId: string, docPath: string): string {
 
 /**
  * Read a context ref, or null when it is not one (a repo-relative doc path, a
- * legacy `knowledge/` ref, a ref that escapes its source's directory).
+ * ref that escapes its source's directory).
  */
 export function parseContextDocRef(ref: string): ContextDocRefParts | null {
   if (!ref.startsWith(`${CONTEXT_REF_PREFIX}/`)) return null;

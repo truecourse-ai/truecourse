@@ -12,7 +12,6 @@ import { setContextEventPublisher } from './services/context.service.js';
 import { startContextSyncSchedule, type ContextSchedule } from './services/context-schedule.service.js';
 import { operatorClaudeCode } from './services/workspace-llm.service.js';
 import { sweepStaleRunClones } from './services/run-clone.service.js';
-import { backfillGuardRunSections } from './services/guard-sections.service.js';
 import { setRepoJobsCanceller } from './services/repo-removal.service.js';
 import { stopAllWatchers } from './services/watcher.service.js';
 import { stopAllRunTails } from './services/session-tailer.service.js';
@@ -20,7 +19,6 @@ import { wipeLegacyPostgresData, getLogDir } from '@truecourse/core/config/paths
 import { getProjectByPath } from '@truecourse/core/config/registry';
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { closeLogger, configureLogger, log } from '@truecourse/core/lib/logger';
-import { migrateWorkspaceContext, migrateWorkspaceDecisions } from '@truecourse/data-store';
 import { publishEvent } from '@truecourse/jobs';
 
 const port = parseInt(process.env.PORT || '3001', 10);
@@ -69,14 +67,6 @@ async function main() {
   // Swap the file storage seams for Postgres before anything reads or writes
   // repo state, and clear run-clone debris a crashed process left behind.
   installDbStores(getDbHandle(), { masterSecret });
-  // Bring the workspaces that already exist into Context: a Repository source
-  // per connected repository, and the old per-repository llms.txt registries as
-  // workspace site sources. Idempotent — a second boot changes nothing.
-  await migrateWorkspaceContext(getDb());
-  // And their standing choices with them: a force-include, a conflict verdict
-  // or a scope call is about a DOCUMENT, and documents are now addressed by the
-  // context grammar. Runs after the sources exist, since it maps onto them.
-  await migrateWorkspaceDecisions(getDb());
   sweepStaleRunClones();
   if (operatorClaudeCode()) {
     log.info("[LLM] operator mode — every workspace runs on this process's Claude Code login");
@@ -133,14 +123,6 @@ async function main() {
     log.info('[Server] GitHub connect disabled — set GITHUB_APP_* to enable');
   }
 
-  // The section history of the runs stored before summaries existed, derived
-  // once. It runs after the doc reader knows which workspace a repository reads
-  // (the link store above), and in the background: nothing about serving the
-  // dashboard waits on history.
-  void backfillGuardRunSections().catch((err: unknown) => {
-    log.warn(`[Guard] the section backfill failed: ${(err as Error).message}`);
-  });
-
   // A site has no push to refresh it, so it is swept on a clock: every site
   // older than a day gets a sync enqueued (single-flight collapses duplicates).
   const contextSchedule: ContextSchedule = startContextSyncSchedule(getDb(), {
@@ -152,9 +134,9 @@ async function main() {
   try {
     await jobs.start();
     log.info('[Server] background jobs running');
-    // One sweep now the queue can take it: a source that has never synced (a
-    // migrated one, or one whose first sync died with the process) gets its
-    // first sync here rather than waiting out the hour.
+    // One sweep now the queue can take it: a source that has never synced,
+    // because its first sync died with the process, gets one here rather than
+    // waiting out the hour.
     void contextSchedule.sweep().catch((err: unknown) => {
       log.warn(`[context] the sweep failed: ${(err as Error).message}`);
     });

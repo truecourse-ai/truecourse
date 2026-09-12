@@ -429,9 +429,8 @@ function ModelsTab() {
 
 export default function SettingsPage() {
   const { tab } = useParams<{ tab?: string }>();
-  // `providers` was this tab's address before it was named for what it holds.
   const active = useMemo<TabId>(
-    () => (TABS.find((t) => t.id === (tab === 'providers' ? 'repositories' : tab))?.id ?? 'members') as TabId,
+    () => (TABS.find((t) => t.id === tab)?.id ?? 'members') as TabId,
     [tab],
   );
 

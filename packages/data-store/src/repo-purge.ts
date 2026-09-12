@@ -29,7 +29,6 @@ import {
   repoConfig,
   repoUiState,
   specSets,
-  specSources,
   contextBindings,
   guardRuns,
   guardResults,
@@ -63,9 +62,6 @@ export async function purgeRepoData(db: Db, repoKey: string): Promise<void> {
     await tx.delete(repoConfig).where(eq(repoConfig.repoKey, repoKey));
     await tx.delete(repoUiState).where(eq(repoUiState.repoKey, repoKey));
     await tx.delete(specSets).where(eq(specSets.repoKey, repoKey));
-    // Legacy: nothing writes `spec_sources` any more, but a repository
-    // connected before Context may still have the row the boot migration read.
-    await tx.delete(specSources).where(eq(specSources.repoKey, repoKey));
     // Only the LINKS: the sources themselves belong to the workspace, and one
     // another repository still reads must survive this disconnect.
     const unlinked = await tx

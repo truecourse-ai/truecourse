@@ -110,8 +110,8 @@ describe('GET /spec/corpus (hosted, the repository’s slice)', () => {
     setSpecStore(spec);
     setContextStore(memoryContextStore());
     await writeLatest(fixture.repoPath, baselineLatest('base1'));
-    // A per-repository corpus from before Context — no longer what it runs
-    // against, so no longer what it shows.
+    // A corpus stored against the repository itself is not what it runs
+    // against, so not what it shows: the slice of the workspace corpus is.
     await spec.saveSpec({ repoKey: fixture.repoPath, commitSha: 'base1' }, 'corpus', corpusWithArea('base/area'));
     await spec.saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', workspaceCorpus());
     app = createTestApp();

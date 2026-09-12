@@ -294,16 +294,6 @@ describe('one document of Context', () => {
       '/preview/context',
     );
   });
-
-  it('resolves the older singular source address to the source’s page', async () => {
-    serve();
-    renderAt('/preview/context/source/site-docs-acme');
-    await waitFor(() =>
-      expect(screen.getByTestId('address').textContent).toBe(
-        '/preview/context/sources/site-docs-acme',
-      ),
-    );
-  });
 });
 
 describe('the conflicts of the workspace', () => {

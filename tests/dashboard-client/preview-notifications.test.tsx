@@ -435,45 +435,16 @@ describe('opening a row', () => {
     expect(screen.getByTestId('address')).toHaveTextContent('/preview/notifications');
   });
 
-  it('opens a row stored before runs were named at the repository’s runs on the Agent page', async () => {
-    serve([note({ id: 'n-6', data: { jobId: 'job-6', repoFullName: REPO.name } })]);
+  it('stays put for a setup whose event named no run', async () => {
+    const state = serve([note({ id: 'n-6', data: { jobId: 'job-6', repoFullName: REPO.name } })]);
     renderAt('/preview/notifications');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(1));
 
     await user.click(rows()[0]!);
 
-    await waitFor(() =>
-      expect(screen.getByTestId('address')).toHaveTextContent(`/preview/agent?repo=${REPO.id}`),
-    );
-  });
-
-  it('opens a scan stored without its run at the Documents view', async () => {
-    serve([note({ ...SCAN_FAILED, id: 'n-7', data: { jobId: 'job-7' } })]);
-    renderAt('/preview/notifications');
-    const user = userEvent.setup();
-    await waitFor(() => expect(rows()).toHaveLength(1));
-
-    await user.click(rows()[0]!);
-
-    await waitFor(() =>
-      expect(screen.getByTestId('address')).toHaveTextContent('/preview/context/documents'),
-    );
-  });
-
-  it('reads a stored flow run’s guard run from the key it was stored under', async () => {
-    serve([note({ ...RUN, id: 'n-8', data: { jobId: 'job-8', repoFullName: REPO.name, runId: GUARD_RUN } })]);
-    renderAt('/preview/notifications');
-    const user = userEvent.setup();
-    await waitFor(() => expect(rows()).toHaveLength(1));
-
-    await user.click(rows()[0]!);
-
-    await waitFor(() =>
-      expect(screen.getByTestId('address')).toHaveTextContent(
-        `/preview/repos/${REPO.id}/runs/${encodeURIComponent(GUARD_RUN)}`,
-      ),
-    );
+    await waitFor(() => expect(state.reads).toEqual([{ ids: ['n-6'] }]));
+    expect(screen.getByTestId('address')).toHaveTextContent('/preview/notifications');
   });
 });
 
