@@ -48,6 +48,26 @@ async function create(command: 'spec-scan' | 'guard-setup' | 'guard-generate' | 
 }
 
 describe('Postgres activity storage', () => {
+  it('coalesces a settlement burst while retaining facts and transcript ordering', async () => {
+    const run = await create();
+    const facts: string[] = [];
+    for (let i = 0; i < 687; i++) {
+      facts.push(`flow ${i}: ${'x'.repeat(500)}`);
+      run.setChecklist([{ key: 'validate', label: 'Settling', status: 'active', facts: [...facts] }]);
+    }
+    run.persistence.appendEvent('worker', event(0));
+    run.setChecklist([{ key: 'validate', label: 'Settling', status: 'done', facts: [...facts] }]);
+    run.finish('completed');
+    await run.flush!();
+    const history = await run.readActivity!(-1);
+    // Initial, one coalesced burst, transcript, final checklist, terminal.
+    expect(history).toHaveLength(5);
+    expect(history[1]).toMatchObject({ kind: 'run', run: { display: { blocks: [{ items: [{ status: 'active', facts }] }] } } });
+    expect(history[2]).toMatchObject({ kind: 'session-event', event: { type: 'user-message', seq: 0 } });
+    expect(history[3]).toMatchObject({ kind: 'run', run: { display: { blocks: [{ items: [{ status: 'done', facts }] }] } } });
+    expect(history[4]).toMatchObject({ kind: 'run', run: { status: 'completed' } });
+  });
+
   it('compacts snapshot-heavy pages without skipping transcripts or altering stored history', async () => {
     const run = await create();
     for (let i = 0; i < 100; i++) run.setGitRef!(`${i}-${'x'.repeat(10_000)}`);
@@ -187,6 +207,7 @@ describe('Postgres activity storage', () => {
       })());
     });
     run.setChecklist([{ key: 'a', label: 'Read documents', status: 'active' }]);
+    await run.flush!(); // Already-published snapshots must never be coalesced.
     run.setChecklist([{ key: 'a', label: 'Read documents', status: 'done' }]);
     await run.flush!(); await Promise.all(observations); unsubscribe();
     const events = await run.readActivity!(-1);

@@ -716,7 +716,7 @@ export interface GenerateGuardsOptions {
    *  The wider signature is kept so the runner's own phase type still fits. */
   onBirthPhase?: (phase: 'build' | 'run' | 'confirm', total?: number) => void
   /** Per-FLOW settle progress: `total` = the flows this run had work for. */
-  onFlowSettled?: (settled: number, total: number) => void
+  onFlowSettled?: (settled: number, total: number) => void | Promise<void>
   /**
    * One line per THING the run did, filed under the phase that did it: the
    * section that changed, the doc that was extracted, the interface that was
@@ -2086,7 +2086,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   }
   // Announce the settle denominator before the first (slow) authoring/birth phase,
   // so the live counter is never a bare count without context.
-  options.onFlowSettled?.(0, changedWorks.length)
+  await options.onFlowSettled?.(0, changedWorks.length)
 
   // 7. Workers — one `guard-generate.flow-worker` session per (flow, surface
   // with a plan). The build is kicked first: every execution inside the worker
@@ -4089,7 +4089,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     for (const gap of work.gaps) {
       fact('validate', `${work.flow.id} x ${gap.surface}: ${gap.kind} gap, ${asLine(gap.reason)}`)
     }
-    options.onFlowSettled?.(++flowsSettled, settleTotal)
+    await options.onFlowSettled?.(++flowsSettled, settleTotal)
   }
   flowsReport.settled += flowsReport.skipped
   // A committed flow that no longer exists is treated by INTENT, not by symmetry:

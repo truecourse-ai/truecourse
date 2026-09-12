@@ -307,12 +307,24 @@ export class PgSessionRunStore implements SessionRunBackend {
     let pending = Promise.resolve();
     let failure: unknown;
     const flush = async () => { await pending; if (failure) throw failure; };
-    const enqueue = (body: ActivityEventBody, snapshot?: Record) => {
+    // Only adjacent checklist updates can replace one another. Transcript and
+    // lifecycle events are ordering barriers and are always persisted.
+    let checklistTail: { value: ActivityEventBody; state?: Record } | undefined;
+    const enqueue = (body: ActivityEventBody, snapshot?: Record, coalesce = false) => {
       if (failure) throw failure;
       const value = clone(body);
-      const state = snapshot ? clone(toPublicRunRecord(snapshot)) : undefined;
+      const state = snapshot && value.kind === 'run' ? value.run as Record : undefined;
+      if (coalesce && checklistTail) {
+        checklistTail.value = value;
+        checklistTail.state = state;
+        return;
+      }
+      const queued = { value, state };
+      checklistTail = coalesce ? queued : undefined;
       pending = pending.then(async () => {
+        if (checklistTail === queued) checklistTail = undefined;
         if (failure) return;
+        const { value, state } = queued;
         const event = await this.db.transaction(async tx => {
           const [row] = await tx.select({ ...getTableColumns(activityRuns), leaseActive: sql<boolean>`${activityRuns.leaseUntil} > CURRENT_TIMESTAMP` }).from(activityRuns).where(and(eq(activityRuns.runId, record.runId), eq(activityRuns.repoKey, repoKey))).for('update');
           if (!row) throw new Error('Session run was removed');
@@ -341,7 +353,7 @@ export class PgSessionRunStore implements SessionRunBackend {
     }, 20_000);
     heartbeat.unref();
     if (!owned) clearInterval(heartbeat);
-    const write = () => enqueue({ kind: 'run', run: toPublicRunRecord(record) }, record);
+    const write = (coalesce = false) => enqueue({ kind: 'run', run: toPublicRunRecord(record) }, record, coalesce);
     return {
       runId: record.runId, dir, record: () => record, flush,
       subscribeActivity: notify => this.subscribe(`run:${record.runId}`, notify),
@@ -358,7 +370,7 @@ export class PgSessionRunStore implements SessionRunBackend {
         const at = blocks.findIndex(block => block.kind === 'checklist');
         const checklist = { kind: 'checklist' as const, items };
         record.display = { blocks: at < 0 ? [checklist, ...blocks] : blocks.map((block, i) => i === at ? checklist : block) };
-        write();
+        write(true);
       },
       setError(error) { record.error = error; write(); },
       finish(status, options) {

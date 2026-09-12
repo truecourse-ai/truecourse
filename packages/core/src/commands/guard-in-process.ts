@@ -712,7 +712,7 @@ export async function guardGenerateInProcess(
       // One line per THING the run did, filed under the step that did it. The
       // engine's phase names ARE this checklist's keys, so they line up.
       onFact: (step, line) => tracker?.fact(step, line),
-      onFlowSettled: (settled, total) => {
+      onFlowSettled: async (settled, total) => {
         throwIfAborted();
         building = false;
         flowsDone = settled;
@@ -720,6 +720,9 @@ export async function guardGenerateInProcess(
         // Gap-only flows settle without any worker running — only re-render a
         // LIVE validate line; never start the step early.
         if (validateStarted || settled > 0) renderValidate();
+        // Drain persistence before advancing: a synchronous settlement burst
+        // must not retain hundreds of complete progress snapshots.
+        await run.flush?.();
       },
     });
 
