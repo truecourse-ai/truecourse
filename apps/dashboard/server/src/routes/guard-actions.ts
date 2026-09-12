@@ -48,6 +48,7 @@
  */
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
+import { readGuardGenerateResume } from '../jobs/guard-generate-resume.js';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
 import {
   estimateGuard,
@@ -229,6 +230,8 @@ router.get('/:id/guard/estimate', async (req: Request, res: Response, next: Next
 router.post('/:id/guard/generate', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
+    const resumeRunId: unknown = req.body?.resumeRunId;
+    const resume = resumeRunId === undefined ? undefined : await readGuardGenerateResume(repo.path, resumeRunId);
     // Extracting both sides of an unresolved overlap births a paid finding that
     // is really the dispute. Answered BEFORE the provider check: nothing about a
     // blocked corpus is fixed by a provider, and the full report is the remedy.
@@ -246,6 +249,7 @@ router.post('/:id/guard/generate', async (req: Request, res: Response, next: Nex
       repoFullName: repo.path,
       workspaceOrgId: orgOf(req),
       source: 'manual',
+      ...(resume ? { resumeRunId: resume.runId } : {}),
     });
     if (outcome.status === 'busy') {
       res.status(409).json({ error: 'A guard job is already running for this repo.' });

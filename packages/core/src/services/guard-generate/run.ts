@@ -191,6 +191,8 @@ export interface CreateGuardGenerateSeamsOptions {
    * (`generateGuards({ only })`) returns before calling their seams.
    */
   only?: GenerateStep
+  /** Completed steps of an interrupted run: cache replay only, with no stop after. */
+  replaySteps?: readonly GenerateStep[]
   /**
    * Test seam: a lazy thunk overriding the internal
    * `createConfiguredSessionDriver` path — the spec-scan analog's shape, plus
@@ -446,7 +448,8 @@ export function createGuardGenerateSessionSeams(
   }
   /** Single-step mode: is `step` PRIOR to the chosen one (replay, never spend)? */
   const replayOnly = (step: GenerateStep): boolean =>
-    opts.only !== undefined && GENERATE_SESSION_STEPS.indexOf(step) < GENERATE_SESSION_STEPS.indexOf(opts.only)
+    opts.replaySteps?.includes(step) === true ||
+    (opts.only !== undefined && GENERATE_SESSION_STEPS.indexOf(step) < GENERATE_SESSION_STEPS.indexOf(opts.only))
 
   const extractSession: ExtractSessionSeam = async (input) => {
     const universe = buildGuardDocUniverse(input.docs)

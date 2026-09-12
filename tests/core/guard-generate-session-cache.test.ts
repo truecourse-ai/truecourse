@@ -106,6 +106,23 @@ const EXTRACT_DRAFT = {
 const transportFailure = { kind: 'failure' as const, failure: { kind: 'transport' as const, detail: 'gone', class: 'provider' as const, retryability: 'none' as const } }
 
 describe('the extract seam’s cache', () => {
+  it('resumes completed extraction without constructing a driver, and refuses a missing result', async () => {
+    const r = docRepo()
+    const [doc] = docsOf(r)
+    sessionScript = async call => {
+      await callTool(call, 'check_claims', EXTRACT_DRAFT)
+      return outcome(EXTRACT_DRAFT)
+    }
+    await createGuardGenerateSessionSeams({ repoRoot: r }).extractSession({ docs: [doc] })
+    const before = constructions
+    sessionScript = () => { throw new Error('completed extraction must not run again') }
+    const resumed = createGuardGenerateSessionSeams({ repoRoot: r, replaySteps: ['extract', 'flows'] })
+    expect((await resumed.extractSession({ docs: [doc] })).summary).toMatchObject({ ran: 0, fromCache: 1 })
+    await expect(resumed.extractSession({ docs: [{ ...doc, content: `${doc.content}\nNew requirement` }] }))
+      .rejects.toMatchObject({ name: 'GenerateStepNotReadyError', step: 'extract' })
+    expect(constructions).toBe(before)
+  })
+
   it('runs a session on a miss, writes the entry, and serves the next run from it', async () => {
     const r = docRepo()
     const [doc] = docsOf(r)
@@ -242,10 +259,15 @@ describe('the flows seam’s cache', () => {
     expect(result.inputsKey).toBe(flowsSessionCacheKey(area))
     expect(await getCacheEntry(r, FLOWS_SESSION_CACHE_NAME, flowsSessionCacheKey(area))).toEqual(CLEAN_FLOWS)
 
-    const second = await createGuardGenerateSessionSeams({ repoRoot: r }).flowsAreaSession({ areas: [area], docs })
+    const resumed = createGuardGenerateSessionSeams({ repoRoot: r, replaySteps: ['extract', 'flows'] })
+    const second = await resumed.flowsAreaSession({ areas: [area], docs })
     expect(second.summary).toMatchObject({ ran: 0, fromCache: 1 })
     const hit = second.byArea.get('tasks')!
     expect(hit.ok && hit.fromCache).toBe(true)
+    const before = constructions
+    await expect(resumed.flowsAreaSession({ areas: [{ ...area, areaId: 'uncached-area' }], docs }))
+      .rejects.toMatchObject({ name: 'GenerateStepNotReadyError', step: 'flows' })
+    expect(constructions).toBe(before)
   })
 
   // The session had its chance in-session: `check_flows` told it. An outcome the

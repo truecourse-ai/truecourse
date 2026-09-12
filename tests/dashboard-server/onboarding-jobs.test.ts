@@ -781,6 +781,61 @@ describe('the guard generate job', () => {
     expect(disposed).toEqual([clone]);
   });
 
+  it('resumes from Postgres history after the original clone and backend instance are gone', async () => {
+    setSessionRunBackend(new PgSessionRunStore(db));
+    const savedTree = path.join(makeTmpDir('tc-resume-input-'), 'tree');
+    generateImpl = async (repoRoot, options) => {
+      fs.cpSync(repoRoot, savedTree, { recursive: true });
+      for (const key of ['index', 'extract', 'interfaces', 'flows', 'match']) options?.tracker?.done(key);
+      options?.tracker?.start('author');
+      options?.tracker?.start('validate');
+      throw new Error('worker interrupted');
+    };
+    await saveSetupBundle();
+    await jobs.enqueueGuardGenerate(request);
+    await Promise.all(running);
+    const [source] = await listStoredSessionRuns(REPO, 'guard-generate');
+    expect(source.status).toBe('failed');
+    expect(fs.existsSync(clone)).toBe(false);
+
+    setSessionRunBackend(new PgSessionRunStore(db));
+    setWorkTreeProvider(async () => {
+      fs.cpSync(savedTree, clone, { recursive: true });
+      return { dir: clone, dispose: () => fs.rmSync(clone, { recursive: true, force: true }) };
+    });
+    let resumed = false;
+    generateImpl = async (repoRoot, options) => {
+      expect(options?.resume).toEqual({
+        runId: source.runId, gitRef: source.gitRef,
+        completedSteps: ['index', 'extract', 'interfaces', 'flows', 'match'],
+      });
+      resumed = true;
+      return authoring(repoRoot, options);
+    };
+    await jobs.enqueueGuardGenerate({ ...request, resumeRunId: source.runId });
+    await Promise.all(running);
+    expect(resumed).toBe(true);
+    expect((await jobsOfType('repo.guard-generate')).map(job => job.status).sort()).toEqual(['failed', 'succeeded']);
+    expect((await openStoredSessionRun(REPO, 'guard-generate', source.runId)).record().status).toBe('failed');
+  });
+
+  it('refuses a resume at a different commit before generation runs', async () => {
+    await saveSetupBundle();
+    generateImpl = async (_root, options) => {
+      options?.sessionRun?.setGitRef?.('a'.repeat(40));
+      throw new Error('interrupted');
+    };
+    await jobs.enqueueGuardGenerate(request);
+    await Promise.all(running);
+    const [source] = await listStoredSessionRuns(REPO, 'guard-generate');
+    let calls = 0;
+    generateImpl = async (...args) => { calls++; return authoring(...args); };
+    await jobs.enqueueGuardGenerate({ ...request, resumeRunId: source.runId });
+    await Promise.all(running);
+    expect(calls).toBe(0);
+    expect((await jobsOfType('repo.guard-generate')).some(job => job.error?.includes('commit has changed'))).toBe(true);
+  });
+
   it.each(['file', 'postgres'])('materializes and persists generated results with %s activity history', async storage => {
     if (storage === 'postgres') setSessionRunBackend(new PgSessionRunStore(db));
     await saveSetupBundle();

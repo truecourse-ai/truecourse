@@ -30,6 +30,7 @@ import { materializeGuardOverlays } from '@truecourse/core/lib/guard-overlays';
 import { materializeGuardSetupBundle } from '@truecourse/core/services/guard-setup/bundle';
 import {
   buildGuardReport,
+  assertGuardGenerateResumeCommit,
   buildOpenConflictsReport,
   guardGenerateInProcess,
   GUARD_GENERATE_STEPS,
@@ -38,6 +39,7 @@ import {
 import type { JobDefinition, JobPayload } from '@truecourse/jobs';
 import { startWorkspaceLlm, type WorkspaceLlm } from '../../services/workspace-llm.service.js';
 import { acquireWorkTree } from '../../services/work-tree.service.js';
+import { readGuardGenerateResume } from '../guard-generate-resume.js';
 import { materializeStoredSpec } from '../materialize-spec.js';
 import {
   materializeStoredGuardState,
@@ -48,7 +50,7 @@ import { firstLine, type OnboardingJobRequest } from './onboarding.js';
 
 export const REPO_GUARD_GENERATE_TASK = 'repo.guard-generate';
 
-export type GuardGenerateJobRequest = OnboardingJobRequest;
+export type GuardGenerateJobRequest = OnboardingJobRequest & { resumeRunId?: string };
 
 export type GuardGenerateJobPayload = GuardGenerateJobRequest & JobPayload;
 
@@ -88,12 +90,18 @@ export function createRepoGuardGenerateTask(
     async run(ctx) {
       return dashboardActivity(ctx, 'guard-generate', GUARD_GENERATE_STEPS, async (activityRun, activityTracker) => {
         const { repoFullName } = ctx.payload;
+        // Re-read at execution time as well: the queue payload carries identity,
+        // never client-supplied completed steps or a trusted snapshot of status.
+        const resume = ctx.payload.resumeRunId
+          ? await readGuardGenerateResume(repoFullName, ctx.payload.resumeRunId)
+          : undefined;
         const llm = await startLlm(ctx.payload.workspaceOrgId);
 
         await ctx.phase('clone');
         const tree = await acquireWorkTree(repoFullName);
         try {
           const commitSha = await resolveCommitSha(tree.dir);
+          if (resume) assertGuardGenerateResumeCommit(resume, commitSha);
           activityRun.setGitRef?.(commitSha);
           activityTracker.fact('clone', `cloned ${repoFullName} at ${commitSha.slice(0, 8)}`);
           const ref = { repoKey: repoFullName, commitSha };
@@ -139,6 +147,7 @@ export function createRepoGuardGenerateTask(
               sessionRun: activityRun,
               tracker: activityTracker,
               requireExistingRecipe: true,
+              ...(resume ? { resume } : {}),
               ...(ctx.signal ? { signal: ctx.signal } : {}),
             }));
           } catch (err) {

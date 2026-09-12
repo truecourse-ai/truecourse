@@ -10,7 +10,7 @@
 
 import { startGuardGenerate, startGuardSetup, startSpecScan, type RunStart } from './scan';
 
-export type RunTrigger = (repoId: string) => Promise<RunStart>;
+export type RunTrigger = (repoId: string, resumeRunId?: string) => Promise<RunStart>;
 
 const RUN_TRIGGERS: Record<string, RunTrigger> = {
   'spec-scan': startSpecScan,
