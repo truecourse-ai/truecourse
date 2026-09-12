@@ -126,7 +126,7 @@ The deterministic scan runs in a worker thread with a per-file time budget, so a
 ## Commands
 
 ```bash
-truecourse analyze                    # Analyze current repo (prompts before stashing dirty trees)
+truecourse analyze [project-path]      # Analyze a repository (defaults to the current directory)
 truecourse analyze --stash            # Pre-approve stashing pending changes (CI-friendly)
 truecourse analyze --no-stash         # Analyze working tree as-is, no stash
 truecourse analyze --diff             # New/resolved violations from your uncommitted changes
