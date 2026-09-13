@@ -1,9 +1,11 @@
 /**
  * The api session driver: our own per-turn loop
- * on `generateText` — tools without `execute`, one step per turn, full-history
- * resend, cache breakpoints, per-turn fallback retry, and the malformed
- * mapping. The REAL `generateText` runs against a scripted LanguageModelV3
- * stub (the `buildModel` mock seam the transport tests use).
+ * on `streamText` — tools without `execute`, one step per turn, full-history
+ * resend, cache breakpoints, per-turn fallback retry, the malformed mapping,
+ * and the turn reported as it is written. The REAL `streamText` runs against a
+ * scripted LanguageModelV3 stub (the `buildModel` mock seam the transport
+ * tests use), which plays each scripted turn back as the provider stream it
+ * would arrive on.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
@@ -47,11 +49,46 @@ const cfgNoFallback = { provider: 'anthropic' as const, model: 'primary-model', 
 
 type StubContent =
   | { type: 'text'; text: string }
+  | { type: 'reasoning'; text: string }
   | { type: 'tool-call'; toolCallId: string; toolName: string; input: string };
 
 type StubTurn = { content: StubContent[] } | { throws: unknown };
 
-/** A LanguageModelV3 that plays scripted turns and records every prompt. */
+/** One scripted turn as the parts the provider streams it in. */
+function streamParts(content: StubContent[]): unknown[] {
+  const parts: unknown[] = [{ type: 'stream-start', warnings: [] }];
+  content.forEach((piece, index) => {
+    if (piece.type === 'tool-call') {
+      const id = piece.toolCallId;
+      parts.push(
+        { type: 'tool-input-start', id, toolName: piece.toolName },
+        { type: 'tool-input-delta', id, delta: piece.input },
+        { type: 'tool-input-end', id },
+        { type: 'tool-call', toolCallId: id, toolName: piece.toolName, input: piece.input },
+      );
+      return;
+    }
+    const id = `b${index}`;
+    parts.push(
+      { type: `${piece.type}-start`, id },
+      { type: `${piece.type}-delta`, id, delta: piece.text },
+      { type: `${piece.type}-end`, id },
+    );
+  });
+  parts.push({
+    type: 'finish',
+    finishReason: {
+      unified: content.some((c) => c.type === 'tool-call') ? 'tool-calls' : 'stop',
+    },
+    usage: {
+      inputTokens: { total: 100, noCache: 40, cacheRead: 50, cacheWrite: 10 },
+      outputTokens: { total: 20, text: 20, reasoning: undefined },
+    },
+  });
+  return parts;
+}
+
+/** A LanguageModelV3 that streams scripted turns and records every prompt. */
 function scriptedModel(turns: StubTurn[]) {
   const calls: Array<{
     prompt: unknown[];
@@ -65,7 +102,10 @@ function scriptedModel(turns: StubTurn[]) {
       provider: 'mock',
       modelId: 'mock-model',
       supportedUrls: {},
-      async doGenerate(options: {
+      async doGenerate() {
+        throw new Error('doGenerate not used');
+      },
+      async doStream(options: {
         prompt: unknown[];
         tools?: unknown[];
         providerOptions?: Record<string, Record<string, unknown>>;
@@ -78,18 +118,15 @@ function scriptedModel(turns: StubTurn[]) {
         const turn = turns.shift();
         if (!turn) throw new Error('scripted model ran out of turns');
         if ('throws' in turn) throw turn.throws;
+        const parts = streamParts(turn.content);
         return {
-          content: turn.content,
-          finishReason: turn.content.some((c) => c.type === 'tool-call') ? 'tool-calls' : 'stop',
-          usage: {
-            inputTokens: { total: 100, noCache: 40, cacheRead: 50, cacheWrite: 10 },
-            outputTokens: { total: 20, text: 20, reasoning: undefined },
-          },
-          warnings: [],
+          stream: new ReadableStream({
+            start(controller) {
+              for (const part of parts) controller.enqueue(part);
+              controller.close();
+            },
+          }),
         };
-      },
-      async doStream() {
-        throw new Error('doStream not used');
       },
     },
   };
@@ -117,6 +154,7 @@ function apiError(
 }
 
 const text = (t: string): StubContent => ({ type: 'text', text: t });
+const thinking = (t: string): StubContent => ({ type: 'reasoning', text: t });
 const call = (toolName: string, input: unknown, id = 'c1'): StubContent => ({
   type: 'tool-call',
   toolCallId: id,
@@ -201,6 +239,77 @@ describe('api session driver', () => {
     });
   });
 
+  it('streams the turn as it is written: thinking, prose, then the call being composed', async () => {
+    const scripted = scriptedModel([
+      {
+        content: [
+          thinking('weighing it'),
+          text('let me '),
+          text('probe'),
+          call('probe', { value: 'hi' }),
+        ],
+      },
+      { content: [text('done'), outcomeCall({ verdict: 'keep' })] },
+    ]);
+    buildModelMock.mockReturnValue(scripted.model);
+    const progress: SessionProgress[] = [];
+    const { handle, events } = runSession(createApiSessionDriver(cfg), {
+      onProgress: (p) => progress.push(p),
+    });
+    expect(await handle.done).toMatchObject({ kind: 'outcome' });
+
+    // Each kind in the order the provider wrote it, the prose growing delta by
+    // delta, and the call named from the part that opens it.
+    expect(progress.slice(0, 5)).toEqual([
+      { kind: 'thinking', turnId: '0', text: 'weighing it' },
+      { kind: 'text', turnId: '0', text: 'let me ' },
+      { kind: 'text', turnId: '0', text: 'let me probe' },
+      { kind: 'tool', toolCallId: 'c1', toolName: 'probe', phase: 'calling', elapsedSeconds: 0 },
+      { kind: 'tool', toolCallId: 'c1', toolName: 'probe', phase: 'calling', elapsedSeconds: 0 },
+    ]);
+    expect(progress).toContainEqual({
+      kind: 'tool',
+      toolCallId: 'c1',
+      toolName: 'probe',
+      phase: 'running',
+      elapsedSeconds: 0,
+    });
+    // The next turn groups its own prose under its own id.
+    expect(progress.filter((p) => p.kind !== 'tool').at(-1)).toEqual({
+      kind: 'text',
+      turnId: '1',
+      text: 'done',
+    });
+
+    // What the turn WAS is unchanged: one assistant-turn, its text, its call
+    // and its usage, from the settled result rather than the deltas.
+    const turns = events.filter((e) => e.type === 'assistant-turn');
+    expect(turns).toHaveLength(2);
+    expect(turns[0]).toMatchObject({
+      text: 'let me probe',
+      toolCall: { name: 'probe', args: { value: 'hi' } },
+      model: 'mock-model',
+      usage: { inputTokens: 40, outputTokens: 20, cacheReadTokens: 50, cacheCreateTokens: 10 },
+    });
+    expect(events.map((e) => e.type)).toEqual([
+      'user-message',
+      'assistant-turn',
+      'tool-result',
+      'assistant-turn',
+    ]);
+  });
+
+  it('says nothing to a session that is not watching, and still settles the turn', async () => {
+    const scripted = scriptedModel([
+      { content: [thinking('weighing it'), text('probing'), call('probe', { value: 'hi' })] },
+      { content: [outcomeCall({ verdict: 'keep' })] },
+    ]);
+    buildModelMock.mockReturnValue(scripted.model);
+    const { handle, events } = runSession(createApiSessionDriver(cfg));
+    expect(await handle.done).toMatchObject({ kind: 'outcome', value: { verdict: 'keep' } });
+    expect(events.filter((e) => e.type === 'assistant-turn')).toHaveLength(2);
+  });
+
   it('reports the tool it is in and how long it has been in it, and stops when it returns', async () => {
     const scripted = scriptedModel([
       { content: [call('slow', { value: 'hi' })] },
@@ -231,11 +340,15 @@ describe('api session driver', () => {
         onProgress: (p) => progress.push(p),
       });
       await inTool;
+      // The call is named while the model composes it, and the same call id
+      // carries on into the run, so the two are one thing happening.
       expect(progress).toEqual([
-        { kind: 'tool', toolCallId: 'c1', toolName: 'slow', elapsedSeconds: 0 },
+        { kind: 'tool', toolCallId: 'c1', toolName: 'slow', phase: 'calling', elapsedSeconds: 0 },
+        { kind: 'tool', toolCallId: 'c1', toolName: 'slow', phase: 'calling', elapsedSeconds: 0 },
+        { kind: 'tool', toolCallId: 'c1', toolName: 'slow', phase: 'running', elapsedSeconds: 0 },
       ]);
       await vi.advanceTimersByTimeAsync(2000);
-      expect(progress.at(-1)).toEqual({ kind: 'tool', toolCallId: 'c1', toolName: 'slow', elapsedSeconds: 2 });
+      expect(progress.at(-1)).toEqual({ kind: 'tool', toolCallId: 'c1', toolName: 'slow', phase: 'running', elapsedSeconds: 2 });
       release();
       expect(await handle.done).toMatchObject({ kind: 'outcome' });
       const said = progress.length;

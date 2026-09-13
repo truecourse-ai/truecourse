@@ -454,7 +454,30 @@ describe('the shapes one run cannot show', () => {
     ).toBe('Booting the app');
     expect(
       foldConversation(record, events, {
-        'ses-a': { kind: 'tool', turnId: 't1', toolName: 'run_seed_draft', elapsedSeconds: 12.6 },
+        'ses-a': { kind: 'thinking', turnId: 't1', text: 'The docs disagree' },
+      }).steps[0].sessions[0].live,
+    ).toBe('The docs disagree');
+    // A call the model is still writing has no clock to show, only its name.
+    expect(
+      foldConversation(record, events, {
+        'ses-a': {
+          kind: 'tool',
+          toolCallId: 'tu-1',
+          toolName: 'run_seed_draft',
+          phase: 'calling',
+          elapsedSeconds: 0,
+        },
+      }).steps[0].sessions[0].live,
+    ).toBe('calling run_seed_draft');
+    expect(
+      foldConversation(record, events, {
+        'ses-a': {
+          kind: 'tool',
+          toolCallId: 'tu-1',
+          toolName: 'run_seed_draft',
+          phase: 'running',
+          elapsedSeconds: 12.6,
+        },
       }).steps[0].sessions[0].live,
     ).toBe('run_seed_draft · 12s');
   });
@@ -584,7 +607,7 @@ describe('the shape of the list', () => {
   });
 
   it('says what a piece of work is doing only while it is doing it', () => {
-    const working = { [parent]: { kind: 'tool' as const, toolCallId: 't1', toolName: 'run_scenario', elapsedSeconds: 42.8 } };
+    const working = { [parent]: { kind: 'tool' as const, toolCallId: 't1', toolName: 'run_scenario', phase: 'running' as const, elapsedSeconds: 42.8 } };
     const finished = { [sibling]: { kind: 'text' as const, turnId: 't1', text: 'Writing the outcome' } };
     const sessions = (progress: Record<string, never>) =>
       foldConversation(record, [], progress).steps[0].sessions;

@@ -96,6 +96,14 @@ export interface SdkRateLimitEvent {
   [k: string]: unknown;
 }
 
+/**
+ * One frame of the API's own message stream, forwarded verbatim by the SDK
+ * (`BetaRawMessageStreamEvent`). The fields named here are the ones the driver
+ * reads: a block's own kind at `content_block_start` — `text`, `thinking` or
+ * `tool_use` with the id and name of the call being composed — and its
+ * increments at `content_block_delta` (`text_delta.text`,
+ * `thinking_delta.thinking`, `input_json_delta.partial_json`).
+ */
 export interface SdkPartialAssistantMessage {
   type: 'stream_event';
   parent_tool_use_id: string | null;
@@ -103,8 +111,8 @@ export interface SdkPartialAssistantMessage {
     type: string;
     index?: number;
     message?: { id?: string };
-    content_block?: { type: string; text?: string };
-    delta?: { type: string; text?: string };
+    content_block?: { type: string; text?: string; thinking?: string; id?: string; name?: string };
+    delta?: { type: string; text?: string; thinking?: string; partial_json?: string };
   };
 }
 

@@ -19,7 +19,12 @@ import type {
   SdkUserMessage,
   SdkMcpToolResult,
 } from '../../packages/llm-claude-agent/src/sdk-types';
-import type { SessionDef, SessionEventBody, SessionRunInput } from '../../packages/agent-loop/src/index';
+import type {
+  SessionDef,
+  SessionEventBody,
+  SessionProgress,
+  SessionRunInput,
+} from '../../packages/agent-loop/src/index';
 import { defineSessionTool } from '../../packages/agent-loop/src/index';
 
 // ---------------------------------------------------------------------------
@@ -179,11 +184,60 @@ describe('claude agent session driver', () => {
     await handle.done;
     expect(captured.options?.includePartialMessages).toBe(true);
     expect(progress).toContainEqual({ kind: 'text', turnId: 'turn-1', text: 'Read \ndocs.' });
-    expect(progress).toContainEqual({ kind: 'tool', toolCallId: 'tool-1', toolName: 'probe', elapsedSeconds: 3 });
+    expect(progress).toContainEqual({ kind: 'tool', toolCallId: 'tool-1', toolName: 'probe', phase: 'running', elapsedSeconds: 3 });
     expect(JSON.stringify(progress)).not.toContain('SECRET CHILD');
     const turns = events.filter(e => e.type === 'assistant-turn');
     expect(turns).toHaveLength(1);
     expect(turns[0]).toMatchObject({ text: 'Read \ndocs.', usage: { inputTokens: 4, outputTokens: 2 } });
+  });
+
+  it('reports the thinking and the call being composed, each as its own kind', async () => {
+    const progress: SessionProgress[] = [];
+    const { sdk } = fakeSdk(async function* (ctx) {
+      await ctx.nextUserMessage(); yield init();
+      const partial = (event: object): SdkMessage => ({ type: 'stream_event', parent_tool_use_id: null, event });
+      yield partial({ type: 'message_start', message: { id: 'turn-1' } });
+      yield partial({ type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: 'The docs ' } });
+      yield partial({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'disagree.' } });
+      yield partial({ type: 'content_block_start', index: 1, content_block: { type: 'text', text: 'Probing.' } });
+      // The turn the reader used to sit through in silence: the model writing
+      // the call, argument by argument, before anything runs.
+      yield partial({ type: 'content_block_start', index: 2, content_block: { type: 'tool_use', id: 'tu-1', name: `mcp__${SESSION_MCP_SERVER_NAME}__probe` } });
+      yield partial({ type: 'content_block_delta', index: 2, delta: { type: 'input_json_delta', partial_json: '{"value":' } });
+      yield { type: 'tool_progress', parent_tool_use_id: null, tool_use_id: 'tu-1', tool_name: `mcp__${SESSION_MCP_SERVER_NAME}__probe`, elapsed_time_seconds: 2 };
+      yield success({ verdict: 'keep' });
+    });
+    const { handle } = runSession(sdk, { onProgress: (p) => progress.push(p) });
+    await handle.done;
+
+    // The thinking and the prose are separate lines, not one merged blob, and
+    // the call is the same call id from composing it to running it.
+    expect(progress).toEqual([
+      { kind: 'thinking', turnId: 'turn-1', text: 'The docs ' },
+      { kind: 'thinking', turnId: 'turn-1', text: 'The docs disagree.' },
+      { kind: 'text', turnId: 'turn-1', text: 'Probing.' },
+      { kind: 'tool', toolCallId: 'tu-1', toolName: 'probe', phase: 'calling', elapsedSeconds: 0 },
+      { kind: 'tool', toolCallId: 'tu-1', toolName: 'probe', phase: 'calling', elapsedSeconds: 0 },
+      { kind: 'tool', toolCallId: 'tu-1', toolName: 'probe', phase: 'running', elapsedSeconds: 2 },
+    ]);
+  });
+
+  it('reports only what the stream carries: no name, no call', async () => {
+    const progress: SessionProgress[] = [];
+    const { sdk } = fakeSdk(async function* (ctx) {
+      await ctx.nextUserMessage(); yield init();
+      const partial = (event: object): SdkMessage => ({ type: 'stream_event', parent_tool_use_id: null, event });
+      yield partial({ type: 'message_start', message: { id: 'turn-1' } });
+      // A block kind this driver does not read, and an argument delta for a
+      // block that never opened: neither says anything to invent a line from.
+      yield partial({ type: 'content_block_start', index: 0, content_block: { type: 'redacted_thinking', data: 'opaque' } });
+      yield partial({ type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"value":' } });
+      yield partial({ type: 'content_block_delta', index: 2, delta: { type: 'signature_delta', signature: 'sig' } });
+      yield success({ verdict: 'keep' });
+    });
+    const { handle } = runSession(sdk, { onProgress: (p) => progress.push(p) });
+    await handle.done;
+    expect(progress).toEqual([]);
   });
 
   it('declares live steering, native structured outcome, and resume-at-message', () => {

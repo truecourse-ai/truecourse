@@ -1,6 +1,6 @@
 /**
  * The api SESSION DRIVER: our own per-turn loop
- * on the AI SDK's `generateText` — tools declared without `execute` so the
+ * on the AI SDK's `streamText` — tools declared without `execute` so the
  * model's tool call comes back unrun (one step per turn), the FULL message
  * history resent every turn under the configured provider's cache strategy
  * (`provider-tuning.ts` — breakpoints on the system prompt, a cluster's shared
@@ -22,8 +22,8 @@
 
 import { randomUUID } from 'node:crypto';
 import {
-  generateText,
   jsonSchema,
+  streamText,
   tool,
   type LanguageModel,
   type ModelMessage,
@@ -39,6 +39,7 @@ import type {
   SessionEventBody,
   SessionFailure,
   SessionEvent,
+  SessionProgress,
   SessionRunInput,
   SessionStatus,
   ToolContext,
@@ -232,10 +233,10 @@ interface SessionRuntime {
 }
 
 /**
- * The one thing this driver can say about work in flight: a tool is running,
- * and for how long. Reported every second while it runs, so a surface tailing
- * the session shows the minutes a build or a probe takes rather than silence.
- * Ephemeral display only — never a transcript event, never a turn.
+ * A tool is running, and for how long. Reported every second while it runs, so
+ * a surface tailing the session shows the minutes a build or a probe takes
+ * rather than silence. Ephemeral display only — never a transcript event,
+ * never a turn.
  */
 async function whileRunning<T>(
   onProgress: SessionRunInput['onProgress'],
@@ -245,7 +246,7 @@ async function whileRunning<T>(
   if (!onProgress) return execute();
   const started = Date.now();
   const tick = (): void =>
-    onProgress({ kind: 'tool', ...call, elapsedSeconds: (Date.now() - started) / 1000 });
+    onProgress({ kind: 'tool', ...call, phase: 'running', elapsedSeconds: (Date.now() - started) / 1000 });
   tick();
   const timer = setInterval(tick, 1000);
   (timer as { unref?: () => void }).unref?.();
@@ -289,14 +290,23 @@ async function runApiSession(input: SessionRunInput, rt: SessionRuntime): Promis
     failure: { kind: 'malformed', detail: 'session ended without outcome', retryability: 'none' },
   };
 
+  // The turn's ordinal in this session — what the streamed prose and thinking
+  // of one turn are grouped under. The provider's own message id is not an
+  // option: it arrives with the finished response, after the stream it would
+  // have to name.
+  let turnOrdinal = 0;
+
   for (;;) {
     if (rt.interrupted() || signal.aborted) return endedWithoutOutcome;
     for (const m of rt.drainSteers()) say(m);
 
-    let result: Awaited<ReturnType<typeof generateText>>;
+    let result: TurnResult;
     let modelId: string;
     try {
-      ({ result, modelId } = await callModel(def, messages, toolset, signal, rt));
+      ({ result, modelId } = await callModel(def, messages, toolset, signal, rt, {
+        turnId: String(turnOrdinal++),
+        onProgress: input.onProgress,
+      }));
     } catch (err) {
       return { kind: 'failure', failure: classifyTransportError(err, signal) };
     }
@@ -309,7 +319,7 @@ async function runApiSession(input: SessionRunInput, rt: SessionRuntime): Promis
     // a fallback swap changes it mid-session.
     const respondedModelId = result.response.modelId;
     const raw: RawPayload = {
-      source: 'llm-api.generateText',
+      source: 'llm-api.streamText',
       payload: {
         modelId: respondedModelId,
         messages: result.response.messages,
@@ -399,6 +409,23 @@ async function runApiSession(input: SessionRunInput, rt: SessionRuntime): Promis
   }
 }
 
+type StreamResult = ReturnType<typeof streamText>;
+
+/** One finished turn, as the stream that produced it settled it. */
+interface TurnResult {
+  text: Awaited<StreamResult['text']>;
+  toolCalls: Awaited<StreamResult['toolCalls']>;
+  usage: Awaited<StreamResult['usage']>;
+  finishReason: Awaited<StreamResult['finishReason']>;
+  response: Awaited<StreamResult['response']>;
+}
+
+/** Where a turn's progress goes while the model is still writing it. */
+interface LiveTurn {
+  turnId: string;
+  onProgress: SessionRunInput['onProgress'];
+}
+
 /**
  * One model call, full history under the provider's cache strategy, retries
  * and the fallback swap. `maxRetries: 0` takes the retry away from the SDK —
@@ -406,6 +433,12 @@ async function runApiSession(input: SessionRunInput, rt: SessionRuntime): Promis
  * transcript is indistinguishable from a hang. Every wait is a
  * `provider-retry` event instead; the shell ignores them for budget, so a
  * retry is never a turn.
+ *
+ * The call STREAMS: a turn spent thinking, writing and composing a tool call
+ * is minutes of silence otherwise, and the driver has nothing else to say
+ * about a turn in flight. What the turn WAS is still taken from the settled
+ * result, so the loop, the transcript and the usage accounting read one
+ * finished turn, exactly as a non-streaming call left them.
  */
 async function callModel(
   def: SessionDef,
@@ -413,7 +446,8 @@ async function callModel(
   tools: ToolSet,
   signal: AbortSignal,
   rt: SessionRuntime,
-): Promise<{ result: Awaited<ReturnType<typeof generateText>>; modelId: string }> {
+  live: LiveTurn,
+): Promise<{ result: TurnResult; modelId: string }> {
   // The system prompt and the moving tail close the two cacheable prefixes,
   // and a cluster's shared prefix closes a third BETWEEN them: without a
   // breakpoint of its own it would only ever be cached as part of one session's
@@ -439,20 +473,39 @@ async function callModel(
       ? ({ ...m, providerOptions: { ...m.providerOptions, ...breakpoint } } as ModelMessage)
       : m,
   );
-  const run = (candidate: { model: LanguageModel; modelId: string }) =>
-    generateText({
+  const run = async (candidate: { model: LanguageModel; modelId: string }): Promise<TurnResult> => {
+    const result = streamText({
       model: candidate.model,
       system,
       messages: prompt,
       tools,
       abortSignal: signal,
       maxRetries: 0,
+      // A failed call is reported by this driver — as the `provider-retry`
+      // event of the wait it causes, or as the session's failure. The SDK's
+      // default handler dumps the same error to stderr on top of that, across
+      // whatever the CLI is drawing.
+      onError: () => {},
       // Carries the prompt-cache cluster key and, because the transcript
       // event models ONE tool call per turn, this provider's way of asking
       // for a single call. A turn that still carries several is executed in
       // full — see the loop.
       providerOptions: rt.tuning.callOptions(candidate.modelId, rt.cacheKey),
     });
+    const failure = await reportTurn(result, live);
+    // A call that failed is an `error` part carrying the provider's own error;
+    // the result promises reject with the SDK's no-output error instead, which
+    // says nothing about a status, a Retry-After or another attempt.
+    if (failure) throw failure.error;
+    const [text, toolCalls, usage, finishReason, response] = await Promise.all([
+      result.text,
+      result.toolCalls,
+      result.usage,
+      result.finishReason,
+      result.response,
+    ]);
+    return { text, toolCalls, usage, finishReason, response };
+  };
 
   const candidates = rt.fallback ? [rt.primary, rt.fallback] : [rt.primary];
   let retries = 0;
@@ -489,6 +542,66 @@ async function callModel(
   }
   /* c8 ignore next -- the loops above always return or throw */
   throw new Error('unreachable: no model candidate left');
+}
+
+/**
+ * Drain one turn's stream, saying what it carries as it carries it: the prose
+ * and the thinking written so far, and a tool call from the part that opens it
+ * until the one that closes it — the model composing a call is the silence the
+ * page used to sit through. Draining is also what settles the result, so it
+ * runs whether or not anyone is watching, and it hands back the error part a
+ * failed call ends on.
+ */
+async function reportTurn(
+  result: StreamResult,
+  live: LiveTurn,
+): Promise<{ error: unknown } | undefined> {
+  const report = (progress: SessionProgress): void => live.onProgress?.(progress);
+  const composing = new Map<string, string>();
+  let text = '';
+  let thinking = '';
+  let failure: { error: unknown } | undefined;
+  for await (const part of result.fullStream) {
+    switch (part.type) {
+      case 'text-delta':
+        text += part.text;
+        report({ kind: 'text', turnId: live.turnId, text });
+        break;
+      case 'reasoning-delta':
+        thinking += part.text;
+        report({ kind: 'thinking', turnId: live.turnId, text: thinking });
+        break;
+      case 'tool-input-start':
+        composing.set(part.id, part.toolName);
+        report({
+          kind: 'tool',
+          toolCallId: part.id,
+          toolName: part.toolName,
+          phase: 'calling',
+          elapsedSeconds: 0,
+        });
+        break;
+      case 'tool-input-delta': {
+        const toolName = composing.get(part.id);
+        if (toolName !== undefined) {
+          report({
+            kind: 'tool',
+            toolCallId: part.id,
+            toolName,
+            phase: 'calling',
+            elapsedSeconds: 0,
+          });
+        }
+        break;
+      }
+      case 'error':
+        failure = { error: part.error };
+        break;
+      default:
+        break;
+    }
+  }
+  return failure;
 }
 
 /**
@@ -718,7 +831,7 @@ function rebuildHistory(events: readonly SessionEvent[]): ModelMessage[] {
 
 /** Split the SDK usage into `TurnUsage`, pricing when a hook is present. */
 function turnUsageOf(
-  usage: Awaited<ReturnType<typeof generateText>>['usage'] | undefined,
+  usage: TurnResult['usage'] | undefined,
   modelId: string,
   pricing: ApiSessionDriverOptions['pricing'],
 ): TurnUsage {

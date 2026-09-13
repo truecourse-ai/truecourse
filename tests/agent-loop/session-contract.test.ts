@@ -5,6 +5,7 @@ import {
   SessionEventBodySchema,
   SessionFailureSchema,
   RunRecordSchema,
+  SessionProgressSchema,
   defineSessionTool,
   type SessionEvent,
   type ToolContext,
@@ -190,6 +191,31 @@ describe('session transcript events', () => {
         retryability: 'transient',
       }).success,
     ).toBe(true);
+  });
+});
+
+describe('session progress', () => {
+  it('carries everything a backend streams between two events', () => {
+    const reported = [
+      { kind: 'text', turnId: 'msg-1', text: 'Reading the docs' },
+      { kind: 'thinking', turnId: 'msg-1', text: 'The docs disagree' },
+      { kind: 'tool', toolCallId: 'tu-1', toolName: 'probe', phase: 'calling', elapsedSeconds: 0 },
+      { kind: 'tool', toolCallId: 'tu-1', toolName: 'probe', phase: 'running', elapsedSeconds: 12.6 },
+    ];
+    for (const progress of reported) {
+      expect(SessionProgressSchema.parse(progress)).toEqual(progress);
+    }
+  });
+
+  it('will not take a tool call that does not say which phase it is in', () => {
+    expect(
+      SessionProgressSchema.safeParse({
+        kind: 'tool',
+        toolCallId: 'tu-1',
+        toolName: 'probe',
+        elapsedSeconds: 0,
+      }).success,
+    ).toBe(false);
   });
 });
 

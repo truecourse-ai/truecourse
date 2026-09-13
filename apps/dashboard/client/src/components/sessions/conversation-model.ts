@@ -24,6 +24,7 @@ import type {
   ChildLinkage,
   SessionEvent,
   SessionLlm,
+  SessionProgress,
   SessionStatus,
   TurnUsage,
   UserInputQuestion,
@@ -162,14 +163,7 @@ export function foldConversation(
       ...(entry?.endedAt ? { endedAt: entry.endedAt } : {}),
       ...(spent ? { spent } : {}),
       lines: own.map(toLine).filter((line): line is ConversationLine => line !== null),
-      ...(live
-        ? {
-            live:
-              live.kind === 'text'
-                ? live.text
-                : `${live.toolName} · ${Math.floor(live.elapsedSeconds)}s`,
-          }
-        : {}),
+      ...(live ? { live: liveLine(live) } : {}),
     });
   }
 
@@ -220,6 +214,18 @@ export function foldConversation(
   }
 
   return { ...(record.error ? { error: record.error.message } : {}), steps };
+}
+
+/**
+ * What the stream says is happening, as one line: the prose or the thinking
+ * as far as it is written, a tool call named while the model composes it, and
+ * the same call with its clock once it is running.
+ */
+function liveLine(live: SessionProgress): string {
+  if (live.kind !== 'tool') return live.text;
+  return live.phase === 'calling'
+    ? `calling ${live.toolName}`
+    : `${live.toolName} · ${Math.floor(live.elapsedSeconds)}s`;
 }
 
 /**

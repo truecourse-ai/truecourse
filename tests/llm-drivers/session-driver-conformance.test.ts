@@ -1,6 +1,6 @@
 /**
  * The driver CONFORMANCE SUITE: both session
- * drivers — api (per-turn generateText loop) and Agent SDK (streaming-input
+ * drivers — api (per-turn streamText loop) and Agent SDK (streaming-input
  * subprocess) — run through ONE spec via `runAgentLoop`, which is what keeps
  * two mechanical drivers one semantic loop. Each fixture translates the
  * abstract scenario into its backend's scripting; the assertions are shared.
@@ -47,7 +47,7 @@ interface Fixture {
 }
 
 // ---------------------------------------------------------------------------
-// api fixture: scripted LanguageModelV3 behind the real generateText
+// api fixture: scripted LanguageModelV3 behind the real streamText
 // ---------------------------------------------------------------------------
 
 const cfg = { provider: 'anthropic' as const, model: 'primary-model', apiKey: 'test' };
@@ -64,29 +64,48 @@ function apiFixture(): Fixture {
         modelId: 'mock-model',
         supportedUrls: {},
         async doGenerate() {
+          throw new Error('doGenerate not used');
+        },
+        async doStream() {
           // A real model call takes wall-clock time; without it the whole
           // session resolves in one microtask chain and a mid-run steer has
           // no window to land in.
           await new Promise((r) => setTimeout(r, 10));
           const step = remaining.shift() ?? { kind: 'text' as const, text: `filler ${n++}` };
-          const content =
-            step.kind === 'text'
-              ? [{ type: 'text', text: step.text }]
-              : step.kind === 'tool'
-                ? [{ type: 'tool-call', toolCallId: `c${n++}`, toolName: step.name, input: JSON.stringify(step.args) }]
-                : [{ type: 'tool-call', toolCallId: `c${n++}`, toolName: OUTCOME_TOOL_NAME, input: JSON.stringify(step.value) }];
-          return {
-            content,
-            finishReason: 'stop',
+          const parts: unknown[] = [{ type: 'stream-start', warnings: [] }];
+          if (step.kind === 'text') {
+            parts.push(
+              { type: 'text-start', id: 'b0' },
+              { type: 'text-delta', id: 'b0', delta: step.text },
+              { type: 'text-end', id: 'b0' },
+            );
+          } else {
+            const id = `c${n++}`;
+            const toolName = step.kind === 'tool' ? step.name : OUTCOME_TOOL_NAME;
+            const input = JSON.stringify(step.kind === 'tool' ? step.args : step.value);
+            parts.push(
+              { type: 'tool-input-start', id, toolName },
+              { type: 'tool-input-delta', id, delta: input },
+              { type: 'tool-input-end', id },
+              { type: 'tool-call', toolCallId: id, toolName, input },
+            );
+          }
+          parts.push({
+            type: 'finish',
+            finishReason: { unified: 'stop' },
             usage: {
               inputTokens: { total: 100, noCache: 100 },
               outputTokens: { total: 10, text: 10, reasoning: undefined },
             },
-            warnings: [],
+          });
+          return {
+            stream: new ReadableStream({
+              start(controller) {
+                for (const part of parts) controller.enqueue(part);
+                controller.close();
+              },
+            }),
           };
-        },
-        async doStream() {
-          throw new Error('doStream not used');
         },
       };
       buildModelMock.mockReturnValue(stub);
