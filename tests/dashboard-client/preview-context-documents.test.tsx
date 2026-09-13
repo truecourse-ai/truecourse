@@ -421,7 +421,7 @@ describe('Add context', () => {
     ).toHaveAttribute('href', '/preview/settings/connections');
   });
 
-  it('checks a scope before anything is stored, then links and adds', async () => {
+  it('checks a scope before anything is stored, then adds with no link', async () => {
     const state = serve();
     renderAt('/preview/context/documents');
     const user = userEvent.setup();
@@ -439,13 +439,14 @@ describe('Add context', () => {
     // Checking stores nothing.
     expect(state.calls).not.toContain('POST /api/context/sources');
 
-    // The third step: which repositories read it, none by default.
-    const link = await screen.findByLabelText('acme/web');
-    expect(link).not.toBeChecked();
-    await user.click(link);
+    // Which repositories read it is Code's side: the dialog never asks.
+    expect(screen.queryByLabelText('acme/web')).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Add and sync' }));
 
     await waitFor(() => expect(state.calls).toContain('POST /api/context/sources'));
+    expect(state.posts.find((p) => p.path === '/api/context/sources')?.body).toMatchObject({
+      repoIds: [],
+    });
     await waitFor(() =>
       expect(screen.getByTestId('address')).toHaveTextContent(
         '/preview/context/documents?source=site-docs-other',
@@ -460,9 +461,10 @@ describe('Add context', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Add context' }));
     const dialog = await screen.findByRole('dialog');
-    for (const name of ['Source', 'Scope', 'Link']) {
+    for (const name of ['Source', 'Scope']) {
       expect(within(dialog).getByText(name)).toBeInTheDocument();
     }
+    expect(within(dialog).queryByText('Link')).toBeNull();
     expect(within(dialog).queryByText(/Step \d of \d/)).toBeNull();
 
     await user.click(within(dialog).getByRole('button', { name: /Documentation site/ }));
@@ -605,7 +607,7 @@ describe('Add context', () => {
     });
   });
 
-  it('adds with no links at all when nothing is connected in Code', async () => {
+  it('adds a repository source with nothing connected in Code', async () => {
     const state = serve({ repos: [] });
     renderAt('/preview/context/documents');
     const user = userEvent.setup();
@@ -617,13 +619,7 @@ describe('Add context', () => {
     await user.selectOptions(select, 'acme/handbook');
     await user.click(screen.getByRole('button', { name: 'Check' }));
 
-    expect(
-      await screen.findByText(
-        'No repository reads it yet. Link one from the source page once it is connected.',
-      ),
-    ).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Add and sync' }));
+    await user.click(await screen.findByRole('button', { name: 'Add and sync' }));
     await waitFor(() =>
       expect(state.posts.some((p) => p.path === '/api/context/sources')).toBe(true),
     );

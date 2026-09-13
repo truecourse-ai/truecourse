@@ -14,8 +14,9 @@
  * THE REPOSITORY SCOPE reads the workspace's GitHub accounts and then the
  * repositories one of them can see, not the repositories Code has connected: a
  * source may read any repository the account reaches, and it syncs through that
- * account on its own. The account rides Check and Add, and the Link step is
- * about the connected repositories that will READ the source, which may be none.
+ * account on its own. The account rides Check and Add. Which repositories READ
+ * the source is Code's side: the connect dialog's Context step, a repository's
+ * Context tab, the source page.
  *
  * Nothing is stored until Add and sync: Check runs the real driver against the
  * real scope and stores nothing, and the add closes on the Documents view
@@ -45,7 +46,6 @@ import {
 } from '@/components/ui/dialog';
 import { addContextSource, previewContextSource } from '@/lib/api';
 import { fetchGithubStatus, fetchInstallationRepos } from '@/preview/data/real-repos';
-import { usePreviewState } from '@/preview/shell/preview-state';
 import { Stepper } from '@/preview/ui/stepper';
 import { PREVIEW_BASE } from '@/preview/shell/base';
 import { documentsHref } from './context-hrefs';
@@ -53,7 +53,7 @@ import { documentsHref } from './context-hrefs';
 const FOOT_BUTTON = 'rounded px-3 py-1.5 text-xs font-medium';
 
 /** The dialog's three steps, named rather than numbered. */
-const STEPS = ['Source', 'Scope', 'Link'] as const;
+const STEPS = ['Source', 'Scope'] as const;
 
 type AddableKind = 'repository' | 'site';
 
@@ -105,7 +105,6 @@ export function AddContextDialog({
   onAdded?: () => void;
 }) {
   const navigate = useNavigate();
-  const { repos } = usePreviewState();
 
   const [kind, setKind] = useState<AddableKind | null>(null);
   const [installations, setInstallations] = useState<GithubInstallationSummary[] | null>(null);
@@ -120,7 +119,6 @@ export function AddContextDialog({
   const [checked, setChecked] = useState<ContextSourceCheck | null>(null);
   const [checking, setChecking] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
-  const [picked, setPicked] = useState<string[]>([]);
   const [adding, setAdding] = useState(false);
 
   useEffect(() => {
@@ -140,7 +138,6 @@ export function AddContextDialog({
     setChecked(null);
     setChecking(false);
     setFailure(null);
-    setPicked([]);
     setAdding(false);
   }, [open, initialKind]);
 
@@ -188,8 +185,6 @@ export function AddContextDialog({
     };
   }, [accountId]);
 
-  // The repositories that could READ a source: the ones Code has connected.
-  const connected = repos;
 
   /** The Repository source a repository already has, if it has one. */
   const existingFor = (repoFullName: string) =>
@@ -218,7 +213,7 @@ export function AddContextDialog({
   const scopeReady =
     kind === 'repository' ? Boolean(repoScope) && !already : url.trim() !== '';
 
-  const step: 1 | 2 | 3 = !kind ? 1 : !checked ? 2 : 3;
+  const step: 1 | 2 = !kind ? 1 : 2;
 
   const runCheck = (): void => {
     if (!kind) return;
@@ -234,7 +229,7 @@ export function AddContextDialog({
     if (!kind) return;
     setAdding(true);
     setFailure(null);
-    void addContextSource({ kind, config: config(), repoIds: picked, ...account() })
+    void addContextSource({ kind, config: config(), repoIds: [], ...account() })
       .then((res) => {
         onAdded?.();
         onOpenChange(false);
@@ -460,58 +455,17 @@ export function AddContextDialog({
           </>
         )}
 
-        {step === 3 && (
-          <div>
-            <p className="text-[11px] text-muted-foreground">
-              Which repositories should read this source? None is fine — a source can be linked
-              later from a repository’s Context tab.
-            </p>
-            <ul className="mt-2 max-h-48 divide-y divide-border overflow-y-auto rounded-md border border-border">
-              {connected.map((repo) => (
-                <li key={repo.id} className="flex items-center gap-3 px-3 py-2">
-                  <input
-                    type="checkbox"
-                    id={`ctx-read-${repo.id}`}
-                    checked={picked.includes(repo.id)}
-                    onChange={() =>
-                      setPicked((prev) =>
-                        prev.includes(repo.id)
-                          ? prev.filter((id) => id !== repo.id)
-                          : [...prev, repo.id],
-                      )
-                    }
-                    className="h-3.5 w-3.5 shrink-0 rounded border-border"
-                  />
-                  <label htmlFor={`ctx-read-${repo.id}`} className="min-w-0 flex-1 cursor-pointer">
-                    <span className="block truncate font-mono text-xs text-foreground">
-                      {repo.fullName}
-                    </span>
-                  </label>
-                </li>
-              ))}
-              {connected.length === 0 && (
-                <li className="px-3 py-2 text-[11px] text-muted-foreground">
-                  No repository reads it yet. Link one from the source page once it is connected.
-                </li>
-              )}
-            </ul>
-          </div>
-        )}
-
         <DialogFooter>
           {step > 1 && (
             <button
               type="button"
-              onClick={() => {
-                if (step === 3) setChecked(null);
-                else setKind(null);
-              }}
+              onClick={() => setKind(null)}
               className={`${FOOT_BUTTON} border border-border text-foreground hover:bg-muted/60`}
             >
               Back
             </button>
           )}
-          {step === 2 && (
+          {step === 2 && !checked && (
             <button
               type="button"
               disabled={!scopeReady || checking}
@@ -521,7 +475,7 @@ export function AddContextDialog({
               {checking ? 'Checking…' : 'Check'}
             </button>
           )}
-          {step === 3 && (
+          {step === 2 && checked && (
             <button
               type="button"
               disabled={adding}
