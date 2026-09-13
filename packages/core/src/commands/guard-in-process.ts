@@ -702,12 +702,13 @@ export async function guardGenerateInProcess(
           tracker?.detail('flows', withUsage('flows', `areas ${done}/${total}`));
         }
       },
-      onMatchProgress: (done, total) => {
+      onMatchProgress: ({ done, total, matched, unmatched, blocked }) => {
         advanceTo('match');
+        const tally = `${matched} matched · ${unmatched} no match · ${blocked} blocked`;
         if (done >= total) {
-          tracker?.done('match', withUsage('match', `${total} flow×surface`));
+          tracker?.done('match', withUsage('match', `${total} flow×surface · ${tally}`));
         } else {
-          tracker?.detail('match', withUsage('match', `${done}/${total} flow×surface`));
+          tracker?.detail('match', withUsage('match', `${done}/${total} flow×surface · ${tally}`));
         }
       },
       onWorkerProgress: ({ done, total, settled, blocked }) => {

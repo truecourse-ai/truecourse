@@ -19,7 +19,7 @@
  */
 
 import { slugifyHeading } from '@truecourse/guard-runner'
-import { type ClaimNeed } from '@truecourse/shared'
+import { type ClaimNeed, type GuardPrerequisiteTarget } from '@truecourse/shared'
 import { type ExtractedClaim, type UntestableNote } from './schemas.js'
 import type { GuardDoc, SectionInput } from './section-plan.js'
 
@@ -88,6 +88,9 @@ export function isSystemicSessionLoss(s: GuardSessionSummary): boolean {
  */
 export type ExtractSessionSeam = (input: {
   docs: readonly GuardDoc[]
+  /** The declared dependencies a case prerequisite may name — the closed
+   *  vocabulary the session is briefed on and its outcome is held to. */
+  prerequisiteTargets: readonly GuardPrerequisiteTarget[]
   /** Ticks once per settled doc (cache hits included). */
   onDoc?: (done: number, total: number) => void
 }) => Promise<{ byDoc: Map<string, ExtractResult>; summary: GuardSessionSummary }>

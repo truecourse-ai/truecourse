@@ -130,16 +130,43 @@ describe('generation prerequisite retention', () => {
     expect(absent.needs).toEqual([])
     expect(scenarioCasePrerequisiteProblems(flow(), absent, [{ ...targets[0], state: 'provided' }])).toEqual([])
   })
-  it('keeps unresolved aliases actionable rather than guessing suffixes', () => {
+  it('binds a name that IS a declared identifier and leaves an unknown one alone', () => {
     const result = bindClaimPrerequisites(
       verification,
       needs.map((n) => ({ ...n, detail: undefined })),
       targets,
     )
     expect(result?.cases?.[0].prerequisites?.map((p) => p.dependency)).toEqual([
-      'currencybeacon-api-key',
+      'currencybeacon',
       'currencybeacon-service',
     ])
+  })
+  it('rewrites a spelling variant to the declared name at the fold', () => {
+    const variant = structuredClone(verification)
+    variant.cases![1].prerequisites = [{ dependency: 'CurrencyBeacon', mode: 'absent' }]
+    const bound = bindClaimPrerequisites(variant, [], targets)!
+    expect(bound.cases![1].prerequisites).toEqual([
+      { dependency: 'currencybeacon', mode: 'absent', originalNames: ['CurrencyBeacon'] },
+    ])
+  })
+  it('gates an unresolvable prerequisite of any mode out of matching', () => {
+    const unknown = flow()
+    unknown.milestones[0].verification!.cases = [
+      { id: 'missing-key', claim: 'key missing', method: 'behavior', requires: ['browser'], conditions: [],
+        prerequisites: [{ dependency: 'Stripe', mode: 'absent' }] },
+    ]
+    const partition = partitionFlowPrerequisites(unknown, 'web', targets, { build: 'true', entry: ['node'] })
+    expect(partition.flow.milestones).toEqual([])
+    expect(partition.gaps).toHaveLength(1)
+    expect(partition.gaps[0]).toMatchObject({
+      kind: 'blocked-on',
+      obligations: [{ milestone: 1, caseId: 'missing-key' }],
+      blocker: { kind: 'generation' },
+    })
+    expect(partition.gaps[0].reason).toContain('Prerequisite Stripe (absent) matches no declared dependency')
+    // The declared spelling still passes: only a dangling name is gated.
+    expect(partitionFlowPrerequisites(flow(), 'web', targets, { build: 'true', entry: ['node'] })
+      .flow.milestones[0].verification!.cases!.map((c) => c.id)).toEqual(['missing-key', 'crud'])
   })
   it.each(['command', 'boot'] as const)('does not accept a %s environment as scenario-wide credential absence', (kind) => {
     const step = (value: string): GuardScenario['steps'][number] => kind === 'command'

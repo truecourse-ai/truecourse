@@ -22,7 +22,13 @@
 
 import { createHash } from 'node:crypto'
 import { defineSessionTool, type SessionBudget, type SessionDef, type SessionTool } from '@truecourse/agent-loop'
-import { verificationBoundaryProblems, ExtractOutcomeSchema, type ExtractOutcome } from '@truecourse/shared'
+import {
+  verificationBoundaryProblems,
+  resolveGuardPrerequisiteNormalized,
+  ExtractOutcomeSchema,
+  type ExtractOutcome,
+  type GuardPrerequisiteTarget,
+} from '@truecourse/shared'
 import { snapExtraction, suppressionKey, type GuardDoc } from '@truecourse/guard-generator'
 import { promptFingerprint } from '../agent/session-cache.js'
 import {
@@ -68,7 +74,7 @@ For EVERY claim supply verification.scope (web, api, configuration, implementati
 and verification.cases. Each case has a stable kebab-case id, its source-grounded
 claim, method, requires (observation capabilities), and conditions (an array).
 Preserve per-case prerequisites as [{dependency,mode:"provided"|"absent",evidence,originalNames?}].
-Use the exact known service or catalog identifier when grounded; retain an unresolved name otherwise.
+\`dependency\` names one of the briefing's DECLARED DEPENDENCIES, copied verbatim; a name matching none of them refuses the outcome. When the source requires an account no declared dependency covers, leave the case's prerequisites empty and carry the requirement in the claim's needs.
 A case needs mode provided ONLY when its contract requires a real authenticated service interaction, including earlier setup that must actually use that service. Evidence must identify that source requirement.
 Controlled responses, synthetic invalid keys, timeout/quota/error injection, rounding with chosen rates, response validation, and redaction checks do not require a real provider account. Use prerequisites: [] for those cases and requires: [the observation driver, "request-control"] when response control is needed. A fixture key used with an isolated controlled provider is test input, not a supplied account. Do not require registration before fault control. If a case also genuinely requires live authenticated setup, split the independently provable controlled and live contracts where the source permits; otherwise preserve both requirements.
 Successful application behavior alone does not imply live-provider verification. Distinguish an application response contract proved with controlled provider data from a contract explicitly requiring the real service. Never turn unavailable request control into a credentials requirement.
@@ -229,12 +235,16 @@ export function extractSessionWorkItem(docPath: string): string {
  * discipline the fold applies (`snapExtraction`), so a draft that checks clean
  * folds clean. Returns the entries that would not survive; empty = valid.
  */
-export function validateExtractDraft(draft: ExtractOutcome, doc: GuardDoc): string[] {
+export function validateExtractDraft(
+  draft: ExtractOutcome,
+  doc: GuardDoc,
+  prerequisiteTargets: readonly GuardPrerequisiteTarget[],
+): string[] {
   const snapped = snapExtraction(draft, doc.sections)
   const normalize = (text: string): string => text.replace(/\s+/g, ' ').trim().toLowerCase()
   const keptClaims = new Set(snapped.claims.map((c) => `${c.driver}\0${normalize(c.claim)}`))
   const keptNotes = new Set(snapped.untestable.map((n) => n.sectionAnchor))
-  const problems: string[] = []
+  const problems: string[] = [...extractPrerequisiteProblems(draft, prerequisiteTargets)]
   for (const c of draft.claims) {
     problems.push(...verificationBoundaryProblems(c.verification, false, [c.driver, ...(c.alternativeDrivers ?? [])]).map(p => `claim "${c.claim}": ${p}`))
     if (c.needs.some((n) => n.kind === 'credential' || n.kind === 'external')) {
@@ -263,16 +273,86 @@ export function validateExtractDraft(draft: ExtractOutcome, doc: GuardDoc): stri
   return problems
 }
 
-/** Rechecked on the final outcome, even when the model changes a checked draft. */
-function checkedExtractionSchema(doc: GuardDoc) {
-  return ExtractOutcomeSchema.superRefine((draft, ctx) => {
-    const problems = validateExtractDraft(draft, doc)
-    for (const c of draft.claims) problems.push(...verificationBoundaryProblems(c.verification, true, [c.driver, ...(c.alternativeDrivers ?? [])]).map(p => `claim "${c.claim}": ${p}`))
-    for (const message of new Set(problems)) ctx.addIssue({ code: 'custom', message })
-  })
+/**
+ * The closed vocabulary a case prerequisite may name: every `dependency` must
+ * resolve — by normalized identity, so `CurrencyBeacon` reaches `currencybeacon`
+ * — to a declared target, and the accepted outcome carries the target's own
+ * name. A name reaching nothing is a dangling reference the runner could
+ * neither provide nor clear, so it refuses the outcome and re-asks.
+ */
+function extractPrerequisiteProblems(
+  draft: ExtractOutcome,
+  targets: readonly GuardPrerequisiteTarget[],
+): string[] {
+  const problems: string[] = []
+  for (const c of draft.claims) {
+    for (const item of c.verification?.cases ?? []) {
+      for (const p of item.prerequisites ?? []) {
+        const resolution = resolveGuardPrerequisiteNormalized(p.dependency, targets)
+        if (resolution.kind === 'resolved') continue
+        problems.push(
+          `claim "${c.claim}", case "${item.id}": prerequisite \`${p.dependency}\` ${resolution.kind === 'ambiguous' ? 'matches more than one declared dependency' : 'matches no declared dependency'}. ${declaredDependencyDirective(targets)}`,
+        )
+      }
+    }
+  }
+  return problems
 }
 
-function checkClaimsTool(doc: GuardDoc): SessionTool {
+/** What to do about an unmatched name, in the re-ask and in the briefing. */
+function declaredDependencyDirective(targets: readonly GuardPrerequisiteTarget[]): string {
+  return targets.length
+    ? `Name one of the declared dependencies (${targets.map((t) => t.name).join(', ')}), or leave this case's prerequisites empty and carry the requirement in the claim's needs.`
+    : "This repository declares no dependency, so leave this case's prerequisites empty and carry the requirement in the claim's needs."
+}
+
+/** The accepted outcome speaks the catalog's own names, whatever spelling the
+ *  session used; the original survives on `originalNames`. */
+function canonicalizeExtractPrerequisites(
+  draft: ExtractOutcome,
+  targets: readonly GuardPrerequisiteTarget[],
+): ExtractOutcome {
+  return {
+    ...draft,
+    claims: draft.claims.map((c) =>
+      c.verification?.cases
+        ? {
+            ...c,
+            verification: {
+              ...c.verification,
+              cases: c.verification.cases.map((item) =>
+                item.prerequisites
+                  ? {
+                      ...item,
+                      prerequisites: item.prerequisites.map((p) => {
+                        const resolution = resolveGuardPrerequisiteNormalized(p.dependency, targets)
+                        if (resolution.kind !== 'resolved' || resolution.target.name === p.dependency) return p
+                        return {
+                          ...p,
+                          dependency: resolution.target.name,
+                          originalNames: [...new Set([...(p.originalNames ?? []), p.dependency])],
+                        }
+                      }),
+                    }
+                  : item,
+              ),
+            },
+          }
+        : c,
+    ),
+  }
+}
+
+/** Rechecked on the final outcome, even when the model changes a checked draft. */
+function checkedExtractionSchema(doc: GuardDoc, prerequisiteTargets: readonly GuardPrerequisiteTarget[]) {
+  return ExtractOutcomeSchema.superRefine((draft, ctx) => {
+    const problems = validateExtractDraft(draft, doc, prerequisiteTargets)
+    for (const c of draft.claims) problems.push(...verificationBoundaryProblems(c.verification, true, [c.driver, ...(c.alternativeDrivers ?? [])]).map(p => `claim "${c.claim}": ${p}`))
+    for (const message of new Set(problems)) ctx.addIssue({ code: 'custom', message })
+  }).transform((draft) => canonicalizeExtractPrerequisites(draft, prerequisiteTargets))
+}
+
+function checkClaimsTool(doc: GuardDoc, prerequisiteTargets: readonly GuardPrerequisiteTarget[]): SessionTool {
   return defineSessionTool({
     name: 'check_claims',
     description:
@@ -282,7 +362,7 @@ function checkClaimsTool(doc: GuardDoc): SessionTool {
     destructive: false,
     inputSchema: ExtractOutcomeSchema,
     async execute(args) {
-      const problems = validateExtractDraft(args, doc)
+      const problems = validateExtractDraft(args, doc, prerequisiteTargets)
       for (const c of args.claims) problems.push(...verificationBoundaryProblems(c.verification, true, [c.driver, ...(c.alternativeDrivers ?? [])]).map(p => `claim "${c.claim}": ${p}`))
       if (problems.length === 0) {
         return {
@@ -297,6 +377,9 @@ function checkClaimsTool(doc: GuardDoc): SessionTool {
 export interface ExtractSessionInput {
   doc: GuardDoc
   universe: GuardDocUniverse
+  /** The declared dependencies a case prerequisite may name (the catalog plus
+   *  the recipe's externals), as the generator resolves them. */
+  prerequisiteTargets: readonly GuardPrerequisiteTarget[]
 }
 
 export function extractSessionDef(input: ExtractSessionInput): SessionDef<ExtractOutcome> {
@@ -308,9 +391,9 @@ export function extractSessionDef(input: ExtractSessionInput): SessionDef<Extrac
       readOwnChunkTool(input.doc),
       readOwnSectionTool(input.doc),
       readReferencedDocTool(input.universe),
-      checkClaimsTool(input.doc),
+      checkClaimsTool(input.doc, input.prerequisiteTargets),
     ],
-    outcomeSchema: checkedExtractionSchema(input.doc),
+    outcomeSchema: checkedExtractionSchema(input.doc, input.prerequisiteTargets),
     // A revised draft can still violate a verification boundary. Return the
     // terminal validation errors to the session before losing the whole doc.
     outcomeSchemaRepairs: 2,
@@ -332,7 +415,10 @@ export function extractSessionDef(input: ExtractSessionInput): SessionDef<Extrac
  * sections), the suppressed-quote block when any, and the body's first chunk
  * with an honest "N more chunks" note.
  */
-export function extractSessionBriefing(doc: GuardDoc): string {
+export function extractSessionBriefing(
+  doc: GuardDoc,
+  prerequisiteTargets: readonly GuardPrerequisiteTarget[],
+): string {
   const areas = doc.sections[0]?.areaTags ?? []
   const chunks = docChunkCount(doc)
   const lines = [
@@ -354,6 +440,24 @@ export function extractSessionBriefing(doc: GuardDoc): string {
       ...doc.suppressedQuotes.map((q) => `- "${q}"`),
     )
   }
+  lines.push(
+    '',
+    'DECLARED DEPENDENCIES — the closed vocabulary a case prerequisite may name.',
+    ...(prerequisiteTargets.length
+      ? [
+          'Copy one of these identifiers verbatim into `dependency`:',
+          ...prerequisiteTargets.map((t) => {
+            const also = [...t.aliases, ...t.credentialEnv]
+            return `  ${t.name}${also.length ? ` (also known as ${also.join(', ')})` : ''}`
+          }),
+          'When the source requires an account none of them covers, leave that',
+          "case's prerequisites empty and carry the requirement in the claim's `needs`.",
+        ]
+      : [
+          'This repository declares none: leave every case\'s prerequisites empty and',
+          "carry such requirements in the claim's `needs`.",
+        ]),
+  )
   lines.push('', renderDocChunk(doc, 1).content)
   if (chunks > 1) {
     lines.push('', `${chunks - 1} more chunk(s) — use \`read_chunk\` to page through the rest before you finish.`)

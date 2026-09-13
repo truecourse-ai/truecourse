@@ -701,8 +701,18 @@ export interface GenerateGuardsOptions {
   onInterfaces?: (interfaces: number, surfaces: number) => void
   /** Flow synthesis progress, ticking per area as it settles. */
   onFlowProgress?: (done: number, total: number) => void
-  /** Realization-matching progress, ticking per (flow, surface) pair. */
-  onMatchProgress?: (done: number, total: number) => void
+  /**
+   * Realization-matching progress, ticking per (flow, surface) pair with the
+   * running outcome tallies — every pair settles as matched, as no match, or as
+   * blocked (the engine refused it without a matcher verdict).
+   */
+  onMatchProgress?: (progress: {
+    done: number
+    total: number
+    matched: number
+    unmatched: number
+    blocked: number
+  }) => void
   /**
    * Flow-worker pool progress: `done`/`total` worker sessions settled (cache
    * hits included) plus the running settled/blocked outcome tallies — what the
@@ -1223,6 +1233,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const sessionLossHead = (s: GuardSessionSummary): string =>
     `every session of the \`${s.kind}\` kind failed (${s.failed} of ${s.ran})${s.firstError ? `. First failure: ${s.firstError}` : ''}`
 
+  // The declared dependencies: the closed vocabulary a case prerequisite may
+  // name. The extraction sessions are briefed on it and their outcomes are held
+  // to it; every fold below resolves against the same list.
+  const prerequisiteResolution = resolvePrerequisites(repoRoot, recipe.api?.externals)
+
   // One `guard-generate.extract` session per doc (plan 04 step 15), pooled +
   // cached by the seam; the seam's fold already re-snapped every anchor.
   // Fail-open per doc — a doc with no (or a failed) result lands in
@@ -1230,6 +1245,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   let extractSystemicLoss: GuardSessionSummary | null = null
   const { byDoc: extractByDoc, summary: extractSummary } = await options.extractSession({
     docs,
+    prerequisiteTargets: prerequisiteResolution.targets,
     onDoc: (done, total) => options.onExtractProgress?.(done, total),
   })
   recordSessionSummary(extractSummary)
@@ -1432,7 +1448,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // a flow referencing a claim `scenarios/claims.json` does not hold is a load
   // error on every `guard run` (see claims-persist.ts). Additive-only, and a
   // warm re-run adds nothing, so nothing is written on a no-op.
-  const prerequisiteResolution = resolvePrerequisites(repoRoot, recipe.api?.externals)
   for (const extraction of extracted) if (extraction.result.ok) {
     for (const claim of extraction.result.data.claims) claim.verification = bindClaimPrerequisites(claim.verification, claim.needs ?? [], prerequisiteResolution.targets)
   }
@@ -1697,7 +1712,16 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   let matchCalls = 0
   let matchCallErrors = 0
   let firstMatchError: string | undefined
-  if (matchPairs > 0) options.onMatchProgress?.(0, matchPairs)
+  /** A pair settles as exactly one of these; the three tally to the pair total. */
+  type PairOutcome = 'matched' | 'no match' | 'blocked'
+  const pairTally = { matched: 0, unmatched: 0, blocked: 0 }
+  const tickMatch = (outcome: PairOutcome): void => {
+    if (outcome === 'matched') pairTally.matched++
+    else if (outcome === 'blocked') pairTally.blocked++
+    else pairTally.unmatched++
+    options.onMatchProgress?.({ done: ++matchDone, total: matchPairs, ...pairTally })
+  }
+  if (matchPairs > 0) options.onMatchProgress?.({ done: 0, total: matchPairs, ...pairTally })
 
   /**
    * ONE flow's realization: the surface gates, the (paid) match calls, and the
@@ -1713,6 +1737,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     let localFirstMatchError: string | undefined
     const noteSurface = (surface: GuardDriverId, line: string): void => {
       localFacts.push(`${flow.id} x ${surface}: ${line}`)
+    }
+    /** A MATCH PAIR's one fact, filed with its live tally tick. */
+    const settlePair = (surface: GuardDriverId, outcome: PairOutcome, line: string): void => {
+      noteSurface(surface, line)
+      tickMatch(outcome)
     }
 
     const primary = primarySection(flow, sectionByKey)
@@ -1788,17 +1817,21 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             kind: 'blocked-on',
             reason: composeBlockedOnReason(missingServerBlockedOn(preMatch.app), oneLine(flow.title)),
           })
-          noteSurface(surface, `not matched, the recipe declares no server for ${preMatch.app}`)
+          settlePair(surface, 'no match', `not matched, the recipe declares no server for ${preMatch.app}`)
           continue
         }
       }
       const partition = partitionFlowPrerequisites(flow, surface, prerequisiteResolution.targets, recipe)
       const eligibleFlow = partition.flow
       gaps.push(...partition.gaps)
-      if (!eligibleFlow.milestones.length) { options.onMatchProgress?.(++matchDone, matchPairs); continue }
+      // Every case of the flow was refused before the matcher: no call is made,
+      // and the pair settles on the partition's own reason rather than vanishing.
+      if (!eligibleFlow.milestones.length) {
+        settlePair(surface, 'blocked', `blocked${partition.gaps[0] ? `, ${asLine(partition.gaps[0].reason)}` : ''}`)
+        continue
+      }
       localMatchCalls++
       const outcome = await limit(() => matchFlow(repoRoot, eligibleFlow, surfaceCatalog, matchRunner))
-      options.onMatchProgress?.(++matchDone, matchPairs)
       if (outcome.kind === 'plan' || outcome.kind === 'gap') {
         for (const gap of outcome.gaps) gaps.push({ surface,
           kind: gap.kind === 'mapping' ? 'no-interface' : 'blocked-on',
@@ -1823,7 +1856,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               kind: 'blocked-on',
               reason: composeBlockedOnReason(missingServerBlockedOn(bound.app), oneLine(flow.title)),
             })
-            noteSurface(surface, `no match, the recipe declares no server for ${bound.app}`)
+            settlePair(surface, 'no match', `no match, the recipe declares no server for ${bound.app}`)
             continue
           }
           if (bound.kind === 'spans') {
@@ -1832,12 +1865,16 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               kind: 'blocked-on',
               reason: composeBlockedOnReason(multiServerBlockedOn(bound.apps), oneLine(flow.title)),
             })
-            noteSurface(surface, `no match, the plan spans ${bound.apps.join(', ')}`)
+            settlePair(surface, 'no match', `no match, the plan spans ${bound.apps.join(', ')}`)
             continue
           }
           if (bound.kind === 'bound') serverBySurface.set(surface, bound.server)
           const invocationGaps = flowInvocationGaps(flow, surface, recipe, serverBySurface.get(surface))
-          if (invocationGaps.length) { gaps.push(...invocationGaps); continue }
+          if (invocationGaps.length) {
+            gaps.push(...invocationGaps)
+            settlePair(surface, 'blocked', `blocked, ${asLine(invocationGaps[0].reason)}`)
+            continue
+          }
         }
         const prepared = partitionPlanPreparations(flow, outcome.plan, preparationCatalog(recipe))
         for (const row of prepared.missing) gaps.push({ surface, kind: 'blocked-on', milestones: [row.milestone],
@@ -1851,19 +1888,19 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         const cacheTag = outcome.calls === 0 ? ', from cache' : ''
         if (prepared.plan && complete) {
           const walked = prepared.plan.interfaces.length
-          noteSurface(surface, `matched, ${walked} interface${walked === 1 ? '' : 's'}${cacheTag}`)
+          settlePair(surface, 'matched', `matched, ${walked} interface${walked === 1 ? '' : 's'}${cacheTag}`)
         } else if (prepared.plan) {
-          noteSurface(surface, `no match, no single supported realization proves every milestone and selected case${cacheTag}`)
+          settlePair(surface, 'no match', `no match, no single supported realization proves every milestone and selected case${cacheTag}`)
         } else {
-          noteSurface(surface, `no match, every case needs a verified preparation profile${cacheTag}`)
+          settlePair(surface, 'no match', `no match, every case needs a verified preparation profile${cacheTag}`)
         }
       } else if (outcome.kind === 'gap') {
-        noteSurface(surface, `no match${outcome.gaps[0] ? `, ${asLine(outcome.gaps[0].reason)}` : ''}${outcome.calls === 0 ? ' (from cache)' : ''}`)
+        settlePair(surface, 'no match', `no match${outcome.gaps[0] ? `, ${asLine(outcome.gaps[0].reason)}` : ''}${outcome.calls === 0 ? ' (from cache)' : ''}`)
       } else if (outcome.kind === 'error') {
         localMatchCallErrors++
         localFirstMatchError ??= outcome.reason
         localErrors.push({ flowId: flow.id, doc: primary.doc, anchor: primary.anchor, message: `matching (${surface}) ${outcome.reason}` })
-        noteSurface(surface, `match failed, ${asLine(outcome.reason)}`)
+        settlePair(surface, 'no match', `match failed, ${asLine(outcome.reason)}`)
       }
     }
 

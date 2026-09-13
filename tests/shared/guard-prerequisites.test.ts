@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   GuardVerificationCaseSchema,
+  normalizePrerequisiteName,
   prerequisiteProblems,
   resolveGuardPrerequisite,
+  resolveGuardPrerequisiteNormalized,
   type GuardPrerequisiteTarget,
 } from '@truecourse/shared'
 const target: GuardPrerequisiteTarget = {
@@ -29,6 +31,30 @@ describe('case prerequisites', () => {
     })
     expect(resolveGuardPrerequisite('currencybeacon-api-key', [target]).kind).toBe('unknown')
     expect(resolveGuardPrerequisite('currencybeacon', [target, { ...target, name: 'other' }]).kind).toBe('ambiguous')
+  })
+  it('resolves a spelling variant by normalized identity, and only the runner stays exact', () => {
+    expect(normalizePrerequisiteName('CurrencyBeacon API')).toBe('currencybeaconapi')
+    expect(resolveGuardPrerequisite('CurrencyBeacon', [target]).kind).toBe('unknown')
+    expect(resolveGuardPrerequisiteNormalized('CurrencyBeacon', [target])).toMatchObject({
+      kind: 'resolved',
+      target: { name: 'account' },
+    })
+    expect(resolveGuardPrerequisiteNormalized('Currency_Beacon Api Key', [target])).toMatchObject({
+      kind: 'resolved',
+      target: { name: 'account' },
+    })
+    expect(resolveGuardPrerequisiteNormalized('stripe', [target]).kind).toBe('unknown')
+    expect(resolveGuardPrerequisiteNormalized('-', [target]).kind).toBe('unknown')
+    expect(resolveGuardPrerequisiteNormalized('CurrencyBeacon', [target, { ...target, name: 'other' }]).kind).toBe(
+      'ambiguous',
+    )
+    // One target named exactly as written wins over a normalized collision.
+    expect(
+      resolveGuardPrerequisiteNormalized('currency-beacon', [
+        { ...target, name: 'currency-beacon', aliases: [] },
+        { ...target, name: 'currencybeacon', aliases: [] },
+      ]),
+    ).toMatchObject({ kind: 'resolved', target: { name: 'currency-beacon' } })
   })
   it('requires controlled absence even after registration', () => {
     const requirement = [{ dependency: 'currencybeacon', mode: 'absent' as const }]
