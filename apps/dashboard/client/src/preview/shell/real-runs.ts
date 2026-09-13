@@ -28,11 +28,11 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { listSessionRuns, listWorkspaceRuns, type PublicSessionRun } from '@/lib/api';
-import { getServerUrl } from '@/lib/server-url';
 import { connectSocket, joinRepoRoom, leaveRepoRoom } from '@/lib/socket';
 import { commandLabel, runChecklist } from '@/components/sessions/run-model';
 import type { JobChain, JobStep, Repo } from '@/preview/data/types';
 import { PREVIEW_BASE } from './base';
+import { subscribeToServerEvents } from './event-stream';
 
 /** All the shell needs of a repository to describe its runs. */
 export interface RunRepoRef {
@@ -304,29 +304,14 @@ export function useRealRunStream(repos: Repo[], reposLoaded = true): RealRunStre
       }
     };
     void read();
-    if (typeof EventSource === 'undefined') return () => { stopped = true; };
-    let source: EventSource | null = null;
-    try {
-      source = new EventSource(`${getServerUrl()}/api/events`, { withCredentials: true });
-    } catch {
-      return () => { stopped = true; };
-    }
     // A scan's progress and its settlement ride the job stream; either is a
     // reason to re-read what the workspace is running.
-    const onMessage = (e: MessageEvent<string>): void => {
-      try {
-        const event = JSON.parse(e.data) as { type?: string };
-        if (event.type === 'job.progress' || event.type === 'notification') void read();
-      } catch {
-        // A frame this client has no reading of changes nothing.
-      }
-    };
-    source.addEventListener('message', onMessage);
-    const stream = source;
+    const unsubscribe = subscribeToServerEvents((event) => {
+      if (event.type === 'job.progress' || event.type === 'notification') void read();
+    });
     return () => {
       stopped = true;
-      stream.removeEventListener('message', onMessage);
-      stream.close();
+      unsubscribe();
     };
   }, []);
 

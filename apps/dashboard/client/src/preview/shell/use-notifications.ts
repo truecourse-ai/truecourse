@@ -1,12 +1,12 @@
 /**
  * The workspace's notification feed, as the server stores it.
  *
- * Every background job posts one row when it settles, and the store is the
- * whole feed: this reads it once on mount and prepends each `notification`
- * frame the workspace's SSE stream delivers, so a row lands on whatever page
- * the reader is on. Read state is the server's too, marked optimistically here
- * and posted straight after, so the badge answers the click rather than the
- * round trip.
+ * Every background job holds ONE row that moves as it goes, and the store is
+ * the whole feed: this reads it once on mount and takes each `notification`
+ * frame the page's shared SSE stream delivers to the top of the list, replacing
+ * the row of the same id, so a job lands on whatever page the reader is on.
+ * Read state is the server's too, marked optimistically here and posted
+ * straight after, so the badge answers the click rather than the round trip.
  *
  * Degrades to nothing. With no server to ask (a static page, a jsdom test) the
  * read fails quietly, the feed is empty, and a runtime without `EventSource`
@@ -16,10 +16,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { NotificationLevel, NotificationView } from '@truecourse/shared';
 import { listNotifications, markNotificationsRead } from '@/lib/api';
-import { getServerUrl } from '@/lib/server-url';
 import type { StatusTone } from '@/preview/ui/status-word';
 import type { Repo } from '@/preview/data/types';
 import { PREVIEW_BASE } from './base';
+import { subscribeToServerEvents } from './event-stream';
 
 /** A level as the status idiom says it: one word, one tone. */
 export const LEVEL_STATUS: Record<NotificationLevel, { word: string; tone: StatusTone }> = {
@@ -36,9 +36,13 @@ function text(data: Record<string, unknown> | null, key: string): string | null 
   return typeof value === 'string' && value !== '' ? value : null;
 }
 
-/** The repository a notification is about, as the feed's column shows it. */
-export const notificationRepo = (n: NotificationView): string | null =>
-  text(n.data, 'repoFullName');
+/**
+ * What a notification is about, as the feed's column shows it: the repository
+ * for a repository job, the source for a sync, and nothing for the workspace's
+ * own Document scan, which reads every source there is.
+ */
+export const notificationSubject = (n: NotificationView): string | null =>
+  text(n.data, 'repoFullName') ?? text(n.data, 'sourceTitle');
 
 /**
  * Where a notification opens: the place the event happened. A setup, a
@@ -112,32 +116,17 @@ export function useNotifications(): NotificationFeed {
     })();
   }, []);
 
-  useEffect(() => {
-    if (typeof EventSource === 'undefined') return;
-    let stream: EventSource;
-    try {
-      stream = new EventSource(`${getServerUrl()}/api/events`, { withCredentials: true });
-    } catch {
-      return;
-    }
-    const onMessage = (e: MessageEvent<string>): void => {
-      try {
-        const event = JSON.parse(e.data) as { type?: string; notification?: NotificationView };
+  useEffect(
+    () =>
+      subscribeToServerEvents((event) => {
         if (event.type !== 'notification' || !event.notification) return;
         const landed = event.notification;
-        setNotifications((prev) =>
-          prev.some((n) => n.id === landed.id) ? prev : [landed, ...prev],
-        );
-      } catch {
-        // A frame this client has no reading of changes nothing.
-      }
-    };
-    stream.addEventListener('message', onMessage);
-    return () => {
-      stream.removeEventListener('message', onMessage);
-      stream.close();
-    };
-  }, []);
+        // A job's row moves rather than repeats: the settle frame carries the id
+        // the started frame did, so it replaces that row at the top of the feed.
+        setNotifications((prev) => [landed, ...prev.filter((n) => n.id !== landed.id)]);
+      }),
+    [],
+  );
 
   const markRead = useCallback((id: string) => {
     const row = current.current.find((n) => n.id === id);

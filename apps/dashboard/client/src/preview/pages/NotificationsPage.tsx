@@ -1,13 +1,15 @@
 /**
  * Notifications: the workspace's durable feed, as the server stores it. Every
- * background job posts one row when it settles, and this is that store read
- * back, newest first.
+ * background job holds one row, which moves from started to how it settled, and
+ * this is that store read back, newest first.
  *
  * The index is the platform's index shape (search full width, ONE filter row of
- * Add filter, dimension, value, then a one-line table). Read, Status and
- * Repository live in the address (`?read=&status=&repo=`), so a narrowed feed is
- * a place. An unread row carries its title in the foreground weight and a read
- * one muted; there is no dot and no second line.
+ * Add filter, dimension, value, then a one-line table). Read, Status and About
+ * live in the address (`?read=&status=&about=`), so a narrowed feed is a place.
+ * About is the subject of the row: the repository a repository job ran on, the
+ * source a sync refreshed, nothing for the workspace's own Document scan. An
+ * unread row carries its title in the foreground weight and a read one muted;
+ * there is no dot and no second line.
  *
  * Opening a row marks it read and goes where the event happened: the run's own
  * conversation, the repository's run page, the source's page. A row whose event
@@ -26,17 +28,17 @@ import { relativeTime } from '@/preview/shell/real-runs';
 import {
   LEVEL_STATUS,
   notificationHref,
-  notificationRepo,
+  notificationSubject,
 } from '@/preview/shell/use-notifications';
 
 const LEVELS = Object.keys(LEVEL_STATUS) as NotificationLevel[];
 
 /** The filter dimensions, in the order the Add filter menu offers them. */
-const DIMENSION_KEYS = ['read', 'status', 'repo'] as const;
+const DIMENSION_KEYS = ['read', 'status', 'about'] as const;
 type DimensionKey = (typeof DIMENSION_KEYS)[number];
 
 /** The URL parameter each dimension is spelled with. */
-const PARAM: Record<DimensionKey, string> = { read: 'read', status: 'status', repo: 'repo' };
+const PARAM: Record<DimensionKey, string> = { read: 'read', status: 'status', about: 'about' };
 
 const readValue = (n: NotificationView): string => (n.readAt === null ? 'unread' : 'read');
 
@@ -67,12 +69,12 @@ export default function NotificationsPage() {
     const q = query.trim().toLowerCase();
     const reads = selectedValues(selected, 'read');
     const levels = selectedValues(selected, 'status');
-    const pickedRepos = selectedValues(selected, 'repo');
+    const subjects = selectedValues(selected, 'about');
     return notifications.filter(
       (n) =>
         (reads.length === 0 || reads.includes(readValue(n))) &&
         (levels.length === 0 || levels.includes(n.level)) &&
-        (pickedRepos.length === 0 || pickedRepos.includes(notificationRepo(n) ?? '')) &&
+        (subjects.length === 0 || subjects.includes(notificationSubject(n) ?? '')) &&
         (q === '' ||
           n.title.toLowerCase().includes(q) ||
           (n.body?.toLowerCase().includes(q) ?? false)),
@@ -80,7 +82,9 @@ export default function NotificationsPage() {
   }, [notifications, query, selected]);
 
   const dimensions = useMemo<FilterDimension[]>(() => {
-    const named = [...new Set(notifications.map(notificationRepo).filter((r): r is string => r !== null))].sort();
+    const subjects = [
+      ...new Set(notifications.map(notificationSubject).filter((s): s is string => s !== null)),
+    ].sort();
     return [
       {
         key: 'read',
@@ -104,12 +108,12 @@ export default function NotificationsPage() {
         })).filter((o) => o.count > 0),
       },
       {
-        key: 'repo',
-        label: 'Repository',
-        options: named.map((fullName) => ({
-          key: filterKey('repo', fullName),
-          label: fullName,
-          count: notifications.filter((n) => notificationRepo(n) === fullName).length,
+        key: 'about',
+        label: 'About',
+        options: subjects.map((subject) => ({
+          key: filterKey('about', subject),
+          label: subject,
+          count: notifications.filter((n) => notificationSubject(n) === subject).length,
         })),
       },
     ];
@@ -132,11 +136,11 @@ export default function NotificationsPage() {
         ),
       },
       {
-        key: 'repository',
-        label: 'Repository',
+        key: 'about',
+        label: 'About',
         width: '14rem',
         className: 'font-mono text-[12px] text-muted-foreground',
-        cell: (n) => notificationRepo(n) ?? '',
+        cell: (n) => notificationSubject(n) ?? '',
       },
       {
         key: 'status',

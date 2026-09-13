@@ -473,10 +473,12 @@ describe('the guard setup job', () => {
     const [setup] = await jobsOfType('repo.guard-setup');
     expect(setup).toMatchObject({ status: 'succeeded', result: { status: 'ok', documents: 0 } });
     expect(setup?.error).toBeNull();
-    const [note, started] = await new NotificationStore(db).listForOrg(ORG, { limit: 10 });
+    // One row per job: the started row moved onto how the setup settled.
+    const notes = await new NotificationStore(db).listForOrg(ORG, { limit: 10 });
+    expect(notes).toHaveLength(1);
+    const note = notes[0];
     expect(note).toMatchObject({ level: 'success', title: 'Flow setup complete' });
     expect(note?.body).toContain('No documents linked yet');
-    expect(started).toMatchObject({ level: 'started', title: 'Flow setup started', data: { repoFullName: REPO } });
     // The row's address: the setup's own conversation.
     const [setupRun] = await listStoredSessionRuns(REPO, 'guard-setup');
     expect(note?.data).toMatchObject({ repoFullName: REPO, runId: setupRun!.runId });
@@ -847,7 +849,6 @@ describe('the guard generate job', () => {
     const notes = await new NotificationStore(db).listForOrg(ORG);
     expect(notes.map((n) => [n.level, n.title])).toEqual([
       ['warning', 'Flows generated, findings to review'],
-      ['started', 'Flow generation started'],
     ]);
     // The row's address: the generate's own conversation.
     const [generateRun] = await listStoredSessionRuns(REPO, 'guard-generate');
@@ -897,9 +898,10 @@ describe('the guard generate job', () => {
     const opened = await openStoredSessionRun(REPO, 'guard-generate', run.runId);
     expect(opened?.record()).toMatchObject({ status: 'failed', error: { message: job.error } });
     const notes = await new NotificationStore(db).listForOrg(ORG);
-    expect(notes).toHaveLength(2);
+    expect(notes).toHaveLength(1);
     expect(notes[0]).toMatchObject({ level: 'error', title: 'Flow generation failed', body: expect.stringContaining('docs/app.md') });
-    expect(notes[1]).toMatchObject({ level: 'started', title: 'Flow generation started', data: { repoFullName: REPO, runId: run.runId } });
+    // The moved row keeps what the started row addressed.
+    expect(notes[0]?.data).toMatchObject({ repoFullName: REPO, runId: run.runId });
     expect(enqueued).toEqual(['repo.guard-generate']);
     expect(disposed).toEqual([clone]);
   }, 60_000);
@@ -1196,7 +1198,6 @@ describe('the guard run job', () => {
     const notes = await new NotificationStore(db).listForOrg(ORG);
     expect(notes.map((n) => [n.level, n.title])).toEqual([
       ['warning', 'Flows ran, failures to review'],
-      ['started', 'Flow run started'],
     ]);
     // The row's address: the repository's own page for THIS run.
     expect(notes[0]?.data).toMatchObject({ repoFullName: REPO, guardRunId: RUN_ID });

@@ -13,7 +13,8 @@
  *     whole plan immediately, then advance it via `ctx.phase()`
  *   - carry the display `title` on every emitted event (the client never maps
  *     type→label)
- *   - post the standardized success/failure notification (durable feed + toast)
+ *   - post the standardized success/failure notification (durable feed + toast),
+ *     moving the row the job posted when it began rather than adding a second
  *   - report the failure through the runtime's `onException` seam and re-throw
  *
  * Cancellation is a first-class outcome, not a failure: a job cancelled while
@@ -185,7 +186,7 @@ export async function executeJob<P extends JobPayload, M>(
     detail: (key, detail) => tracker.detail(key, detail),
     notify: async (notification) => {
       try {
-        await postNotification(rt, org, def.type, jobId, notification);
+        await postNotification(rt, org, def.type, jobId, notification, false);
       } catch (err) {
         log.warn(`[jobs] ${def.type} ${jobId}: could not post "${notification.title}": ${(err as Error).message}`);
       }
@@ -216,7 +217,7 @@ export async function executeJob<P extends JobPayload, M>(
       const done = await rt.jobStore.markSucceeded(jobId, outcome.result ?? {});
       if (done) await publishProgress(done);
       if (outcome.notification)
-        await postNotification(rt, org, def.type, jobId, outcome.notification);
+        await postNotification(rt, org, def.type, jobId, outcome.notification, true);
     }
   } catch (err) {
     if (opts.signal?.aborted) {
@@ -226,7 +227,7 @@ export async function executeJob<P extends JobPayload, M>(
       const message = (err as Error).message;
       const failed = await rt.jobStore.markFailed(jobId, message);
       if (failed) await publishProgress(failed);
-      await postNotification(rt, org, def.type, jobId, def.onError(err as Error, payload));
+      await postNotification(rt, org, def.type, jobId, def.onError(err as Error, payload), true);
       rt.onException?.(err, def.errorMeta?.(err as Error, payload));
       failure = err;
     }
@@ -241,20 +242,31 @@ export async function executeJob<P extends JobPayload, M>(
   if (failure) throw failure;
 }
 
+/**
+ * A job is ONE row in the feed. `settles` says this notification is how the job
+ * ended, and an ending moves the row the job posted when it began rather than
+ * landing beside it — the feed shows "Flow setup complete", not a Started still
+ * standing next to it. A job that posted no started row (and every mid-run row)
+ * inserts. Either way the row goes out on the live stream as the same
+ * `notification` event, and the client replaces the row of that id.
+ */
 async function postNotification<M>(
   rt: JobRuntime<M>,
   org: string,
   kind: string,
   jobId: string,
   n: JobNotification,
+  settles: boolean,
 ): Promise<void> {
-  const note = await rt.notifications.add({
+  const row = {
     org,
     kind,
     level: n.level,
     title: n.title,
     body: n.body ?? null,
     data: { jobId, ...n.data },
-  });
+  };
+  const moved = settles ? await rt.notifications.moveStarted({ jobId, ...row }) : null;
+  const note = moved ?? (await rt.notifications.add(row));
   await rt.publish(org, { type: 'notification', notification: note, jobId });
 }

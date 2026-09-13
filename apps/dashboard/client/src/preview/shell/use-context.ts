@@ -3,10 +3,10 @@
  *
  * A Context mutation is workspace-wide (a source added, a sync that reconciled
  * something, a link made or dropped), so the server announces it as
- * `context.changed` on the SSE stream the workspace already holds open — the
- * same stream the Agent page reads job progress from. One subscription here
- * bumps a counter, debounced, and every reader below re-reads on it. No
- * polling, and no repo socket room: Context belongs to no repository.
+ * `context.changed` on the SSE stream the page already holds open — the same
+ * stream the Agent page reads job progress from. One subscription here bumps a
+ * counter, debounced, and every reader below re-reads on it. No polling, and no
+ * repo socket room: Context belongs to no repository.
  *
  * Degrades to nothing: with no server behind the page the reads fail quietly
  * and each hook reports the failure rather than inventing an empty workspace.
@@ -20,7 +20,7 @@ import {
   listContextDocuments,
   listContextSources,
 } from '@/lib/api';
-import { getServerUrl } from '@/lib/server-url';
+import { subscribeToServerEvents } from './event-stream';
 
 /** How long a signal waits for its neighbours before the reads run. */
 const DEBOUNCE_MS = 300;
@@ -49,17 +49,9 @@ export function useContextSignal(): number {
     [],
   );
 
-  useEffect(() => {
-    if (typeof EventSource === 'undefined') return;
-    let source: EventSource | null = null;
-    try {
-      source = new EventSource(`${getServerUrl()}/api/events`, { withCredentials: true });
-    } catch {
-      return;
-    }
-    const onMessage = (e: MessageEvent<string>): void => {
-      try {
-        const event = JSON.parse(e.data) as { type?: string };
+  useEffect(
+    () =>
+      subscribeToServerEvents((event) => {
         if (
           event.type === 'context.changed' ||
           event.type === 'job.progress' ||
@@ -67,17 +59,9 @@ export function useContextSignal(): number {
         ) {
           nudge();
         }
-      } catch {
-        // A frame this client has no reading of changes nothing.
-      }
-    };
-    source.addEventListener('message', onMessage);
-    const stream = source;
-    return () => {
-      stream.removeEventListener('message', onMessage);
-      stream.close();
-    };
-  }, [nudge]);
+      }),
+    [nudge],
+  );
 
   return tick;
 }

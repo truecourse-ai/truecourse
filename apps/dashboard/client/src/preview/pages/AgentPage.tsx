@@ -33,7 +33,6 @@ import {
 } from '@/components/sessions/run-model';
 import { getWorkspaceRun, type WorkspaceRun } from '@/lib/api';
 import { connectSocket } from '@/lib/socket';
-import { getServerUrl } from '@/lib/server-url';
 import { PageHeader } from '@/preview/ui/bits';
 import { filterKey, selectedValues, type FilterDimension } from '@/preview/ui/filter-builder';
 import { IndexTable, type IndexColumn } from '@/preview/ui/index-table';
@@ -43,6 +42,7 @@ import { useRunTrigger } from '@/preview/shell/use-run-trigger';
 import { useWorkspaceRuns } from '@/preview/shell/use-workspace-runs';
 import { conversationHref } from '@/preview/shell/real-runs';
 import { PREVIEW_BASE } from '@/preview/shell/base';
+import { subscribeToServerEvents } from '@/preview/shell/event-stream';
 
 const STATUS_TONE: Record<RunStatus, StatusTone> = {
   running: 'running',
@@ -257,29 +257,13 @@ function ConversationRoute({ runId }: { runId: string }) {
   // A hosted job writes the record from the server side, and a run of the
   // WORKSPACE (a Document scan) has no repository room at all: the job stream
   // is the signal for both, and every tick of it is a re-read of the record.
-  useEffect(() => {
-    if (typeof EventSource === 'undefined') return;
-    let source: EventSource | null = null;
-    try {
-      source = new EventSource(`${getServerUrl()}/api/events`, { withCredentials: true });
-    } catch {
-      return;
-    }
-    const onMessage = (e: MessageEvent<string>): void => {
-      try {
-        const event = JSON.parse(e.data) as { type?: string };
+  useEffect(
+    () =>
+      subscribeToServerEvents((event) => {
         if (event.type === 'job.progress' || event.type === 'notification') void read();
-      } catch {
-        // A frame this client has no reading of changes nothing.
-      }
-    };
-    source.addEventListener('message', onMessage);
-    const stream = source;
-    return () => {
-      stream.removeEventListener('message', onMessage);
-      stream.close();
-    };
-  }, [read]);
+      }),
+    [read],
+  );
 
   if (missing) {
     return (

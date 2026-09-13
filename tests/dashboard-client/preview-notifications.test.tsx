@@ -238,9 +238,22 @@ describe('the notification feed', () => {
 
     expect(within(second!).getByText('Done')).toBeInTheDocument();
     expect(within(third!).getByText('Source synced')).toBeInTheDocument();
+    // About is the subject of the row: a sync is about the source it refreshed.
+    expect(within(third!).getByText('Stripe Docs')).toBeInTheDocument();
     expect(within(fourth!).getByText('Failed')).toBeInTheDocument();
-    // A workspace event names no repository.
+    // The workspace's own scan reads every source, so it is about nothing.
     expect(within(fourth!).queryByText('acme/widgets')).toBeNull();
+    expect(within(fourth!).queryByText('Stripe Docs')).toBeNull();
+  });
+
+  it('reads ONE event stream, however many surfaces of the page watch it', async () => {
+    serve([SETUP, SYNC]);
+    renderAt('/preview/notifications');
+    await waitFor(() => expect(rows()).toHaveLength(2));
+
+    // The feed, the Context dot and the run list all read the same connection —
+    // a browser allows six per host across every tab.
+    expect(streams.filter((s) => !s.closed)).toHaveLength(1);
   });
 
   it('carries an unread title in the foreground weight and a read one muted', async () => {
@@ -308,7 +321,7 @@ describe('the filters', () => {
 
   it('reads OR within one dimension and AND across two', async () => {
     serve([SETUP, RUN, SYNC, SCAN_FAILED]);
-    renderAt('/preview/notifications?status=success&status=error&repo=acme%2Fwidgets');
+    renderAt('/preview/notifications?status=success&status=error&about=acme%2Fwidgets');
 
     // success OR error, AND the one repository: the setup alone.
     await waitFor(() => expect(rows()).toHaveLength(1));
@@ -344,19 +357,21 @@ describe('the filters', () => {
     expect(within(rows()[0]!).getByText('Document scan failed')).toBeInTheDocument();
   });
 
-  it('puts a Repository filter into the address', async () => {
+  it('puts an About filter into the address, for a repository and for a source', async () => {
     serve([SETUP, RUN, SYNC, SCAN_FAILED]);
     renderAt('/preview/notifications');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(4));
 
     await user.click(screen.getByRole('button', { name: 'Add filter' }));
-    await user.click(await screen.findByRole('option', { name: /Repository/ }));
+    await user.click(await screen.findByRole('option', { name: /About/ }));
+    // Both subjects are offered: the repository, and the source a sync refreshed.
+    expect(await screen.findByRole('option', { name: /Stripe Docs/ })).toBeInTheDocument();
     await user.click(await screen.findByRole('option', { name: /acme\/widgets/ }));
 
     await waitFor(() => expect(rows()).toHaveLength(2));
     expect(screen.getByTestId('address')).toHaveTextContent(
-      '/preview/notifications?repo=acme%2Fwidgets',
+      '/preview/notifications?about=acme%2Fwidgets',
     );
   });
 });
@@ -490,6 +505,32 @@ describe('read state and the live stream', () => {
     expect(screen.getByText('Flow setup complete')).toHaveClass('text-muted-foreground');
     const link = screen.getAllByRole('link', { name: /Notifications/ })[0]!;
     expect(link).not.toHaveTextContent('2');
+  });
+
+  it('moves the job’s row when the stream says how it settled, rather than adding a second', async () => {
+    const started = note({
+      id: 'n-8',
+      level: 'started',
+      title: 'Flow setup started',
+      body: null,
+      createdAt: '2026-09-11T09:00:00.000Z',
+    });
+    serve([started, SYNC]);
+    renderAt('/preview/notifications');
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    expect(rows()[0]).toHaveTextContent('Started');
+
+    // The settle frame carries the row's own id: the same row, now done.
+    fireFrame({
+      type: 'notification',
+      notification: { ...started, level: 'success', title: 'Flow setup complete', body: 'Ready.' },
+      jobId: 'job-1',
+    });
+
+    await waitFor(() => expect(rows()[0]).toHaveTextContent('Flow setup complete'));
+    expect(rows()).toHaveLength(2);
+    expect(screen.queryByText('Flow setup started')).toBeNull();
+    expect(rows()[0]).toHaveTextContent('Done');
   });
 
   it('prepends a notification the event stream delivers', async () => {

@@ -20,7 +20,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import type { GuardFlowListItem } from '@/preview/vendor/shared';
 import { guardDriver } from '@/preview/vendor/shared';
-import { getServerUrl } from '@/lib/server-url';
 import { connectSocket } from '@/lib/socket';
 import { CHIP_CLASS, PageHeader } from '@/preview/ui/bits';
 import { filterKey, selectedValues, type FilterDimension } from '@/preview/ui/filter-builder';
@@ -35,6 +34,7 @@ import {
 import type { Repo } from '@/preview/data/types';
 import { usePreviewState } from '@/preview/shell/preview-state';
 import { PREVIEW_BASE } from '@/preview/shell/base';
+import { subscribeToServerEvents } from '@/preview/shell/event-stream';
 import { FlowPage } from '@/preview/repo/FlowPage';
 import { flowHref } from './flow-hrefs';
 
@@ -122,29 +122,13 @@ function useWorkspaceFlows(repos: Repo[]): { rows: FlowRow[]; loading: boolean }
     };
   }, [nudge]);
 
-  useEffect(() => {
-    if (typeof EventSource === 'undefined') return;
-    let source: EventSource | null = null;
-    try {
-      source = new EventSource(`${getServerUrl()}/api/events`, { withCredentials: true });
-    } catch {
-      return;
-    }
-    const onMessage = (e: MessageEvent<string>): void => {
-      try {
-        const event = JSON.parse(e.data) as { type?: string };
+  useEffect(
+    () =>
+      subscribeToServerEvents((event) => {
         if (event.type === 'job.progress' || event.type === 'notification') nudge();
-      } catch {
-        // A frame this client has no reading of changes nothing.
-      }
-    };
-    source.addEventListener('message', onMessage);
-    const stream = source;
-    return () => {
-      stream.removeEventListener('message', onMessage);
-      stream.close();
-    };
-  }, [nudge]);
+      }),
+    [nudge],
+  );
 
   return { rows: rows ?? [], loading: rows === null };
 }

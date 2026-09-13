@@ -193,17 +193,17 @@ async function runScan(result: WorkspaceContextScanResult, opts: RunOptions = {}
 // ---------------------------------------------------------------------------
 
 describe('the context.scan job', () => {
-  it('settles with the corpus it wrote, a started row and ONE success notification', async () => {
+  it('settles with the corpus it wrote, and its started row BECOMES the success row', async () => {
     const { settled, result, notifications } = await runScan(scanResult());
 
     expect(settled?.status).toBe('succeeded');
     expect(result).toMatchObject({ documents: 2, areas: 1, openConflicts: 0, corpusChanged: true });
-    expect(notifications).toHaveLength(2);
+    // One row per job: the row the scan posted when it began moved onto how it
+    // settled instead of a second row landing beside it.
+    expect(notifications).toHaveLength(1);
     expect(notifications[0]).toMatchObject({ level: 'success', title: 'Documents scanned' });
-    // Both rows' address: the scan's own conversation.
+    // The row's address is still the scan's own conversation.
     expect(notifications[0]!.data).toMatchObject({ runId: SCAN_RUN_ID });
-    expect(notifications[1]).toMatchObject({ level: 'started', title: 'Document scan started' });
-    expect(notifications[1]!.data).toMatchObject({ runId: SCAN_RUN_ID });
   });
 
   it('says so when the workspace has an open conflict', async () => {
@@ -236,6 +236,7 @@ describe('the context.scan job', () => {
     const settled = await rt.jobStore.get(job.id);
     expect(settled).toMatchObject({ status: 'failed', error: 'the workspace store went away' });
     const notes = await rt.notifications.listForOrg(ORG, { limit: 10 });
+    expect(notes).toHaveLength(1);
     expect(notes[0]).toMatchObject({ level: 'error', title: 'Document scan failed' });
     // A run the scan opened before dying is still where the failure is read.
     expect(notes[0]!.data).toMatchObject({ runId: SCAN_RUN_ID });
