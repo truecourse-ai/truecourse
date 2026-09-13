@@ -250,7 +250,6 @@ function StepList({
         {step.label}
       </h2>
       {detail && <p className="mt-2 text-[13px] leading-snug text-muted-foreground">{detail}</p>}
-      {step.facts.length > 0 && <Facts facts={step.facts} />}
       {reason && <RunError text={reason} />}
       {step.sessions.length > 0 && (
         <div className="mt-2">
@@ -264,6 +263,7 @@ function StepList({
           ))}
         </div>
       )}
+      {step.facts.length > 0 && <Facts facts={step.facts} />}
     </section>
   );
 }

@@ -183,13 +183,14 @@ export function foldConversation(
   for (const item of items) {
     const kinds = item.sessionKinds ?? [];
     for (const kind of kinds) claimed.add(kind);
+    const sessions = roots.filter((b) => kinds.includes(b.kind)).flatMap(withKin);
     steps.push({
       key: item.key,
       label: item.label,
       status: item.status,
       ...(item.detail ? { detail: item.detail } : {}),
-      facts: factsOf(item),
-      sessions: roots.filter((b) => kinds.includes(b.kind)).flatMap(withKin),
+      facts: factsOf(item).filter((fact) => !restatesSession(fact, sessions)),
+      sessions,
     });
   }
 
@@ -202,6 +203,25 @@ export function foldConversation(
   }
 
   return { ...(record.error ? { error: record.error.message } : {}), steps };
+}
+
+/**
+ * A line the engine wrote about work a session did is not a second record of
+ * it: the session's row is, and opens to the whole of it. Such a line is one
+ * whose subject (the text before its first colon) is a session's work item,
+ * one that credits a session, or one of the vocabulary merges the settling
+ * session's verdict produced. What stays is what no session stands for.
+ */
+function restatesSession(fact: string, sessions: readonly SessionBlock[]): boolean {
+  if (sessions.length === 0) return false;
+  if (/\bsession\b/.test(fact)) return true;
+  if (sessions.some((s) => s.kind.endsWith('settle-areas')) && /" (merged into|reassigned to) "/.test(fact)) {
+    return true;
+  }
+  const at = fact.indexOf(': ');
+  if (at <= 0) return false;
+  const subject = fact.slice(0, at);
+  return sessions.some((s) => s.workItem === subject || s.workItem.replace(/^[a-z-]+:/, '') === subject);
 }
 
 /** A checklist item's recorded facts: the strings under `facts`, read tolerantly since older records have none. */
