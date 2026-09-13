@@ -14,6 +14,23 @@ export interface ContextBatch {
   estimatedTokens: number;
   /** Real file paths included in this batch (full-file/legacy tiers only). */
   filePaths?: string[];
+  /** Exact repository source scope represented by this batch. */
+  sources: ContextBatchSource[];
+}
+
+export interface ContextBatchSource {
+  path: string;
+  selection:
+    | { kind: 'metadata'; fields: MetadataField[] }
+    | { kind: 'full-file' }
+    | {
+        kind: 'targeted';
+        functions: Array<{
+          name: string;
+          startLine: number;
+          endLine: number;
+        }>;
+      };
 }
 
 export interface PreFlightEstimate {
@@ -186,7 +203,7 @@ function extractTargetedFunctions(
 // Metadata summary builder
 // ---------------------------------------------------------------------------
 
-type MetadataField = NonNullable<ContextRequirement['metadataFields']>[number];
+export type MetadataField = NonNullable<ContextRequirement['metadataFields']>[number];
 
 function buildMetadataSummary(fa: FileAnalysis, fields: MetadataField[]): string {
   const parts: string[] = [`=== ${fa.filePath} ===`];
@@ -312,7 +329,7 @@ function buildMetadataContent(
   group: { rules: RuleDto[]; requirement: ContextRequirement },
   fileAnalyses: FileAnalysis[],
   fileContents: Map<string, { content: string; lineCount: number }>,
-): { content: string; fileCount: number } {
+): { content: string; fileCount: number; sources: ContextBatchSource[] } {
   const matching = fileAnalyses.filter((fa) => {
     if (!group.requirement.fileFilter) return true;
     const fc = fileContents.get(fa.filePath);
@@ -322,17 +339,25 @@ function buildMetadataContent(
   const fields = (group.requirement.metadataFields || ['functions', 'imports', 'exports']) as MetadataField[];
   const summaries = matching.map((fa) => buildMetadataSummary(fa, fields));
 
-  return { content: summaries.join('\n\n'), fileCount: matching.length };
+  return {
+    content: summaries.join('\n\n'),
+    fileCount: matching.length,
+    sources: matching.map((fa) => ({
+      path: fa.filePath,
+      selection: { kind: 'metadata', fields },
+    })),
+  };
 }
 
 function buildTargetedContent(
   group: { rules: RuleDto[]; requirement: ContextRequirement },
   fileAnalyses: FileAnalysis[],
   fileContents: Map<string, { content: string; lineCount: number }>,
-): { content: string; fileCount: number; functionCount: number } {
+): { content: string; fileCount: number; functionCount: number; sources: ContextBatchSource[] } {
   const filter = group.requirement.functionFilter || {};
   let totalFunctions = 0;
   const parts: string[] = [];
+  const sources: ContextBatchSource[] = [];
 
   for (const fa of fileAnalyses) {
     const fc = fileContents.get(fa.filePath);
@@ -355,16 +380,23 @@ function buildTargetedContent(
       fileParts.push(`--- ${fn.name} (lines ${fn.startLine}-${fn.endLine}) ---\n${numbered}`);
     }
     parts.push(fileParts.join('\n'));
+    sources.push({
+      path: fa.filePath,
+      selection: {
+        kind: 'targeted',
+        functions: extracted.map(({ name, startLine, endLine }) => ({ name, startLine, endLine })),
+      },
+    });
   }
 
-  return { content: parts.join('\n\n'), fileCount: parts.length, functionCount: totalFunctions };
+  return { content: parts.join('\n\n'), fileCount: parts.length, functionCount: totalFunctions, sources };
 }
 
 function buildFullFileContent(
   group: { rules: RuleDto[]; requirement: ContextRequirement },
   fileAnalyses: FileAnalysis[],
   fileContents: Map<string, { content: string; lineCount: number }>,
-): { content: string; fileCount: number; filePaths: string[] } {
+): { content: string; fileCount: number; filePaths: string[]; sources: ContextBatchSource[] } {
   const parts: string[] = [];
   const filePaths: string[] = [];
 
@@ -384,7 +416,15 @@ function buildFullFileContent(
     filePaths.push(fa.filePath);
   }
 
-  return { content: parts.join('\n\n'), fileCount: parts.length, filePaths };
+  return {
+    content: parts.join('\n\n'),
+    fileCount: parts.length,
+    filePaths,
+    sources: filePaths.map((filePath) => ({
+      path: filePath,
+      selection: { kind: 'full-file' },
+    })),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -398,6 +438,7 @@ function splitIntoBatches(
   fileCount: number,
   functionCount?: number,
   filePaths?: string[],
+  sources: ContextBatchSource[] = [],
 ): ContextBatch[] {
   if (content.length === 0) return [];
 
@@ -412,6 +453,7 @@ function splitIntoBatches(
       functionCount,
       estimatedTokens,
       filePaths,
+      sources,
     }];
   }
 
@@ -421,6 +463,15 @@ function splitIntoBatches(
   let currentContent = '';
   let currentFileCount = 0;
   let currentFilePaths: string[] = [];
+  let currentSources: ContextBatchSource[] = [];
+
+  const targetedFunctionCount = (batchSources: ContextBatchSource[]): number | undefined => {
+    if (tier !== 'targeted') return undefined;
+    return batchSources.reduce(
+      (sum, source) => sum + (source.selection.kind === 'targeted' ? source.selection.functions.length : 0),
+      0,
+    );
+  };
 
   for (let si = 0; si < sections.length; si++) {
     const section = sections[si];
@@ -430,16 +481,20 @@ function splitIntoBatches(
         rules,
         content: currentContent,
         fileCount: currentFileCount,
+        functionCount: targetedFunctionCount(currentSources),
         estimatedTokens: Math.ceil(currentContent.length / CHARS_PER_TOKEN),
         filePaths: currentFilePaths.length > 0 ? currentFilePaths : undefined,
+        sources: currentSources,
       });
       currentContent = '';
       currentFileCount = 0;
       currentFilePaths = [];
+      currentSources = [];
     }
     currentContent += (currentContent ? '\n\n' : '') + section;
     currentFileCount++;
     if (filePaths && filePaths[si]) currentFilePaths.push(filePaths[si]);
+    if (sources[si]) currentSources.push(sources[si]);
   }
 
   if (currentContent.length > 0) {
@@ -448,8 +503,10 @@ function splitIntoBatches(
       rules,
       content: currentContent,
       fileCount: currentFileCount,
+      functionCount: targetedFunctionCount(currentSources),
       estimatedTokens: Math.ceil(currentContent.length / CHARS_PER_TOKEN),
       filePaths: currentFilePaths.length > 0 ? currentFilePaths : undefined,
+      sources: currentSources,
     });
   }
 
@@ -626,25 +683,25 @@ function routeContextInner(
 
   // Metadata batches
   for (const group of grouped.metadata) {
-    const { content, fileCount } = buildMetadataContent(group, fileAnalyses, fileContents);
+    const { content, fileCount, sources } = buildMetadataContent(group, fileAnalyses, fileContents);
     if (fileCount > 0) {
-      batches.push(...splitIntoBatches('metadata', group.rules, content, fileCount));
+      batches.push(...splitIntoBatches('metadata', group.rules, content, fileCount, undefined, undefined, sources));
     }
   }
 
   // Targeted batches
   for (const group of grouped.targeted) {
-    const { content, fileCount, functionCount } = buildTargetedContent(group, fileAnalyses, fileContents);
+    const { content, fileCount, functionCount, sources } = buildTargetedContent(group, fileAnalyses, fileContents);
     if (fileCount > 0) {
-      batches.push(...splitIntoBatches('targeted', group.rules, content, fileCount, functionCount));
+      batches.push(...splitIntoBatches('targeted', group.rules, content, fileCount, functionCount, undefined, sources));
     }
   }
 
   // Full-file batches
   for (const group of grouped.fullFile) {
-    const { content, fileCount, filePaths } = buildFullFileContent(group, fileAnalyses, fileContents);
+    const { content, fileCount, filePaths, sources } = buildFullFileContent(group, fileAnalyses, fileContents);
     if (fileCount > 0) {
-      batches.push(...splitIntoBatches('full-file', group.rules, content, fileCount, undefined, filePaths));
+      batches.push(...splitIntoBatches('full-file', group.rules, content, fileCount, undefined, filePaths, sources));
     }
   }
 
