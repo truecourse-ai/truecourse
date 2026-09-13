@@ -19,8 +19,8 @@
  * Context tab, the source page.
  *
  * Nothing is stored until Add and sync: Check runs the real driver against the
- * real scope and stores nothing, and the add closes on the Documents view
- * narrowed to the new source, which reads Syncing until its first sync lands.
+ * real scope and stores nothing, and the add closes on the new source's page,
+ * which reads Syncing until its first sync lands.
  */
 
 import { useEffect, useState } from 'react';
@@ -48,7 +48,7 @@ import { addContextSource, previewContextSource } from '@/lib/api';
 import { fetchGithubStatus, fetchInstallationRepos } from '@/preview/data/real-repos';
 import { Stepper } from '@/preview/ui/stepper';
 import { PREVIEW_BASE } from '@/preview/shell/base';
-import { documentsHref } from './context-hrefs';
+import { sourceHref } from './context-hrefs';
 
 const FOOT_BUTTON = 'rounded px-3 py-1.5 text-xs font-medium';
 
@@ -233,7 +233,7 @@ export function AddContextDialog({
       .then((res) => {
         onAdded?.();
         onOpenChange(false);
-        navigate(documentsHref({ source: res.source.id }));
+        navigate(sourceHref(res.source.id));
       })
       .catch((e: unknown) => setFailure(e instanceof Error ? e.message : String(e)))
       .finally(() => setAdding(false));

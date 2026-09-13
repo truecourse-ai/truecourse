@@ -17,9 +17,8 @@ import { workspaceSessionsKey } from '@truecourse/core/commands/context-scan';
 import {
   getContextSource,
   listContextBindings,
-  listContextSources,
 } from '@truecourse/core/lib/context-store';
-import { getProjectByPath, slugify } from '@truecourse/core/config/registry';
+import { getProjectByPath } from '@truecourse/core/config/registry';
 import type { RepositorySourceConfig } from '@truecourse/shared';
 import type { RippleRepo } from '../jobs/context-ripple.js';
 
@@ -34,39 +33,29 @@ import type { RippleRepo } from '../jobs/context-ripple.js';
  * would hide a repository from the ripple that reads it.
  */
 export async function workspaceRepositories(org: string): Promise<RippleRepo[]> {
-  const [bindings, sources] = await Promise.all([
-    listContextBindings(org),
-    listContextSources(org),
-  ]);
+  const bindings = await listContextBindings(org);
   const byRepo = new Map<string, Set<string>>();
-  const add = (repoFullName: string, sourceId?: string): void => {
-    const set = byRepo.get(repoFullName) ?? new Set<string>();
-    if (sourceId) set.add(sourceId);
-    byRepo.set(repoFullName, set);
-  };
-  for (const binding of bindings) add(binding.repoFullName, binding.sourceId);
-  for (const source of sources) {
-    if (source.kind !== 'repository') continue;
-    const repoFullName = (source.config as RepositorySourceConfig).repoFullName;
-    if (repoFullName) add(repoFullName, source.id);
+  for (const binding of bindings) {
+    const set = byRepo.get(binding.repoFullName) ?? new Set<string>();
+    set.add(binding.sourceId);
+    byRepo.set(binding.repoFullName, set);
   }
 
+  // Only a repository Code has connected has flows to keep: a source can read
+  // a repository Code does not know, and that repository is nobody's to set up.
   const repos: RippleRepo[] = [];
   for (const [repoFullName, sourceIds] of [...byRepo.entries()].sort()) {
-    repos.push({
-      repoId: await repoSlug(repoFullName),
-      repoFullName,
-      sourceIds: [...sourceIds].sort(),
-    });
+    const entry = await connectedEntry(repoFullName);
+    if (!entry) continue;
+    repos.push({ repoId: entry.slug, repoFullName, sourceIds: [...sourceIds].sort() });
   }
   return repos;
 }
 
 /**
- * The repository a source IS — its own documentation — or null for a site (and
- * for a source that is already gone). Connecting a repository creates exactly
- * this source, so its first sync is what says "this repository just joined",
- * which is where the rest of its onboarding starts.
+ * The CONNECTED repository a source is the own documentation of, or null: for
+ * a site, for a source that is already gone, and for a repository source Code
+ * has not connected (its documents are read; nothing of it is set up).
  */
 export async function repositoryOfSource(
   org: string,
@@ -76,18 +65,19 @@ export async function repositoryOfSource(
   if (!source || source.kind !== 'repository') return null;
   const repoFullName = (source.config as RepositorySourceConfig).repoFullName;
   if (!repoFullName) return null;
-  return { repoId: await repoSlug(repoFullName), repoFullName };
+  const entry = await connectedEntry(repoFullName);
+  return entry ? { repoId: entry.slug, repoFullName } : null;
 }
 
-/** The registry slug the repository's jobs are keyed by for progress rooms. */
-async function repoSlug(repoFullName: string): Promise<string> {
+/** The registry entry of a repository Code has connected, or null. */
+async function connectedEntry(repoFullName: string): Promise<{ slug: string } | null> {
   try {
-    const entry = await getProjectByPath(repoFullName);
-    if (entry) return entry.slug;
+    return await getProjectByPath(repoFullName);
   } catch {
-    /* a registry that will not answer must not stop the ripple */
+    // A registry that will not answer must not stop the ripple; it just
+    // ripples to nobody.
+    return null;
   }
-  return slugify(repoFullName, []);
 }
 
 /**

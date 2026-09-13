@@ -449,7 +449,7 @@ describe('Add context', () => {
     });
     await waitFor(() =>
       expect(screen.getByTestId('address')).toHaveTextContent(
-        '/preview/context/documents?source=site-docs-other',
+        '/preview/context/sources/site-docs-other',
       ),
     );
   });

@@ -82,6 +82,8 @@ interface PreviewStateValue {
   refreshRealRepos: () => Promise<Repo[]>;
   /** The workspace's stored notification feed, newest first. */
   notifications: NotificationView[];
+  /** The feed's first read has settled: a row arriving after this is news. */
+  notificationsReady: boolean;
   unreadCount: number;
   markRead: (id: string) => void;
   markAllRead: () => void;
@@ -260,6 +262,7 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
       unlinkRepo,
       refreshRealRepos,
       notifications: feed.notifications,
+      notificationsReady: feed.ready,
       unreadCount: feed.unreadCount,
       markRead: feed.markRead,
       markAllRead: feed.markAllRead,

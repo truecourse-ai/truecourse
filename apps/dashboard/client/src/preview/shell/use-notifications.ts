@@ -72,6 +72,8 @@ export function notificationHref(n: NotificationView, repos: readonly Repo[]): s
 export interface NotificationFeed {
   /** The stored rows, newest first. Empty until the first read lands. */
   notifications: NotificationView[];
+  /** The first read has settled, so what `notifications` holds is history. */
+  ready: boolean;
   unreadCount: number;
   markRead: (id: string) => void;
   markAllRead: () => void;
@@ -79,6 +81,7 @@ export interface NotificationFeed {
 
 export function useNotifications(): NotificationFeed {
   const [notifications, setNotifications] = useState<NotificationView[]>([]);
+  const [ready, setReady] = useState(false);
   const alive = useRef(true);
   // What the feed holds right now, for the two marks: they are called from a
   // row's click and must decide on the current list, not on a captured one.
@@ -99,6 +102,8 @@ export function useNotifications(): NotificationFeed {
         if (alive.current) setNotifications(stored);
       } catch {
         // No server, or a workspace it will not answer for: nothing to show.
+      } finally {
+        if (alive.current) setReady(true);
       }
     })();
   }, []);
@@ -150,10 +155,11 @@ export function useNotifications(): NotificationFeed {
   return useMemo(
     () => ({
       notifications,
+      ready,
       unreadCount: notifications.filter((n) => n.readAt === null).length,
       markRead,
       markAllRead,
     }),
-    [notifications, markRead, markAllRead],
+    [notifications, ready, markRead, markAllRead],
   );
 }

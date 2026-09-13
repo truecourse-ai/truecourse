@@ -59,6 +59,11 @@ import type {
 } from '@truecourse/core/services/context';
 import type { WorkspaceContextScanResult } from '@truecourse/core/commands/context-scan';
 import { createServerJobs, type JobsMount } from '../../apps/dashboard/server/src/jobs/index';
+import {
+  resetRegistryStore,
+  setRegistryStore,
+  type RegistryStore,
+} from '@truecourse/core/config/registry';
 import { setContextEventPublisher } from '../../apps/dashboard/server/src/services/context.service';
 import { setWorkTreeProvider } from '../../apps/dashboard/server/src/services/work-tree.service';
 import { memoryContextStore } from '../helpers/memory-context-store';
@@ -298,11 +303,25 @@ beforeEach(async () => {
     config: { repoFullName: REPO, installationId: 11, include: [], exclude: [], branch: 'main' },
   });
   await setContextBindings(ORG, REPO, [SOURCE]);
+  // And it is a repository Code knows: only a connected one is set up.
+  const entry = { slug: `acme-widgets-${orgCounter}`, name: REPO, path: REPO };
+  const registry: RegistryStore = {
+    readRegistry: async () => [entry],
+    pruneStaleProjects: async () => [],
+    getProjectBySlug: async (slug) => (slug === entry.slug ? entry : null),
+    getProjectByPath: async (repoPath) => (repoPath === REPO ? entry : null),
+    registerProject: async (repoPath, name) => ({ slug: 'stub', name: name ?? repoPath, path: repoPath }),
+    unregisterProject: async () => false,
+    touchProject: async () => {},
+    setLastAnalyzed: async () => {},
+  };
+  setRegistryStore(registry);
 });
 
 afterEach(async () => {
   await drain();
   await jobs?.stop();
+  resetRegistryStore();
   resetContextStore();
   resetSpecStore();
   setContextEventPublisher(null);

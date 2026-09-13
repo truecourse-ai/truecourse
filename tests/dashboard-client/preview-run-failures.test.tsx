@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { Toaster } from 'sonner';
@@ -95,13 +95,14 @@ const failed = (over: Partial<PublicSessionRun> = {}): PublicSessionRun =>
 
 const realFetch = window.fetch;
 
-function serve(runs: PublicSessionRun[]) {
-  const state = { runs };
+function serve(runs: PublicSessionRun[], notifications: unknown[] = []) {
+  const state = { runs, notifications };
   window.fetch = vi.fn(async (input: RequestInfo | URL) => {
     const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const { pathname } = new URL(href, window.location.origin);
     if (pathname === '/api/repos') return json([REAL]);
     if (pathname === '/api/llm/config') return json({ config: { provider: 'anthropic' }, providers: ['anthropic'] });
+    if (pathname === '/api/notifications') return json({ notifications: state.notifications, unreadCount: 0 });
     if (pathname === `/api/repos/${REAL.id}/sessions/runs`) return json({ runs: state.runs });
     if (pathname === '/api/sessions/runs') {
       return json({ runs: state.runs.map((run) => ({ ...run, repo: { id: REAL.id, fullName: REAL.name } })) });
@@ -117,6 +118,42 @@ function serve(runs: PublicSessionRun[]) {
   }) as unknown as typeof window.fetch;
   return state;
 }
+
+// The event stream the notification feed listens to, as a stub jsdom does not provide.
+const streams: StubEventSource[] = [];
+
+class StubEventSource {
+  listeners = new Set<(e: MessageEvent<string>) => void>();
+  constructor(readonly url: string) {
+    streams.push(this);
+  }
+  addEventListener(_type: string, fn: (e: MessageEvent<string>) => void) {
+    this.listeners.add(fn);
+  }
+  removeEventListener(_type: string, fn: (e: MessageEvent<string>) => void) {
+    this.listeners.delete(fn);
+  }
+  close() {}
+}
+
+function fireFrame(payload: unknown): void {
+  act(() => {
+    for (const stream of streams) {
+      for (const fn of stream.listeners) fn({ data: JSON.stringify(payload) } as MessageEvent<string>);
+    }
+  });
+}
+
+const LANDED = {
+  id: 'n-setup-failed',
+  kind: 'repo.guard-setup',
+  level: 'error',
+  title: 'Flow setup failed',
+  body: REASON,
+  data: { jobId: 'job-1', repoFullName: REAL.name, runId: 'run-failed' },
+  readAt: null,
+  createdAt: '2026-09-12T10:00:00.000Z',
+};
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -142,11 +179,14 @@ const AGENT = '/preview/agent';
 
 beforeEach(() => {
   listeners.clear();
+  streams.length = 0;
+  (globalThis as { EventSource?: unknown }).EventSource = StubEventSource;
   window.history.replaceState({}, '', '/preview');
 });
 
 afterEach(() => {
   window.fetch = realFetch;
+  delete (globalThis as { EventSource?: unknown }).EventSource;
 });
 
 // ---------------------------------------------------------------------------
@@ -215,36 +255,31 @@ describe('the Agent index', () => {
   });
 });
 
-describe('the failure toast', () => {
-  it('fires once when a watched run dies, and carries the reason', async () => {
-    const state = serve([scan()]);
-    renderAt('/preview/code');
-
-    // The world is loaded and the scan is up; NOW it dies.
-    await screen.findByText('linkwarden/linkwarden');
-    await waitFor(() => expect(state.runs[0]!.status).toBe('running'));
-    state.runs = [failed()];
-    fireSocket('session:runs-changed', { repoId: REAL.id });
-
-    expect(await screen.findByText('Document scan failed on linkwarden/linkwarden')).toBeInTheDocument();
-    expect(screen.getByText(REASON)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Open conversation/ })).toBeInTheDocument();
-
-    // Every store write re-reads the runs; the announcement is per run, not per read.
-    fireSocket('session:runs-changed', { repoId: REAL.id });
-    fireSocket('session:runs-changed', { repoId: REAL.id });
-    await waitFor(() =>
-      expect(screen.getAllByText('Document scan failed on linkwarden/linkwarden')).toHaveLength(1),
-    );
-  });
-
-  it('stays silent for a run that was already dead when the page loaded', async () => {
+describe('the notification toast', () => {
+  it('fires once when a notification lands, in the job’s own words, with the way there', async () => {
     serve([failed()]);
     renderAt('/preview/code');
 
     await screen.findByText('linkwarden/linkwarden');
-    // The row knows; the shell does not shout about it.
-    await waitFor(() => expect(screen.queryByRole('button', { name: /Open conversation/ })).toBeNull());
-    expect(screen.queryByText('Document scan failed on linkwarden/linkwarden')).toBeNull();
+    await waitFor(() => expect(streams.length).toBeGreaterThan(0));
+    fireFrame({ type: 'notification', notification: LANDED, jobId: 'job-1' });
+
+    expect(await screen.findByText('Flow setup failed')).toBeInTheDocument();
+    expect(screen.getByText(REASON)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Open/ })).toBeInTheDocument();
+
+    // The same frame again is not news twice.
+    fireFrame({ type: 'notification', notification: LANDED, jobId: 'job-1' });
+    await waitFor(() => expect(screen.getAllByText('Flow setup failed')).toHaveLength(1));
+  });
+
+  it('stays silent for a notification that was already in the feed when the page loaded', async () => {
+    serve([failed()], [LANDED]);
+    renderAt('/preview/code');
+
+    await screen.findByText('linkwarden/linkwarden');
+    await waitFor(() => expect(streams.length).toBeGreaterThan(0));
+    expect(screen.queryByRole('button', { name: /^Open$/ })).toBeNull();
+    expect(screen.queryByText('Flow setup failed')).toBeNull();
   });
 });

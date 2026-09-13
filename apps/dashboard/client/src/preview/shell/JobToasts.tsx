@@ -7,8 +7,10 @@
  *
  * Every job here is a run: the toast carries that run's conversation address.
  *
- * A real run that FAILS announces the same way, once, on the transition — with
- * the run's own reason and a link to the run itself. Both announcements are
+ * A NOTIFICATION that lands while the page is open announces the same way,
+ * once: the job's own words for what happened, in its level's colour, and the
+ * way to where it happened when the row has an address. Rows already in the
+ * feed when the page loaded are history, not news. Both announcements are
  * session-local sets: nothing is persisted, and a reload starts them over.
  */
 
@@ -16,34 +18,43 @@ import { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { ArrowUpRight, X } from 'lucide-react';
+import type { NotificationLevel, NotificationView } from '@truecourse/shared';
 import type { JobChain } from '@/preview/data/types';
-import type { RunFailure } from './real-runs';
 import { usePreviewState } from './preview-state';
+import { notificationHref } from './use-notifications';
+
+const LEVEL_DOT: Record<NotificationLevel, string> = {
+  success: 'bg-emerald-500',
+  warning: 'bg-amber-500',
+  error: 'bg-red-500',
+  info: 'bg-slate-400',
+};
 
 export function JobToasts() {
-  const { jobs, jobsReady, runFailures } = usePreviewState();
+  const { jobs, jobsReady, notifications, notificationsReady, repos } = usePreviewState();
   const navigate = useNavigate();
   // Only jobs that START while the page is open announce (e.g. a repository
   // just connected). Jobs already in flight on arrival — a run resumed after a
   // reload — stay silent: the user didn't just start them, and every sign-in
   // reloads the page.
   const announced = useRef<Set<string> | null>(null);
-  // The same rule for failures: a run that was already failed when the page
-  // loaded is history, not news.
-  const mourned = useRef<Set<string> | null>(null);
+  // The same rule for notifications: what the feed held when the page loaded
+  // is history, not news.
+  const heard = useRef<Set<string> | null>(null);
 
   useEffect(() => {
-    if (!jobsReady) return;
-    if (mourned.current === null) {
-      mourned.current = new Set(runFailures.map((f) => f.id));
+    if (!notificationsReady) return;
+    if (heard.current === null) {
+      heard.current = new Set(notifications.map((n) => n.id));
       return;
     }
-    for (const failure of runFailures) {
-      if (mourned.current.has(failure.id)) continue;
-      mourned.current.add(failure.id);
-      announceFailure(failure, () => navigate(failure.href));
+    for (const landed of notifications) {
+      if (heard.current.has(landed.id)) continue;
+      heard.current.add(landed.id);
+      const href = notificationHref(landed, repos);
+      announceNotification(landed, href ? () => navigate(href) : null);
     }
-  }, [runFailures, jobsReady, navigate]);
+  }, [notifications, notificationsReady, repos, navigate]);
 
   useEffect(() => {
     // The "already in flight on arrival" snapshot is only honest once the
@@ -65,29 +76,31 @@ export function JobToasts() {
 }
 
 /**
- * A failed run, in the same one-line shape as a start: what broke, in the
- * record's own words, and the way to the conversation that broke.
+ * A landed notification, in the same one-line shape as a start: what happened
+ * in the job's own words, and the way to where it happened.
  */
-function announceFailure(failure: RunFailure, openRun: () => void) {
+function announceNotification(n: NotificationView, open: (() => void) | null) {
   toast.custom(
     (id) => (
-      <div className="flex w-full items-start gap-3 text-xs">
-        <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-red-500" aria-hidden />
-        <span className="min-w-0 flex-1">
-          <span className="block font-medium">{failure.title}</span>
-          <span className="block text-muted-foreground">{failure.body}</span>
+      <div className="flex w-full items-center gap-3 text-xs">
+        <span className={`h-2 w-2 shrink-0 rounded-full ${LEVEL_DOT[n.level]}`} aria-hidden />
+        <span className="min-w-0 flex-1 truncate">
+          <span className="font-medium">{n.title}</span>
+          {n.body && <span className="text-muted-foreground"> {n.body}</span>}
         </span>
-        <button
-          type="button"
-          onClick={() => {
-            toast.dismiss(id);
-            openRun();
-          }}
-          className="inline-flex shrink-0 items-center gap-1 font-medium text-foreground hover:underline"
-        >
-          Open conversation
-          <ArrowUpRight className="h-3 w-3" />
-        </button>
+        {open && (
+          <button
+            type="button"
+            onClick={() => {
+              toast.dismiss(id);
+              open();
+            }}
+            className="inline-flex shrink-0 items-center gap-1 font-medium text-foreground hover:underline"
+          >
+            Open
+            <ArrowUpRight className="h-3 w-3" />
+          </button>
+        )}
         <button
           type="button"
           onClick={() => toast.dismiss(id)}
