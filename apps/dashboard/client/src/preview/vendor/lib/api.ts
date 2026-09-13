@@ -19,6 +19,7 @@ import type {
   GuardScenarioSource,
   GuardStaleness,
 } from '@/preview/vendor/shared';
+import type { GuardSetupReport } from '@truecourse/shared';
 import type { GuardDependenciesView, GuardDependencyPatch } from '@/preview/vendor/types/guard-dependencies';
 import type { RunRecord, SessionCommand, SessionEvent } from '@truecourse/agent-loop';
 import type { LlmEstimateData } from '@/preview/vendor/hooks/useSocket';
@@ -1064,6 +1065,17 @@ export function saveGuardDependency(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, ...patch }),
   });
+}
+
+/** The last `guard setup` record; null on 404 (setup has never run here). */
+export async function getGuardSetup(repoId: string): Promise<GuardSetupReport | null> {
+  try {
+    const { report } = await fetchApi<{ report: GuardSetupReport }>(`/api/repos/${repoId}/guard/setup`);
+    return report;
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
 }
 
 /** The last `guard generate` report; null on 404 (never generated). `ref` scopes to a PR head (EE). */

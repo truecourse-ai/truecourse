@@ -36,20 +36,13 @@ import { connectSocket } from '@/lib/socket';
 import { PageHeader } from '@/preview/ui/bits';
 import { filterKey, selectedValues, type FilterDimension } from '@/preview/ui/filter-builder';
 import { IndexTable, type IndexColumn } from '@/preview/ui/index-table';
-import { StatusWord, type StatusTone } from '@/preview/ui/status-word';
+import { RUN_STATUS_TONE, StatusWord } from '@/preview/ui/status-word';
 import { usePreviewState } from '@/preview/shell/preview-state';
 import { useRunTrigger } from '@/preview/shell/use-run-trigger';
 import { useWorkspaceRuns } from '@/preview/shell/use-workspace-runs';
 import { conversationHref } from '@/preview/shell/real-runs';
 import { PREVIEW_BASE } from '@/preview/shell/base';
 import { subscribeToServerEvents } from '@/preview/shell/event-stream';
-
-const STATUS_TONE: Record<RunStatus, StatusTone> = {
-  running: 'running',
-  completed: 'success',
-  failed: 'failure',
-  interrupted: 'attention',
-};
 
 const STATUSES = Object.keys(RUN_STATUS_META) as RunStatus[];
 
@@ -215,7 +208,7 @@ function AgentIndex() {
 /** The status a row wears: what the agent needs first, what it did otherwise. */
 function RunStatusWord({ run }: { run: WorkspaceRun }) {
   if (waitingCount(run) > 0) return <StatusWord tone="attention" word="Needs you" />;
-  return <StatusWord tone={STATUS_TONE[run.status]} word={RUN_STATUS_META[run.status].word} />;
+  return <StatusWord tone={RUN_STATUS_TONE[run.status]} word={RUN_STATUS_META[run.status].word} />;
 }
 
 /** One conversation: the header this page owns, the flow underneath it. */

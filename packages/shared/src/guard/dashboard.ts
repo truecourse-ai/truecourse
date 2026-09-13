@@ -214,6 +214,9 @@ export const GUARD_COVERAGE_PLAIN_ORDER = [
   'not-testable',
 ] as const satisfies readonly GuardCoveragePlainStatus[]
 
+/** The five words as a wire value, for the payloads that carry one. */
+export const GuardCoveragePlainStatusSchema = z.enum([...GUARD_COVERAGE_PLAIN_ORDER])
+
 /** The ONE word per status. Nothing else may name a coverage state to a reader. */
 export const GUARD_COVERAGE_STATUS_WORD: Record<GuardCoveragePlainStatus, string> = {
   succeeded: 'Succeeded',
@@ -1107,6 +1110,12 @@ export const GuardInterfaceFlowRefSchema = z
     title: z.string(),
     /** True when a committed scenario of this flow grounds on the interface. */
     realized: z.boolean(),
+    /**
+     * The flow's own coverage status, the SAME derivation the Flows list shows
+     * for it ({@link guardFlowPlainStatus}) — so an interface can never report a
+     * flow as passing that the Flows page reports as blocked.
+     */
+    status: GuardCoveragePlainStatusSchema,
     /** Why an unrealized usage produced no scenario. Absent when realized. */
     gap: GuardFlowGapSchema.optional(),
   })

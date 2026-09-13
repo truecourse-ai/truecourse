@@ -2,9 +2,9 @@
  * The Runs tab of a CONNECTED repository reads the server, not the fixtures: it
  * lists every stored run — the baseline runs and the pull-request head runs the
  * gate wrote — opens one as its own page, and re-reads itself when a run of the
- * repository lands on the socket. Generating this repository's flows is its
- * header's action, since generating is done to one repository even though the
- * flows it writes are listed at the workspace (see preview-flows.test.tsx).
+ * repository lands on the socket. Starting this repository's work is the
+ * Pipeline tab's (see preview-pipeline-tab.test.tsx); the Runs header keeps its
+ * search only.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -167,19 +167,6 @@ beforeEach(() => {
 
 afterEach(() => {
   window.fetch = realFetch;
-});
-
-describe('generating the flows of a connected repository', () => {
-  it.each([FLOWS, { recipe: null, flows: [] }])('always offers manual generation regardless of the existing inventory', async (flows) => {
-    const calls = serve({ flows });
-    renderAt(`/preview/repos/${REAL.id}/runs`);
-    const generate = await screen.findByRole('button', { name: 'Generate flows' });
-    await waitFor(() => expect(generate).toBeEnabled());
-    await userEvent.click(generate);
-    await waitFor(() => expect(calls).toContain(`POST /api/repos/${REAL.id}/guard/generate`));
-    expect(calls.some((call) => call.includes('/api/ee/'))).toBe(false);
-    expect(screen.getByRole('link', { name: 'Open Agent' })).toHaveAttribute('href', `/preview/agent?repo=${REAL.id}`);
-  });
 });
 
 describe('the Runs tab of a connected repository', () => {

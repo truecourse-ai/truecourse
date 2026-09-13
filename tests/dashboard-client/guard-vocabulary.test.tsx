@@ -736,11 +736,12 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
         steps: [{ kind: 'invoke', command: ['tasks', 'add'], flags: [] }],
         fingerprint: 'sha256:j1',
         flows: [
-          { flowId: 'passing', title: 'A user creates a task', realized: true },
+          { flowId: 'passing', title: 'A user creates a task', realized: true, status: 'succeeded' },
           {
             flowId: 'blocked',
             title: 'A user schedules a reminder',
             realized: false,
+            status: 'blocked',
             gap: { kind: 'blocked-on', reason: 'blocked on credentials', label: 'blocked-on' },
           },
         ],
@@ -790,11 +791,12 @@ describe('guard vocabulary — no retired term reaches a reader', () => {
               steps: [{ kind: 'invoke', command: ['tasks', 'add'], flags: [] }],
               fingerprint: 'sha256:j1',
               flows: [
-                { flowId: 'passing', title: 'A user creates a task', realized: true },
+                { flowId: 'passing', title: 'A user creates a task', realized: true, status: 'succeeded' },
                 {
                   flowId: 'blocked',
                   title: 'A user schedules a reminder',
                   realized: false,
+                  status: 'blocked',
                   gap: { kind: 'blocked-on', reason: 'blocked on credentials', label: 'blocked-on' },
                 },
               ],

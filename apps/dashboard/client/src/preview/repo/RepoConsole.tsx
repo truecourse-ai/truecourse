@@ -3,16 +3,18 @@
  *
  * The section switcher is gone with Code Analysis, so the left menu here is not
  * a switcher between products, it is the tabs of the one thing this repository
- * has: Runs first (what this repository's tests did, and when), then the setup
- * group, Context (which workspace sources this repository reads), Interfaces,
- * Dependencies and the repository's Settings. Every tab reads the server: the
- * runs it stored, the interface catalog derived from its tree, the dependency
- * catalog its setup wrote and the sources it is linked to.
+ * has: Runs first (what this repository's tests did, and when) and Pipeline
+ * beside it (the three pieces of work the repository runs, each with its last
+ * outcome and a way to run it again), then the setup group, Context (which
+ * workspace sources this repository reads), Interfaces, Dependencies and the
+ * repository's Settings. Every tab reads the server: the runs it stored, the
+ * interface catalog derived from its tree, the dependency catalog its setup
+ * wrote and the sources it is linked to.
  *
  * FLOWS ARE NOT A TAB HERE any more: a flow is the workspace's, listed across
  * every repository on the Flows page, and one flow is a page of its own
  * (`/preview/flows/<id>?repo=<id>`). Generating them is still a REPOSITORY
- * action, so it sits in the Runs tab's header.
+ * action, so it is the Pipeline tab's generation row.
  *
  * DOCUMENTATION IS NOT A TAB HERE any more: a source is a workspace object and
  * the corpus is the workspace's, so the documents, their coverage, their
@@ -39,12 +41,14 @@ import { DependenciesTab } from './DependenciesTab';
 import { DependencyPage } from './DependencyPage';
 import { InterfacePage } from './InterfacePage';
 import { InterfacesTab } from './InterfacesTab';
+import { PipelineTab } from './PipelineTab';
 import { RunPage } from './RunPage';
 import { RunsTab } from './RunsTab';
 import { SettingsTab } from './SettingsTab';
 
 const TABS = [
   { id: 'runs', label: 'Runs', group: 'work' },
+  { id: 'pipeline', label: 'Pipeline', group: 'work' },
   { id: 'context', label: 'Context', group: 'setup' },
   { id: 'interfaces', label: 'Interfaces', group: 'setup' },
   { id: 'dependencies', label: 'Dependencies', group: 'setup' },
@@ -137,7 +141,11 @@ export default function RepoConsole() {
         />
 
         <div className="min-h-0 min-w-0 flex-1">
-          {active === 'settings' ? (
+          {active === 'pipeline' ? (
+            // The three pieces of work this repository runs, each with what it
+            // last did and a way to run it again.
+            <PipelineTab repo={repo} />
+          ) : active === 'settings' ? (
             <SettingsTab repo={repo} />
           ) : active === 'context' ? (
             // The sources are the WORKSPACE's, read over `/api/context/sources`,

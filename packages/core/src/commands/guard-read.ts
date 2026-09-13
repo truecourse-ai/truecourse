@@ -56,6 +56,7 @@ import {
   GUARD_DRIVERS,
   type GuardDriverDef,
   guardCoveragePlainStatus,
+  guardFlowPlainStatus,
   type GuardCoveragePlainStatus,
   type GuardSectionTotals,
   GuardClaimsFileSchema,
@@ -1861,9 +1862,7 @@ export async function readGuardInterfaces(repoKey: string, ref?: string): Promis
   if (catalog === undefined) return { ...emptyInterfacesView(), unavailable: 'no-working-tree' }
   if (!catalog) return emptyInterfacesView()
 
-  const corpus = await loadGuardCorpusForView(repoKey, ref)
-  const flowsFile = corpus ? await readGuardFlowsFile(repoKey, corpus.commit) : null
-  const { flowRefs, scenarioIdsByInterface } = interfaceReverseIndex(corpus, flowsFile)
+  const { flowRefs, scenarioIdsByInterface } = interfaceReverseIndex(await loadFlowView(repoKey, ref))
 
   const interfaces: GuardInterfaceRow[] = catalog.interfaces.map((entry) => ({
     id: entry.id,
@@ -2186,16 +2185,30 @@ function parseAuthoredInterfaces(text: string | undefined): InterfacesFile | nul
  *
  * A flow present in both is `realized`; a flow only the plan knows is not, and
  * carries the gap for the planning surface that explains what it waits on.
+ *
+ * Every ref also carries the flow's OWN status, taken from the same flow view the
+ * Flows list is built from ({@link flowListItem} read through
+ * {@link guardFlowPlainStatus}), so the two surfaces cannot word one flow two ways:
+ * a committed scenario says the interface is exercised, never that its flow passes.
  */
 function interfaceReverseIndex(
-  corpus: GuardCorpusForView | null,
-  flowsFile: GuardFlowsFile | null,
+  view: FlowViewSources | null,
 ): { flowRefs: Map<string, GuardInterfaceFlowRef[]>; scenarioIdsByInterface: Map<string, string[]> } {
-  const titleByFlow = new Map((flowsFile?.flows ?? []).map((f) => [f.id, f.title]))
-  const manifestFlows = corpus?.manifest?.flows ?? []
+  const titleByFlow = new Map((view?.flowsFile?.flows ?? []).map((f) => [f.id, f.title]))
+  const manifestFlows = [...(view?.join.manifestFlows.values() ?? [])]
   const ownerByScenario = new Map<string, string>()
   for (const flow of manifestFlows) {
     for (const s of flow.scenarios) ownerByScenario.set(s.id, flow.flowId)
+  }
+
+  const statusCache = new Map<string, GuardCoveragePlainStatus>()
+  const statusOf = (flowId: string): GuardCoveragePlainStatus => {
+    let status = statusCache.get(flowId)
+    if (status === undefined) {
+      status = view ? guardFlowPlainStatus(flowListItem(flowId, view)) : 'blocked'
+      statusCache.set(flowId, status)
+    }
+    return status
   }
 
   // interfaceId → flowId → the ref being assembled.
@@ -2204,7 +2217,17 @@ function interfaceReverseIndex(
     let flows = byInterface.get(interfaceId)
     if (!flows) byInterface.set(interfaceId, (flows = new Map()))
     let ref = flows.get(flowId)
-    if (!ref) flows.set(flowId, (ref = { flowId, title: titleByFlow.get(flowId) ?? flowId, realized: false }))
+    if (!ref) {
+      flows.set(
+        flowId,
+        (ref = {
+          flowId,
+          title: titleByFlow.get(flowId) ?? flowId,
+          realized: false,
+          status: statusOf(flowId),
+        }),
+      )
+    }
     return ref
   }
 
@@ -2220,7 +2243,7 @@ function interfaceReverseIndex(
   }
 
   const scenarioIdsByInterface = new Map<string, string[]>()
-  for (const scenario of corpus?.scenarios ?? []) {
+  for (const scenario of view?.scenarios ?? []) {
     const flowId = scenario.flow?.id ?? ownerByScenario.get(scenario.id) ?? manualFlowId(scenario.id)
     for (const interfaceId of scenario.interface?.path ?? []) {
       const ref = refFor(interfaceId, flowId)

@@ -6,7 +6,7 @@
  * up by adding their call here, and nothing else changes.
  */
 
-import { startContextScan, startGuardGenerate, startGuardSetup, type RunStart } from './scan';
+import { startContextScan, startGuardGenerate, startGuardRun, startGuardSetup, type RunStart } from './scan';
 
 export type RunTrigger = (repoId: string, resumeRunId?: string) => Promise<RunStart>;
 
@@ -16,6 +16,7 @@ const RUN_TRIGGERS: Record<string, RunTrigger> = {
   'spec-scan': () => startContextScan(),
   'guard-setup': startGuardSetup,
   'guard-generate': startGuardGenerate,
+  'guard-run': startGuardRun,
 };
 
 export const triggerFor = (command: string): RunTrigger | null =>

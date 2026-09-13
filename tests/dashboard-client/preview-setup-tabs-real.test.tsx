@@ -208,7 +208,7 @@ const CATALOG: GuardInterfacesView = {
   interfaces: [
     entry('web/save', 'Save settings', 'web', { at: 'settings-dialog', origin: 'authored',
       steps: [{ kind: 'activate', target: 'Save changes' }], endState: 'saved',
-      scenarioIds: ['settings.web.1'], flows: [{ flowId: 'settings', title: 'Configure settings', realized: true }] }),
+      scenarioIds: ['settings.web.1'], flows: [{ flowId: 'settings', title: 'Configure settings', realized: true, status: 'succeeded' }] }),
     entry('web/edit', 'Edit profile', 'web', { at: 'profile', origin: 'derived',
       steps: [{ kind: 'input', target: 'Display name' }], scenarioIds: ['settings.web.2', 'profile.web.1'] }),
     entry('web/open', 'Open profile', 'web', { origin: 'authored', steps: [{ kind: 'navigate', route: '/profile' }] }),

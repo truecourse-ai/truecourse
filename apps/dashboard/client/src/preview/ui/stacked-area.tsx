@@ -64,7 +64,12 @@ export function StackedArea<K extends string>({
   const geometry = useMemo(() => {
     const totals = points.map((p) => series.reduce((n, s) => n + (p.values[s.key] ?? 0), 0));
     const max = Math.max(1, ...totals);
-    const x = (i: number) => (points.length === 1 ? W / 2 : (i / (points.length - 1)) * W);
+    // The plot's columns, as point indices. A lone point is one run whose
+    // composition has stood ever since, so it takes two columns — its own time
+    // and the right edge, now — and paints a flat band rather than a
+    // zero-width line.
+    const columns = points.length === 1 ? [0, 0] : points.map((_, i) => i);
+    const x = (i: number) => (i / Math.max(1, columns.length - 1)) * W;
     const y = (v: number) => H - (v / max) * H;
     // Cumulative tops per series, bottom first.
     const tops: number[][] = [];
@@ -77,8 +82,8 @@ export function StackedArea<K extends string>({
     const areas = series.map((s, si) => {
       const top = tops[si]!;
       const bottom = si === 0 ? points.map(() => 0) : tops[si - 1]!;
-      const up = points.map((_, i) => `${x(i).toFixed(1)},${y(top[i]!).toFixed(1)}`);
-      const down = points.map((_, i) => `${x(i).toFixed(1)},${y(bottom[i]!).toFixed(1)}`).reverse();
+      const up = columns.map((pi, ci) => `${x(ci).toFixed(1)},${y(top[pi]!).toFixed(1)}`);
+      const down = columns.map((pi, ci) => `${x(ci).toFixed(1)},${y(bottom[pi]!).toFixed(1)}`).reverse();
       return { key: s.key, fill: s.fill, path: `M${up.join(' L')} L${down.join(' L')} Z`, edge: `M${up.join(' L')}` };
     });
     return { x, y, areas, max };
@@ -179,11 +184,12 @@ export function StackedArea<K extends string>({
           />
         )}
       </div>
-      {/* The dates: first, middle, last, in HTML so nothing stretches. */}
+      {/* The dates: first, middle, last, in HTML so nothing stretches. A lone
+          point is both ends of its own band, and says its date once. */}
       <div className="mt-1 flex justify-between text-[10px] tabular-nums text-muted-foreground">
         <span>{dateWord(points[0]!.at)}</span>
         {points.length > 2 && <span>{dateWord(points[Math.floor((points.length - 1) / 2)]!.at)}</span>}
-        <span>{dateWord(points[points.length - 1]!.at)}</span>
+        {points.length > 1 && <span>{dateWord(points[points.length - 1]!.at)}</span>}
       </div>
     </section>
   );

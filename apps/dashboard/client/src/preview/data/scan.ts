@@ -60,6 +60,8 @@ export const startGuardSetup = (repoId: string): Promise<RunStart> =>
 export const startGuardGenerate = (repoId: string, resumeRunId?: string): Promise<RunStart> =>
   startRun(repoId, 'guard/generate', resumeRunId ? { resumeRunId } : undefined);
 
+export const startGuardRun = (repoId: string): Promise<RunStart> => startRun(repoId, 'guard/run');
+
 /**
  * The workspace Document scan — the one run that belongs to no repository, so
  * it is started at the workspace address rather than under a repository's. Its

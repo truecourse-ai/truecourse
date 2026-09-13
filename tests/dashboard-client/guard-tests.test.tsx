@@ -250,7 +250,7 @@ const INTERFACES: GuardInterfaceRow[] = [
     entry: { command: ['tasks', 'add'] },
     steps: [{ kind: 'invoke', command: ['tasks', 'add'], flags: ['--json'] }],
     fingerprint: 'sha256:j1',
-    flows: [{ flowId: FLOW_ID, title: FLOW_TITLES.get(FLOW_ID)!, realized: true }],
+    flows: [{ flowId: FLOW_ID, title: FLOW_TITLES.get(FLOW_ID)!, realized: true, status: 'succeeded' }],
     scenarioIds: [PASSING_ID],
     source: 'tree',
   },

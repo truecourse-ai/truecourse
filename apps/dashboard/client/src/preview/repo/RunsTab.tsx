@@ -12,20 +12,14 @@
 
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { GuardHistoryEntry, GuardOutcome } from '@/preview/vendor/shared';
 import { CHIP_CLASS, PageHeader } from '@/preview/ui/bits';
 import { HoverPopover } from '@/preview/ui/hover-popover';
 import { GUARD_OUTCOMES, formatGuardTime } from '@/preview/vendor/lib/guard-drifts';
 import { guardStatusMeta } from '@/preview/vendor/lib/guard-status';
 import type { Repo } from '@/preview/data/types';
-import { GenerateTestsAction } from './GenerateTestsAction';
 import { useGuardTabJump } from './tab-jump';
 import { useGuardRefresh } from './use-guard-refresh';
-import { useGuardRunList } from './use-guard-run-list';
-
-function verdictOf(h: GuardHistoryEntry): GuardOutcome {
-  return h.summary.fail > 0 || h.summary.error > 0 ? 'fail' : 'pass';
-}
+import { guardRunVerdict, useGuardRunList } from './use-guard-run-list';
 
 export function RunsTab({ repo }: { repo: Repo }) {
   useGuardTabJump();
@@ -54,7 +48,6 @@ export function RunsTab({ repo }: { repo: Repo }) {
       <PageHeader
         title="Runs"
         subtitle={rows.length === history.length ? `${history.length}` : `${rows.length} of ${history.length}`}
-        right={<GenerateTestsAction repo={repo} />}
       />
       <div className="min-w-0 shrink-0 border-b border-border px-6 py-2">
         <input
@@ -88,7 +81,7 @@ export function RunsTab({ repo }: { repo: Repo }) {
           </thead>
           <tbody>
             {rows.map((h) => {
-              const verdict = verdictOf(h);
+              const verdict = guardRunVerdict(h);
               return (
                 <tr
                   key={h.runId}

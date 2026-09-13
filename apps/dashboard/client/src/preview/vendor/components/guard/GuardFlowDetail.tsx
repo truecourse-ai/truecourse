@@ -1,4 +1,3 @@
-import { GuardProgressSummary } from '@/components/guard/GuardProgressSummary';
 /**
  * THE guard entity, whole, a flow AND the test that realizes it, on one page.
  *
@@ -54,6 +53,7 @@ import { GuardProgressSummary } from '@/components/guard/GuardProgressSummary';
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpRight, Ban, Braces, Layers, PenLine } from "lucide-react";
+import type { GuardFlowProgress } from "@truecourse/shared";
 import { guardFindingClass } from "@/preview/vendor/shared";
 import type {
   GuardClaimIdentity,
@@ -103,6 +103,51 @@ const LABEL =
 
 const BTN =
   "inline-flex max-w-full items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground";
+
+const EXECUTION_WORD: Record<GuardFlowProgress["execution"], string> = {
+  passed: "Passed",
+  failed: "Failed",
+  error: "Errored",
+  blocked: "Blocked",
+  "not-run": "Not run",
+  "not-generated": "Not generated",
+};
+
+const GENERATION_WORD: Record<GuardFlowProgress["generation"], string> = {
+  ready: "Ready",
+  incomplete: "Incomplete",
+  error: "Errored",
+  unsupported: "Unsupported capability",
+  "needs-setup": "Needs setup",
+};
+
+/**
+ * The flow's three facts under its title, one per line: what its tests DID, how
+ * much of its chain that proved, and how far generation got. Plain rows, never a
+ * status word of their own: the header above carries the flow's one status.
+ */
+function GuardFlowFacts({ progress }: { progress: GuardFlowProgress }) {
+  const facts: [string, string][] = [
+    ["Execution", EXECUTION_WORD[progress.execution]],
+    [
+      "Coverage",
+      progress.coverage === "unknown"
+        ? "Not recorded"
+        : `${progress.verified} of ${progress.total} ${progress.unit} verified`,
+    ],
+    ["Generation", GENERATION_WORD[progress.generation]],
+  ];
+  return (
+    <dl className="mt-3 flex flex-col gap-0.5 text-xs text-muted-foreground">
+      {facts.map(([label, value]) => (
+        <div key={label} className="flex min-w-0 items-baseline gap-2">
+          <dt className="shrink-0">{label}</dt>
+          <dd className="min-w-0 text-foreground">{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
 
 /**
  * The flow's milestones, as a PLAIN LIST, the claim sentences in order, each
@@ -618,12 +663,7 @@ export function GuardFlowDetail({
             </p>
           )
         )}
-        {detail.progress && (
-          <details className="mt-3 text-xs text-muted-foreground">
-            <summary className="cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">Execution and coverage details</summary>
-            <div className="pt-2"><GuardProgressSummary progress={detail.progress} /></div>
-          </details>
-        )}
+        {detail.progress && <GuardFlowFacts progress={detail.progress} />}
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col gap-5 px-6 py-4">

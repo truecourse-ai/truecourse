@@ -14,6 +14,7 @@
  */
 
 import type { ContextDocumentStatus, ContextSourceStatus } from '@truecourse/shared';
+import type { RunStatus } from '@/components/sessions/run-model';
 import { HoverPopover } from '@/preview/ui/hover-popover';
 import type { CheckConclusion } from '@/preview/data/types';
 
@@ -96,6 +97,14 @@ export const CONTEXT_SYNC_TONE: Record<ContextSourceStatus, StatusTone> = {
   failed: 'failure',
   paused: 'neutral',
   never: 'neutral',
+};
+
+/** A run record's own status. The words are the run model's; only the colour is here. */
+export const RUN_STATUS_TONE: Record<RunStatus, StatusTone> = {
+  running: 'running',
+  completed: 'success',
+  failed: 'failure',
+  interrupted: 'attention',
 };
 
 export const VERDICT_TONE: Record<'passed' | 'failed' | 'blocked', StatusTone> = {
