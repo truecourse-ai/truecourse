@@ -24,6 +24,7 @@
  * rather than swallowing the rest of the batch.
  */
 
+import { Check } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -417,9 +418,17 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
                       aria-pressed={selected}
                       onClick={() => setPicked([r.fullName])}
                       className={`flex w-full items-center gap-3 px-3 py-2 text-left transition-colors ${
-                        linked ? 'cursor-default opacity-60' : selected ? 'bg-muted/60' : 'hover:bg-muted/40'
+                        linked ? 'cursor-default opacity-60' : selected ? 'bg-muted' : 'hover:bg-muted/40'
                       }`}
                     >
+                      <span
+                        aria-hidden
+                        className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
+                          selected ? 'border-primary bg-primary text-primary-foreground' : 'border-border'
+                        }`}
+                      >
+                        {selected && <Check className="h-2.5 w-2.5" />}
+                      </span>
                       <span className="block min-w-0 flex-1 truncate font-mono text-xs text-foreground">{r.fullName}</span>
                       <Capsule>{linked ? 'connected' : r.private ? 'private' : 'public'}</Capsule>
                     </button>
@@ -497,7 +506,7 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
             <p className="mt-2 text-[11px] text-muted-foreground">
               {llmProvider === 'missing'
                 ? 'Connecting links the repository. No scan runs until an LLM provider is set in Settings.'
-                : 'Onboarding starts in the background as each repository is connected.'}
+                : 'Flow setup starts in the background once the repository is connected.'}
             </p>
           </div>
         )}
