@@ -104,8 +104,20 @@ export interface ExistingViolation {
   severity: string;
 }
 
+export interface CodeSourceRange {
+  lineStart: number;
+  lineEnd: number;
+}
+
+export interface CodeSourceScope {
+  path: string;
+  ranges: CodeSourceRange[];
+}
+
 export interface CodeViolationContext {
   files: { path: string; content: string }[];
+  /** Exact source ranges supplied to this work unit and therefore owned by its result. */
+  sourceScopes: CodeSourceScope[];
   llmRules: { key: string; name: string; severity: string; prompt: string }[];
   /** Context tier — determines which prompt template to use */
   tier?: 'metadata' | 'targeted' | 'full-file';
@@ -131,6 +143,8 @@ export interface CodeViolationRaw {
   title: string;
   content: string;
   fixPrompt: string | null;
+  /** Input tier that owns this finding; metadata findings are file-level and have no source snippet. */
+  sourceTier?: 'metadata' | 'targeted' | 'full-file';
 }
 
 export interface CodeViolationsResult {

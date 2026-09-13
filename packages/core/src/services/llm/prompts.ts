@@ -257,6 +257,7 @@ IMPORTANT:
 - Only report issues from the rules listed above. Do not invent new rule categories or report issues outside the provided rules.
 - For each violation, set ruleKey to the exact key from the rules list. Every violation MUST have a ruleKey.
 - filePath must exactly match one of the file paths provided above.
+- Metadata findings are file-level: use the exact lineStart and lineEnd bounds shown in that file's header. Do not invent narrower line coordinates without source text.
 - Since you only see metadata (signatures, imports, calls), focus on structural patterns — missing capabilities, dependency issues, and configuration problems detectable without reading function bodies.
 - Only report genuine issues. Do not flag trivial style preferences.
 
@@ -306,6 +307,7 @@ IMPORTANT:
 - Only report issues from the rules listed above. Do not invent new rule categories or report issues outside the provided rules.
 - For each violation, set ruleKey to the exact key from the rules list. Every violation MUST have a ruleKey.
 - filePath must exactly match one of the file paths provided above.
+- Metadata findings are file-level: use the exact lineStart and lineEnd bounds shown in that file's header. Do not invent narrower line coordinates without source text.
 - Since you only see metadata (signatures, imports, calls), focus on structural patterns — missing capabilities, dependency issues, and configuration problems detectable without reading function bodies.
 - Only report genuine issues. Do not flag trivial style preferences.
 
