@@ -238,11 +238,10 @@ export default function DocumentsPage() {
           {
             key: 'title',
             label: 'Document',
-            wrap: true,
             cell: (row) => (
               <>
                 <span className="text-foreground">{row.title}</span>
-                <span className="block truncate font-mono text-[11px] text-muted-foreground">{docPathOf(row.ref)}</span>
+                <span className="ml-2 font-mono text-[11px] text-muted-foreground">{docPathOf(row.ref)}</span>
               </>
             ),
           },
