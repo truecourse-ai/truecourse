@@ -1,11 +1,11 @@
 /**
- * A refetch signal for the setup tabs of a REAL repository: a counter that
+ * A refetch signal for the setup tabs: a counter that
  * bumps when a guard job of the named kind lands on this repository (a setup
  * re-derived the catalogs, a registration changed what is provided). Setup and
  * registration are jobs and writes elsewhere, and their completion on the socket
  * is the only signal a table gets. Listens on the socket the shell already
- * holds; the shell joins every real repository's room and owns that membership,
- * so this never joins or leaves one. A fixture repository never bumps.
+ * holds; the shell joins every repository's room and owns that membership,
+ * so this never joins or leaves one.
  */
 
 import { useEffect, useState } from 'react';
@@ -16,7 +16,6 @@ export function useGuardRefresh(repo: Repo, kinds: readonly string[]): number {
   const [key, setKey] = useState(0);
   const kindsKey = kinds.join(',');
   useEffect(() => {
-    if (!repo.real) return;
     const wanted = new Set(kindsKey.split(','));
     let socket: ReturnType<typeof connectSocket> | null = null;
     const onComplete = (payload: { repoId?: string; kind?: string }): void => {
@@ -31,6 +30,6 @@ export function useGuardRefresh(repo: Repo, kinds: readonly string[]): number {
     return () => {
       socket?.off('spec:complete', onComplete);
     };
-  }, [repo.id, repo.real, kindsKey]);
+  }, [repo.id, kindsKey]);
   return key;
 }

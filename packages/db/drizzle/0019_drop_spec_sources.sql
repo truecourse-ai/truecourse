@@ -1,0 +1,1 @@
+DROP TABLE "spec_sources" CASCADE;

@@ -79,6 +79,10 @@ export function createRepoGuardGenerateTask(
 ): JobDefinition<GuardGenerateJobPayload> {
   const startLlm = deps.startLlm ?? startWorkspaceLlm;
   const runGenerate = deps.runGenerate ?? guardGenerateInProcess;
+  // The session run the body opened, so the failure notification can carry its
+  // address too: `onError` is handed the payload alone. Keyed by job id, and
+  // cleared however the job settles.
+  const runIds = new Map<string, string>();
 
   return {
     type: REPO_GUARD_GENERATE_TASK,
@@ -90,6 +94,12 @@ export function createRepoGuardGenerateTask(
     async run(ctx) {
       return dashboardActivity(ctx, 'guard-generate', GUARD_GENERATE_STEPS, async (activityRun, activityTracker) => {
         const { repoFullName } = ctx.payload;
+        runIds.set(ctx.jobId, activityRun.runId);
+        await ctx.notify({
+          level: 'started',
+          title: 'Flow generation started',
+          data: { repoFullName, runId: activityRun.runId },
+        });
         // Re-read at execution time as well: the queue payload carries identity,
         // never client-supplied completed steps or a trusted snapshot of status.
         const resume = ctx.payload.resumeRunId
@@ -105,9 +115,16 @@ export function createRepoGuardGenerateTask(
           activityRun.setGitRef?.(commitSha);
           activityTracker.fact('clone', `cloned ${repoFullName} at ${commitSha.slice(0, 8)}`);
           const ref = { repoKey: repoFullName, commitSha };
-          if (!(await materializeStoredSpec(ref, tree.dir))) {
+          // Generate needs documents, which setup does not: a repository that
+          // reads none is never rippled here (the scan's ripple skips an empty
+          // slice), so reaching this is somebody pressing Generate on a
+          // repository linked to nothing — which is a refusal with a reason.
+          const slice = await materializeStoredSpec(ref, tree.dir, ctx.payload.workspaceOrgId);
+          if (slice.documents === 0) {
             throw new Error(
-              `${repoFullName} has no scanned spec yet — run the spec scan before generating scenarios.`,
+              slice.hasWorkspaceCorpus
+                ? `${repoFullName} reads no scanned document — link it to a source with documents on its Context tab before generating scenarios.`
+                : `${repoFullName}'s workspace has no scanned documents yet — run the Document scan before generating scenarios.`,
             );
           }
           activityTracker.fact('clone', 'the stored spec corpus and decisions written into the clone');
@@ -169,9 +186,13 @@ export function createRepoGuardGenerateTask(
                 result,
                 notification: {
                   level: 'warning',
-                  title: 'Scenario generation blocked',
-                  body: `${repoFullName} — ${firstLine(err.message)}`,
-                  data: { repoFullName, openConflicts: err.conflicts.length },
+                  title: 'Flow generation blocked',
+                  body: firstLine(err.message),
+                  data: {
+                    repoFullName,
+                    runId: activityRun.runId,
+                    openConflicts: err.conflicts.length,
+                  },
                 },
               };
             }
@@ -214,22 +235,27 @@ export function createRepoGuardGenerateTask(
             notification: report.noChanges
               ? {
                   level: 'success',
-                  title: 'Scenarios up to date',
-                  body: `${repoFullName} — nothing changed since the last generate.`,
-                  data: { repoFullName },
+                  title: 'Flows up to date',
+                  body: 'Nothing changed since the last generate.',
+                  data: { repoFullName, runId: activityRun.runId },
                 }
               : findings > 0
                 ? {
                     level: 'warning',
-                    title: 'Scenarios generated — findings to review',
-                    body: `${repoFullName} — ${written} scenario${written === 1 ? '' : 's'} written, ${findings} birth finding${findings === 1 ? '' : 's'}.`,
-                    data: { repoFullName, written, birthFindings: findings },
+                    title: 'Flows generated, findings to review',
+                    body: `${written} scenario${written === 1 ? '' : 's'} written, ${findings} birth finding${findings === 1 ? '' : 's'}.`,
+                    data: {
+                      repoFullName,
+                      runId: activityRun.runId,
+                      written,
+                      birthFindings: findings,
+                    },
                   }
                 : {
                     level: 'success',
-                    title: 'Scenarios generated',
-                    body: `${repoFullName} — ${written} scenario${written === 1 ? '' : 's'} written.`,
-                    data: { repoFullName, written },
+                    title: 'Flows generated',
+                    body: `${written} scenario${written === 1 ? '' : 's'} written.`,
+                    data: { repoFullName, runId: activityRun.runId, written },
                   },
           };
         } finally {
@@ -238,14 +264,18 @@ export function createRepoGuardGenerateTask(
       });
     },
 
-    onError: (err, payload) => ({
-      level: 'error',
-      title: 'Scenario generation failed',
-      body: `${payload.repoFullName} — ${firstLine(err.message)}`,
-      data: { repoFullName: payload.repoFullName },
-    }),
+    onError: (err, payload) => {
+      const runId = runIds.get(payload.jobId);
+      return {
+        level: 'error',
+        title: 'Flow generation failed',
+        body: firstLine(err.message),
+        data: { repoFullName: payload.repoFullName, ...(runId ? { runId } : {}) },
+      };
+    },
 
     async onSettled(ctx, outcome, result) {
+      runIds.delete(ctx.jobId);
       // Clears the in-page progress popup and refreshes the guard surfaces,
       // however the generate ended.
       await emitRepoLifecycle(ctx.payload.repoFullName, 'guard-generate');

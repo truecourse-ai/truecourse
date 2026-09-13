@@ -11,9 +11,12 @@
 
 import { Router } from 'express';
 import type { AuthVerifier } from '@truecourse/shared';
-import type { EnqueueResult, JobsMount } from '../../apps/dashboard/server/src/jobs/index';
+import type { EnqueueResult, JobsMount, LinksChangedRequest } from '../../apps/dashboard/server/src/jobs/index';
+import type { RippleStart } from '../../apps/dashboard/server/src/jobs/context-ripple';
 import type { OnboardingJobRequest } from '../../apps/dashboard/server/src/jobs/tasks/onboarding';
 import type { GuardSetupJobRequest } from '../../apps/dashboard/server/src/jobs/tasks/repo-guard-setup';
+import type { ContextScanJobRequest } from '../../apps/dashboard/server/src/jobs/tasks/context-scan';
+import type { ContextSyncJobRequest } from '../../apps/dashboard/server/src/jobs/tasks/context-sync';
 import { readRegistry, unregisterProject } from '@truecourse/core/config/registry';
 import { createApp, type CreateAppOptions } from '../../apps/dashboard/server/src/app';
 import type { GithubMount } from '../../apps/dashboard/server/src/github/index';
@@ -34,12 +37,25 @@ export const testAuthVerifier =
   });
 
 /**
+ * A workspace with no GitHub account at all: nothing to install through, no
+ * links, nothing reachable. A test about installations passes its own.
+ */
+export const noGithubAccess: GithubMount['access'] = {
+  listInstallations: async () => [],
+  linkFor: async () => null,
+  reachRepository: async () => null,
+};
+
+/**
  * A GithubMount whose store links every registered repo to `orgId`. Unlinking
  * unregisters the entry, mirroring the derived registry (where deleting the
  * row IS the unregistration). Only the fields app.ts consumes are real; the
  * cast is confined to this helper.
  */
-export function testGithubMount(orgId: string = TEST_ORG): GithubMount {
+export function testGithubMount(
+  orgId: string = TEST_ORG,
+  access: GithubMount['access'] = noGithubAccess,
+): GithubMount {
   const store = {
     getRepo: async () => ({ workspaceOrgId: orgId }),
     listReposForWorkspace: async () =>
@@ -49,7 +65,12 @@ export function testGithubMount(orgId: string = TEST_ORG): GithubMount {
       if (entry) await unregisterProject(entry.slug);
     },
   };
-  return { webhook: Router(), connect: Router(), store: store as unknown as GithubMount['store'] };
+  return {
+    webhook: Router(),
+    connect: Router(),
+    store: store as unknown as GithubMount['store'],
+    access,
+  };
 }
 
 /** A job runner that RECORDS enqueues instead of running anything — what a route
@@ -57,26 +78,38 @@ export function testGithubMount(orgId: string = TEST_ORG): GithubMount {
  *  enqueue surface is real; the cast is confined to this helper. */
 export interface StubJobs {
   mount: JobsMount;
-  scans: OnboardingJobRequest[];
   guardSetups: GuardSetupJobRequest[];
   guardGenerates: OnboardingJobRequest[];
   guardRuns: OnboardingJobRequest[];
+  /** Workspace Document scans — what every Scan button enqueues now. */
+  contextScans: ContextScanJobRequest[];
+  contextSyncs: ContextSyncJobRequest[];
+  /** The link changes handed to the mount; each answers `linksAnswer`. */
+  linkChanges: LinksChangedRequest[];
+  linksAnswer: RippleStart | null;
   /** What the next enqueue answers — set it to `{ status: 'busy' }` for a 409. */
   answer: EnqueueResult;
 }
 
 export function stubJobs(): StubJobs {
   const stub: StubJobs = {
-    scans: [],
     guardSetups: [],
     guardGenerates: [],
     guardRuns: [],
+    contextScans: [],
+    contextSyncs: [],
+    linkChanges: [],
+    linksAnswer: null,
     answer: { status: 'queued', jobId: 'job_test' },
     mount: null as unknown as JobsMount,
   };
   stub.mount = {
-    enqueueScan: async (request: OnboardingJobRequest) => {
-      stub.scans.push(request);
+    enqueueContextScan: async (request: ContextScanJobRequest) => {
+      stub.contextScans.push(request);
+      return stub.answer;
+    },
+    enqueueContextSync: async (request: ContextSyncJobRequest) => {
+      stub.contextSyncs.push(request);
       return stub.answer;
     },
     enqueueGuardSetup: async (request: GuardSetupJobRequest) => {
@@ -90,6 +123,10 @@ export function stubJobs(): StubJobs {
     enqueueGuardRun: async (request: OnboardingJobRequest) => {
       stub.guardRuns.push(request);
       return stub.answer;
+    },
+    startForLinks: async (request: LinksChangedRequest) => {
+      stub.linkChanges.push(request);
+      return stub.linksAnswer;
     },
     cancelRepoJobs: async () => 'stopped' as const,
     routers: { events: Router(), jobs: Router(), notifications: Router() },

@@ -3,8 +3,8 @@
  *
  * Three things are pinned here. WHERE the routers sit: the webhook receiver
  * above the auth gate (GitHub has no session — its HMAC signature is its auth),
- * the connect API below it. WHAT CONNECTING A REPO DOES: write the link row —
- * the row IS the connection — and start the onboarding scan, which acquires
+ * the connect API below it. WHAT CONNECTING A REPO DOES: write the link row
+ * (the row IS the connection) and start the repository's setup, which acquires
  * its own ephemeral work tree; nothing is cloned inside the request, and the
  * registry every route resolves against is a live view of the link store. And
  * WHAT AN UNCONFIGURED SERVER ANSWERS: 503 with the env vars to set, never a
@@ -60,35 +60,11 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
   };
 });
 
-// The scan engine. Stubbed so the link path is exercised without an LLM, an
-// agent session, or a run store — and so a test can hold the scan open and
-// watch the response come back anyway.
-const scan = vi.hoisted(() => ({
-  calls: [] as string[],
-  impl: (async () => ({
-    noChanges: false,
-    curate: { corpus: {}, stats: {} },
-  })) as (repoRoot: string, options?: { signal?: AbortSignal }) => Promise<unknown>,
-}));
-
-vi.mock('@truecourse/core/commands/spec-in-process', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@truecourse/core/commands/spec-in-process')>();
-  return {
-    ...actual,
-    // The real options ride through — `signal` above all, since disconnecting a
-    // repository cancels the scan holding it.
-    curateInProcess: (repoRoot: string, options?: { signal?: AbortSignal }) => {
-      scan.calls.push(repoRoot);
-      return scan.impl(repoRoot, options);
-    },
-  };
-});
-
 import { createApp } from '../../apps/dashboard/server/src/app';
 import {
   createGithubConnection,
-  type OnboardingScanStart,
+  type ContextSyncStart,
+  type SetupStart,
 } from '../../apps/dashboard/server/src/github/index';
 import {
   createRunClone,
@@ -97,6 +73,7 @@ import {
   type GitRunner,
 } from '../../apps/dashboard/server/src/services/run-clone.service';
 import {
+  acquireWorkTree,
   setWorkTreeProvider,
   type WorkTreeProvider,
 } from '../../apps/dashboard/server/src/services/work-tree.service';
@@ -124,8 +101,10 @@ import {
   setSessionsRootResolver,
   resetSessionsRootResolver,
 } from '@truecourse/core/lib/sessions-store';
+import { resetContextStore, setContextStore } from '@truecourse/core/lib/context-store';
 import type { OctokitClient } from '../../packages/github-app/src/octokit';
 import { MemoryGateStore } from '../github-app/memory-store';
+import { memoryContextStore } from '../helpers/memory-context-store';
 
 const ORG = 'org_A';
 const OTHER_ORG = 'org_B';
@@ -133,14 +112,6 @@ const INSTALLATION_ID = 42;
 const REPO = 'acme/widgets';
 const REPO_SLUG = slugify(REPO, []);
 const WEBHOOK_SECRET = 'shhh';
-
-/** What a manual enqueue of the connected repo's scan looks like. */
-const scanRequest = {
-  repoId: REPO_SLUG,
-  repoFullName: REPO,
-  workspaceOrgId: ORG,
-  source: 'manual' as const,
-};
 
 const APP_ENV = {
   GITHUB_APP_ID: '1234',
@@ -217,13 +188,16 @@ function derivedRegistry(gate: MemoryGateStore): RegistryStore {
 
 interface MountOptions {
   workTree?: WorkTreeProvider;
-  scan?: OnboardingScanStart;
+  contextSync?: ContextSyncStart;
+  startSetup?: SetupStart;
   lookupInstallationAccount?: (
     installationId: number,
   ) => Promise<{ accountLogin: string; accountType: string } | null>;
 }
 
 let store: MemoryGateStore;
+/** The workspace's Context, so a test can plant a source and read it back. */
+let contextStore: ReturnType<typeof memoryContextStore>;
 
 function buildApp(opts: MountOptions = {}): Express {
   const github = createGithubConnection({
@@ -233,6 +207,15 @@ function buildApp(opts: MountOptions = {}): Express {
   });
   if (!github) throw new Error('expected a configured GitHub connection');
   return createApp({ serveStatic: false, authVerifier: verify, github, jobs: null });
+}
+
+/** Poll until a fire-and-forget handler has landed. */
+async function waitFor(done: () => boolean, ms = 2000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!done()) {
+    if (Date.now() > deadline) throw new Error('timed out waiting for the handler');
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }
 
 function signed(body: unknown): { payload: string; signature: string } {
@@ -256,6 +239,10 @@ beforeAll(() => {
 
 beforeEach(async () => {
   store = new MemoryGateStore();
+  // A push looks for the source that scopes the repository, so the workspace
+  // store has to exist for the push hook to do anything.
+  contextStore = memoryContextStore();
+  setContextStore(contextStore);
   setRegistryStore(derivedRegistry(store));
   await store.saveInstallation({
     installationId: INSTALLATION_ID,
@@ -265,8 +252,6 @@ beforeEach(async () => {
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
   });
-  scan.calls.length = 0;
-  scan.impl = async () => ({ noChanges: false, curate: { corpus: {}, stats: {} } });
   // The onboarding scan runs on the connecting workspace's provider — give the
   // workspace one, and answer its pre-flight probe without a network call.
   setWorkspaceLlmConfigStore({
@@ -280,6 +265,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   resetRegistryStore();
+  resetContextStore();
   resetWorkspaceLlmConfigStore();
   resetWorkspaceLlmBackend();
   setWorkTreeProvider(null);
@@ -328,7 +314,7 @@ describe('a server with no GitHub App configured', () => {
 
 describe('mount order', () => {
   it('takes a signed webhook with no session cookie', async () => {
-    const app = buildApp({ scan: async () => 'queued' });
+    const app = buildApp({ contextSync: async () => 'queued' });
     const { payload, signature } = signed({
       action: 'created',
       installation: { id: 77, account: { login: 'acme', type: 'Organization' } },
@@ -346,7 +332,7 @@ describe('mount order', () => {
   });
 
   it('rejects an unsigned webhook on the signature, not the gate', async () => {
-    const app = buildApp({ scan: async () => 'queued' });
+    const app = buildApp({ contextSync: async () => 'queued' });
     const res = await request(app)
       .post('/api/github/webhook')
       .set('X-GitHub-Event', 'installation')
@@ -358,9 +344,129 @@ describe('mount order', () => {
   });
 
   it('puts the connect routes behind the auth gate', async () => {
-    const app = buildApp({ scan: async () => 'queued' });
+    const app = buildApp({ contextSync: async () => 'queued' });
     await request(app).get('/api/github/status').expect(401);
     await request(app).get('/api/github/status').set('Cookie', `tc_session=${ORG}`).expect(200);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A push
+// ---------------------------------------------------------------------------
+
+/** The push GitHub delivers for a repository's default branch. */
+const pushWebhook = (app: Express, repoFullName: string) => {
+  const { payload, signature } = signed({
+    ref: 'refs/heads/main',
+    after: 'abc123',
+    repository: { full_name: repoFullName, default_branch: 'main' },
+    installation: { id: INSTALLATION_ID },
+  });
+  return request(app)
+    .post('/api/github/webhook')
+    .set('Content-Type', 'application/json')
+    .set('X-GitHub-Event', 'push')
+    .set('X-Hub-Signature-256', signature)
+    .send(payload);
+};
+
+describe('a push to the default branch', () => {
+  it('syncs a connected repository’s source', async () => {
+    const started: Array<[string, string, string]> = [];
+    const app = buildApp({
+      contextSync: async (orgId, sourceId, source) => {
+        started.push([orgId, sourceId, source]);
+        return 'queued';
+      },
+      startSetup: async () => 'queued',
+    });
+    await linkRepo(app).expect(201);
+    // The source is Context's, made there: connecting makes none.
+    await contextStore.createSource(ORG, {
+      id: 'repo-acme-widgets',
+      kind: 'repository',
+      title: REPO,
+      config: {
+        repoFullName: REPO,
+        installationId: INSTALLATION_ID,
+        include: ['docs/**'],
+        exclude: [],
+        branch: 'main',
+      },
+    });
+
+    await pushWebhook(app, REPO).expect(202);
+    await waitFor(() => started.length > 0);
+    expect(started).toEqual([[ORG, 'repo-acme-widgets', 'push']]);
+  });
+
+  // A source may read a repository Code never connected. The push still tells
+  // the workspace its documents moved, through the installation's own workspace.
+  it('syncs the source of a repository nothing connected', async () => {
+    const started: Array<[string, string, string]> = [];
+    const app = buildApp({
+      contextSync: async (orgId, sourceId, source) => {
+        started.push([orgId, sourceId, source]);
+        return 'queued';
+      },
+    });
+    await contextStore.createSource(ORG, {
+      id: 'repo-acme-handbook',
+      kind: 'repository',
+      title: 'acme/handbook',
+      config: { repoFullName: 'acme/handbook', installationId: INSTALLATION_ID, include: [], exclude: [], branch: 'main' },
+    });
+
+    await pushWebhook(app, 'acme/handbook').expect(202);
+    await waitFor(() => started.length > 0);
+    expect(started).toEqual([[ORG, 'repo-acme-handbook', 'push']]);
+    // Still not connected: a push creates no link and no repository.
+    expect(await store.getRepo('acme/handbook')).toBeNull();
+  });
+
+  it('does nothing for an unconnected repository with no source', async () => {
+    const started: string[] = [];
+    const app = buildApp({
+      contextSync: async (_orgId, sourceId) => {
+        started.push(sourceId);
+        return 'queued';
+      },
+    });
+
+    await pushWebhook(app, 'acme/unknown').expect(202);
+    // Give the fire-and-forget handler the beat it would need to do something.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(started).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The work tree
+// ---------------------------------------------------------------------------
+
+describe('the work-tree provider', () => {
+  it('clones through the installation it is handed, reading no link', async () => {
+    buildApp();
+    const reads: string[] = [];
+    const real = store.getRepo.bind(store);
+    store.getRepo = async (repoFullName: string) => {
+      reads.push(repoFullName);
+      return real(repoFullName);
+    };
+
+    // Nothing is linked, so a link lookup would refuse by name alone. Given the
+    // installation the clone goes straight for its token instead, which this
+    // suite's fake private key cannot mint, and that is where it fails.
+    const failure = await acquireWorkTree('acme/handbook', {
+      installationId: INSTALLATION_ID,
+      workspaceOrgId: ORG,
+    }).then(
+      () => null,
+      (err: unknown) => (err as Error).message,
+    );
+    expect(failure).not.toBeNull();
+    expect(failure).not.toMatch(/not a connected repository/);
+    expect(reads).toEqual([]);
   });
 });
 
@@ -405,11 +511,18 @@ const linkRepo = (app: Express, org = ORG) =>
     .send({ repoFullName: REPO, installationId: INSTALLATION_ID, defaultBranch: 'main' });
 
 describe('linking a repository', () => {
-  it('writes the row, enqueues the scan, and clones nothing in the request', async () => {
+  // Connecting starts the repository's SETUP, which reads the code. What the
+  // repository reads is Context's: no source is made here, and none is synced.
+  it('writes the row, starts the setup, and clones nothing in the request', async () => {
     const started: Array<[string, string, string]> = [];
+    const setups: string[] = [];
     const app = buildApp({
-      scan: async (repoId, repoKey, orgId) => {
-        started.push([repoId, repoKey, orgId]);
+      contextSync: async (orgId, sourceId, source) => {
+        started.push([orgId, sourceId, source]);
+        return 'queued';
+      },
+      startSetup: async (link) => {
+        setups.push(link.repoFullName);
         return 'queued';
       },
     });
@@ -432,25 +545,69 @@ describe('linking a repository', () => {
       remoteUrl: `https://github.com/${REPO}`,
     });
 
-    // The scan was pointed at the repo IDENTITY; no clone dir exists. It runs
-    // on the provider of the workspace that connected the repository.
-    expect(started).toEqual([[REPO_SLUG, REPO, ORG]]);
+    // The setup was started for the repository that landed, no sync went with
+    // it, and no clone dir exists: the work happens on the queue, on the
+    // connecting workspace's provider.
+    expect(setups).toEqual([REPO]);
+    expect(started).toEqual([]);
+    expect(await contextStore.listSources(ORG)).toEqual([]);
     expect(fs.existsSync(getRunClonesDir())).toBe(false);
   });
 
-  it('refuses to connect the same repository twice', async () => {
-    let scans = 0;
+  // Context owns the sources, so a repository whose own documentation is
+  // already a source keeps it untouched: connecting neither edits its scope
+  // (patterns, branch, account) nor binds the repository to it. The connect
+  // dialog's Context step is what writes the bindings.
+  it('leaves an existing source alone and creates none', async () => {
+    const started: Array<[string, string, string]> = [];
     const app = buildApp({
-      scan: async () => {
-        scans += 1;
+      contextSync: async (orgId, sourceId, source) => {
+        started.push([orgId, sourceId, source]);
+        return 'queued';
+      },
+      startSetup: async () => 'queued',
+    });
+    await contextStore.createSource(ORG, {
+      id: 'repo-acme-widgets',
+      kind: 'repository',
+      title: REPO,
+      config: {
+        repoFullName: REPO,
+        installationId: INSTALLATION_ID,
+        include: ['handbook/**'],
+        exclude: [],
+        branch: 'trunk',
+      },
+    });
+
+    await linkRepo(app).expect(201);
+
+    expect((await contextStore.listSources(ORG)).map((s) => s.id)).toEqual(['repo-acme-widgets']);
+    expect((await contextStore.listSources(ORG))[0]!.config).toEqual({
+      repoFullName: REPO,
+      installationId: INSTALLATION_ID,
+      include: ['handbook/**'],
+      exclude: [],
+      branch: 'trunk',
+    });
+    // Nothing was bound and nothing was synced: both are Context's to say.
+    expect(await contextStore.bindings(ORG, REPO)).toEqual([]);
+    expect(started).toEqual([]);
+  });
+
+  it('refuses to connect the same repository twice', async () => {
+    let setups = 0;
+    const app = buildApp({
+      startSetup: async () => {
+        setups += 1;
         return 'queued';
       },
     });
 
     await linkRepo(app).expect(201);
-    // A second link would re-fire the onboarding scan on a live repo.
+    // A second link would re-fire the whole onboarding chain on a live repo.
     await linkRepo(app).expect(409);
-    expect(scans).toBe(1);
+    expect(setups).toBe(1);
   });
 });
 
@@ -460,7 +617,7 @@ describe('linking a repository', () => {
 
 describe('disconnecting a repository', () => {
   it('drops the row and the repo’s session transcripts', async () => {
-    const app = buildApp({ scan: async () => 'queued' });
+    const app = buildApp({ startSetup: async () => 'queued' });
     await linkRepo(app).expect(201);
 
     // Transcripts a scan left behind, keyed by identity.
@@ -478,7 +635,7 @@ describe('disconnecting a repository', () => {
   });
 
   it('drops the link row when the repo is disconnected from Home', async () => {
-    const app = buildApp({ scan: async () => 'queued' });
+    const app = buildApp({ startSetup: async () => 'queued' });
     await linkRepo(app).expect(201);
 
     await request(app)
@@ -501,7 +658,7 @@ describe('disconnecting a repository', () => {
 // ---------------------------------------------------------------------------
 
 describe('a slug that belongs to another workspace', () => {
-  const app = (): Express => buildApp({ scan: async () => 'queued' });
+  const app = (): Express => buildApp({ startSetup: async () => 'queued' });
 
   it('404s the repo detail route — not 403, which would confirm it exists', async () => {
     const server = app();
@@ -564,7 +721,7 @@ describe('a slug that belongs to another workspace', () => {
 
 describe('GET /api/repos with a link store', () => {
   it("hides another workspace's connected repository", async () => {
-    const app = buildApp({ scan: async () => 'queued' });
+    const app = buildApp({ startSetup: async () => 'queued' });
     await linkRepo(app).expect(201);
 
     const mine = await request(app)
@@ -672,210 +829,5 @@ describe('createRunClone', () => {
     expect(fs.existsSync(fresh.dir)).toBe(true);
     expect(fs.existsSync(stale.dir)).toBe(false);
     fresh.dispose();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// The onboarding scan (the real job runner, with the scan engine stubbed)
-// ---------------------------------------------------------------------------
-
-interface Deferred {
-  promise: Promise<unknown>;
-  resolve: () => void;
-}
-
-/** A scan the test holds open, so "the response did not wait" is observable. */
-function heldScan(): Deferred {
-  let resolve!: () => void;
-  const promise = new Promise<unknown>((res) => {
-    resolve = () => res({ noChanges: false, curate: { corpus: { areas: [] }, decisions: {} } });
-  });
-  // Nothing awaits this promise but the job body; a rejection there is handled.
-  promise.catch(() => {});
-  return { promise, resolve };
-}
-
-const settle = (ms = 50): Promise<void> => new Promise((r) => setTimeout(r, ms));
-
-/** Wait for a background effect, rather than guessing how long it will take. */
-async function until(predicate: () => boolean, timeoutMs = 5000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate() && Date.now() < deadline) await settle(10);
-}
-
-describe('connecting a repository enqueues its spec scan', () => {
-  const held: Deferred[] = [];
-  const disposed: string[] = [];
-  let workTreeDir: string;
-  let jobs: JobsMount;
-  /** Every job body the fake worker started — awaited so nothing leaks. */
-  let running: Promise<void>[];
-  // One database for the whole block: a PGlite instance per test would leave
-  // several WASM heaps alive in the worker at once.
-  let pg: PGlite;
-  let db: Db;
-
-  beforeAll(async () => {
-    pg = new PGlite();
-    db = drizzle(pg, { schema }) as unknown as Db;
-    await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
-  });
-
-  afterAll(async () => {
-    await pg.close();
-  });
-
-  /**
-   * The mount with the REAL enqueue behind its scan seam: the queue is real
-   * (PGlite + the harness) and only graphile is faked, so a connect really
-   * queues a job and the job really runs — with the scan engine, work tree and
-   * provider stubbed.
-   */
-  async function appWithRealScan(): Promise<Express> {
-    workTreeDir = fakeWorkTree();
-    const workTree: WorkTreeProvider = async () => ({
-      dir: workTreeDir,
-      dispose: () => disposed.push(workTreeDir),
-    });
-    running = [];
-    jobs = createServerJobs({
-      db,
-      connectionString: 'postgres://unused',
-      hub: { start: async () => {}, stop: async () => {}, subscribe: () => () => {} },
-      startWorker: async ({ rt, tasks }) => {
-        const handlers = new Map(tasks.map((t) => [t.type, registerJob(rt, t)] as const));
-        return {
-          addJob: async (name: string, payload: unknown) => {
-            const handler = handlers.get(name);
-            if (handler) running.push(handler(payload, {}).catch(() => undefined));
-          },
-          stop: async () => {},
-        } as unknown as Runner;
-      },
-    });
-    await jobs.start();
-    setRepoJobsCanceller(jobs.cancelRepoJobs);
-    return buildApp({
-      workTree,
-      scan: async (repoId, repoKey, orgId) =>
-        (
-          await jobs.enqueueScan({
-            repoId,
-            repoFullName: repoKey,
-            workspaceOrgId: orgId,
-            source: 'connect',
-          })
-        ).status,
-    });
-  }
-
-  afterEach(async () => {
-    // Release anything still held so the bodies settle, and only then drop the
-    // dispose log — the release itself disposes a tree.
-    for (const d of held.splice(0)) d.resolve();
-    // Drain, rather than await once: a succeeded scan CHAINS the guard setup,
-    // whose body is pushed onto `running` while we are already awaiting the
-    // scan's. Awaiting the array once would leave that body running past the
-    // reset below, and its `dispose()` would land in the next test's log.
-    for (let pending = running?.splice(0) ?? []; pending.length > 0; pending = running.splice(0)) {
-      await Promise.all(pending);
-    }
-    setRepoJobsCanceller(null);
-    await jobs?.stop();
-    disposed.length = 0;
-  });
-
-  it('runs the scan on the acquired work tree, in the background of the 201', async () => {
-    await linkRepo(await appWithRealScan()).expect(201);
-
-    await until(() => scan.calls.length > 0);
-    expect(scan.calls).toEqual([workTreeDir]);
-    // The tree is disposed once the scan settles.
-    await until(() => disposed.length > 0);
-    expect(disposed).toEqual([workTreeDir]);
-  });
-
-  it('answers before the scan finishes — a held scan does not hold the response', async () => {
-    const pending = heldScan();
-    held.push(pending);
-    scan.impl = () => pending.promise;
-
-    // Only passes if the link never awaits the scan: this one never settles.
-    await linkRepo(await appWithRealScan()).expect(201);
-
-    await until(() => scan.calls.length > 0);
-    expect(scan.calls).toEqual([workTreeDir]);
-    // The job holds the tree until it settles.
-    expect(disposed).toEqual([]);
-  });
-
-  it('a scan that fails leaves the link response alone and rejects nothing', async () => {
-    scan.impl = () => Promise.reject(new Error('no LLM transport configured'));
-    const unhandled: unknown[] = [];
-    const onUnhandled = (reason: unknown): void => {
-      unhandled.push(reason);
-    };
-    process.on('unhandledRejection', onUnhandled);
-    try {
-      await linkRepo(await appWithRealScan()).expect(201);
-
-      await until(() => disposed.length > 0);
-      expect(scan.calls).toHaveLength(1);
-      expect(unhandled).toEqual([]);
-      // The failure landed on the job row and disposed the tree.
-      expect(disposed).toEqual([workTreeDir]);
-    } finally {
-      process.off('unhandledRejection', onUnhandled);
-    }
-  });
-
-  it('does not queue a second scan while one is running', async () => {
-    const pending = heldScan();
-    held.push(pending);
-    scan.impl = () => pending.promise;
-    await appWithRealScan();
-
-    expect((await jobs.enqueueScan(scanRequest)).status).toBe('queued');
-    await until(() => scan.calls.length > 0);
-    expect((await jobs.enqueueScan(scanRequest)).status).toBe('busy');
-
-    expect(scan.calls).toEqual([workTreeDir]);
-  });
-
-  it('unlinking mid-scan cancels the scan and disposes its work tree', async () => {
-    // A scan that ends only when it is cancelled: without cancellation the
-    // unlink hook has nothing to do but refuse.
-    let reached = false;
-    scan.impl = (_repoRoot, options) =>
-      new Promise((_resolve, reject) => {
-        reached = true;
-        const stop = (): void => reject(new Error('the spec scan was cancelled'));
-        if (options?.signal?.aborted) stop();
-        else options?.signal?.addEventListener('abort', stop, { once: true });
-      });
-
-    const app = await appWithRealScan();
-    await linkRepo(app).expect(201);
-    await until(() => reached);
-
-    await request(app)
-      .delete('/api/github/repos/link')
-      .query({ repoFullName: REPO })
-      .set('Cookie', `tc_session=${ORG}`)
-      .expect(200);
-
-    expect(await store.getRepo(REPO)).toBeNull();
-    expect(disposed).toEqual([workTreeDir]);
-  });
-
-  it('sees a scan another process started, through the sessions store', async () => {
-    await appWithRealScan();
-    // A run record left `running` by a live process — what a scan owned by an
-    // earlier server process (or another workspace) looks like from here.
-    createSessionRun(REPO, { command: 'spec-scan', gitRef: 'HEAD' });
-
-    expect((await jobs.enqueueScan(scanRequest)).status).toBe('busy');
-    await settle();
-    expect(scan.calls).toEqual([]);
   });
 });

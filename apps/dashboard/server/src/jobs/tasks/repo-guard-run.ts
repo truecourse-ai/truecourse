@@ -74,6 +74,8 @@ export function createRepoGuardRunTask(
 
     async run(ctx) {
       const { repoFullName } = ctx.payload;
+      // A run has no conversation of its own; its row opens the repository's runs.
+      await ctx.notify({ level: 'started', title: 'Flow run started', data: { repoFullName } });
       // The judge is the run's only model call and it is parked by default, so
       // the workspace's provider is resolved only when it would actually be used.
       const llm = guardVisualJudgeEnabled() ? await startLlm(ctx.payload.workspaceOrgId) : null;
@@ -125,15 +127,15 @@ export function createRepoGuardRunTask(
             red > 0
               ? {
                   level: 'warning',
-                  title: 'Scenarios ran — failures to review',
-                  body: `${repoFullName} — ${summary.pass} of ${summary.total} passed, ${red} failed.`,
-                  data: { repoFullName, runId: jobResult.runId, summary },
+                  title: 'Flows ran, failures to review',
+                  body: `${summary.pass} of ${summary.total} passed, ${red} failed.`,
+                  data: { repoFullName, guardRunId: jobResult.runId, summary },
                 }
               : {
                   level: 'success',
-                  title: 'Scenarios passed',
-                  body: `${repoFullName} — ${summary.pass} of ${summary.total} passed.`,
-                  data: { repoFullName, runId: jobResult.runId, summary },
+                  title: 'Flows passed',
+                  body: `${summary.pass} of ${summary.total} passed.`,
+                  data: { repoFullName, guardRunId: jobResult.runId, summary },
                 },
         };
       } finally {
@@ -143,8 +145,8 @@ export function createRepoGuardRunTask(
 
     onError: (err, payload) => ({
       level: 'error',
-      title: 'Scenario run failed',
-      body: `${payload.repoFullName} — ${firstLine(err.message)}`,
+      title: 'Flow run failed',
+      body: firstLine(err.message),
       data: { repoFullName: payload.repoFullName },
     }),
 

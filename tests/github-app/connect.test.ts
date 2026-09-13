@@ -74,6 +74,10 @@ beforeEach(() => {
       appSlug: 'tc-gate',
       appUrl: 'http://localhost:3000',
       setupRedirectPath: '/preview?connect=1',
+      setupRedirectPaths: {
+        'context-add': '/preview/context?add=repository',
+        'code-connect': '/preview/code?connect=1',
+      },
       octokitFor: () => stubOctokit,
       lookupInstallationAccount: lookupAccount,
     }),
@@ -238,6 +242,37 @@ describe('connect router', () => {
       .query({ installation_id: '100', state: 'org_A' })
       .expect(302)
       .expect('location', 'https://app.truecourse.test/repositories?connect=1');
+  });
+
+  it('issues an install link that remembers where it was started, and returns there', async () => {
+    const status = await request(app).get('/api/ee/github/status').query({ slim: '1', from: 'context-add' }).expect(200);
+    expect(status.body.installUrl).toContain(`state=${encodeURIComponent('org_A:context-add')}`);
+
+    await seedInstallation(null);
+    await request(app)
+      .get('/api/ee/github/setup')
+      .query({ installation_id: '100', state: 'org_A:context-add' })
+      .expect(302)
+      .expect('location', 'http://localhost:3000/preview/context?add=repository');
+    expect((await store.getInstallation(100))?.workspaceOrgId).toBe('org_A');
+  });
+
+  it('ignores an origin it does not know and a state for another workspace', async () => {
+    const status = await request(app).get('/api/ee/github/status').query({ slim: '1', from: 'elsewhere' }).expect(200);
+    expect(status.body.installUrl).toContain('state=org_A');
+    expect(status.body.installUrl).not.toContain('elsewhere');
+
+    await seedInstallation(null);
+    await request(app)
+      .get('/api/ee/github/setup')
+      .query({ installation_id: '100', state: 'org_A:elsewhere' })
+      .expect(302)
+      .expect('location', 'http://localhost:3000/preview?connect=1');
+    await request(app)
+      .get('/api/ee/github/setup')
+      .query({ installation_id: '100', state: 'org_B:context-add' })
+      .expect(302);
+    expect((await store.getInstallation(100))?.workspaceOrgId).toBe('org_A');
   });
 
   it('skips the per-repo spec reads on ?slim=1', async () => {

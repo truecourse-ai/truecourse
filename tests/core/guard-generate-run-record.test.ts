@@ -67,11 +67,17 @@ describe('guard generate run record', () => {
     expect(run.finishedAt).toBeDefined();
     // The checklist mirrors the tracker: the step it died in errored, the rest pending.
     const checklist = run.display?.blocks.find((b) => b.kind === 'checklist') as
-      | { items: { key: string; status: string; sessionKinds?: string[] }[] }
+      | { items: { key: string; status: string; sessionKinds?: string[]; startedAt?: string; endedAt?: string }[] }
       | undefined;
     expect(checklist?.items.map((i) => i.key)).toEqual(GUARD_GENERATE_STEPS.map((s) => s.key));
     expect(checklist?.items[0]).toMatchObject({ key: 'index', status: 'error' });
     expect(checklist?.items.slice(1).every((i) => i.status === 'pending')).toBe(true);
+    // Each step carries its own clock, stamped where its status moved; a step
+    // that never opened carries none.
+    const [opened, ...never] = checklist!.items;
+    expect(Date.parse(opened.startedAt!)).not.toBeNaN();
+    expect(Date.parse(opened.endedAt!)).toBeGreaterThanOrEqual(Date.parse(opened.startedAt!));
+    expect(never.every((i) => i.startedAt === undefined && i.endedAt === undefined)).toBe(true);
     // Each step claims the session kinds that do its work, so a surface reading
     // run.json files every session under its step instead of after the list.
     expect(checklist?.items.map((i) => [i.key, i.sessionKinds])).toEqual([

@@ -2,11 +2,10 @@
  * The shell's account is the SIGNED-IN one: the user in the menu, and the name
  * of the workspace they are actually in.
  *
- * `usePreviewUser` maps the auth context's `AuthUser` into the shape the
- * preview shell draws, and falls back to the fixture user when there is no
- * auth provider above it — which is what keeps the fixture-rendered preview
- * tests (and the mock's own screens) whole. The workspace name follows the
- * same rule; everything else about the workspace stays fixture.
+ * `usePreviewUser` maps the auth context's `AuthUser` into the shape the shell
+ * draws, and answers null when there is no session — nobody is invented to fill
+ * the gap, so the surfaces that draw a user simply draw none. The workspace
+ * follows the same rule: it is the signed-in organization, or nothing.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -14,11 +13,10 @@ import { renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import type { AuthUser } from '@truecourse/shared';
 import { AuthProvider } from '@/ee/AuthContext';
-import { USER, WORKSPACES } from '@/preview/data';
 import { toPreviewUser, usePreviewUser } from '@/preview/shell/use-preview-user';
 import { PreviewStateProvider, usePreviewState } from '@/preview/shell/preview-state';
 
-// The shell holds a socket for the real repositories' runs; none of these cases
+// The shell holds a socket for the repositories' runs; none of these cases
 // is about that, so it is a stub that answers nothing.
 vi.mock('@/lib/socket', () => {
   const socket = { connected: true, on: () => socket, off: () => socket, emit: () => {} };
@@ -31,8 +29,8 @@ vi.mock('@/lib/socket', () => {
   };
 });
 
-// `/me` answers with the session; every other request (the real repo registry)
-// 404s, which is the preview's "no server behind it" case.
+// `/me` answers with the session; every other request (the repo registry)
+// 404s, which is the "no server behind it" case.
 function stubMe(user: AuthUser) {
   vi.stubGlobal(
     'fetch',
@@ -57,7 +55,6 @@ describe('toPreviewUser', () => {
       email: 'dana@acme.dev',
       initial: 'D',
       isOperator: false,
-      role: 'admin',
     });
   });
 
@@ -93,15 +90,15 @@ describe('usePreviewUser', () => {
 
     const { result } = renderHook(() => usePreviewUser(), { wrapper: AuthProvider });
 
-    await waitFor(() => expect(result.current.name).toBe('Dana Rees'));
-    expect(result.current.email).toBe('dana@acme.dev');
-    expect(result.current.initial).toBe('D');
-    expect(result.current.isOperator).toBe(true);
+    await waitFor(() => expect(result.current?.name).toBe('Dana Rees'));
+    expect(result.current?.email).toBe('dana@acme.dev');
+    expect(result.current?.initial).toBe('D');
+    expect(result.current?.isOperator).toBe(true);
   });
 
-  it('is the fixture user with no provider above it', () => {
+  it('is nobody with no provider above it, rather than a stand-in', () => {
     const { result } = renderHook(() => usePreviewUser());
-    expect(result.current).toEqual(USER);
+    expect(result.current).toBeNull();
   });
 });
 
@@ -112,7 +109,7 @@ describe('the active workspace', () => {
     </AuthProvider>
   );
 
-  it('wears the signed-in organization name; the rest of it stays fixture', async () => {
+  it('is the signed-in organization, named and initialled by it', async () => {
     stubMe({
       id: 'user_1',
       email: 'dana@acme.dev',
@@ -122,16 +119,18 @@ describe('the active workspace', () => {
 
     const { result } = renderHook(() => usePreviewState(), { wrapper: withAuth });
 
-    await waitFor(() => expect(result.current.workspace.name).toBe('Northwind Labs'));
-    expect(result.current.workspace.initial).toBe('N');
-    expect(result.current.workspace.plan).toBe(WORKSPACES[0]!.plan);
-    expect(result.current.workspaces).toEqual(WORKSPACES);
+    await waitFor(() => expect(result.current.workspace?.name).toBe('Northwind Labs'));
+    expect(result.current.workspace?.initial).toBe('N');
+    expect(result.current.workspace?.id).toBe('org_1');
   });
 
-  it('stays the fixture workspace with no session', () => {
+  it('is no workspace at all with no session', () => {
     const { result } = renderHook(() => usePreviewState(), {
       wrapper: PreviewStateProvider,
     });
-    expect(result.current.workspace).toEqual(WORKSPACES[0]);
+    expect(result.current.workspace).toBeNull();
+    expect(result.current.repos).toEqual([]);
+    expect(result.current.notifications).toEqual([]);
+    expect(result.current.jobs).toEqual([]);
   });
 });

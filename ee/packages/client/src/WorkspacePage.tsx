@@ -7,14 +7,14 @@
 import { useEffect, useState } from 'react';
 import type {
   SsoStatusResponse,
-  WorkspaceMembersResponse,
+  EeWorkspaceMembersResponse,
   WorkspaceSettingsResponse,
 } from '@truecourse/shared';
 import { getJson, patchJson } from './api';
 
 export default function WorkspacePage() {
   const [sso, setSso] = useState<SsoStatusResponse | null>(null);
-  const [members, setMembers] = useState<WorkspaceMembersResponse | null>(null);
+  const [members, setMembers] = useState<EeWorkspaceMembersResponse | null>(null);
   const [codeAnalysisLlm, setCodeAnalysisLlm] = useState(false);
   const [savingSetting, setSavingSetting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -23,7 +23,7 @@ export default function WorkspacePage() {
     let cancelled = false;
     Promise.all([
       getJson<SsoStatusResponse>('/api/ee/workspace/sso-status'),
-      getJson<WorkspaceMembersResponse>('/api/ee/workspace/members'),
+      getJson<EeWorkspaceMembersResponse>('/api/ee/workspace/members'),
     ])
       .then(([s, m]) => {
         if (cancelled) return;

@@ -26,6 +26,7 @@ import type {
   DriverResult,
   SessionDef,
   SessionEventBody,
+  SessionProgress,
   SessionRunInput,
 } from '../../packages/agent-loop/src/index';
 import { defineSessionTool, SessionToolArgsError } from '../../packages/agent-loop/src/index';
@@ -198,6 +199,51 @@ describe('api session driver', () => {
       structuredOutcome: 'tool',
       resumeAtMessage: false,
     });
+  });
+
+  it('reports the tool it is in and how long it has been in it, and stops when it returns', async () => {
+    const scripted = scriptedModel([
+      { content: [call('slow', { value: 'hi' })] },
+      { content: [outcomeCall({ verdict: 'keep' })] },
+    ]);
+    buildModelMock.mockReturnValue(scripted.model);
+    let release!: () => void;
+    let entered!: () => void;
+    const inTool = new Promise<void>((resolve) => { entered = resolve; });
+    const slow = defineSessionTool({
+      name: 'slow',
+      description: 'takes its time',
+      kind: 'probe',
+      readOnly: true,
+      destructive: false,
+      inputSchema: z.object({ value: z.string() }),
+      execute: () =>
+        new Promise((resolve) => {
+          release = () => resolve({ content: 'done' });
+          entered();
+        }),
+    });
+    const progress: SessionProgress[] = [];
+    vi.useFakeTimers();
+    try {
+      const { handle } = runSession(createApiSessionDriver(cfg), {
+        def: makeDef({ tools: [slow] }),
+        onProgress: (p) => progress.push(p),
+      });
+      await inTool;
+      expect(progress).toEqual([
+        { kind: 'tool', toolCallId: 'c1', toolName: 'slow', elapsedSeconds: 0 },
+      ]);
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(progress.at(-1)).toEqual({ kind: 'tool', toolCallId: 'c1', toolName: 'slow', elapsedSeconds: 2 });
+      release();
+      expect(await handle.done).toMatchObject({ kind: 'outcome' });
+      const said = progress.length;
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(progress).toHaveLength(said);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('reaches an outcome through a tool round-trip, emitting the full transcript', async () => {

@@ -48,6 +48,8 @@ import {
 import { corpusFilePath, CuratedCorpusSchema, type CuratedCorpus } from '@truecourse/spec-consolidator'
 import {
   GUARD_COVERAGE_PLAIN_ORDER,
+  guardSectionRef,
+  type GuardRunSectionSummary,
   scenarioMilestoneProof,
   coversFlowMilestones,
   GUARD_COVERAGE_STATUS_PRECEDENCE,
@@ -377,6 +379,145 @@ async function readCorpusForView(repoKey: string, ref?: string): Promise<Curated
 }
 
 /**
+ * Everything the coverage join reads for ONE repository, in one place: seven
+ * store reads that do not depend on which document is being joined. A caller
+ * that joins MANY documents of the same repository (the Documents view of the
+ * workspace's Context) reads this once and composes each document against it,
+ * rather than re-reading the repository's whole guard state per document.
+ */
+export async function readGuardCoverageSources(
+  repoKey: string,
+  ref?: string,
+  opts: {
+    /**
+     * Read the externals index too. It is the one input that materializes a
+     * scratch tree, and it only ever moves a section between `blocked-on` and
+     * `needs-setup` — two statuses of the SAME word. A caller that wants the
+     * five-word reading and nothing finer (the Documents view) passes false and
+     * pays no tree per repository; anything rendering a section's reason keeps
+     * the default.
+     */
+    externals?: boolean
+  } = {},
+): Promise<GuardCoverageSources> {
+  return {
+    scenarios: await readGuardScenariosForView(repoKey, ref),
+    manifest: await readManifestForView(repoKey, ref),
+    latest: await readGuardRunForView(repoKey, ref),
+    result: await readGuardReport(repoKey, ref),
+    flows: await readGuardFlowsForView(repoKey, ref),
+    claims: await readGuardClaimsForView(repoKey, ref),
+    externals: opts.externals === false ? null : await guardExternalSetupIndexForView(repoKey, ref),
+  }
+}
+
+/**
+ * One document's coverage as ONE of the five words: the worst of its sections,
+ * by {@link GUARD_COVERAGE_PLAIN_ORDER}. Null when the document has no section
+ * at all — nothing was joined, which is not the same as nothing being proven,
+ * and the caller decides what to say about it. Pure: `content` is the live doc
+ * text and `sources` the repository's guard state.
+ */
+export function docCoveragePlainStatus(
+  doc: string,
+  content: string,
+  sources: GuardCoverageSources,
+): GuardCoveragePlainStatus | null {
+  return docCoverageWords(doc, content, sources).doc
+}
+
+/** One document's coverage in the five words, whole: the document's and its sections'. */
+export interface DocCoverageWords {
+  /** The worst of the sections, by {@link GUARD_COVERAGE_PLAIN_ORDER}. */
+  doc: GuardCoveragePlainStatus | null
+  /** Every section, keyed by {@link guardSectionRef}. */
+  sections: Map<string, GuardCoveragePlainStatus>
+  /** What the BLOCKED sections give as their reason, in document order. */
+  blockedReasons: string[]
+}
+
+/**
+ * One document read through {@link composeDocCoverage} ONCE, in the five words:
+ * the per-section map every section-counting surface reads (Home's tally, a
+ * run's stored section summary), the document's own word (the worst of them),
+ * and the blocked sections' reasons. Pure: `content` is the live doc text and
+ * `sources` the repository's guard state.
+ */
+export function docCoverageWords(
+  doc: string,
+  content: string,
+  sources: GuardCoverageSources,
+): DocCoverageWords {
+  const sections = new Map<string, GuardCoveragePlainStatus>()
+  const blockedReasons: string[] = []
+  for (const sec of composeDocCoverage(doc, content, sources).sections) {
+    const word = guardCoveragePlainStatus(sec.status)
+    sections.set(guardSectionRef(doc, sec.anchor), word)
+    if (word === 'blocked' && sec.reason) blockedReasons.push(sec.reason)
+  }
+  const words = new Set(sections.values())
+  return {
+    doc: GUARD_COVERAGE_PLAIN_ORDER.find((word) => words.has(word)) ?? null,
+    sections,
+    blockedReasons,
+  }
+}
+
+/**
+ * The SECTION SUMMARY of one run: every section of every document the run's
+ * scenario set covers, as the word it wore then. Written when the run is
+ * persisted and read back as history, so a point of Home's trend costs no
+ * re-derivation.
+ *
+ * The scenario set and the report are read at the commit the STORE holds them
+ * under: the run's own when it has one there, else the baseline set, the set a
+ * hosted run materializes into its clone before running. The documents are the
+ * ones that set names; a document whose body cannot be read contributes
+ * nothing, and a run that yields no section at all answers null rather than an
+ * empty summary, which the caller records as "not derivable".
+ */
+export async function readGuardRunSectionSummary(
+  repoKey: string,
+  latest: GuardLatest,
+): Promise<GuardRunSectionSummary | null> {
+  const runCommit = latest.run.commit ?? undefined
+  const commit =
+    runCommit && (await readManifestStore(repoKey, runCommit))
+      ? runCommit
+      : ((await getGuardStore().readGuardBaselineCommit(repoKey)) ?? runCommit)
+
+  const sources: GuardCoverageSources = {
+    scenarios: (await getGuardStore().loadScenarios({ repoKey, commitSha: commit ?? '' })).scenarios,
+    manifest: await readManifestStore(repoKey, commit),
+    latest,
+    result: await readGuardResultStore(repoKey, commit),
+    flows: await readGuardFlowsFile(repoKey, commit),
+    claims: await readGuardClaimsFile(repoKey, commit),
+    // The externals index only ever moves a section between two statuses that
+    // wear the SAME word, and it is the one input that materializes a tree.
+    externals: null,
+  }
+
+  const docs = new Set([
+    ...latest.scenarios.map((s) => s.binds.doc),
+    ...(sources.claims?.claims.map((c) => c.doc) ?? []),
+    ...(sources.claims?.untestable.map((u) => u.doc) ?? []),
+    ...(sources.flows?.flows.flatMap((f) => f.milestones.map((m) => m.doc)) ?? []),
+    ...guardManifestSections(sources.manifest).map((m) => m.doc),
+  ])
+
+  const summary: GuardRunSectionSummary = {}
+  for (const doc of docs) {
+    const content = await readRepoDoc(repoKey, doc, commit ? { commit } : undefined)
+    if (content == null) continue
+    for (const [ref, status] of docCoverageWords(doc, content, sources).sections) {
+      summary[ref] = status
+    }
+  }
+  return Object.keys(summary).length > 0 ? summary : null
+}
+
+/**
  * Every kept doc's sections counted under the five coverage words, through the
  * same per-section derivation the doc view renders ({@link composeDocCoverage})
  * — the constraint: no summary may classify a section differently than the doc
@@ -389,15 +530,7 @@ export async function readGuardSectionTotals(
   repoKey: string,
   ref?: string,
 ): Promise<GuardSectionTotals | null> {
-  const sources: GuardCoverageSources = {
-    scenarios: await readGuardScenariosForView(repoKey, ref),
-    manifest: await readManifestForView(repoKey, ref),
-    latest: await readGuardRunForView(repoKey, ref),
-    result: await readGuardReport(repoKey, ref),
-    flows: await readGuardFlowsForView(repoKey, ref),
-    claims: await readGuardClaimsForView(repoKey, ref),
-    externals: await guardExternalSetupIndexForView(repoKey, ref),
-  }
+  const sources = await readGuardCoverageSources(repoKey, ref)
 
   const corpusDocs = (await readCorpusForView(repoKey, ref))?.docs.map((d) => d.ref)
   const docs =

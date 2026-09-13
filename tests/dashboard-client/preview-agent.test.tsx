@@ -44,9 +44,9 @@ vi.mock('@/lib/socket', () => {
 });
 
 vi.mock('@/components/sessions/RunConversationPage', () => ({
-  RunConversationPage: ({ run, repoId }: { run: { runId: string }; repoId: string }) => (
+  RunConversationPage: ({ run, repoId }: { run: { runId: string }; repoId: string | null }) => (
     <div data-testid="conversation">
-      {run.runId} in {repoId}
+      {run.runId} in {repoId ?? ''}
     </div>
   ),
 }));
@@ -99,6 +99,15 @@ const SETUP = run({
 });
 
 const SCAN = run();
+
+/** The workspace's OWN work: a Document scan belongs to no repository. */
+const WORKSPACE_SCAN = run({
+  runId: 'run-scan-workspace',
+  gitRef: 'workspace',
+  startedAt: '2026-09-03T09:00:00.000Z',
+  finishedAt: '2026-09-03T09:01:00.000Z',
+  repo: null,
+});
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -181,7 +190,7 @@ describe('Agent, the index', () => {
     await waitFor(() => expect(rows()).toHaveLength(2));
 
     const [first, second] = rows();
-    expect(within(first!).getByText('Test setup')).toBeInTheDocument();
+    expect(within(first!).getByText('Flow setup')).toBeInTheDocument();
     expect(within(first!).getByText('spiderhands/filecli')).toBeInTheDocument();
     expect(within(first!).getByText('Failed')).toBeInTheDocument();
     expect(within(first!).getByText('2m 30s')).toBeInTheDocument();
@@ -224,7 +233,7 @@ describe('Agent, the index', () => {
 
     await user.click(screen.getByRole('button', { name: 'Add filter' }));
     await user.click(await screen.findByRole('option', { name: /Kind/ }));
-    await user.click(await screen.findByRole('option', { name: /Test setup/ }));
+    await user.click(await screen.findByRole('option', { name: /Flow setup/ }));
 
     await waitFor(() => expect(rows()).toHaveLength(1));
     expect(screen.getByTestId('address')).toHaveTextContent('/preview/agent?kind=guard-setup');
@@ -259,6 +268,32 @@ describe('Agent, the index', () => {
     expect(await screen.findByText('Nothing matches.')).toBeInTheDocument();
   });
 
+  it("shows the workspace's own work with no repository, and still by kind", async () => {
+    serve([WORKSPACE_SCAN, SETUP, SCAN]);
+    renderAt('/preview/agent');
+    const user = userEvent.setup();
+    await waitFor(() => expect(rows()).toHaveLength(3));
+
+    const first = rows()[0]!;
+    expect(within(first).getByText('Document scan')).toBeInTheDocument();
+    expect(within(first).getByText('—')).toBeInTheDocument();
+
+    // The Kind filter still lists it, and narrowing keeps it.
+    await user.click(screen.getByRole('button', { name: 'Add filter' }));
+    await user.click(await screen.findByRole('option', { name: /Kind/ }));
+    await user.click(await screen.findByRole('option', { name: /Document scan/ }));
+    await waitFor(() => expect(rows()).toHaveLength(2));
+
+    // A repository's filter is not about the workspace's own work.
+    await user.click(screen.getByRole('button', { name: 'Remove Kind Document scan' }));
+    await waitFor(() => expect(rows()).toHaveLength(3));
+    await user.click(screen.getByRole('button', { name: 'Add filter' }));
+    await user.click(await screen.findByRole('option', { name: /Repository/ }));
+    await user.click(await screen.findByRole('option', { name: /expense-tracker/ }));
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    expect(within(rows()[0]!).getByText('spiderhands/expense-tracker')).toBeInTheDocument();
+  });
+
   it('re-reads when a repository writes its store, without a reload', async () => {
     const state = serve([SCAN]);
     renderAt('/preview/agent');
@@ -284,7 +319,7 @@ describe('one conversation', () => {
 
     await user.click(rows()[0]!);
 
-    expect(await screen.findByRole('heading', { name: 'Test setup' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Flow setup' })).toBeInTheDocument();
     const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' });
     expect(within(crumbs).getByRole('link', { name: 'Agent' })).toHaveAttribute('href', '/preview/agent');
     expect(screen.getByText('spiderhands/filecli')).toBeInTheDocument();
@@ -308,6 +343,17 @@ describe('one conversation', () => {
     renderAt(`/preview/agent/${SCAN.runId}`);
 
     expect(await screen.findByTestId('conversation')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Run again' })).toBeNull();
+  });
+
+  it("opens the workspace's own conversation, which names no repository", async () => {
+    serve([WORKSPACE_SCAN]);
+    renderAt(`/preview/agent/${WORKSPACE_SCAN.runId}`);
+
+    expect(await screen.findByRole('heading', { name: 'Document scan' })).toBeInTheDocument();
+    expect(screen.getByTestId('conversation')).toHaveTextContent('run-scan-workspace in');
+    expect(screen.queryByText('spiderhands/expense-tracker')).toBeNull();
+    // Nothing offers to run it again from here: it starts on Context.
     expect(screen.queryByRole('button', { name: 'Run again' })).toBeNull();
   });
 
@@ -337,10 +383,10 @@ describe('the way in', () => {
 
   it('is no longer a tab of the repository console', async () => {
     serve([SCAN]);
-    renderAt('/preview/repos/orders-api/coverage');
+    renderAt(`/preview/repos/${REPO_A.id}/runs`);
 
     const menu = await screen.findByRole('navigation', { name: 'Repository sections' });
     expect(within(menu).queryByRole('link', { name: 'Activity' })).toBeNull();
-    expect(within(menu).getByRole('link', { name: 'Coverage' })).toBeInTheDocument();
+    expect(within(menu).getByRole('link', { name: 'Runs' })).toBeInTheDocument();
   });
 });

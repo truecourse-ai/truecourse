@@ -1,9 +1,10 @@
 /**
- * The Tests and Runs tabs of a CONNECTED repository read the server, not the
- * fixtures: Tests lists the flows generate stored and opens one as its own
- * page; Runs lists every stored run — the baseline runs and the pull-request
- * head runs the gate wrote — opens one as its own page, and re-reads itself
- * when a run of the repository lands on the socket.
+ * The Runs tab of a CONNECTED repository reads the server, not the fixtures: it
+ * lists every stored run — the baseline runs and the pull-request head runs the
+ * gate wrote — opens one as its own page, and re-reads itself when a run of the
+ * repository lands on the socket. Generating this repository's flows is its
+ * header's action, since generating is done to one repository even though the
+ * flows it writes are listed at the workspace (see preview-flows.test.tsx).
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -168,42 +169,16 @@ afterEach(() => {
   window.fetch = realFetch;
 });
 
-describe('the Tests tab of a connected repository', () => {
-  it.each([FLOWS, { recipe: null, flows: [] }])('always offers manual generation regardless of the existing test inventory', async (flows) => {
+describe('generating the flows of a connected repository', () => {
+  it.each([FLOWS, { recipe: null, flows: [] }])('always offers manual generation regardless of the existing inventory', async (flows) => {
     const calls = serve({ flows });
-    renderAt(`/preview/repos/${REAL.id}/tests`);
-    const generate = await screen.findByRole('button', { name: 'Generate tests' });
+    renderAt(`/preview/repos/${REAL.id}/runs`);
+    const generate = await screen.findByRole('button', { name: 'Generate flows' });
     await waitFor(() => expect(generate).toBeEnabled());
     await userEvent.click(generate);
     await waitFor(() => expect(calls).toContain(`POST /api/repos/${REAL.id}/guard/generate`));
     expect(calls.some((call) => call.includes('/api/ee/'))).toBe(false);
     expect(screen.getByRole('link', { name: 'Open Agent' })).toHaveAttribute('href', `/preview/agent?repo=${REAL.id}`);
-  });
-
-  it('lists the stored flows and opens one as its own page', async () => {
-    const calls = serve();
-    renderAt(`/preview/repos/${REAL.id}/tests`);
-    const user = userEvent.setup();
-
-    const table = await screen.findByRole('table', { name: 'Tests' });
-    const row = await within(table).findByText('Writes a file and reads it back');
-    expect(within(table).getByText('CLI')).toBeInTheDocument();
-    expect(calls).toContain(`/api/repos/${REAL.id}/guard/flows`);
-
-    await user.click(row);
-    // The page heads itself with the flow's title, under its own breadcrumb
-    // back to Tests (the console's breadcrumb, to the workspace, is the other).
-    await screen.findByRole('heading', { name: 'Writes a file and reads it back' });
-    const crumbs = screen.getAllByRole('navigation', { name: 'Breadcrumb' }).at(-1)!;
-    expect(within(crumbs).getByRole('link', { name: 'Tests' })).toBeInTheDocument();
-  });
-
-  it('says nothing is generated yet, rather than "no match", when the inventory is empty', async () => {
-    serve({ flows: { recipe: null, flows: [] } });
-    renderAt(`/preview/repos/${REAL.id}/tests`);
-
-    await screen.findByText(/No tests generated yet\./);
-    expect(screen.queryByText('No test matches.')).toBeNull();
   });
 });
 
@@ -236,6 +211,21 @@ describe('the Runs tab of a connected repository', () => {
     expect(within(rows[0]!).getByText('hosted')).toBeInTheDocument();
     // No run names a coverage version, so the column stays out of the table.
     expect(within(table).queryByRole('columnheader', { name: 'Coverage' })).toBeNull();
+  });
+
+  it('is a full-width search over an opaque sticky head, and no filter row', async () => {
+    serve();
+    renderAt(`/preview/repos/${REAL.id}/runs`);
+
+    const table = await screen.findByRole('table', { name: 'Runs' });
+    // The search box is the whole toolbar: Origin is a column, and one
+    // dimension does not earn a filter row.
+    expect(screen.getByRole('textbox', { name: 'Search runs' }).className).toContain('w-full');
+    expect(screen.queryByRole('group', { name: /^Filter/ })).toBeNull();
+    // The head sticks, so the rows scrolling under it must be hidden.
+    const head = within(table).getAllByRole('columnheader')[0]!.closest('thead')!;
+    expect(head.className).toContain('sticky');
+    expect(head.className).toContain('bg-card');
   });
 
   it('opens a run as its own page, reading exactly that run', async () => {

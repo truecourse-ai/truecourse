@@ -1,6 +1,6 @@
 /**
- * What the onboarding jobs (`repo.scan` → `repo.guard-setup` →
- * `repo.guard-generate`) share: the payload every one of them carries, and the
+ * What the onboarding jobs (`repo.guard-setup` → `repo.guard-generate` →
+ * `repo.guard-run`) share: the payload every one of them carries, and the
  * one tracker that drives both progress surfaces at once.
  *
  * A repository is onboarded by a chain of jobs, so each of them needs the same

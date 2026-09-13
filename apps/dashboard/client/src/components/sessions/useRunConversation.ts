@@ -1,10 +1,32 @@
-/** The run record supplies the work list; only the opened session loads messages. */
+/**
+ * Reading one conversation: the run record supplies the work list, and only
+ * the opened piece of work loads its messages, one transcript page at a time
+ * (older pages on demand, newer ones by polling while it runs).
+ *
+ * A run of the WORKSPACE (a Document scan, which reads every source and clones
+ * nothing) belongs to no repository: `repoId` is null and the same transcript
+ * is read by run id alone, under `/api/sessions`. One reader, two addresses.
+ */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ActivityEvent } from '@truecourse/shared/activity-stream';
 import type { SessionEvent, SessionProgress } from '@truecourse/agent-loop';
 import * as api from '@/lib/api';
 import type { PublicSessionRun } from '@/lib/api';
 import { foldConversation, type Conversation } from './conversation-model';
+
+/** One transcript page, at the repository's address or the workspace's. */
+function readPage(
+  repoId: string | null,
+  command: PublicSessionRun['command'],
+  runId: string,
+  sessionId: string,
+  options: { before?: number; since?: number },
+  signal: AbortSignal,
+) {
+  return repoId
+    ? api.getSessionTranscriptPage(repoId, command, runId, sessionId, options, signal)
+    : api.getWorkspaceSessionTranscriptPage(runId, sessionId, options, signal);
+}
 
 export interface RunConversationState {
   conversation: Conversation;
@@ -16,7 +38,11 @@ export interface RunConversationState {
   loadOlder: () => void;
 }
 
-export function useRunConversation(run: PublicSessionRun, repoId: string, sessionId: string | null): RunConversationState {
+export function useRunConversation(
+  run: PublicSessionRun,
+  repoId: string | null,
+  sessionId: string | null,
+): RunConversationState {
   const [history, setHistory] = useState<{ key: string; events: SessionEvent[] }>({ key: '', events: [] });
   const [progress, setProgress] = useState<SessionProgress | null>(null);
   const [loading, setLoading] = useState(false);
@@ -56,7 +82,7 @@ export function useRunConversation(run: PublicSessionRun, repoId: string, sessio
       try {
         let since = initial ? undefined : events.at(-1)?.seq ?? -1;
         for (;;) {
-          const page = await api.getSessionTranscriptPage(repoId, command, runId, sessionId,
+          const page = await readPage(repoId, command, runId, sessionId,
             since === undefined ? {} : { since }, controller.signal);
           if (controller.signal.aborted) return;
           absorb(page.events);
@@ -81,7 +107,7 @@ export function useRunConversation(run: PublicSessionRun, repoId: string, sessio
       if (olderPending || !events.length || controller.signal.aborted) return;
       olderPending = true;
       setLoadingOlder(true);
-      void api.getSessionTranscriptPage(repoId, command, runId, sessionId, { before: events[0].seq }, controller.signal)
+      void readPage(repoId, command, runId, sessionId, { before: events[0].seq }, controller.signal)
         .then(page => {
           if (controller.signal.aborted) return;
           absorb(page.events);

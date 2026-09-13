@@ -7,16 +7,19 @@ import { createAuth } from './auth/index.js';
 import { createGithubConnection } from './github/index.js';
 import { createServerJobs } from './jobs/index.js';
 import { closeDb, getDb, getDbHandle, initDb } from './db.js';
-import { installDbStores } from './stores.js';
+import { installDbStores, setRepoWorkspaceLookup } from './stores.js';
+import { setContextEventPublisher } from './services/context.service.js';
+import { startContextSyncSchedule, type ContextSchedule } from './services/context-schedule.service.js';
 import { operatorClaudeCode } from './services/workspace-llm.service.js';
 import { sweepStaleRunClones } from './services/run-clone.service.js';
 import { setRepoJobsCanceller } from './services/repo-removal.service.js';
 import { stopAllWatchers } from './services/watcher.service.js';
 import { stopAllRunTails } from './services/session-tailer.service.js';
 import { wipeLegacyPostgresData, getLogDir } from '@truecourse/core/config/paths';
-import { getProjectByPath } from '@truecourse/core/config/registry';
+import { getProjectByPath, slugify } from '@truecourse/core/config/registry';
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { closeLogger, configureLogger, log } from '@truecourse/core/lib/logger';
+import { publishEvent } from '@truecourse/jobs';
 
 const port = parseInt(process.env.PORT || '3001', 10);
 
@@ -80,22 +83,36 @@ async function main() {
   const jobs = createServerJobs({ db: getDb(), connectionString: databaseUrl });
   // Disconnecting a repository stops whatever it has in flight.
   setRepoJobsCanceller(jobs.cancelRepoJobs);
+  // A Context mutation is workspace-wide, so it rides the SSE stream the
+  // workspace already holds open rather than a repository's socket room.
+  setContextEventPublisher((org, event) => publishEvent(getDb(), org, event));
 
   // 5. GitHub App connection. Optional: without GITHUB_APP_* the server still
   //    boots, and /api/github answers 503 with the vars to set.
   const github = createGithubConnection({
-    scan: async (repoId, repoKey, orgId) => {
-      const outcome = await jobs.enqueueScan({
-        repoId,
-        repoFullName: repoKey,
-        workspaceOrgId: orgId,
-        source: 'connect',
+    // A push to a source's repository syncs the source.
+    contextSync: async (orgId, sourceId, source) => {
+      const outcome = await jobs.enqueueContextSync({ workspaceOrgId: orgId, sourceId, source });
+      return outcome.status;
+    },
+    // Connecting a repository starts its Flow setup. Its context is Context's.
+    startSetup: async (link) => {
+      const entry = await getProjectByPath(link.repoFullName);
+      const outcome = await jobs.enqueueGuardSetup({
+        repoId: entry?.slug ?? slugify(link.repoFullName, []),
+        repoFullName: link.repoFullName,
+        workspaceOrgId: link.workspaceOrgId,
+        source: 'chain',
       });
       return outcome.status;
     },
   });
   if (github) {
     log.info('[Server] GitHub connect enabled');
+    // A `context/` document ref belongs to a workspace, not to a repository, so
+    // the doc reader needs to know whose workspace a repository reads. The link
+    // row is that answer.
+    setRepoWorkspaceLookup(async (repoKey) => (await github.store.getRepo(repoKey))?.workspaceOrgId ?? null);
     // A decision that clears the last block on a generate (the final conflict
     // resolved, the last active finding dismissed) re-generates on its own. The
     // seam is keyed by repo identity alone, so the workspace and the slug are
@@ -115,11 +132,23 @@ async function main() {
     log.info('[Server] GitHub connect disabled — set GITHUB_APP_* to enable');
   }
 
+  // A site has no push to refresh it, so it is swept on a clock: every site
+  // older than a day gets a sync enqueued (single-flight collapses duplicates).
+  const contextSchedule: ContextSchedule = startContextSyncSchedule(getDb(), {
+    enqueue: (request) => jobs.enqueueContextSync(request),
+  });
+
   // A failure to start must not stop the server coming up — the routes then
   // answer honestly that jobs aren't running.
   try {
     await jobs.start();
     log.info('[Server] background jobs running');
+    // One sweep now the queue can take it: a source that has never synced,
+    // because its first sync died with the process, gets one here rather than
+    // waiting out the hour.
+    void contextSchedule.sweep().catch((err: unknown) => {
+      log.warn(`[context] the sweep failed: ${(err as Error).message}`);
+    });
   } catch (err) {
     log.error(
       `[Server] background jobs failed to start (jobs will not process): ${(err as Error).message}`,
@@ -127,7 +156,13 @@ async function main() {
   }
 
   // 6. Setup Express app + socket.io
-  const app = createApp({ authVerifier: auth.verify, authRouter: auth.router, github, jobs });
+  const app = createApp({
+    authVerifier: auth.verify,
+    authRouter: auth.router,
+    workspaceRouter: auth.members,
+    github,
+    jobs,
+  });
   const httpServer = createServer(app);
   setupSocket(httpServer);
 
@@ -172,6 +207,7 @@ async function main() {
     log.info('[Server] Shutting down...');
     stopAllWatchers();
     stopAllRunTails();
+    contextSchedule.stop();
     httpServer.closeAllConnections();
     httpServer.close();
     // Stop the queue before the pool it runs on.

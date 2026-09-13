@@ -15,7 +15,7 @@ export type AnalysisProgress = {
   percent: number;
   detail?: string;
   steps?: AnalysisStep[];
-  /** Job family, when one is stamped ('sources' renders inline, not as the popup). */
+  /** Job family, when one is stamped. */
   kind?: string;
 };
 

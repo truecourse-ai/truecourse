@@ -9,10 +9,14 @@
  * fields; the page decides how a field looks, never what it says.
  *
  * All this level does is ORDER and GROUP: messages in `seq` order inside a
- * paragraph, paragraphs contiguous in the order they first spoke (a pool
- * interleaves them in the journal), a worker's paragraph right after the one
- * that started it, and paragraphs under the step whose `sessionKinds` claims
- * their kind.
+ * paragraph, paragraphs in the order the run's session index holds them, a
+ * worker's paragraph right after the one that started it, and paragraphs under
+ * the step whose `sessionKinds` claims their kind.
+ *
+ * The STRUCTURE is the index's alone — which paragraphs there are, in which
+ * order, under whom, called what, from when to when. Events add lines to a
+ * paragraph and never change the shape of the list, because only the opened
+ * paragraph's transcript is ever loaded.
  */
 
 import type {
@@ -62,6 +66,9 @@ export interface SessionBlock {
   title?: string;
   /** Set when another paragraph started this one; it renders right below it. */
   parentSessionId?: string;
+  /** The session's own clock, as the run indexed it. */
+  startedAt?: string;
+  endedAt?: string;
   spent?: BudgetSpent;
   lines: ConversationLine[];
   /** The stream's own progress line, while the work is live. */
@@ -73,6 +80,9 @@ export interface StepBlock {
   label: string;
   status: StepStatus;
   detail?: string;
+  /** The step's own clock, as the engine stamped it. */
+  startedAt?: string;
+  endedAt?: string;
   /** What the step did, one line each, as the engine recorded it. */
   facts: string[];
   sessions: SessionBlock[];
@@ -106,8 +116,8 @@ export function foldConversation(
 ): Conversation {
   const record = latestRunRecord(run, events);
 
-  // One bucket per paragraph, remembering the cursor it first spoke on: that is
-  // its place in the conversation, whatever the interleaving.
+  // One bucket per paragraph, remembering the cursor it first spoke on: the
+  // place of a paragraph the index has not reached yet.
   const buckets = new Map<string, { first: number; events: SessionEvent[] }>();
   for (const event of events) {
     if (event.kind !== 'session-event') continue;
@@ -116,35 +126,40 @@ export function foldConversation(
     else buckets.set(event.sessionId, { first: event.cursor, events: [event.event] });
   }
 
+  // THE LIST IS THE INDEX. Its order (the order the run opened the work), each
+  // row's name, who started it and its clock all come from the record, never
+  // from a transcript: only the opened paragraph is ever loaded, and a list
+  // built from what happens to be loaded would reorder and rename itself as
+  // the reader opens rows.
   const index = new Map(record.sessions.map((s) => [s.sessionId, s]));
-  const parentOf = new Map<string, string>();
-  for (const [sessionId, bucket] of buckets) {
-    for (const event of bucket.events) {
-      if (event.type === 'child-session') parentOf.set(event.child.sessionId, sessionId);
-    }
-  }
-
-  const ordered = [...buckets.entries()].sort((a, b) => a[1].first - b[1].first).map(([id]) => id);
-  // A paragraph the index lists but the journal has not reached yet still gets
-  // its block, so nothing the run claims to have done goes missing.
-  for (const entry of record.sessions) if (!buckets.has(entry.sessionId)) ordered.push(entry.sessionId);
+  const ordered = record.sessions.map((s) => s.sessionId);
+  // A paragraph the journal carries but the index has not caught up with still
+  // gets its block, so nothing that has spoken goes missing.
+  const unindexed = [...buckets.entries()]
+    .filter(([id]) => !index.has(id))
+    .sort((a, b) => a[1].first - b[1].first)
+    .map(([id]) => id);
+  ordered.push(...unindexed);
 
   const blocks = new Map<string, SessionBlock>();
   for (const sessionId of ordered) {
     const own = [...(buckets.get(sessionId)?.events ?? [])].sort((a, b) => a.seq - b.seq);
     const entry = index.get(sessionId);
     const start = own.find((e) => e.type === 'session-start');
-    const parentSessionId = parentOf.get(sessionId);
+    const status = entry?.status ?? derivedStatus(own);
     const spent = entry?.spent;
-    const live = progress[sessionId];
-    const title = start?.type === 'session-start' ? titleOf(start.display) : undefined;
+    // What the work is doing right now is only shown while it is doing it: the
+    // last progress a session published outlives it in the stream's memory.
+    const live = status === 'running' || status === 'waiting' ? progress[sessionId] : undefined;
     blocks.set(sessionId, {
       sessionId,
       kind: entry?.kind ?? (start?.type === 'session-start' ? start.kind : ''),
       workItem: entry?.workItem ?? (start?.type === 'session-start' ? start.workItem : ''),
-      status: entry?.status ?? derivedStatus(own),
-      ...(title ? { title } : {}),
-      ...(parentSessionId ? { parentSessionId } : {}),
+      status,
+      ...(entry?.title ? { title: entry.title } : {}),
+      ...(entry?.parentSessionId ? { parentSessionId: entry.parentSessionId } : {}),
+      ...(entry?.startedAt ? { startedAt: entry.startedAt } : {}),
+      ...(entry?.endedAt ? { endedAt: entry.endedAt } : {}),
       ...(spent ? { spent } : {}),
       lines: own.map(toLine).filter((line): line is ConversationLine => line !== null),
       ...(live
@@ -183,13 +198,16 @@ export function foldConversation(
   for (const item of items) {
     const kinds = item.sessionKinds ?? [];
     for (const kind of kinds) claimed.add(kind);
+    const sessions = roots.filter((b) => kinds.includes(b.kind)).flatMap(withKin);
     steps.push({
       key: item.key,
       label: item.label,
       status: item.status,
       ...(item.detail ? { detail: item.detail } : {}),
-      facts: factsOf(item),
-      sessions: roots.filter((b) => kinds.includes(b.kind)).flatMap(withKin),
+      ...(item.startedAt ? { startedAt: item.startedAt } : {}),
+      ...(item.endedAt ? { endedAt: item.endedAt } : {}),
+      facts: factsOf(item).filter((fact) => !restatesSession(fact, sessions)),
+      sessions,
     });
   }
 
@@ -204,16 +222,29 @@ export function foldConversation(
   return { ...(record.error ? { error: record.error.message } : {}), steps };
 }
 
+/**
+ * A line the engine wrote about work a session did is not a second record of
+ * it: the session's row is, and opens to the whole of it. Such a line is one
+ * whose subject (the text before its first colon) is a session's work item,
+ * one that credits a session, or one of the vocabulary merges the settling
+ * session's verdict produced. What stays is what no session stands for.
+ */
+function restatesSession(fact: string, sessions: readonly SessionBlock[]): boolean {
+  if (sessions.length === 0) return false;
+  if (/\bsession\b/.test(fact)) return true;
+  if (sessions.some((s) => s.kind.endsWith('settle-areas')) && /" (merged into|reassigned to) "/.test(fact)) {
+    return true;
+  }
+  const at = fact.indexOf(': ');
+  if (at <= 0) return false;
+  const subject = fact.slice(0, at);
+  return sessions.some((s) => s.workItem === subject || s.workItem.replace(/^[a-z-]+:/, '') === subject);
+}
+
 /** A checklist item's recorded facts: the strings under `facts`, read tolerantly since older records have none. */
 function factsOf(item: object): string[] {
   const facts = (item as { facts?: unknown }).facts;
   return Array.isArray(facts) ? facts.filter((f): f is string => typeof f === 'string') : [];
-}
-
-/** The title a session stamped on its display at start, read tolerantly. */
-function titleOf(display: unknown): string | undefined {
-  const title = (display as { title?: unknown } | undefined)?.title;
-  return typeof title === 'string' && title.trim() !== '' ? title : undefined;
 }
 
 // ---------------------------------------------------------------------------

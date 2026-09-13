@@ -390,7 +390,7 @@ export function emitSpecProgress(
 
 export function emitSpecComplete(
   repoId: string,
-  kind: 'scan' | 'guard-setup' | 'guard-generate' | 'guard-run' | 'guard-externals' | 'sources',
+  kind: 'scan' | 'guard-setup' | 'guard-generate' | 'guard-run' | 'guard-externals',
 ): void {
   activeSpec.delete(repoId);
   const io = getIO();

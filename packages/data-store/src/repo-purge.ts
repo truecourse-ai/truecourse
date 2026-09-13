@@ -9,6 +9,15 @@
  * Deliberately NOT purged: `extraction_cache` (content-keyed, repo-agnostic by
  * design) and the workspace-/org-scoped stores (knowledge, traces, settings) —
  * those belong to the workspace, not the repo.
+ *
+ * CONTEXT is workspace state too, so this purge only drops the repository's own
+ * LINKS (`context_bindings`), never a source another repository still reads. The
+ * repository's own Repository source is removed by the disconnect hook
+ * (`removeRepositoryContext`), which checks the remaining readers first — a
+ * source is not the repository's to delete just because it was its own. The
+ * content scopes dropped below are the repository's alone (`spec:<owner/repo>`
+ * and the guard ones); the workspace's own pools (`spec:ws:<org>`,
+ * `context:ws:<org>`) are never named here.
  */
 
 import { eq, inArray, or, sql } from 'drizzle-orm';
@@ -20,7 +29,7 @@ import {
   repoConfig,
   repoUiState,
   specSets,
-  specSources,
+  contextBindings,
   guardRuns,
   guardResults,
   guardScenarioSets,
@@ -35,11 +44,16 @@ import {
   type Db,
 } from '@truecourse/db';
 import { contentScope } from './content-store.js';
+import { touchContextWorkspace } from './context-store.js';
 
 /** Escape LIKE wildcards so a repo key containing `_` or `%` matches literally. */
 const likeLiteral = (s: string): string => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 
 export async function purgeRepoData(db: Db, repoKey: string): Promise<void> {
+  // The workspaces whose Context this purge changed — stamped after the
+  // transaction so their corpus reads as stale even if the disconnect hook
+  // never ran.
+  let touched: string[] = [];
   await db.transaction(async (tx) => {
     await tx.delete(activityRuns).where(eq(activityRuns.repoKey, repoKey));
     await tx.delete(analyses).where(eq(analyses.repoKey, repoKey));
@@ -48,7 +62,13 @@ export async function purgeRepoData(db: Db, repoKey: string): Promise<void> {
     await tx.delete(repoConfig).where(eq(repoConfig.repoKey, repoKey));
     await tx.delete(repoUiState).where(eq(repoUiState.repoKey, repoKey));
     await tx.delete(specSets).where(eq(specSets.repoKey, repoKey));
-    await tx.delete(specSources).where(eq(specSources.repoKey, repoKey));
+    // Only the LINKS: the sources themselves belong to the workspace, and one
+    // another repository still reads must survive this disconnect.
+    const unlinked = await tx
+      .delete(contextBindings)
+      .where(eq(contextBindings.repoFullName, repoKey))
+      .returning({ workspaceOrgId: contextBindings.workspaceOrgId });
+    touched = [...new Set(unlinked.map((row) => row.workspaceOrgId))];
     await tx.delete(guardRuns).where(eq(guardRuns.repoKey, repoKey));
     await tx.delete(guardResults).where(eq(guardResults.repoKey, repoKey));
     await tx.delete(guardScenarioSets).where(eq(guardScenarioSets.repoKey, repoKey));
@@ -77,4 +97,5 @@ export async function purgeRepoData(db: Db, repoKey: string): Promise<void> {
     await tx.delete(ghRuns).where(eq(ghRuns.repoFullName, repoKey));
     await tx.delete(ghPrs).where(eq(ghPrs.repoFullName, repoKey));
   });
+  for (const org of touched) await touchContextWorkspace(db, org);
 }

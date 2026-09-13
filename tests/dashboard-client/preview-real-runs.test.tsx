@@ -1,17 +1,16 @@
 /**
- * The runs of a REAL (URL-connected) repository, streaming into the shell.
+ * The runs of a connected repository, streaming into the shell.
  *
- * The shell follows every real repository's agent runs over the one socket it
+ * The shell follows every repository's agent runs over the one socket it
  * holds, so a run that starts anywhere shows up on whatever page the user is
- * on: a toast, a job chain, the `onboarding` marker on the repository's row,
- * and a notification when it starts and again when it settles.
+ * on: a toast, a job chain, and the `onboarding` marker on the repository's row.
  *
  * The socket here is a hand-rolled emitter: the point of every case below is
  * what the shell does with a `session:runs-changed` event, so the test fires
  * them and lets the shell re-read the runs the fake server holds.
  *
- * The fixtures are the control group. A fixture repository has no real runs, so
- * its rows, its jobs and its notifications must come out exactly as before.
+ * The control group is a workspace with NOTHING connected: no repository is
+ * asked about its runs and no room is joined.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -50,7 +49,7 @@ vi.mock('@/lib/socket', () => {
 });
 
 import PreviewApp from '@/preview/PreviewApp';
-import { relativeTime, repoRunState, toJobChain, toNotifications } from '@/preview/shell/real-runs';
+import { relativeTime, repoRunState, toJobChain } from '@/preview/shell/real-runs';
 import type { PublicSessionRun } from '@/lib/api';
 
 function fireSocket(event: string, payload: unknown): void {
@@ -97,7 +96,7 @@ function runningScan(overrides: Partial<PublicSessionRun> = {}): PublicSessionRu
 
 const realFetch = window.fetch;
 
-/** A server holding one real repository and a mutable run list for it. */
+/** A server holding one connected repository and a mutable run list for it. */
 function serve(runs: PublicSessionRun[]) {
   const state = { runs };
   window.fetch = vi.fn(async (input: RequestInfo | URL) => {
@@ -157,13 +156,9 @@ describe('a run record as the shell reads it', () => {
     ]);
   });
 
-  it('opens the run’s own conversation from its job and from both of its notifications', () => {
+  it('opens the run’s own conversation from its job', () => {
     const run = runningScan();
-    const href = `/preview/agent/${encodeURIComponent(run.runId)}`;
-    expect(toJobChain(repo, run, true).href).toBe(href);
-    expect(toNotifications(repo, run, Date.now()).map((n) => n.href)).toEqual([href]);
-    const settled = runningScan({ status: 'failed', finishedAt: '2026-08-25T10:05:00Z' });
-    expect(toNotifications(repo, settled, Date.now()).map((n) => n.href)).toEqual([href, href]);
+    expect(toJobChain(repo, run, true).href).toBe(`/preview/agent/${encodeURIComponent(run.runId)}`);
   });
 
   it('names the command instead of onboarding on a re-scan', () => {
@@ -213,12 +208,12 @@ describe('a run record as the shell reads it', () => {
 // The shell
 // ---------------------------------------------------------------------------
 
-describe('a real run in the shell', () => {
+describe('a run in the shell', () => {
   it('announces a run that starts while the page is open, and marks the row onboarding', async () => {
     const state = serve([]);
     // Home is not where the subscription lives — the shell is — so any address
     // would do here. This one is also the address that shows the marker.
-    renderAt('/preview');
+    renderAt('/preview/code');
 
     // The room is joined for the real repository — that is what makes the
     // server watch its store at all.
@@ -243,7 +238,7 @@ describe('a real run in the shell', () => {
 
   it('stays silent for a run already in flight when the page loads (every sign-in reloads)', async () => {
     serve([runningScan()]);
-    renderAt('/preview');
+    renderAt('/preview/code');
 
     // The run is known — the row carries the onboarding marker — but it was
     // in flight on arrival, so it never toasts. The runs arrive AFTER the
@@ -254,43 +249,7 @@ describe('a real run in the shell', () => {
     expect(screen.queryByRole('button', { name: /Open conversation/ })).toBeNull();
   });
 
-  it('files a notification when the run starts and another when it settles', async () => {
-    const state = serve([runningScan()]);
-    renderAt('/preview/notifications');
-
-    const started = await screen.findByText('Document scan started on linkwarden/linkwarden');
-    // Newest first: the real row sits ahead of the fixture feed.
-    const newestFixture = screen.getByText('Gate failed on acme/orders-api #482');
-    expect(
-      started.compareDocumentPosition(newestFixture) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(screen.queryByText(/Document scan completed on/)).toBeNull();
-
-    state.runs = [runningScan({ status: 'completed', finishedAt: new Date().toISOString() })];
-    fireSocket('session:runs-changed', { repoId: 'linkwarden' });
-
-    expect(
-      await screen.findByText('Document scan completed on linkwarden/linkwarden'),
-    ).toBeInTheDocument();
-    // The start stays: the feed is a history, not a status line.
-    expect(screen.getByText('Document scan started on linkwarden/linkwarden')).toBeInTheDocument();
-    // The fixtures are still there, below it.
-    expect(screen.getByText('Gate failed on acme/orders-api #482')).toBeInTheDocument();
-  });
-
-  it('files a failure when the run fails', async () => {
-    const state = serve([runningScan()]);
-    renderAt('/preview/notifications');
-    await screen.findByText('Document scan started on linkwarden/linkwarden');
-
-    state.runs = [runningScan({ status: 'failed', finishedAt: new Date().toISOString() })];
-    fireSocket('session:runs-changed', { repoId: 'linkwarden' });
-
-    expect(await screen.findByText('Document scan failed on linkwarden/linkwarden')).toBeInTheDocument();
-  });
-
-  it('leaves the fixtures exactly as they were', async () => {
-    // No real repositories at all: the mock is the whole preview again.
+  it('asks nothing and joins nothing when no repository is connected', async () => {
     window.fetch = vi.fn(async (input: RequestInfo | URL) => {
       const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
       const { pathname } = new URL(href, window.location.origin);
@@ -298,24 +257,24 @@ describe('a real run in the shell', () => {
       return json({ error: 'not found' }, 404);
     }) as unknown as typeof window.fetch;
 
-    renderAt('/preview/notifications');
+    renderAt('/preview/code');
 
-    // The fixture feed, unchanged and still first.
-    expect(await screen.findByText('Gate failed on acme/orders-api #482')).toBeInTheDocument();
-    expect(screen.queryByText(/Document scan started on/)).toBeNull();
-    // And no repository's sessions store was ever asked about.
+    // The one empty line, and no repository's sessions store ever asked about.
+    // The workspace's own runs are still read once: a Document scan belongs to
+    // no repository, and the toast surface follows it either way.
+    expect(await screen.findByText('No repository connected yet.')).toBeInTheDocument();
     const calls = (window.fetch as unknown as { mock: { calls: [RequestInfo | URL][] } }).mock.calls;
-    expect(calls.some(([input]) => String(input).includes('/sessions/runs'))).toBe(false);
+    expect(calls.some(([input]) => /\/api\/repos\/[^/]+\/sessions\/runs/.test(String(input)))).toBe(false);
     expect(socketMock.joins).toEqual([]);
   });
 
-  it('renders the fixtures and nothing throws when there is no server', async () => {
+  it('renders an empty Code and nothing throws when there is no server', async () => {
     window.fetch = vi.fn(async () => {
       throw new TypeError('Failed to fetch');
     }) as unknown as typeof window.fetch;
 
-    renderAt('/preview');
-    expect(await screen.findByText('acme/orders-api')).toBeInTheDocument();
+    renderAt('/preview/code');
+    expect(await screen.findByText('No repository connected yet.')).toBeInTheDocument();
     expect(screen.queryByText(/Onboarding linkwarden/)).toBeNull();
   });
 });

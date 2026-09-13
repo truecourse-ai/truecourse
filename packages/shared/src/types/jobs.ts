@@ -72,7 +72,8 @@ export function isActiveJob(status: JobStatus): boolean {
 
 // --- Notifications --------------------------------------------------
 
-export type NotificationLevel = 'info' | 'success' | 'warning' | 'error';
+/** `started` is the row a run posts the moment it can be watched; the rest are how it settled. */
+export type NotificationLevel = 'started' | 'info' | 'success' | 'warning' | 'error';
 
 /** A durable feed entry (the `notifications` row). Source of truth for history. */
 export interface NotificationView {
@@ -103,7 +104,22 @@ export interface NotificationEvent {
   jobId: string | null;
 }
 
-export type ServerEvent = JobProgressEvent | NotificationEvent;
+/**
+ * The workspace's Context changed — a source was added, synced, paused or
+ * removed, or a repository's links were replaced. Workspace-scoped like every
+ * frame on this stream, so the Context pages re-read without a repo room.
+ */
+export interface ContextChangedEvent {
+  type: 'context.changed';
+  /** What changed, so a listener can narrow its re-read. */
+  change: 'sources' | 'documents' | 'bindings';
+  /** The source it happened to, when it was one source. */
+  sourceId?: string;
+  /** The repository whose links changed, for a `bindings` change. */
+  repoFullName?: string;
+}
+
+export type ServerEvent = JobProgressEvent | NotificationEvent | ContextChangedEvent;
 
 // --- API response shapes --------------------------------------------
 

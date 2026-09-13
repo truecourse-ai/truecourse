@@ -264,6 +264,25 @@ describe('EntityList — groups', () => {
     expect(screen.queryByRole('button', { name: /Fruit/ })).not.toBeInTheDocument();
   });
 
+  it('keeps a sticky group header opaque, whatever tone the surface paints it', () => {
+    render(
+      <EntityList<Item>
+        {...BASE}
+        groups={[
+          // A tinted tone, the kind a run board paints its Failing group with.
+          { key: 'fail', label: 'Failing', tone: 'bg-red-500/15 text-red-600', items: ITEMS.slice(0, 1) },
+          { key: 'plain', label: 'Passing', items: ITEMS.slice(1, 2) },
+        ]}
+      />,
+    );
+    // The header STICKS, so rows must not read through it: the ground is the
+    // surface's and the tone only paints on top of it.
+    for (const label of ['Failing', 'Passing']) {
+      const header = within(list()).getByText(label).closest('.sticky')!;
+      expect(header.className).toContain('bg-card');
+    }
+  });
+
   it('nests one level — a doc’s sections under the doc', () => {
     render(
       <EntityList<Item>

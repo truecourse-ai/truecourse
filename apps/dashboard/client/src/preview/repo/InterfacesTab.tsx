@@ -1,4 +1,8 @@
-/** Full-width catalog of screens, operations and commands. Rows open their own detail page. */
+/**
+ * Full-width catalog of screens, operations and commands. Rows open their own
+ * detail page. The toolbar is the platform's: the search box across the top,
+ * then ONE Add-filter row over both dimensions, never a chip bar per dimension.
+ */
 
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
@@ -8,7 +12,7 @@ import { GuardMethodLabel } from '@/components/guard/GuardMethodLabel';
 import { useGuardFlows } from '@/hooks/useGuardFlows';
 import { catalogOrigins, catalogUsage, interfaceCatalog } from './interface-catalog';
 import { CHIP_CLASS, PageHeader } from '@/preview/ui/bits';
-import { FilterBar } from '@/preview/ui/filter-bar';
+import { FilterBuilder, filterKey, selectedValues, type FilterDimension } from '@/preview/ui/filter-builder';
 import { useGuardInterfaces } from '@/hooks/useGuardInterfaces';
 import type { Repo } from '@/preview/data/types';
 import { useGuardTabJump } from './tab-jump';
@@ -46,22 +50,38 @@ export function InterfacesTab({ repo }: { repo: Repo }) {
   const flows = useGuardFlows(repo.id, true, reloadKey);
   const catalog = useMemo(() => interfaceCatalog(interfaces.view), [interfaces.view]);
   const [query, setQuery] = useState('');
-  const [surfaceFilter, setSurfaceFilter] = useState<string[]>([]);
-  const [originFilter, setOriginFilter] = useState<string[]>([]);
+  /** One selection over both dimensions, as `dimension:value` keys. */
+  const [filters, setFilters] = useState<string[]>([]);
+  const surfaceFilter = useMemo(() => selectedValues(filters, 'surface'), [filters]);
+  const originFilter = useMemo(() => selectedValues(filters, 'origin'), [filters]);
 
   const all: GuardInterfaceRow[] = useMemo(() => interfaces.view?.interfaces ?? [], [interfaces.view]);
 
-  const surfaceOptions = useMemo(() => {
+  const surfaces = useMemo(() => {
     const counts = new Map<string, number>();
     for (const i of all) counts.set(i.type, (counts.get(i.type) ?? 0) + 1);
     return [...counts.entries()].map(([key, count]) => ({ key, label: guardDriver(key)?.label ?? key, count }));
   }, [all]);
-  const originOptions = useMemo(
-    () =>
-      (['derived', 'authored'] as const)
-        .map((key) => ({ key, label: key, count: all.filter((i) => (i.origin ?? 'derived') === key).length }))
-        .filter((o) => o.count > 0),
-    [all],
+  const dimensions: FilterDimension[] = useMemo(
+    () => [
+      {
+        key: 'surface',
+        label: 'Surface',
+        options: surfaces.map((s) => ({ key: filterKey('surface', s.key), label: s.label, count: s.count })),
+      },
+      {
+        key: 'origin',
+        label: 'Origin',
+        options: (['derived', 'authored'] as const)
+          .map((key) => ({
+            key: filterKey('origin', key),
+            label: key,
+            count: all.filter((i) => (i.origin ?? 'derived') === key).length,
+          }))
+          .filter((o) => o.count > 0),
+      },
+    ],
+    [all, surfaces],
   );
 
   const rows = useMemo(() => {
@@ -86,37 +106,27 @@ export function InterfacesTab({ repo }: { repo: Repo }) {
           return count ? [`${count} ${kind === 'entries' ? `entry point${count === 1 ? '' : 's'}` : `${kind}${count === 1 ? '' : 's'}`}`] : [];
         }).join(' · ') || '0 interfaces'}
       />
-      <div className="flex shrink-0 flex-wrap items-center gap-x-6 gap-y-1 border-b border-border px-6 py-2">
+      <div className="min-w-0 shrink-0 border-b border-border px-6 py-2">
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           aria-label="Search interfaces"
           placeholder="Search interfaces"
-          className="w-64 max-w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
         />
-        <div className="flex flex-wrap items-center gap-x-4 [&>div]:border-0 [&>div]:px-0 [&>div]:py-0">
-          <FilterBar
-            label="Surface"
-            ariaLabel="Filter interfaces by surface"
-            options={surfaceOptions}
-            selected={surfaceFilter}
-            onChange={setSurfaceFilter}
-            multi
-          />
-          <FilterBar
-            label="Origin"
-            ariaLabel="Filter interfaces by origin"
-            options={originOptions}
-            selected={originFilter}
-            onChange={setOriginFilter}
-          />
-        </div>
       </div>
+      <FilterBuilder
+        label="Filter"
+        ariaLabel="Filter interfaces"
+        dimensions={dimensions}
+        selected={filters}
+        onChange={setFilters}
+      />
 
       {flows.view?.recipe && (
         <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-6 py-2 text-xs">
           <span className="text-muted-foreground">Preparation</span>
-          {surfaceOptions.filter((s) => surfaceFilter.length === 0 || surfaceFilter.includes(s.key)).map((s) => (
+          {surfaces.filter((s) => surfaceFilter.length === 0 || surfaceFilter.includes(s.key)).map((s) => (
             <Link key={s.key} to={rowUrl(`recipe:${s.key}`)} className="rounded-sm text-foreground underline decoration-border underline-offset-4 hover:decoration-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">{s.label} recipe</Link>
           ))}
         </div>

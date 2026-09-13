@@ -13,8 +13,9 @@
  * status or a job state becomes a colour.
  */
 
+import type { ContextDocumentStatus, ContextSourceStatus } from '@truecourse/shared';
 import { HoverPopover } from '@/preview/ui/hover-popover';
-import type { CheckConclusion, RunOrigin, StepDriver, TestStatus } from '@/preview/data/types';
+import type { CheckConclusion } from '@/preview/data/types';
 
 export type StatusTone = 'success' | 'failure' | 'blocked' | 'attention' | 'neutral' | 'running';
 
@@ -66,20 +67,35 @@ export const CONCLUSION_WORD: Record<CheckConclusion, string> = {
   neutral: 'Neutral',
 };
 
-export const TEST_TONE: Record<TestStatus, StatusTone> = {
-  passing: 'success',
-  failing: 'failure',
+/**
+ * A document of Context, in the product owner's six words. Not linked is grey
+ * with Not testable: neither is anybody's to-do. The WORDS live in
+ * `@truecourse/shared` (the server folds by them); only the colour is here.
+ */
+export const CONTEXT_DOC_TONE: Record<ContextDocumentStatus, StatusTone> = {
+  proved: 'success',
+  failed: 'failure',
   blocked: 'blocked',
+  'not-run': 'neutral',
   'not-testable': 'neutral',
-  'never-run': 'neutral',
+  'not-linked': 'neutral',
 };
 
-export const TEST_WORD: Record<TestStatus, string> = {
-  passing: 'Passing',
-  failing: 'Failing',
-  blocked: 'Blocked',
-  'not-testable': 'Not testable',
-  'never-run': 'Never run',
+/** A source's sync state as a status word, everywhere a source appears. */
+export const CONTEXT_SYNC_WORD: Record<ContextSourceStatus, string> = {
+  synced: 'Synced',
+  syncing: 'Syncing',
+  failed: 'Failed',
+  paused: 'Paused',
+  never: 'Never synced',
+};
+
+export const CONTEXT_SYNC_TONE: Record<ContextSourceStatus, StatusTone> = {
+  synced: 'success',
+  syncing: 'running',
+  failed: 'failure',
+  paused: 'neutral',
+  never: 'neutral',
 };
 
 export const VERDICT_TONE: Record<'passed' | 'failed' | 'blocked', StatusTone> = {
@@ -92,35 +108,6 @@ export const VERDICT_WORD: Record<'passed' | 'failed' | 'blocked', string> = {
   passed: 'Passed',
   failed: 'Failed',
   blocked: 'Blocked',
-};
-
-export const JOB_TONE: Record<'queued' | 'running' | 'succeeded' | 'failed', StatusTone> = {
-  queued: 'neutral',
-  running: 'running',
-  succeeded: 'success',
-  failed: 'failure',
-};
-
-export const JOB_WORD: Record<'queued' | 'running' | 'succeeded' | 'failed', string> = {
-  queued: 'Queued',
-  running: 'Running',
-  succeeded: 'Succeeded',
-  failed: 'Failed',
-};
-
-/**
- * The neutral bounded labels: a capsule's job. They are facts about a row, not
- * judgements of it, which is exactly why they are allowed to be capsules.
- */
-export const ORIGIN_LABEL: Record<RunOrigin, string> = {
-  hosted: 'hosted',
-  local: 'local',
-};
-
-export const DRIVER_LABEL: Record<StepDriver, string> = {
-  cli: 'cli',
-  api: 'api',
-  web: 'web',
 };
 
 /**

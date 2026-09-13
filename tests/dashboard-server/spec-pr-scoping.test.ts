@@ -27,7 +27,13 @@ vi.mock('@truecourse/core/commands/spec-in-process', async (importOriginal) => {
   return { ...actual, recuratePrCorpus: vi.fn() };
 });
 
-import { createTestApp } from '../helpers/test-app';
+import { createTestApp, TEST_ORG } from '../helpers/test-app';
+import { memoryContextStore } from '../helpers/memory-context-store';
+import {
+  resetContextStore,
+  setContextBindings,
+  setContextStore,
+} from '@truecourse/core/lib/context-store';
 import { recuratePrCorpus, getDecisions } from '@truecourse/core/commands/spec-in-process';
 import { setSpecStore, resetSpecStore } from '@truecourse/core/lib/spec-store';
 import { resetAnalysisStore, writeLatest } from '@truecourse/core/lib/analysis-store';
@@ -69,15 +75,32 @@ const corpusWithArea = (areaId: string) => ({
 });
 
 // ---------------------------------------------------------------------------
-// Corpus route — commit-scoped reads (EE: Postgres spec store; the baseline
-// commit is read from the core analyze store's LATEST).
+// Corpus route — hosted. Documentation belongs to the WORKSPACE now, so the
+// repository's corpus is the workspace corpus cut down to the sources it reads
+// (its SLICE). It has no commit dimension: `?ref` names nothing here, and the
+// answer carries no `corpusCommit`.
 // ---------------------------------------------------------------------------
 
-describe('GET /spec/corpus?ref (EE, commit-scoped)', () => {
+describe('GET /spec/corpus (hosted, the repository’s slice)', () => {
   let app: Express;
   let fixture: TestFixture;
   let client: PGlite;
   let spec: PgSpecStore;
+
+  const wsDoc = (sourceId: string, name: string) => `context/${sourceId}/docs/${name}`;
+  const workspaceCorpus = () => ({
+    version: 3,
+    generatedAt: '2026-01-01T00:00:00Z',
+    docs: [
+      { ref: wsDoc('repo-src', 'v.md'), kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['ours/area'], sourceId: 'repo-src', sourceKind: 'repository' },
+      { ref: wsDoc('other-src', 'x.md'), kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['theirs/area'], sourceId: 'other-src', sourceKind: 'site' },
+    ],
+    areas: [
+      { id: 'ours/area', product: 'ours', concern: 'area', docRefs: [wsDoc('repo-src', 'v.md')], overlaps: [] },
+      { id: 'theirs/area', product: 'theirs', concern: 'area', docRefs: [wsDoc('other-src', 'x.md')], overlaps: [] },
+    ],
+    skippedDocs: [],
+  });
 
   beforeEach(async () => {
     fixture = await setupTestFixture();
@@ -85,46 +108,52 @@ describe('GET /spec/corpus?ref (EE, commit-scoped)', () => {
     const db = await makeDb(client);
     spec = new PgSpecStore(db);
     setSpecStore(spec);
-    // Baseline anchored at base1 (the analyze LATEST the corpus reader anchors
-    // on). Seeded via the core file analyze store.
+    setContextStore(memoryContextStore());
     await writeLatest(fixture.repoPath, baselineLatest('base1'));
+    // A corpus stored against the repository itself is not what it runs
+    // against, so not what it shows: the slice of the workspace corpus is.
     await spec.saveSpec({ repoKey: fixture.repoPath, commitSha: 'base1' }, 'corpus', corpusWithArea('base/area'));
-    await spec.saveSpec({ repoKey: fixture.repoPath, commitSha: 'head1' }, 'corpus', corpusWithArea('head/area'));
+    await spec.saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', workspaceCorpus());
     app = createTestApp();
   });
   afterEach(async () => {
     resetSpecStore();
+    resetContextStore();
     resetAnalysisStore();
     await client.close();
     await teardownTestFixture(fixture.project.slug);
   });
 
-  it('no ref → the baseline-commit corpus (never loadLatest), labelled corpusCommit', async () => {
+  it('answers only the documents of the sources this repository reads', async () => {
+    await setContextBindings(TEST_ORG, fixture.repoPath, ['repo-src']);
+
     const res = await request(app).get(`/api/repos/${fixture.project.slug}/spec/corpus`).expect(200);
-    expect(res.body.corpus.areas[0].id).toBe('base/area');
-    expect(res.body.corpusCommit).toBe('base1');
+    expect(res.body.corpus.docs.map((d: { ref: string }) => d.ref)).toEqual([
+      wsDoc('repo-src', 'v.md'),
+    ]);
+    expect(res.body.corpus.areas.map((a: { id: string }) => a.id)).toEqual(['ours/area']);
+    // The slice is derived from one workspace corpus — there is no commit to name.
+    expect(res.body.corpusCommit).toBeUndefined();
   });
 
-  it('ref=<head> → the PR-head corpus at that commit', async () => {
+  it('ignores ?ref — a workspace corpus has no commit dimension', async () => {
+    await setContextBindings(TEST_ORG, fixture.repoPath, ['repo-src']);
+
     const res = await request(app)
       .get(`/api/repos/${fixture.project.slug}/spec/corpus`)
-      .query({ ref: 'head1' })
+      .query({ ref: 'base1' })
       .expect(200);
-    expect(res.body.corpus.areas[0].id).toBe('head/area');
-    expect(res.body.corpusCommit).toBe('head1');
+    expect(res.body.corpus.areas.map((a: { id: string }) => a.id)).toEqual(['ours/area']);
+    expect(res.body.corpusCommit).toBeUndefined();
   });
 
-  it('ref with no stored corpus (code-only PR) → falls back to the baseline corpus', async () => {
-    const res = await request(app)
-      .get(`/api/repos/${fixture.project.slug}/spec/corpus`)
-      .query({ ref: 'codeonly' })
-      .expect(200);
-    expect(res.body.corpus.areas[0].id).toBe('base/area');
-    expect(res.body.corpusCommit).toBe('base1'); // labelled so the client can note the fallback
+  it('404s a repository linked to no source that yielded a document', async () => {
+    await setContextBindings(TEST_ORG, fixture.repoPath, []);
+    await request(app).get(`/api/repos/${fixture.project.slug}/spec/corpus`).expect(404);
   });
 });
 
-describe('GET /spec/corpus?ref — 404 when neither ref nor baseline has a corpus', () => {
+describe('GET /spec/corpus — 404 when the workspace has never scanned', () => {
   let app: Express;
   let fixture: TestFixture;
   let client: PGlite;
@@ -134,11 +163,12 @@ describe('GET /spec/corpus?ref — 404 when neither ref nor baseline has a corpu
     client = new PGlite();
     const db = await makeDb(client);
     setSpecStore(new PgSpecStore(db));
-    // No baseline analysis written → baselineCommit resolves to null.
+    setContextStore(memoryContextStore());
     app = createTestApp();
   });
   afterEach(async () => {
     resetSpecStore();
+    resetContextStore();
     resetAnalysisStore();
     await client.close();
     await teardownTestFixture(fixture.project.slug);

@@ -1,5 +1,3 @@
-// PREVIEW: REAL — starting an agentic run on a connected repository.
-
 /**
  * Ask the server to start a run, and say what happened in words a surface can
  * act on.
@@ -56,11 +54,35 @@ export async function startRun(repoId: string, path: string, payload?: unknown):
   return { kind: 'failed', message };
 }
 
-export const startSpecScan = (repoId: string): Promise<RunStart> =>
-  startRun(repoId, 'spec/corpus/scan');
-
 export const startGuardSetup = (repoId: string): Promise<RunStart> =>
   startRun(repoId, 'guard/setup');
 
 export const startGuardGenerate = (repoId: string, resumeRunId?: string): Promise<RunStart> =>
   startRun(repoId, 'guard/generate', resumeRunId ? { resumeRunId } : undefined);
+
+/**
+ * The workspace Document scan — the one run that belongs to no repository, so
+ * it is started at the workspace address rather than under a repository's. Its
+ * refusals are the repository routes' own, word for word.
+ */
+export async function startContextScan(): Promise<RunStart> {
+  const url = `${getServerUrl()}/api/context/scan`;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (e) {
+    return { kind: 'failed', message: e instanceof Error ? e.message : String(e) };
+  }
+  if (res.ok) return { kind: 'started' };
+  const body = (await res.json().catch(() => null)) as { error?: string; message?: string } | null;
+  const code = body?.error ?? '';
+  const message = body?.message ?? code ?? `The server answered ${res.status}.`;
+  if (code === 'llm-not-configured') return { kind: 'not-configured', message };
+  if (code === 'llm-probe-failed') return { kind: 'probe-failed', message };
+  if (res.status === 409) return { kind: 'busy', message };
+  return { kind: 'failed', message };
+}

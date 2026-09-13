@@ -1,210 +1,198 @@
 /**
- * Settings as a hub: members and SSO, provider connections, the LLM, the
- * connectors, and the plan. The sub-tab is in the URL, so a settings page is a
- * place a link can point at.
+ * Settings as a hub: the workspace's members, where its repositories are
+ * connected from, the document connectors, and the LLM provider. The sub-tab
+ * is in the URL, so a settings page is a place a link can point at.
  *
- * Plan-gated features are SHOWN and locked, never hidden: a workspace on Team
- * can see that SSO and the connectors exist and what they would do, which is
- * the whole point of one edition with plan-gated features.
+ * Everything here is the server's. There is no plan and no entitlement read yet,
+ * so nothing is drawn as plan-gated: a feature that is not built says Coming
+ * soon, which is what it is, rather than wearing a lock that would claim a plan
+ * decides it.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { Lock, Plus } from 'lucide-react';
-import { LLM_PROVIDER_KINDS } from '@truecourse/shared';
-import type { LlmConfigResponse, LlmConfigUpdate, LlmProviderKind } from '@truecourse/shared';
-import { Badge } from '@/components/ui/badge';
-import { EntityList } from '@/preview/ui/entity-list';
+import { useParams, useSearchParams } from 'react-router-dom';
+import { CONTEXT_SOURCE_KIND_LABEL, GITHUB_INSTALL_ORIGINS, LLM_PROVIDER_KINDS } from '@truecourse/shared';
+import type {
+  ContextSourceKind,
+  GithubInstallationSummary,
+  GithubRepoSummary,
+  LlmConfigResponse,
+  LlmConfigUpdate,
+  LlmProviderKind,
+  GithubInstallOrigin,
+} from '@truecourse/shared';
+import { ConnectorLogo, type ConnectorTool } from '@/preview/ui/connector-logos';
 import { StatusWord } from '@/preview/ui/status-word';
-import { Capsule, Facts, ProviderIcon, PROVIDER_NAME, PageHeader, SideMenu } from '@/preview/ui/bits';
-import { ENTITLEMENTS, MEMBERS } from '@/preview/data';
+import { Facts, ProviderIcon, PROVIDER_NAME, PageHeader, SideMenu } from '@/preview/ui/bits';
 import { fetchLlmConfig, saveLlmConfig } from '@/preview/data/llm-config';
-import type { Member, ProviderId } from '@/preview/data/types';
+import { fetchGithubStatus } from '@/preview/data/real-repos';
+import type { ProviderId } from '@/preview/data/types';
+import { MembersTab } from '@/preview/pages/MembersTab';
 import { usePreviewState } from '@/preview/shell/preview-state';
 import { PREVIEW_BASE } from '@/preview/shell/PreviewShell';
 
 const TABS = [
   { id: 'members', label: 'Members' },
-  { id: 'providers', label: 'Providers' },
+  { id: 'repositories', label: 'Repositories' },
+  { id: 'connections', label: 'Connections' },
   { id: 'models', label: 'Models' },
-  { id: 'integrations', label: 'Integrations' },
-  { id: 'plan', label: 'Plan' },
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
 
-function Card({
-  title,
-  description,
-  locked = false,
-  children,
-}: {
-  title: string;
-  description?: string;
-  locked?: boolean;
-  children?: React.ReactNode;
-}) {
-  return (
-    <section className="rounded-md border border-border bg-card px-4 py-3">
-      <div className="flex items-center gap-2">
-        <h3 className="text-xs font-semibold text-foreground">{title}</h3>
-        {locked && (
-          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-            <Lock className="h-3 w-3" />
-            Enterprise plan
-          </span>
-        )}
-      </div>
-      {description && <p className="mt-1 text-[11px] text-muted-foreground">{description}</p>}
-      {children && <div className="mt-2">{children}</div>}
-    </section>
-  );
+/** What `/api/github/status` said; null while the read is in flight. */
+type GithubProviderState = {
+  installations: GithubInstallationSummary[];
+  /** Where the App is installed. Absent on a server that has no App configured. */
+  installUrl: string | null;
+  /** The repositories linked to this workspace, per installation. */
+  linked: GithubRepoSummary[];
+  /** Why the read failed, when it did. */
+  reason?: string;
+};
+
+/** The providers a repository can be connected from, in the order they are offered. */
+const PROVIDERS: readonly ProviderId[] = ['github', 'gitlab', 'azure'];
+
+/**
+ * Repositories: where they are connected FROM. One row per source-control
+ * provider — its mark, its name, a status word, and the accounts under it,
+ * one line each.
+ *
+ * GitHub is the real one: its accounts are the App's installations the server
+ * reports, each line naming the account, its type and how many repositories
+ * this workspace has linked through it, and connecting is a top-level
+ * navigation to the App's install page. GitLab and Azure DevOps are listed and
+ * say Coming soon: hiding them would make the page lie about where this is
+ * going, and offering them would make it lie about what it does.
+ */
+/** Where an install started here returns to: the place that sent the user here, else this tab. */
+function installOriginOf(raw: string | null): GithubInstallOrigin {
+  return raw && (GITHUB_INSTALL_ORIGINS as readonly string[]).includes(raw)
+    ? (raw as GithubInstallOrigin)
+    : 'settings';
 }
 
-function MembersTab() {
-  const [invite, setInvite] = useState(false);
+function RepositoriesTab() {
+  const [github, setGithub] = useState<GithubProviderState | null>(null);
+  const [params] = useSearchParams();
+  const from = installOriginOf(params.get('from'));
+
+  useEffect(() => {
+    let live = true;
+    void fetchGithubStatus(from)
+      .then((status) => {
+        if (!live) return;
+        setGithub({
+          installations: status.installations,
+          installUrl: status.installUrl || null,
+          linked: status.repos,
+        });
+      })
+      .catch((error: unknown) => {
+        if (!live) return;
+        setGithub({
+          installations: [],
+          installUrl: null,
+          linked: [],
+          reason: error instanceof Error ? error.message : 'GitHub could not be reached',
+        });
+      });
+    return () => {
+      live = false;
+    };
+  }, [from]);
+
+  const installations = github?.installations ?? [];
+
   return (
-    <div className="space-y-4">
-      <div className="border-t border-border">
-        <EntityList<Member>
-          label="Workspace members"
-          variant="embedded"
-          items={MEMBERS}
-          itemId={(m) => m.id}
-          renderRow={(m) => (
-            <>
-              <div className="flex w-full min-w-0 items-center gap-2">
-                <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{m.name}</span>
-                <Capsule>{m.role}</Capsule>
-              </div>
-              <div className="flex w-full min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
-                <span className="min-w-0 truncate">{m.email}</span>
-                <span className="ml-auto shrink-0">joined {m.joined}</span>
-              </div>
-            </>
-          )}
-          search={{
-            placeholder: 'Search members',
-            ariaLabel: 'Search members',
-            match: (m, q) => m.name.toLowerCase().includes(q) || m.email.toLowerCase().includes(q),
-          }}
-          noun={{ one: 'member', many: 'members' }}
-          toolbar={
-            <button
-              type="button"
-              onClick={() => setInvite((v) => !v)}
-              className="rounded bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground hover:opacity-90"
-            >
-              Invite member
-            </button>
-          }
-        />
-      </div>
-
-      {invite && (
-        <Card title="Invite a member" description="An invitation expires after seven days.">
-          <div className="flex items-center gap-2">
-            <input
-              placeholder="name@acme.dev"
-              aria-label="Invitation e-mail"
-              className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-            />
-            <button
-              type="button"
-              onClick={() => setInvite(false)}
-              className="shrink-0 rounded border border-border px-2 py-1 text-[11px] font-medium text-foreground hover:bg-muted/60"
-            >
-              Send
-            </button>
-          </div>
-        </Card>
-      )}
-
-      <Card
-        title="Single sign-on"
-        locked
-        description="SAML and SCIM provisioning, with the workspace role mapped from a directory group. Available on the Enterprise plan."
-      >
-        <Link to={`${PREVIEW_BASE}/settings/plan`} className="text-[11px] text-primary hover:underline">
-          See the plan
-        </Link>
-      </Card>
-    </div>
-  );
-}
-
-function ProvidersTab() {
-  const { connections, addConnection, revokeConnection } = usePreviewState();
-  const [adding, setAdding] = useState(false);
-  return (
-    <div className="space-y-4">
-      <div className="border-t border-border">
-        {connections.map((c) => (
-          <section key={c.id} className="flex items-center gap-3 border-b border-border/60 py-2.5">
-            <ProviderIcon provider={c.provider} className="h-4 w-4" />
+    <ul className="divide-y divide-border border-b border-border" aria-label="Providers">
+      {PROVIDERS.map((id) => {
+        const live = id === 'github';
+        return (
+          <li key={id} className="flex items-start gap-4 px-6 py-3">
+            <ProviderIcon provider={id} className="mt-0.5 h-6 w-6 shrink-0" />
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <h3 className="text-xs font-semibold text-foreground">
-                  {PROVIDER_NAME[c.provider]} · {c.account}
-                </h3>
-                <Capsule>{c.kind}</Capsule>
-                <StatusWord tone="success" word="Connected" />
+              <div className="flex items-center gap-3">
+                <span className="text-[13px] font-medium text-foreground">{PROVIDER_NAME[id]}</span>
+                {!live && <span className="text-[11px] text-muted-foreground">Coming soon</span>}
+                {live && github === null && <StatusWord tone="neutral" word="Reading" />}
+                {live && github !== null && (
+                  <StatusWord
+                    tone={installations.length > 0 ? 'success' : 'neutral'}
+                    word={installations.length > 0 ? 'Connected' : 'Not connected'}
+                  />
+                )}
               </div>
-              <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{c.about}</p>
-              <p className="mt-0.5 text-[11px] text-muted-foreground">
-                {c.repoCount} repositories visible · connected {c.connectedAt}
-              </p>
+              {live && github?.reason && (
+                <p className="mt-1 text-[11px] text-destructive">{github.reason}</p>
+              )}
+              {live && installations.length > 0 && (
+                <ul className="mt-1 space-y-1" aria-label="GitHub installations">
+                  {installations.map((i) => {
+                    const linked = (github?.linked ?? []).filter(
+                      (r) => r.installationId === i.installationId,
+                    ).length;
+                    return (
+                      <li key={i.installationId} className="truncate text-[11px] text-muted-foreground">
+                        <span className="text-foreground">{i.accountLogin || `#${i.installationId}`}</span>
+                        {i.accountType ? ` · ${i.accountType.toLowerCase()}` : ''} ·{' '}
+                        {linked} repositor{linked === 1 ? 'y' : 'ies'} linked
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
             </div>
-            <button
-              type="button"
-              onClick={() => revokeConnection(c.id)}
-              className="shrink-0 rounded border border-border px-2 py-1 text-[11px] font-medium text-destructive hover:bg-muted/60"
-            >
-              Revoke
-            </button>
-          </section>
-        ))}
-        {connections.length === 0 && (
-          <p className="py-6 text-center text-xs text-muted-foreground">No connection yet.</p>
-        )}
-      </div>
-      {adding ? (
-        <div className="rounded-md border border-border px-3 py-2.5">
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {(['github', 'gitlab', 'azure'] as ProviderId[]).map((id) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => {
-                  addConnection(id);
-                  setAdding(false);
-                }}
-                className="inline-flex items-center gap-1.5 rounded border border-border px-2 py-1 text-[11px] font-medium text-foreground hover:bg-muted/60"
+            {live && github?.installUrl && (
+              <a
+                href={github.installUrl}
+                className={`shrink-0 rounded px-2.5 py-1.5 text-xs font-medium ${
+                  installations.length === 0
+                    ? 'bg-primary text-primary-foreground hover:opacity-90'
+                    : 'border border-border text-foreground hover:bg-muted/60'
+                }`}
               >
-                <ProviderIcon provider={id} />
-                {PROVIDER_NAME[id]}
-              </button>
-            ))}
-            <button
-              type="button"
-              onClick={() => setAdding(false)}
-              className="ml-auto rounded px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
-            >
-              Cancel
-            </button>
+                {installations.length === 0 ? 'Connect' : 'Add account'}
+              </a>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/**
+ * The tools a document can come from, one row each with its brand mark and the
+ * shared name of its kind. None can be connected yet, so every row says Coming
+ * soon and none of them is a control: hiding them would make the page lie about
+ * where this is going, and offering them would make it lie about what it does.
+ */
+const CONNECTORS: readonly { kind: ContextSourceKind; tool: ConnectorTool }[] = [
+  { kind: 'jira', tool: 'jira' },
+  { kind: 'confluence', tool: 'confluence' },
+  { kind: 'google-drive', tool: 'gdrive' },
+  { kind: 'onedrive', tool: 'onedrive' },
+  { kind: 'notion', tool: 'notion' },
+  { kind: 'slack', tool: 'slack' },
+];
+
+function ConnectionsTab() {
+  return (
+    <ul className="divide-y divide-border border-b border-border" aria-label="Connectors">
+      {CONNECTORS.map((connector) => (
+        <li key={connector.kind} className="flex items-start gap-4 px-6 py-3">
+          <ConnectorLogo tool={connector.tool} className="mt-0.5 h-6 w-6 shrink-0" />
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <span className="truncate text-[13px] font-medium text-foreground">
+              {CONTEXT_SOURCE_KIND_LABEL[connector.kind]}
+            </span>
+            <span className="shrink-0 text-[11px] text-muted-foreground">Coming soon</span>
           </div>
-        </div>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setAdding(true)}
-          className="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] font-medium text-foreground hover:bg-muted/60"
-        >
-          <Plus className="h-3 w-3" />
-          Add connection
-        </button>
-      )}
-    </div>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -279,15 +267,15 @@ function ModelsTab() {
   // no run ever reads, so there is none — only what the runs use.
   if (data?.operator) {
     return (
-      <Card title="Active provider">
-        <Facts
-          rows={[
-            { label: 'Provider', value: 'Claude Code (operator)' },
-            { label: 'Model', value: <span className="font-mono">{data.operator.model}</span> },
-            { label: 'Set by', value: <span className="font-mono">TRUECOURSE_LLM_TRANSPORT=claude-code</span> },
-          ]}
-        />
-      </Card>
+      <Facts
+        className="border-b border-border"
+        rowClassName="px-6"
+        rows={[
+          { label: 'Provider', value: 'Claude Code (operator)' },
+          { label: 'Model', value: <span className="font-mono">{data.operator.model}</span> },
+          { label: 'Set by', value: <span className="font-mono">TRUECOURSE_LLM_TRANSPORT=claude-code</span> },
+        ]}
+      />
     );
   }
 
@@ -327,25 +315,21 @@ function ModelsTab() {
   };
 
   return (
-    <div className="space-y-4">
+    <div>
       {current && (
-        <Card title="Active provider">
-          <Facts
-            rows={[
-              { label: 'Provider', value: PROVIDER_LABEL[current.provider] },
-              { label: 'Model', value: <span className="font-mono">{current.model}</span> },
-              { label: 'Key', value: current.hasKey ? (current.keyMask ?? 'stored') : 'no stored key' },
-              { label: 'Updated', value: new Date(current.updatedAt).toLocaleString() },
-            ]}
-          />
-        </Card>
+        <Facts
+          className="border-b border-border"
+          rowClassName="px-6"
+          rows={[
+            { label: 'Provider', value: PROVIDER_LABEL[current.provider] },
+            { label: 'Model', value: <span className="font-mono">{current.model}</span> },
+            { label: 'Key', value: current.hasKey ? (current.keyMask ?? 'stored') : 'no stored key' },
+            { label: 'Updated', value: new Date(current.updatedAt).toLocaleString() },
+          ]}
+        />
       )}
 
-      <Card
-        title="LLM provider"
-        description="The engine calls the model from the hosted product only. The CLI never makes an LLM call."
-      >
-        <form onSubmit={submit} className="space-y-2">
+        <form onSubmit={submit} className="max-w-xl space-y-2 px-6 py-5">
           <label className="block text-[11px] font-medium text-muted-foreground">
             Provider
             <select
@@ -431,6 +415,10 @@ function ModelsTab() {
             </label>
           )}
 
+          <p className="pt-1 text-[11px] text-muted-foreground">
+            The engine calls the model from the hosted product only. The CLI never makes an LLM call.
+          </p>
+
           <div className="flex flex-wrap items-center gap-3 pt-1">
             <button
               type="submit"
@@ -445,97 +433,48 @@ function ModelsTab() {
             {error && <span className="text-[11px] text-destructive">{error}</span>}
           </div>
         </form>
-      </Card>
-    </div>
-  );
-}
-
-function IntegrationsTab() {
-  return (
-    <div className="space-y-3">
-      <Card
-        title="Jira"
-        locked
-        description="Open a Jira issue from a gate failure, with the failing step, its evidence and the claim it breaks."
-      >
-        <button type="button" className="text-[11px] text-primary hover:underline">
-          Upgrade to Enterprise
-        </button>
-      </Card>
-      <Card
-        title="Confluence"
-        locked
-        description="Read Confluence spaces as spec sources, the way an llms.txt site is read today."
-      >
-        <button type="button" className="text-[11px] text-primary hover:underline">
-          Upgrade to Enterprise
-        </button>
-      </Card>
-    </div>
-  );
-}
-
-function PlanTab() {
-  const { workspace } = usePreviewState();
-  return (
-    <div className="space-y-4">
-      <Card title="Current plan" description="Plans decide which features are on. Nothing is hidden, only locked.">
-        <Badge variant="outline" className="h-5 px-2 text-[11px]">
-          {workspace.plan}
-        </Badge>
-      </Card>
-
-      <div className="overflow-hidden rounded-md border border-border">
-        <Facts
-          rows={ENTITLEMENTS.map((e) => ({
-            label: e.label,
-            value: (
-              <span className="inline-flex items-center gap-1.5">
-                {e.locked && <Lock className="h-3 w-3 text-muted-foreground" />}
-                {e.value}
-              </span>
-            ),
-          }))}
-        />
-      </div>
-
-      <Card
-        title="Self-hosted license key"
-        locked
-        description="A self-hosted deployment runs the same product against your own store and your own runner."
-      >
-        <input
-          disabled
-          placeholder="TC-XXXX-XXXX-XXXX"
-          aria-label="Self-hosted license key"
-          className="w-full cursor-not-allowed rounded border border-border bg-muted/40 px-2 py-1 font-mono text-xs text-muted-foreground"
-        />
-      </Card>
     </div>
   );
 }
 
 export default function SettingsPage() {
   const { tab } = useParams<{ tab?: string }>();
-  const active = useMemo<TabId>(() => (TABS.find((t) => t.id === tab)?.id ?? 'members') as TabId, [tab]);
+  const active = useMemo<TabId>(
+    () => (TABS.find((t) => t.id === tab)?.id ?? 'members') as TabId,
+    [tab],
+  );
+
+  const [inviteOpen, setInviteOpen] = useState(false);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <PageHeader title="Settings" />
+      <PageHeader
+        title="Settings"
+        right={
+          active === 'members' && (
+            <button
+              type="button"
+              onClick={() => setInviteOpen(true)}
+              className="rounded bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
+            >
+              Invite member
+            </button>
+          )
+        }
+      />
       <div className="flex min-h-0 flex-1">
         <SideMenu
           label="Settings sections"
           activeId={active}
           items={TABS.map((t) => ({ id: t.id, label: t.label, to: `${PREVIEW_BASE}/settings/${t.id}` }))}
         />
-        <div className="min-h-0 min-w-0 flex-1 overflow-auto px-6 py-5">
-          <div className="max-w-4xl">
-            {active === 'members' && <MembersTab />}
-            {active === 'providers' && <ProvidersTab />}
-            {active === 'models' && <ModelsTab />}
-            {active === 'integrations' && <IntegrationsTab />}
-            {active === 'plan' && <PlanTab />}
-          </div>
+        <div className="min-h-0 min-w-0 flex-1 overflow-auto">
+          {active === 'members' && (
+            <MembersTab inviteOpen={inviteOpen} onInviteOpenChange={setInviteOpen} />
+          )}
+          {active === 'repositories' && <RepositoriesTab />}
+          {active === 'connections' && <ConnectionsTab />}
+          {active === 'models' && <ModelsTab />}
         </div>
       </div>
     </div>

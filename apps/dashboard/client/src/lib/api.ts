@@ -17,6 +17,23 @@ import type {
   GuardScenarioSource,
   GuardStaleness,
 } from '@truecourse/shared';
+import type {
+  AuthUser,
+  ContextBindingsResponse,
+  ContextDocumentsViewResponse,
+  ContextSource,
+  ContextSourceCheck,
+  ContextSourceDetailResponse,
+  ContextSourcesResponse,
+  ContextSourceUpdateResponse,
+  ContextSourceView,
+  HomePeriod,
+  HomeResponse,
+  NotificationsResponse,
+  WorkspaceInvitation,
+  WorkspaceMembersResponse,
+  WorkspacesResponse,
+} from '@truecourse/shared';
 import type { GuardExternalPatch, GuardExternalsView } from '@/types/guard-externals';
 import type { RunRecord, SessionCommand, SessionEvent } from '@truecourse/agent-loop';
 import type { ActivityEvent } from '@truecourse/shared/activity-stream';
@@ -917,12 +934,15 @@ export async function getSpecCorpus(
 }
 
 /**
- * Enqueue a fresh corpus scan. It runs as a background job, so this resolves as
- * soon as the job is QUEUED (202): progress arrives over `spec:progress` and the
- * corpus is refetched when `spec:complete { kind: 'scan' }` lands.
+ * Enqueue the workspace Document scan. Documentation belongs to the workspace,
+ * so there is ONE scan and it is started at the workspace address — a
+ * repository never starts one of its own. It runs as a background job, so this
+ * resolves as soon as the job is QUEUED (202): progress arrives over
+ * `spec:progress` and the corpus is refetched when `spec:complete
+ * { kind: 'scan' }` lands.
  */
-export function startSpecCorpusScan(repoId: string): Promise<{ jobId: string }> {
-  return fetchApi<{ jobId: string }>(`/api/repos/${repoId}/spec/corpus/scan`, { method: 'POST' });
+export function startContextScan(): Promise<{ jobId: string }> {
+  return fetchApi<{ jobId: string }>('/api/context/scan', { method: 'POST' });
 }
 
 /** A source doc's markdown (for the prose Spec tab). `commit` reads it at a PR head (EE). */
@@ -930,119 +950,6 @@ export function getSpecDoc(repoId: string, ref: string, commit?: string): Promis
   const c = commit ? `&commit=${encodeURIComponent(commit)}` : '';
   return fetchApi<{ ref: string; content: string }>(
     `/api/repos/${repoId}/spec/doc?ref=${encodeURIComponent(ref)}${c}`,
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Web spec sources — llms.txt documentation sites snapshotted into the repo as
-// spec docs. Pure fetching (no LLM, no estimate); add/refresh stream progress
-// over `spec:progress` and end with `spec:complete { kind: 'sources' }`.
-// Working-tree only, so the UI is `local-filesystem`-gated like External APIs.
-// ---------------------------------------------------------------------------
-
-/** A link the fetch wrote no page for, with the reason it was passed over. */
-export interface SpecSourceSkip {
-  url: string;
-  reason: 'external-origin' | 'not-markdown' | 'fetch-failed';
-  /** Status line or transport message, when the reason had one. */
-  detail?: string;
-}
-
-/** One registered source: the registry entry the sources list renders. */
-export interface SpecSourceView {
-  id: string;
-  title: string;
-  llmsTxtUrl: string;
-  fetchedAt: string;
-  docCount: number;
-  skipped: SpecSourceSkip[];
-}
-
-/** One snapshotted page of a source: its corpus ref, its page path inside the
- *  site, the llms.txt link title, and the URL it was fetched from. */
-export interface SpecSourceDoc {
-  ref: string;
-  path: string;
-  title: string;
-  url: string;
-}
-
-/** One source WITH its pages — the detail pane's payload (the listing omits them). */
-export interface SpecSourceDetailView extends SpecSourceView {
-  docs: SpecSourceDoc[];
-}
-
-/** What an add WOULD fetch — shown for confirmation before anything is written. */
-export interface SpecSourcePreview {
-  llmsTxtUrl: string;
-  title: string;
-  totalLinks: number;
-  /** The same-origin links — the ones an add fetches. */
-  fetchableLinks: number;
-  skipped: SpecSourceSkip[];
-}
-
-export interface SpecSourceAddResult {
-  source: SpecSourceView;
-  /** Snapshot files written. */
-  written: number;
-  skipped: SpecSourceSkip[];
-}
-
-/** One source's reconciliation with its site. `unchanged` is a count (the paths
- *  would be the whole site on a run where nothing moved). */
-export interface SpecSourceRefreshResult {
-  source: SpecSourceView;
-  added: string[];
-  changed: string[];
-  removed: string[];
-  unchanged: number;
-  skipped: SpecSourceSkip[];
-}
-
-export function listSpecSources(repoId: string): Promise<{ sources: SpecSourceView[] }> {
-  return fetchApi<{ sources: SpecSourceView[] }>(`/api/repos/${repoId}/spec/sources`);
-}
-
-/** One source with the pages it snapshotted — read when its detail is opened. */
-export function getSpecSource(repoId: string, sourceId: string): Promise<{ source: SpecSourceDetailView }> {
-  return fetchApi<{ source: SpecSourceDetailView }>(
-    `/api/repos/${repoId}/spec/sources/${encodeURIComponent(sourceId)}`,
-  );
-}
-
-/** Read the site's llms.txt and report what an add would fetch. Writes nothing. */
-export function previewSpecSource(repoId: string, url: string): Promise<SpecSourcePreview> {
-  return fetchApi<SpecSourcePreview>(`/api/repos/${repoId}/spec/sources/preview`, {
-    method: 'POST',
-    body: JSON.stringify({ url }),
-  });
-}
-
-/** Register the site and snapshot every markdown page its llms.txt lists. */
-export function addSpecSource(repoId: string, url: string, id?: string): Promise<SpecSourceAddResult> {
-  return fetchApi<SpecSourceAddResult>(`/api/repos/${repoId}/spec/sources`, {
-    method: 'POST',
-    body: JSON.stringify(id ? { url, id } : { url }),
-  });
-}
-
-/** Refetch one source, or every registered one when `sourceId` is omitted. */
-export function refreshSpecSources(
-  repoId: string,
-  sourceId?: string,
-): Promise<{ results: SpecSourceRefreshResult[] }> {
-  const path = sourceId
-    ? `/api/repos/${repoId}/spec/sources/${encodeURIComponent(sourceId)}/refresh`
-    : `/api/repos/${repoId}/spec/sources/refresh`;
-  return fetchApi<{ results: SpecSourceRefreshResult[] }>(path, { method: 'POST' });
-}
-
-/** Drop a source: its snapshot files and its registry entry. */
-export function removeSpecSource(repoId: string, sourceId: string): Promise<{ removed: SpecSourceView }> {
-  return fetchApi<{ removed: SpecSourceView }>(
-    `/api/repos/${repoId}/spec/sources/${encodeURIComponent(sourceId)}`,
-    { method: 'DELETE' },
   );
 }
 
@@ -1527,8 +1434,12 @@ export function getSessionTranscript(
 // The workspace's agent runs (the Agent page) — every connected repository at once.
 // ---------------------------------------------------------------------------
 
-/** A run of the workspace, tagged with the repository it ran for. */
-export type WorkspaceRun = PublicSessionRun & { repo: { id: string; fullName: string } };
+/**
+ * A run of the workspace, tagged with the repository it ran for — or with
+ * NOBODY: a Document scan is the workspace's own work over its sources, so it
+ * names no repository and its `repo` is null.
+ */
+export type WorkspaceRun = PublicSessionRun & { repo: { id: string; fullName: string } | null };
 
 /**
  * Every run of the workspace, newest first, narrowed by the server. `before` is
@@ -1577,10 +1488,342 @@ export function readRunActivity(
   );
 }
 
-export function getSessionTranscriptPage(repoId: string, command: SessionCommand, runId: string, sessionId: string,
-  options: { before?: number; since?: number }, signal?: AbortSignal): Promise<{ events: SessionEvent[]; hasMore: boolean; progress?: import("@truecourse/agent-loop").SessionProgress | null }> {
+/**
+ * One page of a WORKSPACE run's activity journal — the same journal, addressed
+ * by run id alone. A Document scan belongs to no repository, so its
+ * conversation is read here rather than under `/api/repos/:id`.
+ */
+export function readWorkspaceRunActivity(
+  runId: string,
+  after: number,
+  limit: number,
+): Promise<{ events: ActivityEvent[]; nextCursor: number; done: boolean }> {
+  return fetchApi<{ events: ActivityEvent[]; nextCursor: number; done: boolean }>(
+    `/api/sessions/runs/${encodeURIComponent(runId)}/activity?after=${after}&limit=${limit}`,
+  );
+}
+
+/** One piece of a workspace run's work, verbatim. */
+export function getWorkspaceRunTranscript(
+  runId: string,
+  sessionId: string,
+  since?: number,
+): Promise<{ events: SessionEvent[] }> {
+  const query = since !== undefined ? `?since=${since}` : '';
+  return fetchApi<{ events: SessionEvent[] }>(
+    `/api/sessions/runs/${encodeURIComponent(runId)}/transcript/${encodeURIComponent(sessionId)}${query}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Context — the WORKSPACE's documentation sources, the documents they yield,
+// and the one corpus the Document scan curates from them. Everything here is
+// workspace-scoped: no repository id appears, because a source belongs to the
+// workspace and a repository only LINKS the ones it reads.
+// ---------------------------------------------------------------------------
+
+export function listContextSources(): Promise<ContextSourcesResponse> {
+  return fetchApi<ContextSourcesResponse>('/api/context/sources');
+}
+
+/** The rows of the Documents view, composed and folded on the server. */
+export function listContextDocuments(query: {
+  area?: string[];
+  status?: string[];
+  source?: string[];
+  repo?: string[];
+} = {}): Promise<ContextDocumentsViewResponse> {
+  const params = new URLSearchParams();
+  for (const [key, values] of Object.entries(query)) {
+    for (const value of values ?? []) params.append(key, value);
+  }
+  const search = params.toString();
+  return fetchApi<ContextDocumentsViewResponse>(
+    `/api/context/documents${search ? `?${search}` : ''}`,
+  );
+}
+
+/** One document's body, by the ref the corpus names it with. */
+export function getContextDoc(ref: string): Promise<{ ref: string; content: string }> {
+  return fetchApi<{ ref: string; content: string }>(
+    `/api/context/doc?ref=${encodeURIComponent(ref)}`,
+  );
+}
+
+/** The workspace corpus + its decisions, or null before the first scan. */
+export async function getContextCorpus(): Promise<SpecCorpusResponse | null> {
+  try {
+    return await fetchApi<SpecCorpusResponse>('/api/context/corpus');
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
+/** Has the workspace's Context moved since the corpus was built? */
+export function getContextStaleness(): Promise<{
+  changedAt: string | null;
+  corpusAt: string | null;
+  stale: boolean;
+}> {
+  return fetchApi<{ changedAt: string | null; corpusAt: string | null; stale: boolean }>(
+    '/api/context/staleness',
+  );
+}
+
+/** What a scope WOULD yield, before anything is stored. */
+export function previewContextSource(body: {
+  kind: string;
+  config: Record<string, unknown>;
+  /** The GitHub installation a repository scope is read through. */
+  installationId?: number;
+}): Promise<ContextSourceCheck> {
+  return fetchApi<ContextSourceCheck>('/api/context/sources/preview', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/** Add a source, link the repositories named, and sync it. */
+export function addContextSource(body: {
+  kind: string;
+  config: Record<string, unknown>;
+  repoIds: string[];
+  /** The GitHub installation a repository source syncs through. */
+  installationId?: number;
+}): Promise<{ source: ContextSourceView; jobId?: string }> {
+  return fetchApi<{ source: ContextSourceView; jobId?: string }>('/api/context/sources', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/** One source and its syncs — what the source's own page reads. */
+export function getContextSource(sourceId: string): Promise<ContextSourceDetailResponse> {
+  return fetchApi<ContextSourceDetailResponse>(
+    `/api/context/sources/${encodeURIComponent(sourceId)}`,
+  );
+}
+
+/** Replace a source's scope; the answer says which sync it started, or why none. */
+export function updateContextSourceConfig(
+  sourceId: string,
+  config: Record<string, unknown>,
+): Promise<ContextSourceUpdateResponse> {
+  return fetchApi<ContextSourceUpdateResponse>(
+    `/api/context/sources/${encodeURIComponent(sourceId)}`,
+    { method: 'PATCH', body: JSON.stringify({ config }) },
+  );
+}
+
+export function syncContextSource(sourceId: string): Promise<{ jobId: string }> {
+  return fetchApi<{ jobId: string }>(
+    `/api/context/sources/${encodeURIComponent(sourceId)}/sync`,
+    { method: 'POST' },
+  );
+}
+
+export function pauseContextSource(
+  sourceId: string,
+  paused: boolean,
+): Promise<{ source: ContextSourceView }> {
+  return fetchApi<{ source: ContextSourceView }>(
+    `/api/context/sources/${encodeURIComponent(sourceId)}/pause`,
+    { method: 'POST', body: JSON.stringify({ paused }) },
+  );
+}
+
+/** Drop a source; the answer names the repositories that just stopped reading it. */
+export function removeContextSource(
+  sourceId: string,
+): Promise<{ removed: ContextSource; repositories: string[]; jobId?: string }> {
+  return fetchApi<{ removed: ContextSource; repositories: string[]; jobId?: string }>(
+    `/api/context/sources/${encodeURIComponent(sourceId)}`,
+    { method: 'DELETE' },
+  );
+}
+
+/** Which workspace sources one repository reads. */
+export function getRepoContextBindings(repoId: string): Promise<ContextBindingsResponse> {
+  return fetchApi<ContextBindingsResponse>(`/api/repos/${repoId}/context/bindings`);
+}
+
+/** Replace the set a repository reads — the toggles are one state, saved whole. */
+export function putRepoContextBindings(
+  repoId: string,
+  sourceIds: string[],
+): Promise<ContextBindingsResponse> {
+  return fetchApi<ContextBindingsResponse>(
+    `/api/repos/${repoId}/context/bindings`,
+    { method: 'PUT', body: JSON.stringify({ sourceIds }) },
+  );
+}
+
+// The workspace's own decisions: a force-include, a force-exclude and a
+// conflict verdict are settled ONCE for the workspace, not per repository.
+
+export function addContextInclude(ref: string): Promise<SpecDecisionAck> {
+  return fetchApi<SpecDecisionAck>('/api/context/includes', {
+    method: 'POST',
+    body: JSON.stringify({ ref }),
+  });
+}
+
+export function removeContextInclude(ref: string): Promise<SpecDecisionAck> {
+  return fetchApi<SpecDecisionAck>('/api/context/includes', {
+    method: 'DELETE',
+    body: JSON.stringify({ ref }),
+  });
+}
+
+export function addContextExclude(ref: string): Promise<SpecDecisionAck> {
+  return fetchApi<SpecDecisionAck>('/api/context/excludes', {
+    method: 'POST',
+    body: JSON.stringify({ ref }),
+  });
+}
+
+export function removeContextExclude(ref: string): Promise<SpecDecisionAck> {
+  return fetchApi<SpecDecisionAck>('/api/context/excludes', {
+    method: 'DELETE',
+    body: JSON.stringify({ ref }),
+  });
+}
+
+export function postContextConflictResolution(payload: {
+  docA: string;
+  anchorA: string | null;
+  quoteA?: string;
+  docB: string;
+  anchorB: string | null;
+  quoteB?: string;
+  verdict: 'a' | 'b' | 'dismissed';
+  note?: string;
+}): Promise<SpecConflictAck> {
+  return fetchApi<SpecConflictAck>('/api/context/conflict-resolution', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteContextConflictResolution(payload: {
+  docA: string;
+  anchorA: string | null;
+  docB: string;
+  anchorB: string | null;
+}): Promise<SpecConflictAck> {
+  return fetchApi<SpecConflictAck>('/api/context/conflict-resolution', {
+    method: 'DELETE',
+    body: JSON.stringify(payload),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Members: the workspace's people. Its WorkOS organization's memberships and
+// the invitations standing against it, read live on every request.
+// ---------------------------------------------------------------------------
+
+export function listWorkspaceMembers(): Promise<WorkspaceMembersResponse> {
+  return fetchApi<WorkspaceMembersResponse>('/api/workspace/members');
+}
+
+/** Invite one person. WorkOS mails the invitation; the row comes back. */
+export function inviteWorkspaceMember(
+  email: string,
+): Promise<{ invitation: WorkspaceInvitation }> {
+  return fetchApi<{ invitation: WorkspaceInvitation }>('/api/workspace/invitations', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  });
+}
+
+export function revokeWorkspaceInvitation(id: string): Promise<void> {
+  return fetchApi<void>(`/api/workspace/invitations/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
+
+export function removeWorkspaceMember(id: string): Promise<void> {
+  return fetchApi<void>(`/api/workspace/members/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Workspaces: the organizations the signed-in user belongs to, and the two
+// moves between them. These mint the session cookie, so they sit on the auth
+// router rather than behind the gate.
+// ---------------------------------------------------------------------------
+
+export function listWorkspaces(): Promise<WorkspacesResponse> {
+  return fetchApi<WorkspacesResponse>('/api/auth/workspaces');
+}
+
+/** Create one and go into it. The session comes back in the new organization. */
+export function createWorkspace(name: string): Promise<{ user: AuthUser }> {
+  return fetchApi<{ user: AuthUser }>('/api/auth/workspaces', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  });
+}
+
+export function switchWorkspace(organizationId: string): Promise<{ user: AuthUser }> {
+  return fetchApi<{ user: AuthUser }>('/api/auth/workspaces/switch', {
+    method: 'POST',
+    body: JSON.stringify({ organizationId }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Notifications: the workspace's durable feed. Every job posts into it when it
+// settles; the page reads it back and marks rows read.
+// ---------------------------------------------------------------------------
+
+export function listNotifications(): Promise<NotificationsResponse> {
+  return fetchApi<NotificationsResponse>('/api/notifications');
+}
+
+/** Mark the named rows read, or every unread row. Answers with the new count. */
+export function markNotificationsRead(
+  what: { ids: string[] } | { all: true },
+): Promise<{ unreadCount: number }> {
+  return fetchApi<{ unreadCount: number }>('/api/notifications/read', {
+    method: 'POST',
+    body: JSON.stringify(what),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Home: the whole dashboard in one read, today's sections, the trend, the
+// areas, what waits on a person and what changed.
+// ---------------------------------------------------------------------------
+
+export function fetchHome(period: HomePeriod): Promise<HomeResponse> {
+  return fetchApi<HomeResponse>(`/api/home?period=${encodeURIComponent(period)}`);
+}
+
+export interface SessionTranscriptPage {
+  events: SessionEvent[];
+  hasMore: boolean;
+  progress?: import('@truecourse/agent-loop').SessionProgress | null;
+}
+
+function transcriptPageQuery(options: { before?: number; since?: number }): URLSearchParams {
   const query = new URLSearchParams({ limit: '100' });
   if (options.before !== undefined) query.set('before', String(options.before));
   if (options.since !== undefined) query.set('since', String(options.since));
+  return query;
+}
+
+export function getSessionTranscriptPage(repoId: string, command: SessionCommand, runId: string, sessionId: string,
+  options: { before?: number; since?: number }, signal?: AbortSignal): Promise<SessionTranscriptPage> {
+  const query = transcriptPageQuery(options);
   return fetchApi(`/api/repos/${encodeURIComponent(repoId)}/sessions/runs/${command}/${encodeURIComponent(runId)}/transcript/${encodeURIComponent(sessionId)}?${query}`, { signal });
+}
+
+/** The same page for a WORKSPACE run, addressed by run id alone. */
+export function getWorkspaceSessionTranscriptPage(runId: string, sessionId: string,
+  options: { before?: number; since?: number }, signal?: AbortSignal): Promise<SessionTranscriptPage> {
+  const query = transcriptPageQuery(options);
+  return fetchApi(`/api/sessions/runs/${encodeURIComponent(runId)}/transcript/${encodeURIComponent(sessionId)}?${query}`, { signal });
 }

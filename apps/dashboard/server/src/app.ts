@@ -15,7 +15,8 @@ import rulesRouter from './routes/rules.js';
 import flowsRouter from './routes/flows.js';
 import analyticsRouter from './routes/analytics.js';
 import specRouter from './routes/spec.js';
-import specSourcesRouter from './routes/spec-sources.js';
+import { createContextRouter, createContextBindingsRouter } from './routes/context.js';
+import { createHomeRouter } from './routes/home.js';
 import guardRouter from './routes/guard.js';
 import guardActionsRouter from './routes/guard-actions.js';
 import sessionsRouter, { createWorkspaceSessionsRouter } from './routes/sessions.js';
@@ -48,6 +49,11 @@ export interface CreateAppOptions {
   authVerifier: AuthVerifier | null;
   /** Public auth routes, mounted at /api/auth above the gate. */
   authRouter?: express.Router;
+  /**
+   * The workspace's people, mounted at /api/workspace BEHIND the gate: every
+   * route there reads the session's organization off the request.
+   */
+  workspaceRouter?: express.Router;
   /**
    * The GitHub App connection. REQUIRED for the same reason as `authVerifier`:
    * whether this server can connect repositories is a deployment decision, not
@@ -140,6 +146,11 @@ export function createApp(opts: CreateAppOptions): express.Express {
   // slug-resolving route needs, so another workspace's repo reads as absent.
   const githubLinks = opts.github?.store ?? null;
 
+  // The workspace's people: its WorkOS organization's memberships and the
+  // invitations standing against it. Scoped to the session's organization, so
+  // it needs the gate above it and nothing else.
+  if (opts.workspaceRouter) app.use('/api/workspace', opts.workspaceRouter);
+
   // The workspace's Models settings — workspace-scoped, not repo-scoped, so it
   // sits beside the registry routes rather than behind the project resolver.
   app.use('/api/llm', llmRouter);
@@ -157,6 +168,15 @@ export function createApp(opts: CreateAppOptions): express.Express {
       });
     }
   }
+
+  // The workspace's CONTEXT: its documentation sources and what they yielded.
+  // A source belongs to the workspace, not to a repository, so this mounts
+  // above the repository routers and behind the gate alone — no slug to resolve.
+  app.use('/api/context', createContextRouter({ githubLinks, github: opts.github?.access ?? null }));
+
+  // Home: the workspace's sections today and over time, what waits on a person
+  // and what changed. Workspace-scoped like Context, and read-only.
+  app.use('/api/home', createHomeRouter({ githubLinks }));
 
   // Home page / registry routes run without a project.
   app.use('/api/repos', createReposRouter({ githubLinks }));
@@ -176,7 +196,7 @@ export function createApp(opts: CreateAppOptions): express.Express {
   app.use('/api/repos', projectResolver, flowsRouter);
   app.use('/api/repos', projectResolver, analyticsRouter);
   app.use('/api/repos', projectResolver, specRouter);
-  app.use('/api/repos', projectResolver, specSourcesRouter);
+  app.use('/api/repos', projectResolver, createContextBindingsRouter());
   app.use('/api/repos', projectResolver, guardRouter);
   app.use('/api/repos', projectResolver, guardActionsRouter);
   app.use('/api/repos', projectResolver, sessionsRouter);

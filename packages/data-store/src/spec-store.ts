@@ -187,6 +187,27 @@ export class PgSpecStore implements SpecStore {
     return this.content.getJson<T>(contentScope.workspaceSpec(ref.workspaceOrgId), rows[0].contentSha);
   }
 
+  /** The workspace scan's document snapshot: bodies once per workspace by sha,
+   *  the manifest as the workspace's `docs` artifact. */
+  async saveWorkspaceSpecDocs(ref: WorkspaceRef, files: Record<string, string>): Promise<void> {
+    const scope = contentScope.workspaceSpec(ref.workspaceOrgId);
+    const manifest: Record<string, string> = {};
+    for (const [docRef, body] of Object.entries(files)) {
+      manifest[docRef] = await this.content.putText(scope, body);
+    }
+    await this.saveWorkspaceSpec(ref, 'docs', { v: 1, files: manifest });
+  }
+
+  async loadWorkspaceSpecDoc(workspaceOrgId: string, docRef: string): Promise<string | null> {
+    const manifest = await this.loadWorkspaceSpec<SpecDocsManifest>(
+      { workspaceOrgId },
+      'docs',
+    );
+    const sha = manifest?.files?.[docRef];
+    if (!sha) return null;
+    return this.content.get(contentScope.workspaceSpec(workspaceOrgId), sha);
+  }
+
   // --- decisions ledger (per scope: a repo key, or `ws:<org>`) --------------
 
   private async saveDecisions(scope: string, json: unknown): Promise<void> {

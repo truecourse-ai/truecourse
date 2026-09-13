@@ -1,5 +1,3 @@
-// PREVIEW: REAL — which agentic commands the shell can start for itself.
-
 /**
  * The command → start-it map.
  *
@@ -8,18 +6,17 @@
  * up by adding their call here, and nothing else changes.
  */
 
-import { startGuardGenerate, startGuardSetup, startSpecScan, type RunStart } from './scan';
+import { startContextScan, startGuardGenerate, startGuardSetup, type RunStart } from './scan';
 
 export type RunTrigger = (repoId: string, resumeRunId?: string) => Promise<RunStart>;
 
 const RUN_TRIGGERS: Record<string, RunTrigger> = {
-  'spec-scan': startSpecScan,
+  // The Document scan belongs to the workspace, not to a repository: whichever
+  // run row offers it, it starts the one workspace scan.
+  'spec-scan': () => startContextScan(),
   'guard-setup': startGuardSetup,
   'guard-generate': startGuardGenerate,
 };
 
 export const triggerFor = (command: string): RunTrigger | null =>
   RUN_TRIGGERS[command] ?? null;
-
-/** The command a repository with no runs at all starts with. */
-export const FIRST_RUN_COMMAND = 'spec-scan';

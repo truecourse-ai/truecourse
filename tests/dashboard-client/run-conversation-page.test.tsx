@@ -84,6 +84,40 @@ function factCount(text: string): number {
   return sentences + pairs;
 }
 
+/**
+ * A run in flight, with the clocks the record carries: one step being worked
+ * on, one piece of work still going and one that ended.
+ */
+const LIVE_RUN = {
+  command: 'guard-generate',
+  runId: 'run-live-clock',
+  gitRef: 'abc1234',
+  startedAt: '2026-09-11T10:00:00.000Z',
+  status: 'running',
+  activityStream: 'ai-sdk-v1',
+  display: {
+    blocks: [
+      {
+        kind: 'checklist',
+        items: [
+          { key: 'extract', label: 'Extracting claims', status: 'done', startedAt: '2026-09-11T10:00:10.000Z', endedAt: '2026-09-11T10:00:20.000Z' },
+          { key: 'match', label: 'Matching flows', status: 'active', detail: '46/85 flow×surface', startedAt: '2026-09-11T10:00:30.000Z',
+            sessionKinds: ['guard-generate.flow-worker'] },
+        ],
+      },
+    ],
+  },
+  sessions: [
+    { sessionId: 'ses-run', kind: 'guard-generate.flow-worker', workItem: 'flow:create-an-expense:api', status: 'running',
+      startedAt: '2026-09-11T10:00:40.000Z', spent: { turns: 1, tokens: 10, costUsd: 0 } },
+    { sessionId: 'ses-done', kind: 'guard-generate.flow-worker', workItem: 'flow:list-expenses:api', status: 'completed',
+      startedAt: '2026-09-11T10:00:10.000Z', endedAt: '2026-09-11T10:01:42.000Z', spent: { turns: 4, tokens: 90, costUsd: 0 } },
+    // Stopped with the machine that ran it: it never recorded an end.
+    { sessionId: 'ses-lost', kind: 'guard-generate.flow-worker', workItem: 'flow:pay-an-invoice:api', status: 'parked',
+      startedAt: '2026-09-11T10:00:20.000Z', spent: { turns: 2, tokens: 20, costUsd: 0 } },
+  ],
+} as unknown as PublicSessionRun;
+
 function renderPage(run: PublicSessionRun) {
   return render(
     <MemoryRouter>
@@ -467,6 +501,71 @@ describe('one conversation, as a page', () => {
       expect(within(pane()).getAllByText('A newly recorded message')).toHaveLength(1);
       fresh.unmount();
     } finally { vi.useRealTimers(); }
+  });
+
+  it('shows how long every piece of work has taken, and keeps counting the ones still going', async () => {
+    serve([]);
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-09-11T10:01:00.000Z'));
+      renderPage(LIVE_RUN);
+      const running = screen.getByRole('button', { name: /^flow:create-an-expense:api/ });
+      const done = screen.getByRole('button', { name: /^flow:list-expenses:api/ });
+      // Nothing is open: every row carries its own elapsed all the same.
+      expect(screen.queryByRole('complementary', { name: 'Work' })).toBeNull();
+      expect(within(running).getByText('20s')).toBeInTheDocument();
+      expect(within(done).getByText('1m 32s')).toBeInTheDocument();
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      expect(within(running).getByText('21s')).toBeInTheDocument();
+      expect(within(done).getByText('1m 32s')).toBeInTheDocument();
+
+      // Work that stopped without recording its end says nothing rather than
+      // counting on against a clock it left long ago.
+      const lost = screen.getByRole('button', { name: /^flow:pay-an-invoice:api/ });
+      expect(lost.textContent).toBe('flow:pay-an-invoice:apiflow-worker');
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('shows the step being worked on as working: a pulsing dot and its own elapsed', async () => {
+    serve([]);
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-09-11T10:01:00.000Z'));
+      renderPage(LIVE_RUN);
+      const heading = screen.getByRole('heading', { level: 2, name: /Matching flows/ });
+      expect(heading.querySelector('[aria-hidden]')?.className).toContain('animate-pulse');
+      expect(within(heading).getByText('30s')).toBeInTheDocument();
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      expect(within(heading).getByText('31s')).toBeInTheDocument();
+
+      // A step that has ended keeps the time it took, and stops pulsing.
+      const settled = screen.getByRole('heading', { level: 2, name: /Extracting claims/ });
+      expect(settled.querySelector('[aria-hidden]')?.className).not.toContain('animate-pulse');
+      expect(within(settled).getByText('10s')).toBeInTheDocument();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('folds a prompt that arrived as one very long line', async () => {
+    const blob = JSON.stringify({ instruction: 'Author the scenarios of this flow.', flow: 'x'.repeat(400) });
+    serve([
+      { cursor: 0, kind: 'session-event', sessionId: 'ses-run',
+        event: { type: 'session-start', seq: 0, ts: '2026-09-11T10:00:40.000Z', kind: 'guard-generate.flow-worker', workItem: 'flow:create-an-expense:api', systemPrompt: 'S', toolNames: [] } },
+      { cursor: 1, kind: 'session-event', sessionId: 'ses-run',
+        event: { type: 'user-message', seq: 1, ts: '2026-09-11T10:00:41.000Z', content: blob } },
+    ] as ActivityEvent[]);
+    renderPage(LIVE_RUN);
+    await userEvent.click(screen.getByRole('button', { name: /^flow:create-an-expense:api/ }));
+    const work = within(pane());
+    // A text with no line breaks is measured in characters; folded to its
+    // first lines until it is opened, exactly as a many-line one.
+    await work.findByText(`${blob.length} characters`);
+    const asParagraph = (): boolean =>
+      [...pane().querySelectorAll('p')].some((p) => p.textContent === blob);
+    expect(asParagraph()).toBe(false);
+    expect(pane().querySelector('.line-clamp-3')?.textContent).toBe(blob);
+    await userEvent.click(work.getByRole('button', { name: rx(blob.slice(0, 30)) }));
+    expect(asParagraph()).toBe(true);
   });
 
   it('shows a selected transcript error without downloading other agents', async () => {

@@ -114,6 +114,7 @@ export type { CurateResult, CurateStats } from './curate.js';
 
 export {
   resolveRepoIdentity,
+  resolveWorkspaceIdentity,
   readRepoIdentityInput,
   repoFromRemote,
   coresOf,

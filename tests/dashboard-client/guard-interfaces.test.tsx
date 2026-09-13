@@ -683,7 +683,9 @@ const catalogOutline = () =>
   ).map((el) =>
     el.getAttribute('role') === 'listitem'
       ? rowLabel(el)
-      : `# ${el.querySelector('span')?.textContent ?? ''}`,
+      // A group header's label is the element that takes the row's slack; the
+      // count sits beside it and the whole face rides an opaque ground.
+      : `# ${el.querySelector('.flex-1')?.textContent ?? ''}`,
   );
 
 /** A place row of the panel, by the title it reads under. */

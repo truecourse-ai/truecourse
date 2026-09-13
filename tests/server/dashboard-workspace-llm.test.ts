@@ -73,8 +73,8 @@ import { analyzeInProcess } from '@truecourse/core/commands/analyze-in-process';
 import { isAnalysisActive } from '@truecourse/core/services/analysis-registry';
 import { createLLMProvider } from '@truecourse/core/services/llm/provider';
 import { getFlowFromLatest, enrichFlowWithLLM } from '@truecourse/core/services/flow';
-import { createSessionRun, listSessionRuns } from '@truecourse/core/lib/sessions-store';
-import { runStoredSpecScan } from '../../apps/dashboard/server/src/services/spec-scan.service';
+import { listSessionRuns } from '@truecourse/core/lib/sessions-store';
+import { workspaceSessionsKey } from '@truecourse/core/commands/context-scan';
 import type { SessionDriver } from '@truecourse/agent-loop';
 import type { LlmTransport } from '@truecourse/shared/llm';
 import type { GlobalApiLlmConfig } from '@truecourse/core/config/global-config';
@@ -154,8 +154,10 @@ const url = (suffix: string) => `/api/repos/${fixture.project.slug}/${suffix}`;
 
 const start = (suffix: string) => {
   switch (suffix) {
+    // The Document scan belongs to the WORKSPACE: it is started at the
+    // workspace address, not under a repository.
     case 'spec scan':
-      return request(app).post(url('spec/corpus/scan'));
+      return request(app).post('/api/context/scan');
     case 'guard generate':
       return request(app).post(url('guard/generate')).send({ confirmed: true });
     case 'analyze':
@@ -166,6 +168,9 @@ const start = (suffix: string) => {
 };
 
 const ENTRIES = ['spec scan', 'guard generate', 'analyze', 'flow enrich'];
+
+/** The workspace's own scan runs, newest first — the Document scan's records. */
+const workspaceScanRuns = () => listSessionRuns(workspaceSessionsKey(TEST_ORG), 'spec-scan');
 
 describe('a workspace with no provider configured', () => {
   beforeEach(() => {
@@ -182,9 +187,9 @@ describe('a workspace with no provider configured', () => {
     await start('spec scan').expect(409);
     await start('guard generate').expect(409);
     expect(probe).not.toHaveBeenCalled();
-    expect(jobs.scans).toEqual([]);
+    expect(jobs.contextScans).toEqual([]);
     expect(jobs.guardGenerates).toEqual([]);
-    expect(listSessionRuns(fixture.repoPath, 'spec-scan')).toHaveLength(0);
+    expect(workspaceScanRuns()).toHaveLength(0);
   });
 });
 
@@ -196,17 +201,19 @@ describe('a provider that will not answer', () => {
   it.each(ENTRIES)('answers %s with the probe failure, before any spend', async (entry) => {
     const res = await start(entry).expect(502);
     expect(res.body).toMatchObject({ error: 'llm-probe-failed', message: '401 invalid x-api-key' });
-    expect(jobs.scans).toEqual([]);
+    expect(jobs.contextScans).toEqual([]);
     expect(jobs.guardGenerates).toEqual([]);
     expect(vi.mocked(analyzeInProcess)).not.toHaveBeenCalled();
     expect(vi.mocked(enrichFlowWithLLM)).not.toHaveBeenCalled();
   });
 
+  // The scan is the WORKSPACE's now, so the run it leaves is the workspace's.
   it('leaves the scan a failed run that says why, so Activity can show it', async () => {
+    const before = workspaceScanRuns().length;
     await start('spec scan').expect(502);
 
-    const runs = listSessionRuns(fixture.repoPath, 'spec-scan');
-    expect(runs).toHaveLength(1);
+    const runs = workspaceScanRuns();
+    expect(runs).toHaveLength(before + 1);
     expect(runs[0]).toMatchObject({
       status: 'failed',
       error: { message: '401 invalid x-api-key', kind: 'llm-probe' },
@@ -216,24 +223,18 @@ describe('a provider that will not answer', () => {
 
 describe('a configured, answering provider', () => {
   // The scan runs on the queue, so the route's job is the PRE-FLIGHT: prove the
-  // workspace's provider, then hand the repository to the runner.
+  // workspace's provider, then hand the WORKSPACE to the runner — the scan is
+  // the workspace's Document scan, whatever surface pressed it.
   it('proves the workspace provider, then queues the scan', async () => {
     const res = await start('spec scan').expect(202);
 
     expect(probe).toHaveBeenCalledTimes(1);
     expect(probe.mock.calls[0][0]).toEqual(WORKSPACE_CONFIG);
     expect(res.body).toEqual({ jobId: 'job_test' });
-    expect(jobs.scans).toEqual([
-      {
-        repoId: fixture.project.slug,
-        repoFullName: fixture.repoPath,
-        workspaceOrgId: TEST_ORG,
-        source: 'manual',
-      },
-    ]);
+    expect(jobs.contextScans).toEqual([{ workspaceOrgId: TEST_ORG, source: 'manual' }]);
   });
 
-  it('answers 409 when the repository is already working', async () => {
+  it('answers 409 when a scan is already running', async () => {
     jobs.answer = { status: 'busy' };
 
     const res = await start('spec scan').expect(409);
@@ -258,43 +259,21 @@ describe('a configured, answering provider', () => {
   });
 
   it('gives the analyze LLM rules that same transport', async () => {
-    // The run starts after the 202 — the route accepts, then works.
+    // The run starts after the 202 — the route accepts, then works. How long
+    // that takes is not this test's subject, so the wait is generous: under a
+    // loaded suite the default second is not enough, and a timeout there would
+    // be a lie about the transport.
     await start('analyze').expect(202);
 
-    await vi.waitFor(() => expect(vi.mocked(createLLMProvider)).toHaveBeenCalledWith(transport));
-  });
+    await vi.waitFor(() => expect(vi.mocked(createLLMProvider)).toHaveBeenCalledWith(transport), {
+      timeout: 20_000,
+    });
+  }, 30_000);
 
   it('enriches a flow on that transport', async () => {
     await start('flow enrich').expect(200);
 
     expect(vi.mocked(enrichFlowWithLLM)).toHaveBeenCalledWith(fixture.repoPath, 'f1', transport);
-  });
-
-  // The pipeline itself, not the route: whatever kills a scan lands ON the run
-  // record before it is rethrown, because Activity shows runs, not this
-  // process's log.
-  it('records WHY a scan crashed on the run it created', async () => {
-    vi.mocked(curateInProcess).mockImplementationOnce(async (_repoRoot, options) => {
-      const run = createSessionRun(fixture.repoPath, { command: 'spec-scan', gitRef: 'main' });
-      options?.onRunStarted?.({ command: 'spec-scan', runId: run.runId, dir: run.dir });
-      run.finish('failed');
-      throw new Error('the clone went missing');
-    });
-
-    await expect(runStoredSpecScan(fixture.repoPath, { driver })).rejects.toThrow(
-      'the clone went missing',
-    );
-
-    expect(listSessionRuns(fixture.repoPath, 'spec-scan')[0]).toMatchObject({
-      status: 'failed',
-      error: { message: 'the clone went missing' },
-    });
-  });
-
-  it('runs the spec scan on the driver built from the workspace config', async () => {
-    await runStoredSpecScan(fixture.repoPath, { driver, transportMode: 'api' });
-
-    expect(vi.mocked(curateInProcess).mock.calls[0][1]).toMatchObject({ driver });
   });
 
   it('leaves analyze alone when LLM rules are off — no provider is needed', async () => {
@@ -332,7 +311,7 @@ describe("operator mode — the server's own Claude Code", () => {
 
     expect(claudeProbe).toHaveBeenCalledTimes(1);
     expect(probe).not.toHaveBeenCalled();
-    expect(jobs.scans).toHaveLength(1);
+    expect(jobs.contextScans).toHaveLength(1);
   });
 
   it('queues the generate on the operator’s login too', async () => {
@@ -348,6 +327,6 @@ describe("operator mode — the server's own Claude Code", () => {
 
     const res = await start('spec scan').expect(502);
     expect(res.body).toMatchObject({ error: 'llm-probe-failed', message: 'Not logged in · run claude login' });
-    expect(jobs.scans).toEqual([]);
+    expect(jobs.contextScans).toEqual([]);
   });
 });

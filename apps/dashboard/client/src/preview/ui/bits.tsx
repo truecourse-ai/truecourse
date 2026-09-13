@@ -1,8 +1,7 @@
 /**
- * The small shared pieces every preview screen reaches for: the provider mark,
- * the neutral capsules (origin, driver, interface source), the pin mark a
- * pinned detail wears, a detail pane's header and its footer facts, and the
- * preview/pin selection hook the panels share.
+ * The small shared pieces every screen reaches for: the provider mark, the
+ * neutral capsule, the pin mark a pinned detail wears, a detail pane's header
+ * and its footer facts, and the preview/pin selection hook the panels share.
  *
  * They live together because each is three lines and none of them is a
  * decision: the decisions are in {@link StatusWord} (a status is a dot plus a
@@ -12,14 +11,14 @@
 
 import { useCallback, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronRight, Cloud, Github, Gitlab, Pin, type LucideIcon } from 'lucide-react';
-import type { InterfaceOrigin, ProviderId, RunOrigin, StepDriver } from '@/preview/data/types';
+import { ChevronRight, Pin } from 'lucide-react';
+import type { ProviderId } from '@/preview/data/types';
+import azure from './logos/azure.svg';
+import github from './logos/github.svg';
+import gitlab from './logos/gitlab.svg';
 
-const PROVIDER_ICON: Record<ProviderId, LucideIcon> = {
-  github: Github,
-  gitlab: Gitlab,
-  azure: Cloud,
-};
+/** The providers' own marks (the SVG Logos and Devicon sets, CC0/MIT), as image files. */
+const PROVIDER_LOGO: Record<ProviderId, string> = { github, gitlab, azure };
 
 export const PROVIDER_NAME: Record<ProviderId, string> = {
   github: 'GitHub',
@@ -28,8 +27,13 @@ export const PROVIDER_NAME: Record<ProviderId, string> = {
 };
 
 export function ProviderIcon({ provider, className = 'h-3.5 w-3.5' }: { provider: ProviderId; className?: string }) {
-  const Icon = PROVIDER_ICON[provider];
-  return <Icon className={`${className} shrink-0 text-muted-foreground`} aria-label={PROVIDER_NAME[provider]} />;
+  return (
+    <img
+      src={PROVIDER_LOGO[provider]}
+      alt={PROVIDER_NAME[provider]}
+      className={`${className} shrink-0 object-contain`}
+    />
+  );
 }
 
 /** A neutral bounded label. Never a status: those are dot plus word. */
@@ -38,24 +42,6 @@ export const CHIP_CLASS = 'inline-flex shrink-0 items-center rounded bg-muted px
 
 export function Capsule({ children, className = '' }: { children: ReactNode; className?: string }) {
   return <span className={`${CHIP_CLASS} ${className}`}>{children}</span>;
-}
-
-export function OriginChip({ origin }: { origin: RunOrigin }) {
-  return <Capsule>{origin}</Capsule>;
-}
-
-export function DriverChips({ drivers }: { drivers: readonly StepDriver[] }) {
-  return (
-    <>
-      {drivers.map((d) => (
-        <Capsule key={d}>{d}</Capsule>
-      ))}
-    </>
-  );
-}
-
-export function SourceChip({ origin }: { origin: InterfaceOrigin }) {
-  return <Capsule>{origin}</Capsule>;
 }
 
 /** The mark a pinned detail wears in its header, so a pin is visible, not remembered. */
@@ -95,11 +81,21 @@ export function DetailHeader({
 }
 
 /** Footer facts: one per line, label left, value right, no table. */
-export function Facts({ rows }: { rows: readonly { label: string; value: ReactNode }[] }) {
+export function Facts({
+  rows,
+  /** The list's own classes: a border when nothing around it draws one. */
+  className = '',
+  /** The rows' horizontal inset: `px-4` inside a box, `px-6` flush with a pane. */
+  rowClassName = 'px-4',
+}: {
+  rows: readonly { label: string; value: ReactNode }[];
+  className?: string;
+  rowClassName?: string;
+}) {
   return (
-    <dl className="divide-y divide-border/60 border-t border-border">
+    <dl className={`divide-y divide-border/60 ${className}`}>
       {rows.map((r) => (
-        <div key={r.label} className="flex items-baseline gap-4 px-4 py-1.5 text-xs">
+        <div key={r.label} className={`flex items-baseline gap-4 py-1.5 text-xs ${rowClassName}`}>
           <dt className="w-44 shrink-0 text-muted-foreground">{r.label}</dt>
           <dd className="min-w-0 flex-1 break-words text-foreground">{r.value}</dd>
         </div>

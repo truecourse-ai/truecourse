@@ -8,21 +8,9 @@
  *
  * The mutable resolution ledger (decisions) is NOT here — it's per-repo, not
  * per-commit, and lives inline in the `decisions` table.
- *
- *   spec_sources — the repo's registered web spec sources (the llms.txt sites
- *                  `spec source add` snapshots): one mutable registry row per
- *                  repo, the page bodies content-addressed in `content` under
- *                  the same spec scope by the hash the registry names.
  */
 
-import {
-  pgTable,
-  text,
-  timestamp,
-  primaryKey,
-  index,
-  jsonb,
-} from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, primaryKey, index } from 'drizzle-orm/pg-core';
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'string' });
 
@@ -42,10 +30,3 @@ export const specSets = pgTable(
     index('spec_sets_repo_artifact_created_idx').on(t.repoKey, t.artifact, t.createdAt),
   ],
 );
-
-export const specSources = pgTable('spec_sources', {
-  repoKey: text('repo_key').primaryKey(),
-  /** The `sources.json` registry as the engine writes it. */
-  registry: jsonb('registry').notNull(),
-  updatedAt: ts('updated_at').notNull(),
-});

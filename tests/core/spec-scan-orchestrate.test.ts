@@ -28,6 +28,8 @@ import {
   SPEC_SCAN_ORCHESTRATE_SESSION_KIND,
   applyScopeVerdicts,
   buildScanScopeUniverse,
+  buildWorkspaceScopeUniverse,
+  verdictCoversDoc,
   mergeScopeOutcome,
   normalizeScopePath,
   orchestrateSessionDef,
@@ -501,6 +503,73 @@ describe('applyScopeVerdicts', () => {
     )
     expect(kept.map((d) => d.path)).toContain('docs/archive/old.md')
     expect(kept.map((d) => d.path)).not.toContain('docs/a.md')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The CONTEXT grammar — the workspace's universe, where every document is
+// `context/<sourceId>/<docPath>` and a verdict names a source or a subtree of one.
+// ---------------------------------------------------------------------------
+
+describe('scope verdicts under the context grammar', () => {
+  const docs = [
+    docCandidate('context/repo-src/README.md'),
+    docCandidate('context/repo-src/docs/a.md'),
+    docCandidate('context/repo-src/docs/archive/old.md'),
+    docCandidate('context/site-src/index.md'),
+  ]
+  const sources = [
+    { id: 'repo-src', title: 'acme/widgets', pages: 3 },
+    { id: 'site-src', title: 'Acme Docs', pages: 1 },
+  ]
+  const ids = new Set(sources.map((s) => s.id))
+  const apply = (rows: Parameters<typeof applyScopeVerdicts>[1]): string[] =>
+    applyScopeVerdicts(docs, rows, sources, [], 'context').map((d) => d.path)
+
+  it('a SOURCE ID covers every document of that source', () => {
+    expect(verdictCoversDoc('site-src', 'context/site-src/index.md', ids, 'context')).toBe(true)
+    expect(verdictCoversDoc('site-src', 'context/repo-src/docs/a.md', ids, 'context')).toBe(false)
+    expect(apply([verdict({ path: 'site-src', verdict: 'exclude' })])).not.toContain(
+      'context/site-src/index.md',
+    )
+  })
+
+  it('a SUBTREE of a repository source is `context/<sourceId>/<dir>`', () => {
+    expect(apply([verdict({ path: 'context/repo-src/docs/archive', verdict: 'exclude' })])).toEqual([
+      'context/repo-src/README.md',
+      'context/repo-src/docs/a.md',
+      'context/site-src/index.md',
+    ])
+  })
+
+  it('the source\'s own full prefix works too, and the most specific still wins', () => {
+    expect(
+      apply([
+        verdict({ path: 'context/repo-src', verdict: 'exclude' }),
+        verdict({ path: 'context/repo-src/docs', verdict: 'keep' }),
+      ]),
+    ).toEqual(['context/repo-src/docs/a.md', 'context/repo-src/docs/archive/old.md', 'context/site-src/index.md'])
+  })
+
+  it('`.` covers nothing — no document of a workspace is root-level', () => {
+    expect(verdictCoversDoc('.', 'context/repo-src/README.md', ids, 'context')).toBe(false)
+    expect(apply([verdict({ path: '.', verdict: 'exclude' })])).toHaveLength(4)
+  })
+
+  it('a covered workspace spends no session; growth inside one source re-opens it', () => {
+    const scope = buildWorkspaceScopeUniverse(buildScanUniverse(docs), sources)
+    const rows = sources.map((s) => verdict({ path: s.id, verdict: 'keep' }))
+    expect(scopeCoverage(scope, rows).covered).toBe(true)
+
+    const grown = buildWorkspaceScopeUniverse(
+      buildScanUniverse([...docs, docCandidate('context/new-src/a.md')]),
+      [...sources, { id: 'new-src', title: 'New', pages: 1 }],
+    )
+    const coverage = scopeCoverage(grown, rows)
+    expect(coverage.covered).toBe(false)
+    expect(coverage.uncoveredSources.map((s) => s.id)).toEqual(['new-src'])
+    // Uncovered documents are grouped the way a verdict path is written.
+    expect(coverage.uncoveredDirs.map((d) => d.path)).toEqual(['context/new-src'])
   })
 })
 
