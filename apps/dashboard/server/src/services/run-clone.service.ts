@@ -35,9 +35,6 @@ const CLONE_TIMEOUT_MS = 10 * 60 * 1000;
 /** The config key `cloneAuthArgs` sets, and that the fresh clone must not keep. */
 const GITHUB_AUTH_HEADER_KEY = 'http.https://github.com/.extraheader';
 
-/** Run-clone dirs older than this are debris from a crashed run. */
-const STALE_CLONE_MS = 60 * 60 * 1000;
-
 /** Prefix every per-run clone dir carries, so the sweep deletes nothing else. */
 const RUN_CLONE_PREFIX = 'tc-run-';
 
@@ -105,7 +102,7 @@ export interface RunClone {
 /**
  * Shallow-clone a connected repository into a fresh per-run directory under
  * its workspace's run-clones dir. The caller MUST `dispose()` when the run
- * settles, however it settles; the boot sweep only covers crashes.
+ * settles, however it settles; the boot sweep only covers a crash.
  *
  * The token rides a `git clone -c http.*.extraheader` flag rather than the
  * URL, so it stays out of the recorded remote, out of git's error output
@@ -159,27 +156,28 @@ export async function createRunClone(
 }
 
 /**
- * Remove run-clone dirs left behind by a crashed process. Called once at boot;
- * an hour is far longer than any single run, so a live run's clone is never
- * touched.
+ * Remove every run clone under this machine's run-clones dir. Called once at
+ * boot: a clone belongs to the process that made it and dies with it, and a
+ * booting process has made none — so whatever is there is debris from a run
+ * that never got to dispose it, however recently it was written. This is the
+ * only process that reads or writes the dir (a second server on one machine
+ * relocates it with TRUECOURSE_HOME), so there is no live run to protect.
  */
-export function sweepStaleRunClones(now = Date.now()): number {
+export function sweepRunClones(): number {
   let removed = 0;
   for (const tenant of listDirs(getRunClonesDir())) {
     const tenantRoot = path.join(getRunClonesDir(), tenant);
     for (const name of listDirs(tenantRoot)) {
       if (!name.startsWith(RUN_CLONE_PREFIX)) continue;
-      const full = path.join(tenantRoot, name);
       try {
-        if (now - fs.statSync(full).mtimeMs < STALE_CLONE_MS) continue;
-        fs.rmSync(full, { recursive: true, force: true });
+        fs.rmSync(path.join(tenantRoot, name), { recursive: true, force: true });
         removed += 1;
       } catch {
         // best-effort
       }
     }
   }
-  if (removed > 0) log.info(`[run-clone] swept ${removed} stale run clone(s)`);
+  if (removed > 0) log.info(`[run-clone] swept ${removed} abandoned run clone(s)`);
   return removed;
 }
 

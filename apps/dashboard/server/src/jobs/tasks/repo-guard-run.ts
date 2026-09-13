@@ -4,14 +4,16 @@
  *
  * The last link of onboarding: a generate that authored scenarios chains into
  * it, and the Run button enqueues it. The runner is deterministic and reads
- * files, so the job brackets it the way the generate job does: the baseline
- * scenario set and setup's newest bundle (the recipe, the dependency catalog,
- * the interface catalog the drift annotation reads) are materialized into the
- * clone, the committed scenarios run against the program the recipe builds,
- * and what the run left — the run snapshot and every scenario's evidence,
- * transcripts and browser screenshots alike — is saved back under the clone's
- * commit as the repo's guard baseline. The job only ever runs on the default
- * branch.
+ * files, so the job brackets it the way the generate job does: the repository's
+ * slice of the workspace spec (the documents a scenario binds to — without them
+ * every bind resolves against a file that is not there and the whole board
+ * settles orphaned), the baseline scenario set and setup's newest bundle (the
+ * recipe, the dependency catalog, the interface catalog the drift annotation
+ * reads) are materialized into the clone, the committed scenarios run against
+ * the program the recipe builds, and what the run left — the run snapshot and
+ * every scenario's evidence, transcripts and browser screenshots alike — is
+ * saved back under the clone's commit as the repo's guard baseline. The job
+ * only ever runs on the default branch.
  *
  * The one LLM call a run can make, the visual judge over a failing web step's
  * screenshot, rides the asking workspace's provider — and only when the judge
@@ -37,6 +39,7 @@ import type { GuardSummary } from '@truecourse/shared';
 import type { JobDefinition, JobPayload } from '@truecourse/jobs';
 import { startWorkspaceLlm, type WorkspaceLlm } from '../../services/workspace-llm.service.js';
 import { acquireWorkTree } from '../../services/work-tree.service.js';
+import { materializeStoredSpec } from '../materialize-spec.js';
 import { materializeStoredGuardState, persistGuardRun } from '../materialize-guard.js';
 import { firstLine, mirrorTracker, type OnboardingJobRequest } from './onboarding.js';
 
@@ -84,6 +87,10 @@ export function createRepoGuardRunTask(
       const tree = await acquireWorkTree(repoFullName);
       try {
         const commitSha = await resolveCommitSha(tree.dir);
+        const ref = { repoKey: repoFullName, commitSha };
+        // The documents first: a scenario binds to a `context/` ref, and the
+        // runner resolves that bind by reading the document out of the clone.
+        await materializeStoredSpec(ref, tree.dir, ctx.payload.workspaceOrgId);
         const baseline = await materializeStoredGuardState(repoFullName, tree.dir);
         if (!baseline) {
           throw new Error(
@@ -112,7 +119,7 @@ export function createRepoGuardRunTask(
         if (ctx.signal?.aborted) return { notification: null };
         if (result.status !== 'ok') throw new Error(runFailureMessage(result));
 
-        await persistGuardRun({ repoKey: repoFullName, commitSha }, tree.dir, result.latest);
+        await persistGuardRun(ref, tree.dir, result.latest);
 
         const { summary } = result.latest;
         const jobResult: GuardRunJobResult = {

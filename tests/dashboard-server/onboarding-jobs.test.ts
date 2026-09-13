@@ -70,9 +70,12 @@ import {
 import { guardSetupInProcess } from '@truecourse/core/commands/guard-setup';
 import { OpenConflictsError } from '@truecourse/core/commands/guard-in-process';
 import {
+  buildDocSectionIndex,
   guardDecisionsPath,
+  indexRepoDocs,
   manifestPath,
   recipePath,
+  resolveBinding,
   scenariosDir,
   writeGuardResult as writeCloneGuardResult,
 } from '@truecourse/guard-runner';
@@ -207,6 +210,15 @@ afterAll(() => {
 
 const request = { repoId: 'widgets', repoFullName: REPO, workspaceOrgId: ORG, source: 'connect' as const };
 
+/** The one Context source the workspace holds in this suite. */
+const SOURCE_ID = 'repo-acme-widgets';
+
+/** The ref a scenario binds to: a document is the WORKSPACE's, not the repo's. */
+const contextRef = (docPath: string): string => `context/${SOURCE_ID}/${docPath}`;
+
+/** The body every seeded document carries — one markdown section. */
+const contextDocBody = (docPath: string): string => `# ${docPath}\n`;
+
 /**
  * The scan's output, as the store holds it now: a workspace corpus over the
  * repository's own Context source, with the documents it names in the context
@@ -214,8 +226,7 @@ const request = { repoId: 'widgets', repoFullName: REPO, workspaceOrgId: ORG, so
  * materializes into its clone.
  */
 async function seedWorkspaceSpec(docPaths: string[] = ['docs/orgs.md']): Promise<void> {
-  const sourceId = 'repo-acme-widgets';
-  await writeContextDocuments(ORG, sourceId, {
+  await writeContextDocuments(ORG, SOURCE_ID, {
     documents: docPaths.map((docPath) => ({
       docId: docPath,
       docPath,
@@ -223,20 +234,20 @@ async function seedWorkspaceSpec(docPaths: string[] = ['docs/orgs.md']): Promise
       url: null,
       contentHash: `sha-${docPath}`,
       updatedAt: '2026-01-01T00:00:00.000Z',
-      body: `# ${docPath}\n`,
+      body: contextDocBody(docPath),
     })),
     removed: [],
   });
-  await setContextBindings(ORG, REPO, [sourceId]);
+  await setContextBindings(ORG, REPO, [SOURCE_ID]);
   await saveWorkspaceSpec({ workspaceOrgId: ORG }, 'corpus', {
     version: 3,
     generatedAt: '2026-01-01T00:00:00Z',
     docs: docPaths.map((docPath) => ({
-      ref: `context/${sourceId}/${docPath}`,
+      ref: contextRef(docPath),
       kind: 'prd',
       lastTouched: '',
       areaTags: [],
-      sourceId,
+      sourceId: SOURCE_ID,
       sourceKind: 'repository',
     })),
     areas: [],
@@ -1114,14 +1125,23 @@ describe('the guard run job', () => {
     });
   }
 
+  /** The bind a stored scenario carries — the default is inert; the binding
+   *  tests pass the document they seeded and the section it really holds. */
+  interface StoredBind {
+    doc: string;
+    section: string;
+    fingerprint: string;
+  }
+  const DEFAULT_BIND: StoredBind = { doc: 'docs/orgs.md', section: 'create', fingerprint: 'sha256:x' };
+
   /** What generate left: a stored scenario set and its baseline report. */
-  async function storeGeneratedSet(): Promise<void> {
+  async function storeGeneratedSet(bind: StoredBind = DEFAULT_BIND): Promise<void> {
     const dir = makeTmpDir('tc-onboarding-run-set-');
     const orgs = path.join(scenariosDir(dir), 'orgs');
     fs.mkdirSync(orgs, { recursive: true });
     fs.writeFileSync(
       path.join(orgs, 'a1.yaml'),
-      ['id: a1', 'title: create an org', 'binds:', '  - doc: docs/orgs.md', '    section: create', '    fingerprint: "sha256:x"', 'steps:', '  - run: ["--help"]', '    expect:', '      exit: 0', ''].join('\n'),
+      ['id: a1', 'title: create an org', 'binds:', `  - doc: ${bind.doc}`, `    section: ${bind.section}`, `    fingerprint: "${bind.fingerprint}"`, 'steps:', '  - run: ["--help"]', '    expect:', '      exit: 0', ''].join('\n'),
     );
     fs.writeFileSync(manifestPath(dir), JSON.stringify({ version: GUARD_FORMAT_VERSION, flows: [] }, null, 2) + '\n');
     const ref = { repoKey: REPO, commitSha: GEN_COMMIT };
@@ -1217,6 +1237,66 @@ describe('the guard run job', () => {
     const [job] = await jobsOfType('repo.guard-run');
     expect(job).toMatchObject({ status: 'failed', error: expect.stringMatching(/pnpm build/) });
     expect(await readGuardLatest(REPO)).toBeNull();
+  });
+
+  // The documents a scenario binds to are the WORKSPACE's, not the clone's: a
+  // run that does not materialize them resolves every bind against a file that
+  // is not there, and the whole board settles orphaned without a build.
+  const DOC_PATH = 'docs/orgs.md';
+
+  /** The section the seeded document really holds, as the runner derives it. */
+  function seededBind(): StoredBind {
+    const doc = contextRef(DOC_PATH);
+    const section = buildDocSectionIndex(doc, contextDocBody(DOC_PATH)).sections[0];
+    if (!section) throw new Error(`the seeded ${doc} holds no section to bind to`);
+    return { doc, section: section.anchor, fingerprint: section.fingerprint };
+  }
+
+  it('materializes the document the scenario binds to into the clone', async () => {
+    await seedWorkspaceSpec();
+    const bind = seededBind();
+    await storeGeneratedSet(bind);
+    await saveSetupBundle();
+
+    const read: { body?: string | null } = {};
+    runImpl = async (repoRoot, options) => {
+      const file = path.join(repoRoot, bind.doc);
+      read.body = fs.existsSync(file) ? fs.readFileSync(file, 'utf-8') : null;
+      return failingRun(repoRoot, options);
+    };
+
+    await jobs.enqueueGuardRun(request);
+    await Promise.all(running);
+
+    const [job] = await jobsOfType('repo.guard-run');
+    expect(job?.error).toBeNull();
+    expect(read.body).toBe(contextDocBody(DOC_PATH));
+  });
+
+  it('binds the stored scenario to that document — a match, not an orphan', async () => {
+    await seedWorkspaceSpec();
+    const bind = seededBind();
+    await storeGeneratedSet(bind);
+    await saveSetupBundle();
+
+    const resolved: { missing?: string[]; kind?: string } = {};
+    runImpl = async (repoRoot, options) => {
+      // The runner's own binding pass, over the clone the job prepared.
+      const docs = indexRepoDocs(repoRoot, [bind.doc]);
+      resolved.missing = [...docs.missing];
+      resolved.kind = resolveBinding(
+        docs.indexes.get(bind.doc) ?? null,
+        bind.section,
+        bind.fingerprint,
+      ).kind;
+      return failingRun(repoRoot, options);
+    };
+
+    await jobs.enqueueGuardRun(request);
+    await Promise.all(running);
+
+    expect(resolved.missing).toEqual([]);
+    expect(resolved.kind).toBe('match');
   });
 });
 

@@ -69,7 +69,7 @@ import {
 import {
   createRunClone,
   getRunClonesDir,
-  sweepStaleRunClones,
+  sweepRunClones,
   type GitRunner,
 } from '../../apps/dashboard/server/src/services/run-clone.service';
 import {
@@ -818,16 +818,21 @@ describe('createRunClone', () => {
     expect(fs.existsSync(tenantRoot) ? fs.readdirSync(tenantRoot) : []).toEqual([]);
   });
 
-  it('sweeps stale run clones and keeps fresh ones', async () => {
+  it('sweeps every run clone at boot, however recently it was written', async () => {
     const { run } = recordingGit();
-    const fresh = await createRunClone(REPO, 't', { workspaceOrgId: ORG, run });
-    const stale = await createRunClone(REPO, 't', { workspaceOrgId: OTHER_ORG, run });
+    // A clone belongs to the process that made it, and a booting process made
+    // none — so a clone written a second ago is as abandoned as an old one.
+    const justNow = await createRunClone(REPO, 't', { workspaceOrgId: ORG, run });
+    const older = await createRunClone(REPO, 't', { workspaceOrgId: OTHER_ORG, run });
     const oldTime = (Date.now() - 2 * 60 * 60 * 1000) / 1000;
-    fs.utimesSync(stale.dir, oldTime, oldTime);
+    fs.utimesSync(older.dir, oldTime, oldTime);
+    // Anything that is not a run clone stays: the sweep goes by the prefix.
+    const keep = path.join(getRunClonesDir(), 'org_a', 'not-a-run-clone');
+    fs.mkdirSync(keep, { recursive: true });
 
-    expect(sweepStaleRunClones()).toBe(1);
-    expect(fs.existsSync(fresh.dir)).toBe(true);
-    expect(fs.existsSync(stale.dir)).toBe(false);
-    fresh.dispose();
+    expect(sweepRunClones()).toBe(2);
+    expect(fs.existsSync(justNow.dir)).toBe(false);
+    expect(fs.existsSync(older.dir)).toBe(false);
+    expect(fs.existsSync(keep)).toBe(true);
   });
 });

@@ -11,7 +11,7 @@ import { installDbStores, setRepoWorkspaceLookup } from './stores.js';
 import { setContextEventPublisher } from './services/context.service.js';
 import { startContextSyncSchedule, type ContextSchedule } from './services/context-schedule.service.js';
 import { operatorClaudeCode } from './services/workspace-llm.service.js';
-import { sweepStaleRunClones } from './services/run-clone.service.js';
+import { sweepRunClones } from './services/run-clone.service.js';
 import { setRepoJobsCanceller } from './services/repo-removal.service.js';
 import { stopAllWatchers } from './services/watcher.service.js';
 import { stopAllRunTails } from './services/session-tailer.service.js';
@@ -67,7 +67,7 @@ async function main() {
   // Swap the file storage seams for Postgres before anything reads or writes
   // repo state, and clear run-clone debris a crashed process left behind.
   installDbStores(getDbHandle(), { masterSecret });
-  sweepStaleRunClones();
+  sweepRunClones();
   if (operatorClaudeCode()) {
     log.info("[LLM] operator mode — every workspace runs on this process's Claude Code login");
   }
