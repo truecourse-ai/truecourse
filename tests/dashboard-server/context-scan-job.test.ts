@@ -37,7 +37,12 @@ import {
   type ContextSyncJobRequest,
   type ContextSyncJobResult,
 } from '../../apps/dashboard/server/src/jobs/tasks/context-sync';
-import { rippleContextScan, sliceChanged, type RippleRepo } from '../../apps/dashboard/server/src/jobs/context-ripple';
+import {
+  rippleContextScan,
+  rippleLinksChanged,
+  sliceChanged,
+  type RippleRepo,
+} from '../../apps/dashboard/server/src/jobs/context-ripple';
 import { setContextEventPublisher } from '../../apps/dashboard/server/src/services/context.service';
 import { memoryContextStore } from '../helpers/memory-context-store';
 import type { WorkspaceLlm } from '../../apps/dashboard/server/src/services/workspace-llm.service';
@@ -500,6 +505,60 @@ describe('the ripple', () => {
 
   // The ripple runs from the settle hook, once the single-flight key is free —
   // so the repositories it starts are started after the scan's own row settled.
+  // A repository's links changing moves its slice with the corpus standing
+  // still: the one repository gets the ripple's rule, and no scan.
+  describe('for a repository whose links changed', () => {
+    const widgets: RippleRepo = { repoId: 'widgets', repoFullName: 'acme/widgets', sourceIds: [SRC_A] };
+
+    it('starts Test generation for a repository that is set up', async () => {
+      const r = ripple({ setUp: ['acme/widgets'] });
+      const started = await rippleLinksChanged(r.deps, { corpus: corpus(), openConflicts: 0, repo: widgets });
+
+      expect(r.generates).toEqual(['acme/widgets']);
+      expect(started).toEqual({ repoFullName: 'acme/widgets', job: 'guard-generate' });
+    });
+
+    it('starts Test setup for one that never was', async () => {
+      const r = ripple();
+      const started = await rippleLinksChanged(r.deps, { corpus: corpus(), openConflicts: 0, repo: widgets });
+
+      expect(r.setups).toEqual(['acme/widgets']);
+      expect(started?.job).toBe('guard-setup');
+    });
+
+    it('starts nothing while its setup is in flight — a connect just started it', async () => {
+      const r = ripple({ settingUp: ['acme/widgets'] });
+      const started = await rippleLinksChanged(r.deps, { corpus: corpus(), openConflicts: 0, repo: widgets });
+
+      expect(started).toBeNull();
+      expect(r.setups).toEqual([]);
+      expect(r.generates).toEqual([]);
+    });
+
+    it('starts nothing before the workspace has a corpus, or when the links cut no slice', async () => {
+      const r = ripple({ setUp: ['acme/widgets'] });
+      expect(await rippleLinksChanged(r.deps, { corpus: null, openConflicts: 0, repo: widgets })).toBeNull();
+      expect(
+        await rippleLinksChanged(r.deps, { corpus: corpus(), openConflicts: 0, repo: { ...widgets, sourceIds: [] } }),
+      ).toBeNull();
+      expect(r.generates).toEqual([]);
+    });
+
+    it('starts nothing while a conflict is open', async () => {
+      const r = ripple({ setUp: ['acme/widgets'] });
+      expect(await rippleLinksChanged(r.deps, { corpus: corpus(), openConflicts: 1, repo: widgets })).toBeNull();
+      expect(r.generates).toEqual([]);
+    });
+
+    it('never throws — the links are saved either way', async () => {
+      const r = ripple({ setUp: ['acme/widgets'] });
+      r.deps.startGenerate = async () => {
+        throw new Error('the queue is gone');
+      };
+      expect(await rippleLinksChanged(r.deps, { corpus: corpus(), openConflicts: 0, repo: widgets })).toBeNull();
+    });
+  });
+
   it('is what the settled job runs', async () => {
     const r = ripple();
     const { settled } = await runScan(scanResult(), { deps: { ripple: () => r.deps } });

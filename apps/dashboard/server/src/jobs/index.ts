@@ -73,6 +73,11 @@ import {
   workspaceRepositories,
 } from '../services/context-scan.service.js';
 import { loadGuardSetupBundle } from '@truecourse/core/lib/guard-store';
+import { loadWorkspaceSpec } from '@truecourse/core/lib/spec-store';
+import { getWorkspaceDecisions } from '@truecourse/core/commands/spec-in-process';
+import { openConflicts } from '@truecourse/shared';
+import type { CuratedCorpus } from '@truecourse/spec-consolidator';
+import { rippleLinksChanged, type RippleStart } from './context-ripple.js';
 import type { OnboardingJobRequest } from './tasks/onboarding.js';
 
 /** What an enqueue did: it queued a job, or the repo is already working. */
@@ -95,11 +100,26 @@ export interface JobsMount extends Jobs {
    */
   enqueueContextScan(request: ContextScanJobRequest): Promise<EnqueueResult>;
   /**
+   * A repository's links changed, so its slice moved without the corpus
+   * moving: start what the ripple would start for it — nothing while its setup
+   * is in flight, Test generation once set up, Test setup before — under the
+   * ripple's gates. Null when nothing was started.
+   */
+  startForLinks(request: LinksChangedRequest): Promise<RippleStart | null>;
+  /**
    * Stop everything this repository has in flight, for a disconnect. `not-here`
    * means one of its jobs is running on another replica, which is not ours to
    * settle — the caller must refuse the disconnect.
    */
   cancelRepoJobs(repoFullName: string, orgId: string): Promise<'stopped' | 'not-here'>;
+}
+
+export interface LinksChangedRequest {
+  workspaceOrgId: string;
+  repoId: string;
+  repoFullName: string;
+  /** The links the repository now has. */
+  sourceIds: string[];
 }
 
 export interface CreateServerJobsOptions {
@@ -212,6 +232,19 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
       ).status === 'queued',
   });
 
+  const startForLinks = async (request: LinksChangedRequest): Promise<RippleStart | null> => {
+    const { workspaceOrgId, repoId, repoFullName, sourceIds } = request;
+    const corpus = await loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId }, 'corpus');
+    const conflicts = corpus
+      ? openConflicts(corpus, await getWorkspaceDecisions(workspaceOrgId)).length
+      : 0;
+    return rippleLinksChanged(rippleDeps(workspaceOrgId), {
+      corpus,
+      openConflicts: conflicts,
+      repo: { repoId, repoFullName, sourceIds },
+    });
+  };
+
   const tasks: readonly JobTask[] = [
     createRepoGuardSetupTask({
       ...opts.guardSetup,
@@ -313,6 +346,7 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
     enqueueGuardRun,
     enqueueContextSync,
     enqueueContextScan,
+    startForLinks,
     cancelRepoJobs,
   });
 }

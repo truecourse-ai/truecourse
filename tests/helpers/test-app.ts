@@ -11,7 +11,8 @@
 
 import { Router } from 'express';
 import type { AuthVerifier } from '@truecourse/shared';
-import type { EnqueueResult, JobsMount } from '../../apps/dashboard/server/src/jobs/index';
+import type { EnqueueResult, JobsMount, LinksChangedRequest } from '../../apps/dashboard/server/src/jobs/index';
+import type { RippleStart } from '../../apps/dashboard/server/src/jobs/context-ripple';
 import type { OnboardingJobRequest } from '../../apps/dashboard/server/src/jobs/tasks/onboarding';
 import type { GuardSetupJobRequest } from '../../apps/dashboard/server/src/jobs/tasks/repo-guard-setup';
 import type { ContextScanJobRequest } from '../../apps/dashboard/server/src/jobs/tasks/context-scan';
@@ -83,6 +84,9 @@ export interface StubJobs {
   /** Workspace Document scans — what every Scan button enqueues now. */
   contextScans: ContextScanJobRequest[];
   contextSyncs: ContextSyncJobRequest[];
+  /** The link changes handed to the mount; each answers `linksAnswer`. */
+  linkChanges: LinksChangedRequest[];
+  linksAnswer: RippleStart | null;
   /** What the next enqueue answers — set it to `{ status: 'busy' }` for a 409. */
   answer: EnqueueResult;
 }
@@ -94,6 +98,8 @@ export function stubJobs(): StubJobs {
     guardRuns: [],
     contextScans: [],
     contextSyncs: [],
+    linkChanges: [],
+    linksAnswer: null,
     answer: { status: 'queued', jobId: 'job_test' },
     mount: null as unknown as JobsMount,
   };
@@ -117,6 +123,10 @@ export function stubJobs(): StubJobs {
     enqueueGuardRun: async (request: OnboardingJobRequest) => {
       stub.guardRuns.push(request);
       return stub.answer;
+    },
+    startForLinks: async (request: LinksChangedRequest) => {
+      stub.linkChanges.push(request);
+      return stub.linksAnswer;
     },
     cancelRepoJobs: async () => 'stopped' as const,
     routers: { events: Router(), jobs: Router(), notifications: Router() },

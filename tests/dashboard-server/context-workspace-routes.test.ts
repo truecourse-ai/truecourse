@@ -249,15 +249,34 @@ describe('PUT /api/repos/:id/context/bindings', () => {
     });
   });
 
-  it('starts the Document scan when the set actually differs', async () => {
+  it('hands the changed links to the queue, never a Document scan', async () => {
     const res = await request(app)
       .put(`/api/repos/${fixture.project.slug}/context/bindings`)
       .send({ sourceIds: [SRC_B] })
       .expect(200);
 
     expect(res.body.sourceIds).toEqual([SRC_B]);
-    expect(res.body.jobId).toBe('job_test');
-    expect(jobs.contextScans).toEqual([{ workspaceOrgId: TEST_ORG, source: 'link' }]);
+    expect(res.body.started).toBeUndefined();
+    expect(jobs.contextScans).toEqual([]);
+    expect(jobs.linkChanges).toEqual([
+      {
+        workspaceOrgId: TEST_ORG,
+        repoId: fixture.project.slug,
+        repoFullName: fixture.project.name,
+        sourceIds: [SRC_B],
+      },
+    ]);
+  });
+
+  it('answers with what the queue started for the repository', async () => {
+    jobs.linksAnswer = { repoFullName: fixture.project.name, job: 'guard-generate' };
+
+    const res = await request(app)
+      .put(`/api/repos/${fixture.project.slug}/context/bindings`)
+      .send({ sourceIds: [SRC_B] })
+      .expect(200);
+
+    expect(res.body.started).toBe('guard-generate');
   });
 
   it('starts nothing when the set is saved unchanged', async () => {
@@ -268,8 +287,9 @@ describe('PUT /api/repos/:id/context/bindings', () => {
       .send({ sourceIds: [SRC_B] })
       .expect(200);
 
-    expect(res.body.jobId).toBeUndefined();
+    expect(res.body.started).toBeUndefined();
     expect(jobs.contextScans).toEqual([]);
+    expect(jobs.linkChanges).toEqual([]);
   });
 });
 

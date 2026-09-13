@@ -21,8 +21,12 @@
  *     left alone, however much the rest of the workspace moved.
  *
  * And a repository whose Test setup is already queued or running is skipped:
- * connecting one starts its setup from the sync's settle hook, before any scan
- * exists, and that setup chains its own generate.
+ * connecting one starts its setup before any scan exists, and that setup
+ * chains its own generate.
+ *
+ * A repository's LINKS changing is the other way its slice moves — with the
+ * corpus standing still, so no scan is owed. `rippleLinksChanged` gives that
+ * one repository the same treatment under the same gates.
  *
  * Quiet by construction: the scan posts ONE notification and the rippled jobs
  * post none of their own until they settle (a job notifies on its outcome, never
@@ -98,6 +102,26 @@ export function sliceChanged(
   return corpusContentSha(before) !== corpusContentSha(after);
 }
 
+/**
+ * Start what ONE repository whose slice moved needs: nothing while its setup
+ * is already in flight (that run reads the stored corpus and chains its own
+ * generate), Test generation once it has been set up, Test setup before. Null
+ * when nothing started — the repository is already working, and its running
+ * job will read the stored corpus.
+ */
+async function startRepo(deps: ContextRippleDeps, repo: RippleRepo): Promise<RippleStart | null> {
+  if (await deps.isSettingUp(repo.repoFullName)) {
+    log.info(`[context] ${repo.repoFullName} is already setting up — nothing started`);
+    return null;
+  }
+  const job = (await deps.hasSetup(repo.repoFullName)) ? 'guard-generate' : 'guard-setup';
+  const queued =
+    job === 'guard-setup' ? await deps.startSetup(repo) : await deps.startGenerate(repo);
+  if (queued) return { repoFullName: repo.repoFullName, job };
+  log.info(`[context] ${repo.repoFullName} is already working — nothing started`);
+  return null;
+}
+
 /** Start what each repository whose slice changed needs. Never throws. */
 export async function rippleContextScan(
   deps: ContextRippleDeps,
@@ -117,17 +141,8 @@ export async function rippleContextScan(
       // A repository with no slice at all has nothing to generate against.
       if (sliceCorpus(input.corpus, repo.sourceIds) === null) continue;
       try {
-        // Its setup is already in flight (a connect started it): that run reads
-        // the stored corpus and chains its own generate.
-        if (await deps.isSettingUp(repo.repoFullName)) {
-          log.info(`[context] ${repo.repoFullName} is already setting up — ripple skipped`);
-          continue;
-        }
-        const job = (await deps.hasSetup(repo.repoFullName)) ? 'guard-generate' : 'guard-setup';
-        const queued =
-          job === 'guard-setup' ? await deps.startSetup(repo) : await deps.startGenerate(repo);
-        if (queued) started.push({ repoFullName: repo.repoFullName, job });
-        else log.info(`[context] ${repo.repoFullName} is already working — ripple coalesced`);
+        const start = await startRepo(deps, repo);
+        if (start) started.push(start);
       } catch (err) {
         log.warn(
           `[context] could not ripple to ${repo.repoFullName}: ${(err as Error).message}`,
@@ -138,4 +153,38 @@ export async function rippleContextScan(
     log.warn(`[context] ripple for ${deps.workspaceOrgId} failed: ${(err as Error).message}`);
   }
   return started;
+}
+
+export interface LinksChangedInput {
+  /** The workspace corpus as stored (null before the workspace's first scan). */
+  corpus: CuratedCorpus | null;
+  /** Open conflicts on that corpus — any at all stops the start, as for the ripple. */
+  openConflicts: number;
+  /** The repository, with the links it now has. */
+  repo: RippleRepo;
+}
+
+/**
+ * A repository's links changed: its slice moved while the corpus stood still.
+ * Under the ripple's gates — a corpus that holds a document of its sources, no
+ * open conflict — the repository gets what the ripple would give it. Throws
+ * nothing; a start that fails is logged, since the links are saved either way.
+ */
+export async function rippleLinksChanged(
+  deps: ContextRippleDeps,
+  input: LinksChangedInput,
+): Promise<RippleStart | null> {
+  if (input.corpus === null || sliceCorpus(input.corpus, input.repo.sourceIds) === null) return null;
+  if (input.openConflicts > 0) {
+    log.info(
+      `[context] ${deps.workspaceOrgId}: ${input.openConflicts} open conflict(s) — ${input.repo.repoFullName} not started`,
+    );
+    return null;
+  }
+  try {
+    return await startRepo(deps, input.repo);
+  } catch (err) {
+    log.warn(`[context] could not start ${input.repo.repoFullName}: ${(err as Error).message}`);
+    return null;
+  }
 }

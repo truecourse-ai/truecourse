@@ -1652,8 +1652,8 @@ export function getRepoContextBindings(repoId: string): Promise<ContextBindingsR
 export function putRepoContextBindings(
   repoId: string,
   sourceIds: string[],
-): Promise<ContextBindingsResponse & { jobId?: string }> {
-  return fetchApi<ContextBindingsResponse & { jobId?: string }>(
+): Promise<ContextBindingsResponse> {
+  return fetchApi<ContextBindingsResponse>(
     `/api/repos/${repoId}/context/bindings`,
     { method: 'PUT', body: JSON.stringify({ sourceIds }) },
   );

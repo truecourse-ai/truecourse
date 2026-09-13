@@ -225,10 +225,10 @@ const CONFLICT_VERDICTS = ['a', 'b', 'dismissed'] as const;
 
 /**
  * Start the workspace Document scan after a change to WHICH documents the
- * corpus should hold (a source removed, a repository's links replaced). Returns
- * the job id, or null when a scan is already running — which is not a failure:
- * the running scan's settle hook re-reads the workspace's staleness stamp and
- * queues the one follow-up run itself.
+ * corpus should hold (a source removed). Returns the job id, or null when a
+ * scan is already running — which is not a failure: the running scan's settle
+ * hook re-reads the workspace's staleness stamp and queues the one follow-up
+ * run itself.
  */
 async function startWorkspaceScan(org: string, source: 'link'): Promise<string | null> {
   try {
@@ -1063,13 +1063,20 @@ export function createContextBindingsRouter(): Router {
         return;
       }
       await emitContextChanged(org, { change: 'bindings', repoFullName: entry.name });
-      // The slices moved, so the corpus must be recomputed over them — the scan
-      // is what re-derives who reads what, and its ripple regenerates the tests.
-      const jobId = await startWorkspaceScan(org, 'link');
+      // The corpus stood still; only this repository's slice moved. Its tests
+      // are what the change reaches, so it gets what a ripple would give it —
+      // and a repository connecting right now is already setting up, so
+      // nothing.
+      const started = await requireJobs().startForLinks({
+        workspaceOrgId: org,
+        repoId: entry.slug,
+        repoFullName: entry.name,
+        sourceIds: wanted,
+      });
       res.json({
         repoFullName: entry.name,
         sourceIds: await contextBindings(org, entry.name),
-        ...(jobId ? { jobId } : {}),
+        ...(started ? { started: started.job } : {}),
       });
     } catch (e) {
       respond(res, next, e);
