@@ -44,7 +44,7 @@ export interface StepDef {
 export interface JobNotification {
   level: NotificationLevel;
   title: string;
-  body: string;
+  body?: string;
   data?: Record<string, unknown>;
 }
 
@@ -69,6 +69,12 @@ export interface JobContext<P> {
   phase(key: string, detail?: string): Promise<void>;
   /** Update the active step's inline detail (e.g. a `3/12` counter). */
   detail(key: string, detail: string): Promise<void>;
+  /**
+   * Post a feed row mid-run — the `started` row, once the body knows where the
+   * run can be watched (its run id, its repository). Best-effort: a row that
+   * could not be written is logged, never thrown into the body.
+   */
+  notify(notification: JobNotification): Promise<void>;
   /**
    * Cancellation for the body's long-running work — a user cancel (disconnect,
    * supersede) or a worker shutdown. Bodies that spawn children or run pipelines
@@ -177,6 +183,13 @@ export async function executeJob<P extends JobPayload, M>(
     tracker,
     phase: (key, detail) => tracker.advance(key, detail),
     detail: (key, detail) => tracker.detail(key, detail),
+    notify: async (notification) => {
+      try {
+        await postNotification(rt, org, def.type, jobId, notification);
+      } catch (err) {
+        log.warn(`[jobs] ${def.type} ${jobId}: could not post "${notification.title}": ${(err as Error).message}`);
+      }
+    },
     signal: opts.signal,
   };
 
@@ -240,7 +253,7 @@ async function postNotification<M>(
     kind,
     level: n.level,
     title: n.title,
-    body: n.body,
+    body: n.body ?? null,
     data: { jobId, ...n.data },
   });
   await rt.publish(org, { type: 'notification', notification: note, jobId });

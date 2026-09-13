@@ -74,6 +74,8 @@ export function createRepoGuardRunTask(
 
     async run(ctx) {
       const { repoFullName } = ctx.payload;
+      // A run has no conversation of its own; its row opens the repository's runs.
+      await ctx.notify({ level: 'started', title: 'Flow run started', data: { repoFullName } });
       // The judge is the run's only model call and it is parked by default, so
       // the workspace's provider is resolved only when it would actually be used.
       const llm = guardVisualJudgeEnabled() ? await startLlm(ctx.payload.workspaceOrgId) : null;

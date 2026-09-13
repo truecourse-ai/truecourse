@@ -473,9 +473,10 @@ describe('the guard setup job', () => {
     const [setup] = await jobsOfType('repo.guard-setup');
     expect(setup).toMatchObject({ status: 'succeeded', result: { status: 'ok', documents: 0 } });
     expect(setup?.error).toBeNull();
-    const [note] = await new NotificationStore(db).listForOrg(ORG, { limit: 10 });
+    const [note, started] = await new NotificationStore(db).listForOrg(ORG, { limit: 10 });
     expect(note).toMatchObject({ level: 'success', title: 'Flow setup complete' });
     expect(note?.body).toContain('No documents linked yet');
+    expect(started).toMatchObject({ level: 'started', title: 'Flow setup started', data: { repoFullName: REPO } });
     // The row's address: the setup's own conversation.
     const [setupRun] = await listStoredSessionRuns(REPO, 'guard-setup');
     expect(note?.data).toMatchObject({ repoFullName: REPO, runId: setupRun!.runId });
@@ -844,7 +845,10 @@ describe('the guard generate job', () => {
     );
     expect(evidence).toBe('step 1 failed');
     const notes = await new NotificationStore(db).listForOrg(ORG);
-    expect(notes.map((n) => [n.level, n.title])).toEqual([['warning', 'Flows generated, findings to review']]);
+    expect(notes.map((n) => [n.level, n.title])).toEqual([
+      ['warning', 'Flows generated, findings to review'],
+      ['started', 'Flow generation started'],
+    ]);
     // The row's address: the generate's own conversation.
     const [generateRun] = await listStoredSessionRuns(REPO, 'guard-generate');
     expect(notes[0]?.data).toMatchObject({ repoFullName: REPO, runId: generateRun!.runId });
@@ -893,8 +897,9 @@ describe('the guard generate job', () => {
     const opened = await openStoredSessionRun(REPO, 'guard-generate', run.runId);
     expect(opened?.record()).toMatchObject({ status: 'failed', error: { message: job.error } });
     const notes = await new NotificationStore(db).listForOrg(ORG);
-    expect(notes).toHaveLength(1);
+    expect(notes).toHaveLength(2);
     expect(notes[0]).toMatchObject({ level: 'error', title: 'Flow generation failed', body: expect.stringContaining('docs/app.md') });
+    expect(notes[1]).toMatchObject({ level: 'started', title: 'Flow generation started', data: { repoFullName: REPO, runId: run.runId } });
     expect(enqueued).toEqual(['repo.guard-generate']);
     expect(disposed).toEqual([clone]);
   }, 60_000);
@@ -1007,7 +1012,8 @@ describe('the guard generate job', () => {
     const [job] = await jobsOfType('repo.guard-generate');
     expect(job).toMatchObject({ status: 'cancelled', error: null });
     expect(await readGuardBaselineCommit(REPO)).toBeNull();
-    expect(await new NotificationStore(db).listForOrg(ORG)).toEqual([]);
+    // The started row stands — the run did start; the stop itself settles quietly.
+    expect((await new NotificationStore(db).listForOrg(ORG)).map((n) => n.level)).toEqual(['started']);
     expect(disposed).toEqual([clone]);
   });
 });
@@ -1188,7 +1194,10 @@ describe('the guard run job', () => {
     expect(await store.readGuardEvidenceBytesAt(REPO, dir, 'step-1.png')).toEqual(PNG);
 
     const notes = await new NotificationStore(db).listForOrg(ORG);
-    expect(notes.map((n) => [n.level, n.title])).toEqual([['warning', 'Flows ran, failures to review']]);
+    expect(notes.map((n) => [n.level, n.title])).toEqual([
+      ['warning', 'Flows ran, failures to review'],
+      ['started', 'Flow run started'],
+    ]);
     // The row's address: the repository's own page for THIS run.
     expect(notes[0]?.data).toMatchObject({ repoFullName: REPO, guardRunId: RUN_ID });
     expect(notes[0]?.data).not.toHaveProperty('runId');
@@ -1258,7 +1267,7 @@ describe('disconnecting a repository mid-setup', () => {
 
     const [setup] = await jobsOfType('repo.guard-setup');
     expect(setup).toMatchObject({ status: 'cancelled', error: null });
-    expect(await new NotificationStore(db).listForOrg(ORG)).toEqual([]);
+    expect((await new NotificationStore(db).listForOrg(ORG)).map((n) => n.level)).toEqual(['started']);
     expect(disposedHere).toHaveLength(1);
   });
 

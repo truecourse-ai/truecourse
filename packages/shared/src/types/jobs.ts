@@ -72,7 +72,8 @@ export function isActiveJob(status: JobStatus): boolean {
 
 // --- Notifications --------------------------------------------------
 
-export type NotificationLevel = 'info' | 'success' | 'warning' | 'error';
+/** `started` is the row a run posts the moment it can be watched; the rest are how it settled. */
+export type NotificationLevel = 'started' | 'info' | 'success' | 'warning' | 'error';
 
 /** A durable feed entry (the `notifications` row). Source of truth for history. */
 export interface NotificationView {

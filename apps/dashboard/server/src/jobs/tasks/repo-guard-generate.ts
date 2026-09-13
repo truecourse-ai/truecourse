@@ -95,6 +95,11 @@ export function createRepoGuardGenerateTask(
       return dashboardActivity(ctx, 'guard-generate', GUARD_GENERATE_STEPS, async (activityRun, activityTracker) => {
         const { repoFullName } = ctx.payload;
         runIds.set(ctx.jobId, activityRun.runId);
+        await ctx.notify({
+          level: 'started',
+          title: 'Flow generation started',
+          data: { repoFullName, runId: activityRun.runId },
+        });
         // Re-read at execution time as well: the queue payload carries identity,
         // never client-supplied completed steps or a trusted snapshot of status.
         const resume = ctx.payload.resumeRunId

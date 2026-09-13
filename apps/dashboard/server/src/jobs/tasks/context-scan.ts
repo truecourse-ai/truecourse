@@ -120,6 +120,7 @@ export function createContextScanTask(
         transportMode: llm.mode,
         onRunStarted: (info) => {
           runIds.set(ctx.jobId, info.runId);
+          void ctx.notify({ level: 'started', title: 'Document scan started', data: { runId: info.runId } });
         },
         ...(ctx.signal ? { signal: ctx.signal } : {}),
       });

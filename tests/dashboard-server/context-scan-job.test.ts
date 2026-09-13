@@ -193,15 +193,17 @@ async function runScan(result: WorkspaceContextScanResult, opts: RunOptions = {}
 // ---------------------------------------------------------------------------
 
 describe('the context.scan job', () => {
-  it('settles with the corpus it wrote and ONE success notification', async () => {
+  it('settles with the corpus it wrote, a started row and ONE success notification', async () => {
     const { settled, result, notifications } = await runScan(scanResult());
 
     expect(settled?.status).toBe('succeeded');
     expect(result).toMatchObject({ documents: 2, areas: 1, openConflicts: 0, corpusChanged: true });
-    expect(notifications).toHaveLength(1);
+    expect(notifications).toHaveLength(2);
     expect(notifications[0]).toMatchObject({ level: 'success', title: 'Documents scanned' });
-    // The row's address: the scan's own conversation.
+    // Both rows' address: the scan's own conversation.
     expect(notifications[0]!.data).toMatchObject({ runId: SCAN_RUN_ID });
+    expect(notifications[1]).toMatchObject({ level: 'started', title: 'Document scan started' });
+    expect(notifications[1]!.data).toMatchObject({ runId: SCAN_RUN_ID });
   });
 
   it('says so when the workspace has an open conflict', async () => {
@@ -253,6 +255,7 @@ describe('the context.scan job', () => {
     );
 
     const notes = await rt.notifications.listForOrg(ORG, { limit: 10 });
+    expect(notes).toHaveLength(1);
     expect(notes[0]!.data).not.toHaveProperty('runId');
   });
 });

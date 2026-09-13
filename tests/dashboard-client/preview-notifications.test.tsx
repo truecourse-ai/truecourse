@@ -408,6 +408,28 @@ describe('opening a row', () => {
     );
   });
 
+  it('opens a flow run that has only started at the repository’s runs', async () => {
+    const state = serve([
+      note({
+        id: 'n-7',
+        kind: 'repo.guard-run',
+        level: 'started',
+        title: 'Flow run started',
+        body: null,
+        data: { jobId: 'job-7', repoFullName: REPO.name },
+      }),
+    ]);
+    renderAt('/preview/notifications');
+    const user = userEvent.setup();
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    expect(rows()[0]).toHaveTextContent('Started');
+
+    await user.click(rows()[0]!);
+
+    await waitFor(() => expect(state.reads).toEqual([{ ids: ['n-7'] }]));
+    expect(screen.getByTestId('address')).toHaveTextContent(`/preview/repos/${REPO.id}/runs`);
+  });
+
   it('opens a sync at the source’s page', async () => {
     const state = serve([SYNC]);
     renderAt('/preview/notifications');

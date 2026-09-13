@@ -23,6 +23,7 @@ import { PREVIEW_BASE } from './base';
 
 /** A level as the status idiom says it: one word, one tone. */
 export const LEVEL_STATUS: Record<NotificationLevel, { word: string; tone: StatusTone }> = {
+  started: { word: 'Started', tone: 'running' },
   success: { word: 'Done', tone: 'success' },
   warning: { word: 'Needs you', tone: 'blocked' },
   error: { word: 'Failed', tone: 'failure' },
@@ -42,8 +43,9 @@ export const notificationRepo = (n: NotificationView): string | null =>
 /**
  * Where a notification opens: the place the event happened. A setup, a
  * generation and a scan open their run's own conversation, a flow run opens
- * that run on the repository's Runs page, and a sync opens the source it
- * refreshed. A row whose payload names none of those has no address.
+ * that run on the repository's Runs page (the runs themselves while it is
+ * still going), and a sync opens the source it refreshed. A row whose payload
+ * names none of those has no address.
  */
 export function notificationHref(n: NotificationView, repos: readonly Repo[]): string | null {
   const runId = text(n.data, 'runId');
@@ -55,8 +57,10 @@ export function notificationHref(n: NotificationView, repos: readonly Repo[]): s
       return runId ? `${PREVIEW_BASE}/agent/${encodeURIComponent(runId)}` : null;
     case 'repo.guard-run': {
       const guardRunId = text(n.data, 'guardRunId');
-      if (!repo || !guardRunId) return null;
-      return `${PREVIEW_BASE}/repos/${repo.id}/runs/${encodeURIComponent(guardRunId)}`;
+      if (!repo) return null;
+      return guardRunId
+        ? `${PREVIEW_BASE}/repos/${repo.id}/runs/${encodeURIComponent(guardRunId)}`
+        : `${PREVIEW_BASE}/repos/${repo.id}/runs`;
     }
     case 'context.sync': {
       const sourceId = text(n.data, 'sourceId');

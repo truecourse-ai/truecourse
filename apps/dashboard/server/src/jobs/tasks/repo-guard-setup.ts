@@ -82,6 +82,11 @@ export function createRepoGuardSetupTask(
       return dashboardActivity(ctx, 'guard-setup', GUARD_SETUP_STEPS, async (activityRun, activityTracker) => {
         const { repoFullName, only, refresh } = ctx.payload;
         runIds.set(ctx.jobId, activityRun.runId);
+        await ctx.notify({
+          level: 'started',
+          title: 'Flow setup started',
+          data: { repoFullName, runId: activityRun.runId },
+        });
         const llm = await startLlm(ctx.payload.workspaceOrgId);
 
         await ctx.phase('clone');
