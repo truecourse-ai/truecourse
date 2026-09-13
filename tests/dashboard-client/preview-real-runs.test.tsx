@@ -260,9 +260,11 @@ describe('a run in the shell', () => {
     renderAt('/preview/code');
 
     // The one empty line, and no repository's sessions store ever asked about.
+    // The workspace's own runs are still read once: a Document scan belongs to
+    // no repository, and the toast surface follows it either way.
     expect(await screen.findByText('No repository connected yet.')).toBeInTheDocument();
     const calls = (window.fetch as unknown as { mock: { calls: [RequestInfo | URL][] } }).mock.calls;
-    expect(calls.some(([input]) => String(input).includes('/sessions/runs'))).toBe(false);
+    expect(calls.some(([input]) => /\/api\/repos\/[^/]+\/sessions\/runs/.test(String(input)))).toBe(false);
     expect(socketMock.joins).toEqual([]);
   });
 

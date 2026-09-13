@@ -27,7 +27,8 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { listSessionRuns, type PublicSessionRun } from '@/lib/api';
+import { listSessionRuns, listWorkspaceRuns, type PublicSessionRun } from '@/lib/api';
+import { getServerUrl } from '@/lib/server-url';
 import { connectSocket, joinRepoRoom, leaveRepoRoom } from '@/lib/socket';
 import { commandLabel, runChecklist } from '@/components/sessions/run-model';
 import type { JobChain, JobStep, Repo } from '@/preview/data/types';
@@ -81,7 +82,7 @@ export const conversationHref = (runId: string): string =>
  * first spec scan and names the command for every later run: one job surface,
  * but a first scan IS the onboarding chain and a re-scan is not.
  */
-export function toJobChain(repo: RunRepoRef, run: PublicSessionRun, first: boolean): JobChain {
+export function toJobChain(repo: RunRepoRef | null, run: PublicSessionRun, first: boolean): JobChain {
   const steps: JobStep[] = runChecklist(run).map((p) => ({
     key: p.key,
     label: p.label,
@@ -89,12 +90,13 @@ export function toJobChain(repo: RunRepoRef, run: PublicSessionRun, first: boole
     ...(p.detail ? { counter: p.detail } : {}),
   }));
   return {
-    id: `real-${repo.id}-${run.runId}`,
-    title:
-      first && run.command === 'spec-scan'
+    id: `real-${repo?.id ?? 'workspace'}-${run.runId}`,
+    title: !repo
+      ? nounFor(run.command)
+      : first && run.command === 'spec-scan'
         ? `Onboarding ${repo.fullName}`
         : `${nounFor(run.command)} ${repo.fullName}`,
-    repoFullName: repo.fullName,
+    repoFullName: repo?.fullName ?? '',
     href: conversationHref(run.runId),
     // A run that has not published its checklist yet still has one honest step.
     steps: steps.length > 0 ? steps : [{ key: 'start', label: 'Starting', state: 'active' }],
@@ -114,11 +116,11 @@ export interface RunFailure {
   href: string;
 }
 
-export function toFailure(repo: RunRepoRef, run: PublicSessionRun): RunFailure | null {
+export function toFailure(repo: RunRepoRef | null, run: PublicSessionRun): RunFailure | null {
   if (run.status !== 'failed') return null;
   return {
-    id: `real-${repo.id}-${run.runId}`,
-    title: `${nounFor(run.command)} failed on ${repo.fullName}`,
+    id: `real-${repo?.id ?? 'workspace'}-${run.runId}`,
+    title: repo ? `${nounFor(run.command)} failed on ${repo.fullName}` : `${nounFor(run.command)} failed`,
     body: run.error?.message ?? 'It ended failed.',
     href: conversationHref(run.runId),
   };
@@ -194,6 +196,9 @@ export function useRealRunStream(repos: Repo[], reposLoaded = true): RealRunStre
   // Repo ids whose runs have been read at least once (success or failure) —
   // with `reposLoaded`, the two halves of `ready`.
   const [readRepoIds, setReadRepoIds] = useState<ReadonlySet<string>>(() => new Set());
+  // The workspace's OWN runs (the Document scan), which belong to no repository
+  // and no room: read from the workspace listing, re-read on the job stream.
+  const [workspaceRuns, setWorkspaceRuns] = useState<PublicSessionRun[] | null>(null);
   // A clock, not an animation: re-read the wording every 30s so "just now"
   // becomes "4 minutes ago" without a socket event to prompt it.
   const [now, setNow] = useState(() => Date.now());
@@ -287,6 +292,44 @@ export function useRealRunStream(repos: Repo[], reposLoaded = true): RealRunStre
     return () => clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    let stopped = false;
+    const read = async (): Promise<void> => {
+      try {
+        const { runs } = await listWorkspaceRuns({ limit: 50 });
+        if (stopped || !alive.current) return;
+        setWorkspaceRuns(runs.filter((run) => run.repo === null));
+      } catch {
+        if (!stopped && alive.current) setWorkspaceRuns((prev) => prev ?? []);
+      }
+    };
+    void read();
+    if (typeof EventSource === 'undefined') return () => { stopped = true; };
+    let source: EventSource | null = null;
+    try {
+      source = new EventSource(`${getServerUrl()}/api/events`, { withCredentials: true });
+    } catch {
+      return () => { stopped = true; };
+    }
+    // A scan's progress and its settlement ride the job stream; either is a
+    // reason to re-read what the workspace is running.
+    const onMessage = (e: MessageEvent<string>): void => {
+      try {
+        const event = JSON.parse(e.data) as { type?: string };
+        if (event.type === 'job.progress' || event.type === 'notification') void read();
+      } catch {
+        // A frame this client has no reading of changes nothing.
+      }
+    };
+    source.addEventListener('message', onMessage);
+    const stream = source;
+    return () => {
+      stopped = true;
+      stream.removeEventListener('message', onMessage);
+      stream.close();
+    };
+  }, []);
+
   const derived = useMemo(() => {
     const jobs: { run: PublicSessionRun; chain: JobChain }[] = [];
     const failures: { at: string; failure: RunFailure }[] = [];
@@ -305,6 +348,11 @@ export function useRealRunStream(repos: Repo[], reposLoaded = true): RealRunStre
         if (failure) failures.push({ at: run.finishedAt ?? run.startedAt, failure });
       }
     }
+    for (const run of workspaceRuns ?? []) {
+      if (!isSettled(run)) jobs.push({ run, chain: toJobChain(null, run, false) });
+      const failure = toFailure(null, run);
+      if (failure) failures.push({ at: run.finishedAt ?? run.startedAt, failure });
+    }
 
     jobs.sort((a, b) => b.run.startedAt.localeCompare(a.run.startedAt));
     failures.sort((a, b) => b.at.localeCompare(a.at));
@@ -313,9 +361,9 @@ export function useRealRunStream(repos: Repo[], reposLoaded = true): RealRunStre
       failures: failures.map((f) => f.failure),
       repoState,
     };
-  }, [repoRefs, runsByRepo, now]);
+  }, [repoRefs, runsByRepo, workspaceRuns, now]);
 
-  const ready = reposLoaded && repoRefs.every((r) => readRepoIds.has(r.id));
+  const ready = reposLoaded && workspaceRuns !== null && repoRefs.every((r) => readRepoIds.has(r.id));
 
   return useMemo(
     () => ({
