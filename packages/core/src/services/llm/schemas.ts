@@ -25,19 +25,25 @@ export const ServiceViolationOutputSchema = z.object({
   ),
 });
 
+export const DatabaseViolationItemSchema = z.object({
+  type: z.literal('database'),
+  title: z.string(),
+  content: z.string(),
+  severity: z.enum(['low', 'medium', 'high', 'critical']),
+  targetDatabaseId: z.string().nullable().describe('The id of the database this violation applies to, must be an exact id from the Databases list'),
+  targetTable: z.string().nullable().describe('The exact table name this violation applies to'),
+  fixPrompt: z.string().nullable(),
+  ruleKey: z.string().describe('The exact key from the Analysis Rules list that triggered this violation — must match one of the rule keys.'),
+});
+
 export const DatabaseViolationOutputSchema = z.object({
-  violations: z.array(
-    z.object({
-      type: z.literal('database'),
-      title: z.string(),
-      content: z.string(),
-      severity: z.enum(['low', 'medium', 'high', 'critical']),
-      targetDatabaseId: z.string().nullable().describe('The id of the database this violation applies to, must be an exact id from the Databases list'),
-      targetTable: z.string().nullable().describe('The exact table name this violation applies to'),
-      fixPrompt: z.string().nullable(),
-      ruleKey: z.string().describe('The exact key from the Analysis Rules list that triggered this violation — must match one of the rule keys.'),
-    })
-  ),
+  violations: z.array(DatabaseViolationItemSchema),
+});
+
+export const DatabaseLifecycleViolationOutputSchema = z.object({
+  resolvedViolationIds: z.array(z.string()).describe('IDs of previous violations that are now resolved — the issue no longer exists'),
+  unchangedViolationIds: z.array(z.string()).describe('IDs of previous violations that still exist unchanged — every previous violation ID must appear in either resolvedViolationIds or unchangedViolationIds'),
+  newViolations: z.array(DatabaseViolationItemSchema),
 });
 
 export const ModuleViolationOutputSchema = z.object({

@@ -26,6 +26,7 @@ import {
 } from './prompts.js';
 import {
   ServiceViolationOutputSchema,
+  DatabaseLifecycleViolationOutputSchema,
   DatabaseViolationOutputSchema,
   ModuleViolationOutputSchema,
   DiffViolationOutputSchema,
@@ -53,6 +54,7 @@ import type {
   FlowEnrichmentResult,
   DiffViolationItem,
   DiffViolationsResult,
+  DatabaseViolationsLifecycleResult,
   ServiceDescription,
 } from './provider.js';
 
@@ -443,6 +445,40 @@ export abstract class BaseCLIProvider implements LLMProvider {
     };
   }
 
+  async generateDatabaseViolationsWithLifecycle(
+    context: DatabaseViolationContext,
+    opts?: { onStart?: () => void },
+  ): Promise<DatabaseViolationsLifecycleResult> {
+    const { vars, idMap } = buildDatabaseTemplateVars(context);
+    const prompt = getPrompt('violations-database-lifecycle', vars);
+
+    log.info('[CLI] Lifecycle database call starting...');
+    const t0 = Date.now();
+    const { data: object, usage: cliUsage } = await this.spawnAndParse(
+      prompt,
+      DatabaseLifecycleViolationOutputSchema,
+      {
+        extraArgs: ['--tools', ''],
+        label: 'database-lifecycle',
+        onStart: opts?.onStart,
+      },
+    );
+    const dur = Date.now() - t0;
+    log.info(`[CLI] Lifecycle database call done in ${dur}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
+    this.collectUsage('database', cliUsage, dur);
+
+    return {
+      resolvedViolationIds: resolveIds(object.resolvedViolationIds, idMap),
+      unchangedViolationIds: resolveIds(object.unchangedViolationIds, idMap),
+      newViolations: object.newViolations.map((violation) => ({
+        ...violation,
+        targetDatabaseId: violation.targetDatabaseId?.startsWith('db-')
+          ? idMap.get(violation.targetDatabaseId) ?? null
+          : null,
+      })),
+    };
+  }
+
   async generateModuleViolations(
     context: ModuleViolationContext,
     opts?: { onStart?: () => void },
@@ -543,6 +579,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
   ): Promise<AllViolationsLifecycleResult> {
     const onCallStart = contexts.onCallStart;
     const allResolved: string[] = [];
+    const allUnchanged: string[] = [];
     const allNew: DiffViolationItem[] = [];
     let serviceDescriptions: ServiceDescription[] = [];
 
@@ -578,20 +615,9 @@ export abstract class BaseCLIProvider implements LLMProvider {
     if (contexts.database) {
       const ctx = contexts.database;
       if (ctx.existingViolations && ctx.existingViolations.length > 0) {
-        promises.push(['database', (async () => {
-          const { vars, idMap } = buildDatabaseTemplateVars(ctx);
-          idMaps.database = idMap;
-          const prompt = getPrompt('violations-database-lifecycle', vars);
-          log.info('[CLI] Lifecycle database call starting...');
-          const t0 = Date.now();
-          const { data: object, usage: cliUsage } = await this.spawnAndParse(prompt, DiffViolationOutputSchema, {
-            extraArgs: ['--tools', ''], label: 'database-lifecycle', onStart: () => onCallStart?.('database'),
-          });
-          const dur = Date.now() - t0;
-          log.info(`[CLI] Lifecycle database call done in ${dur}ms — resolved: ${object.resolvedViolationIds.length}, new: ${object.newViolations.length}`);
-          this.collectUsage('database', cliUsage, dur);
-          return object;
-        })()]);
+        promises.push(['database', this.generateDatabaseViolationsWithLifecycle(ctx, {
+          onStart: () => onCallStart?.('database'),
+        })]);
       } else {
         promises.push(['database-normal', this.generateDatabaseViolations(ctx, {
           onStart: () => onCallStart?.('database'),
@@ -620,6 +646,7 @@ export abstract class BaseCLIProvider implements LLMProvider {
           this.collectUsage('module', cliUsage, dur);
           return {
             resolvedViolationIds: resolveIds(object.resolvedViolationIds, idMap),
+            unchangedViolationIds: resolveIds(object.unchangedViolationIds, idMap),
             newViolations: object.newViolations.map((i) => {
               const realModuleId = resolveId(i.targetModuleId, idMap);
               return {
@@ -668,8 +695,9 @@ export abstract class BaseCLIProvider implements LLMProvider {
 
       if (key === 'service') {
         const idMap = idMaps.service;
-        const result = outcome.value as { resolvedViolationIds: string[]; newViolations: DiffViolationItem[]; serviceDescriptions: ServiceDescription[] };
+        const result = outcome.value as { resolvedViolationIds: string[]; unchangedViolationIds: string[]; newViolations: DiffViolationItem[]; serviceDescriptions: ServiceDescription[] };
         allResolved.push(...resolveIds(result.resolvedViolationIds, idMap));
+        allUnchanged.push(...resolveIds(result.unchangedViolationIds, idMap));
         allNew.push(...result.newViolations.map((v) => ({
           ...v,
           targetServiceId: resolveId(v.targetServiceId, idMap) ?? null,
@@ -696,21 +724,24 @@ export abstract class BaseCLIProvider implements LLMProvider {
           });
         }
       } else if (key === 'database') {
-        const idMap = idMaps.database;
-        const result = outcome.value as DiffViolationsResult;
-        allResolved.push(...resolveIds(result.resolvedViolationIds, idMap));
+        const result = outcome.value as DatabaseViolationsLifecycleResult;
+        allResolved.push(...result.resolvedViolationIds);
+        allUnchanged.push(...result.unchangedViolationIds);
         allNew.push(...result.newViolations.map((v) => ({
           ...v,
-          targetServiceId: v.targetServiceId ?? null,
-          targetModuleId: v.targetModuleId ?? null,
-          targetMethodId: v.targetMethodId ?? null,
-          targetServiceName: v.targetServiceName ?? null,
-          targetModuleName: v.targetModuleName ?? null,
-          targetMethodName: v.targetMethodName ?? null,
+          targetServiceId: null,
+          targetDatabaseId: v.targetDatabaseId,
+          targetModuleId: null,
+          targetMethodId: null,
+          targetTable: v.targetTable ?? null,
+          targetServiceName: null,
+          targetModuleName: null,
+          targetMethodName: null,
         })));
       } else if (key === 'module') {
         const result = outcome.value as DiffViolationsResult;
         allResolved.push(...result.resolvedViolationIds);
+        allUnchanged.push(...result.unchangedViolationIds);
         allNew.push(...result.newViolations.map((v) => ({
           ...v,
           targetServiceId: v.targetServiceId ?? null,
@@ -736,7 +767,12 @@ export abstract class BaseCLIProvider implements LLMProvider {
       }
     }
 
-    return { resolvedViolationIds: allResolved, newViolations: allNew, serviceDescriptions };
+    return {
+      resolvedViolationIds: allResolved,
+      unchangedViolationIds: allUnchanged,
+      newViolations: allNew,
+      serviceDescriptions,
+    };
   }
 
   async generateCodeViolations(

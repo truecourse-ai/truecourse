@@ -195,6 +195,7 @@ export interface ViolationLifecycleParams {
   previousActiveViolations: ActiveViolation[];
   /** Maps for resolving names to IDs on new violations (targets in current graph) */
   serviceNameToId?: Map<string, string>;
+  databaseNameToId?: Map<string, string>;
   moduleNameToId?: Map<string, string>;
   methodNameToId?: Map<string, string>;
 }
@@ -209,6 +210,7 @@ export function computeViolationLifecycle(
     resolvedViolationIds,
     previousActiveViolations,
     serviceNameToId,
+    databaseNameToId,
     moduleNameToId,
     methodNameToId,
   } = params;
@@ -230,7 +232,10 @@ export function computeViolationLifecycle(
         prev.targetServiceName && serviceNameToId
           ? serviceNameToId.get(prev.targetServiceName) ?? null
           : null,
-      targetDatabaseId: null,            // databases get new IDs each run
+      targetDatabaseId:
+        prev.targetDatabaseName && databaseNameToId
+          ? databaseNameToId.get(prev.targetDatabaseName) ?? null
+          : null,
       targetModuleId:
         prev.targetModuleName && moduleNameToId
           ? moduleNameToId.get(prev.targetModuleName) ?? null
@@ -333,10 +338,10 @@ export function computeViolationLifecycle(
       severity: v.severity as ViolationRecord['severity'],
       status: 'new',
       targetServiceId,
-      targetDatabaseId: null,
+      targetDatabaseId: v.targetDatabaseId ?? null,
       targetModuleId,
       targetMethodId,
-      targetTable: null,
+      targetTable: v.targetTable ?? null,
       relatedServiceId: null,
       relatedModuleId: null,
       fixPrompt: v.fixPrompt ?? null,
