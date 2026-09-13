@@ -23,9 +23,8 @@ import type { FilterOption } from './filter-bar';
 /**
  * One value a dimension offers, with the TWO numbers a value has: `count` is
  * the faceted one the menu shows (what picking it would leave, given what is
- * already picked), `total` is what the value keeps of the full set on its own,
- * which is what an applied pill says. They are the same number only while
- * nothing else narrows the list.
+ * already picked), `total` is what the value keeps of the full set on its own.
+ * An applied pill wears neither: the list's tally is where the numbers live.
  */
 export interface FilterValue extends FilterOption {
   total: number;
@@ -113,7 +112,6 @@ export function FilterBuilder({ label, ariaLabel, dimensions, selected, onChange
           <span key={key} className={PILL}>
             <span className="opacity-70">{dim.label} ·</span>
             {option.label}
-            {` ${option.total}`}
             <button
               type="button"
               aria-label={`Remove ${dim.label} ${option.label}`}

@@ -535,7 +535,7 @@ function WorkRow({
         selected ? 'bg-muted/60 text-foreground' : 'text-foreground'
       }`}
     >
-      {hasChildren && <span aria-hidden className={`${BRANCH} bottom-0 top-1/2`} />}
+      {hasChildren && <span aria-hidden className={`${BRANCH} bottom-0 top-[calc(50%+4px)]`} />}
       {parent && (
         <>
           <span aria-hidden className={`${BRANCH} top-0 ${lastChild ? 'h-1/2' : 'bottom-0'}`} />
@@ -559,8 +559,9 @@ function WorkRow({
 /**
  * The trunk down from a parent's dot, on the dot's own centre line: the dot
  * starts 8px in and is 8px wide, so its centre is at 12px and a 1px line
- * sits half a pixel to the left of it. The tick runs from there to the edge
- * of a child's dot, which starts 28px in.
+ * sits half a pixel to the left of it, leaving the dot's lower edge (its
+ * radius is 4px) rather than cutting through it. The tick runs from there to
+ * the edge of a child's dot, which starts 28px in.
  */
 const BRANCH = 'absolute left-[11.5px] w-px bg-border';
 

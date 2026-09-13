@@ -242,7 +242,7 @@ describe('Flows, the index', () => {
     expect(screen.getByRole('option', { name: 'spiderhands/filecli 0' })).toBeInTheDocument();
   });
 
-  it('says on an applied filter what that filter alone keeps, and what the list was cut from', async () => {
+  it('names an applied filter without a number, and the tally says what the list was cut from', async () => {
     // Five flows: two blocked (one per repository), and two in acme/web.
     serve({
       cliFlows: [
@@ -270,13 +270,12 @@ describe('Flows, the index', () => {
     await user.click(await screen.findByRole('option', { name: 'acme/web 1' }));
 
     await waitFor(() => expect(rows()).toHaveLength(1));
-    // Each pill keeps its own size in the whole list: the intersection is what
-    // the tally says, and a pill repeating it says nothing new.
+    // A pill names its filter and nothing more: the numbers live in the tally.
     const filters = screen.getByRole('group', { name: 'Filter flows' });
     const pill = (name: string) =>
       within(filters).getByRole('button', { name: `Remove ${name}` }).parentElement!;
-    expect(pill('Status Blocked').textContent).toBe('Status ·Blocked 2');
-    expect(pill('Repository acme/web').textContent).toBe('Repository ·acme/web 2');
+    expect(pill('Status Blocked').textContent).toBe('Status ·Blocked');
+    expect(pill('Repository acme/web').textContent).toBe('Repository ·acme/web');
     expect(screen.getByRole('group', { name: 'Flows tally' }).textContent).toBe('1 Blocked1 of 5');
   });
 

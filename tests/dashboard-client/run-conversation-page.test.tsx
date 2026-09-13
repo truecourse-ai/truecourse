@@ -727,7 +727,7 @@ describe('work under the work that started it', () => {
     const parent = screen.getByRole('button', { name: /^create-an-expense-through-the-api/ });
     const child = screen.getByRole('button', { name: /^Fidelity check/ });
     const sibling = screen.getByRole('button', { name: /^list-expenses/ });
-    expect(branches(parent)).toEqual([expect.stringContaining('top-1/2')]);
+    expect(branches(parent)).toEqual([expect.stringContaining('top-[calc(50%+4px)]')]);
     expect(branches(child)).toEqual([
       expect.stringContaining('h-1/2'),
       expect.stringContaining('h-px'),
