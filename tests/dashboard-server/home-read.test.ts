@@ -340,12 +340,15 @@ describe('GET /api/home', () => {
   describe('what needs attention', () => {
     it('names the latest conversation of its kind that ended badly, and no other', async () => {
       withProvider();
-      createSessionRun(repoA.repoPath, { command: 'spec-scan', gitRef: 'abc' }).finish('failed', {
+      // Runs of one repository never share a start time: the lane serializes
+      // them. The clock here says so, where back-to-back creation would not.
+      const at = (minute: number) => () => new Date(`2026-09-11T10:${String(minute).padStart(2, '0')}:00.000Z`);
+      createSessionRun(repoA.repoPath, { command: 'spec-scan', gitRef: 'abc', now: at(1) }).finish('failed', {
         error: { message: 'the provider refused' },
       });
       // A later success on the same kind clears an older failure.
-      createSessionRun(repoA.repoPath, { command: 'guard-setup', gitRef: 'abc' }).finish('failed');
-      createSessionRun(repoA.repoPath, { command: 'guard-setup', gitRef: 'abc' }).finish('completed');
+      createSessionRun(repoA.repoPath, { command: 'guard-setup', gitRef: 'abc', now: at(2) }).finish('failed');
+      createSessionRun(repoA.repoPath, { command: 'guard-setup', gitRef: 'abc', now: at(3) }).finish('completed');
 
       const rows = (await home()).attention.filter((row) => row.kind === 'conversation');
 
