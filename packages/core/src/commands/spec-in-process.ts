@@ -711,6 +711,11 @@ export async function curateInProcess(
       else tracker?.done('discover', note);
     } else {
       ensureVerify();
+      // The tag step's line is its outcome, not the last thing it was doing.
+      tracker?.detail(
+        'tag',
+        `${result.stats.docsKept} kept · ${result.stats.docsScanned - result.stats.docsKept} skipped · ${result.stats.areaCount} areas`,
+      );
       tracker?.done('overlap', `${result.stats.areaCount} areas · ${result.stats.overlapFlags} overlaps`);
       tracker?.done(
         'verify',

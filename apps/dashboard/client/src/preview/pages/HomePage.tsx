@@ -42,8 +42,7 @@ import { PageHeader, SectionTitle } from '@/preview/ui/bits';
 import { EntityList, type EntityListGroup } from '@/preview/ui/entity-list';
 import { StackedArea, type StackedSeries } from '@/preview/ui/stacked-area';
 import { CONTEXT_DOC_TONE, StatusWord, type StatusTone } from '@/preview/ui/status-word';
-import { useContextSignal, useContextSources } from '@/preview/shell/use-context';
-import { usePreviewState } from '@/preview/shell/preview-state';
+import { useOnboarding } from '@/preview/shell/use-onboarding';
 import { PREVIEW_BASE } from '@/preview/shell/base';
 import { documentsHref } from './context-hrefs';
 
@@ -518,13 +517,11 @@ function Onboarding({ hasContext, hasRepo }: { hasContext: boolean; hasRepo: boo
 }
 
 export default function HomePage() {
-  const signal = useContextSignal();
-  const { sources } = useContextSources(signal);
-  const { repos, reposLoaded } = usePreviewState();
+  const { ready, hasContext, hasRepo, done, signal } = useOnboarding();
 
   // Until both reads have landed there is nothing honest to draw: an empty
   // list in flight is not a workspace with nothing in it.
-  if (sources === null || !reposLoaded) {
+  if (!ready) {
     return (
       <div className="flex h-full min-h-0 min-w-0 flex-col">
         <PageHeader title="Home" />
@@ -532,9 +529,7 @@ export default function HomePage() {
     );
   }
 
-  const hasContext = sources.length > 0;
-  const hasRepo = repos.length > 0;
-  if (!hasContext || !hasRepo) return <Onboarding hasContext={hasContext} hasRepo={hasRepo} />;
+  if (!done) return <Onboarding hasContext={hasContext} hasRepo={hasRepo} />;
 
   return <Dashboard signal={signal} />;
 }

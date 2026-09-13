@@ -294,7 +294,25 @@ function titleOf(block: SessionBlock): string {
           .map((l) => l.trim())
           .find((l) => l.startsWith('FLOW:'))
       : undefined;
-  return flow ?? block.workItem ?? block.kind;
+  return flow ?? subjectOf(block.workItem) ?? block.kind;
+}
+
+/**
+ * A work item as a reader says it: `doc:context/<source>/docs/app.md` is
+ * `docs/app.md`, `area:core/billing:0` is `core/billing`, and a bare item
+ * (`vocabulary`, `preparations`) is itself.
+ */
+export function subjectOf(workItem: string | undefined): string | undefined {
+  if (!workItem) return workItem;
+  const doc = /^doc:(.+)$/.exec(workItem);
+  if (doc) {
+    const ref = doc[1]!;
+    const parts = ref.split('/');
+    return parts[0] === 'context' && parts.length > 2 ? parts.slice(2).join('/') : ref;
+  }
+  const area = /^area:(.+?)(?::\d+)?$/.exec(workItem);
+  if (area) return area[1]!;
+  return workItem;
 }
 
 /** The kind of work: the title the session stamped on itself, else the last segment of its kind id. */

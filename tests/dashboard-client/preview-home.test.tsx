@@ -386,7 +386,9 @@ describe('Home', () => {
 describe('Home onboarding', () => {
   const list = () => screen.getByRole('list', { name: 'Getting started' });
   const rows = () => within(list()).getAllByRole('listitem');
-  const action = (name: string) => screen.getByRole('link', { name });
+  // The page's own checkpoints; the side menu tracks the same two under the same words.
+  const action = (name: string) =>
+    within(screen.getByRole('list', { name: 'Getting started' })).getByRole('link', { name });
 
   it('asks for both when the workspace has neither, Add context first', async () => {
     serve({ repos: [], sources: [] });

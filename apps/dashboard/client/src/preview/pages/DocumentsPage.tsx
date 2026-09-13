@@ -98,6 +98,12 @@ function SourceHeader({ source }: { source: ContextSourceView }) {
   return <StatusWord tone={CONTEXT_SYNC_TONE[source.status]} word={CONTEXT_SYNC_WORD[source.status]} />;
 }
 
+/** The document's own path inside its source: the ref minus the context prefix and the source id. */
+function docPathOf(ref: string): string {
+  const parts = ref.split('/');
+  return parts[0] === 'context' && parts.length > 2 ? parts.slice(2).join('/') : ref;
+}
+
 export default function DocumentsPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -232,27 +238,33 @@ export default function DocumentsPage() {
           {
             key: 'title',
             label: 'Document',
-            cell: (row) => <span className="text-foreground">{row.title}</span>,
+            wrap: true,
+            cell: (row) => (
+              <>
+                <span className="text-foreground">{row.title}</span>
+                <span className="block truncate font-mono text-[11px] text-muted-foreground">{docPathOf(row.ref)}</span>
+              </>
+            ),
           },
-          { key: 'area', label: 'Area', width: '14rem', className: 'text-muted-foreground', cell: (row) => row.area },
+          { key: 'area', label: 'Area', width: '10rem', className: 'text-muted-foreground', cell: (row) => row.area },
           {
             key: 'source',
             label: 'Source',
-            width: '12rem',
+            width: '10rem',
             className: 'text-muted-foreground',
             cell: (row) => row.sourceTitle,
           },
           {
             key: 'repos',
             label: 'Repositories',
-            width: '14rem',
+            width: '10rem',
             className: 'font-mono text-[12px] text-muted-foreground',
             cell: repositoriesLabel,
           },
           {
             key: 'status',
             label: 'Status',
-            width: '8rem',
+            width: '7.5rem',
             cell: (row) => (
               <StatusWord
                 tone={CONTEXT_DOC_TONE[row.status]}

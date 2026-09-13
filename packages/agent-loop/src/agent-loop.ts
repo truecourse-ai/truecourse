@@ -168,6 +168,7 @@ function startSession<TOutcome>(
       sessionId,
       kind: def.kind,
       workItem,
+      ...(def.display?.title ? { title: def.display.title } : {}),
       status,
       spent: spent(),
       ...extra,

@@ -34,6 +34,7 @@ import {
   PanelLeftOpen,
   Settings,
   ShieldCheck,
+  Check,
   type LucideIcon,
 } from 'lucide-react';
 import { useAuth } from '@/ee/AuthContext';
@@ -41,6 +42,7 @@ import { useThemeToggle } from '@/hooks/useThemeToggle';
 import { CreateWorkspaceDialog } from './CreateWorkspaceDialog';
 import { usePreviewState } from './preview-state';
 import { usePreviewUser } from './use-preview-user';
+import { useOnboarding } from './use-onboarding';
 import { PREVIEW_BASE } from './base';
 
 export { PREVIEW_BASE };
@@ -222,6 +224,71 @@ function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
   );
 }
 
+/**
+ * The two checkpoints of a new workspace, tracked above the user menu until
+ * both are done: a mark each, its words, and the way to do it. Gone once the
+ * workspace is one.
+ */
+function GettingStarted({ collapsed }: { collapsed: boolean }) {
+  const { ready, hasContext, hasRepo, done } = useOnboarding();
+  if (!ready || done) return null;
+  const steps = [
+    { key: 'context', label: 'Connect context', done: hasContext, to: `${PREVIEW_BASE}/context?add=1` },
+    { key: 'repo', label: 'Connect repository', done: hasRepo, to: `${PREVIEW_BASE}/code?connect=1` },
+  ];
+  const doneCount = steps.filter((step) => step.done).length;
+  if (collapsed) {
+    return (
+      <div className="flex justify-center border-t border-border py-2">
+        <Link
+          to={PREVIEW_BASE}
+          aria-label={`Getting started, ${doneCount} of ${steps.length} done`}
+          className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-foreground"
+        >
+          {doneCount}/{steps.length}
+        </Link>
+      </div>
+    );
+  }
+  return (
+    <div className="border-t border-border px-3 py-3" aria-label="Getting started">
+      <div className="flex items-center justify-between px-1">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Getting started
+        </span>
+        <span className="text-[11px] tabular-nums text-muted-foreground">
+          {doneCount} of {steps.length}
+        </span>
+      </div>
+      <ul className="mt-1.5 space-y-0.5">
+        {steps.map((step) => (
+          <li key={step.key}>
+            {step.done ? (
+              <span className="flex items-center gap-2 rounded-md px-1 py-1 text-xs text-muted-foreground">
+                <span
+                  aria-hidden
+                  className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white"
+                >
+                  <Check className="h-2.5 w-2.5" />
+                </span>
+                <span className="line-through">{step.label}</span>
+              </span>
+            ) : (
+              <Link
+                to={step.to}
+                className="flex items-center gap-2 rounded-md px-1 py-1 text-xs text-foreground transition-colors hover:bg-muted/60"
+              >
+                <span aria-hidden className="inline-block h-4 w-4 shrink-0 rounded-full border border-border" />
+                <span>{step.label}</span>
+              </Link>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function UserMenu({ collapsed }: { collapsed: boolean }) {
   const { isDark, toggle: toggleTheme } = useThemeToggle();
   const { workspace } = usePreviewState();
@@ -362,6 +429,7 @@ export function PreviewShell({ children }: { children: ReactNode }) {
           </div>
         )}
 
+        <GettingStarted collapsed={collapsed} />
         <div className="border-t border-border px-2 py-2">
           <UserMenu collapsed={collapsed} />
         </div>

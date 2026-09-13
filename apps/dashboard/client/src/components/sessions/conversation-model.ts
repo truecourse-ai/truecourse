@@ -137,7 +137,7 @@ export function foldConversation(
     const parentSessionId = parentOf.get(sessionId);
     const spent = entry?.spent;
     const live = progress[sessionId];
-    const title = start?.type === 'session-start' ? titleOf(start.display) : undefined;
+    const title = entry?.title ?? (start?.type === 'session-start' ? titleOf(start.display) : undefined);
     blocks.set(sessionId, {
       sessionId,
       kind: entry?.kind ?? (start?.type === 'session-start' ? start.kind : ''),

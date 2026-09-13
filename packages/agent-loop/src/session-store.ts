@@ -38,6 +38,8 @@ export const SessionIndexEntrySchema = z.object({
   sessionId: z.string(),
   kind: z.string(),
   workItem: z.string(),
+  /** The short human name of this kind of work, as the session's display declares it. */
+  title: z.string().optional(),
   status: SessionStatusSchema,
   providerSessionId: z.string().optional(),
   /** Driver-owned resume pointer — opaque to everything else. */
