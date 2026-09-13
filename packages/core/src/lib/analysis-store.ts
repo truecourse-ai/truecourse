@@ -12,6 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { atomicWriteJson } from './atomic-write.js';
+import { readJsonStreaming, writeJsonStreaming } from './streaming-json.js';
 import type {
   AnalysisSnapshot,
   DiffSnapshot,
@@ -136,14 +137,14 @@ class FileAnalysisStore implements AnalysisStore {
     }
     const cached = latestCache.get(repoPath);
     if (cached && cached.mtime === mtime) return cached.data;
-    const data = JSON.parse(fs.readFileSync(file, 'utf-8')) as LatestSnapshot;
+    const data = await readJsonStreaming<LatestSnapshot>(file);
     patchViolations(data.violations);
     latestCache.set(repoPath, { mtime, data });
     return data;
   }
 
   async writeLatest(repoPath: string, latest: LatestSnapshot): Promise<void> {
-    atomicWriteJson(latestPath(repoPath), latest);
+    await writeJsonStreaming(latestPath(repoPath), latest);
     latestCache.delete(repoPath);
   }
 
@@ -158,14 +159,14 @@ class FileAnalysisStore implements AnalysisStore {
 
   async writeAnalysis(repoPath: string, snapshot: AnalysisSnapshot): Promise<WrittenAnalysis> {
     const filename = buildAnalysisFilename(snapshot.id, snapshot.createdAt);
-    atomicWriteJson(analysisFilePath(repoPath, filename), snapshot);
+    await writeJsonStreaming(analysisFilePath(repoPath, filename), snapshot);
     return { filename, snapshot };
   }
 
   async readAnalysis(repoPath: string, filename: string): Promise<AnalysisSnapshot | null> {
     const file = analysisFilePath(repoPath, filename);
     if (!fs.existsSync(file)) return null;
-    const data = JSON.parse(fs.readFileSync(file, 'utf-8')) as AnalysisSnapshot;
+    const data = await readJsonStreaming<AnalysisSnapshot>(file);
     patchViolations(data.violations?.added);
     return data;
   }
@@ -217,14 +218,14 @@ class FileAnalysisStore implements AnalysisStore {
   async readDiff(repoPath: string): Promise<DiffSnapshot | null> {
     const file = diffPath(repoPath);
     if (!fs.existsSync(file)) return null;
-    const data = JSON.parse(fs.readFileSync(file, 'utf-8')) as DiffSnapshot;
+    const data = await readJsonStreaming<DiffSnapshot>(file);
     patchViolations(data.newViolations);
     patchViolations(data.resolvedViolations);
     return data;
   }
 
   async writeDiff(repoPath: string, diff: DiffSnapshot): Promise<void> {
-    atomicWriteJson(diffPath(repoPath), diff);
+    await writeJsonStreaming(diffPath(repoPath), diff);
   }
 
   async deleteDiff(repoPath: string): Promise<void> {
