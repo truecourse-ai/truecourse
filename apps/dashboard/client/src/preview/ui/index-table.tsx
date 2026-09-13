@@ -25,7 +25,12 @@ function toPx(width: string): number {
 
 /**
  * The columns' widths, in pixels, for the sized columns: the declared width
- * to begin with, then whatever the reader dragged, for this visit.
+ * to begin with, then whatever the reader dragged, for this visit. The first
+ * column carries no width of its own: it takes what the others leave, so a
+ * drag on its edge is a drag on its neighbour.
+ *
+ * A drag on the line between two columns moves width from one to the other,
+ * and the table's total never changes: nothing spills into a third column.
  */
 function useColumnWidths(columns: readonly { key: string; width?: string }[]) {
   const [widths, setWidths] = useState<Record<string, number>>(() => {
@@ -33,16 +38,28 @@ function useColumnWidths(columns: readonly { key: string; width?: string }[]) {
     for (const c of columns) if (c.width) declared[c.key] = toPx(c.width);
     return declared;
   });
-  const set = useCallback((key: string, px: number) => {
-    setWidths((prev) => ({ ...prev, [key]: Math.max(MIN_COLUMN_PX, Math.round(px)) }));
-  }, []);
-  return { widths, set };
+  const resizeBetween = useCallback(
+    (left: number, deltaPx: number) => {
+      const a = columns[left];
+      const b = columns[left + 1];
+      if (!a || !b || !b.width) return;
+      setWidths((prev) => {
+        const bWidth = prev[b.key] ?? toPx(b.width ?? '0px');
+        if (!a.width) {
+          // The first column grows by what its neighbour gives up.
+          return { ...prev, [b.key]: Math.max(MIN_COLUMN_PX, Math.round(bWidth - deltaPx)) };
+        }
+        const aWidth = prev[a.key] ?? toPx(a.width);
+        const delta = Math.max(MIN_COLUMN_PX - aWidth, Math.min(deltaPx, bWidth - MIN_COLUMN_PX));
+        return { ...prev, [a.key]: Math.round(aWidth + delta), [b.key]: Math.round(bWidth - delta) };
+      });
+    },
+    [columns],
+  );
+  return { widths, resizeBetween };
 }
 
-/**
- * The handle on a sized column's right edge: drag it and the column follows.
- * The first column has none, since it takes what the others leave.
- */
+/** The line between two columns, in the header: drag it and the two columns trade width. */
 function ResizeHandle({ onResize }: { onResize: (deltaPx: number) => void }) {
   const start = useRef<number | null>(null);
   useEffect(() => {
@@ -71,7 +88,7 @@ function ResizeHandle({ onResize }: { onResize: (deltaPx: number) => void }) {
         start.current = e.clientX;
         document.body.style.cursor = 'col-resize';
       }}
-      className="absolute inset-y-0 right-0 w-1.5 cursor-col-resize hover:bg-border"
+      className="absolute inset-y-0 -right-1 w-2 cursor-col-resize hover:bg-primary/40"
     />
   );
 }
@@ -127,7 +144,7 @@ export function IndexTable<T>({
   /** The one line under an empty table: nothing at all, or nothing that matches. */
   empty: ReactNode;
 }) {
-  const { widths, set } = useColumnWidths(columns);
+  const { widths, resizeBetween } = useColumnWidths(columns);
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <div className="border-b border-border px-3 py-2">
@@ -144,8 +161,9 @@ export function IndexTable<T>({
       )}
       {/* Fixed layout: the sized columns take their width, the first column
           takes what they leave, and a cell truncates rather than pushing the
-          table wider. The page never scrolls sideways. A sized column's right
-          edge is a handle: drag it and the column follows, for this visit. */}
+          table wider. The page never scrolls sideways. The line between two
+          header cells is a handle: drag it and the two columns trade width,
+          for this visit. */}
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
         <table className="w-full table-fixed border-collapse text-[13px]" aria-label={label}>
           <thead className="sticky top-0 z-10 bg-card">
@@ -154,12 +172,10 @@ export function IndexTable<T>({
                 <th
                   key={c.key}
                   {...(c.width ? { style: { width: `${widths[c.key] ?? toPx(c.width)}px` } } : {})}
-                  className={`relative truncate py-2 font-semibold ${c.align === 'right' ? 'text-right' : 'text-left'} ${i === 0 ? 'pl-6 pr-3' : i === columns.length - 1 ? 'pl-3 pr-6' : 'px-3'}`}
+                  className={`relative truncate py-2 font-semibold ${c.align === 'right' ? 'text-right' : 'text-left'} ${i === 0 ? 'pl-6 pr-3' : i === columns.length - 1 ? 'pl-3 pr-6' : 'px-3'} ${i < columns.length - 1 ? 'border-r border-border' : ''}`}
                 >
                   {c.label}
-                  {c.width && (
-                    <ResizeHandle onResize={(delta) => set(c.key, (widths[c.key] ?? toPx(c.width ?? '0px')) + delta)} />
-                  )}
+                  {i < columns.length - 1 && <ResizeHandle onResize={(delta) => resizeBetween(i, delta)} />}
                 </th>
               ))}
             </tr>
