@@ -68,9 +68,6 @@ const STATIC_EE_IMPORT =
 const AI_SDK_HOME = 'packages/llm-api';
 
 const ACTIVITY_SDK_IMPORTS: Record<string, { values: string[]; types: string[] }> = {
-  'apps/dashboard/client/src/lib/activity-stream.ts': {
-    values: ['DefaultChatTransport'], types: ['UIMessageChunk'],
-  },
   'apps/dashboard/server/src/routes/sessions.ts': {
     values: ['createUIMessageStreamResponse'], types: [],
   },
@@ -185,12 +182,10 @@ describe('open-core import boundary', () => {
   });
 
   it.each([
-    "import { DefaultChatTransport as Transport } from 'ai';",
-    "import {\n DefaultChatTransport, type UIMessageChunk,\n} from 'ai';",
-    "import type { UIMessageChunk } from 'ai';",
-    "type Chunk = import('ai').UIMessageChunk;",
+    "import { createUIMessageStreamResponse as respond } from 'ai';",
+    "import {\n createUIMessageStreamResponse,\n} from 'ai';",
   ])('permits activity transport imports: %s', src => {
-    expect(aiSdkImportViolations('apps/dashboard/client/src/lib/activity-stream.ts', src)).toEqual([]);
+    expect(aiSdkImportViolations('apps/dashboard/server/src/routes/sessions.ts', src)).toEqual([]);
   });
 
   it.each([
@@ -209,7 +204,7 @@ describe('open-core import boundary', () => {
     "type Model = import('ai').LanguageModel;",
     "type SDK = typeof import('ai');",
   ])('rejects model APIs and unrestricted SDK access inside activity files: %s', src => {
-    expect(aiSdkImportViolations('apps/dashboard/client/src/lib/activity-stream.ts', src).length).toBeGreaterThan(0);
+    expect(aiSdkImportViolations('apps/dashboard/server/src/routes/sessions.ts', src).length).toBeGreaterThan(0);
   });
 
   it('keeps UI transport imports scoped to their activity adapters', () => {
