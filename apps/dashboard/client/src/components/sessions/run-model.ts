@@ -33,7 +33,15 @@ export function displayBlocks(display: unknown): readonly DisplayBlock[] {
 export type RunStatus = PublicSessionRun['status'];
 export type StepStatus = 'pending' | 'active' | 'done' | 'error';
 
-export const RUN_STATUS_META: Record<RunStatus, { word: string; dot: string }> = {
+/**
+ * What a piece of the agent's work wears: a run record's own status, or
+ * `queued` for work that has not started — a job waiting its turn in the
+ * workspace's queue, which has no run record behind it yet.
+ */
+export type WorkStatus = RunStatus | 'queued';
+
+export const RUN_STATUS_META: Record<WorkStatus, { word: string; dot: string }> = {
+  queued: { word: 'Queued', dot: 'bg-muted-foreground' },
   running: { word: 'Running', dot: 'bg-sky-500' },
   completed: { word: 'Finished', dot: 'bg-emerald-500' },
   failed: { word: 'Failed', dot: 'bg-red-500' },

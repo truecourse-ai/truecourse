@@ -10,6 +10,11 @@
  * outcome, never a wish. A row opens what it is about: setup and generation open
  * their conversation, a run opens the run.
  *
+ * The one word that is not an outcome is QUEUED: the heavy jobs of a workspace
+ * run one at a time, so this repository's can be waiting its turn with nothing
+ * to report yet. Then the row says what it waits for, and every Re-run waits
+ * with it.
+ *
  * It re-reads on the same signals the Runs tab watches: a guard job settling on
  * this repository's room, and a run-store write while one is in flight.
  */
@@ -37,6 +42,7 @@ import {
 } from '@/preview/ui/status-word';
 import { usePreviewState } from '@/preview/shell/preview-state';
 import { useRunTrigger } from '@/preview/shell/use-run-trigger';
+import { jobCommand, jobRepoFullName, waitingFact } from '@/preview/shell/use-active-jobs';
 import { activityHref, conversationHref, relativeTime } from '@/preview/shell/real-runs';
 import { PREVIEW_BASE } from '@/preview/shell/base';
 import type { Repo } from '@/preview/data/types';
@@ -185,14 +191,18 @@ function PipelineRow({
 export function PipelineTab({ repo }: { repo: Repo }) {
   const navigate = useNavigate();
   const { runs, setup, report, history, loaded } = usePipeline(repo);
-  const { jobs, jobsReady } = usePreviewState();
+  const { jobs, jobsReady, activeJobs, activeJobsReady } = usePreviewState();
   const trigger = useRunTrigger(repo.id);
   const generate = useGuardGenerate(repo.id);
 
   // One heavy job at a time per repository: while this one is working, every
-  // row's action waits with it.
-  const activeJob = jobs.some((job) => job.repoFullName === repo.fullName);
-  const busy = activeJob || trigger.pending || generate.busy || !jobsReady;
+  // row's action waits with it — and a job that has not started is just as much
+  // in flight as a running one, so it waits for those too.
+  const activeJob =
+    jobs.some((job) => job.repoFullName === repo.fullName) ||
+    activeJobs.some((job) => jobRepoFullName(job) === repo.fullName);
+  const busy =
+    activeJob || trigger.pending || generate.busy || !jobsReady || !activeJobsReady;
 
   const openRun = useCallback(
     (run: PublicSessionRun | null) =>
@@ -208,7 +218,22 @@ export function PipelineTab({ repo }: { repo: Repo }) {
       run ? { tone: RUN_STATUS_TONE[run.status], word: RUN_STATUS_META[run.status].word } : NEVER;
     const verdict = lastRun ? (guardRunVerdict(lastRun) === 'fail' ? 'failed' : 'passed') : null;
 
-    return [
+    // Work that has not started has no run to read: the workspace's job list is
+    // where it is visible, and the row says it is queued and what it waits for.
+    const waiting = (command: string) => {
+      const job = activeJobs.find(
+        (j) => jobCommand(j) === command && jobRepoFullName(j) === repo.fullName,
+      );
+      if (!job || job.status !== 'queued') return null;
+      return {
+        tone: RUN_STATUS_TONE.queued,
+        word: RUN_STATUS_META.queued.word,
+        fact: waitingFact(job, activeJobs),
+        at: job.createdAt,
+      };
+    };
+
+    const chain = [
       {
         key: SETUP,
         title: commandLabel(SETUP),
@@ -243,7 +268,25 @@ export function PipelineTab({ repo }: { repo: Repo }) {
         onRerun: () => trigger.start(RUN),
       },
     ];
-  }, [runs, setup, report, history, openRun, navigate, repo.id, trigger, generate.begin]);
+
+    // A row's key is the command it runs, which is what a waiting job names.
+    return chain.map((row) => {
+      const wait = waiting(row.key);
+      return wait ? { ...row, ...wait } : row;
+    });
+  }, [
+    runs,
+    setup,
+    report,
+    history,
+    openRun,
+    navigate,
+    repo.id,
+    repo.fullName,
+    activeJobs,
+    trigger,
+    generate.begin,
+  ]);
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">

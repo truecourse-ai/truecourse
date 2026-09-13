@@ -200,6 +200,22 @@ describe('the Runs tab of a connected repository', () => {
     expect(within(table).queryByRole('columnheader', { name: 'Coverage' })).toBeNull();
   });
 
+  it('tallies the runs it shows by verdict, and never beside the title', async () => {
+    serve();
+    renderAt(`/preview/repos/${REAL.id}/runs`);
+    const user = userEvent.setup();
+    const table = await screen.findByRole('table', { name: 'Runs' });
+    await within(table).findByText('f00d123');
+
+    const tally = () => screen.getByRole('group', { name: 'Runs tally' });
+    expect(tally().textContent).toBe('2 Failed');
+    // The number lives at the bottom, once: the header carries the name alone.
+    expect(screen.getByRole('heading', { name: 'Runs' }).parentElement!.textContent).toBe('Runs');
+
+    await user.type(screen.getByRole('textbox', { name: 'Search runs' }), 'f00d123');
+    await waitFor(() => expect(tally().textContent).toBe('1 Failed'));
+  });
+
   it('is a full-width search over an opaque sticky head, and no filter row', async () => {
     serve();
     renderAt(`/preview/repos/${REAL.id}/runs`);

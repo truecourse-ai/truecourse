@@ -34,11 +34,13 @@ import {
   selectedValues,
   type FilterDimension,
 } from '@/preview/ui/filter-builder';
+import { facetDimensions } from '@/preview/ui/filter-facets';
 import {
   CONTEXT_DOC_TONE,
   CONTEXT_SYNC_TONE,
   CONTEXT_SYNC_WORD,
   StatusWord,
+  tallyOf,
 } from '@/preview/ui/status-word';
 import { formatRelativeTime } from '@/preview/vendor/shared/format/relative-time';
 import { useContextDocuments, useContextSignal, useContextSources } from '@/preview/shell/use-context';
@@ -139,58 +141,72 @@ export default function DocumentsPage() {
     [searchParams, setSearchParams],
   );
 
+  const matchesQuery = useCallback(
+    (row: ContextDocumentRow) => {
+      const q = query.trim().toLowerCase();
+      return q === '' || row.title.toLowerCase().includes(q);
+    },
+    [query],
+  );
+
   const dimensions = useMemo<FilterDimension[]>(() => {
-    const count = (dimension: Dimension, value: string) =>
-      rowsAll.filter((row) => valuesOf(row, dimension).includes(value)).length;
     const areas = [...new Set(rowsAll.map((row) => row.area))]
       .filter(Boolean)
       .sort((a, b) => a.localeCompare(b));
     const repositories = [...new Set(rowsAll.flatMap((row) => row.repositories))].sort((a, b) =>
       a.localeCompare(b),
     );
-    const sourceOptions = (sources ?? []).map((source) => ({
-      key: filterKey('source', source.id),
-      label: source.title,
-      count: count('source', source.id),
-    }));
-    return [
-      {
-        key: 'area',
-        label: DIMENSION_WORD.area,
-        options: areas.map((area) => ({
-          key: filterKey('area', area),
-          label: area,
-          count: count('area', area),
-        })),
-      },
-      {
-        key: 'status',
-        label: DIMENSION_WORD.status,
-        options: CONTEXT_DOCUMENT_STATUS_ORDER.map((status: ContextDocumentStatus) => ({
-          key: filterKey('status', status),
-          label: CONTEXT_DOCUMENT_STATUS_WORD[status],
-          count: count('status', status),
-        })).filter((option) => option.count > 0),
-      },
-      { key: 'source', label: DIMENSION_WORD.source, options: sourceOptions },
-      {
-        key: 'repo',
-        label: DIMENSION_WORD.repo,
-        options: repositories.map((repo) => ({
-          key: filterKey('repo', repo),
-          label: repo,
-          count: count('repo', repo),
-        })),
-      },
-    ];
-  }, [rowsAll, sources]);
+    const values = (dimension: Dimension) => (row: ContextDocumentRow) => valuesOf(row, dimension);
+    return facetDimensions<ContextDocumentRow>({
+      rows: rowsAll,
+      selected,
+      matches: matchesQuery,
+      dimensions: [
+        {
+          key: 'area',
+          label: DIMENSION_WORD.area,
+          valuesOf: values('area'),
+          values: areas.map((area) => ({ value: area, label: area })),
+        },
+        {
+          key: 'status',
+          label: DIMENSION_WORD.status,
+          valuesOf: values('status'),
+          values: CONTEXT_DOCUMENT_STATUS_ORDER.map((status: ContextDocumentStatus) => ({
+            value: status,
+            label: CONTEXT_DOCUMENT_STATUS_WORD[status],
+          })),
+          hideEmpty: true,
+        },
+        {
+          key: 'source',
+          label: DIMENSION_WORD.source,
+          valuesOf: values('source'),
+          values: (sources ?? []).map((source) => ({ value: source.id, label: source.title })),
+        },
+        {
+          key: 'repo',
+          label: DIMENSION_WORD.repo,
+          valuesOf: values('repo'),
+          values: repositories.map((repo) => ({ value: repo, label: repo })),
+        },
+      ],
+    });
+  }, [rowsAll, matchesQuery, selected, sources]);
 
-  const rows = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return rowsAll.filter(
-      (row) => (!q || row.title.toLowerCase().includes(q)) && keeps(row, selected),
-    );
-  }, [rowsAll, query, selected]);
+  const rows = useMemo(
+    () => rowsAll.filter((row) => matchesQuery(row) && keeps(row, selected)),
+    [rowsAll, matchesQuery, selected],
+  );
+
+  const tally = useMemo(
+    () =>
+      tallyOf(rows, CONTEXT_DOCUMENT_STATUS_ORDER, (row) => row.status, (status) => ({
+        word: CONTEXT_DOCUMENT_STATUS_WORD[status],
+        tone: CONTEXT_DOC_TONE[status],
+      })),
+    [rows],
+  );
 
   const onlySource = useMemo(() => {
     const picked = selectedValues(selected, 'source');
@@ -233,6 +249,7 @@ export default function DocumentsPage() {
         selected={selected}
         onSelect={select}
         filterAriaLabel="Filter documents"
+        tally={tally}
         empty={empty}
         columns={[
           {

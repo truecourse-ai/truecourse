@@ -38,6 +38,7 @@ vi.mock('@/lib/socket', () => {
 });
 
 import PreviewApp from '@/preview/PreviewApp';
+import type { JobView } from '@truecourse/shared';
 
 function fireSocket(event: string, payload: unknown): void {
   for (const fn of listeners.get(event) ?? []) fn(payload);
@@ -114,8 +115,36 @@ const HISTORY = {
   ],
 };
 
+/**
+ * A job of the workspace. `key` is the server's own (`<type>:<owner/repo>`),
+ * which is how a job names the repository it runs for.
+ */
+function job(over: Partial<JobView> & Pick<JobView, 'type'>): JobView {
+  return {
+    id: over.type,
+    workspaceOrgId: 'org_1',
+    key: `${over.type}:${REAL.name}`,
+    status: 'queued',
+    progress: { current: 0, total: 0, message: null },
+    result: null,
+    error: null,
+    createdAt: '2026-09-03T11:00:00.000Z',
+    startedAt: null,
+    finishedAt: null,
+    ...over,
+  };
+}
+
 /** One connected repository, with a settled setup, generate and run behind it. */
-function serve(options: { runs?: unknown[]; setup?: unknown; report?: unknown; history?: unknown } = {}) {
+function serve(
+  options: {
+    runs?: unknown[];
+    setup?: unknown;
+    report?: unknown;
+    history?: unknown;
+    jobs?: JobView[];
+  } = {},
+) {
   const calls: string[] = [];
   window.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
@@ -126,6 +155,7 @@ function serve(options: { runs?: unknown[]; setup?: unknown; report?: unknown; h
     if (url.pathname === '/api/repos') return json([REAL]);
     if (url.pathname === '/api/llm/config') return json({ config: { provider: 'anthropic' }, providers: ['anthropic'] });
     if (url.pathname === '/api/sessions/runs') return json({ runs: [] });
+    if (url.pathname === '/api/jobs') return json({ jobs: options.jobs ?? [] });
     if (rest === 'sessions/runs') return json({ runs: options.runs ?? [SETUP_RUN, GENERATE_RUN] });
     if (rest === 'guard/setup') {
       const report = options.setup === undefined ? SETUP_REPORT : options.setup;
@@ -235,6 +265,33 @@ describe('the Pipeline tab of a connected repository', () => {
     expect(within(setup!).getByRole('button', { name: 'Re-run Flow setup' })).toBeDisabled();
     // …and the row says what the run itself says.
     expect(within(generate!).getByText('Running')).toBeInTheDocument();
+  });
+
+  it('says a piece of work waiting its turn is queued, and holds every Re-run', async () => {
+    serve({
+      jobs: [
+        job({
+          id: 'job-holding',
+          type: 'repo.guard-setup',
+          key: 'repo.guard-setup:spiderhands/expense-tracker',
+          status: 'running',
+          startedAt: '2026-09-03T10:59:00.000Z',
+        }),
+        job({ type: 'repo.guard-generate' }),
+      ],
+    });
+    renderAt(`/preview/repos/${REAL.id}/pipeline`);
+
+    const [setup, generate] = await rows();
+    await waitFor(() => expect(within(generate!).getByText('Queued')).toBeInTheDocument());
+    expect(
+      within(generate!).getByText('waiting for Flow setup on spiderhands/expense-tracker'),
+    ).toBeInTheDocument();
+    // Its own Re-run waits, and so does every other row's: one at a time.
+    expect(within(generate!).getByRole('button', { name: 'Re-run Flow generation' })).toBeDisabled();
+    expect(within(setup!).getByRole('button', { name: 'Re-run Flow setup' })).toBeDisabled();
+    // The row that is not waiting still says what it last did.
+    expect(within(setup!).getByText('Finished')).toBeInTheDocument();
   });
 
   it('opens a setup or generation row as its conversation, and the run row as the run', async () => {

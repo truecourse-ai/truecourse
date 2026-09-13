@@ -10,8 +10,9 @@
  * over the shell's one socket: a run in flight is a job (a toast, an in-flight
  * chain whose steps are the run's own phase checklist), a run that ended badly
  * is an announcement, and both feed the `onboarding` marker and the last check
- * on the repository's row. The NOTIFICATION FEED is the server's own store,
- * read by `useNotifications`.
+ * on the repository's row. Work that has NOT started has no run record at all,
+ * so the workspace's job queue is read beside them (`useActiveJobs`). The
+ * NOTIFICATION FEED is the server's own store, read by `useNotifications`.
  *
  * Nothing is persisted here: no localStorage, and the socket only listens.
  */
@@ -36,9 +37,10 @@ import {
 } from '@/lib/api';
 import { useAuth } from '@/ee/AuthContext';
 import { useRealRunStream, type RunFailure } from './real-runs';
+import { useActiveJobs } from './use-active-jobs';
 import { useNotifications } from './use-notifications';
 import { PREVIEW_BASE } from './base';
-import type { NotificationView, WorkspaceSummary } from '@truecourse/shared';
+import type { JobView, NotificationView, WorkspaceSummary } from '@truecourse/shared';
 import type { JobChain, Repo, Workspace } from '@/preview/data/types';
 
 interface PreviewStateValue {
@@ -96,6 +98,14 @@ interface PreviewStateValue {
    * waits on this before it snapshots what to stay silent about.
    */
   jobsReady: boolean;
+  /**
+   * The workspace's background jobs, queued and running. Work that has not
+   * started has no run record and lives only here: the heavy jobs share one
+   * queue per workspace, so a repository's can wait in it for a long time.
+   */
+  activeJobs: JobView[];
+  /** The job read has settled, so an empty `activeJobs` is an idle workspace. */
+  activeJobsReady: boolean;
   /** The runs that ended badly, newest first. */
   runFailures: RunFailure[];
   /**
@@ -229,6 +239,8 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
 
   // The repositories' runs, followed live. Inert without a server.
   const realRuns = useRealRunStream(repos, reposLoaded);
+  // The workspace's jobs, where work that has not started yet is visible.
+  const queue = useActiveJobs();
   // The workspace's notification feed, read from the store and followed live.
   const feed = useNotifications();
 
@@ -268,6 +280,8 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
       markAllRead: feed.markAllRead,
       jobs: realRuns.jobs,
       jobsReady: realRuns.ready,
+      activeJobs: queue.jobs,
+      activeJobsReady: queue.ready,
       runFailures: realRuns.failures,
       llmProvider,
       refreshLlmProvider,
@@ -281,6 +295,7 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
     repos,
     reposLoaded,
     realRuns,
+    queue,
     feed,
     llmProvider,
     refreshLlmProvider,

@@ -328,6 +328,29 @@ describe('the filters', () => {
     expect(within(rows()[0]!).getByText('Flow setup complete')).toBeInTheDocument();
   });
 
+  it('tallies the feed it shows by level, and counts the values over the rest', async () => {
+    serve([SETUP, RUN, SYNC, SCAN_FAILED]);
+    renderAt('/preview/notifications');
+    const user = userEvent.setup();
+    await waitFor(() => expect(rows()).toHaveLength(4));
+
+    const tally = () => screen.getByRole('group', { name: 'Workspace notifications tally' });
+    expect(tally().textContent).toBe('2 Done1 Needs you1 Failed');
+
+    await user.click(screen.getByRole('button', { name: 'Add filter' }));
+    await user.click(await screen.findByRole('option', { name: /About/ }));
+    await user.click(await screen.findByRole('option', { name: /acme\/widgets/ }));
+
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    expect(tally().textContent).toBe('1 Done1 Needs you');
+
+    // The status values now count what that subject holds.
+    await user.click(screen.getByRole('button', { name: 'Add filter' }));
+    await user.click(await screen.findByRole('option', { name: /Status/ }));
+    expect(await screen.findByRole('option', { name: 'Done 1' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Failed 0' })).toBeInTheDocument();
+  });
+
   it('puts a Read filter picked through Add filter into the address', async () => {
     serve([SETUP, RUN, SYNC, SCAN_FAILED]);
     renderAt('/preview/notifications');

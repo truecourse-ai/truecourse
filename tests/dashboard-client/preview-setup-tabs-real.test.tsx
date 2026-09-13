@@ -254,15 +254,17 @@ describe('the full-page interface catalog', () => {
     await within(table).findByRole('link', { name: 'Profile /profile' });
     await user.type(screen.getByLabelText('Search interfaces'), 'Save changes');
     expect(within(table).getAllByRole('row')).toHaveLength(2);
-    // ONE Add-filter row over both dimensions: pick the dimension, then a value.
+    // ONE Add-filter row over both dimensions: pick the dimension, then a
+    // value. The counts are of what the search kept — this screen's two
+    // interfaces, one of each origin — not of the whole catalog.
     await user.click(screen.getByRole('button', { name: 'Add filter' }));
     await user.click(screen.getByRole('option', { name: 'Origin 2' }));
-    await user.click(screen.getByRole('option', { name: 'derived 4' }));
+    await user.click(screen.getByRole('option', { name: 'derived 1' }));
     expect(within(table).getByRole('link', { name: 'Profile /profile' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Remove Origin derived' }));
     await user.click(screen.getByRole('button', { name: 'Add filter' }));
     await user.click(screen.getByRole('option', { name: 'Origin 2' }));
-    await user.click(screen.getByRole('option', { name: 'authored 2' }));
+    await user.click(screen.getByRole('option', { name: 'authored 1' }));
     expect(within(table).getByRole('link', { name: 'Profile /profile' })).toBeInTheDocument();
   });
 

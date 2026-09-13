@@ -21,8 +21,9 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { NotificationLevel, NotificationView } from '@truecourse/shared';
 import { PageHeader } from '@/preview/ui/bits';
 import { filterKey, selectedValues, type FilterDimension } from '@/preview/ui/filter-builder';
+import { facetDimensions } from '@/preview/ui/filter-facets';
 import { IndexTable, type IndexColumn } from '@/preview/ui/index-table';
-import { StatusWord } from '@/preview/ui/status-word';
+import { StatusWord, tallyOf } from '@/preview/ui/status-word';
 import { usePreviewState } from '@/preview/shell/preview-state';
 import { relativeTime } from '@/preview/shell/real-runs';
 import {
@@ -65,8 +66,17 @@ export default function NotificationsPage() {
     [setParams],
   );
 
+  const matchesQuery = useCallback(
+    (n: NotificationView) => {
+      const q = query.trim().toLowerCase();
+      return (
+        q === '' || n.title.toLowerCase().includes(q) || (n.body?.toLowerCase().includes(q) ?? false)
+      );
+    },
+    [query],
+  );
+
   const rows = useMemo(() => {
-    const q = query.trim().toLowerCase();
     const reads = selectedValues(selected, 'read');
     const levels = selectedValues(selected, 'status');
     const subjects = selectedValues(selected, 'about');
@@ -75,49 +85,52 @@ export default function NotificationsPage() {
         (reads.length === 0 || reads.includes(readValue(n))) &&
         (levels.length === 0 || levels.includes(n.level)) &&
         (subjects.length === 0 || subjects.includes(notificationSubject(n) ?? '')) &&
-        (q === '' ||
-          n.title.toLowerCase().includes(q) ||
-          (n.body?.toLowerCase().includes(q) ?? false)),
+        matchesQuery(n),
     );
-  }, [notifications, query, selected]);
+  }, [notifications, matchesQuery, selected]);
+
+  const tally = useMemo(
+    () => tallyOf(rows, LEVELS, (n) => n.level, (level) => LEVEL_STATUS[level]),
+    [rows],
+  );
 
   const dimensions = useMemo<FilterDimension[]>(() => {
     const subjects = [
       ...new Set(notifications.map(notificationSubject).filter((s): s is string => s !== null)),
     ].sort();
-    return [
-      {
-        key: 'read',
-        label: 'Read',
-        options: [
-          { key: filterKey('read', 'unread'), label: 'Unread', count: unreadCount },
-          {
-            key: filterKey('read', 'read'),
-            label: 'Read',
-            count: notifications.length - unreadCount,
+    return facetDimensions<NotificationView>({
+      rows: notifications,
+      selected,
+      matches: matchesQuery,
+      dimensions: [
+        {
+          key: 'read',
+          label: 'Read',
+          valuesOf: (n) => [readValue(n)],
+          values: [
+            { value: 'unread', label: 'Unread' },
+            { value: 'read', label: 'Read' },
+          ],
+        },
+        {
+          key: 'status',
+          label: 'Status',
+          valuesOf: (n) => [n.level],
+          values: LEVELS.map((level) => ({ value: level, label: LEVEL_STATUS[level].word })),
+          hideEmpty: true,
+        },
+        {
+          key: 'about',
+          label: 'About',
+          valuesOf: (n) => {
+            const subject = notificationSubject(n);
+            return subject === null ? [] : [subject];
           },
-        ],
-      },
-      {
-        key: 'status',
-        label: 'Status',
-        options: LEVELS.map((level) => ({
-          key: filterKey('status', level),
-          label: LEVEL_STATUS[level].word,
-          count: notifications.filter((n) => n.level === level).length,
-        })).filter((o) => o.count > 0),
-      },
-      {
-        key: 'about',
-        label: 'About',
-        options: subjects.map((subject) => ({
-          key: filterKey('about', subject),
-          label: subject,
-          count: notifications.filter((n) => notificationSubject(n) === subject).length,
-        })),
-      },
-    ];
-  }, [notifications, unreadCount]);
+          values: subjects.map((subject) => ({ value: subject, label: subject })),
+        },
+      ],
+    });
+  }, [notifications, matchesQuery, selected]);
 
   const columns = useMemo<IndexColumn<NotificationView>[]>(
     () => [
@@ -197,6 +210,7 @@ export default function NotificationsPage() {
           selected={selected}
           onSelect={onSelect}
           filterAriaLabel="Filter notifications"
+          tally={tally}
           empty={narrowed ? 'Nothing matches.' : 'Nothing has happened yet.'}
         />
       </div>

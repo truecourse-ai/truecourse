@@ -12,7 +12,8 @@ import { GuardMethodLabel } from '@/components/guard/GuardMethodLabel';
 import { useGuardFlows } from '@/hooks/useGuardFlows';
 import { catalogOrigins, catalogUsage, interfaceCatalog } from './interface-catalog';
 import { CHIP_CLASS, PageHeader } from '@/preview/ui/bits';
-import { FilterBuilder, filterKey, selectedValues, type FilterDimension } from '@/preview/ui/filter-builder';
+import { FilterBuilder, selectedValues, type FilterDimension } from '@/preview/ui/filter-builder';
+import { facetDimensions } from '@/preview/ui/filter-facets';
 import { useGuardInterfaces } from '@/hooks/useGuardInterfaces';
 import type { Repo } from '@/preview/data/types';
 import { useGuardTabJump } from './tab-jump';
@@ -57,31 +58,54 @@ export function InterfacesTab({ repo }: { repo: Repo }) {
 
   const all: GuardInterfaceRow[] = useMemo(() => interfaces.view?.interfaces ?? [], [interfaces.view]);
 
-  const surfaces = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const i of all) counts.set(i.type, (counts.get(i.type) ?? 0) + 1);
-    return [...counts.entries()].map(([key, count]) => ({ key, label: guardDriver(key)?.label ?? key, count }));
-  }, [all]);
+  const surfaces = useMemo(
+    () =>
+      [...new Set(all.map((i) => i.type))].map((key) => ({
+        key,
+        label: guardDriver(key)?.label ?? key,
+      })),
+    [all],
+  );
+
+  /**
+   * The interfaces the search keeps: the members of every catalog row it
+   * matches. The counts are of interfaces, the search is over the rows they
+   * make up, so it reaches them through their membership.
+   */
+  const searched = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (q === '') return null;
+    return new Set(
+      catalog.rows.filter((row) => row.search.includes(q)).flatMap((row) => row.members.map((m) => m.id)),
+    );
+  }, [catalog, query]);
+
   const dimensions: FilterDimension[] = useMemo(
-    () => [
-      {
-        key: 'surface',
-        label: 'Surface',
-        options: surfaces.map((s) => ({ key: filterKey('surface', s.key), label: s.label, count: s.count })),
-      },
-      {
-        key: 'origin',
-        label: 'Origin',
-        options: (['derived', 'authored'] as const)
-          .map((key) => ({
-            key: filterKey('origin', key),
-            label: key,
-            count: all.filter((i) => (i.origin ?? 'derived') === key).length,
-          }))
-          .filter((o) => o.count > 0),
-      },
-    ],
-    [all, surfaces],
+    () =>
+      facetDimensions<GuardInterfaceRow>({
+        rows: all,
+        selected: filters,
+        ...(searched ? { matches: (i: GuardInterfaceRow) => searched.has(i.id) } : {}),
+        dimensions: [
+          {
+            key: 'surface',
+            label: 'Surface',
+            valuesOf: (i) => [i.type],
+            values: surfaces.map((s) => ({ value: s.key, label: s.label })),
+          },
+          {
+            key: 'origin',
+            label: 'Origin',
+            valuesOf: (i) => [i.origin ?? 'derived'],
+            values: (['derived', 'authored'] as const).map((origin) => ({
+              value: origin,
+              label: origin,
+            })),
+            hideEmpty: true,
+          },
+        ],
+      }),
+    [all, filters, searched, surfaces],
   );
 
   const rows = useMemo(() => {

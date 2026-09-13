@@ -4,6 +4,8 @@
  * (`/runs/:runId`, see ./RunPage.tsx), never a nested column. The search box
  * narrows by pull request number, commit or branch; there is no filter row,
  * because a list with one dimension does not earn one — Origin is a column.
+ * How many runs the list shows is its TALLY, at the bottom, by verdict, never
+ * a number beside the title.
  *
  * The rows are EVERY run the store holds, the baseline runs and the
  * pull-request head runs the gate wrote, re-read when a run of this repository
@@ -14,12 +16,21 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CHIP_CLASS, PageHeader } from '@/preview/ui/bits';
 import { HoverPopover } from '@/preview/ui/hover-popover';
+import { StatusTally, tallyOf, type StatusTone } from '@/preview/ui/status-word';
 import { GUARD_OUTCOMES, formatGuardTime } from '@/preview/vendor/lib/guard-drifts';
 import { guardStatusMeta } from '@/preview/vendor/lib/guard-status';
 import type { Repo } from '@/preview/data/types';
 import { useGuardTabJump } from './tab-jump';
 import { useGuardRefresh } from './use-guard-refresh';
 import { guardRunVerdict, useGuardRunList } from './use-guard-run-list';
+
+/** A run's verdict, bad news first: the order the rows and the tally read in. */
+const VERDICTS = ['fail', 'pass'] as const;
+
+const VERDICT_META: Record<(typeof VERDICTS)[number], { word: string; tone: StatusTone }> = {
+  fail: { word: 'Failed', tone: 'failure' },
+  pass: { word: 'Passed', tone: 'success' },
+};
 
 export function RunsTab({ repo }: { repo: Repo }) {
   useGuardTabJump();
@@ -41,14 +52,16 @@ export function RunsTab({ repo }: { repo: Repo }) {
       );
   }, [history, query]);
 
+  const tally = useMemo(
+    () => tallyOf(rows, VERDICTS, guardRunVerdict, (verdict) => VERDICT_META[verdict]),
+    [rows],
+  );
+
   const openRun = (runId: string) => navigate(`/preview/repos/${repo.id}/runs/${encodeURIComponent(runId)}`);
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <PageHeader
-        title="Runs"
-        subtitle={rows.length === history.length ? `${history.length}` : `${rows.length} of ${history.length}`}
-      />
+      <PageHeader title="Runs" />
       <div className="min-w-0 shrink-0 border-b border-border px-6 py-2">
         <input
           value={query}
@@ -106,7 +119,7 @@ export function RunsTab({ repo }: { repo: Repo }) {
                     <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
                       <span className="inline-flex shrink-0 items-center gap-1.5 text-[10px] font-medium text-foreground">
                         <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${guardStatusMeta(verdict).dot}`} />
-                        {verdict === 'fail' ? 'Failed' : 'Passed'}
+                        {VERDICT_META[verdict].word}
                       </span>
                       <span className="inline-flex flex-wrap items-center gap-2 tabular-nums">
                         {GUARD_OUTCOMES.filter((o) => h.summary[o] > 0).map((o) => (
@@ -134,6 +147,7 @@ export function RunsTab({ repo }: { repo: Repo }) {
           </tbody>
         </table>
       </div>
+      <StatusTally label="Runs" items={tally} />
     </div>
   );
 }

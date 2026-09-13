@@ -204,6 +204,44 @@ describe('Flows, the index', () => {
     expect(within(rows()[0]!).getByText('Checks out with a saved card')).toBeInTheDocument();
   });
 
+  it('tallies the flows it shows, and the tally follows the narrowing', async () => {
+    serve();
+    renderAt('/preview/flows');
+    const user = userEvent.setup();
+    await waitFor(() => expect(rows()).toHaveLength(2));
+
+    const tally = () => screen.getByRole('group', { name: 'Flows tally' });
+    expect(tally().textContent).toBe('1 Blocked1 Succeeded');
+
+    await user.click(screen.getByRole('button', { name: 'Add filter' }));
+    await user.click(await screen.findByRole('option', { name: /Repository/ }));
+    await user.click(await screen.findByRole('option', { name: /acme\/web/ }));
+
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    expect(tally().textContent).toBe('1 Blocked');
+  });
+
+  it('counts each filter value over what the other filters already keep', async () => {
+    serve();
+    renderAt('/preview/flows');
+    const user = userEvent.setup();
+    await waitFor(() => expect(rows()).toHaveLength(2));
+
+    // Both statuses, before anything narrows them.
+    await user.click(screen.getByRole('button', { name: 'Add filter' }));
+    await user.click(await screen.findByRole('option', { name: /Status/ }));
+    expect(await screen.findByRole('option', { name: 'Blocked 1' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Succeeded 1' })).toBeInTheDocument();
+
+    // One repository picked: the statuses are what THAT repository holds, and
+    // the repositories still say what swapping to them would give.
+    await user.click(screen.getByRole('option', { name: 'Blocked 1' }));
+    await user.click(screen.getByRole('button', { name: 'Add filter' }));
+    await user.click(await screen.findByRole('option', { name: /Repository/ }));
+    expect(await screen.findByRole('option', { name: 'acme/web 1' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'spiderhands/filecli 0' })).toBeInTheDocument();
+  });
+
   it('reads the address it arrives on, and narrows by driver too', async () => {
     serve();
     renderAt('/preview/flows?driver=cli');

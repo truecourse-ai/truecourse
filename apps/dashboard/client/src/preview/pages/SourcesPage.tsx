@@ -23,7 +23,7 @@ import {
   type ContextSourceView,
 } from '@truecourse/shared';
 import { IndexTable } from '@/preview/ui/index-table';
-import { CONTEXT_SYNC_TONE, CONTEXT_SYNC_WORD, StatusWord } from '@/preview/ui/status-word';
+import { CONTEXT_SYNC_TONE, CONTEXT_SYNC_WORD, StatusWord, tallyOf } from '@/preview/ui/status-word';
 import { formatRelativeTime } from '@/preview/vendor/shared/format/relative-time';
 import { useContextSignal, useContextSources } from '@/preview/shell/use-context';
 import { ContextFrame } from './ContextFrame';
@@ -58,6 +58,15 @@ export default function SourcesPage() {
     return q === '' ? all : all.filter((source) => source.title.toLowerCase().includes(q));
   }, [all, query]);
 
+  const tally = useMemo(
+    () =>
+      tallyOf(rows, CONTEXT_SOURCE_STATUS_ORDER, (source) => source.status, (status) => ({
+        word: CONTEXT_SYNC_WORD[status],
+        tone: CONTEXT_SYNC_TONE[status],
+      })),
+    [rows],
+  );
+
   const empty =
     sources === null
       ? 'Loading…'
@@ -77,6 +86,7 @@ export default function SourcesPage() {
         query={query}
         onQuery={setQuery}
         searchPlaceholder="Search sources"
+        tally={tally}
         empty={empty}
         columns={[
           {

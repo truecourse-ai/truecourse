@@ -238,6 +238,20 @@ describe('Context, the sources', () => {
     expect(within(rows()[0]!).getByText('docs.paused.com')).toBeInTheDocument();
   });
 
+  it('tallies the sources it shows by sync state, worst first', async () => {
+    serve();
+    renderAt('/preview/context');
+    const user = userEvent.setup();
+    await waitFor(() => expect(rows()).toHaveLength(5));
+
+    const tally = () => screen.getByRole('group', { name: 'Sources tally' });
+    expect(tally().textContent).toBe('1 Failed1 Never synced1 Syncing1 Paused1 Synced');
+
+    await user.type(screen.getByRole('textbox', { name: 'Search sources' }), 'paused');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    expect(tally().textContent).toBe('1 Paused');
+  });
+
   it('opens the page of the source a row names, on a single click', async () => {
     serve();
     renderAt('/preview/context');

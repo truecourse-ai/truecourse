@@ -12,6 +12,11 @@
  * The list follows the work without a reload: the workspace job stream and the
  * repositories' own store writes both re-read it (see `useWorkspaceRuns`).
  *
+ * A run record exists once a job's body starts, so work still WAITING for its
+ * turn in the workspace's queue would show nowhere. The queue is read beside
+ * the runs and its jobs are rows of the same list, which is why one row is one
+ * piece of work rather than one run record.
+ *
  * The conversation route owns the one-row header (the repository, the status,
  * the ref, how long it took, and Run again when the work ended badly) and
  * mounts the conversation itself below it.
@@ -29,22 +34,26 @@ import {
   shortRef,
   startedLabel,
   waitingCount,
-  type RunStatus,
+  type WorkStatus,
 } from '@/components/sessions/run-model';
+import type { JobView } from '@truecourse/shared';
 import { getWorkspaceRun, type WorkspaceRun } from '@/lib/api';
 import { connectSocket } from '@/lib/socket';
 import { PageHeader } from '@/preview/ui/bits';
 import { filterKey, selectedValues, type FilterDimension } from '@/preview/ui/filter-builder';
+import { facetDimensions } from '@/preview/ui/filter-facets';
 import { IndexTable, type IndexColumn } from '@/preview/ui/index-table';
-import { RUN_STATUS_TONE, StatusWord } from '@/preview/ui/status-word';
+import { RUN_STATUS_TONE, StatusWord, tallyOf } from '@/preview/ui/status-word';
 import { usePreviewState } from '@/preview/shell/preview-state';
 import { useRunTrigger } from '@/preview/shell/use-run-trigger';
 import { useWorkspaceRuns } from '@/preview/shell/use-workspace-runs';
+import { jobCommand, jobRepoFullName, waitingFact } from '@/preview/shell/use-active-jobs';
 import { conversationHref } from '@/preview/shell/real-runs';
 import { PREVIEW_BASE } from '@/preview/shell/base';
 import { subscribeToServerEvents } from '@/preview/shell/event-stream';
+import type { Repo } from '@/preview/data/types';
 
-const STATUSES = Object.keys(RUN_STATUS_META) as RunStatus[];
+const STATUSES = Object.keys(RUN_STATUS_META) as WorkStatus[];
 
 /** The filter dimensions, in the order the Add filter menu offers them. */
 const DIMENSION_KEYS = ['kind', 'status', 'repo'] as const;
@@ -53,19 +62,110 @@ type DimensionKey = (typeof DIMENSION_KEYS)[number];
 /** The URL parameter each dimension is spelled with. */
 const PARAM: Record<DimensionKey, string> = { kind: 'kind', status: 'status', repo: 'repo' };
 
+/**
+ * One piece of work on the index: a run of the agent, or a job the workspace
+ * has not started yet, which has no run record to be listed by. Never both and
+ * never neither — see {@link jobRow} for the handover.
+ */
+interface AgentRow {
+  id: string;
+  command: string;
+  status: WorkStatus;
+  repo: { id: string; fullName: string } | null;
+  /** The ref the work is on; work that has not started names none. */
+  gitRef: string;
+  /** When the work started, or when it was enqueued. */
+  startedAt: string;
+  /** What work that is still waiting is waiting for. */
+  waitingOn: string | null;
+  /** The record behind the row, once the work has written one. */
+  run: WorkspaceRun | null;
+  /** Where the row opens; null when the workspace has nowhere to send it. */
+  href: string | null;
+}
+
+const runRow = (run: WorkspaceRun): AgentRow => ({
+  id: run.runId,
+  command: run.command,
+  status: run.status,
+  repo: run.repo,
+  gitRef: run.gitRef,
+  startedAt: run.startedAt,
+  waitingOn: null,
+  run,
+  href: conversationHref(run.runId),
+});
+
+/**
+ * A job as a row, until its own run record takes over. The record is written
+ * when the job's BODY starts, so a job that has just turned `running` is still
+ * the only row its work has: the row stands until a run of the same repository
+ * and command, started no earlier than the job, is in the list — which is what
+ * keeps it from vanishing and reappearing.
+ *
+ * A job that runs no conversation (a source sync) is nobody's row and is null.
+ */
+function jobRow(
+  job: JobView,
+  jobs: readonly JobView[],
+  runs: readonly WorkspaceRun[],
+  repos: readonly Repo[],
+): AgentRow | null {
+  const command = jobCommand(job);
+  if (!command) return null;
+  const fullName = jobRepoFullName(job);
+  const at = job.startedAt ?? job.createdAt;
+  const started = runs.some(
+    (run) =>
+      run.command === command &&
+      (run.repo?.fullName ?? null) === fullName &&
+      Date.parse(run.startedAt) >= Date.parse(at),
+  );
+  if (started) return null;
+  const repo = repos.find((r) => r.fullName === fullName) ?? null;
+  return {
+    id: `job-${job.id}`,
+    command,
+    status: job.status === 'queued' ? 'queued' : 'running',
+    repo: repo ? { id: repo.id, fullName: repo.fullName } : null,
+    gitRef: '',
+    startedAt: at,
+    waitingOn: job.status === 'queued' ? waitingFact(job, jobs) : null,
+    run: null,
+    // Where the work will appear when it starts: the repository's pipeline, and
+    // for the workspace's own document scan the Context it reads.
+    href: fullName
+      ? repo
+        ? `${PREVIEW_BASE}/repos/${repo.id}/pipeline`
+        : null
+      : `${PREVIEW_BASE}/context`,
+  };
+}
+
 export default function AgentPage({ runId }: { runId?: string }) {
   return runId ? <ConversationRoute runId={runId} /> : <AgentIndex />;
 }
 
 function AgentIndex() {
   const navigate = useNavigate();
-  const { repos } = usePreviewState();
+  const { repos, activeJobs } = usePreviewState();
   const [params, setParams] = useSearchParams();
   const [query, setQuery] = useState('');
 
   const connected = repos;
   const repoIds = useMemo(() => connected.map((r) => r.id), [connected]);
-  const { runs, error } = useWorkspaceRuns(repoIds);
+  const { runs: records, error } = useWorkspaceRuns(repoIds);
+
+  // Every run of the workspace, and the work still waiting to become one.
+  const runs = useMemo<AgentRow[] | null>(() => {
+    if (records === null) return null;
+    const waiting = activeJobs
+      .map((job) => jobRow(job, activeJobs, records, connected))
+      .filter((row): row is AgentRow => row !== null);
+    return [...waiting, ...records.map(runRow)].sort((a, b) =>
+      b.startedAt.localeCompare(a.startedAt),
+    );
+  }, [records, activeJobs, connected]);
 
   // The selection is the address: `?kind=spec-scan&repo=owner-repo`, several
   // values per dimension, as the builder's `dimension:value` keys.
@@ -86,64 +186,89 @@ function AgentIndex() {
     [setParams],
   );
 
+  const matchesQuery = useCallback(
+    (row: AgentRow) => {
+      const q = query.trim().toLowerCase();
+      return (
+        q === '' ||
+        commandLabel(row.command).toLowerCase().includes(q) ||
+        (row.repo?.fullName.toLowerCase().includes(q) ?? false) ||
+        row.gitRef.toLowerCase().includes(q)
+      );
+    },
+    [query],
+  );
+
   const rows = useMemo(() => {
     const all = runs ?? [];
-    const q = query.trim().toLowerCase();
     const kinds = selectedValues(selected, 'kind');
     const statuses = selectedValues(selected, 'status');
     const pickedRepos = selectedValues(selected, 'repo');
     return all.filter(
-      (run) =>
-        (kinds.length === 0 || kinds.includes(run.command)) &&
-        (statuses.length === 0 || statuses.includes(run.status)) &&
-        (pickedRepos.length === 0 || (run.repo !== null && pickedRepos.includes(run.repo.id))) &&
-        (q === '' ||
-          commandLabel(run.command).toLowerCase().includes(q) ||
-          (run.repo?.fullName.toLowerCase().includes(q) ?? false) ||
-          run.gitRef.toLowerCase().includes(q)),
+      (row) =>
+        (kinds.length === 0 || kinds.includes(row.command)) &&
+        (statuses.length === 0 || statuses.includes(row.status)) &&
+        (pickedRepos.length === 0 || (row.repo !== null && pickedRepos.includes(row.repo.id))) &&
+        matchesQuery(row),
     );
-  }, [runs, query, selected]);
+  }, [runs, matchesQuery, selected]);
+
+  const tally = useMemo(
+    () =>
+      tallyOf(rows, STATUSES, (row) => row.status, (status) => ({
+        word: RUN_STATUS_META[status].word,
+        tone: RUN_STATUS_TONE[status],
+      })),
+    [rows],
+  );
 
   const dimensions = useMemo<FilterDimension[]>(() => {
     const all = runs ?? [];
     const commands = [...new Set(all.map((r) => r.command))].sort();
-    return [
-      {
-        key: 'kind',
-        label: 'Kind',
-        options: commands.map((command) => ({
-          key: filterKey('kind', command),
-          label: commandLabel(command),
-          count: all.filter((r) => r.command === command).length,
-        })),
-      },
-      {
-        key: 'status',
-        label: 'Status',
-        options: STATUSES.map((status) => ({
-          key: filterKey('status', status),
-          label: RUN_STATUS_META[status].word,
-          count: all.filter((r) => r.status === status).length,
-        })).filter((o) => o.count > 0),
-      },
-      {
-        key: 'repo',
-        label: 'Repository',
-        options: connected.map((repo) => ({
-          key: filterKey('repo', repo.id),
-          label: repo.fullName,
-          count: all.filter((r) => r.repo?.id === repo.id).length,
-        })),
-      },
-    ];
-  }, [runs, connected]);
+    return facetDimensions<AgentRow>({
+      rows: all,
+      selected,
+      matches: matchesQuery,
+      dimensions: [
+        {
+          key: 'kind',
+          label: 'Kind',
+          valuesOf: (row) => [row.command],
+          values: commands.map((command) => ({ value: command, label: commandLabel(command) })),
+        },
+        {
+          key: 'status',
+          label: 'Status',
+          valuesOf: (row) => [row.status],
+          values: STATUSES.map((status) => ({
+            value: status,
+            label: RUN_STATUS_META[status].word,
+          })),
+          hideEmpty: true,
+        },
+        {
+          key: 'repo',
+          label: 'Repository',
+          valuesOf: (row) => (row.repo === null ? [] : [row.repo.id]),
+          values: connected.map((repo) => ({ value: repo.id, label: repo.fullName })),
+        },
+      ],
+    });
+  }, [runs, connected, matchesQuery, selected]);
 
-  const columns = useMemo<IndexColumn<WorkspaceRun>[]>(
+  const columns = useMemo<IndexColumn<AgentRow>[]>(
     () => [
       {
         key: 'conversation',
         label: 'Conversation',
-        cell: (run) => <span className="text-foreground">{commandLabel(run.command)}</span>,
+        cell: (row) => (
+          <span className="flex min-w-0 items-baseline gap-2">
+            <span className="truncate text-foreground">{commandLabel(row.command)}</span>
+            {row.waitingOn && (
+              <span className="truncate text-[11px] text-muted-foreground">{row.waitingOn}</span>
+            )}
+          </span>
+        ),
       },
       {
         key: 'repository',
@@ -151,21 +276,26 @@ function AgentIndex() {
         className: 'font-mono text-[12px] text-muted-foreground',
         // The workspace's own work (a Document scan reads every source and
         // clones nothing) belongs to no repository, and says so.
-        cell: (run) => run.repo?.fullName ?? '—',
+        cell: (row) => row.repo?.fullName ?? '—',
       },
-      { key: 'status', label: 'Status', width: '8rem', cell: (run) => <RunStatusWord run={run} /> },
+      {
+        key: 'status',
+        label: 'Status', width: '8rem',
+        cell: (row) => <RunStatusWord status={row.status} run={row.run} />,
+      },
       {
         key: 'started',
         label: 'Started', width: '10rem',
         className: 'text-muted-foreground',
-        cell: (run) => startedLabel(run.startedAt),
+        cell: (row) => startedLabel(row.startedAt),
       },
       {
         key: 'took',
         label: 'Took', width: '6rem',
         align: 'right',
         className: 'text-muted-foreground',
-        cell: (run) => runDuration(run),
+        // Nothing has been taken yet by work that has not begun.
+        cell: (row) => (row.run ? runDuration(row.run) : ''),
       },
     ],
     [],
@@ -188,9 +318,11 @@ function AgentIndex() {
         <IndexTable
           label="Agent conversations"
           rows={rows}
-          rowId={(run) => run.runId}
+          rowId={(row) => row.id}
           columns={columns}
-          onOpen={(run) => navigate(conversationHref(run.runId))}
+          onOpen={(row) => {
+            if (row.href) navigate(row.href);
+          }}
           query={query}
           onQuery={setQuery}
           searchPlaceholder="Search conversations"
@@ -198,6 +330,7 @@ function AgentIndex() {
           selected={selected}
           onSelect={onSelect}
           filterAriaLabel="Filter conversations"
+          tally={tally}
           empty={empty}
         />
       </div>
@@ -206,9 +339,9 @@ function AgentIndex() {
 }
 
 /** The status a row wears: what the agent needs first, what it did otherwise. */
-function RunStatusWord({ run }: { run: WorkspaceRun }) {
-  if (waitingCount(run) > 0) return <StatusWord tone="attention" word="Needs you" />;
-  return <StatusWord tone={RUN_STATUS_TONE[run.status]} word={RUN_STATUS_META[run.status].word} />;
+function RunStatusWord({ status, run }: { status: WorkStatus; run: WorkspaceRun | null }) {
+  if (run && waitingCount(run) > 0) return <StatusWord tone="attention" word="Needs you" />;
+  return <StatusWord tone={RUN_STATUS_TONE[status]} word={RUN_STATUS_META[status].word} />;
 }
 
 /** One conversation: the header this page owns, the flow underneath it. */
@@ -310,7 +443,7 @@ function ConversationRoute({ runId }: { runId: string }) {
             {run.repo && (
               <span className="font-mono text-muted-foreground">{run.repo.fullName}</span>
             )}
-            <RunStatusWord run={run} />
+            <RunStatusWord status={run.status} run={run} />
             <span className="font-mono text-muted-foreground">{shortRef(run.gitRef)}</span>
             <span className="tabular-nums text-muted-foreground">{runDuration(run)}</span>
             {canRerun && starter.supports(run.command) && (

@@ -6,11 +6,11 @@
  */
 
 import { useEffect, useState } from 'react';
-import type { GuardHistoryEntry, GuardOutcome } from '@/preview/vendor/shared';
+import type { GuardHistoryEntry } from '@/preview/vendor/shared';
 import * as api from '@/preview/vendor/lib/api';
 
 /** A stored run's verdict: one failure or one error makes the run a failure. */
-export function guardRunVerdict(entry: GuardHistoryEntry): GuardOutcome {
+export function guardRunVerdict(entry: GuardHistoryEntry): 'pass' | 'fail' {
   return entry.summary.fail > 0 || entry.summary.error > 0 ? 'fail' : 'pass';
 }
 

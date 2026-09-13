@@ -300,6 +300,28 @@ describe('Context, the documents', () => {
     expect(within(rows()[0]!).getByText('Onboarding')).toBeInTheDocument();
   });
 
+  it('tallies the documents it shows, and counts each value over the other filters', async () => {
+    serve();
+    renderAt('/preview/context/documents');
+    const user = userEvent.setup();
+    await waitFor(() => expect(rows()).toHaveLength(2));
+
+    const tally = () => screen.getByRole('group', { name: 'Documents tally' });
+    expect(tally().textContent).toBe('1 Failed1 Not linked');
+
+    await user.click(screen.getByRole('button', { name: 'Add filter' }));
+    await user.click(await screen.findByRole('option', { name: /Source/ }));
+    await user.click(await screen.findByRole('option', { name: /docs\.acme\.com/ }));
+
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    expect(tally().textContent).toBe('1 Failed');
+
+    await user.click(screen.getByRole('button', { name: 'Add filter' }));
+    await user.click(await screen.findByRole('option', { name: /Status/ }));
+    expect(await screen.findByRole('option', { name: 'Failed 1' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Not linked 0' })).toBeInTheDocument();
+  });
+
   it('narrows to a repository the address names', async () => {
     serve();
     renderAt(`/preview/context/documents?repo=${encodeURIComponent(REPO_A.name)}`);

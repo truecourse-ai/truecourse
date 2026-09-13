@@ -96,6 +96,44 @@ describe('singleFlightEnqueue', () => {
   });
 });
 
+describe('the queued row on the stream', () => {
+  it('is announced the moment it is enqueued, wearing the task\u2019s title', async () => {
+    const heard: { orgId: string; event: { type: string; job?: { id: string; status: string; title?: string } } }[] = [];
+    await client.listen('tc_events', (payload) => {
+      heard.push(JSON.parse(payload));
+    });
+    const def: JobDefinition<Payload> = {
+      type: 'test.job',
+      title: 'Test work',
+      steps: [],
+      org: () => ORG,
+      async run() {
+        return { result: null, notification: null };
+      },
+      onError: () => ({ level: 'error', title: 'failed', body: '' }),
+    };
+    const fakeRunner = { addJob: async () => {}, stop: async () => {} } as unknown as Runner;
+    const jobs = createJobs({
+      db,
+      connectionString: 'postgres://unused',
+      tasks: [def],
+      hub: { start: async () => {}, stop: async () => {}, subscribe: () => () => {} },
+      startWorker: async () => fakeRunner,
+    });
+    await jobs.start();
+
+    const jobId = await jobs.singleFlightEnqueue('test.job', ORG, 'test.job:r', { repo: 'acme/widgets' });
+
+    // A waiting job is visible from this frame, before anything runs it.
+    expect(heard).toHaveLength(1);
+    expect(heard[0]).toMatchObject({
+      orgId: ORG,
+      event: { type: 'job.progress', job: { id: jobId, status: 'queued', title: 'Test work' } },
+    });
+    await jobs.stop();
+  });
+});
+
 describe('the queue name', () => {
   /** A runner that records the spec each enqueue reached graphile with. */
   async function jobsRecording(): Promise<{

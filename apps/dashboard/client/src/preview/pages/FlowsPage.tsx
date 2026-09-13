@@ -23,7 +23,9 @@ import { guardDriver } from '@/preview/vendor/shared';
 import { connectSocket } from '@/lib/socket';
 import { CHIP_CLASS, PageHeader } from '@/preview/ui/bits';
 import { filterKey, selectedValues, type FilterDimension } from '@/preview/ui/filter-builder';
+import { facetDimensions } from '@/preview/ui/filter-facets';
 import { IndexTable, type IndexColumn } from '@/preview/ui/index-table';
+import { GUARD_COVERAGE_TONE, tallyOf } from '@/preview/ui/status-word';
 import { GuardFlowStatusChip } from '@/preview/vendor/components/guard/GuardStatusBadge';
 import * as api from '@/preview/vendor/lib/api';
 import {
@@ -167,55 +169,72 @@ function FlowsIndex() {
     [setParams],
   );
 
+  const matchesQuery = useCallback(
+    (r: FlowRow) => {
+      const q = query.trim().toLowerCase();
+      return q === '' || r.flow.title.toLowerCase().includes(q);
+    },
+    [query],
+  );
+
   const rows = useMemo(() => {
-    const q = query.trim().toLowerCase();
     const statuses = selectedValues(selected, 'status');
     const drivers = selectedValues(selected, 'driver');
     const repoIds = selectedValues(selected, 'repo');
     return all.filter(
       (r) =>
-        (q === '' || r.flow.title.toLowerCase().includes(q)) &&
+        matchesQuery(r) &&
         (statuses.length === 0 || statuses.includes(guardFlowPlainStatus(r.flow))) &&
         (drivers.length === 0 || (r.flow.drivers ?? []).some((d) => drivers.includes(d))) &&
         (repoIds.length === 0 || repoIds.includes(r.repo.id)),
     );
-  }, [all, query, selected]);
+  }, [all, matchesQuery, selected]);
+
+  const tally = useMemo(
+    () =>
+      tallyOf(rows, GUARD_FLOW_STATUS_ORDER, (r) => guardFlowPlainStatus(r.flow), (status) => ({
+        word: GUARD_FLOW_STATUS_WORD[status],
+        tone: GUARD_COVERAGE_TONE[status],
+      })),
+    [rows],
+  );
 
   const dimensions = useMemo<FilterDimension[]>(() => {
-    const drivers = new Map<string, number>();
-    for (const r of all) for (const d of r.flow.drivers ?? []) drivers.set(d, (drivers.get(d) ?? 0) + 1);
-    return [
-      {
-        key: 'status',
-        label: 'Status',
-        options: GUARD_FLOW_STATUS_ORDER.map((key) => ({
-          key: filterKey('status', key),
-          label: GUARD_FLOW_STATUS_WORD[key],
-          count: all.filter((r) => guardFlowPlainStatus(r.flow) === key).length,
-        })).filter((o) => o.count > 0),
-      },
-      {
-        key: 'driver',
-        label: 'Driver',
-        options: [...drivers.entries()].map(([key, count]) => ({
-          key: filterKey('driver', key),
-          label: guardDriver(key)?.label ?? key,
-          count,
-        })),
-      },
-      {
-        key: 'repo',
-        label: 'Repository',
-        options: repos
-          .map((repo) => ({
-            key: filterKey('repo', repo.id),
-            label: repo.fullName,
-            count: all.filter((r) => r.repo.id === repo.id).length,
-          }))
-          .filter((o) => o.count > 0),
-      },
-    ];
-  }, [all, repos]);
+    const drivers = [...new Set(all.flatMap((r) => r.flow.drivers ?? []))];
+    return facetDimensions<FlowRow>({
+      rows: all,
+      selected,
+      matches: matchesQuery,
+      dimensions: [
+        {
+          key: 'status',
+          label: 'Status',
+          valuesOf: (r) => [guardFlowPlainStatus(r.flow)],
+          values: GUARD_FLOW_STATUS_ORDER.map((status) => ({
+            value: status,
+            label: GUARD_FLOW_STATUS_WORD[status],
+          })),
+          hideEmpty: true,
+        },
+        {
+          key: 'driver',
+          label: 'Driver',
+          valuesOf: (r) => r.flow.drivers ?? [],
+          values: drivers.map((driver) => ({
+            value: driver,
+            label: guardDriver(driver)?.label ?? driver,
+          })),
+        },
+        {
+          key: 'repo',
+          label: 'Repository',
+          valuesOf: (r) => [r.repo.id],
+          values: repos.map((repo) => ({ value: repo.id, label: repo.fullName })),
+          hideEmpty: true,
+        },
+      ],
+    });
+  }, [all, matchesQuery, repos, selected]);
 
   const columns = useMemo<IndexColumn<FlowRow>[]>(
     () => [
@@ -294,6 +313,7 @@ function FlowsIndex() {
           selected={selected}
           onSelect={onSelect}
           filterAriaLabel="Filter flows"
+          tally={tally}
           empty={empty}
         />
       </div>

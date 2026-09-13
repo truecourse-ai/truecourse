@@ -21,7 +21,8 @@ import {
   selectedValues,
   type FilterDimension,
 } from '@/preview/ui/filter-builder';
-import { StatusWord } from '@/preview/ui/status-word';
+import { facetDimensions } from '@/preview/ui/filter-facets';
+import { StatusWord, tallyOf, type StatusTone } from '@/preview/ui/status-word';
 import { useContextSignal } from '@/preview/shell/use-context';
 import { useEffect, useRef } from 'react';
 import { ContextFrame } from './ContextFrame';
@@ -41,8 +42,17 @@ export interface ConflictRow {
   resolved: boolean;
 }
 
+/** A conflict's state, open first: the order the filter offers and the tally counts in. */
+const STATUS_VALUES = ['open', 'resolved'] as const;
+type ConflictStatus = (typeof STATUS_VALUES)[number];
+
+const STATUS_WORD: Record<ConflictStatus, string> = { open: 'Open', resolved: 'Resolved' };
+const STATUS_TONE: Record<ConflictStatus, StatusTone> = { open: 'blocked', resolved: 'success' };
+
+const statusOf = (row: ConflictRow): ConflictStatus => (row.resolved ? 'resolved' : 'open');
+
 function valueOf(row: ConflictRow, dimension: Dimension): string {
-  return dimension === 'status' ? (row.resolved ? 'resolved' : 'open') : row.area;
+  return dimension === 'status' ? statusOf(row) : row.area;
 }
 
 function keeps(row: ConflictRow, selected: readonly string[]): boolean {
@@ -142,39 +152,51 @@ export default function ConflictsPage() {
     [searchParams, setSearchParams],
   );
 
-  const dimensions = useMemo<FilterDimension[]>(() => {
-    const count = (dimension: Dimension, value: string) =>
-      all.filter((row) => valueOf(row, dimension) === value).length;
-    const areas = [...new Set(all.map((row) => row.area))].sort((a, b) => a.localeCompare(b));
-    return [
-      {
-        key: 'status',
-        label: DIMENSION_WORD.status,
-        options: [
-          { key: filterKey('status', 'open'), label: 'Open', count: count('status', 'open') },
-          {
-            key: filterKey('status', 'resolved'),
-            label: 'Resolved',
-            count: count('status', 'resolved'),
-          },
-        ].filter((option) => option.count > 0),
-      },
-      {
-        key: 'area',
-        label: DIMENSION_WORD.area,
-        options: areas.map((area) => ({
-          key: filterKey('area', area),
-          label: area,
-          count: count('area', area),
-        })),
-      },
-    ];
-  }, [all]);
+  const matchesQuery = useCallback(
+    (row: ConflictRow) => {
+      const q = query.trim().toLowerCase();
+      return q === '' || row.title.toLowerCase().includes(q);
+    },
+    [query],
+  );
 
-  const rows = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return all.filter((row) => (!q || row.title.toLowerCase().includes(q)) && keeps(row, selected));
-  }, [all, query, selected]);
+  const dimensions = useMemo<FilterDimension[]>(() => {
+    const areas = [...new Set(all.map((row) => row.area))].sort((a, b) => a.localeCompare(b));
+    return facetDimensions<ConflictRow>({
+      rows: all,
+      selected,
+      matches: matchesQuery,
+      dimensions: [
+        {
+          key: 'status',
+          label: DIMENSION_WORD.status,
+          valuesOf: (row) => [statusOf(row)],
+          values: STATUS_VALUES.map((value) => ({ value, label: STATUS_WORD[value] })),
+          hideEmpty: true,
+        },
+        {
+          key: 'area',
+          label: DIMENSION_WORD.area,
+          valuesOf: (row) => [valueOf(row, 'area')],
+          values: areas.map((area) => ({ value: area, label: area })),
+        },
+      ],
+    });
+  }, [all, matchesQuery, selected]);
+
+  const rows = useMemo(
+    () => all.filter((row) => matchesQuery(row) && keeps(row, selected)),
+    [all, matchesQuery, selected],
+  );
+
+  const tally = useMemo(
+    () =>
+      tallyOf(rows, STATUS_VALUES, statusOf, (value) => ({
+        word: STATUS_WORD[value],
+        tone: STATUS_TONE[value],
+      })),
+    [rows],
+  );
 
   const empty = !loaded
     ? 'Loading…'
@@ -198,6 +220,7 @@ export default function ConflictsPage() {
         selected={selected}
         onSelect={select}
         filterAriaLabel="Filter conflicts"
+        tally={tally}
         empty={empty}
         columns={[
           {
@@ -211,10 +234,7 @@ export default function ConflictsPage() {
             label: 'Status',
             width: '8rem',
             cell: (row) => (
-              <StatusWord
-                tone={row.resolved ? 'success' : 'blocked'}
-                word={row.resolved ? 'Resolved' : 'Open'}
-              />
+              <StatusWord tone={STATUS_TONE[statusOf(row)]} word={STATUS_WORD[statusOf(row)]} />
             ),
           },
         ]}

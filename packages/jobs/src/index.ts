@@ -30,7 +30,7 @@ import { log } from '@truecourse/core/lib/logger';
 import type { Router } from 'express';
 import type { Runner } from 'graphile-worker';
 import { EventHub, publishEvent, type EventBackplane } from './events.js';
-import type { JobRuntime } from './harness.js';
+import type { JobPayload, JobRuntime } from './harness.js';
 import { releaseAbandonedQueueLocks } from './queue-locks.js';
 import {
   cancelLocalJob,
@@ -188,7 +188,20 @@ export function createJobs<M = Record<string, unknown>>(opts: CreateJobsOptions<
       await jobStore.markFailed(job.id, (err as Error).message).catch(() => undefined);
       throw err;
     }
+    // The queued row is news the moment it exists: a job waiting its turn in
+    // a lane shows on the Agent page from this frame, not from the next frame
+    // of the job it waits behind.
+    await publish(org, { type: 'job.progress', job: { ...job, title: titleOf(task, { ...payload, jobId: job.id }) } }).catch(
+      (err) => log.warn(`[jobs] could not announce queued ${task} ${job.id}: ${(err as Error).message}`),
+    );
     return job.id;
+  };
+
+  /** The display title a task declares, or defines for this payload. */
+  const titleOf = (task: string, payload: JobPayload): string => {
+    const def = opts.tasks.find((t) => t.type === task);
+    if (!def) return task;
+    return 'title' in def ? def.title : def.define(payload).title;
   };
 
   const cancel = async (jobId: string): Promise<CancelResult> => {

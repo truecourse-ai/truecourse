@@ -1,16 +1,22 @@
 /**
  * THE index of a top-level page: the search full width, ONE filter row (Add
- * filter, the dimension, the value), then a one-line table whose rows open
- * the thing. Code, Tests and Sessions read this way; Context's lists do too.
- * A surface names its columns and renders its cells; the chrome, the row's
- * click and keyboard, the empty line are this component's.
+ * filter, the dimension, the value), a one-line table whose rows open the
+ * thing, and THE TALLY under it. Code, Tests and Sessions read this way;
+ * Context's lists do too. A surface names its columns and renders its cells;
+ * the chrome, the row's click and keyboard, the empty line are this
+ * component's.
  *
  * The filter row belongs to the surfaces that have dimensions to narrow along;
  * a list that has none (Context's Sources) names none and gets no row.
+ *
+ * The tally is the ONE place a list says how many: the rows it SHOWS, counted
+ * by status word. A surface counts its own vocabulary and hands the words over;
+ * the header never carries a number.
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { FilterBuilder, type FilterDimension } from './filter-builder';
+import { StatusTally, type TallyItem } from './status-word';
 
 /** The narrowest a dragged column may get, in pixels. */
 const MIN_COLUMN_PX = 56;
@@ -125,6 +131,7 @@ export function IndexTable<T>({
   onSelect = () => {},
   filterLabel = 'Filter',
   filterAriaLabel,
+  tally,
   empty,
 }: {
   label: string;
@@ -141,6 +148,8 @@ export function IndexTable<T>({
   onSelect?: (next: string[]) => void;
   filterLabel?: string;
   filterAriaLabel?: string;
+  /** The shown rows counted by status word, worst first; none means no tally. */
+  tally?: readonly TallyItem[];
   /** The one line under an empty table: nothing at all, or nothing that matches. */
   empty: ReactNode;
 }) {
@@ -211,6 +220,7 @@ export function IndexTable<T>({
           </tbody>
         </table>
       </div>
+      {tally && <StatusTally label={label} items={tally} />}
     </div>
   );
 }

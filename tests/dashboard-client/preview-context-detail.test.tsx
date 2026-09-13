@@ -309,6 +309,8 @@ describe('the conflicts of the workspace', () => {
     expect(within(row).getByText('Open')).toBeInTheDocument();
     // A conflict belongs to the workspace: no repository column.
     expect(within(table).queryByRole('columnheader', { name: 'Repository' })).toBeNull();
+    // How many of each the list shows is its last line.
+    expect(screen.getByRole('group', { name: 'Conflicts tally' }).textContent).toBe('1 Open');
   });
 
   it('opens the conflict with its resolver, on the workspace corpus', async () => {

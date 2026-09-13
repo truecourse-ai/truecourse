@@ -29,6 +29,7 @@ import type {
   ContextSourceView,
   HomePeriod,
   HomeResponse,
+  JobsResponse,
   NotificationsResponse,
   WorkspaceInvitation,
   WorkspaceMembersResponse,
@@ -1772,6 +1773,16 @@ export function switchWorkspace(organizationId: string): Promise<{ user: AuthUse
     method: 'POST',
     body: JSON.stringify({ organizationId }),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Jobs: the background work of the workspace. A job is tracked from the moment
+// it is enqueued, which is where work waiting its turn in the queue is read.
+// ---------------------------------------------------------------------------
+
+/** Every job the workspace has in flight: the `queued` ones and the running. */
+export function listActiveJobs(): Promise<JobsResponse> {
+  return fetchApi<JobsResponse>('/api/jobs?active=1');
 }
 
 // ---------------------------------------------------------------------------

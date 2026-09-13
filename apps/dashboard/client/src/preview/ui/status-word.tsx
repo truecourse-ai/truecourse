@@ -3,9 +3,11 @@
  *
  * A status is never a tinted capsule. The DOT carries the colour (emerald for
  * good, red for failed, amber for blocked, muted for nothing-said, blue for
- * still-running) and the WORD carries the meaning at full contrast, so a row
- * reads the same in light and dark and a screen reader gets a word rather than
- * a colour. Capsules ({@link Badge}) are for neutral bounded labels only:
+ * still-running and for guard's unproven) and the WORD carries the meaning at
+ * full contrast, so a row reads the same in light and dark and a screen reader
+ * gets a word rather than a colour. The same dot carries a LIST'S TALLY
+ * ({@link StatusTally}), the one place a list says how many rows wear each
+ * word. Capsules ({@link Badge}) are for neutral bounded labels only:
  * `hosted` / `local`, `cli` / `api` / `web`, `derived` / `authored`, a plan name.
  *
  * Every surface maps its own vocabulary onto a TONE here rather than inventing
@@ -14,11 +16,19 @@
  */
 
 import type { ContextDocumentStatus, ContextSourceStatus } from '@truecourse/shared';
-import type { RunStatus } from '@/components/sessions/run-model';
+import type { GuardCoveragePlainStatus } from '@/preview/vendor/shared';
+import type { WorkStatus } from '@/components/sessions/run-model';
 import { HoverPopover } from '@/preview/ui/hover-popover';
 import type { CheckConclusion } from '@/preview/data/types';
 
-export type StatusTone = 'success' | 'failure' | 'blocked' | 'attention' | 'neutral' | 'running';
+export type StatusTone =
+  | 'success'
+  | 'failure'
+  | 'blocked'
+  | 'attention'
+  | 'unproven'
+  | 'neutral'
+  | 'running';
 
 const DOT: Record<StatusTone, string> = {
   success: 'bg-emerald-500',
@@ -27,6 +37,10 @@ const DOT: Record<StatusTone, string> = {
   // Amber for the states that want a reader rather than a fix: an interrupted
   // conversation, one holding a question.
   attention: 'bg-amber-500',
+  // Guard's one blue: nothing has ruled here yet and someone can move it. Guard
+  // bans amber, so its Blocked and its Never run wear this rather than the
+  // amber Context's Blocked wears.
+  unproven: 'bg-sky-500',
   neutral: 'bg-muted-foreground',
   running: 'bg-sky-500',
 };
@@ -99,8 +113,10 @@ export const CONTEXT_SYNC_TONE: Record<ContextSourceStatus, StatusTone> = {
   never: 'neutral',
 };
 
-/** A run record's own status. The words are the run model's; only the colour is here. */
-export const RUN_STATUS_TONE: Record<RunStatus, StatusTone> = {
+/** A piece of work's status. The words are the run model's; only the colour is
+ *  here. Waiting its turn is nobody's to-do, so it is the muted tone. */
+export const RUN_STATUS_TONE: Record<WorkStatus, StatusTone> = {
+  queued: 'neutral',
   running: 'running',
   completed: 'success',
   failed: 'failure',
@@ -118,6 +134,76 @@ export const VERDICT_WORD: Record<'passed' | 'failed' | 'blocked', string> = {
   failed: 'Failed',
   blocked: 'Blocked',
 };
+
+/**
+ * The five coverage words as tones. The words and the order are guard's
+ * (`GUARD_COVERAGE_PLAIN_ORDER`); the paint is guard's four colours, so a
+ * tally under a guard list and the chips in it carry the same dot.
+ */
+export const GUARD_COVERAGE_TONE: Record<GuardCoveragePlainStatus, StatusTone> = {
+  failed: 'failure',
+  blocked: 'unproven',
+  'never-run': 'unproven',
+  succeeded: 'success',
+  'not-testable': 'neutral',
+};
+
+/** One word of a list's tally: how many of the shown rows wear it. */
+export interface TallyItem {
+  key: string;
+  /** The status word: "Failed", "Blocked". */
+  word: string;
+  count: number;
+  tone: StatusTone;
+}
+
+/**
+ * The rows a list SHOWS, counted by status, in the order the list's own filter
+ * offers them. Every word of the order comes back, zero included;
+ * {@link StatusTally} is what leaves the empty ones out.
+ */
+export function tallyOf<T, K extends string>(
+  rows: readonly T[],
+  order: readonly K[],
+  statusOf: (row: T) => K,
+  describe: (key: K) => { word: string; tone: StatusTone },
+): TallyItem[] {
+  const counts = new Map<K, number>();
+  for (const row of rows) {
+    const key = statusOf(row);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return order.map((key) => ({ key, count: counts.get(key) ?? 0, ...describe(key) }));
+}
+
+/**
+ * THE tally of a list, its last line: one dot per status word with how many of
+ * the shown rows wear it, worst first, a word no row wears left out. The dots
+ * read as Home's area rows read; the word is spelled out because a list has no
+ * legend above it. It counts what is SHOWN, so the search and the filters move
+ * it, and it is the ONE place a list says how many of anything it holds.
+ */
+export function StatusTally({ label, items }: { label: string; items: readonly TallyItem[] }) {
+  const shown = items.filter((item) => item.count > 0);
+  if (shown.length === 0) return null;
+  return (
+    <div
+      role="group"
+      aria-label={`${label} tally`}
+      className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-t border-border px-6 py-2"
+    >
+      {shown.map((item) => (
+        <span
+          key={item.key}
+          className="inline-flex items-center gap-1.5 text-[11px] font-medium text-foreground"
+        >
+          <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${DOT[item.tone]}`} />
+          <span className="tabular-nums">{`${item.count} ${item.word}`}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
 
 /**
  * A tally as dots: one colored dot per bucket with its number, no words. For a
