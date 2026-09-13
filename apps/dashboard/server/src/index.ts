@@ -16,7 +16,7 @@ import { setRepoJobsCanceller } from './services/repo-removal.service.js';
 import { stopAllWatchers } from './services/watcher.service.js';
 import { stopAllRunTails } from './services/session-tailer.service.js';
 import { wipeLegacyPostgresData, getLogDir } from '@truecourse/core/config/paths';
-import { getProjectByPath } from '@truecourse/core/config/registry';
+import { getProjectByPath, slugify } from '@truecourse/core/config/registry';
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { closeLogger, configureLogger, log } from '@truecourse/core/lib/logger';
 import { publishEvent } from '@truecourse/jobs';
@@ -90,11 +90,20 @@ async function main() {
   // 5. GitHub App connection. Optional: without GITHUB_APP_* the server still
   //    boots, and /api/github answers 503 with the vars to set.
   const github = createGithubConnection({
-    // Connecting a repository creates its Repository source and syncs it; that
-    // sync chains the workspace Document scan, whose ripple starts the new
-    // repository's Test setup. Connect enqueues nothing else.
+    // A push to a source's repository syncs the source.
     contextSync: async (orgId, sourceId, source) => {
       const outcome = await jobs.enqueueContextSync({ workspaceOrgId: orgId, sourceId, source });
+      return outcome.status;
+    },
+    // Connecting a repository starts its Flow setup. Its context is Context's.
+    startSetup: async (link) => {
+      const entry = await getProjectByPath(link.repoFullName);
+      const outcome = await jobs.enqueueGuardSetup({
+        repoId: entry?.slug ?? slugify(link.repoFullName, []),
+        repoFullName: link.repoFullName,
+        workspaceOrgId: link.workspaceOrgId,
+        source: 'chain',
+      });
       return outcome.status;
     },
   });

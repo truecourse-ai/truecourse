@@ -7,9 +7,10 @@
  * re-reads the real `/api/repos`. A repository that came back that way renders
  * on Code with none of the fixture coverage the mock repositories have.
  *
- * The CONTEXT STEP is the second real seam: the workspace's sources come from
- * `/api/context/sources`, the repository's own documentation leads them checked,
- * and what was picked is written per repository with
+ * The CONTEXT STEP is the second real seam: the workspace's EXISTING sources
+ * come from `/api/context/sources` (connecting creates none, sources are made
+ * in Context), a source that is a picked repository's own documentation leads
+ * them checked, and what was picked is written per repository with
  * `PUT /api/repos/:id/context/bindings` once the link landed.
  *
  * The seam widened with the agent's own page: its conversations are the real
@@ -126,6 +127,16 @@ function source(over: Partial<ContextSourceView> & Pick<ContextSourceView, 'id' 
     repositories: [],
     ...over,
   };
+}
+
+/** A workspace source that is a repository's own documentation. */
+function ownSource(repoFullName: string): ContextSourceView {
+  return source({
+    id: `repo-${repoFullName.replace('/', '-')}`,
+    kind: 'repository',
+    title: repoFullName,
+    config: { repoFullName, installationId: 42, include: ['docs/**'], exclude: [], branch: 'main' },
+  });
 }
 
 /** A server answering the registry, connect routes and empty guard summaries. */
@@ -495,7 +506,37 @@ describe('connecting a repository through the GitHub App', () => {
     ]);
   });
 
-  it("offers the workspace's sources with the repository's own documentation first and checked", async () => {
+  it("leads with the picked repository's own documentation, checked and named as such", async () => {
+    serve({
+      sources: [
+        source({ id: 'site-docs', kind: 'site', title: 'docs.acme.com', docCount: 12 }),
+        ownSource('linkwarden/linkwarden'),
+      ],
+      installationRepos: { 42: [{ fullName: 'linkwarden/linkwarden', defaultBranch: 'main', private: false }] },
+    });
+
+    const dialog = await openGithubRepos();
+    await userEvent.click(await screen.findByLabelText('linkwarden/linkwarden'));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
+
+    const list = await within(dialog).findByRole('list', { name: 'Context sources' });
+    await waitFor(() =>
+      expect(within(within(list).getAllByRole('listitem')[0]!).getByRole('checkbox')).toBeChecked(),
+    );
+    const items = within(list).getAllByRole('listitem');
+    expect(items).toHaveLength(2);
+    expect(within(items[0]!).getByText("This repository’s own documentation")).toBeInTheDocument();
+    expect(within(items[1]!).getByText('docs.acme.com')).toBeInTheDocument();
+    expect(within(items[1]!).getByRole('checkbox')).not.toBeChecked();
+    expect(within(dialog).getByRole('link', { name: 'Add context' })).toHaveAttribute(
+      'href',
+      '/preview/context',
+    );
+  });
+
+  // Context makes the sources; connecting makes none. A repository Context has
+  // never read has no own-documentation row to offer, only the rest.
+  it('offers only the other sources when Context has none for the repository', async () => {
     serve({
       sources: [source({ id: 'site-docs', kind: 'site', title: 'docs.acme.com', docCount: 12 })],
       installationRepos: { 42: [{ fullName: 'linkwarden/linkwarden', defaultBranch: 'main', private: false }] },
@@ -507,29 +548,45 @@ describe('connecting a repository through the GitHub App', () => {
 
     const list = await within(dialog).findByRole('list', { name: 'Context sources' });
     const items = within(list).getAllByRole('listitem');
-    expect(within(items[0]!).getByRole('checkbox')).toBeChecked();
-    expect(within(items[0]!).getByText("This repository’s own documentation")).toBeInTheDocument();
-    expect(within(items[1]!).getByText('docs.acme.com')).toBeInTheDocument();
-    expect(within(items[1]!).getByRole('checkbox')).not.toBeChecked();
-    expect(within(dialog).getByRole('link', { name: 'Add context' })).toHaveAttribute(
-      'href',
-      '/preview/context',
-    );
+    expect(items).toHaveLength(1);
+    expect(within(items[0]!).getByText('docs.acme.com')).toBeInTheDocument();
+    expect(within(items[0]!).getByRole('checkbox')).not.toBeChecked();
+    expect(within(dialog).queryByText("This repository’s own documentation")).toBeNull();
   });
 
-  it("binds what the step picked, plus the repository's own source, once the link lands", async () => {
-    const registry: RegistryEntry[] = [];
-    const own = source({
-      id: 'repo-linkwarden-linkwarden',
-      kind: 'repository',
-      title: 'linkwarden/linkwarden',
-      config: { repoFullName: 'linkwarden/linkwarden', installationId: 11, include: ['docs/**'], exclude: [], branch: '' },
+  it('says the workspace has no source yet when there is none', async () => {
+    serve({
+      sources: [],
+      installationRepos: { 42: [{ fullName: 'linkwarden/linkwarden', defaultBranch: 'main', private: false }] },
     });
-    const sources: ContextSourceView[] = [source({ id: 'site-docs', kind: 'site', title: 'docs.acme.com' })];
+
+    const dialog = await openGithubRepos();
+    await userEvent.click(await screen.findByLabelText('linkwarden/linkwarden'));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
+
+    expect(
+      await within(dialog).findByText('This workspace has no source yet.'),
+    ).toBeInTheDocument();
+  });
+
+  // What the step picked is written per repository, and a repository's own
+  // documentation is its own: the other repository in the same batch never
+  // reads it.
+  it('binds what each repository picked, and never another one’s own documentation', async () => {
+    const registry: RegistryEntry[] = [];
     const { bound } = serve({
       registry,
-      sources,
-      installationRepos: { 42: [{ fullName: 'linkwarden/linkwarden', defaultBranch: 'main', private: false }] },
+      sources: [
+        ownSource('linkwarden/linkwarden'),
+        ownSource('linkwarden/docs'),
+        source({ id: 'site-docs', kind: 'site', title: 'docs.acme.com' }),
+      ],
+      installationRepos: {
+        42: [
+          { fullName: 'linkwarden/linkwarden', defaultBranch: 'main', private: false },
+          { fullName: 'linkwarden/docs', defaultBranch: 'trunk', private: true },
+        ],
+      },
       link: (body) => {
         registry.push({
           id: String(body.repoFullName).split('/')[1]!,
@@ -538,52 +595,29 @@ describe('connecting a repository through the GitHub App', () => {
           remoteUrl: `https://github.com/${String(body.repoFullName)}`,
           defaultBranch: body.defaultBranch,
         });
-        // Linking creates the repository's own source, which is how the dialog
-        // learns its id rather than composing one.
-        sources.push(own);
         return json({ ok: true }, 201);
       },
     });
 
     const dialog = await openGithubRepos();
     await userEvent.click(await screen.findByLabelText('linkwarden/linkwarden'));
+    await userEvent.click(within(dialog).getByLabelText('linkwarden/docs'));
     await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
+
+    // Both own sources lead the list checked; the site is added, and the docs
+    // repository's own documentation is taken back off.
     await userEvent.click(await within(dialog).findByLabelText(/docs\.acme\.com/));
+    await userEvent.click(within(dialog).getByLabelText(/linkwarden\/docs/));
     await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
     await userEvent.click(within(dialog).getByRole('button', { name: 'Connect and start onboarding' }));
 
-    await waitFor(() => expect(bound).toEqual([
-      { repoId: 'linkwarden', sourceIds: ['site-docs', own.id] },
-    ]));
+    await waitFor(() =>
+      expect(bound).toEqual([
+        { repoId: 'linkwarden', sourceIds: ['repo-linkwarden-linkwarden', 'site-docs'] },
+        { repoId: 'docs', sourceIds: ['site-docs'] },
+      ]),
+    );
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-  });
-
-  it("binds only the workspace sources when its own documentation is unchecked", async () => {
-    const registry: RegistryEntry[] = [];
-    const { bound } = serve({
-      registry,
-      sources: [source({ id: 'site-docs', kind: 'site', title: 'docs.acme.com' })],
-      installationRepos: { 42: [{ fullName: 'linkwarden/linkwarden', defaultBranch: 'main', private: false }] },
-      link: (body) => {
-        registry.push({
-          id: String(body.repoFullName).split('/')[1]!,
-          name: String(body.repoFullName),
-          path: `/clones/${String(body.repoFullName).replace('/', '__')}`,
-          remoteUrl: `https://github.com/${String(body.repoFullName)}`,
-          defaultBranch: body.defaultBranch,
-        });
-        return json({ ok: true }, 201);
-      },
-    });
-
-    const dialog = await openGithubRepos();
-    await userEvent.click(await screen.findByLabelText('linkwarden/linkwarden'));
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
-    await userEvent.click(await within(dialog).findByLabelText(/own documentation/));
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Connect and start onboarding' }));
-
-    await waitFor(() => expect(bound).toEqual([{ repoId: 'linkwarden', sourceIds: [] }]));
   });
 
   it('renders an empty Code and nothing throws with no server behind it', async () => {

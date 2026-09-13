@@ -1,11 +1,12 @@
 /**
  * What connecting, pushing to and disconnecting a repository do to Context.
  *
- * Connect: the repository's own documentation becomes a workspace source with
- * the default patterns and the link's installation, linked to itself, and its
- * sync is enqueued BEFORE the onboarding scan. A push to the default branch
- * syncs it again. Disconnect takes the repository's links and nothing else: the
- * sources are the workspace's, and a source is removed in Context.
+ * Connect: nothing. Sources are made in Context, so connecting a repository in
+ * Code creates none and syncs none; it starts the repository's setup and leaves
+ * what it reads to the connect dialog's Context step. A push to the default
+ * branch syncs the source that already scopes the repository. Disconnect takes
+ * the repository's links and nothing else: the sources are the workspace's, and
+ * a source is removed in Context.
  *
  * The hooks are driven through the real `createGithubConnection` mount (a
  * signed webhook for the push, the connect router's link hook for the rest), so
@@ -25,7 +26,6 @@ import {
   type ContextSyncStart,
 } from '../../apps/dashboard/server/src/github/index';
 import {
-  ensureRepositoryContextSource,
   removeRepositoryContext,
   repositoryContextSource,
 } from '../../apps/dashboard/server/src/services/context-lifecycle.service';
@@ -91,78 +91,37 @@ async function link(repoFullName = REPO, org = ORG): Promise<void> {
   });
 }
 
-describe('connecting a repository', () => {
-  it('creates its Repository source with the default patterns, linked to itself', async () => {
-    await ensureRepositoryContextSource({
-      repoFullName: REPO,
-      workspaceOrgId: ORG,
+/** The repository's own documentation, as Context holds it: a workspace source. */
+async function ownSource(repoFullName = REPO, org = ORG): Promise<void> {
+  await store.createSource(org, {
+    id: 'repo-acme-api',
+    kind: 'repository',
+    title: repoFullName,
+    config: {
+      repoFullName,
       installationId: INSTALLATION_ID,
-      defaultBranch: 'main',
-    });
-    const source = await repositoryContextSource(ORG, REPO);
-    expect(source).toMatchObject({ id: 'repo-acme-api', kind: 'repository', title: REPO });
-    expect(source!.config).toMatchObject({
-      repoFullName: REPO,
-      installationId: INSTALLATION_ID,
-      branch: 'main',
       include: ['docs/**', '**/*.md'],
-      exclude: expect.arrayContaining(['**/CHANGELOG*', '**/LICENSE*']),
-    });
-    expect(await store.bindings(ORG, REPO)).toEqual(['repo-acme-api']);
+      exclude: [],
+      branch: 'main',
+    },
   });
-
-  it('is idempotent, and keeps patterns that were edited since', async () => {
-    await ensureRepositoryContextSource({
-      repoFullName: REPO,
-      workspaceOrgId: ORG,
-      installationId: INSTALLATION_ID,
-      defaultBranch: 'main',
-    });
-    await store.updateSource(ORG, 'repo-acme-api', {
-      config: {
-        repoFullName: REPO,
-        installationId: INSTALLATION_ID,
-        include: ['handbook/**'],
-        exclude: [],
-        branch: 'main',
-      },
-    });
-    await ensureRepositoryContextSource({
-      repoFullName: REPO,
-      workspaceOrgId: ORG,
-      installationId: INSTALLATION_ID,
-      defaultBranch: 'main',
-    });
-    expect(await store.listSources(ORG)).toHaveLength(1);
-    expect((await repositoryContextSource(ORG, REPO))!.config).toMatchObject({
-      include: ['handbook/**'],
-    });
-  });
-
-  it('does nothing at all when no workspace context store is installed', async () => {
-    resetContextStore();
-    expect(
-      await ensureRepositoryContextSource({
-        repoFullName: REPO,
-        workspaceOrgId: ORG,
-        installationId: INSTALLATION_ID,
-        defaultBranch: 'main',
-      }),
-    ).toBeNull();
-  });
-});
+}
 
 describe('the connect hook', () => {
-  // The onboarding chain starts in Context now: connecting creates the
-  // repository's source and syncs it, and nothing else is enqueued here — the
-  // sync chains the workspace Document scan, whose ripple starts Test setup.
-  it('creates the source and syncs it, and enqueues nothing else', async () => {
+  // Connecting starts the repository's setup, which reads the CODE. Context is
+  // the other side of the product: no source is made here, and none is synced.
+  it('starts the setup, creates no source and syncs nothing', async () => {
+    const setups: string[] = [];
     const github = createGithubConnection({
       store: gate,
       octokitFor: () => ({}) as never,
       workTree: async () => ({ dir: '/nowhere', dispose: () => {} }),
       contextSync: async (orgId, sourceId, source) => {
         syncs.push({ orgId, sourceId, source });
+        return 'queued';
+      },
+      startSetup: async (linked) => {
+        setups.push(linked.repoFullName);
         return 'queued';
       },
     });
@@ -172,20 +131,17 @@ describe('the connect hook', () => {
     // flow does, through the mount's own onRepoLinked wiring.
     await linkThroughMount(github!, { repoFullName: REPO, workspaceOrgId: ORG });
 
-    expect(syncs).toEqual([{ orgId: ORG, sourceId: 'repo-acme-api', source: 'add' }]);
-    expect(await repositoryContextSource(ORG, REPO)).not.toBeNull();
+    expect(setups).toEqual([REPO]);
+    expect(syncs).toEqual([]);
+    expect(await store.listSources(ORG)).toEqual([]);
+    expect(await store.bindings(ORG, REPO)).toEqual([]);
   });
 });
 
 describe('a push to the default branch', () => {
   it('syncs the repository’s own source', async () => {
     await link();
-    await ensureRepositoryContextSource({
-      repoFullName: REPO,
-      workspaceOrgId: ORG,
-      installationId: INSTALLATION_ID,
-      defaultBranch: 'main',
-    });
+    await ownSource();
     const app = webhookApp();
     await postPush(app, 'refs/heads/main');
     await settle();
@@ -194,12 +150,7 @@ describe('a push to the default branch', () => {
 
   it('ignores a push to another branch', async () => {
     await link();
-    await ensureRepositoryContextSource({
-      repoFullName: REPO,
-      workspaceOrgId: ORG,
-      installationId: INSTALLATION_ID,
-      defaultBranch: 'main',
-    });
+    await ownSource();
     const app = webhookApp();
     await postPush(app, 'refs/heads/feature');
     await settle();
@@ -219,12 +170,7 @@ describe('disconnecting a repository', () => {
   // Disconnecting in Code says nothing about what Context reads: every source
   // stays, with its scope and its installation, and only the links go.
   it('drops its links and keeps every source it read', async () => {
-    await ensureRepositoryContextSource({
-      repoFullName: REPO,
-      workspaceOrgId: ORG,
-      installationId: INSTALLATION_ID,
-      defaultBranch: 'main',
-    });
+    await ownSource();
     await store.createSource(ORG, {
       id: 'site-docs',
       kind: 'site',
@@ -236,7 +182,7 @@ describe('disconnecting a repository', () => {
     await removeRepositoryContext(ORG, REPO);
 
     expect(await store.bindings(ORG, REPO)).toEqual([]);
-    // The repository's own source survives with the scope it was created with.
+    // The repository's own source survives with the scope Context gave it.
     const own = await repositoryContextSource(ORG, REPO);
     expect(own).not.toBeNull();
     expect(own!.config).toMatchObject({
@@ -250,12 +196,7 @@ describe('disconnecting a repository', () => {
   });
 
   it('keeps a Repository source another repository still reads', async () => {
-    await ensureRepositoryContextSource({
-      repoFullName: REPO,
-      workspaceOrgId: ORG,
-      installationId: INSTALLATION_ID,
-      defaultBranch: 'main',
-    });
+    await ownSource();
     await store.setBindings(ORG, 'acme/web', ['repo-acme-api']);
 
     await removeRepositoryContext(ORG, REPO);
@@ -271,12 +212,7 @@ describe('disconnecting a repository', () => {
         changes.push({ change: event.change, repoFullName: event.repoFullName });
       }
     });
-    await ensureRepositoryContextSource({
-      repoFullName: REPO,
-      workspaceOrgId: ORG,
-      installationId: INSTALLATION_ID,
-      defaultBranch: 'main',
-    });
+    await ownSource();
     changes.length = 0;
 
     await removeRepositoryContext(ORG, REPO);

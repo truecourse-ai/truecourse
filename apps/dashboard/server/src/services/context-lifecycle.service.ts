@@ -1,43 +1,27 @@
 /**
- * What connecting and disconnecting a repository MEAN for Context.
+ * What a repository's own documentation IS to Context, and what disconnecting
+ * it means.
  *
- * Connect: the repository gets its Repository source — the default patterns,
- * the branch the link records — linked to itself, and its first sync is
- * enqueued. That happens BEFORE the onboarding scan is enqueued, so the
- * workspace already knows the repository's documents exist by the time anything
- * reads them.
+ * A repository's own documentation is a workspace source like any other, made
+ * in Context. Connecting the repository in Code creates none: it only starts
+ * the repository's setup, and the connect dialog links the sources that already
+ * exist. What is left here is the lookup a push needs (which source reads this
+ * repository) and the disconnect.
  *
- * Disconnect: the repository's links go, and its Repository source goes with
- * them — unless another repository still reads it (a platform repository's docs
- * feeding a service). A SITE the repository read is never removed: it belongs
- * to the workspace, and losing one reader is not losing the source.
+ * Disconnect: the repository's links go and every source stays, because a
+ * source belongs to the workspace and losing one reader is not losing it.
  */
 
 import { log } from '@truecourse/core/lib/logger';
 import {
-  contextBindings,
   contextStoreInstalled,
-  createContextSource,
   getContextSource,
   listContextSources,
   setContextBindings,
 } from '@truecourse/core/lib/context-store';
-import { repositoryConfig, repositorySourceId } from '@truecourse/core/services/context';
-import {
-  DEFAULT_REPOSITORY_EXCLUDE,
-  DEFAULT_REPOSITORY_INCLUDE,
-  type ContextSource,
-} from '@truecourse/shared';
+import { repositorySourceId } from '@truecourse/core/services/context';
+import { type ContextSource } from '@truecourse/shared';
 import { emitContextChanged } from './context.service.js';
-
-export interface RepositoryContextInput {
-  repoFullName: string;
-  workspaceOrgId: string;
-  /** The GitHub App installation the source reads through, from the Code link. */
-  installationId: number;
-  /** The branch the source follows — the repository's default branch. */
-  defaultBranch: string;
-}
 
 /** The workspace's Repository source for this repository, or null. */
 export async function repositoryContextSource(
@@ -58,41 +42,6 @@ function sourceScopes(source: ContextSource, repoFullName: string): boolean {
     source.kind === 'repository' &&
     (source.config as { repoFullName?: string }).repoFullName === repoFullName
   );
-}
-
-/**
- * Make sure the repository has its source and reads it. Idempotent: a
- * repository that already has one keeps it (and its edited patterns) and is
- * only re-linked if the link went missing. Returns the source id, or null when
- * no workspace context store is installed (file mode).
- */
-export async function ensureRepositoryContextSource(
-  input: RepositoryContextInput,
-): Promise<string | null> {
-  if (!contextStoreInstalled()) return null;
-  const { repoFullName, workspaceOrgId: org, installationId, defaultBranch } = input;
-  const existing = await repositoryContextSource(org, repoFullName);
-  const sourceId = existing?.id ?? repositorySourceId(repoFullName);
-  if (!existing) {
-    await createContextSource(org, {
-      id: sourceId,
-      kind: 'repository',
-      title: repoFullName,
-      config: repositoryConfig({
-        repoFullName,
-        installationId,
-        include: [...DEFAULT_REPOSITORY_INCLUDE],
-        exclude: [...DEFAULT_REPOSITORY_EXCLUDE],
-        branch: defaultBranch,
-      }),
-    });
-  }
-  const links = await contextBindings(org, repoFullName);
-  if (!links.includes(sourceId)) {
-    await setContextBindings(org, repoFullName, [...links, sourceId]);
-  }
-  await emitContextChanged(org, { change: 'sources', sourceId });
-  return sourceId;
 }
 
 /**

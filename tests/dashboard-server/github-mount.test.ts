@@ -3,8 +3,8 @@
  *
  * Three things are pinned here. WHERE the routers sit: the webhook receiver
  * above the auth gate (GitHub has no session — its HMAC signature is its auth),
- * the connect API below it. WHAT CONNECTING A REPO DOES: write the link row —
- * the row IS the connection — and start the onboarding scan, which acquires
+ * the connect API below it. WHAT CONNECTING A REPO DOES: write the link row
+ * (the row IS the connection) and start the repository's setup, which acquires
  * its own ephemeral work tree; nothing is cloned inside the request, and the
  * registry every route resolves against is a live view of the link store. And
  * WHAT AN UNCONFIGURED SERVER ANSWERS: 503 with the env vars to set, never a
@@ -64,6 +64,7 @@ import { createApp } from '../../apps/dashboard/server/src/app';
 import {
   createGithubConnection,
   type ContextSyncStart,
+  type SetupStart,
 } from '../../apps/dashboard/server/src/github/index';
 import {
   createRunClone,
@@ -188,6 +189,7 @@ function derivedRegistry(gate: MemoryGateStore): RegistryStore {
 interface MountOptions {
   workTree?: WorkTreeProvider;
   contextSync?: ContextSyncStart;
+  startSetup?: SetupStart;
   lookupInstallationAccount?: (
     installationId: number,
   ) => Promise<{ accountLogin: string; accountType: string } | null>;
@@ -237,8 +239,8 @@ beforeAll(() => {
 
 beforeEach(async () => {
   store = new MemoryGateStore();
-  // Connecting a repository creates its workspace Context source, so the
-  // workspace store has to exist for the connect hook to do anything.
+  // A push looks for the source that scopes the repository, so the workspace
+  // store has to exist for the push hook to do anything.
   contextStore = memoryContextStore();
   setContextStore(contextStore);
   setRegistryStore(derivedRegistry(store));
@@ -376,9 +378,22 @@ describe('a push to the default branch', () => {
         started.push([orgId, sourceId, source]);
         return 'queued';
       },
+      startSetup: async () => 'queued',
     });
     await linkRepo(app).expect(201);
-    started.length = 0;
+    // The source is Context's, made there: connecting makes none.
+    await contextStore.createSource(ORG, {
+      id: 'repo-acme-widgets',
+      kind: 'repository',
+      title: REPO,
+      config: {
+        repoFullName: REPO,
+        installationId: INSTALLATION_ID,
+        include: ['docs/**'],
+        exclude: [],
+        branch: 'main',
+      },
+    });
 
     await pushWebhook(app, REPO).expect(202);
     await waitFor(() => started.length > 0);
@@ -496,14 +511,18 @@ const linkRepo = (app: Express, org = ORG) =>
     .send({ repoFullName: REPO, installationId: INSTALLATION_ID, defaultBranch: 'main' });
 
 describe('linking a repository', () => {
-  // Onboarding starts in Context: the repository's own documentation becomes a
-  // workspace source and its SYNC is what the connect enqueues. That sync
-  // chains the workspace Document scan, whose ripple starts the tests.
-  it('writes the row, enqueues the context sync, and clones nothing in the request', async () => {
+  // Connecting starts the repository's SETUP, which reads the code. What the
+  // repository reads is Context's: no source is made here, and none is synced.
+  it('writes the row, starts the setup, and clones nothing in the request', async () => {
     const started: Array<[string, string, string]> = [];
+    const setups: string[] = [];
     const app = buildApp({
       contextSync: async (orgId, sourceId, source) => {
         started.push([orgId, sourceId, source]);
+        return 'queued';
+      },
+      startSetup: async (link) => {
+        setups.push(link.repoFullName);
         return 'queued';
       },
     });
@@ -526,22 +545,27 @@ describe('linking a repository', () => {
       remoteUrl: `https://github.com/${REPO}`,
     });
 
-    // The sync was pointed at the repository's own source; no clone dir exists.
-    // The work happens on the queue, on the connecting workspace's provider.
-    expect(started).toEqual([[ORG, 'repo-acme-widgets', 'add']]);
+    // The setup was started for the repository that landed, no sync went with
+    // it, and no clone dir exists: the work happens on the queue, on the
+    // connecting workspace's provider.
+    expect(setups).toEqual([REPO]);
+    expect(started).toEqual([]);
+    expect(await contextStore.listSources(ORG)).toEqual([]);
     expect(fs.existsSync(getRunClonesDir())).toBe(false);
   });
 
-  // Context may add a repository's source before Code ever connects it, so
-  // connecting reuses the source it finds rather than making a second one, and
-  // leaves its scope (patterns, branch, account) exactly as the user set it.
-  it('reuses the Context source a repository already has', async () => {
+  // Context owns the sources, so a repository whose own documentation is
+  // already a source keeps it untouched: connecting neither edits its scope
+  // (patterns, branch, account) nor binds the repository to it. The connect
+  // dialog's Context step is what writes the bindings.
+  it('leaves an existing source alone and creates none', async () => {
     const started: Array<[string, string, string]> = [];
     const app = buildApp({
       contextSync: async (orgId, sourceId, source) => {
         started.push([orgId, sourceId, source]);
         return 'queued';
       },
+      startSetup: async () => 'queued',
     });
     await contextStore.createSource(ORG, {
       id: 'repo-acme-widgets',
@@ -566,16 +590,16 @@ describe('linking a repository', () => {
       exclude: [],
       branch: 'trunk',
     });
-    // The repository now READS it, and the connect still starts its sync.
-    expect(await contextStore.bindings(ORG, REPO)).toEqual(['repo-acme-widgets']);
-    expect(started).toEqual([[ORG, 'repo-acme-widgets', 'add']]);
+    // Nothing was bound and nothing was synced: both are Context's to say.
+    expect(await contextStore.bindings(ORG, REPO)).toEqual([]);
+    expect(started).toEqual([]);
   });
 
   it('refuses to connect the same repository twice', async () => {
-    let syncs = 0;
+    let setups = 0;
     const app = buildApp({
-      contextSync: async () => {
-        syncs += 1;
+      startSetup: async () => {
+        setups += 1;
         return 'queued';
       },
     });
@@ -583,7 +607,7 @@ describe('linking a repository', () => {
     await linkRepo(app).expect(201);
     // A second link would re-fire the whole onboarding chain on a live repo.
     await linkRepo(app).expect(409);
-    expect(syncs).toBe(1);
+    expect(setups).toBe(1);
   });
 });
 
@@ -593,7 +617,7 @@ describe('linking a repository', () => {
 
 describe('disconnecting a repository', () => {
   it('drops the row and the repo’s session transcripts', async () => {
-    const app = buildApp({ contextSync: async () => 'queued' });
+    const app = buildApp({ startSetup: async () => 'queued' });
     await linkRepo(app).expect(201);
 
     // Transcripts a scan left behind, keyed by identity.
@@ -611,7 +635,7 @@ describe('disconnecting a repository', () => {
   });
 
   it('drops the link row when the repo is disconnected from Home', async () => {
-    const app = buildApp({ contextSync: async () => 'queued' });
+    const app = buildApp({ startSetup: async () => 'queued' });
     await linkRepo(app).expect(201);
 
     await request(app)
@@ -634,7 +658,7 @@ describe('disconnecting a repository', () => {
 // ---------------------------------------------------------------------------
 
 describe('a slug that belongs to another workspace', () => {
-  const app = (): Express => buildApp({ contextSync: async () => 'queued' });
+  const app = (): Express => buildApp({ startSetup: async () => 'queued' });
 
   it('404s the repo detail route — not 403, which would confirm it exists', async () => {
     const server = app();
@@ -697,7 +721,7 @@ describe('a slug that belongs to another workspace', () => {
 
 describe('GET /api/repos with a link store', () => {
   it("hides another workspace's connected repository", async () => {
-    const app = buildApp({ contextSync: async () => 'queued' });
+    const app = buildApp({ startSetup: async () => 'queued' });
     await linkRepo(app).expect(201);
 
     const mine = await request(app)

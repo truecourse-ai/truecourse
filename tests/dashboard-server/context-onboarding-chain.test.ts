@@ -1,6 +1,6 @@
 /**
- * ONBOARDING, END TO END, on the real queue: connecting a repository syncs its
- * own documentation, and what follows depends on what that sync found.
+ * ONBOARDING, END TO END, on the real queue: a repository's own documentation
+ * syncs, and what follows depends on what that sync found.
  *
  * Two paths are pinned, because they are the two a connected repository can
  * take:
@@ -295,7 +295,8 @@ beforeEach(async () => {
   failures = [];
   enqueued = [];
   setGuardStore(new PgGuardStore(db));
-  // Connecting created the repository's source and linked it — slice 1's hook.
+  // Context holds the repository's own documentation, and the repository reads
+  // it: the connect dialog's Context step wrote that binding.
   await context.createSource(ORG, {
     id: SOURCE,
     kind: 'repository',
@@ -332,7 +333,7 @@ afterEach(async () => {
 const jobsOfType = async (type: string): Promise<JobView[]> =>
   (await new JobStore(db).listForOrg(ORG)).filter((j) => j.type === type);
 
-/** What the connect hook does: sync the repository's own source. */
+/** The head of the chain: the first sync of the repository's own source. */
 const connect = (): Promise<unknown> =>
   jobs.enqueueContextSync({ workspaceOrgId: ORG, sourceId: SOURCE, source: 'add' });
 

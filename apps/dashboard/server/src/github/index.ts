@@ -41,7 +41,6 @@ import { setWorkTreeProvider, type WorkTreeProvider } from '../services/work-tre
 import type { ContextGithubAccess } from '../routes/context.js';
 import { removeRepoRunState } from '../services/repo-removal.service.js';
 import {
-  ensureRepositoryContextSource,
   removeRepositoryContext,
   repositoryContextSource,
 } from '../services/context-lifecycle.service.js';
@@ -77,11 +76,24 @@ export interface GithubConnectionOverrides {
   /** Per-run work trees. Default: a token clone into the workspace's run dir. */
   workTree?: WorkTreeProvider;
   /**
-   * Sync a context source. Boot passes the job enqueue; without one the source
-   * is created and left for a Sync now.
+   * Sync a context source. Boot passes the job enqueue; without one a push
+   * leaves the source for a Sync now.
    */
   contextSync?: ContextSyncStart;
+  /**
+   * Start a connected repository's Flow setup. Boot passes the job enqueue;
+   * without one the repository is linked and left for a Set up.
+   */
+  startSetup?: SetupStart;
 }
+
+/** How connect starts a repository's setup: the queue's answer, as a word. */
+export type SetupStart = (link: RepoLinkRecord) => Promise<'queued' | 'busy' | 'failed'>;
+
+const noSetupRunner: SetupStart = async (link) => {
+  log.warn(`[github] background jobs are not running — ${link.repoFullName} was not set up`);
+  return 'failed';
+};
 
 const noContextSyncRunner: ContextSyncStart = async (_orgId, sourceId) => {
   log.warn(`[github] background jobs are not running — ${sourceId} was not synced`);
@@ -98,6 +110,7 @@ export function createGithubConnection(
   const octokitFor =
     overrides.octokitFor ?? ((installationId: number) => installationOctokit(cfg, installationId));
   const contextSync = overrides.contextSync ?? noContextSyncRunner;
+  const startSetup = overrides.startSetup ?? noSetupRunner;
 
   // App auth is built on first use: the private key is only parsed when a token
   // is actually minted, so a test that injects `workTree` never needs a real one.
@@ -220,35 +233,20 @@ export function createGithubConnection(
       overrides.lookupInstallationAccount ??
       ((installationId: number) => fetchInstallationAccount(cfg, installationId)),
     onRepoLinked: async (link: RepoLinkRecord) => {
-      // The whole onboarding chain now starts HERE, in Context: the
-      // repository's own documentation becomes a workspace source, its sync is
-      // enqueued, and that sync — which always reconciles something the first
-      // time — chains the workspace Document scan, whose ripple starts this
-      // repository's Test setup. The row is the connection: no clone, no
+      // Connecting starts the repository's Flow setup, which derives its recipe,
+      // dependencies and interfaces from the CODE. What the repository reads is
+      // Context's side: sources are made there, and the connect dialog's Context
+      // step links the ones that exist. The row is the connection: no clone, no
       // registration, nothing awaited but the enqueue.
       try {
-        const sourceId = await ensureRepositoryContextSource({
-          repoFullName: link.repoFullName,
-          workspaceOrgId: link.workspaceOrgId,
-          installationId: link.installationId,
-          defaultBranch: link.defaultBranch,
-        });
-        if (!sourceId) {
-          log.warn(
-            `[github] ${link.repoFullName} connected without a context source — no workspace store`,
-          );
-          return;
-        }
-        const outcome = await contextSync(link.workspaceOrgId, sourceId, 'add');
+        const outcome = await startSetup(link);
         if (outcome !== 'queued') {
-          log.info(`[github] ${link.repoFullName} connected — context sync ${outcome}`);
+          log.info(`[github] ${link.repoFullName} connected — setup ${outcome}`);
         }
       } catch (err) {
-        // A context source that could not be created is not a reason to refuse
-        // the connection — the repository is linked, and Sync now still works.
-        log.error(
-          `[github] could not create ${link.repoFullName}'s context source: ${(err as Error).message}`,
-        );
+        // A setup that could not start is not a reason to refuse the
+        // connection: the repository is linked, and Set up still works.
+        log.error(`[github] could not start ${link.repoFullName}'s setup: ${(err as Error).message}`);
       }
     },
     onRepoUnlinked: async (link: RepoLinkRecord) => {

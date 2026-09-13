@@ -101,13 +101,13 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [picked, setPicked] = useState<string[]>([]);
   /**
-   * The Context step. The repository's OWN documentation is not a workspace
-   * source yet — it is the Repository source connecting creates — so it is a
-   * flag here and an id only after the link, while `contextPicked` holds the
-   * workspace sources that already exist.
+   * The Context step: which of the workspace's EXISTING sources the connected
+   * repositories read. Sources are made in Context; connecting makes none. A
+   * source that is a picked repository's own documentation is checked to
+   * begin with and named as such, and links to that repository alone.
    */
-  const [ownDocs, setOwnDocs] = useState(true);
   const [contextPicked, setContextPicked] = useState<string[]>([]);
+  const [contextPrimed, setContextPrimed] = useState(false);
   /** The workspace's sources; null while they are being read. */
   const [sources, setSources] = useState<ContextSourceView[] | null>(null);
   const [github, setGithub] = useState<GithubStatus>({ kind: 'loading' });
@@ -128,8 +128,8 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
       setReposError(null);
       setLinking(null);
       setLinkErrors({});
-      setOwnDocs(true);
       setContextPicked([]);
+      setContextPrimed(false);
     }
   }, [open]);
 
@@ -203,37 +203,48 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   const isLinked = (fullName: string) =>
     github.kind === 'ready' && github.linked.some((l) => l.fullName === fullName);
 
+  /** The repository a source is the own documentation of, or null for any other source. */
+  const ownerOf = (source: ContextSourceView): string | null =>
+    source.kind === 'repository' ? (source.config as RepositorySourceConfig).repoFullName : null;
+
+  // The Context step's rows: a picked repository's own documentation first,
+  // then the rest, in the workspace's order.
+  const orderedSources = [...(sources ?? [])].sort((a, b) => {
+    const aOwn = ownerOf(a) !== null && picked.includes(ownerOf(a)!) ? 0 : 1;
+    const bOwn = ownerOf(b) !== null && picked.includes(ownerOf(b)!) ? 0 : 1;
+    return aOwn - bOwn;
+  });
+  // Entering the step checks each picked repository's own documentation once;
+  // what the reader unchecks after that stays unchecked.
+  useEffect(() => {
+    if (step !== 3 || sources === null || contextPrimed) return;
+    const own = sources.filter((source) => {
+      const owner = ownerOf(source);
+      return owner !== null && picked.includes(owner);
+    });
+    setContextPicked((prev) => [...new Set([...prev, ...own.map((source) => source.id)])]);
+    setContextPrimed(true);
+  }, [step, sources, picked, contextPrimed]);
+
   const toggle = (fullName: string) =>
     setPicked((prev) => (prev.includes(fullName) ? prev.filter((n) => n !== fullName) : [...prev, fullName]));
 
   /**
    * What the Context step picked, written as each landed repository's bindings:
-   * the workspace sources it checked, plus the repository's OWN source — read
-   * back off the sources list the link just added it to, never composed from a
-   * name. A repository whose source has not appeared yet is bound to what it
-   * did pick; the binding a failed write leaves unmade is spoken, since the
-   * repository is connected either way.
+   * the picked sources, except another picked repository's own documentation,
+   * which is that repository's alone. The binding a failed write leaves unmade
+   * is spoken, since the repository is connected either way.
    */
   const bindContext = async (landed: readonly string[], connected: readonly { id: string; fullName: string }[]) => {
     if (landed.length === 0) return;
-    let workspaceSources: ContextSourceView[] = [];
-    try {
-      workspaceSources = (await listContextSources()).sources;
-    } catch {
-      // No sources to read is not a reason to skip what the step picked.
-    }
-    setSources(workspaceSources);
+    const byId = new Map((sources ?? []).map((source) => [source.id, source]));
     for (const fullName of landed) {
       const repoId = connected.find((r) => r.fullName === fullName)?.id;
       if (!repoId) continue;
-      const own = ownDocs
-        ? workspaceSources.find(
-            (source) =>
-              source.kind === 'repository' &&
-              (source.config as RepositorySourceConfig).repoFullName === fullName,
-          )?.id
-        : undefined;
-      const ids = [...new Set([...contextPicked, ...(own ? [own] : [])])];
+      const ids = contextPicked.filter((id) => {
+        const owner = byId.get(id) ? ownerOf(byId.get(id)!) : null;
+        return owner === null || owner === fullName;
+      });
       try {
         await putRepoContextBindings(repoId, ids);
       } catch (error) {
@@ -426,41 +437,37 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
         {step === 3 && (
           <div>
             <ul className="max-h-64 divide-y divide-border overflow-y-auto rounded-md border border-border" aria-label="Context sources">
-              <li className="flex items-center gap-3 px-3 py-2">
-                <input
-                  type="checkbox"
-                  id="ctx-own-docs"
-                  checked={ownDocs}
-                  onChange={() => setOwnDocs((v) => !v)}
-                  className="h-3.5 w-3.5 shrink-0 rounded border-border"
-                />
-                <label htmlFor="ctx-own-docs" className="min-w-0 flex-1 cursor-pointer">
-                  <span className="block truncate text-[13px] text-foreground">This repository’s own documentation</span>
-                </label>
-                <Capsule>{CONTEXT_SOURCE_KIND_LABEL.repository}</Capsule>
-              </li>
-              {(sources ?? []).map((source) => (
-                <li key={source.id} className="flex items-center gap-3 px-3 py-2">
-                  <input
-                    type="checkbox"
-                    id={`ctx-bind-${source.id}`}
-                    checked={contextPicked.includes(source.id)}
-                    onChange={() =>
-                      setContextPicked((prev) =>
-                        prev.includes(source.id) ? prev.filter((id) => id !== source.id) : [...prev, source.id],
-                      )
-                    }
-                    className="h-3.5 w-3.5 shrink-0 rounded border-border"
-                  />
-                  <label htmlFor={`ctx-bind-${source.id}`} className="min-w-0 flex-1 cursor-pointer">
-                    <span className="block truncate text-[13px] text-foreground">{source.title}</span>
-                    <span className="block truncate text-[11px] text-muted-foreground">
-                      {source.docCount} document{source.docCount === 1 ? '' : 's'}
-                    </span>
-                  </label>
-                  <Capsule>{CONTEXT_SOURCE_KIND_LABEL[source.kind]}</Capsule>
-                </li>
-              ))}
+              {orderedSources.map((source) => {
+                const own = ownerOf(source);
+                const ownOfPicked = own !== null && picked.includes(own);
+                return (
+                  <li key={source.id} className="flex items-center gap-3 px-3 py-2">
+                    <input
+                      type="checkbox"
+                      id={`ctx-bind-${source.id}`}
+                      checked={contextPicked.includes(source.id)}
+                      onChange={() =>
+                        setContextPicked((prev) =>
+                          prev.includes(source.id) ? prev.filter((id) => id !== source.id) : [...prev, source.id],
+                        )
+                      }
+                      className="h-3.5 w-3.5 shrink-0 rounded border-border"
+                    />
+                    <label htmlFor={`ctx-bind-${source.id}`} className="min-w-0 flex-1 cursor-pointer">
+                      <span className="block truncate text-[13px] text-foreground">
+                        {ownOfPicked && picked.length === 1 ? 'This repository’s own documentation' : source.title}
+                      </span>
+                      <span className="block truncate text-[11px] text-muted-foreground">
+                        {source.docCount} document{source.docCount === 1 ? '' : 's'}
+                      </span>
+                    </label>
+                    <Capsule>{CONTEXT_SOURCE_KIND_LABEL[source.kind]}</Capsule>
+                  </li>
+                );
+              })}
+              {sources !== null && sources.length === 0 && (
+                <li className="px-3 py-2 text-[11px] text-muted-foreground">This workspace has no source yet.</li>
+              )}
               {sources === null && (
                 <li className="px-3 py-2 text-[11px] text-muted-foreground">Reading the workspace's sources</li>
               )}
