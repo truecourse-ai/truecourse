@@ -232,7 +232,7 @@ export function IndexTable<T>({
         <StatusTally
           label={label}
           items={tally}
-          {...(total != null && total > rows.length ? { total } : {})}
+          {...(total != null ? { total } : {})}
         />
       )}
     </div>

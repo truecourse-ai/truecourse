@@ -49,6 +49,13 @@ vi.mock('@/components/sessions/RunConversationPage', () => ({
       {run.runId} in {repoId ?? ''}
     </div>
   ),
+  // The header's clock: the real one ticks off the page's own interval; here it
+  // reads the record's own span so the header carries the same words either way.
+  RunElapsed: ({ run }: { run: { startedAt: string; finishedAt?: string } }) => (
+    <span className="tabular-nums text-muted-foreground">
+      {run.finishedAt ? `${Math.round((Date.parse(run.finishedAt) - Date.parse(run.startedAt)) / 1000)}s` : ''}
+    </span>
+  ),
 }));
 
 import PreviewApp from '@/preview/PreviewApp';

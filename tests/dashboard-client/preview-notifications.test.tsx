@@ -335,7 +335,7 @@ describe('the filters', () => {
     await waitFor(() => expect(rows()).toHaveLength(4));
 
     const tally = () => screen.getByRole('group', { name: 'Workspace notifications tally' });
-    expect(tally().textContent).toBe('2 Done1 Needs you1 Failed');
+    expect(tally().textContent).toBe('2 Done1 Needs you1 Failed4 total');
 
     await user.click(screen.getByRole('button', { name: 'Add filter' }));
     await user.click(await screen.findByRole('option', { name: /About/ }));
@@ -343,7 +343,7 @@ describe('the filters', () => {
 
     await waitFor(() => expect(rows()).toHaveLength(2));
     // Narrowed, the tally ends with the count the list was cut from.
-    expect(tally().textContent).toBe('1 Done1 Needs youof 4');
+    expect(tally().textContent).toBe('1 Done1 Needs you4 total');
 
     // The status values now count what that subject holds.
     await user.click(screen.getByRole('button', { name: 'Add filter' }));

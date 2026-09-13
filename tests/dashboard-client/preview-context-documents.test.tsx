@@ -307,7 +307,7 @@ describe('Context, the documents', () => {
     await waitFor(() => expect(rows()).toHaveLength(2));
 
     const tally = () => screen.getByRole('group', { name: 'Documents tally' });
-    expect(tally().textContent).toBe('1 Failed1 Not linked');
+    expect(tally().textContent).toBe('1 Failed1 Not linked2 total');
 
     await user.click(screen.getByRole('button', { name: 'Add filter' }));
     await user.click(await screen.findByRole('option', { name: /Source/ }));
@@ -315,7 +315,7 @@ describe('Context, the documents', () => {
 
     await waitFor(() => expect(rows()).toHaveLength(1));
     // Narrowed, the tally ends with the count the list was cut from.
-    expect(tally().textContent).toBe('1 Failedof 2');
+    expect(tally().textContent).toBe('1 Failed2 total');
 
     await user.click(screen.getByRole('button', { name: 'Add filter' }));
     await user.click(await screen.findByRole('option', { name: /Status/ }));

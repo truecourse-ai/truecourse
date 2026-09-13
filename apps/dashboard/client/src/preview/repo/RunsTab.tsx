@@ -220,7 +220,7 @@ export function RunsTab({ repo }: { repo: Repo }) {
       <StatusTally
         label="Runs"
         items={tally}
-        {...(history.length > rows.length ? { total: history.length } : {})}
+        total={history.length}
       />
     </div>
   );

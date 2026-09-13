@@ -103,19 +103,19 @@ describe('the index table', () => {
     expect(screen.queryByRole('group', { name: 'Flows tally' })).toBeNull();
   });
 
-  it('ends a narrowed tally with the count it was cut from', () => {
-    renderTable({ tally: TALLY, total: 19 });
+  it('ends the tally with the count the list holds in full', () => {
+    renderTable({ tally: TALLY, total: 79 });
 
     const tally = screen.getByRole('group', { name: 'Flows tally' });
-    expect(tally.textContent).toBe('12 Failed30 Blocked37 Succeededof 19');
-    // Muted, and last: the words are the tally, this is what is missing from it.
+    expect(tally.textContent).toBe('12 Failed30 Blocked37 Succeeded79 total');
+    // Muted, and last: the words are the tally, this is the size of the whole.
     const last = tally.lastElementChild!;
-    expect(last.textContent).toBe('of 19');
+    expect(last.textContent).toBe('79 total');
     expect(last.className).toContain('text-muted-foreground');
   });
 
-  it('says no total while the list shows everything it holds', () => {
-    renderTable({ tally: TALLY, total: 2 });
+  it('ends in no total when the list hands none', () => {
+    renderTable({ tally: TALLY });
     expect(screen.getByRole('group', { name: 'Flows tally' }).textContent).toBe(
       '12 Failed30 Blocked37 Succeeded',
     );

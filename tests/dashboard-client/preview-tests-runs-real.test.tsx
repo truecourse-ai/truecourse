@@ -231,13 +231,13 @@ describe('the Runs tab of a connected repository', () => {
     await within(table).findByText('f00d123');
 
     const tally = () => screen.getByRole('group', { name: 'Runs tally' });
-    expect(tally().textContent).toBe('2 Failed');
+    expect(tally().textContent).toBe('2 Failed2 total');
     // The number lives at the bottom, once: the header carries the name alone.
     expect(screen.getByRole('heading', { name: 'Runs' }).parentElement!.textContent).toBe('Runs');
 
     // Narrowed, it also says what it was cut from, so the reader sees the rest.
     await user.type(screen.getByRole('textbox', { name: 'Search runs' }), 'f00d123');
-    await waitFor(() => expect(tally().textContent).toBe('1 Failedof 2'));
+    await waitFor(() => expect(tally().textContent).toBe('1 Failed2 total'));
   });
 
   it('is a full-width search over an opaque sticky head, and no filter row', async () => {

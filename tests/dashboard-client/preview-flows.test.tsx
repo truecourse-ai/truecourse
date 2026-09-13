@@ -211,14 +211,14 @@ describe('Flows, the index', () => {
     await waitFor(() => expect(rows()).toHaveLength(2));
 
     const tally = () => screen.getByRole('group', { name: 'Flows tally' });
-    expect(tally().textContent).toBe('1 Blocked1 Succeeded');
+    expect(tally().textContent).toBe('1 Blocked1 Succeeded2 total');
 
     await user.click(screen.getByRole('button', { name: 'Add filter' }));
     await user.click(await screen.findByRole('option', { name: /Repository/ }));
     await user.click(await screen.findByRole('option', { name: /acme\/web/ }));
 
     await waitFor(() => expect(rows()).toHaveLength(1));
-    expect(tally().textContent).toBe('1 Blockedof 2');
+    expect(tally().textContent).toBe('1 Blocked2 total');
   });
 
   it('counts each filter value over what the other filters already keep', async () => {
@@ -277,7 +277,7 @@ describe('Flows, the index', () => {
       within(filters).getByRole('button', { name: `Remove ${name}` }).parentElement!;
     expect(pill('Status Blocked').textContent).toBe('Status ·Blocked 2');
     expect(pill('Repository acme/web').textContent).toBe('Repository ·acme/web 2');
-    expect(screen.getByRole('group', { name: 'Flows tally' }).textContent).toBe('1 Blockedof 5');
+    expect(screen.getByRole('group', { name: 'Flows tally' }).textContent).toBe('1 Blocked5 total');
   });
 
   it('reads the address it arrives on, and narrows by driver too', async () => {
