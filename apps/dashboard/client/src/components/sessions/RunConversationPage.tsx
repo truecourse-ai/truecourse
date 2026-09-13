@@ -27,8 +27,9 @@ import type { PublicSessionRun } from '@/lib/api';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
+import { Capsule } from '@/preview/ui/bits';
 import { FindingCard, FindingResolveProvider } from './conversation-pieces';
-import { STEP_DOT, formatDuration } from './run-model';
+import { STEP_DOT, formatDuration, runDuration } from './run-model';
 import { useRunConversation } from './useRunConversation';
 import type { ConversationLine, DataField, SessionBlock, StepBlock } from './conversation-model';
 
@@ -82,6 +83,16 @@ function elapsedOf(
   const to = endedAt ? Date.parse(endedAt) : now;
   if (to === undefined || !Number.isFinite(from) || !Number.isFinite(to) || to < from) return undefined;
   return formatDuration(to - from);
+}
+
+/**
+ * The whole run's elapsed, for the header the page is mounted under: the same
+ * clock its rows keep, so the total moves while the run does. It stops the
+ * moment the run records its end.
+ */
+export function RunElapsed({ run }: { run: PublicSessionRun }) {
+  const now = useNow(run.status === 'running' && !run.finishedAt);
+  return <>{runDuration(run, now)}</>;
 }
 
 export function RunConversationPage({
@@ -300,21 +311,49 @@ function StepList({
       </h2>
       {detail && <p className="mt-2 text-[13px] leading-snug text-muted-foreground">{detail}</p>}
       {reason && <RunError text={reason} />}
-      {step.sessions.length > 0 && (
-        <div className="mt-2">
-          {step.sessions.map((block) => (
-            <WorkRow
-              key={block.sessionId}
-              block={block}
-              selected={block.sessionId === selectedId}
-              onSelect={onSelect}
-              now={now}
-            />
-          ))}
-        </div>
-      )}
+      {step.sessions.length > 0 && <WorkList step={step} selectedId={selectedId} onSelect={onSelect} now={now} />}
       {step.facts.length > 0 && <Facts facts={step.facts} />}
     </section>
+  );
+}
+
+/**
+ * The work under one step, as a tree: a child sits under the row that started
+ * it, joined to it by the line that runs from its parent's dot down through
+ * the last of them.
+ */
+function WorkList({
+  step,
+  selectedId,
+  onSelect,
+  now,
+}: {
+  step: StepBlock;
+  selectedId: string | null;
+  onSelect: (sessionId: string) => void;
+  now: number;
+}) {
+  const blocks = step.sessions;
+  const byId = new Map(blocks.map((block) => [block.sessionId, block]));
+  const parents = new Set(blocks.map((block) => block.parentSessionId));
+  return (
+    <div className="mt-2">
+      {blocks.map((block, i) => {
+        const parent = block.parentSessionId ? byId.get(block.parentSessionId) : undefined;
+        return (
+          <WorkRow
+            key={block.sessionId}
+            block={block}
+            {...(parent ? { parent } : {})}
+            hasChildren={parents.has(block.sessionId)}
+            lastChild={parent !== undefined && blocks[i + 1]?.parentSessionId !== block.parentSessionId}
+            selected={block.sessionId === selectedId}
+            onSelect={onSelect}
+            now={now}
+          />
+        );
+      })}
+    </div>
   );
 }
 
@@ -342,8 +381,9 @@ function titleOf(block: SessionBlock): string {
 
 /**
  * A work item as a reader says it: `doc:context/<source>/docs/app.md` is
- * `docs/app.md`, `area:core/billing:0` is `core/billing`, and a bare item
- * (`vocabulary`, `preparations`) is itself.
+ * `docs/app.md`, `area:core/billing:0` is `core/billing`, `flow:pay-an-
+ * invoice:api` is the flow alone (its surface is the capsule beside it), and a
+ * bare item (`vocabulary`, `preparations`) is itself.
  */
 export function subjectOf(workItem: string | undefined): string | undefined {
   if (!workItem) return workItem;
@@ -355,7 +395,29 @@ export function subjectOf(workItem: string | undefined): string | undefined {
   }
   const area = /^area:(.+?)(?::\d+)?$/.exec(workItem);
   if (area) return area[1]!;
+  const flow = FLOW_ITEM.exec(workItem);
+  if (flow) return flow[1]!;
   return workItem;
+}
+
+/** `flow:<id>:<surface>` — the id greedy, so a flow named with a colon keeps it. */
+const FLOW_ITEM = /^flow:(.+):([^:]+)$/;
+
+/** The surface a work item is for, when it names one. */
+export function surfaceOf(workItem: string | undefined): string | undefined {
+  const flow = workItem ? FLOW_ITEM.exec(workItem) : null;
+  return flow ? flow[2]! : undefined;
+}
+
+/** A piece of work by name: the work item as a reader says it, its surface beside it. */
+function WorkTitle({ block, className = '' }: { block: SessionBlock; className?: string }) {
+  const surface = surfaceOf(block.workItem);
+  return (
+    <span className={`flex min-w-0 items-baseline gap-2 ${className}`}>
+      <span className="min-w-0 truncate">{titleOf(block)}</span>
+      {surface && <Capsule>{surface}</Capsule>}
+    </span>
+  );
 }
 
 /** The kind of work: the title the session stamped on itself, else the last segment of its kind id. */
@@ -439,39 +501,63 @@ function Facts({ facts }: { facts: readonly string[] }) {
   );
 }
 
-/** One row: the dot, the title, how long it took. Pressed when it is the open one. */
+/**
+ * One row: the dot, the title, how long it took. Pressed when it is the open
+ * one. A child of the row above it is drawn on the branch that joins them, and
+ * one doing exactly its parent's work item does not say that item again — it
+ * reads by what it is.
+ */
 function WorkRow({
   block,
+  parent,
+  hasChildren,
+  lastChild,
   selected,
   onSelect,
   now,
 }: {
   block: SessionBlock;
+  parent?: SessionBlock;
+  hasChildren: boolean;
+  lastChild: boolean;
   selected: boolean;
   onSelect: (sessionId: string) => void;
   now: number;
 }) {
   const took = elapsedOf(block.startedAt, block.endedAt, isLive(block) ? now : undefined);
+  const ownItem = parent === undefined || parent.workItem !== block.workItem;
   return (
     <button
       type="button"
       aria-pressed={selected}
       onClick={() => onSelect(block.sessionId)}
-      className={`grid w-full ${COLUMNS} items-baseline rounded-md py-1.5 text-left text-[13px] leading-snug transition-colors hover:bg-muted/40 ${
+      className={`relative grid w-full ${COLUMNS} items-baseline rounded-md py-1.5 text-left text-[13px] leading-snug transition-colors hover:bg-muted/40 ${
         selected ? 'bg-muted/60 text-foreground' : 'text-foreground'
       }`}
     >
-      <span className={`flex min-w-0 items-baseline gap-3 ${block.parentSessionId ? 'pl-7' : 'pl-2'}`}>
+      {hasChildren && <span aria-hidden className={`${BRANCH} bottom-0 top-1/2`} />}
+      {parent && (
+        <>
+          <span aria-hidden className={`${BRANCH} top-0 ${lastChild ? 'h-1/2' : 'bottom-0'}`} />
+          <span aria-hidden className="absolute left-3 top-1/2 h-px w-3.5 bg-border" />
+        </>
+      )}
+      <span className={`flex min-w-0 items-baseline gap-3 ${parent ? 'pl-7' : 'pl-2'}`}>
         <WorkDot status={block.status} className="self-center" />
-        <span className="min-w-0 flex-1 truncate">{titleOf(block)}</span>
+        {ownItem ? <WorkTitle block={block} /> : <span className="min-w-0 truncate">{kindOf(block)}</span>}
       </span>
       <span className="flex min-w-0 items-baseline gap-3 pr-2">
-        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground/70">{kindOf(block)}</span>
+        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground/70">
+          {ownItem ? kindOf(block) : ''}
+        </span>
         {took && <span className="w-14 shrink-0 text-right tabular-nums text-[11px] text-muted-foreground">{took}</span>}
       </span>
     </button>
   );
 }
+
+/** The line down from a parent's dot, at the dot's own middle. */
+const BRANCH = 'absolute left-3 w-px bg-border';
 
 function WorkDot({ status, className = '' }: { status: SessionStatus; className?: string }) {
   return <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${WORK_DOT[status]} ${className}`} />;
@@ -514,7 +600,7 @@ function WorkPane({ block, onClose, loading, hasOlder, loadingOlder, loadOlder, 
     >
       <div className="flex h-11 shrink-0 items-center gap-3 px-5">
         <WorkDot status={block.status} />
-        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">{titleOf(block)}</span>
+        <WorkTitle block={block} className="flex-1 text-[13px] font-medium text-foreground" />
         <span className="shrink-0 font-mono text-[11px] text-muted-foreground/70">{kindOf(block)}</span>
         {took && <span className="shrink-0 tabular-nums text-[11px] text-muted-foreground">{took}</span>}
         <button
@@ -578,11 +664,32 @@ function Transcript({ block }: { block: SessionBlock }) {
     <div>
       {rows}
       {/* What the work is doing right now, as the stream last said it: the
-          tool it is in with its seconds, or the words it is writing. */}
-      {block.live && <p className={`mt-3 ${TEXT} text-muted-foreground`}>{block.live}</p>}
+          tool it is in with its seconds, the words it is writing, or the
+          silence while it reads what it was handed. */}
+      {block.live && (
+        <p className={`mt-3 ${TEXT} text-muted-foreground`}>
+          {block.live}
+          <Ellipsis />
+        </p>
+      )}
     </div>
   );
 }
+
+/** Three dots cycling under the line that is still being written; still for a reader who asked for less motion. */
+function Ellipsis() {
+  return (
+    <span aria-hidden>
+      {DOT_DELAYS.map((delay, i) => (
+        <span key={i} className={`motion-safe:animate-pulse ${delay}`}>
+          .
+        </span>
+      ))}
+    </span>
+  );
+}
+
+const DOT_DELAYS = ['', '[animation-delay:250ms]', '[animation-delay:500ms]'];
 
 /**
  * The tools that deliver the outcome rather than do work: the API driver's

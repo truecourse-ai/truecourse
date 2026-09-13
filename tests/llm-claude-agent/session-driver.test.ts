@@ -211,8 +211,10 @@ describe('claude agent session driver', () => {
     await handle.done;
 
     // The thinking and the prose are separate lines, not one merged blob, and
-    // the call is the same call id from composing it to running it.
+    // the call is the same call id from composing it to running it. Before any
+    // of it, the wait on a model that has the briefing and has written nothing.
     expect(progress).toEqual([
+      { kind: 'waiting', turnId: '0' },
       { kind: 'thinking', turnId: 'turn-1', text: 'The docs ' },
       { kind: 'thinking', turnId: 'turn-1', text: 'The docs disagree.' },
       { kind: 'text', turnId: 'turn-1', text: 'Probing.' },
@@ -237,7 +239,44 @@ describe('claude agent session driver', () => {
     });
     const { handle } = runSession(sdk, { onProgress: (p) => progress.push(p) });
     await handle.done;
-    expect(progress).toEqual([]);
+    // Nothing but the wait the driver itself knows about.
+    expect(progress).toEqual([{ kind: 'waiting', turnId: '0' }]);
+  });
+
+  it('says it is waiting on the model once a tool result has gone back, until the turn streams', async () => {
+    const log: string[] = [];
+    const { sdk } = fakeSdk(async function* (ctx) {
+      await ctx.nextUserMessage();
+      yield init();
+      const partial = (event: object): SdkMessage => ({ type: 'stream_event', parent_tool_use_id: null, event });
+      yield partial({ type: 'message_start', message: { id: 'turn-1' } });
+      yield partial({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'tu-1', name: `mcp__${SESSION_MCP_SERVER_NAME}__probe` } });
+      yield assistant([{ type: 'tool_use', id: 'tu-1', name: `mcp__${SESSION_MCP_SERVER_NAME}__probe`, input: { value: 'hi' } }]);
+      await ctx.tools.get('probe')!.handler({ value: 'hi' }, {});
+      // The next turn, which is what the wait was on.
+      yield partial({ type: 'message_start', message: { id: 'turn-2' } });
+      yield partial({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: 'done' } });
+      yield success({ verdict: 'keep' });
+    });
+    const { handle } = runSession(sdk, {
+      onEvent: (e) => log.push(`event:${e.type}`),
+      onProgress: (p) => log.push(p.kind === 'waiting' ? `waiting:${p.turnId}` : `progress:${p.kind}`),
+    });
+    await handle.done;
+
+    // The wait is reported AFTER the result it waits on was recorded — the
+    // order a progress map keyed per session depends on, since the commit of
+    // a tool result is what clears the line the wait then draws — and the
+    // first token of the next turn supersedes it.
+    expect(log).toEqual([
+      'waiting:0',
+      'event:user-message',
+      'progress:tool',
+      'event:assistant-turn',
+      'event:tool-result',
+      'waiting:1',
+      'progress:text',
+    ]);
   });
 
   it('declares live steering, native structured outcome, and resume-at-message', () => {

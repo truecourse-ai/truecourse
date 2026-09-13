@@ -10,8 +10,9 @@
  * a list that has none (Context's Sources) names none and gets no row.
  *
  * The tally is the ONE place a list says how many: the rows it SHOWS, counted
- * by status word. A surface counts its own vocabulary and hands the words over;
- * the header never carries a number.
+ * by status word, and, while the search or a filter narrows it, the full count
+ * it was cut from. A surface counts its own vocabulary and hands the words and
+ * that number over; the header never carries a number.
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -132,6 +133,7 @@ export function IndexTable<T>({
   filterLabel = 'Filter',
   filterAriaLabel,
   tally,
+  total,
   empty,
 }: {
   label: string;
@@ -150,6 +152,12 @@ export function IndexTable<T>({
   filterAriaLabel?: string;
   /** The shown rows counted by status word, worst first; none means no tally. */
   tally?: readonly TallyItem[];
+  /**
+   * How many rows the list holds before the search and the filters. The table
+   * knows what it SHOWS and not what was cut, so the surface hands it over;
+   * the tally names it only while the two differ.
+   */
+  total?: number;
   /** The one line under an empty table: nothing at all, or nothing that matches. */
   empty: ReactNode;
 }) {
@@ -220,7 +228,13 @@ export function IndexTable<T>({
           </tbody>
         </table>
       </div>
-      {tally && <StatusTally label={label} items={tally} />}
+      {tally && (
+        <StatusTally
+          label={label}
+          items={tally}
+          {...(total != null && total > rows.length ? { total } : {})}
+        />
+      )}
     </div>
   );
 }

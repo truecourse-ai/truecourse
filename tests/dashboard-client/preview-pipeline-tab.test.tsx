@@ -195,6 +195,16 @@ async function rows(): Promise<HTMLElement[]> {
   return within(list).getAllByRole('listitem');
 }
 
+/** A row's two lines: title and word above, fact and time below. */
+function lines(row: HTMLElement): HTMLElement[] {
+  return Array.from(row.querySelector('button')!.children) as HTMLElement[];
+}
+
+/** Whether the row's action is spinning. */
+function spins(row: HTMLElement): boolean {
+  return row.querySelectorAll('.animate-spin').length > 0;
+}
+
 beforeEach(() => {
   listeners.clear();
   window.history.replaceState({}, '', '/preview');
@@ -228,13 +238,66 @@ describe('the Pipeline tab of a connected repository', () => {
     expect(calls).toContain(`/api/repos/${REAL.id}/guard/history?all=1`);
   });
 
-  it('says Never run for work this repository has never done', async () => {
+  it('says Never run for work this repository has never done, and offers Run', async () => {
     serve({ runs: [], setup: null, report: null, history: { runs: [] } });
     renderAt(`/preview/repos/${REAL.id}/pipeline`);
 
     for (const row of await rows()) {
       expect(within(row).getByText('Never run')).toBeInTheDocument();
+      // Nothing to re-do: the button offers the first run.
+      expect(within(row).getByRole('button', { name: /^Run / })).toBeInTheDocument();
+      expect(within(row).queryByRole('button', { name: /^Re-run / })).toBeNull();
     }
+  });
+
+  it('gives the three rows one shape, whatever each has to say', async () => {
+    serve({ runs: [], setup: null, report: null, history: { runs: [] } });
+    renderAt(`/preview/repos/${REAL.id}/pipeline`);
+
+    const shapes = (await rows()).map((row) => lines(row).map((line) => line.className));
+    // Two lines each, the same two: a row with no fact and no time still takes
+    // the line, so the column never steps.
+    expect(shapes.map((shape) => shape.length)).toEqual([2, 2, 2]);
+    expect(new Set(shapes.map((shape) => shape.join('|'))).size).toBe(1);
+    expect(shapes[0]![1]).toContain('min-h-4');
+
+    const [setup] = await rows();
+    const [top, bottom] = lines(setup!);
+    expect(top!.textContent).toBe('Flow setupNever run');
+    expect(bottom!.textContent).toBe('');
+  });
+
+  it('says what a running row is doing, and spins that row alone', async () => {
+    serve({
+      runs: [
+        SETUP_RUN,
+        {
+          ...GENERATE_RUN,
+          status: 'running',
+          finishedAt: undefined,
+          display: {
+            blocks: [
+              {
+                kind: 'checklist',
+                items: [
+                  { key: 'extract', label: 'Reading the documents', status: 'done' },
+                  { key: 'flows', label: 'Writing the flows', status: 'active' },
+                  { key: 'prove', label: 'Proving the scenarios', status: 'pending' },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    });
+    renderAt(`/preview/repos/${REAL.id}/pipeline`);
+
+    const [setup, generate, run] = await rows();
+    await waitFor(() => expect(within(generate!).getByText('Writing the flows')).toBeInTheDocument());
+    expect(spins(generate!)).toBe(true);
+    // The others wait with it, but a dead button is how they say so.
+    expect(spins(setup!)).toBe(false);
+    expect(spins(run!)).toBe(false);
   });
 
   it.each([
@@ -290,6 +353,9 @@ describe('the Pipeline tab of a connected repository', () => {
     // Its own Re-run waits, and so does every other row's: one at a time.
     expect(within(generate!).getByRole('button', { name: 'Re-run Flow generation' })).toBeDisabled();
     expect(within(setup!).getByRole('button', { name: 'Re-run Flow setup' })).toBeDisabled();
+    // The waiting row is the one that spins; the rest are simply dead.
+    expect(spins(generate!)).toBe(true);
+    expect(spins(setup!)).toBe(false);
     // The row that is not waiting still says what it last did.
     expect(within(setup!).getByText('Finished')).toBeInTheDocument();
   });

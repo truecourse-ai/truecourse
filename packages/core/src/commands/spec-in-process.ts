@@ -615,6 +615,9 @@ export async function curateInProcess(
   let tagStarted = false;
   let overlapStarted = false;
   let verifyStarted = false;
+  // The overlap step counts two different things: the collision CLUSTERS it
+  // reviews, and the AREAS of the whole corpus. Both lines name their own.
+  let overlapClusters = 0;
   const ensureTag = (): void => {
     if (tagStarted) return;
     tracker?.done('discover');
@@ -687,7 +690,13 @@ export async function curateInProcess(
         },
         onOverlapProgress: (done, total) => {
           ensureOverlap();
-          tracker?.detail('overlap', total > 0 ? `${done}/${total} areas` : 'no areas');
+          overlapClusters = total;
+          tracker?.detail(
+            'overlap',
+            total > 0
+              ? `${done}/${total} cluster${total === 1 ? '' : 's'} to review`
+              : 'no clusters to review',
+          );
         },
       });
     } catch (e) {
@@ -716,7 +725,10 @@ export async function curateInProcess(
         'tag',
         `${result.stats.docsKept} kept · ${result.stats.docsScanned - result.stats.docsKept} skipped · ${result.stats.areaCount} areas`,
       );
-      tracker?.done('overlap', `${result.stats.areaCount} areas · ${result.stats.overlapFlags} overlaps`);
+      tracker?.done(
+        'overlap',
+        `${result.stats.areaCount} areas · ${overlapClusters} cluster${overlapClusters === 1 ? '' : 's'} reviewed · ${result.stats.overlapFlags} overlaps`,
+      );
       tracker?.done(
         'verify',
         result.stats.autoResolvedConflicts.length > 0

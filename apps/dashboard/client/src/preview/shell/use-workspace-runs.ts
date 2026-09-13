@@ -2,11 +2,12 @@
  * The Agent page's read: `GET /api/sessions/runs`, newest first, plus the two
  * live signals that make it move.
  *
- * The page's shared stream (`/api/events`) says a hosted job ticked or settled,
- * which is when a run record is written from the server side; the repository
- * socket's `session:runs-changed` says a run store write landed for one
- * repository, which is what a locally started run produces. Either one re-reads
- * the list, debounced so a burst of progress frames costs one request.
+ * The page's shared stream (`/api/events`) carries `run.changed` for every run
+ * record the store commits — a repository's and the workspace's own — plus the
+ * job frames that bracket hosted work; the repository socket's
+ * `session:runs-changed` is the same signal for a run started outside the
+ * server. Any of them re-reads the list, debounced so a burst of frames costs
+ * one request.
  *
  * Room membership belongs to the shell (`useRealRunStream` joins every real
  * repository once and holds it), so this only listens: a page that joined and
@@ -100,7 +101,13 @@ export function useWorkspaceRuns(repoIds: readonly string[]): WorkspaceRunsState
   useEffect(
     () =>
       subscribeToServerEvents((event) => {
-        if (event.type === 'job.progress' || event.type === 'notification') nudge();
+        if (
+          event.type === 'run.changed' ||
+          event.type === 'job.progress' ||
+          event.type === 'notification'
+        ) {
+          nudge();
+        }
       }),
     [nudge],
   );

@@ -2,18 +2,22 @@
  * THE counts beside a filter's values, for every list that narrows along
  * several dimensions ({@link FilterBuilder}).
  *
- * A count answers ONE question: how many rows do I get if I pick this. So it is
- * FACETED — computed over the rows the search and the OTHER dimensions already
+ * A value carries TWO numbers, because a menu and an applied pill ask
+ * different questions. `count` is FACETED — how many rows picking this would
+ * leave, computed over the rows the search and the OTHER dimensions already
  * keep, never over the dimension's own selection. Picking a repository moves
  * the status counts; picking a status never makes its own count shrink to
  * itself, and the values beside it still say what swapping to them would give.
+ * `total` is the value's own size in the full set — how many rows that filter
+ * alone keeps — which is what the pill of an applied filter says, so it does
+ * not collapse to the intersection every other number on the page already
+ * shows.
  *
  * Reading: AND across dimensions, OR within one, the reading the builder
  * documents and every list applies to its rows.
  */
 
-import type { FilterOption } from './filter-bar';
-import { filterKey, selectedValues, type FilterDimension } from './filter-builder';
+import { filterKey, selectedValues, type FilterDimension, type FilterValue } from './filter-builder';
 
 /** One value a dimension offers: what it is called, and what it rides as. */
 export interface FacetValue {
@@ -68,11 +72,17 @@ export function facetDimensions<T>({
       }),
     );
     const counts = countBy(narrowed, dimension.valuesOf);
-    const full = dimension.hideEmpty ? countBy(rows, dimension.valuesOf) : null;
-    const options: FilterOption[] = [];
+    const full = countBy(rows, dimension.valuesOf);
+    const options: FilterValue[] = [];
     for (const { value, label } of dimension.values) {
-      if (full && (full.get(value) ?? 0) === 0) continue;
-      options.push({ key: filterKey(dimension.key, value), label, count: counts.get(value) ?? 0 });
+      const total = full.get(value) ?? 0;
+      if (dimension.hideEmpty && total === 0) continue;
+      options.push({
+        key: filterKey(dimension.key, value),
+        label,
+        count: counts.get(value) ?? 0,
+        total,
+      });
     }
     return { key: dimension.key, label: dimension.label, options };
   });

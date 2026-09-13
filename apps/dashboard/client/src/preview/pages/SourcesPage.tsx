@@ -87,6 +87,7 @@ export default function SourcesPage() {
         onQuery={setQuery}
         searchPlaceholder="Search sources"
         tally={tally}
+        total={all.length}
         empty={empty}
         columns={[
           {

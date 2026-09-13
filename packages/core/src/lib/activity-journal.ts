@@ -50,21 +50,32 @@ export function appendActivityEvent(dir: string, body: ActivityEventBody): Activ
   // A run's session index is mutable. Live delivery must carry the same detached
   // snapshot as replay, not a reference that a later index update can change.
   const event = JSON.parse(serialized) as ActivityEvent;
+  retireActivityProgress(dir, body);
   publishCommittedActivity(dir, event);
   return event;
 }
 
-/** Publish only after the selected durable store commits. */
-export function publishCommittedActivity(dir: string, event: ActivityEvent): void {
-  if (event.kind === 'run') {
-    if (event.run.status !== 'running') progress.delete(dir);
-    else for (const session of event.run.sessions) {
+/**
+ * Drop the live progress an accepted event supersedes: a session's, once a turn,
+ * a tool result, an outcome or a failure of it is recorded; every session's,
+ * once the run is over. Called the moment a writer ACCEPTS the event, in the
+ * driver's own order, so a progress the driver reports right after (the wait
+ * for the model's next turn) is never undone by the commit of what preceded it.
+ */
+export function retireActivityProgress(dir: string, body: ActivityEventBody): void {
+  if (body.kind === 'run') {
+    if (body.run.status !== 'running') progress.delete(dir);
+    else for (const session of body.run.sessions) {
       if (session.status !== 'running') progress.get(dir)?.delete(session.sessionId);
     }
-  } else if (['assistant-turn', 'tool-result', 'outcome', 'failure'].includes(event.event.type)) {
-    progress.get(dir)?.delete(event.sessionId);
+  } else if (['assistant-turn', 'tool-result', 'outcome', 'failure'].includes(body.event.type)) {
+    progress.get(dir)?.delete(body.sessionId);
   }
   if (progress.get(dir)?.size === 0) progress.delete(dir);
+}
+
+/** Publish only after the selected durable store commits. */
+export function publishCommittedActivity(dir: string, event: ActivityEvent): void {
   for (const notify of listeners.get(dir) ?? []) notify(event);
 }
 

@@ -250,6 +250,7 @@ export default function DocumentsPage() {
         onSelect={select}
         filterAriaLabel="Filter documents"
         tally={tally}
+        total={rowsAll.length}
         empty={empty}
         columns={[
           {

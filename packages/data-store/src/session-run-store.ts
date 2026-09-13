@@ -7,7 +7,7 @@ import {
   sessionRunDir, toPublicRunRecord,
   type TranscriptPageOptions, type TranscriptPage, type ActivityPage, type RepoRunRecord, type SessionRunBackend, type SessionRunQuery, type SessionRunStore,
 } from '@truecourse/core/lib/sessions-store';
-import { publishActivityProgress, publishCommittedActivity, readActivityEvents } from '@truecourse/core/lib/activity-journal';
+import { publishActivityProgress, publishCommittedActivity, readActivityEvents, retireActivityProgress } from '@truecourse/core/lib/activity-journal';
 import { ActivityEventSchema, type ActivityEvent, type ActivityEventBody } from '@truecourse/shared/activity-stream';
 import type { SessionRunStore as Store } from '@truecourse/core/lib/sessions-store';
 
@@ -45,13 +45,20 @@ export class PgSessionRunStore implements SessionRunBackend {
   private readonly live = new Map<string, SessionRunStore>();
   private readonly imports = new Map<string, Promise<void>>();
   private readonly watchers = new Map<string, Set<() => void>>();
+  private readonly runListeners = new Set<(repoKey: string, runId: string) => void>();
   private listener: PoolClient | undefined;
   private connecting = false;
   private retry: ReturnType<typeof setTimeout> | undefined;
   constructor(private readonly db: Db, private readonly notificationPool?: Pool) {}
 
+  /** Is anything still reading announcements? The LISTEN connection lives
+   *  exactly as long as this is true. */
+  private get watched(): boolean {
+    return this.watchers.size > 0 || this.runListeners.size > 0;
+  }
+
   private async listen(): Promise<void> {
-    if (!this.notificationPool || this.listener || this.connecting || !this.watchers.size) return;
+    if (!this.notificationPool || this.listener || this.connecting || !this.watched) return;
     this.connecting = true;
     try {
       const client = await this.notificationPool.connect();
@@ -73,7 +80,7 @@ export class PgSessionRunStore implements SessionRunBackend {
         } catch { /* Ignore foreign payloads on this channel. */ }
       });
       await client.query('LISTEN truecourse_activity');
-      if (!this.watchers.size && this.listener === client) { this.listener = undefined; client.release(true); return; }
+      if (!this.watched && this.listener === client) { this.listener = undefined; client.release(true); return; }
       // Cover the gap before LISTEN and any connection recovery.
       for (const callbacks of this.watchers.values()) for (const notify of callbacks) notify();
     } catch {
@@ -83,16 +90,29 @@ export class PgSessionRunStore implements SessionRunBackend {
   }
 
   private scheduleListen(): void {
-    if (this.retry || !this.watchers.size) return;
+    if (this.retry || !this.watched) return;
     this.retry = setTimeout(() => { this.retry = undefined; void this.listen(); }, 1000);
     this.retry.unref();
   }
 
   private announce(repoKey: string, runId: string, includeRun = true): void {
     for (const key of [`repo:${repoKey}`, ...(includeRun ? [`run:${runId}`] : [])]) for (const notify of this.watchers.get(key) ?? []) notify();
+    for (const notify of this.runListeners) notify(repoKey, runId);
   }
 
   subscribeRepo(repoKey: string, notify: () => void): () => void { return this.subscribe(`repo:${repoKey}`, notify); }
+
+  /** Every record write, whichever run it belongs to and whichever process
+   *  made it. The server relays these onto the workspace's live stream, which
+   *  is the only signal a run with no repository room ever gets. */
+  subscribeRuns(notify: (repoKey: string, runId: string) => void): () => void {
+    this.runListeners.add(notify);
+    void this.listen();
+    return () => {
+      this.runListeners.delete(notify);
+      this.releaseIdleListener();
+    };
+  }
 
   private subscribe(runId: string, notify: () => void): () => void {
     let callbacks = this.watchers.get(runId);
@@ -101,11 +121,14 @@ export class PgSessionRunStore implements SessionRunBackend {
     return () => {
       callbacks.delete(notify);
       if (!callbacks.size) this.watchers.delete(runId);
-      if (!this.watchers.size) {
-        if (this.retry) { clearTimeout(this.retry); this.retry = undefined; }
-        if (this.listener) { const client = this.listener; this.listener = undefined; client.release(true); }
-      }
+      this.releaseIdleListener();
     };
+  }
+
+  private releaseIdleListener(): void {
+    if (this.watched) return;
+    if (this.retry) { clearTimeout(this.retry); this.retry = undefined; }
+    if (this.listener) { const client = this.listener; this.listener = undefined; client.release(true); }
   }
 
   private prepare(repoKey: string): Promise<void> {
@@ -330,6 +353,10 @@ export class PgSessionRunStore implements SessionRunBackend {
     const enqueue = (body: ActivityEventBody, snapshot?: Record, coalesce = false) => {
       if (failure) throw failure;
       const value = clone(body);
+      // The live progress this event supersedes goes NOW, in the driver's own
+      // order: the commit lands later, after the driver may already have
+      // reported what it is waiting on next.
+      retireActivityProgress(dir, value);
       const state = snapshot && value.kind === 'run' ? value.run as Record : undefined;
       if (coalesce && checklistTail) {
         checklistTail.value = value;

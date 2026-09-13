@@ -26,7 +26,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { MousePointer2 } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
-import { RunConversationPage } from '@/components/sessions/RunConversationPage';
+import { RunConversationPage, RunElapsed } from '@/components/sessions/RunConversationPage';
 import {
   RUN_STATUS_META,
   commandLabel,
@@ -318,6 +318,7 @@ function AgentIndex() {
         <IndexTable
           label="Agent conversations"
           rows={rows}
+          total={(runs ?? []).length}
           rowId={(row) => row.id}
           columns={columns}
           onOpen={(row) => {
@@ -397,15 +398,20 @@ function ConversationRoute({ runId }: { runId: string }) {
     };
   }, [repoId, read]);
 
-  // A hosted job writes the record from the server side, and a run of the
-  // WORKSPACE (a Document scan) has no repository room at all: the job stream
-  // is the signal for both, and every tick of it is a re-read of the record.
+  // A run of the WORKSPACE (a Document scan) has no repository room at all, so
+  // the shared stream is what moves this header: `run.changed` is one frame per
+  // record write of THIS run, and the job frames bracket the hosted work around
+  // it. Every one of them is a re-read of the record.
   useEffect(
     () =>
       subscribeToServerEvents((event) => {
+        if (event.type === 'run.changed') {
+          if (event.runId === runId) void read();
+          return;
+        }
         if (event.type === 'job.progress' || event.type === 'notification') void read();
       }),
-    [read],
+    [read, runId],
   );
 
   if (missing) {
@@ -445,7 +451,7 @@ function ConversationRoute({ runId }: { runId: string }) {
             )}
             <RunStatusWord status={run.status} run={run} />
             <span className="font-mono text-muted-foreground">{shortRef(run.gitRef)}</span>
-            <span className="tabular-nums text-muted-foreground">{runDuration(run)}</span>
+            <RunElapsed run={run} />
             {canRerun && starter.supports(run.command) && (
               <button
                 type="button"

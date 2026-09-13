@@ -119,7 +119,24 @@ export interface ContextChangedEvent {
   repoFullName?: string;
 }
 
-export type ServerEvent = JobProgressEvent | NotificationEvent | ContextChangedEvent;
+/**
+ * One run's record was written — a session started or settled, a step's detail
+ * moved, the run itself finished. Workspace-scoped like every frame here, which
+ * is how a run of the WORKSPACE (a Document scan, which belongs to no
+ * repository and has no socket room) reaches the page watching it.
+ */
+export interface RunChangedEvent {
+  type: 'run.changed';
+  runId: string;
+  /** The key the run lives under: a repository's `owner/repo`, or `workspace:<org>`. */
+  repoKey: string;
+}
+
+export type ServerEvent =
+  | JobProgressEvent
+  | NotificationEvent
+  | ContextChangedEvent
+  | RunChangedEvent;
 
 // --- API response shapes --------------------------------------------
 

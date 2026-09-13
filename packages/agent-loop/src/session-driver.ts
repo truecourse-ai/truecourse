@@ -20,10 +20,16 @@ import { z } from 'zod';
  * turn being written, the thinking that precedes it, and the tool call — first
  * as the model composes it (`calling`), then as it runs (`running`, the same
  * `toolCallId`, so a surface following the call sees one thing happening).
+ *
+ * And the gap before any of it: `waiting` is the driver saying the model holds
+ * the context — the briefing, or the tool results it just got back — and has
+ * streamed nothing yet. Reported after the driver hands that context over, and
+ * superseded by the first real progress of the turn it names.
  */
 export const SessionProgressSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('text'), turnId: z.string(), text: z.string() }),
   z.object({ kind: z.literal('thinking'), turnId: z.string(), text: z.string() }),
+  z.object({ kind: z.literal('waiting'), turnId: z.string() }),
   z.object({
     kind: z.literal('tool'),
     toolCallId: z.string(),

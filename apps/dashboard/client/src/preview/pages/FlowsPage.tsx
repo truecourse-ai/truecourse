@@ -314,6 +314,7 @@ function FlowsIndex() {
           onSelect={onSelect}
           filterAriaLabel="Filter flows"
           tally={tally}
+          total={all.length}
           empty={empty}
         />
       </div>

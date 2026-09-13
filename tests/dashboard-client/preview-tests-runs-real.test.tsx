@@ -41,6 +41,7 @@ vi.mock('@/lib/socket', () => {
 });
 
 import PreviewApp from '@/preview/PreviewApp';
+import type { JobView } from '@truecourse/shared';
 
 function fireSocket(event: string, payload: unknown): void {
   for (const fn of listeners.get(event) ?? []) fn(payload);
@@ -122,8 +123,29 @@ const HEAD_RUN = {
   runFlows: [],
 };
 
+/**
+ * A job of the workspace, as `GET /api/jobs?active=1` hands it over. `key` is
+ * the server's own (`<type>:<owner/repo>`), which is how a job names the
+ * repository it runs for.
+ */
+function job(over: Partial<JobView> & Pick<JobView, 'type'>): JobView {
+  return {
+    id: over.type,
+    workspaceOrgId: 'org_1',
+    key: `${over.type}:${REAL.name}`,
+    status: 'running',
+    progress: { current: 0, total: 0, message: null },
+    result: null,
+    error: null,
+    createdAt: '2026-09-03T10:59:00Z',
+    startedAt: '2026-09-03T11:00:00Z',
+    finishedAt: null,
+    ...over,
+  };
+}
+
 /** One connected repository and what its server answers. */
-function serve(options: { flows?: unknown; history?: unknown } = {}) {
+function serve(options: { flows?: unknown; history?: unknown; jobs?: JobView[] } = {}) {
   const calls: string[] = [];
   window.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
@@ -132,6 +154,7 @@ function serve(options: { flows?: unknown; history?: unknown } = {}) {
     calls.push(method === 'GET' ? `${url.pathname}${url.search}` : `${method} ${url.pathname}`);
     const rest = url.pathname.replace(`/api/repos/${REAL.id}/`, '');
     if (url.pathname === '/api/repos') return json([REAL]);
+    if (url.pathname === '/api/jobs') return json({ jobs: options.jobs ?? [] });
     if (url.pathname === '/api/llm/config') return json({ config: { provider: 'anthropic' }, providers: ['anthropic'] });
     if (rest === 'sessions/runs') return json({ runs: [] });
     if (rest === 'guard/generate' && method === 'POST') return json({ jobId: 'generation-retry' }, 202);
@@ -212,8 +235,9 @@ describe('the Runs tab of a connected repository', () => {
     // The number lives at the bottom, once: the header carries the name alone.
     expect(screen.getByRole('heading', { name: 'Runs' }).parentElement!.textContent).toBe('Runs');
 
+    // Narrowed, it also says what it was cut from, so the reader sees the rest.
     await user.type(screen.getByRole('textbox', { name: 'Search runs' }), 'f00d123');
-    await waitFor(() => expect(tally().textContent).toBe('1 Failed'));
+    await waitFor(() => expect(tally().textContent).toBe('1 Failedof 2'));
   });
 
   it('is a full-width search over an opaque sticky head, and no filter row', async () => {
@@ -241,6 +265,73 @@ describe('the Runs tab of a connected repository', () => {
     await screen.findByText('Writes a file and reads it back');
     expect(calls).toContain(`/api/repos/${REAL.id}/guard/runs/r-head7`);
     expect(screen.queryByText('No such run')).toBeNull();
+  });
+
+  it('leads with the run in flight, on the branch the header names, saying its step', async () => {
+    serve({
+      jobs: [
+        job({
+          type: 'repo.guard-run',
+          progress: {
+            current: 1,
+            total: 3,
+            message: null,
+            steps: [
+              { key: 'clone', label: 'Cloning the repository', status: 'done' },
+              { key: 'run', label: 'Running the scenarios', status: 'active' },
+            ],
+          },
+        }),
+      ],
+    });
+    renderAt(`/preview/repos/${REAL.id}/runs`);
+
+    const table = await screen.findByRole('table', { name: 'Runs' });
+    await within(table).findByText('Running');
+    const rows = within(table).getAllByRole('row').slice(1);
+    // First row, above every stored run.
+    expect(rows).toHaveLength(3);
+    const flight = rows[0]!;
+    expect(within(flight).getByText('main')).toBeInTheDocument();
+    expect(within(flight).getByText('hosted')).toBeInTheDocument();
+    expect(within(flight).getByText('Running the scenarios')).toBeInTheDocument();
+    // It has no run page yet, so it is not a door.
+    expect(flight.className).not.toContain('cursor-pointer');
+  });
+
+  it('says a run waiting its turn is queued, and what it waits for', async () => {
+    serve({
+      jobs: [
+        job({
+          id: 'holding',
+          type: 'repo.guard-generate',
+          key: 'repo.guard-generate:spiderhands/expense-tracker',
+        }),
+        job({ type: 'repo.guard-run', status: 'queued', startedAt: null }),
+      ],
+    });
+    renderAt(`/preview/repos/${REAL.id}/runs`);
+
+    const table = await screen.findByRole('table', { name: 'Runs' });
+    const flight = (await within(table).findByText('Queued')).closest('tr')!;
+    expect(
+      within(flight).getByText('waiting for Flow generation on spiderhands/expense-tracker'),
+    ).toBeInTheDocument();
+  });
+
+  it('steps aside for the stored run the moment it lands: never two rows for one run', async () => {
+    serve({
+      history: {
+        runs: [{ ...HISTORY.runs[0], ranAt: '2026-09-03T11:04:00.000Z' }],
+      },
+      jobs: [job({ type: 'repo.guard-run' })],
+    });
+    renderAt(`/preview/repos/${REAL.id}/runs`);
+
+    const table = await screen.findByRole('table', { name: 'Runs' });
+    await within(table).findByText('a1b2c3d');
+    expect(within(table).getAllByRole('row').slice(1)).toHaveLength(1);
+    expect(within(table).queryByText('Running')).toBeNull();
   });
 
   it('re-reads the list when a run of the repository lands on the socket', async () => {

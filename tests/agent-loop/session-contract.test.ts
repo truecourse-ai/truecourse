@@ -201,6 +201,9 @@ describe('session progress', () => {
       { kind: 'thinking', turnId: 'msg-1', text: 'The docs disagree' },
       { kind: 'tool', toolCallId: 'tu-1', toolName: 'probe', phase: 'calling', elapsedSeconds: 0 },
       { kind: 'tool', toolCallId: 'tu-1', toolName: 'probe', phase: 'running', elapsedSeconds: 12.6 },
+      // The state that streams nothing: the model holds the context and has
+      // written no token of the turn it names yet.
+      { kind: 'waiting', turnId: 'msg-2' },
     ];
     for (const progress of reported) {
       expect(SessionProgressSchema.parse(progress)).toEqual(progress);

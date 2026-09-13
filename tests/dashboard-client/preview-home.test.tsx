@@ -265,7 +265,9 @@ describe('Home', () => {
 
     const strip = await screen.findByRole('list', { name: 'Today' });
     expect(within(strip).getByText('40%')).toBeInTheDocument();
-    expect(within(strip).getByText('proved')).toBeInTheDocument();
+    // The leading cell names what is counted and how much of it there is; the
+    // status cells beside it stay bare.
+    expect(within(strip).getByText('2 of 5 sections proved')).toBeInTheDocument();
     expect(within(strip).getByRole('listitem', { name: '2 Proved' })).toBeInTheDocument();
     expect(within(strip).getByRole('listitem', { name: '1 Failed' })).toBeInTheDocument();
     expect(within(strip).getByRole('listitem', { name: '1 Blocked' })).toBeInTheDocument();

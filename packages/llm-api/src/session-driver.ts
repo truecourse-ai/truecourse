@@ -299,6 +299,12 @@ async function runApiSession(input: SessionRunInput, rt: SessionRuntime): Promis
   for (;;) {
     if (rt.interrupted() || signal.aborted) return endedWithoutOutcome;
     for (const m of rt.drainSteers()) say(m);
+    // Everything the turn is composed from has been handed over — the opening
+    // messages, or the tool results of the turn before — and nothing streams
+    // back until the first token. Reported here, after those results were
+    // recorded, so the surface following the session says so instead of
+    // going dark.
+    input.onProgress?.({ kind: 'waiting', turnId: String(turnOrdinal) });
 
     let result: TurnResult;
     let modelId: string;

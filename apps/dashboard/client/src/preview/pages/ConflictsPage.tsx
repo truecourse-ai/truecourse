@@ -221,6 +221,7 @@ export default function ConflictsPage() {
         onSelect={select}
         filterAriaLabel="Filter conflicts"
         tally={tally}
+        total={all.length}
         empty={empty}
         columns={[
           {

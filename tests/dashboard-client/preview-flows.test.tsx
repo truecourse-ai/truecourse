@@ -218,7 +218,7 @@ describe('Flows, the index', () => {
     await user.click(await screen.findByRole('option', { name: /acme\/web/ }));
 
     await waitFor(() => expect(rows()).toHaveLength(1));
-    expect(tally().textContent).toBe('1 Blocked');
+    expect(tally().textContent).toBe('1 Blockedof 2');
   });
 
   it('counts each filter value over what the other filters already keep', async () => {
@@ -240,6 +240,44 @@ describe('Flows, the index', () => {
     await user.click(await screen.findByRole('option', { name: /Repository/ }));
     expect(await screen.findByRole('option', { name: 'acme/web 1' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'spiderhands/filecli 0' })).toBeInTheDocument();
+  });
+
+  it('says on an applied filter what that filter alone keeps, and what the list was cut from', async () => {
+    // Five flows: two blocked (one per repository), and two in acme/web.
+    serve({
+      cliFlows: [
+        WRITE_READ,
+        flow({ flowId: 'purge', title: 'Purges the cache', drivers: ['cli'] }),
+        flow({
+          flowId: 'restore',
+          title: 'Restores a backup',
+          drivers: ['cli'],
+          status: 'blocked-on',
+          bucket: 'blocked',
+        }),
+      ],
+      webFlows: [CHECKOUT, flow({ flowId: 'signup', title: 'Signs up', drivers: ['web'] })],
+    });
+    renderAt('/preview/flows');
+    const user = userEvent.setup();
+    await waitFor(() => expect(rows()).toHaveLength(5));
+
+    await user.click(screen.getByRole('button', { name: 'Add filter' }));
+    await user.click(await screen.findByRole('option', { name: /Status/ }));
+    await user.click(await screen.findByRole('option', { name: 'Blocked 2' }));
+    await user.click(screen.getByRole('button', { name: 'Add filter' }));
+    await user.click(await screen.findByRole('option', { name: /Repository/ }));
+    await user.click(await screen.findByRole('option', { name: 'acme/web 1' }));
+
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    // Each pill keeps its own size in the whole list: the intersection is what
+    // the tally says, and a pill repeating it says nothing new.
+    const filters = screen.getByRole('group', { name: 'Filter flows' });
+    const pill = (name: string) =>
+      within(filters).getByRole('button', { name: `Remove ${name}` }).parentElement!;
+    expect(pill('Status Blocked').textContent).toBe('Status ·Blocked 2');
+    expect(pill('Repository acme/web').textContent).toBe('Repository ·acme/web 2');
+    expect(screen.getByRole('group', { name: 'Flows tally' }).textContent).toBe('1 Blockedof 5');
   });
 
   it('reads the address it arrives on, and narrows by driver too', async () => {

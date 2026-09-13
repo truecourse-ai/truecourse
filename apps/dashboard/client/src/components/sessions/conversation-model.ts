@@ -218,10 +218,12 @@ export function foldConversation(
 
 /**
  * What the stream says is happening, as one line: the prose or the thinking
- * as far as it is written, a tool call named while the model composes it, and
- * the same call with its clock once it is running.
+ * as far as it is written, a tool call named while the model composes it, the
+ * same call with its clock once it is running, and the word for the one state
+ * that streams nothing — the model reading what it was just handed.
  */
 function liveLine(live: SessionProgress): string {
+  if (live.kind === 'waiting') return 'Thinking';
   if (live.kind !== 'tool') return live.text;
   return live.phase === 'calling'
     ? `calling ${live.toolName}`

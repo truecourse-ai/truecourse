@@ -288,8 +288,10 @@ function Dashboard({ signal }: { signal: number }) {
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <PageHeader title="Home" />
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {/* Today's numbers, once: the proved share, then every status of
-            today's sections, each a door into Documents narrowed to it. */}
+        {/* Today's numbers, once: the proved share, which is the one cell that
+            names what is being counted and how much of it there is, then every
+            status of today's sections, each a door into Documents narrowed to
+            it. */}
         {today && (
           <div
             className="grid grid-cols-2 border-b border-border sm:grid-cols-3 lg:grid-cols-6 [&>*]:border-b [&>*]:border-r [&>*]:border-border lg:[&>*]:border-b-0 [&>*:nth-child(2n)]:border-r-0 sm:[&>*:nth-child(2n)]:border-r sm:[&>*:nth-child(3n)]:border-r-0 lg:[&>*:nth-child(3n)]:border-r lg:[&>*:last-child]:border-r-0"
@@ -298,7 +300,9 @@ function Dashboard({ signal }: { signal: number }) {
           >
             <div role="listitem" className="bg-background px-6 py-4">
               <span className="block text-2xl font-semibold tabular-nums text-foreground">{provenShare}%</span>
-              <span className="mt-0.5 block text-[11px] text-muted-foreground">proved</span>
+              <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                {`${today.byStatus.proved} of ${today.total} ${today.total === 1 ? 'section' : 'sections'} proved`}
+              </span>
             </div>
             {HOME_STATUS_ORDER.map((status) => (
               <button

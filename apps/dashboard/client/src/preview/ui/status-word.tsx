@@ -182,8 +182,21 @@ export function tallyOf<T, K extends string>(
  * read as Home's area rows read; the word is spelled out because a list has no
  * legend above it. It counts what is SHOWN, so the search and the filters move
  * it, and it is the ONE place a list says how many of anything it holds.
+ *
+ * A NARROWED list ends in one muted "of N", the rows it holds in full, so the
+ * reader sees how much the search and the filters cut. An unnarrowed one has
+ * none: the words already sum to everything.
  */
-export function StatusTally({ label, items }: { label: string; items: readonly TallyItem[] }) {
+export function StatusTally({
+  label,
+  items,
+  total,
+}: {
+  label: string;
+  items: readonly TallyItem[];
+  /** The full row count, given only while the list is narrower than it. */
+  total?: number;
+}) {
   const shown = items.filter((item) => item.count > 0);
   if (shown.length === 0) return null;
   return (
@@ -201,6 +214,9 @@ export function StatusTally({ label, items }: { label: string; items: readonly T
           <span className="tabular-nums">{`${item.count} ${item.word}`}</span>
         </span>
       ))}
+      {total != null && (
+        <span className="text-[11px] tabular-nums text-muted-foreground">{`of ${total}`}</span>
+      )}
     </div>
   );
 }

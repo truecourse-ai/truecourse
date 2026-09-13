@@ -165,6 +165,40 @@ function fireSocket(event: string, payload: unknown) {
   });
 }
 
+/**
+ * The workspace's live stream (`/api/events`), which is where a run's record
+ * writes arrive — the only signal work of the workspace itself ever gets.
+ */
+class FakeEventSource {
+  static open: FakeEventSource[] = [];
+  readyState = 1;
+  private readonly handlers = new Set<(e: MessageEvent<string>) => void>();
+  constructor(readonly url: string) {
+    FakeEventSource.open.push(this);
+  }
+  addEventListener(type: string, handler: (e: MessageEvent<string>) => void) {
+    if (type === 'message') this.handlers.add(handler);
+  }
+  removeEventListener(_type: string, handler: (e: MessageEvent<string>) => void) {
+    this.handlers.delete(handler);
+  }
+  close() {
+    this.readyState = 2;
+    FakeEventSource.open = FakeEventSource.open.filter((s) => s !== this);
+  }
+  deliver(event: unknown) {
+    for (const handler of [...this.handlers]) {
+      handler({ data: JSON.stringify(event) } as MessageEvent<string>);
+    }
+  }
+}
+
+function fireServerEvent(event: unknown) {
+  act(() => {
+    for (const source of [...FakeEventSource.open]) source.deliver(event);
+  });
+}
+
 /** The router's address, so a URL-backed selection can be asserted. */
 function Address() {
   const { pathname, search } = useLocation();
@@ -194,11 +228,13 @@ function rows() {
 
 beforeEach(() => {
   listeners.clear();
+  (window as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
   window.history.replaceState({}, '', '/preview');
 });
 
 afterEach(() => {
   window.fetch = realFetch;
+  delete (window as unknown as { EventSource?: unknown }).EventSource;
   vi.restoreAllMocks();
 });
 
@@ -328,6 +364,23 @@ describe('Agent, the index', () => {
     fireSocket('session:runs-changed', { repoId: REPO_B.id });
 
     await waitFor(() => expect(rows()).toHaveLength(2), { timeout: 3000 });
+  });
+
+  it('re-reads on a run change of the workspace itself, which has no room', async () => {
+    const state = serve([SCAN]);
+    renderAt('/preview/agent');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+
+    state.runs = [WORKSPACE_SCAN, SCAN];
+    fireServerEvent({
+      type: 'run.changed',
+      runId: WORKSPACE_SCAN.runId,
+      repoKey: 'workspace:org_1',
+    });
+
+    await waitFor(() => expect(rows()).toHaveLength(2), { timeout: 3000 });
+    // The new row is the workspace's own work: it names no repository.
+    expect(within(rows()[0]!).getByText('—')).toBeInTheDocument();
   });
 });
 
@@ -506,6 +559,36 @@ describe('one conversation', () => {
     expect(screen.queryByText('spiderhands/expense-tracker')).toBeNull();
     // Nothing offers to run it again from here: it starts on Context.
     expect(screen.queryByRole('button', { name: 'Run again' })).toBeNull();
+  });
+
+  it("follows its own run's record writes, and leaves another run's alone", async () => {
+    const running = run({
+      runId: WORKSPACE_SCAN.runId,
+      status: 'running',
+      startedAt: '2026-09-03T09:00:00.000Z',
+      finishedAt: undefined,
+      repo: null,
+    });
+    const state = serve([running]);
+    renderAt(`/preview/agent/${running.runId}`);
+    const reads = () =>
+      state.calls.filter((c) => c === `/api/sessions/runs/${running.runId}`).length;
+
+    expect(await screen.findByText('Running')).toBeInTheDocument();
+    const settled = reads();
+
+    // Another run's write is not this conversation's business.
+    fireServerEvent({ type: 'run.changed', runId: 'run-elsewhere', repoKey: 'workspace:org_1' });
+
+    state.runs = [WORKSPACE_SCAN];
+    fireServerEvent({
+      type: 'run.changed',
+      runId: WORKSPACE_SCAN.runId,
+      repoKey: 'workspace:org_1',
+    });
+
+    expect(await screen.findByText('Finished')).toBeInTheDocument();
+    expect(reads()).toBe(settled + 1);
   });
 
   it('says so at an address this workspace has nothing at', async () => {

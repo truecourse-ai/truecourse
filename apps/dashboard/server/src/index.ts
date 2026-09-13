@@ -7,7 +7,13 @@ import { createAuth } from './auth/index.js';
 import { createGithubConnection } from './github/index.js';
 import { createServerJobs } from './jobs/index.js';
 import { closeDb, getDb, getDbHandle, initDb } from './db.js';
-import { installDbStores, setRepoWorkspaceLookup } from './stores.js';
+import {
+  installDbStores,
+  setRepoWorkspaceLookup,
+  subscribeSessionRunWrites,
+  workspaceOfRepo,
+} from './stores.js';
+import { startRunChangeRelay } from './services/run-events.service.js';
 import { setContextEventPublisher } from './services/context.service.js';
 import { startContextSyncSchedule, type ContextSchedule } from './services/context-schedule.service.js';
 import { operatorClaudeCode } from './services/workspace-llm.service.js';
@@ -86,6 +92,14 @@ async function main() {
   // A Context mutation is workspace-wide, so it rides the SSE stream the
   // workspace already holds open rather than a repository's socket room.
   setContextEventPublisher((org, event) => publishEvent(getDb(), org, event));
+  // A run's record writes ride the same stream: the Agent page and the open
+  // conversation follow work the moment the store commits it, including a run
+  // of the workspace itself, which belongs to no repository room.
+  const stopRunRelay = startRunChangeRelay({
+    subscribe: subscribeSessionRunWrites,
+    workspaceOf: workspaceOfRepo,
+    publish: (org, event) => publishEvent(getDb(), org, event),
+  });
 
   // 5. GitHub App connection. Optional: without GITHUB_APP_* the server still
   //    boots, and /api/github answers 503 with the vars to set.
@@ -207,6 +221,7 @@ async function main() {
     log.info('[Server] Shutting down...');
     stopAllWatchers();
     stopAllRunTails();
+    stopRunRelay();
     contextSchedule.stop();
     httpServer.closeAllConnections();
     httpServer.close();

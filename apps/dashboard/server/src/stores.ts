@@ -87,6 +87,20 @@ async function readWorkspaceDoc(repoKey: string, ref: string): Promise<string | 
   return (await readContextDocByRef(org, ref)) ?? (await loadWorkspaceSpecDoc(org, ref));
 }
 
+let sessionRuns: PgSessionRunStore | null = null;
+
+/**
+ * Every committed run-record write, whichever process made it. The server
+ * relays these onto the workspace's live stream (`services/run-events.service`),
+ * which is how a run with no repository room reaches the page watching it.
+ */
+export function subscribeSessionRunWrites(
+  notify: (repoKey: string, runId: string) => void,
+): () => void {
+  if (!sessionRuns) throw new Error('No session run store installed (boot did not run installDbStores).');
+  return sessionRuns.subscribeRuns(notify);
+}
+
 /** How a repository key resolves to the workspace whose Context it reads. */
 export type RepoWorkspaceLookup = (repoKey: string) => Promise<string | null>;
 
@@ -97,7 +111,7 @@ export function setRepoWorkspaceLookup(lookup: RepoWorkspaceLookup | null): void
   repoWorkspace = lookup;
 }
 
-async function workspaceOfRepo(repoKey: string): Promise<string | null> {
+export async function workspaceOfRepo(repoKey: string): Promise<string | null> {
   if (!repoWorkspace) return null;
   try {
     return await repoWorkspace(repoKey);
@@ -163,7 +177,8 @@ export function installDbStores(
       : path.join(getGlobalDir(), 'sessions', repoDirName(repoDirOrKey)),
   );
 
-  setSessionRunBackend(new PgSessionRunStore(db, lockPool));
+  sessionRuns = new PgSessionRunStore(db, lockPool);
+  setSessionRunBackend(sessionRuns);
 
   // Disconnecting a repo purges its per-repo rows (they key on the bare repo
   // key with no workspace column — left behind, the next workspace to connect

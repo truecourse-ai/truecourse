@@ -1,10 +1,12 @@
 /**
- * The faceted counts beside a filter's values.
+ * The two counts beside a filter's values.
  *
- * A count answers "how many rows do I get if I pick this", so it is computed
- * over the rows the search and the OTHER dimensions already keep. What is
- * asserted here is that reading: a selection moves every other dimension's
- * counts and never its own, the search moves all of them, and a value nothing
+ * `count` answers "how many rows do I get if I pick this", so it is computed
+ * over the rows the search and the OTHER dimensions already keep. `total`
+ * answers "how many rows does this value keep on its own", over the full set,
+ * which is what an applied pill says. What is asserted here is that reading: a
+ * selection moves every other dimension's counts and never its own, the search
+ * moves all of them, a value's own size moves with neither, and a value nothing
  * in the FULL set carries is dropped rather than shown as a zero.
  */
 
@@ -67,6 +69,14 @@ function counts(dimensions: ReturnType<typeof facetDimensions>, key: string) {
   );
 }
 
+/** The same values' own sizes, as an applied pill would say them. */
+function totals(dimensions: ReturnType<typeof facetDimensions>, key: string) {
+  const dimension = dimensions.find((d) => d.key === key)!;
+  return Object.fromEntries(
+    dimension.options.map((option) => [option.key.slice(key.length + 1), option.total]),
+  );
+}
+
 const facets = (selected: string[], matches?: (row: Row) => boolean) =>
   facetDimensions<Row>({
     rows: ROWS,
@@ -116,8 +126,19 @@ describe('faceted filter counts', () => {
     const dimensions = facets([]);
     expect(dimensions.map((d) => d.label)).toEqual(['Status', 'Repository', 'Driver']);
     expect(dimensions[1]!.options).toEqual([
-      { key: 'repo:web', label: 'acme/web', count: 2 },
-      { key: 'repo:api', label: 'acme/api', count: 3 },
+      { key: 'repo:web', label: 'acme/web', count: 2, total: 2 },
+      { key: 'repo:api', label: 'acme/api', count: 3, total: 3 },
     ]);
+  });
+
+  it('keeps each value’s own size out of the narrowing, for the applied pill', () => {
+    // The pill of an applied filter says what that filter alone keeps, so it
+    // never collapses to the intersection the tally already shows.
+    const dimensions = facets(['repo:api', 'status:failed'], (row) => row.title !== 'payout');
+    expect(counts(dimensions, 'status')).toEqual({ failed: 1, blocked: 1, passed: 0 });
+    expect(totals(dimensions, 'status')).toEqual({ failed: 2, blocked: 1, passed: 2 });
+    expect(totals(dimensions, 'repo')).toEqual({ web: 2, api: 3 });
+    // A row carrying several values of one dimension counts once in each.
+    expect(totals(dimensions, 'driver')).toEqual({ web: 2, api: 3 });
   });
 });

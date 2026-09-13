@@ -11,7 +11,7 @@ import { schema, activityRuns, activityEvents, MIGRATIONS_DIR, type Db, type Poo
 import { PgSessionRunStore } from '../../packages/data-store/src/session-run-store';
 import { purgeRepoData } from '../../packages/data-store/src/repo-purge';
 import { createSessionRun, readStoredActivityPage, readStoredTranscript, sessionRunCursor, validateStoredActivityCursor, setSessionRunBackend, setSessionsRootResolver, resetSessionsRootResolver, type SessionRunStore } from '@truecourse/core/lib/sessions-store';
-import { subscribeActivity, readActivityEvents } from '@truecourse/core/lib/activity-journal';
+import { subscribeActivity, readActivityEvents, readActivityProgress } from '@truecourse/core/lib/activity-journal';
 import { acquireRunsWatch, releaseRunsWatch } from '../../apps/dashboard/server/src/services/session-tailer.service';
 import { createActivityStream } from '../../apps/dashboard/server/src/services/activity-stream.service';
 
@@ -239,6 +239,23 @@ describe('Postgres activity storage', () => {
     await expect(run.readActivity!(900)).rejects.toThrow('boundary');
   });
 
+  it('retires live progress when an event is accepted, not when it commits, so what the driver reports next survives', async () => {
+    const run = await create();
+    const sessionId = 'session-1';
+    run.persistence.updateIndex({ sessionId, kind: 'spec-scan.curate-doc', workItem: 'doc:a.md', status: 'running', spent: { turns: 0, tokens: 0, costUsd: 0 } });
+    run.persistence.publishProgress(sessionId, { kind: 'tool', toolCallId: 't1', toolName: 'read_file', phase: 'running', elapsedSeconds: 2 });
+    expect(readActivityProgress(run.dir)[sessionId]).toMatchObject({ kind: 'tool' });
+
+    // The driver records the tool's result and, in the same tick, says it is
+    // now waiting on the model. The result's commit lands later and must not
+    // take that report with it.
+    run.persistence.appendEvent(sessionId, { type: 'tool-result', toolCallId: 't1', result: 'ok', seq: 1, ts: new Date().toISOString() } as never);
+    expect(readActivityProgress(run.dir)[sessionId]).toBeUndefined();
+    run.persistence.publishProgress(sessionId, { kind: 'waiting', turnId: '1' });
+    await run.flush!();
+    expect(readActivityProgress(run.dir)[sessionId]).toEqual({ kind: 'waiting', turnId: '1' });
+  });
+
   it('rolls back the snapshot and cursor together on write failure and rejects flush', async () => {
     const run = await create();
     await db.execute(sql`ALTER TABLE activity_events ADD CONSTRAINT reject_test CHECK (cursor = 0)`);
@@ -316,6 +333,23 @@ it('notifies another server of new runs through PostgreSQL LISTEN/NOTIFY', async
   expect((await other.list(REPO))[0]!.runId).toBe(run.runId);
   stop();
   await unlisten?.();
+});
+
+
+it('announces every record write to a run listener, naming the key and the run', async () => {
+  // What the server relays onto the workspace's live stream: a run with no
+  // repository room is reachable only through these announcements.
+  const seen: string[] = [];
+  const stop = store.subscribeRuns((repoKey, runId) => { seen.push(`${repoKey}|${runId}`); });
+  try {
+    const run = await create();
+    expect(seen).toEqual([`${REPO}|${run.runId}`]);
+    run.setGitRef('def');
+    run.finish('completed');
+    await run.flush!();
+    expect(seen.length).toBeGreaterThan(1);
+    expect(new Set(seen)).toEqual(new Set([`${REPO}|${run.runId}`]));
+  } finally { stop(); }
 });
 
 

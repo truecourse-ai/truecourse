@@ -249,7 +249,8 @@ describe('Context, the sources', () => {
 
     await user.type(screen.getByRole('textbox', { name: 'Search sources' }), 'paused');
     await waitFor(() => expect(rows()).toHaveLength(1));
-    expect(tally().textContent).toBe('1 Paused');
+    // Narrowed, the tally ends with the count the list was cut from.
+    expect(tally().textContent).toBe('1 Pausedof 5');
   });
 
   it('opens the page of the source a row names, on a single click', async () => {

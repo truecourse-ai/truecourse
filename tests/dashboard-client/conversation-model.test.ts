@@ -457,6 +457,13 @@ describe('the shapes one run cannot show', () => {
         'ses-a': { kind: 'thinking', turnId: 't1', text: 'The docs disagree' },
       }).steps[0].sessions[0].live,
     ).toBe('The docs disagree');
+    // The one state that streams nothing: the model has the context and has
+    // written no token of the turn yet.
+    expect(
+      foldConversation(record, events, {
+        'ses-a': { kind: 'waiting', turnId: '2' },
+      }).steps[0].sessions[0].live,
+    ).toBe('Thinking');
     // A call the model is still writing has no clock to show, only its name.
     expect(
       foldConversation(record, events, {

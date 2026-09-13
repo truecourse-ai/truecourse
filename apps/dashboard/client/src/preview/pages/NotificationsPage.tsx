@@ -211,6 +211,7 @@ export default function NotificationsPage() {
           onSelect={onSelect}
           filterAriaLabel="Filter notifications"
           tally={tally}
+          total={notifications.length}
           empty={narrowed ? 'Nothing matches.' : 'Nothing has happened yet.'}
         />
       </div>

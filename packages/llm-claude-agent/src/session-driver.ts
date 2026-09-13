@@ -212,6 +212,13 @@ async function runClaudeAgentSession(
       .join('\n');
     input.onProgress?.({ kind, turnId, text });
   };
+  // The model holds the context and has streamed nothing yet. The turn it is
+  // about to write has no provider id until it starts, so a wait names it by
+  // its ordinal in the session.
+  let turnsSeen = 0;
+  const reportWaiting = (): void => {
+    input.onProgress?.({ kind: 'waiting', turnId: String(turnsSeen) });
+  };
   const reportCall = (index: number): void => {
     const block = progressBlocks.get(index);
     if (block?.kind !== 'tool') return;
@@ -270,7 +277,7 @@ async function runClaudeAgentSession(
   const server = sdk.createSdkMcpServer({
     name: SESSION_MCP_SERVER_NAME,
     version: '1.0.0',
-    tools: def.tools.map((t) => buildMcpTool(sdk, t, onEvent, signal, flushTurn)),
+    tools: def.tools.map((t) => buildMcpTool(sdk, t, onEvent, signal, flushTurn, reportWaiting)),
   });
 
   const options: SdkQueryOptions = {
@@ -332,6 +339,7 @@ async function runClaudeAgentSession(
   } else {
     wiring.sendUser(input.resume ? RESUME_NUDGE : 'Begin.');
   }
+  reportWaiting();
 
   const endedWithoutOutcome = (): DriverResult =>
     failure(
@@ -360,6 +368,7 @@ async function runClaudeAgentSession(
             if (pendingTurn && pendingTurn.id !== event.message?.id) flushTurn();
             progressTurnId = event.message?.id;
             progressBlocks.clear();
+            turnsSeen += 1;
             break;
           }
           const turnId = progressTurnId;
@@ -620,6 +629,7 @@ function buildMcpTool(
   onEvent: SessionRunInput['onEvent'],
   signal: AbortSignal,
   flushTurn: () => void,
+  reportWaiting: () => void,
 ): unknown {
   const driverCtx: ToolContext = {
     workItem: '',
@@ -660,6 +670,11 @@ function buildMcpTool(
       const message = `tool \`${tool.name}\` crashed: ${err instanceof Error ? err.message : String(err)}`;
       onEvent({ type: 'tool-result', toolName: tool.name, content: message, isError: true });
       return toMcpResult(message, true);
+    } finally {
+      // Whatever the result is, it goes back to the model now — and the model
+      // composes on it in silence. Reported after the result was recorded, so
+      // the commit that clears a session's progress cannot clear this.
+      reportWaiting();
     }
   });
 }

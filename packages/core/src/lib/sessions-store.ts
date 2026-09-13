@@ -54,6 +54,11 @@ export function isWorkspaceSessionsKey(key: string): boolean {
   return key.startsWith('workspace:');
 }
 
+/** The workspace a run key names, or null when the key names a repository. */
+export function workspaceOfSessionsKey(key: string): string | null {
+  return isWorkspaceSessionsKey(key) ? key.slice('workspace:'.length) : null;
+}
+
 /** A workspace key as one safe directory segment. */
 function workspaceDirName(key: string): string {
   return key.replace(/[^A-Za-z0-9._-]+/g, '-');

@@ -9,16 +9,29 @@
  *
  * The rows are EVERY run the store holds, the baseline runs and the
  * pull-request head runs the gate wrote, re-read when a run of this repository
- * lands on the socket.
+ * lands on the socket — led by the run IN FLIGHT, which no store holds yet: the
+ * workspace's own run job for this repository, on the branch the header names,
+ * saying what step it is on. It hands over to the stored row the moment that
+ * run lands, so one run is never two rows.
  */
 
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import type { JobView } from '@truecourse/shared';
+import { RUN_STATUS_META } from '@/components/sessions/run-model';
 import { CHIP_CLASS, PageHeader } from '@/preview/ui/bits';
 import { HoverPopover } from '@/preview/ui/hover-popover';
-import { StatusTally, tallyOf, type StatusTone } from '@/preview/ui/status-word';
+import {
+  RUN_STATUS_TONE,
+  StatusTally,
+  StatusWord,
+  tallyOf,
+  type StatusTone,
+} from '@/preview/ui/status-word';
 import { GUARD_OUTCOMES, formatGuardTime } from '@/preview/vendor/lib/guard-drifts';
 import { guardStatusMeta } from '@/preview/vendor/lib/guard-status';
+import { usePreviewState } from '@/preview/shell/preview-state';
+import { jobCommand, jobRepoFullName, waitingFact } from '@/preview/shell/use-active-jobs';
 import type { Repo } from '@/preview/data/types';
 import { useGuardTabJump } from './tab-jump';
 import { useGuardRefresh } from './use-guard-refresh';
@@ -32,25 +45,58 @@ const VERDICT_META: Record<(typeof VERDICTS)[number], { word: string; tone: Stat
   pass: { word: 'Passed', tone: 'success' },
 };
 
+/** The search, over the three things a run is found by. */
+function matchesQuery(
+  run: { pullRequest?: number | null; commit?: string | null; branch?: string | null },
+  q: string,
+): boolean {
+  return (
+    q === '' ||
+    (run.pullRequest != null && `#${run.pullRequest}`.includes(q)) ||
+    (run.commit ?? '').toLowerCase().includes(q) ||
+    (run.branch ?? '').toLowerCase().includes(q)
+  );
+}
+
+/** What a job is doing now: the live step of its checklist, else its own line. */
+function currentStep(job: JobView): string {
+  return job.progress.steps?.find((step) => step.status === 'active')?.label ?? job.progress.message ?? '';
+}
+
 export function RunsTab({ repo }: { repo: Repo }) {
   useGuardTabJump();
   const navigate = useNavigate();
   const reloadKey = useGuardRefresh(repo, ['guard-run']);
   const { runs: history, loading, error } = useGuardRunList(repo.id, reloadKey);
+  const { activeJobs } = usePreviewState();
   const [query, setQuery] = useState('');
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
     return [...history]
       .sort((a, b) => b.ranAt.localeCompare(a.ranAt))
-      .filter(
-        (h) =>
-          !q ||
-          (h.pullRequest != null && `#${h.pullRequest}`.includes(q)) ||
-          (h.commit ?? '').toLowerCase().includes(q) ||
-          (h.branch ?? '').toLowerCase().includes(q),
-      );
+      .filter((h) => matchesQuery(h, q));
   }, [history, query]);
+
+  // The run this repository is doing right now. A stored run at or after the
+  // job's start IS the run it is writing, so the row steps aside for it rather
+  // than doubling it while the job list catches up.
+  const inFlight = useMemo(() => {
+    if (!matchesQuery({ branch: repo.defaultBranch }, query.trim().toLowerCase())) return null;
+    const job = activeJobs.find(
+      (j) => jobCommand(j) === 'guard-run' && jobRepoFullName(j) === repo.fullName,
+    );
+    if (!job) return null;
+    const at = job.startedAt ?? job.createdAt;
+    if (history.some((h) => Date.parse(h.ranAt) >= Date.parse(at))) return null;
+    const status = job.status === 'running' ? 'running' : 'queued';
+    return {
+      status,
+      at,
+      fact: currentStep(job) || (status === 'queued' ? waitingFact(job, activeJobs) : ''),
+      branch: repo.defaultBranch,
+    } as const;
+  }, [activeJobs, history, query, repo.defaultBranch, repo.fullName]);
 
   const tally = useMemo(
     () => tallyOf(rows, VERDICTS, guardRunVerdict, (verdict) => VERDICT_META[verdict]),
@@ -93,6 +139,30 @@ export function RunsTab({ repo }: { repo: Repo }) {
             </tr>
           </thead>
           <tbody>
+            {inFlight && (
+              <tr className="border-b border-border/60">
+                <td className="px-6 py-2.5 font-mono text-[12px] text-muted-foreground" />
+                <td className="px-3 py-2.5 font-mono text-[12px] text-foreground">
+                  <span className="block truncate" title={inFlight.branch}>{inFlight.branch}</span>
+                </td>
+                <td className="px-3 py-2.5" />
+                <td className="px-3 py-2.5">
+                  <span className={CHIP_CLASS}>hosted</span>
+                </td>
+                <td className="px-3 py-2.5">
+                  <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <StatusWord
+                      tone={RUN_STATUS_TONE[inFlight.status]}
+                      word={RUN_STATUS_META[inFlight.status].word}
+                    />
+                    <span className="min-w-0 truncate text-[10px] text-muted-foreground">{inFlight.fact}</span>
+                  </span>
+                </td>
+                <td className="whitespace-nowrap px-6 py-2.5 text-muted-foreground">
+                  {formatGuardTime(inFlight.at)}
+                </td>
+              </tr>
+            )}
             {rows.map((h) => {
               const verdict = guardRunVerdict(h);
               return (
@@ -137,7 +207,7 @@ export function RunsTab({ repo }: { repo: Repo }) {
                 </tr>
               );
             })}
-            {rows.length === 0 && (
+            {rows.length === 0 && !inFlight && (
               <tr>
                 <td colSpan={6} className="px-6 py-8 text-center text-muted-foreground">
                   {loading ? 'Loading runs.' : error ? error : history.length === 0 ? 'No run yet.' : 'No run matches.'}
@@ -147,7 +217,11 @@ export function RunsTab({ repo }: { repo: Repo }) {
           </tbody>
         </table>
       </div>
-      <StatusTally label="Runs" items={tally} />
+      <StatusTally
+        label="Runs"
+        items={tally}
+        {...(history.length > rows.length ? { total: history.length } : {})}
+      />
     </div>
   );
 }

@@ -258,9 +258,11 @@ describe('api session driver', () => {
     });
     expect(await handle.done).toMatchObject({ kind: 'outcome' });
 
-    // Each kind in the order the provider wrote it, the prose growing delta by
-    // delta, and the call named from the part that opens it.
-    expect(progress.slice(0, 5)).toEqual([
+    // Each kind in the order the provider wrote it: the wait on the model
+    // first, the prose growing delta by delta, and the call named from the
+    // part that opens it.
+    expect(progress.slice(0, 6)).toEqual([
+      { kind: 'waiting', turnId: '0' },
       { kind: 'thinking', turnId: '0', text: 'weighing it' },
       { kind: 'text', turnId: '0', text: 'let me ' },
       { kind: 'text', turnId: '0', text: 'let me probe' },
@@ -296,6 +298,34 @@ describe('api session driver', () => {
       'assistant-turn',
       'tool-result',
       'assistant-turn',
+    ]);
+  });
+
+  it('says it is waiting on the model once the tool results have gone back, until the turn streams', async () => {
+    const scripted = scriptedModel([
+      { content: [call('probe', { value: 'hi' })] },
+      { content: [text('done'), outcomeCall({ verdict: 'keep' })] },
+    ]);
+    buildModelMock.mockReturnValue(scripted.model);
+    const log: string[] = [];
+    const { handle } = runSession(createApiSessionDriver(cfg), {
+      onEvent: (e) => log.push(`event:${e.type}`),
+      onProgress: (p) => log.push(p.kind === 'waiting' ? `waiting:${p.turnId}` : `progress:${p.kind}`),
+    });
+    expect(await handle.done).toMatchObject({ kind: 'outcome' });
+
+    // The wait is reported AFTER the result it waits on was recorded — the
+    // order a progress map keyed per session depends on, since the commit of
+    // a tool result is what clears the line the wait then draws — and the
+    // first token of the next turn supersedes it.
+    expect(log.filter((line) => line !== 'progress:tool')).toEqual([
+      'event:user-message',
+      'waiting:0',
+      'event:assistant-turn',
+      'event:tool-result',
+      'waiting:1',
+      'progress:text',
+      'event:assistant-turn',
     ]);
   });
 
@@ -343,6 +373,7 @@ describe('api session driver', () => {
       // The call is named while the model composes it, and the same call id
       // carries on into the run, so the two are one thing happening.
       expect(progress).toEqual([
+        { kind: 'waiting', turnId: '0' },
         { kind: 'tool', toolCallId: 'c1', toolName: 'slow', phase: 'calling', elapsedSeconds: 0 },
         { kind: 'tool', toolCallId: 'c1', toolName: 'slow', phase: 'calling', elapsedSeconds: 0 },
         { kind: 'tool', toolCallId: 'c1', toolName: 'slow', phase: 'running', elapsedSeconds: 0 },

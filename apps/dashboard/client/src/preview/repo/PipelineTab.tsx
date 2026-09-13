@@ -15,6 +15,10 @@
  * to report yet. Then the row says what it waits for, and every Re-run waits
  * with it.
  *
+ * Work in flight says which step it is on, off the run's own checklist, and its
+ * is the one button that spins: the rows that merely wait for it are dead, not
+ * busy.
+ *
  * It re-reads on the same signals the Runs tab watches: a guard job settling on
  * this repository's room, and a run-store write while one is in flight.
  */
@@ -27,7 +31,7 @@ import type { GuardGenerateReport, GuardHistoryEntry } from '@/preview/vendor/sh
 import { Button } from '@/components/ui/button';
 import { listSessionRuns, type PublicSessionRun } from '@/lib/api';
 import { connectSocket } from '@/lib/socket';
-import { RUN_STATUS_META, commandLabel } from '@/components/sessions/run-model';
+import { RUN_STATUS_META, commandLabel, runChecklist } from '@/components/sessions/run-model';
 import { useGuardGenerate } from '@/hooks/useGuardGenerate';
 import * as api from '@/preview/vendor/lib/api';
 import { GUARD_OUTCOMES } from '@/preview/vendor/lib/guard-drifts';
@@ -81,6 +85,12 @@ function runFact(entry: GuardHistoryEntry | null): string {
   return GUARD_OUTCOMES.filter((o) => entry.summary[o] > 0)
     .map((o) => `${entry.summary[o]} ${guardStatusMeta(o).label.toLowerCase()}`)
     .join(', ');
+}
+
+/** What work in flight is doing right now: the live step of its own checklist. */
+function stepFact(run: PublicSessionRun | null): string {
+  if (!run || run.status !== 'running') return '';
+  return runChecklist(run).find((item) => item.status === 'active')?.label ?? '';
 }
 
 /** The newest run of one command, or null when that work never ran here. */
@@ -148,14 +158,25 @@ function usePipeline(repo: Repo): {
   return { runs, setup, report, history, loaded };
 }
 
-/** One piece of work: what it is, what it last did, when, and how to run it again. */
+/**
+ * One piece of work, in the four corners every row of the product wears: what
+ * it is top-left, its word top-right, one fact bottom-left, when it was
+ * bottom-right. The second line is there whether or not it has anything to
+ * say, so the three rows are one height and the column does not step.
+ *
+ * The button spins on the row whose work is actually in flight. The others are
+ * dead while the lane is busy and say so by being dead: a spinner on a row
+ * that is not working reads as work that is not happening.
+ */
 function PipelineRow({
   title,
   tone,
   word,
   fact,
   at,
+  verb,
   busy,
+  working,
   onOpen,
   onRerun,
 }: {
@@ -164,7 +185,10 @@ function PipelineRow({
   word: string;
   fact: string;
   at: string | null;
+  /** "Run" the first time, "Re-run" once this work has a last time. */
+  verb: string;
   busy: boolean;
+  working: boolean;
   onOpen: () => void;
   onRerun: () => void;
 }) {
@@ -175,14 +199,18 @@ function PipelineRow({
           <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">{title}</span>
           <StatusWord tone={tone} word={word} />
         </span>
-        <span className="flex w-full items-center gap-2 text-[11px] text-muted-foreground">
-          <span className="min-w-0 truncate">{fact}</span>
-          {at && <span className="ml-auto shrink-0">{relativeTime(at)}</span>}
+        <span className="flex min-h-4 w-full items-center gap-2 text-[11px] text-muted-foreground">
+          <span className="min-w-0 flex-1 truncate">{fact}</span>
+          <span className="shrink-0">{at ? relativeTime(at) : ''}</span>
         </span>
       </button>
-      <Button size="sm" variant="outline" disabled={busy} onClick={onRerun} aria-label={`Re-run ${title}`}>
-        {busy ? <Loader2 aria-hidden className="h-3.5 w-3.5 animate-spin" /> : <RotateCw aria-hidden className="h-3.5 w-3.5" />}
-        Re-run
+      <Button size="sm" variant="outline" disabled={busy} onClick={onRerun} aria-label={`${verb} ${title}`}>
+        {working ? (
+          <Loader2 aria-hidden className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <RotateCw aria-hidden className="h-3.5 w-3.5" />
+        )}
+        {verb}
       </Button>
     </li>
   );
@@ -213,6 +241,7 @@ export function PipelineTab({ repo }: { repo: Repo }) {
   const rows = useMemo(() => {
     const setupRun = newest(runs, SETUP);
     const generateRun = newest(runs, GENERATE);
+    const runRun = newest(runs, RUN);
     const lastRun = [...history].sort((a, b) => b.ranAt.localeCompare(a.ranAt))[0] ?? null;
     const statusOf = (run: PublicSessionRun | null) =>
       run ? { tone: RUN_STATUS_TONE[run.status], word: RUN_STATUS_META[run.status].word } : NEVER;
@@ -238,8 +267,10 @@ export function PipelineTab({ repo }: { repo: Repo }) {
         key: SETUP,
         title: commandLabel(SETUP),
         ...statusOf(setupRun),
-        fact: setupFact(setup),
+        fact: stepFact(setupRun) || setupFact(setup),
         at: setupRun?.finishedAt ?? setupRun?.startedAt ?? setup?.ranAt ?? null,
+        ran: Boolean(setupRun ?? setup),
+        newestRun: setupRun,
         onOpen: () => openRun(setupRun),
         onRerun: () => trigger.start(SETUP),
       },
@@ -247,8 +278,10 @@ export function PipelineTab({ repo }: { repo: Repo }) {
         key: GENERATE,
         title: commandLabel(GENERATE),
         ...statusOf(generateRun),
-        fact: generateFact(report),
+        fact: stepFact(generateRun) || generateFact(report),
         at: generateRun?.finishedAt ?? generateRun?.startedAt ?? report?.generatedAt ?? null,
+        ran: Boolean(generateRun ?? report),
+        newestRun: generateRun,
         onOpen: () => openRun(generateRun),
         onRerun: generate.begin,
       },
@@ -257,8 +290,10 @@ export function PipelineTab({ repo }: { repo: Repo }) {
         title: commandLabel(RUN),
         tone: verdict ? VERDICT_TONE[verdict] : NEVER.tone,
         word: verdict ? VERDICT_WORD[verdict] : NEVER.word,
-        fact: runFact(lastRun),
+        fact: stepFact(runRun) || runFact(lastRun),
         at: lastRun?.ranAt ?? null,
+        ran: lastRun !== null,
+        newestRun: runRun,
         onOpen: () =>
           navigate(
             lastRun
@@ -270,10 +305,22 @@ export function PipelineTab({ repo }: { repo: Repo }) {
     ];
 
     // A row's key is the command it runs, which is what a waiting job names.
-    return chain.map((row) => {
+    const withWait = chain.map((row) => {
       const wait = waiting(row.key);
-      return wait ? { ...row, ...wait } : row;
+      return {
+        ...row,
+        ...(wait ?? {}),
+        verb: row.ran ? 'Re-run' : 'Run',
+        queued: wait !== null,
+        running: row.newestRun?.status === 'running',
+      };
     });
+
+    // ONE spinner: the work in flight, and only the one waiting its turn when
+    // nothing of this repository is running.
+    const spinning =
+      withWait.find((row) => row.running)?.key ?? withWait.find((row) => row.queued)?.key ?? null;
+    return withWait.map((row) => ({ ...row, working: row.key === spinning }));
   }, [
     runs,
     setup,
@@ -305,7 +352,9 @@ export function PipelineTab({ repo }: { repo: Repo }) {
               word={row.word}
               fact={row.fact}
               at={row.at}
+              verb={row.verb}
               busy={busy}
+              working={row.working}
               onOpen={row.onOpen}
               onRerun={row.onRerun}
             />

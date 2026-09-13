@@ -434,6 +434,79 @@ describe('spec scan run record — the checklist block', () => {
   })
 })
 
+/**
+ * The overlap step counts two different things under one word, so each line
+ * says which it means: the CLUSTERS the review has to look at while it runs,
+ * and the corpus's AREAS beside the clusters it reviewed once it settles.
+ */
+describe('spec scan progress — the overlap step says what it counts', () => {
+  let repo: string
+  beforeEach(() => {
+    resetKvCacheStore()
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-scan-overlap-counts-'))
+    fs.mkdirSync(path.join(repo, 'docs'), { recursive: true })
+    // Two docs sharing rare identifiers: one collision cluster, one area.
+    fs.writeFileSync(path.join(repo, 'docs', 'alpha.md'), '# Alpha\n\nSet `sessionTtl` and `tokenScope` here.\n')
+    fs.writeFileSync(path.join(repo, 'docs', 'beta.md'), '# Beta\n\nSet `sessionTtl` and `tokenScope` there.\n')
+  })
+  afterEach(() => {
+    resetKvCacheStore()
+    fs.rmSync(repo, { recursive: true, force: true })
+  })
+
+  it('counts clusters while it runs, and names both counts when it settles', async () => {
+    const driver = stubDriver(async (call) => {
+      if (call.kind === 'spec-scan.settle-areas') {
+        await call.emit(toolResult('check_settlement', 'valid'))
+        return outcome({ concernMerges: {}, productMerges: {}, productVerdicts: [], subdivisions: [] })
+      }
+      if (call.kind === 'spec-scan.overlap') {
+        await call.emit(toolResult('check_findings', 'valid'))
+        return outcome({ overlaps: [], notReached: [] })
+      }
+      return outcome({
+        keep: true,
+        reason: 'spec',
+        subject: 'this-product',
+        areas: [{ product: 'core', concern: 'sessions' }],
+        status: 'shipped',
+      })
+    }).driver
+
+    const details: string[] = []
+    const tracker = new StepTracker((payload) => {
+      const step = payload.steps?.find((s) => s.key === 'overlap')
+      if (step?.detail && details.at(-1) !== step.detail) details.push(step.detail)
+    }, [...CURATE_STEPS])
+
+    await curateInProcess(repo, {
+      skipGit: true,
+      skipCorpusWrite: true,
+      tracker,
+      driver,
+      transportMode: 'api',
+      decisions: {
+        version: 2,
+        manualIncludes: [],
+        manualExcludes: [],
+        manualAreas: [],
+        conflictResolutions: [],
+        instructions: [],
+        scopeVerdicts: ['.', 'docs'].map((p) => ({
+          path: p,
+          verdict: 'keep' as const,
+          reason: 'covered by the test',
+          decidedAt: '2026-01-01T00:00:00.000Z',
+          resolvedBy: 'user' as const,
+        })),
+      },
+    })
+
+    expect(details[0]).toBe('0/1 cluster to review')
+    expect(details.at(-1)).toBe('1 areas · 1 cluster reviewed · 0 overlaps')
+  })
+})
+
 describe('spec-scan defs — declared display', () => {
   const defs = () => [
     orchestrateSessionDef(emptyScope()),
