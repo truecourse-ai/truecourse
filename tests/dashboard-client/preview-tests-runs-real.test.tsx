@@ -237,7 +237,7 @@ describe('the Runs tab of a connected repository', () => {
 
     // Narrowed, it also says what it was cut from, so the reader sees the rest.
     await user.type(screen.getByRole('textbox', { name: 'Search runs' }), 'f00d123');
-    await waitFor(() => expect(tally().textContent).toBe('1 Failed2 total'));
+    await waitFor(() => expect(tally().textContent).toBe('1 Failed1 of 2'));
   });
 
   it('is a full-width search over an opaque sticky head, and no filter row', async () => {

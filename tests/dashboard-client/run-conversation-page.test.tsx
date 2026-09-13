@@ -692,9 +692,11 @@ describe('work under the work that started it', () => {
     ],
   } as unknown as PublicSessionRun;
 
-  /** The lines a row draws to join it to its kin. */
+  /** The lines a row draws to join it to its kin: the trunk on the dot's centre line, the tick into the child. */
   const branches = (el: HTMLElement) =>
-    [...el.querySelectorAll('span')].filter((s) => s.className.includes('left-3')).map((s) => s.className);
+    [...el.querySelectorAll('span')]
+      .filter((s) => s.className.includes('bg-border') && (s.className.includes('w-px') || s.className.includes('h-px')))
+      .map((s) => s.className);
 
   it('names a flow by the flow, its surface beside it, and a child by what it is', async () => {
     serve([]);

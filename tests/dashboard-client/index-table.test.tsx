@@ -114,6 +114,11 @@ describe('the index table', () => {
     expect(last.className).toContain('text-muted-foreground');
   });
 
+  it('states the cut when the list is narrowed', () => {
+    renderTable({ tally: TALLY, total: 100 });
+    expect(screen.getByRole('group', { name: 'Flows tally' }).lastElementChild!.textContent).toBe('79 of 100');
+  });
+
   it('ends in no total when the list hands none', () => {
     renderTable({ tally: TALLY });
     expect(screen.getByRole('group', { name: 'Flows tally' }).textContent).toBe(

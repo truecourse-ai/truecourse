@@ -183,9 +183,9 @@ export function tallyOf<T, K extends string>(
  * legend above it. It counts what is SHOWN, so the search and the filters move
  * it, and it is the ONE place a list says how many of anything it holds.
  *
- * The bar ends in one muted "N total", the rows the list holds in full, so a
- * narrowed list shows how much the search and the filters cut, and an
- * unnarrowed one states its size in one place.
+ * The bar ends in one muted size: "N total" when the list shows everything it
+ * holds, "K of N" when the search or a filter narrowed it to K rows, so the
+ * cut is stated rather than left to be summed from the words.
  */
 export function StatusTally({
   label,
@@ -199,6 +199,7 @@ export function StatusTally({
 }) {
   const shown = items.filter((item) => item.count > 0);
   if (shown.length === 0) return null;
+  const counted = items.reduce((sum, item) => sum + item.count, 0);
   return (
     <div
       role="group"
@@ -215,7 +216,9 @@ export function StatusTally({
         </span>
       ))}
       {total != null && (
-        <span className="text-[11px] tabular-nums text-muted-foreground">{`${total} total`}</span>
+        <span className="text-[11px] tabular-nums text-muted-foreground">
+          {counted < total ? `${counted} of ${total}` : `${total} total`}
+        </span>
       )}
     </div>
   );

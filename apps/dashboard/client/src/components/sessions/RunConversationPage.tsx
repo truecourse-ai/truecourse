@@ -539,7 +539,7 @@ function WorkRow({
       {parent && (
         <>
           <span aria-hidden className={`${BRANCH} top-0 ${lastChild ? 'h-1/2' : 'bottom-0'}`} />
-          <span aria-hidden className="absolute left-3 top-1/2 h-px w-3.5 bg-border" />
+          <span aria-hidden className="absolute left-3 top-1/2 h-px w-4 bg-border" />
         </>
       )}
       <span className={`flex min-w-0 items-baseline gap-3 ${parent ? 'pl-7' : 'pl-2'}`}>
@@ -556,8 +556,13 @@ function WorkRow({
   );
 }
 
-/** The line down from a parent's dot, at the dot's own middle. */
-const BRANCH = 'absolute left-3 w-px bg-border';
+/**
+ * The trunk down from a parent's dot, on the dot's own centre line: the dot
+ * starts 8px in and is 8px wide, so its centre is at 12px and a 1px line
+ * sits half a pixel to the left of it. The tick runs from there to the edge
+ * of a child's dot, which starts 28px in.
+ */
+const BRANCH = 'absolute left-[11.5px] w-px bg-border';
 
 function WorkDot({ status, className = '' }: { status: SessionStatus; className?: string }) {
   return <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${WORK_DOT[status]} ${className}`} />;

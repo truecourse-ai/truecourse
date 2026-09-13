@@ -343,7 +343,7 @@ describe('the filters', () => {
 
     await waitFor(() => expect(rows()).toHaveLength(2));
     // Narrowed, the tally ends with the count the list was cut from.
-    expect(tally().textContent).toBe('1 Done1 Needs you4 total');
+    expect(tally().textContent).toBe('1 Done1 Needs you2 of 4');
 
     // The status values now count what that subject holds.
     await user.click(screen.getByRole('button', { name: 'Add filter' }));

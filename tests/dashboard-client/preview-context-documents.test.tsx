@@ -315,7 +315,7 @@ describe('Context, the documents', () => {
 
     await waitFor(() => expect(rows()).toHaveLength(1));
     // Narrowed, the tally ends with the count the list was cut from.
-    expect(tally().textContent).toBe('1 Failed2 total');
+    expect(tally().textContent).toBe('1 Failed1 of 2');
 
     await user.click(screen.getByRole('button', { name: 'Add filter' }));
     await user.click(await screen.findByRole('option', { name: /Status/ }));
