@@ -40,10 +40,11 @@ export const RUN_STATUS_META: Record<RunStatus, { word: string; dot: string }> =
   interrupted: { word: 'Interrupted', dot: 'bg-amber-500' },
 };
 
-/** The step-dot palette: a pending step is an empty ring, never a fill. */
+/** The step-dot palette: a pending step is an empty ring, never a fill; the
+ *  step being worked on pulses, as the work under it does. */
 export const STEP_DOT: Record<StepStatus, string> = {
   pending: 'border border-border bg-transparent',
-  active: 'bg-sky-500',
+  active: 'bg-sky-500 animate-pulse',
   done: 'bg-emerald-500',
   error: 'bg-red-500',
 };

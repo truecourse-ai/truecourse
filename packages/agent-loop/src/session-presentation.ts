@@ -63,6 +63,10 @@ export type DisplayDispute = z.infer<typeof DisplayDisputeSchema>;
  * `facts` is what the step DID, one line per thing, in the engine's own words
  * and in the order it happened. Counts stay in `detail`; a fact says which
  * doc, which flow, which interface, and whether a cache answered.
+ *
+ * `startedAt`/`endedAt` are the step's own clock, stamped where its status
+ * moves, so how long a step has been going is read rather than guessed. A
+ * record written before they existed carries neither.
  */
 export const ChecklistItemSchema = z.object({
   key: z.string(),
@@ -71,6 +75,8 @@ export const ChecklistItemSchema = z.object({
   detail: z.string().optional(),
   sessionKinds: z.array(z.string()).optional(),
   facts: z.array(z.string()).optional(),
+  startedAt: z.string().optional(),
+  endedAt: z.string().optional(),
 });
 export type ChecklistItem = z.infer<typeof ChecklistItemSchema>;
 

@@ -342,7 +342,7 @@ describe('the shapes one run cannot show', () => {
       },
       sessions: [
         entry({ sessionId: parent, kind: 'guard-generate.flow-worker', workItem: 'flow:delete-a-document:api', status: 'running' }),
-        entry({ sessionId: child, kind: 'guard-generate.fidelity', workItem: 'flow:delete-a-document:api' }),
+        entry({ sessionId: child, kind: 'guard-generate.fidelity', workItem: 'flow:delete-a-document:api', parentSessionId: parent }),
         entry({ sessionId: 'ses-flow-2', kind: 'guard-generate.flow-worker', workItem: 'flow:add-a-document:api', status: 'running' }),
       ],
     });
@@ -502,11 +502,104 @@ describe('the shapes one run cannot show', () => {
           },
         ],
       },
-      sessions: [{ sessionId: 'ses-a', kind: 'guard-generate.fidelity', workItem: 'flow:x:cli', status: 'completed', spent: { ...spent } }],
+      sessions: [{ sessionId: 'ses-a', kind: 'guard-generate.fidelity', workItem: 'flow:x:cli', title: 'Fidelity check', status: 'completed', spent: { ...spent } }],
     });
     const { steps } = foldConversation(record, events);
     expect(steps[0].facts).toEqual(['README.md: 6 sections unchanged', 'docs/app.md: 12 sections unchanged']);
     expect(steps[1].facts).toEqual([]);
     expect(steps[1].sessions[0].title).toBe('Fidelity check');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// the list is the index's, and only the index's
+// ---------------------------------------------------------------------------
+
+describe('the shape of the list', () => {
+  const parent = 'ses-flow';
+  const child = 'ses-fidelity';
+  const sibling = 'ses-web';
+  const flow = 'flow:create-and-read-an-expense-through-the-api:api';
+
+  const record = run({
+    command: 'guard-generate',
+    status: 'running',
+    display: {
+      blocks: [
+        {
+          kind: 'checklist',
+          items: [
+            {
+              key: 'author',
+              label: 'Authoring scenarios',
+              status: 'active',
+              sessionKinds: ['guard-generate.flow-worker', 'guard-generate.fidelity'],
+              startedAt: at(0),
+            } as never,
+          ],
+        },
+      ],
+    },
+    // The order the run opened the work in — the child last, as it started.
+    sessions: [
+      entry({ sessionId: parent, kind: 'guard-generate.flow-worker', workItem: flow, title: 'Scenario author', status: 'running', startedAt: at(0) }),
+      entry({ sessionId: sibling, kind: 'guard-generate.flow-worker', workItem: 'flow:list-expenses:web', title: 'Scenario author', startedAt: at(1), endedAt: at(93) }),
+      entry({ sessionId: child, kind: 'guard-generate.fidelity', workItem: flow, title: 'Fidelity check', parentSessionId: parent, startedAt: at(20), endedAt: at(50) }),
+    ],
+  });
+
+  /** Everything the list is made of, none of which a transcript may move. */
+  const shape = (events: ActivityEvent[], progress = {}) =>
+    foldConversation(record, events, progress).steps.flatMap((step) =>
+      step.sessions.map((block) => [
+        block.sessionId,
+        block.title,
+        block.parentSessionId,
+        block.startedAt,
+        block.endedAt,
+      ]),
+    );
+
+  it('is the same rows, in the same order, whether or not a transcript is loaded', () => {
+    seq = 0;
+    const opened = journal({
+      sessionId: parent,
+      events: [
+        ev({ type: 'session-start', kind: 'guard-generate.flow-worker', workItem: flow, systemPrompt: 'S', toolNames: [], display: { title: 'FLOW: Create and read an expense' } as never }),
+        ev({ type: 'user-message', content: `FLOW: Create and read an expense\nAuthor its scenarios.` }),
+        ev({ type: 'child-session', phase: 'started', child: { sessionId: child, kind: 'guard-generate.fidelity', workItem: flow } }),
+      ],
+    });
+
+    expect(shape([])).toEqual([
+      [parent, 'Scenario author', undefined, at(0), undefined],
+      [child, 'Fidelity check', parent, at(20), at(50)],
+      [sibling, 'Scenario author', undefined, at(1), at(93)],
+    ]);
+    expect(shape(opened)).toEqual(shape([]));
+    // Opening one row loads its messages and nobody else's.
+    expect(
+      foldConversation(record, opened).steps[0].sessions.map((b) => b.lines.length),
+    ).toEqual([3, 0, 0]);
+  });
+
+  it('says what a piece of work is doing only while it is doing it', () => {
+    const working = { [parent]: { kind: 'tool' as const, toolCallId: 't1', toolName: 'run_scenario', elapsedSeconds: 42.8 } };
+    const finished = { [sibling]: { kind: 'text' as const, turnId: 't1', text: 'Writing the outcome' } };
+    const sessions = (progress: Record<string, never>) =>
+      foldConversation(record, [], progress).steps[0].sessions;
+    expect(sessions(working as never).map((b) => b.live)).toEqual([
+      'run_scenario · 42s',
+      undefined,
+      undefined,
+    ]);
+    // The stream remembers the last thing a session said it was doing; a
+    // session that has ended is not doing it any more.
+    expect(sessions(finished as never).map((b) => b.live)).toEqual([undefined, undefined, undefined]);
+  });
+
+  it('carries the step’s own clock', () => {
+    const [step] = foldConversation(record, []).steps;
+    expect([step.startedAt, step.endedAt]).toEqual([at(0), undefined]);
   });
 });

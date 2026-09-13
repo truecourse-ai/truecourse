@@ -17,7 +17,7 @@
  * mounts the conversation itself below it.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { MousePointer2 } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -224,13 +224,30 @@ function ConversationRoute({ runId }: { runId: string }) {
   const [missing, setMissing] = useState(false);
   const starter = useRunTrigger(run?.repo?.id ?? '');
 
+  // Signals arrive faster than reads answer while a run is busy. One read is in
+  // flight at a time; a signal that lands meanwhile is remembered and served by
+  // ONE follow-up read, so what is shown is always the newest answer.
+  const reading = useRef(false);
+  const again = useRef(false);
   const read = useCallback(async () => {
+    if (reading.current) {
+      again.current = true;
+      return;
+    }
+    reading.current = true;
     try {
-      const res = await getWorkspaceRun(runId);
-      setRun(res.run);
-      setMissing(false);
-    } catch {
-      setMissing(true);
+      do {
+        again.current = false;
+        try {
+          const res = await getWorkspaceRun(runId);
+          setRun(res.run);
+          setMissing(false);
+        } catch {
+          setMissing(true);
+        }
+      } while (again.current);
+    } finally {
+      reading.current = false;
     }
   }, [runId]);
 

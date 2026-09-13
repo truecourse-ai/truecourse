@@ -680,6 +680,55 @@ describe('runAgentLoop sub-sessions', () => {
     expect(outcome.spent.turns).toBe(1);
   });
 
+  it('indexes when each session opened, when it ended, and who started it', async () => {
+    const { driver } = fakeDriver(async ({ input, emit }) => {
+      if (input.def.kind === 'spec-scan.overlap') {
+        await emit({ type: 'assistant-turn', text: 'child work', usage: usage(5) });
+        return { kind: 'outcome', value: { verdict: 'child-done' } };
+      }
+      const res = await input.def.tools[0].execute({}, dummyToolCtx());
+      await emit({ type: 'tool-result', toolName: 'delegate', content: res.content });
+      return { kind: 'outcome', value: { verdict: 'parent-done' } };
+    });
+    const { persistence: store, index } = memoryPersistence();
+    const writes: SessionIndexEntry[] = [];
+    const persistence: SessionPersistence = {
+      ...store,
+      updateIndex(entry) {
+        writes.push(entry);
+        store.updateIndex(entry);
+      },
+    };
+    await runAgentLoop({
+      def: makeDef({ tools: [delegate] }),
+      workItem: 'docs/a.md',
+      initialMessages: [],
+      driver,
+      persistence,
+      sessionId: 'parent',
+      mintSessionId: () => 'child-1',
+    }).outcome;
+
+    // The first row of a session is written when it opens: it knows when it
+    // started and not yet when it ended.
+    expect(writes[0]).toMatchObject({ sessionId: 'parent', status: 'running' });
+    expect(typeof writes[0].startedAt).toBe('string');
+    expect(writes[0].endedAt).toBeUndefined();
+
+    const parent = index.get('parent')!;
+    const child = index.get('child-1')!;
+    expect(parent.parentSessionId).toBeUndefined();
+    expect(child.parentSessionId).toBe('parent');
+    for (const entry of [parent, child]) {
+      expect(Date.parse(entry.startedAt!)).not.toBeNaN();
+      expect(Date.parse(entry.endedAt!)).not.toBeNaN();
+      expect(Date.parse(entry.endedAt!)).toBeGreaterThanOrEqual(Date.parse(entry.startedAt!));
+    }
+    // The child opened inside the parent and ended before it.
+    expect(Date.parse(child.startedAt!)).toBeGreaterThanOrEqual(Date.parse(parent.startedAt!));
+    expect(Date.parse(child.endedAt!)).toBeLessThanOrEqual(Date.parse(parent.endedAt!));
+  });
+
   it('a child dispatching its own child gets a structured failure, not a session', async () => {
     const deeper = defineSessionTool({
       name: 'deeper',

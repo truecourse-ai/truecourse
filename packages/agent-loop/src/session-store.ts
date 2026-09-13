@@ -33,13 +33,24 @@ export const RunStatusSchema = z.enum(['running', 'completed', 'failed', 'interr
 export type RunStatus = z.infer<typeof RunStatusSchema>;
 
 /** One row of the run's session index — the dashboard lists sessions from
- *  here, never by parsing transcripts; resume finds parked sessions here. */
+ *  here, never by parsing transcripts; resume finds parked sessions here.
+ *
+ *  The index carries EVERYTHING a list of the run's work needs — its order (the
+ *  array's own, which is start order), each row's name, who started it and how
+ *  long it took — so a surface renders the list from the record alone and a
+ *  transcript it loads adds messages, never structure. Optional where a record
+ *  written before the field existed simply has none. */
 export const SessionIndexEntrySchema = z.object({
   sessionId: z.string(),
   kind: z.string(),
   workItem: z.string(),
   /** The short human name of this kind of work, as the session's display declares it. */
   title: z.string().optional(),
+  /** The session that dispatched this one; absent on a top-level session. */
+  parentSessionId: z.string().optional(),
+  /** When the loop opened this session, and when it reached a terminal status. */
+  startedAt: z.string().optional(),
+  endedAt: z.string().optional(),
   status: SessionStatusSchema,
   providerSessionId: z.string().optional(),
   /** Driver-owned resume pointer — opaque to everything else. */

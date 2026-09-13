@@ -130,10 +130,12 @@ export function wrapUpMessage(preconditionTool?: string): string {
   ].join(' ');
 }
 
-/** `depth` is the sub-session depth: 0 = top-level, 1 = child (the max). */
+/** `depth` is the sub-session depth: 0 = top-level, 1 = child (the max);
+ *  `parent` is the session that dispatched this one, at depth 1. */
 function startSession<TOutcome>(
   input: AgentLoopInput<TOutcome>,
   depth: number,
+  parent?: string,
 ): AgentLoopHandle<TOutcome> {
   const { def, workItem, driver, persistence, sessionId } = input;
   const now = input.now ?? (() => new Date().toISOString());
@@ -163,12 +165,22 @@ function startSession<TOutcome>(
   let status: SessionStatus = 'running';
   const spent = () => ({ turns, tokens, costUsd });
 
+  // The index row's own clock: opened at the first write (which is the one that
+  // follows `session-start`), closed the first time the status is terminal.
+  let startedAt: string | undefined;
+  let endedAt: string | undefined;
+
   const updateIndex = (extra?: { resumeCursor?: unknown; providerSessionId?: string }) => {
+    startedAt ??= now();
+    if (status !== 'running' && status !== 'waiting') endedAt ??= now();
     persistence.updateIndex({
       sessionId,
       kind: def.kind,
       workItem,
       ...(def.display?.title ? { title: def.display.title } : {}),
+      ...(parent ? { parentSessionId: parent } : {}),
+      startedAt,
+      ...(endedAt ? { endedAt } : {}),
       status,
       spent: spent(),
       ...extra,
@@ -377,6 +389,7 @@ function startSession<TOutcome>(
             mintSessionId,
           },
           depth + 1,
+          sessionId,
         );
         const childOutcome = await child.outcome;
         append({

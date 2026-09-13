@@ -231,6 +231,31 @@ interface SessionRuntime {
   drainSteers: () => string[];
 }
 
+/**
+ * The one thing this driver can say about work in flight: a tool is running,
+ * and for how long. Reported every second while it runs, so a surface tailing
+ * the session shows the minutes a build or a probe takes rather than silence.
+ * Ephemeral display only — never a transcript event, never a turn.
+ */
+async function whileRunning<T>(
+  onProgress: SessionRunInput['onProgress'],
+  call: { toolCallId: string; toolName: string },
+  execute: () => Promise<T>,
+): Promise<T> {
+  if (!onProgress) return execute();
+  const started = Date.now();
+  const tick = (): void =>
+    onProgress({ kind: 'tool', ...call, elapsedSeconds: (Date.now() - started) / 1000 });
+  tick();
+  const timer = setInterval(tick, 1000);
+  (timer as { unref?: () => void }).unref?.();
+  try {
+    return await execute();
+  } finally {
+    clearInterval(timer);
+  }
+}
+
 async function runApiSession(input: SessionRunInput, rt: SessionRuntime): Promise<DriverResult> {
   const { def, onEvent, signal } = input;
   const { toolset, widenedByTool } = buildToolset(def);
@@ -336,9 +361,10 @@ async function runApiSession(input: SessionRunInput, rt: SessionRuntime): Promis
         continue;
       }
       try {
-        const toolResult = await sessionTool.execute(
-          strippedInput(call, widenedByTool),
-          driverToolCtx,
+        const toolResult = await whileRunning(
+          input.onProgress,
+          { toolCallId: call.toolCallId, toolName: call.toolName },
+          () => sessionTool.execute(strippedInput(call, widenedByTool), driverToolCtx),
         );
         replyToCall(
           messages,
