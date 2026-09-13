@@ -13,7 +13,7 @@ import { ShieldCheck } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PageHeader, SideMenu } from '@/preview/ui/bits';
 
-const BASE = '/preview/admin';
+const BASE = '/admin';
 
 const SECTIONS = {
   jobs: {

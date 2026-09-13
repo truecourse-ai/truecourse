@@ -4,6 +4,7 @@ import type {
   CapabilitiesResponse,
   GuardArtifactSource,
   GuardClaimIdentity,
+  GuardClaimsView,
   GuardDecisions,
   GuardDocCoverage,
   GuardFlowDetail,
@@ -15,8 +16,11 @@ import type {
   GuardLatestWithRunFlows,
   GuardScenarioInventory,
   GuardScenarioSource,
+  GuardSetupReport,
   GuardStaleness,
+  GuardStatusSummary,
 } from '@truecourse/shared';
+import type { GuardDependenciesView, GuardDependencyPatch } from '@/types/guard-dependencies';
 import type {
   AuthUser,
   ContextBindingsResponse,
@@ -762,6 +766,8 @@ export interface SpecConflictResolution {
   verdict: 'a' | 'b' | 'dismissed';
   resolvedAt?: string;
   note?: string;
+  /** `auto` = the scan applied a high-confidence recommendation itself; absent/`user` = a human verdict. */
+  resolvedBy?: 'user' | 'auto';
 }
 
 /**
@@ -777,6 +783,8 @@ export interface SpecOverlapReview {
     rationale: string;
     /** For `fix-doc`: the suggested doc edit the user applies themselves. */
     fix?: string;
+    /** The judge's grade; `high` actionable recommendations are auto-applied at scan. */
+    confidence?: 'low' | 'medium' | 'high';
   };
 }
 
@@ -864,8 +872,23 @@ export interface SpecCorpus {
   skippedDocs?: SpecSkippedDoc[];
 }
 
+/** The coverage version a corpus read is, and what it changed against its parent. */
+export interface SpecCorpusVersionInfo {
+  id: string;
+  label: string;
+  parentId: string | null;
+  ref: string;
+  sha: string;
+  pullRequest?: number;
+  generated: boolean;
+  docChanges: Record<string, { change: 'added' | 'edited' | 'removed'; sections?: string[] }>;
+  conflictChanges: Record<string, 'opened' | 'resolved'>;
+}
+
 export interface SpecCorpusResponse {
   corpus: SpecCorpus;
+  /** The version this corpus is, when the store is versioned. */
+  version?: SpecCorpusVersionInfo;
   /** Doc refs the user force-included (bypass the relevance filter). */
   manualIncludes?: string[];
   /** Doc refs the user force-excluded (dropped from the corpus). */
@@ -1029,9 +1052,61 @@ export async function getGuardFlow(repoId: string, flowId: string, ref?: string)
   }
 }
 
+/**
+ * The extracted claim corpus with the trace from claim to flow to scenario, plus
+ * the statements extraction refused. Always 200 — an unextracted repo answers an
+ * `extracted: false` view, never an error.
+ */
+export function getGuardClaims(repoId: string, ref?: string): Promise<GuardClaimsView> {
+  return fetchApi<GuardClaimsView>(withRef(`/api/repos/${repoId}/guard/claims`, ref));
+}
+
 /** The code-derived interface catalog + its reverse index onto the flows. Always 200. */
 export function getGuardInterfaces(repoId: string, ref?: string): Promise<GuardInterfacesView> {
   return fetchApi<GuardInterfacesView>(withRef(`/api/repos/${repoId}/guard/interfaces`, ref));
+}
+
+/** The compact status summary (coverage + last run + last generate). Always 200. */
+export function getGuardStatus(repoId: string, ref?: string): Promise<GuardStatusSummary> {
+  return fetchApi<GuardStatusSummary>(withRef(`/api/repos/${repoId}/guard/status`, ref));
+}
+
+/**
+ * The dependencies view: every class of starting state the committed catalog
+ * declares, joined with the instances THIS workspace registered, the flows each
+ * one blocks, and the external-service half where the row is one.
+ */
+export function getGuardDependencies(repoId: string): Promise<GuardDependenciesView> {
+  return fetchApi<GuardDependenciesView>(`/api/repos/${repoId}/guard/dependencies`);
+}
+
+/**
+ * Register ONE dependency's instance. The response IS the fresh view, so the page
+ * swaps state from it, and it carries resolution, never a stored value. A refused
+ * write (an undeclared variable, a class with nothing to register, a broken
+ * overlay) comes back as a 422 ApiError whose message is safe to show verbatim.
+ */
+export function saveGuardDependency(
+  repoId: string,
+  name: string,
+  patch: GuardDependencyPatch,
+): Promise<GuardDependenciesView> {
+  return fetchApi<GuardDependenciesView>(`/api/repos/${repoId}/guard/dependencies`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, ...patch }),
+  });
+}
+
+/** The last `guard setup` record; null on 404 (setup has never run here). */
+export async function getGuardSetup(repoId: string): Promise<GuardSetupReport | null> {
+  try {
+    const { report } = await fetchApi<{ report: GuardSetupReport }>(`/api/repos/${repoId}/guard/setup`);
+    return report;
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
 }
 
 /**
@@ -1044,7 +1119,7 @@ export function mapGuardInterfaces(repoId: string): Promise<GuardInterfacesView>
 }
 
 /** Which artifact-backed entity a raw read addresses — the route's own segment. */
-export type GuardArtifactKind = 'interface';
+export type GuardArtifactKind = 'interface' | 'flow' | 'claim' | 'dependency' | 'recipe';
 
 /**
  * The stored artifact behind one entity — its own pretty-printed slice of the
@@ -1059,8 +1134,9 @@ export async function getGuardArtifactRaw(
   ref?: string,
 ): Promise<GuardArtifactSource | null> {
   try {
+    const query = id ? `?id=${encodeURIComponent(id)}` : '';
     return await fetchApi<GuardArtifactSource>(
-      withRef(`/api/repos/${repoId}/guard/${kind}/raw?id=${encodeURIComponent(id)}`, ref),
+      withRef(`/api/repos/${repoId}/guard/${kind}/raw${query}`, ref),
     );
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return null;

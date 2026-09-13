@@ -5,13 +5,13 @@
  * The server ships per-section coverage (anchor/status/scenarios) but not the
  * doc body, so the client re-reads the raw markdown (the same file, via the Spec
  * doc endpoint) and paints each heading's slice. For the paint to line up, the
- * client's heading detection must match the server's section index exactly —
+ * client's heading detection must match the server's section index exactly -
  * ATX headings only, skipping any inside fenced code blocks (a `#` line in a
  * shell example is not a heading). This mirrors `parseHeadings` in
  * packages/guard-runner/src/section-index.ts; keep the two rules identical.
  *
  * Blocks are a FLAT partition (each heading + its body up to the NEXT heading of
- * any level) so rendering them in order reproduces the whole document once —
+ * any level) so rendering them in order reproduces the whole document once -
  * unlike the server's nested `fullText`. The heading count and order still match
  * the server's sections 1:1, so alignment is by document order (with a
  * heading-text guard so a spurious block just renders unmarked instead of
@@ -85,9 +85,9 @@ export function splitDocBlocks(content: string): DocBlock[] {
   return blocks;
 }
 
-import { headingMatchKey as norm } from './heading-match';
+import { headingMatchKey as norm } from '@/lib/heading-match';
 
-// Slugify a heading the GitHub/anchor way — strip inline emphasis/code markers,
+// Slugify a heading the GitHub/anchor way, strip inline emphasis/code markers,
 // lowercase, fold non-alphanumeric runs to single hyphens, trim. Mirrors
 // `slugifyHeading` in packages/guard-runner/src/section-index.ts; used only to
 // resolve in-doc `#heading-slug` links, never to move a boundary.
@@ -129,7 +129,7 @@ const isBlankOrAnchorOnly = (line: string): boolean => stripDocAnchors(line).tri
 
 /**
  * Map every in-page link target the doc mints to the coverage section a click on
- * it should scroll to — so the coverage view turns an in-doc cross-reference
+ * it should scroll to, so the coverage view turns an in-doc cross-reference
  * (`[§1](#introduction)`) into a `?gsec` selection instead of a new tab.
  *
  * Targets: each block's heading slug and its server anchor, plus the doc's empty
@@ -171,12 +171,18 @@ export function buildAnchorTargets(
 }
 
 /**
- * Coverage section aligned to each rendered block, parallel to `blocks`. A
- * preamble block, or a block whose heading doesn't match the next unconsumed
- * section, gets `null` (rendered without a status band). With the fence-aware
- * split above this consumes the sections in lockstep; the guard only matters if
- * the two heading rules ever diverge, and then it fails safe (unmarked) rather
- * than mis-colouring.
+ * Coverage section aligned to each rendered block, parallel to `blocks`. A block
+ * whose heading doesn't match the next unconsumed section gets `null` (rendered
+ * without a status band). With the fence-aware split above this consumes the
+ * sections in lockstep; the guard only matters if the two heading rules ever
+ * diverge, and then it fails safe (unmarked) rather than mis-colouring.
+ *
+ * The preamble block is the doc's LEAD REGION, which the server derives as a
+ * section of its own (level 0, named by the frontmatter title). It has no heading
+ * for the text guard to compare, so it aligns structurally: the leading preamble
+ * takes a leading level-0 section, and both are first by construction. Consuming
+ * it is what keeps the rest in lockstep, leaving it unconsumed would push every
+ * heading block against the lead and unmark the whole document.
  */
 export function alignSections(
   blocks: DocBlock[],
@@ -184,9 +190,11 @@ export function alignSections(
 ): Array<GuardSectionCoverage | null> {
   const out: Array<GuardSectionCoverage | null> = [];
   let si = 0;
-  for (const block of blocks) {
+  for (const [i, block] of blocks.entries()) {
     if (block.level === 0 || block.headingText === '') {
-      out.push(null);
+      const lead = i === 0 && si === 0 && sections[0]?.level === 0 ? sections[0] : null;
+      if (lead) si++;
+      out.push(lead);
       continue;
     }
     const next = sections[si];

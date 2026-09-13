@@ -13,10 +13,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import type { GuardCoveragePlainStatus, GuardLastRunSummary } from '@/preview/vendor/shared';
+import type { GuardCoveragePlainStatus, GuardLastRunSummary } from '@truecourse/shared';
 import type { Repo } from '@/preview/data/types';
-import { GUARD_COVERAGE_PLAIN_ORDER } from '@/preview/vendor/shared';
-import { fiveWordSegments } from '@/preview/vendor/components/guard/GuardCoverageOverview';
+import { GUARD_COVERAGE_PLAIN_ORDER } from '@truecourse/shared';
+import { fiveWordSegments } from '@/components/guard/GuardCoverageOverview';
 import { PageHeader, ProviderIcon } from '@/preview/ui/bits';
 import { StatusWord, CONCLUSION_TONE } from '@/preview/ui/status-word';
 import { usePreviewState } from '@/preview/shell/preview-state';
@@ -113,9 +113,9 @@ export default function CodePage() {
                 <tr
                   key={repo.id}
                   tabIndex={0}
-                  onClick={() => navigate(`/preview/repos/${repo.id}`)}
+                  onClick={() => navigate(`/repos/${repo.id}`)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && e.target === e.currentTarget) navigate(`/preview/repos/${repo.id}`);
+                    if (e.key === 'Enter' && e.target === e.currentTarget) navigate(`/repos/${repo.id}`);
                   }}
                   className="cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/40 focus:bg-muted/40 focus:outline-none"
                 >
@@ -154,7 +154,7 @@ export default function CodePage() {
                   <td className="px-3 py-2.5 text-right tabular-nums text-foreground">{proven(sections)}</td>
                   <td className="px-3 py-2.5">
                     <Link
-                      to={lastRun ? `/preview/repos/${repo.id}/runs` : activityHref(repo.id)}
+                      to={lastRun ? `/repos/${repo.id}/runs` : activityHref(repo.id)}
                       onClick={(event) => event.stopPropagation()}
                       title={lastCheck.summary}
                       className="flex items-center gap-2 hover:underline"

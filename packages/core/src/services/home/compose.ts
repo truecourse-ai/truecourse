@@ -38,9 +38,6 @@ import {
 } from '@truecourse/shared';
 import { worstContextStatus } from '../context/documents.js';
 
-/** Where the client mounts its pages. Every href Home hands out starts here. */
-export const HOME_ROUTE_BASE = '/preview';
-
 /** One run of a repository's section history, as Home reads it. */
 export interface HomeHistoryRun {
   runId: string;
@@ -176,7 +173,7 @@ function foldDocuments(sections: ReadonlyMap<string, HomeStatus>): Map<string, H
 
 /** One document, by its corpus ref. */
 export function homeDocHref(ref: string): string {
-  return `${HOME_ROUTE_BASE}/context/doc/${encodeURIComponent(ref)}`;
+  return `/context/doc/${encodeURIComponent(ref)}`;
 }
 
 /** The file name of a ref, the honest last resort for a title. */
@@ -316,7 +313,7 @@ export function composeHomeAttention(
       status: run.status === 'failed' ? 'Failed' : 'Interrupted',
       fact: [run.repository, run.message].filter(Boolean).join(', '),
       at: run.at,
-      href: `${HOME_ROUTE_BASE}/agent/${encodeURIComponent(run.runId)}`,
+      href: `/agent/${encodeURIComponent(run.runId)}`,
     });
   }
 
@@ -328,7 +325,7 @@ export function composeHomeAttention(
       status: 'Conflict',
       fact: conflict.area,
       at: null,
-      href: `${HOME_ROUTE_BASE}/context/conflicts/${encodeURIComponent(conflict.id)}`,
+      href: `/context/conflicts/${encodeURIComponent(conflict.id)}`,
     });
   }
 
@@ -367,7 +364,7 @@ export function composeHomeAttention(
       status: 'Sync failed',
       fact: source.statusNote ?? '',
       at: source.lastSyncAt,
-      href: `${HOME_ROUTE_BASE}/context/sources/${encodeURIComponent(source.id)}`,
+      href: `/context/sources/${encodeURIComponent(source.id)}`,
     });
   }
 
@@ -379,7 +376,7 @@ export function composeHomeAttention(
       status: 'Needs setup',
       fact: 'Nothing can run until this workspace names a provider',
       at: null,
-      href: `${HOME_ROUTE_BASE}/settings/models`,
+      href: '/settings/models',
     });
   }
 

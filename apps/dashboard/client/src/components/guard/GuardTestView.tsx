@@ -1,39 +1,39 @@
 /**
- * A TEST, rendered ONCE — the ONE scenario rendering in guard.
+ * A TEST, rendered ONCE, the ONE scenario rendering in guard.
  *
  * Two things can feed it: the flow's own committed test (read inside the merged
- * FLOW detail, which is the entity) or an INSTANCE — how that test ran in one run,
- * on the Runs tab. The body is identical — only the provenance and the result that
- * feeds it differ — so a reader learns it once.
+ * FLOW detail, which is the entity) or an INSTANCE, how that test ran in one run,
+ * on the Runs tab. The body is identical, only the provenance and the result that
+ * feeds it differ, so a reader learns it once.
  *
  * IT IS ONE COLUMN AND ONE SCROLL. The page reads top to bottom at every screen
  * size; the hosting pane scrolls, and nothing inside it nests a vertical scroll
  * of its own.
  *
  *   verdict band    a fit-width card: the status word, the triage verdict, where
- *                   it broke (clickable — it expands that step and scrolls to it)
+ *                   it broke (clickable, it expands that step and scrolls to it)
  *                   and the one "Next:" a reader acts on
  *   filmstrip       a browser run only: one tile per captured step, in step order,
  *                   the failing tile marked. Clicking a tile expands its step and
  *                   brings its picture into view; Replay plays the session video
  *                   in a modal
  *   the steps       every step as ONE dense collapsible line. Opening a row reads
- *                   its whole record inline — result, output, picture, run
- *                   conditions — and closing it gives the line back. The failing
+ *                   its whole record inline, result, output, picture, run
+ *                   conditions, and closing it gives the line back. The failing
  *                   step starts open.
  *   the record      Transcript and Interfaces, collapsible, stacked one after the
- *                   other; the rulings stand OPEN below them — a decision surface
+ *                   other; the rulings stand OPEN below them, a decision surface
  *                   is not something to hide behind a toggle
  *   footer          Test · File · Flow · Spec, on one line
  *
  * FAILURE OWNS THE FIRST OPEN ROW, and says so in redundant channels: the verdict
  * band names it, the row is tinted, its filmstrip tile is marked. Error tint is the
- * ONLY per-row colour — a rainbow of per-status row fills would make the one red
+ * ONLY per-row colour, a rainbow of per-status row fills would make the one red
  * row worth nothing.
  *
  * FOUR FACTS PER STEP ROW: mark · number · kind · command, with the duration right
- * aligned. Collapsed rows never wrap and never grow — a long command ellipsises and
- * keeps its whole text in the title — because the closed list is for SCANNING; the
+ * aligned. Collapsed rows never wrap and never grow, a long command ellipsises and
+ * keeps its whole text in the title, because the closed list is for SCANNING; the
  * reading happens inside the opened row.
  *
  * THE MILESTONE IS A DIVIDER, NOT A BAND. A group of steps is headed by its number
@@ -43,20 +43,20 @@
  * space than the steps it introduced.
  *
  * SETUP IS STEP 0. The `setup:` block is the world step 1 starts in, so it reads as
- * a pseudo-row at the top of the same list — expandable like any other step, with
+ * a pseudo-row at the top of the same list, expandable like any other step, with
  * the seeded files, the git world and the env overlay inline.
  *
- * AN OPEN ROW IS HONEST. A step's record speaks its own surface — a cli step is
+ * AN OPEN ROW IS HONEST. A step's record speaks its own surface, a cli step is
  * never offered browser vocabulary and a browser step is never offered an exit
- * code — and a field that applies but has nothing behind it says so in words
+ * code, and a field that applies but has nothing behind it says so in words
  * ("the step printed nothing", "not recorded in this run"): a blank is the one
  * thing a reader cannot act on.
  *
  * TWO READINGS of one file, on the header's shared mode switch: View (this page)
  * and YAML (the stored artifact itself). Every artifact-backed entity offers exactly
- * that pair, through the same component — see {@link ArtifactModeSwitch}.
+ * that pair, through the same component, see {@link ArtifactModeSwitch}.
  *
- * {@link GuardScenarioBody} is the workspace — the flow detail embeds it under the
+ * {@link GuardScenarioBody} is the workspace, the flow detail embeds it under the
  * flow's own header, where it claims the height the header leaves.
  * {@link GuardTestView} wraps it in a header of its own for the RUN INSTANCE, which
  * has no flow header above it. Same component, one implementation, no parallel test
@@ -64,7 +64,7 @@
  *
  * NO SURFACE LABEL rides here. Guard runs one surface per flow today, so "CLI test"
  * only ever restated the same word on every row and every header. When a second
- * surface exists it returns as a plain label beside the title — not a chip.
+ * surface exists it returns as a plain label beside the title, not a chip.
  *
  * NOTHING SCROLLS SIDEWAYS. Wide DATA (an expected value, an output, a
  * transcript) WRAPS in place ({@link GuardLongText}) so it reads without a
@@ -109,8 +109,8 @@ import {
   ArtifactModeSwitch,
   ArtifactRaw,
   useArtifactMode,
-} from "@/components/ui/artifact-view";
-import { HoverPopover } from "@/components/ui/hover-popover";
+} from "@/preview/ui/artifact-view";
+import { HoverPopover } from "@/preview/ui/hover-popover";
 import * as api from "@/lib/api";
 import { renderInlineMarkup } from "@/lib/inline-markup";
 import { formatGuardDuration } from "@/lib/guard-drifts";
@@ -119,23 +119,23 @@ import {
   GuardRunFilmstrip,
   GuardScreenshotLightbox,
   GuardStepScreenshot,
-} from "./GuardEvidenceVisuals";
-import { GuardLongText } from "./GuardLongText";
-import { GuardTestSetup } from "./GuardTestSetup";
-import { GuardTriageChip } from "./GuardTriageChip";
-import { GuardVisualChip } from "./GuardVisualChip";
-import { GuardFlowStatusChip } from "./GuardStatusBadge";
-import { PRE } from "./detail-styles";
+} from "@/components/guard/GuardEvidenceVisuals";
+import { GuardLongText } from "@/components/guard/GuardLongText";
+import { GuardTestSetup } from "@/components/guard/GuardTestSetup";
+import { GuardTriageChip } from "@/components/guard/GuardTriageChip";
+import { GuardVisualChip } from "@/components/guard/GuardVisualChip";
+import { GuardFlowStatusChip } from "@/components/guard/GuardStatusBadge";
+import { PRE } from "@/components/guard/detail-styles";
 
-/** The section label every panel wears ABOVE its frame — Verdict, Steps, … */
+/** The section label every panel wears ABOVE its frame, Verdict, Steps, … */
 const LABEL =
   "mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground";
-/** A truncating label inside a footer fact — it must shrink, or it stretches the row. */
+/** A truncating label inside a footer fact, it must shrink, or it stretches the row. */
 const FOOT_TEXT = "min-w-0 truncate";
 const FOOT_BTN =
   "inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1 rounded text-[11px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary";
 
-/** One fact on the footer's single line — "Test <id>", "File <path>". */
+/** One fact on the footer's single line, "Test <id>", "File <path>". */
 function FootFact({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex min-w-0 max-w-full items-baseline gap-1.5">
@@ -155,12 +155,12 @@ export interface GuardTestViewModel {
   id: string;
   title: string;
   status: GuardTestStatusView;
-  /** "Latest state" | "As of run <id>" — which result the page is showing. */
+  /** "Latest state" | "As of run <id>", which result the page is showing. */
   provenance: string;
   durationMs?: number | null;
   failure?: GuardFailureDetail;
   /**
-   * The triage verdict behind a BIRTH failure — what the failure IS, not
+   * The triage verdict behind a BIRTH failure, what the failure IS, not
    * just that it happened. Absent on a run failure (a different event, with no
    * verdict of its own) and on a test that committed untriaged.
    */
@@ -169,7 +169,7 @@ export interface GuardTestViewModel {
   /** The claim behind the failing milestone, when the flow named one. */
   failedMilestoneClaim?: string;
   /**
-   * The flow's milestones — the claim sentence each step group is headed with, and
+   * The flow's milestones, the claim sentence each step group is headed with, and
    * the section that states it, which the divider links to. Matched to a step by
    * `order`; absent (a hand-written test, an unjoined run) leaves the group headed
    * by its number alone, with nothing to link to.
@@ -191,16 +191,16 @@ export interface GuardTestViewModel {
   claimTitles?: Readonly<Record<string, string>>;
   interfaceDrifted?: boolean;
   /**
-   * True when the failing step was an UNMILESTONED preparation step — a prerequisite
+   * True when the failing step was an UNMILESTONED preparation step, a prerequisite
    * the spec never asserts. Renders beside the failure so a red test that never
    * reached the specified behavior is not read as drift.
    */
   blockedPrecondition?: boolean;
-  /** What the test is ultimately checking — the flow's goal. */
+  /** What the test is ultimately checking, the flow's goal. */
   goal?: string;
   flow?: { id: string; title: string };
   /**
-   * The spec section the test binds to — the footer's Spec fact. Optional: read
+   * The spec section the test binds to, the footer's Spec fact. Optional: read
    * inside its own flow the step dividers already link every section the test
    * walks, and a flow with no inventory row behind it has nothing to point at.
    */
@@ -214,7 +214,7 @@ export interface GuardTestViewModel {
   evidence: GuardEvidenceRef | null;
 }
 
-/** The pseudo-step the `setup:` block reads as — the world step 1 starts in. */
+/** The pseudo-step the `setup:` block reads as, the world step 1 starts in. */
 const SETUP_STEP = 0;
 
 type StepOutcome = "passed" | "failed" | "skipped";
@@ -242,7 +242,7 @@ const STEP_DOT: Record<StepOutcome, string> = {
 };
 
 /**
- * The left strip a step row wears — coloured only where a verdict landed.
+ * The left strip a step row wears, coloured only where a verdict landed.
  * Painted as an inset shadow, not a border: two borders on one box miter into
  * each other with a diagonal seam, and the strip's ends must stay square.
  */
@@ -252,7 +252,7 @@ const STEP_BAND: Record<StepOutcome, string> = {
   skipped: "",
 };
 
-/** The one mark a step wears — the product-wide status dot, in its outcome's colour. */
+/** The one mark a step wears, the product-wide status dot, in its outcome's colour. */
 function StepMark({ outcome }: { outcome: StepOutcome }) {
   return (
     <span
@@ -263,7 +263,7 @@ function StepMark({ outcome }: { outcome: StepOutcome }) {
 }
 
 /**
- * One labelled line of a step panel — "expected", "actual", "output". The
+ * One labelled line of a step panel, "expected", "actual", "output". The
  * verdict mark lives INSIDE the fixed-width label column so every value box
  * starts at the same left edge whether or not its row carries a mark.
  */
@@ -287,7 +287,7 @@ function DiffRow({
   );
 }
 
-/** A field with nothing behind it — said in words, never left as a blank. */
+/** A field with nothing behind it, said in words, never left as a blank. */
 function NoValue({ children }: { children: ReactNode }) {
   return (
     <p className="pt-1 text-[11px] italic leading-snug text-muted-foreground">
@@ -300,7 +300,7 @@ function NoValue({ children }: { children: ReactNode }) {
 const NOT_RECORDED = "not recorded in this run";
 
 /**
- * EVERY member of a step's expectation beside the answer THAT member got — the
+ * EVERY member of a step's expectation beside the answer THAT member got, the
  * honest pairing, in one component because it is one idea on every surface: a
  * browser step asserting an address and the page's words has two answers, and so
  * does a request step asserting a status and a json path. Showing one of them
@@ -339,7 +339,7 @@ function CheckRows({
 }
 
 /**
- * THE JUDGE'S READING, under the PICTURE it read — what a vision model
+ * THE JUDGE'S READING, under the PICTURE it read, what a vision model
  * saw in the screenshot the step left behind, under its own label so it never
  * reads as one of the measured rows above it. It follows the `screen` row
  * because it is a reading OF that picture; a judged failure whose bytes are
@@ -358,11 +358,11 @@ function VisualJudgeRow({ visual }: { visual: GuardVisualAnnotation }) {
         {visual.verdict === "yes" && (
           <p className="text-sky-700 dark:text-sky-300">
             The expected result appears visible, so the assertion itself may be
-            wrong — a brittle locator or matcher — rather than the page.
+            wrong, a brittle locator or matcher, rather than the page.
           </p>
         )}
         <p className="italic text-muted-foreground">
-          a vision model’s reading of the step’s screenshot — the expectation
+          a vision model’s reading of the step’s screenshot, the expectation
           above alone decided this step
         </p>
       </div>
@@ -372,29 +372,29 @@ function VisualJudgeRow({ visual }: { visual: GuardVisualAnnotation }) {
 
 /**
  * WHAT A STEP DID, as the four things a reader asks for in the order they ask.
- * EVERY step carries the same set — a passing step's actuals are as much a fact as
- * a failing one's — so a reader learns one inspector and reads every row with it.
+ * EVERY step carries the same set, a passing step's actuals are as much a fact as
+ * a failing one's, so a reader learns one inspector and reads every row with it.
  *
  * The panels speak the step's OWN surface: a cli or api step returns a code and
  * prints streams; a web step ends up at an address, shows a page and logs to a
- * console. A step with no record of its own reads the same either way — the
+ * console. A step with no record of its own reads the same either way, the
  * authored expectation, and the honest absence of everything else.
  *
  * Nothing here is invented. A step the viewed run never reached (it stopped at an
  * earlier failure) and every step of a test that has never run say so, in place of
  * the value they do not have.
  *
- * Every value is a long-data block — clamped vertically, scrolled horizontally,
+ * Every value is a long-data block, clamped vertically, scrolled horizontally,
  * never wrapped (a wrapped command line or JSON body lies about its shape).
  */
 interface StepPanelProps {
-  /** What the step asserts, as authored — empty when it asserts nothing. */
+  /** What the step asserts, as authored, empty when it asserts nothing. */
   expected: string;
   /** What it returned: `exit 0`, `status 200`, the mismatch. Absent when it returns nothing. */
   actual?: string;
   stdout?: string;
   stderr?: string;
-  /** Whether the viewed run has a record of this step at all — what tells "no output" from "not recorded". */
+  /** Whether the viewed run has a record of this step at all, what tells "no output" from "not recorded". */
   recorded: boolean;
   /** The browser's record, on a web step the viewed run took. */
   web?: GuardStepWebActual;
@@ -405,8 +405,8 @@ interface StepPanelProps {
 }
 
 /**
- * The RESULT tab: what the step asserted, what it got back, and — on a browser
- * step — where it ended up and what the page showed. The judge's reading rides
+ * The RESULT tab: what the step asserted, what it got back, and, on a browser
+ * step, where it ended up and what the page showed. The judge's reading rides
  * here too, under its own label, because it is about this same verdict.
  */
 function ResultPanel({
@@ -468,7 +468,7 @@ function ResultPanel({
 
 /**
  * The OUTPUT tab: what the step PRINTED while doing what it did. A browser step
- * spawns nothing — no exit code, no streams — so the only stream it has is the
+ * spawns nothing, no exit code, no streams, so the only stream it has is the
  * page's own console, and the panel says so in the browser's words rather than
  * inventing an "exit 0" it never had.
  */
@@ -539,14 +539,14 @@ function stepPanelProps(
   };
 }
 
-/** The row height every closed step line keeps — one line, four facts. */
+/** The row height every closed step line keeps, one line, four facts. */
 const STEP_ROW =
   "flex h-7 w-full min-w-0 cursor-pointer items-center gap-2 px-2.5 text-left outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary";
-/** The kind token — a fact about the step, never a verdict, so never coloured. */
+/** The kind token, a fact about the step, never a verdict, so never coloured. */
 const STEP_KIND =
   "shrink-0 rounded bg-muted px-1 py-px text-[10px] font-medium text-muted-foreground";
 
-/** The chevron every collapsible row leads with — pointing at what a click does. */
+/** The chevron every collapsible row leads with, pointing at what a click does. */
 function RowChevron({ open }: { open: boolean }) {
   return (
     <ChevronRight
@@ -561,7 +561,7 @@ function RowChevron({ open }: { open: boolean }) {
 /**
  * ONE collapsible step: mark · number · kind · command on the closed line, with
  * its duration right aligned; clicking opens the step's whole record inline
- * under it ({@link StepBody}). The closed command never wraps — the closed list
+ * under it ({@link StepBody}). The closed command never wraps, the closed list
  * is for scanning, and the whole text stays reachable in the title and in the
  * opened record.
  */
@@ -590,7 +590,7 @@ function StepRow({
   return (
     <li
       ref={rowRef}
-      aria-label={`Step ${step.n}: ${step.command} — ${label}`}
+      aria-label={`Step ${step.n}: ${step.command}, ${label}`}
       className={`border-b border-border/50 last:border-b-0 ${STEP_BAND[outcome]}`}
     >
       <button
@@ -628,7 +628,7 @@ function StepRow({
 }
 
 /**
- * STEP 0 — the world the steps start in, as a row of the same list. The `setup:`
+ * STEP 0, the world the steps start in, as a row of the same list. The `setup:`
  * block is not a section above the investigation: it is the state that was already
  * true when step 1 ran, which makes it the first thing in the sequence a reader
  * walks. It renders only when the file declares one.
@@ -647,7 +647,7 @@ function SetupRow({
   return (
     <li
       ref={rowRef}
-      aria-label="Step 0: setup — the world the steps start in"
+      aria-label="Step 0: setup, the world the steps start in"
       className="border-b border-border/50"
     >
       <button
@@ -683,7 +683,7 @@ function SetupRow({
 /**
  * One step's whole record, inline under its row, as the labelled rows a reader
  * asks for in order: what it asserted and got, what it printed, the picture it
- * left, and the conditions it ran under. Every value is a long-data block —
+ * left, and the conditions it ran under. Every value is a long-data block -
  * clamped by its own expander, scrolled horizontally, never wrapped.
  */
 function StepBody({
@@ -700,7 +700,7 @@ function StepBody({
   passed: boolean;
   failure?: GuardFailureDetail;
   claim?: string;
-  /** The spec section stating the claim — the jump the divider used to carry. */
+  /** The spec section stating the claim, the jump the divider used to carry. */
   claimLink?: { label: string; onOpen: () => void };
   /** The step's picture, when the run's evidence bundle holds one for it. */
   picture?: ReactNode;
@@ -748,7 +748,7 @@ function StepBody({
         </>
       ) : (
         panel.web?.screenshot && (
-          // The picture's bytes are not in this bundle — its recorded file
+          // The picture's bytes are not in this bundle, its recorded file
           // name is the honest remainder of the record.
           <>
             <DiffRow label="screen">
@@ -767,7 +767,7 @@ function StepBody({
 
 /**
  * The conditions the step ran under, and the note it was written with. A step
- * with nothing set around it renders nothing — inline, an empty-conditions line
+ * with nothing set around it renders nothing, inline, an empty-conditions line
  * on every row would be noise, not honesty.
  */
 function InfoPanel({ step }: { step: GuardScenarioStepView }) {
@@ -809,7 +809,7 @@ function InfoPanel({ step }: { step: GuardScenarioStepView }) {
 }
 
 /**
- * The recorded failure's record — the run outlived the scenario revision it
+ * The recorded failure's record, the run outlived the scenario revision it
  * executed, so the evidence renders without pretending a current authored row
  * is the one that ran.
  */
@@ -859,7 +859,7 @@ function RecordedFailureRow({
       <ol>
         <li
           ref={rowRef}
-          aria-label={`Step ${failure.step}: recorded run failure — failed`}
+          aria-label={`Step ${failure.step}: recorded run failure, failed`}
           className={STEP_BAND.failed}
         >
           <button
@@ -905,7 +905,7 @@ function stepClaim(
   if (step.milestone != null) {
     const milestone = milestones.get(step.milestone);
     return milestone
-      ? `Milestone ${step.milestone} — ${milestone.claimTitle}`
+      ? `Milestone ${step.milestone}, ${milestone.claimTitle}`
       : `Milestone ${step.milestone}`;
   }
   if (step.claims && step.claims.length > 0) {
@@ -985,7 +985,7 @@ function InterfacePathSection({
 }
 
 /**
- * One supporting record, closed until a reader asks for it — a full-width header
+ * One supporting record, closed until a reader asks for it, a full-width header
  * row with the content inline under it, the sections stacking one after the
  * other. Opening one never closes another, and nothing in it scrolls on its own:
  * the page does.
@@ -1037,7 +1037,7 @@ function CollapsibleSection({
 }
 
 /**
- * The verdict's paint — the product-wide status dot at display size, echoed by
+ * The verdict's paint, the product-wide status dot at display size, echoed by
  * the card's border. Same four-colour vocabulary as every guard chip
  * (`lib/guard-status.ts`): red is a verdict someone must act on, green is
  * proven, blue is "no verdict yet, and someone can move it", grey is nobody's
@@ -1048,15 +1048,15 @@ const VERDICT_TONE: Record<
   GuardTestStatusView["plain"],
   { dot: string; border: string }
 > = {
-  failing: { dot: "bg-red-500", border: "border-red-500/35" },
-  passing: { dot: "bg-emerald-500", border: "border-emerald-500/35" },
+  failed: { dot: "bg-red-500", border: "border-red-500/35" },
+  succeeded: { dot: "bg-emerald-500", border: "border-emerald-500/35" },
   blocked: { dot: "bg-sky-500", border: "border-sky-500/35" },
-  "needs-setup": { dot: "bg-sky-500", border: "border-sky-500/35" },
-  ungenerated: { dot: "bg-slate-400", border: "border-border" },
+  "never-run": { dot: "bg-sky-500", border: "border-sky-500/35" },
+  "not-testable": { dot: "bg-slate-400", border: "border-border" },
 };
 
 /**
- * THE scenario workspace — no header and no scroll box of its own, so it drops
+ * THE scenario workspace, no header and no scroll box of its own, so it drops
  * straight into the merged flow detail's body under the flow's header and claims
  * the height that header leaves. {@link GuardTestView} is the same body with a
  * header of its own, for the run instance that has no flow header above it.
@@ -1082,7 +1082,7 @@ export function GuardScenarioBody({
   interfaces: GuardInterfaceRow[] | null;
   /** The parent's artifact mode: true renders the stored YAML instead of the page. */
   raw?: boolean;
-  /** The rulings a reader can make about this flow — the drawer's last item. */
+  /** The rulings a reader can make about this flow, the drawer's last item. */
   rulings?: ReactNode;
   /** Extra verdict-band notes (stale/orphaned bindings, "no result yet"). */
   notes?: ReactNode;
@@ -1154,7 +1154,7 @@ export function GuardScenarioBody({
       });
   }, [repoId, test.id, evRunId, evPath]);
 
-  // The bundle the visuals are addressed by — the same directory the transcript is
+  // The bundle the visuals are addressed by, the same directory the transcript is
   // read from, as the pair of primitives above already names it.
   const where: api.GuardEvidenceWhere | null = evPath
     ? { evidencePath: evPath }
@@ -1185,7 +1185,7 @@ export function GuardScenarioBody({
       });
   }, [repoId, test.id, ev]);
 
-  // The visuals, on their own read — keyed on the two primitives, so re-rendering
+  // The visuals, on their own read, keyed on the two primitives, so re-rendering
   // the parent never re-fetches them. A bundle that has none, and a store that
   // cannot answer for them, leave the workspace exactly as it was: the transcript
   // alone. Never blocks the transcript, and never reports a failure of its own.
@@ -1208,8 +1208,8 @@ export function GuardScenarioBody({
       });
   }, [repoId, test.id, evRunId, evPath]);
 
-  const failed = test.status.plain === "failing";
-  const passed = test.status.plain === "passing" && !failed;
+  const failed = test.status.plain === "failed";
+  const passed = test.status.plain === "succeeded" && !failed;
   // "failed (birth)" is the plan's own wording for a test committed red: it ran
   // once, at authoring time, and disagreed with the code.
   const verdictWord = failed
@@ -1227,8 +1227,8 @@ export function GuardScenarioBody({
     [test.milestones],
   );
   // WHICH rows start open is a fact about the VIEWED RESULT, so the step list is
-  // keyed on it: reading another test — or this same test as another run's
-  // record — re-opens that result's failing step instead of inheriting the
+  // keyed on it: reading another test, or this same test as another run's
+  // record, re-opens that result's failing step instead of inheriting the
   // toggles the last one was left in.
   const resultKey = `${test.id}:${test.failure?.step ?? "none"}`;
   const stepSignature = source?.steps.map((step) => step.n).join(",") ?? "";
@@ -1245,8 +1245,8 @@ export function GuardScenarioBody({
   const screenshots = visuals.filter((visual) => visual.kind === "screenshot");
   const videos = visuals.filter((visual) => visual.kind === "video");
   // The lightbox is keyed on the sequence ITSELF (its file names), so a different
-  // test's evidence closes it and an ordinary re-render — `visuals` may be a
-  // fresh array — does not.
+  // test's evidence closes it and an ordinary re-render, `visuals` may be a
+  // fresh array, does not.
   const shotSequence = screenshots.map((visual) => visual.file).join("|");
   useEffect(() => setOpenShot(null), [shotSequence]);
   const completedSteps = test.failure
@@ -1267,7 +1267,7 @@ export function GuardScenarioBody({
     });
   };
   /**
-   * Expand a step's record and bring it into view — the landing move of every
+   * Expand a step's record and bring it into view, the landing move of every
    * jump here (a filmstrip tile, the verdict's "failed at" line). When the step
    * left a picture, the scroll aims at the picture itself.
    */
@@ -1298,10 +1298,10 @@ export function GuardScenarioBody({
         </p>
       )}
 
-      {/* THE VERDICT — the one thing a reader opens this page to learn, on a
+      {/* THE VERDICT, the one thing a reader opens this page to learn, on a
           card washed in the verdict's own colour and sized to what it says, not
-          to the row. The status chip is gone from here — the word with its mark
-          already is that fact — and every fact on the card reads at the page's
+          to the row. The status chip is gone from here, the word with its mark
+          already is that fact, and every fact on the card reads at the page's
           own quiet sizes; everything else about the failure reads at the step
           it happened on. */}
       <section aria-label="Test verdict" className="min-w-0 shrink-0">
@@ -1348,7 +1348,7 @@ export function GuardScenarioBody({
             <HoverPopover
               portal
               width="wide"
-              content="This test failed the first time it ran, when it was written. It is committed anyway — the doc and the code disagree, and the next run that turns it green closes that gap."
+              content="This test failed the first time it ran, when it was written. It is committed anyway, the doc and the code disagree, and the next run that turns it green closes that gap."
             >
               <span className="cursor-help text-[11px] text-muted-foreground underline decoration-dotted">
                 what does birth mean?
@@ -1360,27 +1360,11 @@ export function GuardScenarioBody({
               portal
               align="start"
               width="wide"
-              content="The live interface catalog no longer matches the fingerprints this test was grounded on — the code surface it was derived from moved. Never a pass/fail input; re-generate to re-ground it."
+              content="The live interface catalog no longer matches the fingerprints this test was grounded on, the code surface it was derived from moved. Never a pass/fail input; re-generate to re-ground it."
             >
               <span className="inline-flex cursor-help items-center gap-1.5 text-[11px] text-muted-foreground">
                 <span className="h-2 w-2 shrink-0 rounded-full bg-slate-400" />
                 Interface drift
-              </span>
-            </HoverPopover>
-          )}
-          {test.blockedPrecondition && (
-            // The step that failed only PREPARED the world: the specified behavior
-            // was never reached, so this is a broken prerequisite, not drift. An
-            // annotation beside the verdict — it never moves the outcome.
-            <HoverPopover
-              portal
-              align="start"
-              width="wide"
-              content="The step that failed only prepares the world (a seeding request, a login) — it asserts nothing the spec says. The specified behavior was never reached, so this failure is a broken prerequisite, not doc-vs-code drift. It still fails: fix the setup (seed the data, declare the fixture) and re-run."
-            >
-              <span className="inline-flex cursor-help items-center gap-1.5 text-[11px] text-sky-600 dark:text-sky-400">
-                <span className="h-2 w-2 shrink-0 rounded-full bg-sky-500" />
-                Setup failed — a prerequisite step broke before any specified behavior ran
               </span>
             </HoverPopover>
           )}
@@ -1389,7 +1373,7 @@ export function GuardScenarioBody({
         {test.failure && (
           <p className="mt-1.5 min-w-0 text-[12px] leading-snug">
             {/* The failure is a fact about ONE step, so the sentence that names it
-                is the way to that step — the fourth channel the failure surfaces
+                is the way to that step, the fourth channel the failure surfaces
                 in, beside the tinted row, the marked tile and the first selection. */}
             <button
               type="button"
@@ -1414,7 +1398,7 @@ export function GuardScenarioBody({
             {test.failedMilestoneClaim && (
               <span className="text-muted-foreground">
                 {" "}
-                — {test.failedMilestoneClaim}
+               , {test.failedMilestoneClaim}
               </span>
             )}
             {recordedFailureMissingFromSource && (
@@ -1437,7 +1421,7 @@ export function GuardScenarioBody({
         </div>
       </section>
 
-      {/* THE RUN, AS PICTURES — one tile per captured step, in step order.
+      {/* THE RUN, AS PICTURES, one tile per captured step, in step order.
           Clicking a tile expands its step below and brings its picture into
           view. A cli/api run recorded none, so a cli/api run has no strip. */}
       {where && screenshots.length > 0 && (
@@ -1455,7 +1439,7 @@ export function GuardScenarioBody({
         </div>
       )}
 
-      {/* THE STEPS — one collapsible list, one column at every width. An opened
+      {/* THE STEPS, one collapsible list, one column at every width. An opened
           row grows the page and the page scrolls; nothing here scrolls on its
           own. */}
       <section aria-label="test steps" className="min-w-0 shrink-0">
@@ -1556,7 +1540,7 @@ export function GuardScenarioBody({
         </div>
       </section>
 
-      {/* THE SUPPORTING RECORD — Transcript and Interfaces closed until asked
+      {/* THE SUPPORTING RECORD, Transcript and Interfaces closed until asked
           for, stacked one after the other; a decision belongs after the
           evidence, so the rulings stand OPEN below them, never behind a
           toggle. */}
@@ -1589,12 +1573,12 @@ export function GuardScenarioBody({
             {...(onOpenInterface ? { onOpenInterface } : {})}
           />
         </CollapsibleSection>
-        {/* The ruling stands apart from the record it follows — a destructive
+        {/* The ruling stands apart from the record it follows, a destructive
             control never sits flush under ordinary reading. */}
         {rulings && <div className="min-w-0 pt-3">{rulings}</div>}
       </div>
 
-      {/* The facts a developer copies or jumps from — one line, never a block. */}
+      {/* The facts a developer copies or jumps from, one line, never a block. */}
       <dl className="min-w-0 shrink-0 space-y-1 border-t border-border pt-2 text-[11px]">
         <FootFact label="Test">
           <span className="truncate font-mono text-muted-foreground">
@@ -1664,7 +1648,7 @@ export function GuardScenarioBody({
 }
 
 /**
- * The scenario workspace under a header of its OWN — the run instance's screen,
+ * The scenario workspace under a header of its OWN, the run instance's screen,
  * where there is no flow header above it to carry the title, the status and the
  * mode switch. Everything below the header is {@link GuardScenarioBody}, the same
  * rendering the merged flow detail embeds.
@@ -1675,7 +1659,6 @@ export function GuardTestView({
   interfaces,
   rulings,
   headerAction,
-  lead,
   notes,
   onOpenFlow,
   onOpenInterface,
@@ -1687,8 +1670,6 @@ export function GuardTestView({
   rulings?: ReactNode;
   /** A link out of this page (the run instance's "open this flow"). */
   headerAction?: ReactNode;
-  /** What a run instance shows ABOVE the test: the flow it is an instance of. */
-  lead?: ReactNode;
   notes?: ReactNode;
   onOpenFlow?: (flowId: string) => void;
   onOpenInterface?: (interfaceId: string) => void;
@@ -1698,7 +1679,7 @@ export function GuardTestView({
   const { mode, setMode, raw } = useArtifactMode("YAML");
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col bg-background">
-      {/* The page's ONE vertical scroll, and the header scrolls WITH it — a
+      {/* The page's ONE vertical scroll, and the header scrolls WITH it, a
           pinned title bar cost height the reading needs. x is clipped so a wide
           line can only scroll its own block. */}
       <div
@@ -1730,7 +1711,6 @@ export function GuardTestView({
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col px-6 py-4">
-        {lead}
         <GuardScenarioBody
           repoId={repoId}
           test={test}

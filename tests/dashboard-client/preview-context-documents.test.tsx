@@ -230,7 +230,7 @@ function renderAt(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/preview/*" element={<PreviewApp />} />
+        <Route path="/*" element={<PreviewApp />} />
       </Routes>
       <Address />
       <Toaster />
@@ -244,7 +244,7 @@ function rows() {
 }
 
 beforeEach(() => {
-  window.history.replaceState({}, '', '/preview');
+  window.history.replaceState({}, '', '/');
 });
 
 afterEach(() => {
@@ -255,7 +255,7 @@ afterEach(() => {
 describe('Context, the documents', () => {
   it('draws one row per document, in the words the server folded', async () => {
     serve();
-    renderAt('/preview/context/documents');
+    renderAt('/context/documents');
 
     await waitFor(() => expect(rows()).toHaveLength(2));
     const [refunds, onboarding] = rows();
@@ -273,14 +273,14 @@ describe('Context, the documents', () => {
 
   it('names the one repository that reads a document', async () => {
     serve({ documents: [{ ...REFUNDS, repositories: [REPO_A.name] }] });
-    renderAt('/preview/context/documents');
+    renderAt('/context/documents');
     await waitFor(() => expect(rows()).toHaveLength(1));
     expect(within(rows()[0]!).getByText('acme/web')).toBeInTheDocument();
   });
 
   it('searches the title and puts a picked filter in the address', async () => {
     serve();
-    renderAt('/preview/context/documents');
+    renderAt('/context/documents');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(2));
 
@@ -295,14 +295,14 @@ describe('Context, the documents', () => {
 
     await waitFor(() => expect(rows()).toHaveLength(1));
     expect(screen.getByTestId('address')).toHaveTextContent(
-      '/preview/context/documents?status=not-linked',
+      '/context/documents?status=not-linked',
     );
     expect(within(rows()[0]!).getByText('Onboarding')).toBeInTheDocument();
   });
 
   it('tallies the documents it shows, and counts each value over the other filters', async () => {
     serve();
-    renderAt('/preview/context/documents');
+    renderAt('/context/documents');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(2));
 
@@ -325,21 +325,21 @@ describe('Context, the documents', () => {
 
   it('narrows to a repository the address names', async () => {
     serve();
-    renderAt(`/preview/context/documents?repo=${encodeURIComponent(REPO_A.name)}`);
+    renderAt(`/context/documents?repo=${encodeURIComponent(REPO_A.name)}`);
     await waitFor(() => expect(rows()).toHaveLength(1));
     expect(within(rows()[0]!).getByText('Refunds')).toBeInTheDocument();
   });
 
   it('opens a document from its row', async () => {
     serve();
-    renderAt('/preview/context/documents');
+    renderAt('/context/documents');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(2));
 
     await user.click(rows()[0]!);
     await waitFor(() =>
       expect(screen.getByTestId('address')).toHaveTextContent(
-        '/preview/context/doc/context%2Fsite-docs-acme%2Frefunds.md',
+        '/context/doc/context%2Fsite-docs-acme%2Frefunds.md',
       ),
     );
   });
@@ -348,17 +348,17 @@ describe('Context, the documents', () => {
 describe('narrowed to one source', () => {
   it('sits under that source, carries its sync status, and has nothing to press', async () => {
     serve();
-    renderAt(`/preview/context/documents?source=${SITE.id}`);
+    renderAt(`/context/documents?source=${SITE.id}`);
 
     const crumbs = await screen.findByRole('navigation', { name: 'Breadcrumb' });
     expect(within(crumbs).getByRole('link', { name: 'Context' })).toHaveAttribute(
       'href',
-      '/preview/context',
+      '/context',
     );
     // The trail leads back through the source's own page.
     expect(within(crumbs).getByRole('link', { name: 'docs.acme.com' })).toHaveAttribute(
       'href',
-      `/preview/context/sources/${SITE.id}`,
+      `/context/sources/${SITE.id}`,
     );
     expect(await screen.findByRole('heading', { name: 'Documents' })).toBeInTheDocument();
     expect(screen.getByText('Synced')).toBeInTheDocument();
@@ -371,12 +371,12 @@ describe('narrowed to one source', () => {
 
   it('names a repository source in its trail, and spells out no scope in the header', async () => {
     serve();
-    renderAt(`/preview/context/documents?source=${REPO_SOURCE.id}`);
+    renderAt(`/context/documents?source=${REPO_SOURCE.id}`);
 
     const crumbs = await screen.findByRole('navigation', { name: 'Breadcrumb' });
     expect(within(crumbs).getByRole('link', { name: 'acme/web' })).toHaveAttribute(
       'href',
-      `/preview/context/sources/${REPO_SOURCE.id}`,
+      `/context/sources/${REPO_SOURCE.id}`,
     );
     expect(screen.getByText('Never synced')).toBeInTheDocument();
     expect(screen.queryByText('the default branch')).toBeNull();
@@ -387,7 +387,7 @@ describe('narrowed to one source', () => {
 describe('the workspace scan', () => {
   it('starts the one Document scan the workspace has', async () => {
     const state = serve();
-    renderAt('/preview/context/documents');
+    renderAt('/context/documents');
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole('button', { name: 'Scan' }));
@@ -396,7 +396,7 @@ describe('the workspace scan', () => {
 
   it('carries an amber dot while the context has moved since the corpus', async () => {
     serve({ stale: true });
-    renderAt('/preview/context/documents');
+    renderAt('/context/documents');
     expect(await screen.findByLabelText('scan pending')).toBeInTheDocument();
   });
 
@@ -415,7 +415,7 @@ describe('the workspace scan', () => {
         },
       ],
     });
-    renderAt('/preview/context/documents');
+    renderAt('/context/documents');
 
     const button = await screen.findByRole('button', { name: 'Scanning…' });
     expect(button).toBeDisabled();
@@ -426,7 +426,7 @@ describe('the workspace scan', () => {
 describe('Add context', () => {
   it('offers the two kinds that need no account, and sends the tools to Settings', async () => {
     serve();
-    renderAt('/preview/context/documents');
+    renderAt('/context/documents');
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole('button', { name: 'Add context' }));
@@ -441,12 +441,12 @@ describe('Add context', () => {
     expect(within(list).queryByText('Coming soon')).toBeNull();
     expect(
       within(list).getByRole('link', { name: 'Connect another tool in Settings' }),
-    ).toHaveAttribute('href', '/preview/settings/connections');
+    ).toHaveAttribute('href', '/settings/connections');
   });
 
   it('checks a scope before anything is stored, then adds with no link', async () => {
     const state = serve();
-    renderAt('/preview/context/documents');
+    renderAt('/context/documents');
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole('button', { name: 'Add context' }));
@@ -472,14 +472,14 @@ describe('Add context', () => {
     });
     await waitFor(() =>
       expect(screen.getByTestId('address')).toHaveTextContent(
-        '/preview/context/sources/site-docs-other',
+        '/context/sources/site-docs-other',
       ),
     );
   });
 
   it('names where you are with a stepper, and says what Check does for THIS kind', async () => {
     serve();
-    renderAt('/preview/context/documents');
+    renderAt('/context/documents');
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole('button', { name: 'Add context' }));
@@ -500,7 +500,7 @@ describe('Add context', () => {
 
   it('lists what the account can see, disabling a repository that already has a source', async () => {
     serve();
-    renderAt('/preview/context/documents');
+    renderAt('/context/documents');
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole('button', { name: 'Add context' }));
@@ -527,7 +527,7 @@ describe('Add context', () => {
 
   it('picks the account first when the workspace has more than one', async () => {
     const state = serve({ installations: [ACME_ACCOUNT, OTHER_ACCOUNT] });
-    renderAt('/preview/context/documents');
+    renderAt('/context/documents');
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole('button', { name: 'Add context' }));
@@ -547,7 +547,7 @@ describe('Add context', () => {
 
   it('sends the user to Settings when no account is connected', async () => {
     serve({ installations: [] });
-    renderAt('/preview/context/documents');
+    renderAt('/context/documents');
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole('button', { name: 'Add context' }));
@@ -556,14 +556,14 @@ describe('Add context', () => {
     expect(await screen.findByText('No GitHub account connected yet.')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Connect an account in Settings' })).toHaveAttribute(
       'href',
-      '/preview/settings/repositories?from=context-add',
+      '/settings/repositories?from=context-add',
     );
     expect(screen.queryByLabelText('Repository')).toBeNull();
   });
 
   it('reopens at the Repository step when the install returns to ?add=repository', async () => {
     serve();
-    renderAt('/preview/context/documents?add=repository');
+    renderAt('/context/documents?add=repository');
 
     // No click: the dialog is open on the repository step with the account read.
     expect(await screen.findByRole('dialog', { name: 'Add context' })).toBeInTheDocument();
@@ -573,7 +573,7 @@ describe('Add context', () => {
 
   it('opens at the kind step when the address says ?add=1', async () => {
     serve();
-    renderAt('/preview/context/documents?add=1');
+    renderAt('/context/documents?add=1');
 
     // No click: Home's checkpoint sends the reader here with the dialog open on
     // the first step, both kinds offered and none chosen.
@@ -585,7 +585,7 @@ describe('Add context', () => {
 
   it('offers Settings under the repository picker', async () => {
     serve();
-    renderAt('/preview/context/documents');
+    renderAt('/context/documents');
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole('button', { name: 'Add context' }));
@@ -594,13 +594,13 @@ describe('Add context', () => {
     expect(await screen.findByRole('combobox', { name: 'Repository' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Connect another account in Settings' })).toHaveAttribute(
       'href',
-      '/preview/settings/repositories?from=context-add',
+      '/settings/repositories?from=context-add',
     );
   });
 
   it('checks and adds an unconnected repository through its account', async () => {
     const state = serve();
-    renderAt('/preview/context/documents');
+    renderAt('/context/documents');
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole('button', { name: 'Add context' }));
@@ -632,7 +632,7 @@ describe('Add context', () => {
 
   it('adds a repository source with nothing connected in Code', async () => {
     const state = serve({ repos: [] });
-    renderAt('/preview/context/documents');
+    renderAt('/context/documents');
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole('button', { name: 'Add context' }));

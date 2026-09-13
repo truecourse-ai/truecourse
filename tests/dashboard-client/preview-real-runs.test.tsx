@@ -118,7 +118,7 @@ function renderAt(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/preview/*" element={<PreviewApp />} />
+        <Route path="/*" element={<PreviewApp />} />
       </Routes>
       {/* The real app mounts the Toaster; the preview routes are a descendant of it. */}
       <Toaster />
@@ -130,7 +130,7 @@ beforeEach(() => {
   listeners.clear();
   socketMock.joins.length = 0;
   socketMock.leaves.length = 0;
-  window.history.replaceState({}, '', '/preview');
+  window.history.replaceState({}, '', '/');
 });
 
 afterEach(() => {
@@ -147,7 +147,7 @@ describe('a run record as the shell reads it', () => {
   it('is an onboarding job whose steps are the run checklist', () => {
     const job = toJobChain(repo, runningScan(), true);
     expect(job.title).toBe('Onboarding linkwarden/linkwarden');
-    expect(job.href).toBe(`/preview/agent/${encodeURIComponent(runningScan().runId)}`);
+    expect(job.href).toBe(`/agent/${encodeURIComponent(runningScan().runId)}`);
     expect(job.steps).toEqual([
       { key: 'discover', label: 'Discover documents', state: 'done', counter: '41 docs · 12 to curate' },
       { key: 'tag', label: 'Curate documents', state: 'active', counter: '3/12 docs' },
@@ -158,7 +158,7 @@ describe('a run record as the shell reads it', () => {
 
   it('opens the run’s own conversation from its job', () => {
     const run = runningScan();
-    expect(toJobChain(repo, run, true).href).toBe(`/preview/agent/${encodeURIComponent(run.runId)}`);
+    expect(toJobChain(repo, run, true).href).toBe(`/agent/${encodeURIComponent(run.runId)}`);
   });
 
   it('names the command instead of onboarding on a re-scan', () => {
@@ -213,7 +213,7 @@ describe('a run in the shell', () => {
     const state = serve([]);
     // Home is not where the subscription lives — the shell is — so any address
     // would do here. This one is also the address that shows the marker.
-    renderAt('/preview/code');
+    renderAt('/code');
 
     // The room is joined for the real repository — that is what makes the
     // server watch its store at all.
@@ -238,7 +238,7 @@ describe('a run in the shell', () => {
 
   it('stays silent for a run already in flight when the page loads (every sign-in reloads)', async () => {
     serve([runningScan()]);
-    renderAt('/preview/code');
+    renderAt('/code');
 
     // The run is known — the row carries the onboarding marker — but it was
     // in flight on arrival, so it never toasts. The runs arrive AFTER the
@@ -257,7 +257,7 @@ describe('a run in the shell', () => {
       return json({ error: 'not found' }, 404);
     }) as unknown as typeof window.fetch;
 
-    renderAt('/preview/code');
+    renderAt('/code');
 
     // The one empty line, and no repository's sessions store ever asked about.
     // The workspace's own runs are still read once: a Document scan belongs to
@@ -273,7 +273,7 @@ describe('a run in the shell', () => {
       throw new TypeError('Failed to fetch');
     }) as unknown as typeof window.fetch;
 
-    renderAt('/preview/code');
+    renderAt('/code');
     expect(await screen.findByText('No repository connected yet.')).toBeInTheDocument();
     expect(screen.queryByText(/Onboarding linkwarden/)).toBeNull();
   });

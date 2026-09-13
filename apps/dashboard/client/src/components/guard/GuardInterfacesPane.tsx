@@ -69,9 +69,9 @@ import type {
   InterfaceState,
 } from '@truecourse/shared';
 import { guardDriver } from '@truecourse/shared';
-import { ArtifactModeSwitch, ArtifactRaw, useArtifactMode } from '@/components/ui/artifact-view';
+import { ArtifactModeSwitch, ArtifactRaw, useArtifactMode } from '@/preview/ui/artifact-view';
 import { EmptyState } from '@/components/ui/empty-state';
-import { HoverPopover } from '@/components/ui/hover-popover';
+import { HoverPopover } from '@/preview/ui/hover-popover';
 import { useGuardArtifactRaw } from '@/hooks/useGuardArtifactRaw';
 import { useScrollToSelected } from '@/hooks/useScrollToSelected';
 import { formatGuardTime, shortFingerprint } from '@/lib/guard-drifts';
@@ -109,8 +109,7 @@ import {
 } from './GuardInterfaceContract';
 import { GuardMethodLabel } from './GuardMethodLabel';
 import { GuardRecipeDetail } from './GuardRecipeDetail';
-import { GuardFlowStatusChip } from '@/preview/vendor/components/guard/GuardStatusBadge';
-import { GuardTabStrip, type GuardTabStripItem } from './GuardTabStrip';
+import { GuardFlowStatusChip } from '@/components/guard/GuardStatusBadge';
 import type { GuardTabsState } from '@/hooks/useGuardTabs';
 
 /**
@@ -351,7 +350,6 @@ export function GuardInterfacesPane({
   loading,
   error,
   tabs,
-  showTabs = true,
   member,
   onMember,
   recipe = null,
@@ -367,8 +365,6 @@ export function GuardInterfacesPane({
   error: string | null;
   /** The ROW tab set — its ids are `<surface>:<placeId|slug>`. */
   tabs: GuardTabsState;
-  /** Full-page routes provide their own breadcrumb navigation. */
-  showTabs?: boolean;
   /** The member expanded inside the open row, by interface id. */
   member?: string | null;
   onMember?: (interfaceId: string | null) => void;
@@ -382,7 +378,7 @@ export function GuardInterfacesPane({
   prRef?: string;
   onOpenFlow: (flowId: string) => void;
 }) {
-  const { activeId, openTabs, open, close } = tabs;
+  const { activeId, open } = tabs;
   const { mode, setMode, raw } = useArtifactMode('JSON');
   const expanded = member ?? null;
 
@@ -479,29 +475,6 @@ export function GuardInterfacesPane({
     onMember?.(null);
     open(interfaceSelectionId(iface), false);
   };
-
-  /** A row selection as a reader knows it — the row's own words, never the id. */
-  const rowLabel = (id: string): string => {
-    const parsed = parsePlaceSelectionId(id);
-    if (!parsed) return id;
-    const surface = guardDriver(parsed.surface)?.label ?? parsed.surface;
-    if (parsed.placeId === ENTRIES_PLACE) return `${surface} ways in`;
-    if (selectsInterface(parsed.surface)) {
-      const iface = findInterfaceBySlug(parsed.surface, parsed.placeId, view.interfaces);
-      if (!iface) return id;
-      return surfaceShape(parsed.surface) === 'commands'
-        ? commandLabel(iface)
-        : `${entryMethod(iface)} ${entryPath(iface)}`;
-    }
-    return (view.resources?.[parsed.surface] ?? []).find((r) => r.id === parsed.placeId)?.title ?? id;
-  };
-
-  const tabItems: GuardTabStripItem[] = openTabs.map((t) => ({
-    ...t,
-    label: rowLabel(t.id),
-    title: t.id,
-    icon: Braces,
-  }));
 
   /**
    * The member's own identity, its contract and its flows. `nested` is the gutter
@@ -723,17 +696,6 @@ export function GuardInterfacesPane({
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* No Overview chip: with nothing open this pane IS its no-selection
-          state — "pick a place", and nothing else to read. */}
-      {showTabs && <GuardTabStrip
-        tabs={tabItems}
-        activeId={recipeSurface ? null : activeId}
-        onSelect={(t) => {
-          onCloseRecipe?.();
-          open(t.id, t.pinned);
-        }}
-        onClose={close}
-      />}
       <div className="relative min-h-0 flex-1 overflow-hidden">{body}</div>
     </div>
   );

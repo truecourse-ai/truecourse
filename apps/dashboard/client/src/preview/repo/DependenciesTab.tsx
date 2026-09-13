@@ -8,9 +8,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { PageHeader } from '@/preview/ui/bits';
-import { useGuardDependencies } from '@/preview/vendor/hooks/useGuardDependencies';
-import { GUARD_DEPENDENCY_STATE, guardDependencyMatches, guardDependencyType } from '@/preview/vendor/lib/guard-dependencies';
-import type { GuardDependencyRow } from '@/preview/vendor/types/guard-dependencies';
+import { useGuardDependencies } from '@/hooks/useGuardDependencies';
+import { GUARD_DEPENDENCY_STATE, guardDependencyMatches, guardDependencyType } from '@/lib/guard-dependencies';
+import type { GuardDependencyRow } from '@/types/guard-dependencies';
 import type { Repo } from '@/preview/data/types';
 import { useGuardTabJump } from './tab-jump';
 import { useGuardRefresh } from './use-guard-refresh';
@@ -23,7 +23,7 @@ export function DependenciesTab({ repo }: { repo: Repo }) {
   const [params] = useSearchParams();
   const jumpTo = params.get('dependency');
   useEffect(() => {
-    if (jumpTo) navigate(`/preview/repos/${repo.id}/dependencies/${encodeURIComponent(jumpTo)}`, { replace: true });
+    if (jumpTo) navigate(`/repos/${repo.id}/dependencies/${encodeURIComponent(jumpTo)}`, { replace: true });
   }, [jumpTo, navigate, repo.id]);
 
   const reloadKey = useGuardRefresh(repo, ['guard-setup', 'guard-externals', 'guard-generate', 'guard-run']);
@@ -38,7 +38,7 @@ export function DependenciesTab({ repo }: { repo: Repo }) {
   }, [all, query]);
 
   const openDependency = (name: string) =>
-    navigate(`/preview/repos/${repo.id}/dependencies/${encodeURIComponent(name)}`);
+    navigate(`/repos/${repo.id}/dependencies/${encodeURIComponent(name)}`);
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">

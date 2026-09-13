@@ -1,36 +1,48 @@
 /**
- * THE GUARD STATUS VOCABULARY — the ONE place a guard status becomes words.
+ * THE GUARD STATUS VOCABULARY, the ONE place a guard status becomes words.
  *
  * The wire keeps its ids (bucket `guarded`/`partial`, gap kinds, coverage
  * statuses); everything a user READS about a status is derived here, so one state
  * can never wear two words:
  *
- *  - ONE WORD table ({@link GUARD_FLOW_STATUS_WORD}) — the four plain statuses
- *    (Passing / Failing / Blocked / Not generated) every chip, filter and header
- *    shows, over the whole coverage-status domain ({@link guardStatusWord});
- *  - ONE SENTENCE table (the per-gap-kind copy behind {@link guardGapNeed}) — what
+ *  - the FIVE WORDS of coverage ({@link GUARD_FLOW_STATUS_WORD}, owned by
+ *    `@truecourse/shared` so the CLI says the same five), Succeeded / Failed /
+ *    Blocked / Not testable / Never run. Every section, flow, counter, filter and
+ *    chip wears one of them and nothing else ({@link guardStatusWord});
+ *  - ONE SENTENCE table (the per-gap-kind copy behind {@link guardGapNeed}), what
  *    a state concretely NEEDS, in the words a user would use ("needs credentials
  *    and network access", "awaiting web driver", "no code path does this"), shown
- *    by DETAIL rows ({@link guardNoTestSentence}) as `word: sentence`;
- *  - the LEGEND label ({@link guardStatusLabel}) and hover hint
- *    ({@link guardStatusHint}) the coverage surfaces render — a label is the plain
- *    word unless the state needs naming apart from its siblings (a legend lists
- *    every gap kind side by side), and it is then the sentence's own words.
+ *    by DETAIL rows ({@link guardWhyNoTest}) as `word: sentence`. This is where a
+ *    state's own name lives now that the word is one of five: "Blocked" says WHAT,
+ *    "no code path mapped" says WHY, and the pair is the whole read;
+ *  - the DETAIL label ({@link guardStatusLabel}) and hover hint
+ *    ({@link guardStatusHint}), a state's own name, for the surfaces that must
+ *    tell siblings apart (a run's drift groups, a surface chip's need). It is the
+ *    five-word status unless the state needs naming apart, and then it is the
+ *    sentence's own words. It is NEVER a coverage status word;
+ *  - the VERDICT words ({@link GUARD_TEST_VERDICT_WORD}), a scenario that RAN
+ *    keeps "Passing" / "Failing", per the ontology rule. The five words are
+ *    coverage vocabulary, not run-verdict wording.
  *
- * `guard-status.ts` holds COLOUR only and reads its labels/hints from here — the
+ * `guard-status.ts` holds COLOUR only and reads its labels/hints from here, the
  * two are locked together by a test over every coverage status.
  */
 
 import {
+  GUARD_COVERAGE_PLAIN_ORDER,
+  GUARD_COVERAGE_STATUS_WORD,
   MISSING_DATA_NOUN,
   awaitingDriverIds,
+  guardCoveragePlainStatus,
   guardDriver,
+  guardFlowPlainStatus as sharedFlowPlainStatus,
   guardSetupServiceLabel,
   needsSetupIsDone,
   needsSetupServices,
   parseBlockedOnCapabilities,
 } from '@truecourse/shared';
 import type {
+  GuardCoveragePlainStatus,
   GuardDriverId,
   GuardFlowGap,
   GuardFlowListItem,
@@ -41,176 +53,163 @@ import type {
   GuardTestStatus,
 } from '@truecourse/shared';
 
-/** A flow's state in plain words — the Flows-list filter domain. */
-export type GuardFlowPlainStatus =
-  | 'failing'
-  | 'needs-setup'
-  | 'blocked'
-  | 'ungenerated'
-  | 'passing';
+/**
+ * A coverage state in plain words, the five, and the Flows-list filter domain.
+ * The domain lives in `@truecourse/shared` so the CLI and the dashboard cannot
+ * drift apart on it; this alias is the client's local name for it.
+ */
+export type GuardFlowPlainStatus = GuardCoveragePlainStatus;
 
 /**
- * THE word table. One state, one word — chips, filters and detail rows all read
+ * THE word table. One state, one word, chips, filters and detail rows all read
  * it, so a list row and the detail it opens can never disagree.
  */
-export const GUARD_FLOW_STATUS_WORD: Record<GuardFlowPlainStatus, string> = {
-  failing: 'Failing',
-  'needs-setup': 'Needs setup',
-  blocked: 'Blocked',
-  ungenerated: 'Not generated',
-  passing: 'Passing',
-};
+export const GUARD_FLOW_STATUS_WORD = GUARD_COVERAGE_STATUS_WORD;
 
-/** Severity-led order — bad news first, good news last. Needs-setup sits directly
- *  below failing: it is not a failure, but it is the one state a user can clear
- *  today, so it outranks the blocked wall it was promoted out of. */
-export const GUARD_FLOW_STATUS_ORDER: GuardFlowPlainStatus[] = [
-  'failing',
-  'needs-setup',
-  'blocked',
-  'ungenerated',
-  'passing',
-];
+/** Severity-led order, bad news first, then the unproven, then the good news, and
+ *  "Not testable" last (the one status that is nobody's to-do). */
+export const GUARD_FLOW_STATUS_ORDER: GuardFlowPlainStatus[] = [...GUARD_COVERAGE_PLAIN_ORDER];
 
-/** `awaiting web driver` — the one phrasing of a surface with no driver yet. */
+/** `awaiting web driver`, the one phrasing of a surface with no driver yet. */
 const awaitingSentence = (driver: string) => `awaiting ${driver} driver`;
 
 /**
- * One entry per wire status.
+ * One entry per wire status, the SENTENCE half of the vocabulary.
  *
- * `label` is omitted whenever the plain WORD is the whole truth — `blocked-on` is
- * exactly "Blocked", and inventing a second name for it ("Needs setup") is the
- * bug this table exists to prevent. It is spelled out only where a legend must
- * tell sibling states apart, and then it is the sentence's own words, capitalized.
+ * `label` is omitted whenever the five-word status is the whole truth -
+ * `blocked-on` is exactly "Blocked", and inventing a second status name for it
+ * ("Needs setup") is the bug this table exists to prevent. It is spelled out only
+ * where a surface must tell sibling states apart (a run's drift groups, a surface
+ * chip's need), and then it is the sentence's own words, capitalized, never a
+ * sixth coverage status.
  *
- * That rule is why `needs-setup` is a DIFFERENT wire status rather than a second
- * label for `blocked-on`: the server derives it by joining the gap against the
- * externals view, which the client could not do, so the two really are two
- * states — and the table names them accordingly, once each.
+ * `plain` is NOT here: which of the five words a wire status wears is decided once,
+ * in `@truecourse/shared`, by the same precedence tiers the rollups use. A label
+ * and a word can therefore never contradict each other.
  */
 interface GuardStatusVocab {
-  plain: GuardFlowPlainStatus;
-  /** Legend/chip label. Omitted ⇒ `GUARD_FLOW_STATUS_WORD[plain]`. */
+  /** The state's own name, for a surface that lists siblings side by side.
+   *  Omitted ⇒ the five-word status ({@link guardStatusWord}). */
   label?: string;
-  /** The plain sentence a detail row shows after the word — the gap kinds. */
+  /** The plain sentence a detail row shows after the word, the gap kinds. */
   sentence?: string;
   /** A longer explainer for a state whose name doesn't say what happened. */
   hint?: string;
 }
 
 const VOCAB = {
-  pass: { plain: 'passing' },
-  fail: { plain: 'failing' },
-  error: { plain: 'failing', label: 'Error', sentence: 'the test could not run' },
+  // The two RUN outcomes keep the verdict words wherever a run names its own
+  // results (a drift group header, a run tally). Their coverage word is still
+  // Succeeded / Failed, the questions differ, so the answers may.
+  pass: { label: 'Passing' },
+  fail: { label: 'Failing' },
+  error: { label: 'Error', sentence: 'the test could not run' },
   stale: {
-    plain: 'blocked',
     label: 'Stale',
-    hint: 'The bound spec text changed since generation — not run. Regenerate to re-anchor.',
+    hint: 'The bound spec text changed since generation, not run. Regenerate to re-anchor.',
   },
   orphaned: {
-    plain: 'blocked',
     label: 'Orphaned',
-    hint: 'The bound spec section no longer exists — not run. Regenerate to re-anchor.',
+    hint: 'The bound spec section no longer exists, not run. Regenerate to re-anchor.',
   },
-  guarded: { plain: 'passing', label: 'Not run yet', sentence: 'not run yet' },
+  // It PASSED, just not in this run. The word is "Succeeded"; the label and
+  // sentence say which execution earned it, so nobody reads a stale green as fresh.
+  guarded: { label: 'Passed earlier', sentence: 'passed when it was written, not in this run' },
+  'never-run': {
+    sentence: 'never executed',
+    hint: 'The test is committed but has never executed, not in a run, and not when it was written. Run `truecourse guard run` to find out what it proves.',
+  },
   ...(Object.fromEntries(
     awaitingDriverIds.map((id) => [
       id,
-      {
-        plain: 'blocked',
-        label: guardDriver(id)?.waitingLabel ?? id,
-        sentence: awaitingSentence(id),
-      },
+      { label: guardDriver(id)?.waitingLabel ?? id, sentence: awaitingSentence(id) },
     ]),
   ) as Record<(typeof awaitingDriverIds)[number], GuardStatusVocab>),
+  // The RUN outcome: the scenario exists, binds a supplied dependency, and was held
+  // back because nobody registered an instance of it. One registration away from a
+  // verdict, so it says which registration, the result's `blockedOn` names the
+  // dependency and the requirement behind that sentence.
+  blocked: {
+    label: 'Blocked',
+    sentence: 'needs a test subject you provide',
+    hint: 'The test binds a supplied dependency, a project, a corpus, credentials, that has no registered instance on this machine, so it did not run. Register one in dependencies.local.json.',
+  },
   // No label: this state IS "Blocked". What it needs is a SENTENCE, and the
   // capability nouns the gap names decide it (`guardGapNeed`).
-  'blocked-on': { plain: 'blocked', sentence: 'verification is blocked' },
+  'blocked-on': { sentence: 'verification is blocked' },
   // The one blocked state that is a TO-DO: the missing capability is an
-  // external service the user can hand guard an account for. It gets its own word
-  // (the comment above forbids a second name for `blocked-on`; this is a DIFFERENT
-  // wire status, derived from the externals view, precisely so the two can be told
-  // apart) and its own attention colour. The SERVICES ride the gap (`guardGapNeed`).
+  // external service the user can hand guard an account for. Its word is "Blocked"
+  // like every other blocker; what makes it worth its own wire status is the
+  // SERVICES it can name and the CTA it can offer (`guardGapNeed`), plus its own
+  // attention colour.
   'needs-setup': {
-    plain: 'needs-setup',
     sentence: 'needs an external service or seed data you can provide',
-    hint: 'Blocked on something you can provide: a third-party account (External APIs page) or seed data the seed script doesn’t create yet. Provide it, then re-run guard generate.',
+    hint: 'Blocked on something you can provide: a third-party account (Dependencies page) or seed data the seed script doesn’t create yet. Provide it, then re-run guard generate.',
   },
-  // The run OUTCOME `blocked`: the scenario binds a supplied dependency nobody has
-  // registered on this machine, so it never ran — the runner names the dependency.
-  blocked: {
-    plain: 'blocked',
-    label: 'Blocked',
-    sentence: 'blocked on a dependency you can register',
-    hint: 'The test binds a supplied dependency with no registered instance. Register it in the local dependency overlay, then re-run.',
-  },
-  // Committed and never executed — the same story as `guarded` without a birth run.
-  'never-run': { plain: 'passing', label: 'Never run', sentence: 'never run' },
-  untestable: { plain: 'blocked', label: 'Nothing testable', sentence: 'nothing testable' },
-  'no-claim': { plain: 'blocked', label: 'No testable claim', sentence: 'no testable claim' },
-  // The two realization gaps, kept apart because their remedies are opposite: an
-  // empty catalog is an EXTRACTION gap (teach the mapper this surface), while
-  // `unrealizable` is the real "the spec promises this, no code surface offers it".
+  untestable: { label: 'Nothing testable', sentence: 'nothing testable' },
+  'no-claim': { label: 'No testable claim', sentence: 'no testable claim' },
+  // The two realization gaps, kept apart because their remedies are opposite, and
+  // so are their WORDS: an empty catalog is an EXTRACTION gap that mapping the
+  // surface clears (Blocked), while `unrealizable` is the settled "the spec
+  // promises this, no code surface offers it" (Not testable).
   'no-interface': {
-    plain: 'blocked',
     label: 'No code path mapped',
     sentence: 'no code path mapped',
     hint: 'A required action has no executable interface in the catalog. Update the mapping, then regenerate the tests.',
   },
   unrealizable: {
-    plain: 'blocked',
     label: 'No code path does this',
     sentence: 'no code path does this',
     hint: 'The surface was examined and no interface path serves this flow.',
   },
-  // The user dismissed this claim's finding (won't-fix / noise) — an honest,
+  // The user dismissed this claim's finding (won't-fix / noise), an honest,
   // muted status, never a fail.
-  dismissed: { plain: 'blocked', label: 'Dismissed', sentence: 'dismissed' },
-  // Generate TRIED to author a test here and could not. Still `ungenerated` in
-  // plain words — nothing ran, so it is not a failing test — but its OWN label,
-  // because "we tried and could not" is a different fact from `unguarded`'s
-  // "nothing has been attempted", and the two used to read identically.
+  dismissed: { label: 'Dismissed', sentence: 'dismissed' },
+  // Generate TRIED to author a test here and could not. Blocked in plain words -
+  // nothing ran, so it is not a failing test, and re-running generate clears it -
+  // but its OWN label, because "we tried and could not" is a different fact from
+  // `unguarded`'s "nothing accounts for this", and the two used to read identically.
   'authoring-error': {
-    plain: 'ungenerated',
     label: 'Authoring error',
     sentence: 'couldn’t create the test',
-    hint: 'Generate tried to author a test here and failed — nothing ran, so there is no result. Re-run generate to retry.',
+    hint: 'Generate tried to author a test here and failed, nothing ran, so there is no result. Re-run generate to retry.',
   },
-  unguarded: { plain: 'ungenerated', sentence: 'no test yet' },
+  // Nothing accounts for this section at all, no flow, no gap, no claim. A HOLE in
+  // the coverage record rather than a verdict about the repo, which is why its word
+  // is Blocked and its sentence says what closes it.
+  unguarded: { sentence: 'nothing accounts for this yet' },
 } satisfies Record<GuardSectionCoverageStatus, GuardStatusVocab>;
 
 // Compile-time backstop: a new `GuardSectionCoverageStatus` (a new outcome,
 // driver, or gap kind) with no entry above makes `_UnmappedStatus` non-`never`
-// and fails the build — a state the UI can't name never ships.
+// and fails the build, a state the UI can't name never ships.
 type _UnmappedStatus = Exclude<GuardSectionCoverageStatus, keyof typeof VOCAB>;
 const _allStatusesNamed: _UnmappedStatus extends never ? true : never = true;
 void _allStatusesNamed;
 
 /**
  * A coverage status's vocabulary entry. The runtime twin of the backstop above: a
- * status the table never learned (a payload from a newer server) reads as
- * "blocked" — attention-needing, never blank — and throws under test so the
- * mapping is fixed rather than papered over.
+ * status the table never learned (a payload from a newer server) has no sentence
+ * of its own, its five-word status still speaks for it, and throws under test so
+ * the mapping is fixed rather than papered over.
  */
 function vocab(status: GuardSectionCoverageStatus): GuardStatusVocab {
   const entry: GuardStatusVocab | undefined = VOCAB[status];
   if (entry) return entry;
   if (import.meta.env.MODE === 'test') throw new Error(`Guard status with no plain status: ${status}`);
-  return { plain: 'blocked' };
+  return {};
 }
 
-/** A coverage status in plain words — one of the four. */
-export function guardPlainStatus(status: GuardSectionCoverageStatus): GuardFlowPlainStatus {
-  return vocab(status).plain;
-}
+/** A coverage status in plain words, one of the five. */
+export const guardPlainStatus = guardCoveragePlainStatus;
 
-/** The one WORD a status wears, wherever it appears. */
+/** The one WORD a status wears on a coverage surface, wherever it appears. */
 export function guardStatusWord(status: GuardSectionCoverageStatus): string {
   return GUARD_FLOW_STATUS_WORD[guardPlainStatus(status)];
 }
 
-/** The legend/chip label — the word itself unless a legend must name this state
- *  apart from its siblings. */
+/** The state's own name, for a surface that must tell siblings apart, the
+ *  five-word status unless this state needs naming apart from them. */
 export function guardStatusLabel(status: GuardSectionCoverageStatus): string {
   return vocab(status).label ?? guardStatusWord(status);
 }
@@ -220,28 +219,29 @@ export function guardStatusHint(status: GuardSectionCoverageStatus): string | un
   return vocab(status).hint;
 }
 
-/**
- * A flow's plain status — exactly one of the four, for every flow the wire can
- * carry. FAILING MEANS A TEST RAN AND FAILED (at birth or in a run): guard commits
- * failing tests, so a birth failure reaches the list as a `fail` surface and the
- * flow's own status carries it. A recorded birth failure the surface join lost
- * still decides, so that flow can never read blank.
- *
- * An AUTHORING error is deliberately NOT failing: nothing ran, so there is no
- * result to report. Such a flow has no test and no gap, which is exactly
- * "Not generated" — its detail says it will retry next generate.
- */
-export function guardFlowPlainStatus(
-  flow: Pick<GuardFlowListItem, 'status' | 'bucket' | 'findings'>,
-): GuardFlowPlainStatus {
-  if (flow.findings > 0) return 'failing';
-  if (flow.bucket === 'ungenerated') return 'ungenerated';
-  return guardPlainStatus(flow.status);
-}
+/** A flow's plain status, one of the five, derived once in `@truecourse/shared`
+ *  so `guard flows` and the Flows tab can never disagree about a flow. */
+export const guardFlowPlainStatus = sharedFlowPlainStatus;
 
 // ---------------------------------------------------------------------------
-// A TEST's status — the Tests tab's row word and the flow detail's test row.
+// A TEST's status, the Tests tab's row word and the flow detail's test row.
 // ---------------------------------------------------------------------------
+
+/**
+ * The RUN-VERDICT words. A scenario that executed keeps "Passing" / "Failing" -
+ * the ontology's verdict wording, while its section's and flow's COVERAGE reads
+ * "Succeeded" / "Failed". The two vocabularies answer different questions ("did
+ * this run prove out?" vs "what do we know about this spec?"), so a test row and
+ * the section it covers are allowed to word the same fact differently; nothing
+ * else may.
+ */
+export const GUARD_TEST_VERDICT_WORD: Record<GuardFlowPlainStatus, string> = {
+  succeeded: 'Passing',
+  failed: 'Failing',
+  blocked: GUARD_COVERAGE_STATUS_WORD.blocked,
+  'not-testable': GUARD_COVERAGE_STATUS_WORD['not-testable'],
+  'never-run': GUARD_COVERAGE_STATUS_WORD['never-run'],
+};
 
 /** A committed test's status and which execution decided it. */
 export interface GuardTestStatusView {
@@ -249,7 +249,7 @@ export interface GuardTestStatusView {
   plain: GuardFlowPlainStatus;
   /** True when no run covers the test and its BIRTH execution decided the status. */
   birth: boolean;
-  /** The one status word a row shows — "Passing", "Failing", "Failing (birth)". */
+  /** The one verdict word a row shows, "Passing", "Failing", "Failing (birth)". */
   word: string;
 }
 
@@ -257,7 +257,7 @@ export interface GuardTestStatusView {
  * What a committed test's status IS: the last run's outcome when a run covered
  * it, else the status the generate committed it with (guard commits a test that
  * failed its first execution, so a fresh clone paints its red tests red). A test
- * no run covered and no manifest names reads `guarded` — committed, never run.
+ * no run covered and no manifest names reads `guarded`, committed, never run.
  */
 export function guardTestStatusView(test: {
   /** The last run's outcome for this test, when the run had one. */
@@ -268,26 +268,32 @@ export function guardTestStatusView(test: {
   status?: GuardSectionCoverageStatus;
   stage?: GuardResultStage;
 }): GuardTestStatusView {
+  const neverRun = test.outcome == null && test.committed === 'never-run';
   const status: GuardSectionCoverageStatus =
-    test.status ?? test.outcome ?? (test.committed === 'failing' ? 'fail' : 'guarded');
-  const birth = test.stage ? test.stage === 'birth' : test.outcome == null;
+    test.status ??
+    test.outcome ??
+    (test.committed === 'failing' ? 'fail' : neverRun ? 'never-run' : 'guarded');
+  // A test with no birth execution has no birth verdict either: `birth` says which
+  // EXECUTION decided the status, and there was none.
+  const birth = test.stage ? test.stage === 'birth' : test.outcome == null && !neverRun;
   const plain = guardPlainStatus(status);
-  const word = plain === 'failing' && birth ? `${GUARD_FLOW_STATUS_WORD[plain]} (birth)` : GUARD_FLOW_STATUS_WORD[plain];
+  const verdict = GUARD_TEST_VERDICT_WORD[plain];
+  const word = plain === 'failed' && birth ? `${verdict} (birth)` : verdict;
   return { status, plain, birth, word };
 }
 
 // ---------------------------------------------------------------------------
-// The SENTENCE half of the pair — what a state needs, in plain words.
+// The SENTENCE half of the pair, what a state needs, in plain words.
 // ---------------------------------------------------------------------------
 
 /** The sentence for a surface whose authoring was ATTEMPTED and never finished. */
-export const GUARD_RETRY_SENTENCE = 'couldn’t create the test — will retry next generate';
+export const GUARD_RETRY_SENTENCE = 'couldn’t create the test, will retry next generate';
 
 /**
  * The LEAD of the sentence a REFUSED run puts in the retry sentence's place. The two
  * are opposite promises and must never be confused: an authoring error is
  * self-healing (the next generate re-authors and may succeed), while a refusal is a
- * fact about the world — the runner declined before anything was built or executed,
+ * fact about the world, the runner declined before anything was built or executed,
  * and every re-run declines identically until the configuration changes. Telling a
  * reader "will retry next generate" there sends them to run the same $35 command again.
  */
@@ -295,11 +301,11 @@ export const GUARD_BLOCKED_LEAD = 'nothing could be tested';
 
 /**
  * The blocking reason of a run-level refusal, as the sentence a surface with no test
- * carries: the lead above, then the runner's OWN message (never re-worded — it is the
+ * carries: the lead above, then the runner's OWN message (never re-worded, it is the
  * canonical wording every guard surface quotes).
  */
 export function guardBlockedSentence(reason: string): string {
-  return `${GUARD_BLOCKED_LEAD} — ${reason.trim()}`;
+  return `${GUARD_BLOCKED_LEAD}, ${reason.trim()}`;
 }
 
 /**
@@ -314,21 +320,21 @@ export function guardRefusalError<T extends { kind?: string; message: string }>(
 }
 
 /**
- * The sentence for a flow nothing has been attempted for yet — no test, no gap, no
- * error. "Not generated" is the state; this is what happens next, so the read is
- * never a bare dead end.
+ * The sentence for a flow nothing has been attempted for yet, no test, no gap, no
+ * error. "Blocked" is the word; this is what unblocks it, so the read is never a
+ * bare dead end.
  */
-export const GUARD_NOT_ATTEMPTED_SENTENCE = 'no test yet — will be attempted on the next generate';
+export const GUARD_NOT_ATTEMPTED_SENTENCE = 'no test yet, will be attempted on the next generate';
 
 /**
  * The sentence for a flow the specs no longer derive, kept for its committed test.
  * It stands WHERE THE GOAL WOULD BE, because the missing goal is what it explains.
  */
 export const GUARD_UNDERIVED_SENTENCE =
-  'No longer derived from your specs — kept because its test still runs.';
+  'No longer derived from your specs, kept because its test still runs.';
 
 /**
- * The MARKER for that same flow — the chip it wears beside its status, in a list
+ * The MARKER for that same flow, the chip it wears beside its status, in a list
  * row and in the detail header alike. The sentence above EXPLAINS; this is what a
  * reader spots while scanning. It is not a status and never borrows a status
  * colour: being underived says nothing about whether the flow's test passes.
@@ -336,31 +342,31 @@ export const GUARD_UNDERIVED_SENTENCE =
 export const GUARD_NOT_IN_SPECS_LABEL = 'Not in specs';
 
 /**
- * The marker a flow the USER ruled out wears — the same non-status idiom as the
+ * The marker a flow the USER ruled out wears, the same non-status idiom as the
  * one above, for the same reason: a dismissal is a decision about whether this
  * flow should be tested, not a verdict on whether it passes. It is derived from
- * `scenarios/decisions.json`, so it appears the instant the ruling is made — the
+ * `scenarios/decisions.json`, so it appears the instant the ruling is made, the
  * `dismissed` coverage status only follows on the next generate.
  */
 export const GUARD_DISMISSED_LABEL = 'Dismissed';
 
 /**
  * The marker a flow carries when the last generate produced a finding that is OUR
- * OWN defect — a `generation-defect` verdict or a fidelity rejection. Muted for
+ * OWN defect, a `generation-defect` verdict or a fidelity rejection. Muted for
  * the same reason as its siblings: it is not a status. Nothing was committed and
  * nothing in the repo is broken, so it must never read as drift or take a status
  * colour; the flow simply re-authors on the next generate.
  */
 export const GUARD_TOOL_DEFECT_LABEL = 'Tool defect';
 
-/** The hover behind that marker — whose fault it is, and what happens next. */
+/** The hover behind that marker, whose fault it is, and what happens next. */
 export const GUARD_TOOL_DEFECT_HINT =
-  'Guard wrote a test it judged faulty (a wrong assertion, a wrong endpoint), so nothing was committed. This is our defect, not drift in your code — the flow re-authors on the next generate.';
+  'Guard wrote a test it judged faulty (a wrong assertion, a wrong endpoint), so nothing was committed. This is our defect, not drift in your code, the flow re-authors on the next generate.';
 
-/** What a dismissed flow's detail says, under the marker — the whole consequence
+/** What a dismissed flow's detail says, under the marker, the whole consequence
  *  of the ruling in one line, so "undo" is never a leap of faith. */
 export const GUARD_FLOW_DISMISSED_SENTENCE =
-  'Ruled out of testing — the next generate drops this flow and deletes its tests.';
+  'Ruled out of testing, the next generate drops this flow and deletes its tests.';
 
 /** The ruling itself, as the button says it. */
 export const GUARD_DISMISS_FLOW_ACTION = 'Don’t test this flow';
@@ -371,7 +377,7 @@ export const GUARD_DISMISS_FLOW_HINT =
 
 /**
  * The capability nouns a `blocked-on` reason names, in the words a user would
- * use. Ordered — the first pattern that matches wins, so "a recipe `api` block"
+ * use. Ordered, the first pattern that matches wins, so "a recipe `api` block"
  * reads as the API recipe and never as a bare "api".
  */
 const CAPABILITY_NEEDS: [RegExp, string][] = [
@@ -381,17 +387,17 @@ const CAPABILITY_NEEDS: [RegExp, string][] = [
   [/network|internet/i, 'needs network access'],
   [/llm|model provider/i, 'needs an LLM provider'],
   [/database|datastore|\bdb\b|postgres|mysql|sqlite/i, 'needs a database'],
-  // The "pre-existing DATA nothing seeds" noun — a record the API cannot
+  // The "pre-existing DATA nothing seeds" noun, a record the API cannot
   // create through its own endpoints and no fixture provides. AFTER the database row,
   // which owns the INFRASTRUCTURE reading (`datastore` is a db, not a missing row).
   // `\bdata\b` is word-anchored on purpose: `database`, `metadata`, `dataset` must
   // not land here on a substring.
   [/missing[- ]?data|\bseed\b|\bfixture\b|\bdata\b/i, 'needs seed data'],
   // The generic third-party nouns. BEFORE the running-service row, which
-  // `external-service` would otherwise match and read as "needs a running service" —
+  // `external-service` would otherwise match and read as "needs a running service" -
   // the opposite triage (that one is yours to start; this one is someone else's).
   // A reason naming a DETECTED service (`stripe`) matches no row and falls through
-  // to `needs stripe`, which is exactly right — no row is needed per service.
+  // to `needs stripe`, which is exactly right, no row is needed per service.
   [
     /external[- ]?(service|api|system)|third[- ]?party|\bsaas\b|integration|upstream/i,
     'needs an external service (or a stub)',
@@ -407,7 +413,7 @@ function capabilityNeed(capability: string): string {
 }
 
 /**
- * Several needs as ONE English phrase — "needs credentials and network access",
+ * Several needs as ONE English phrase, "needs credentials and network access",
  * not a `·`-separated list of fragments. The shared "needs " lead is said once.
  */
 function joinNeeds(needs: string[]): string {
@@ -420,17 +426,17 @@ function joinNeeds(needs: string[]): string {
 }
 
 // ---------------------------------------------------------------------------
-// NEEDS SETUP — the words for the one blocked state that is a to-do.
+// NEEDS SETUP, the words for the one blocked state that is a to-do.
 // ---------------------------------------------------------------------------
 
-/** "open-meteo", "open-meteo and stripe" — a list of service names as one phrase. */
+/** "open-meteo", "open-meteo and stripe", a list of service names as one phrase. */
 function joinServiceLabels(services: string[]): string {
   const labels = services.map(guardSetupServiceLabel);
   if (labels.length <= 1) return labels[0] ?? 'an external service';
   return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
 }
 
-/** "open-meteo", "open-meteo and stripe" — the services a needs-setup row is about. */
+/** "open-meteo", "open-meteo and stripe", the services a needs-setup row is about. */
 export function guardNeedsSetupServiceList(needsSetup: GuardNeedsSetup): string {
   return joinServiceLabels(needsSetupServices(needsSetup));
 }
@@ -443,20 +449,20 @@ export function guardNeedsSetupServiceList(needsSetup: GuardNeedsSetup): string 
  * account already provided whose flows the next generate will author.
  *
  * The banner that has room for a real sentence uses {@link guardNeedsSetupHeadline}
- * instead — same state, same facts, told at the length the surface affords.
+ * instead, same state, same facts, told at the length the surface affords.
  */
 export function guardNeedsSetupNeed(needsSetup: GuardNeedsSetup): string {
   if (needsSetupIsDone(needsSetup)) {
-    return `${guardNeedsSetupServiceList(needsSetup)} is set up — re-run guard generate to author these flows`;
+    return `${guardNeedsSetupServiceList(needsSetup)} is set up, re-run guard generate to author these flows`;
   }
-  // The seed exists — its being outstanding means it doesn't create this data, and
+  // The seed exists, its being outstanding means it doesn't create this data, and
   // "needs setup: seed data" would send the reader to a page with no row for it.
   if (needsSetup.services.every((s) => s === MISSING_DATA_NOUN)) return SEED_DATA_NEED;
   return `needs setup: ${guardNeedsSetupServiceList(needsSetup)}`;
 }
 
 /**
- * The FULL sentence the needs-setup banner leads with — the compact phrase is
+ * The FULL sentence the needs-setup banner leads with, the compact phrase is
  * three words and a colon, which is a label, not an explanation. This says what
  * is actually going on: nothing can be tested yet, these named third parties are
  * why, and an account clears it (the links beside it are how).
@@ -464,7 +470,7 @@ export function guardNeedsSetupNeed(needsSetup: GuardNeedsSetup): string {
  * Seed data is handled apart: it is not a service anyone signs up for, so it
  * never reads as one. An OUTSTANDING seed noun only exists when a seed script is
  * already declared AND the last generate ran with it (the setup index carries
- * `missing-data → incomplete` for exactly that case) — so the sentence states the
+ * `missing-data → incomplete` for exactly that case), so the sentence states the
  * verdict: the seed ran, and it doesn't create the data this flow needs.
  */
 export function guardNeedsSetupHeadline(needsSetup: GuardNeedsSetup): string {
@@ -474,25 +480,25 @@ export function guardNeedsSetupHeadline(needsSetup: GuardNeedsSetup): string {
 
   if (needsSetupIsDone(needsSetup)) {
     const list = joinServiceLabels(outstanding);
-    return `${list} ${outstanding.length > 1 ? 'are' : 'is'} already set up — these tests just haven’t been authored since.`;
+    return `${list} ${outstanding.length > 1 ? 'are' : 'is'} already set up, these tests just haven’t been authored since.`;
   }
   const seed = external.length < outstanding.length ? SEED_DATA_SENTENCE : '';
   if (external.length === 0) {
-    return 'Not testable yet — the seed script ran, but doesn’t create the data this flow needs.';
+    return 'Not testable yet, the seed script ran, but doesn’t create the data this flow needs.';
   }
   return (
-    `Not testable yet — ${joinServiceLabels(external)} ${plural ? 'are external services that need accounts' : 'is an external service that needs an account'}` +
+    `Not testable yet, ${joinServiceLabels(external)} ${plural ? 'are external services that need accounts' : 'is an external service that needs an account'}` +
     ` before guard can test against ${plural ? 'them' : 'it'}.${seed}`
   );
 }
 
-/** The seed-data half of the state — the noun that is not a service — in the
+/** The seed-data half of the state, the noun that is not a service, in the
  *  banner's words. */
 const SEED_DATA_NEED = 'needs data the seed script doesn’t create yet';
 const SEED_DATA_SENTENCE = ` It also ${SEED_DATA_NEED}.`;
 
 /**
- * The CTA for ONE service — the words of a link that lands on that service's card.
+ * The CTA for ONE service, the words of a link that lands on that service's card.
  * A gap naming several outstanding services renders one of these per service: a
  * single link could only ever open the first, leaving the rest unreachable.
  */
@@ -501,14 +507,14 @@ export function guardProvideServiceCta(service: string): string {
 }
 
 /**
- * The CTA a needs-setup surface renders when it has no ONE service to name — the
+ * The CTA a needs-setup surface renders when it has no ONE service to name, the
  * done sub-state's command, or the whole-list fallback for a gap whose only
  * services are unlinkable. Per-service links use {@link guardProvideServiceCta}.
  */
 export function guardNeedsSetupCta(needsSetup: GuardNeedsSetup): string {
   if (needsSetupIsDone(needsSetup)) return 'Re-run guard generate';
-  // "Provide seed data" would name the External APIs page, which has no row for a
-  // seed — the action is editing the seed script, so the CTA says so.
+  // "Provide seed data" would name the Dependencies page, which has no row for a
+  // seed, the action is editing the seed script, so the CTA says so.
   if (needsSetup.services.every((s) => s === MISSING_DATA_NOUN)) return 'Extend the seed script';
   return `Provide ${guardNeedsSetupServiceList(needsSetup)}`;
 }
@@ -518,19 +524,19 @@ export const GUARD_REGENERATE_COMMAND = 'truecourse guard generate';
 
 /**
  * The one line UNDER the banner headline: what the headline deliberately leaves
- * out — that a throwaway sandbox account is enough, and that providing one is
+ * out, that a throwaway sandbox account is enough, and that providing one is
  * step 1 of 2. It must never restate the headline; the legend's standalone
  * explainer ({@link guardStatusHint}) still says the whole thing for a reader
  * who has no banner in front of them.
  */
-export const GUARD_NEEDS_SETUP_NEXT = `A real or sandbox account both work — provide one, then re-run \`${GUARD_REGENERATE_COMMAND}\` to author these tests.`;
+export const GUARD_NEEDS_SETUP_NEXT = `A real or sandbox account both work, provide one, then re-run \`${GUARD_REGENERATE_COMMAND}\` to author these tests.`;
 
-/** The command that DRAFTS a seed — the one action a missing-data gap
+/** The command that DRAFTS a seed, the one action a missing-data gap
  *  with no `api.seed` has, spelled once for every surface that offers it. */
 export const GUARD_SEED_INIT_COMMAND = 'truecourse guard seed --init';
 
 /**
- * What this gap concretely NEEDS, in plain words — the sentence half of the pair.
+ * What this gap concretely NEEDS, in plain words, the sentence half of the pair.
  * An awaiting-driver gap names the driver it waits on; a `blocked-on` gap
  * translates the capability nouns its reason carries; the rest read the ONE
  * sentence table above, by the coverage status their kind is.
@@ -538,7 +544,7 @@ export const GUARD_SEED_INIT_COMMAND = 'truecourse guard seed --init';
 export function guardGapNeed(gap: GuardFlowGap): string {
   if (gap.kind === 'awaiting-driver') return gap.driver ? awaitingSentence(gap.driver) : gap.label;
   // A gap promoted to needs-setup names the SERVICE, never a generic
-  // noun — "needs setup: open-meteo" is the whole triage in three words.
+  // noun, "needs setup: open-meteo" is the whole triage in three words.
   if (gap.blocker?.kind === 'unsupported-capability') return gap.reason;
   if (gap.blocker?.kind === 'configuration') return gap.blocker.action ?? gap.reason;
   if (gap.blocker?.kind === 'generation') return gap.reason;
@@ -552,7 +558,7 @@ export function guardGapNeed(gap: GuardFlowGap): string {
 }
 
 /**
- * The WHY half of the pair, as its OWN line — "Needs credentials and network
+ * The WHY half of the pair, as its OWN line, "Needs credentials and network
  * access." A detail row answers two questions with two elements: the status chip
  * says WHAT state this surface is in (the word above), this says WHY.
  *
@@ -561,7 +567,7 @@ export function guardGapNeed(gap: GuardFlowGap): string {
  * simply waiting for the next generate. Neither is ever a blank row.
  *
  * A `blocked` reason OUTRANKS all of that, gap included: when the run was refused,
- * nothing about this surface was examined — not its gap, not its authoring — so the
+ * nothing about this surface was examined, not its gap, not its authoring, so the
  * only true thing to say is what stopped the run.
  */
 export function guardWhyNoTest(
@@ -578,15 +584,15 @@ export function guardWhyNoTest(
   return `${why.charAt(0).toUpperCase()}${why.slice(1)}.`;
 }
 
-/** A surface's own name — "CLI", "Web" — never "CLI test". */
+/** A surface's own name, "CLI", "Web", never "CLI test". */
 export function surfaceLabel(surface: GuardDriverId): string {
   return guardDriver(surface)?.label ?? surface;
 }
 
 // ---------------------------------------------------------------------------
-// The Flows list FILTER — ONE domain read by the list's dropdown, the overview's
-// stat chips and the row predicate alike, so a chip's count can never differ
-// from what clicking it shows.
+// The Flows list FILTER, ONE domain read by the list's filter bar and the row
+// predicate alike, so a chip's count can never differ from what clicking it
+// shows.
 // ---------------------------------------------------------------------------
 
 /** What the Flows list narrows to: a status word, the not-in-specs marker, or everything. */

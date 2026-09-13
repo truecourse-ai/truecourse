@@ -7,9 +7,9 @@
 import { Loader2, Plug } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PageHeader } from '@/preview/ui/bits';
-import { GuardDependencyDetail } from '@/preview/vendor/components/guard/GuardDependencyDetail';
-import { useGuardDependencies } from '@/preview/vendor/hooks/useGuardDependencies';
-import { useGuardView } from '@/preview/vendor/hooks/useGuardView';
+import { GuardDependencyDetail } from '@/components/guard/GuardDependencyDetail';
+import { useGuardDependencies } from '@/hooks/useGuardDependencies';
+import { useGuardView } from '@/hooks/useGuardView';
 import type { Repo } from '@/preview/data/types';
 import { useGuardTabJump } from './tab-jump';
 import { useGuardRefresh } from './use-guard-refresh';
@@ -29,7 +29,7 @@ export function DependencyPage({ repo, name }: { repo: Repo; name: string }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader
-        crumbs={[{ label: 'Dependencies', to: `/preview/repos/${repo.id}/dependencies` }]}
+        crumbs={[{ label: 'Dependencies', to: `/repos/${repo.id}/dependencies` }]}
         title={dependency?.name ?? 'Dependency'}
       />
       <div className="relative min-h-0 flex-1 overflow-hidden">

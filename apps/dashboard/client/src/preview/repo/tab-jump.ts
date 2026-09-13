@@ -5,7 +5,7 @@
  * real dashboard's hook and writes the destination as `?section=guard&tab=<id>`
  * beside the selection it carries (`?flow=`, `?interface=`, `?dependency=`,
  * `?doc=`+`?section=`). The real repo page reads the tab out of that param; the
- * preview reads it out of the PATH (`/preview/repos/:slug/:tab`), so the param
+ * preview reads it out of the PATH ('/repos/:slug/:tab'), so the param
  * alone would land nowhere and a call to action would quietly do nothing.
  *
  * This hook is the one line of translation, and only that: it moves the tab the
@@ -23,7 +23,6 @@
 
 import { useEffect } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { PREVIEW_BASE } from '@/preview/shell/PreviewShell';
 import { DOCUMENTS_BASE, conflictHref, docHref } from '@/preview/pages/context-hrefs';
 import { flowHref, flowsHref } from '@/preview/pages/flow-hrefs';
 
@@ -94,7 +93,7 @@ export function useGuardTabJump(repoId?: string): void {
     const query = next.toString();
     navigate(
       {
-        ...(path ? { pathname: `${PREVIEW_BASE}/repos/${slug}/${path}` } : {}),
+        ...(path ? { pathname: `/repos/${slug}/${path}` } : {}),
         search: query ? `?${query}` : '',
       },
       { replace: true },

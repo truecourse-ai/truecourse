@@ -27,15 +27,15 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Loader2, RotateCw } from 'lucide-react';
 import type { GuardSetupReport } from '@truecourse/shared';
-import type { GuardGenerateReport, GuardHistoryEntry } from '@/preview/vendor/shared';
+import type { GuardGenerateReport, GuardHistoryEntry } from '@truecourse/shared';
 import { Button } from '@/components/ui/button';
 import { listSessionRuns, type PublicSessionRun } from '@/lib/api';
 import { connectSocket } from '@/lib/socket';
 import { RUN_STATUS_META, commandLabel, runChecklist } from '@/components/sessions/run-model';
 import { useGuardGenerate } from '@/hooks/useGuardGenerate';
-import * as api from '@/preview/vendor/lib/api';
-import { GUARD_OUTCOMES } from '@/preview/vendor/lib/guard-drifts';
-import { guardStatusMeta } from '@/preview/vendor/lib/guard-status';
+import * as api from '@/lib/api';
+import { GUARD_OUTCOMES } from '@/lib/guard-drifts';
+import { guardStatusMeta } from '@/lib/guard-status';
 import { PageHeader } from '@/preview/ui/bits';
 import {
   RUN_STATUS_TONE,
@@ -48,7 +48,6 @@ import { usePreviewState } from '@/preview/shell/preview-state';
 import { useRunTrigger } from '@/preview/shell/use-run-trigger';
 import { jobCommand, jobRepoFullName, waitingFact } from '@/preview/shell/use-active-jobs';
 import { activityHref, conversationHref, relativeTime } from '@/preview/shell/real-runs';
-import { PREVIEW_BASE } from '@/preview/shell/base';
 import type { Repo } from '@/preview/data/types';
 import { useGuardRefresh } from './use-guard-refresh';
 import { guardRunVerdict, useGuardRunList } from './use-guard-run-list';
@@ -297,8 +296,8 @@ export function PipelineTab({ repo }: { repo: Repo }) {
         onOpen: () =>
           navigate(
             lastRun
-              ? `${PREVIEW_BASE}/repos/${repo.id}/runs/${encodeURIComponent(lastRun.runId)}`
-              : `${PREVIEW_BASE}/repos/${repo.id}/runs`,
+              ? `/repos/${repo.id}/runs/${encodeURIComponent(lastRun.runId)}`
+              : `/repos/${repo.id}/runs`,
           ),
         onRerun: () => trigger.start(RUN),
       },

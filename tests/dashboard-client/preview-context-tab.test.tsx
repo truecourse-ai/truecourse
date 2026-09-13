@@ -115,17 +115,17 @@ function renderAt(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/preview/*" element={<PreviewApp />} />
+        <Route path="/*" element={<PreviewApp />} />
       </Routes>
       <Toaster />
     </MemoryRouter>,
   );
 }
 
-const CONTEXT_TAB = `/preview/repos/${REPO.id}/context`;
+const CONTEXT_TAB = `/repos/${REPO.id}/context`;
 
 beforeEach(() => {
-  window.history.replaceState({}, '', '/preview');
+  window.history.replaceState({}, '', '/');
 });
 
 afterEach(() => {
@@ -145,7 +145,7 @@ describe("the repository's Context tab", () => {
     const own = items[0]!;
     expect(within(own).getByRole('link', { name: 'acme/web' })).toHaveAttribute(
       'href',
-      '/preview/context/documents?source=repo-acme-web',
+      '/context/documents?source=repo-acme-web',
     );
     expect(within(own).getByText('Synced')).toBeInTheDocument();
     expect(within(own).getByText('repository')).toBeInTheDocument();
@@ -196,7 +196,7 @@ describe("the repository's Context tab", () => {
     renderAt(CONTEXT_TAB);
     expect(await screen.findByRole('link', { name: 'Add context' })).toHaveAttribute(
       'href',
-      '/preview/context',
+      '/context',
     );
   });
 });
@@ -217,7 +217,7 @@ describe('what the console no longer has', () => {
 
   it('has no Tests tab either: the flows are the workspace\'s, and a bare address lands on Runs', async () => {
     serve();
-    renderAt(`/preview/repos/${REPO.id}`);
+    renderAt(`/repos/${REPO.id}`);
     const menu = await screen.findByRole('navigation', { name: 'Repository sections' });
     expect(within(menu).queryByRole('link', { name: 'Tests' })).toBeNull();
     expect(within(menu).queryByRole('link', { name: 'Flows' })).toBeNull();

@@ -119,7 +119,7 @@ describe('the missing-data seed hint', () => {
     expect(guardSetupServiceLabel('missing-data')).toBe('seed data');
     expect(guardSetupServiceLabel('open-meteo')).toBe('open-meteo');
     expect(guardNeedsSetupNeed({ services: [], provided: ['missing-data'] })).toBe(
-      'seed data is set up — re-run guard generate to author these flows',
+      'seed data is set up, re-run guard generate to author these flows',
     );
   });
 });

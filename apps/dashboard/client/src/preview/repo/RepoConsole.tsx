@@ -13,17 +13,19 @@
  *
  * FLOWS ARE NOT A TAB HERE any more: a flow is the workspace's, listed across
  * every repository on the Flows page, and one flow is a page of its own
- * (`/preview/flows/<id>?repo=<id>`). Generating them is still a REPOSITORY
+ * ('/flows/<id>?repo=<id>'). Generating them is still a REPOSITORY
  * action, so it is the Pipeline tab's generation row.
  *
  * DOCUMENTATION IS NOT A TAB HERE any more: a source is a workspace object and
  * the corpus is the workspace's, so the documents, their coverage, their
  * conflicts and the scan that curates them live on Context, and a document's
- * coverage page is `/preview/context/doc/<ref>?repo=<id>`. This tab only says
+ * coverage page is '/context/doc/<ref>?repo=<id>'. This tab only says
  * which of them this repository reads. The agent's own work is not a tab
- * either: it lives on the Agent page, narrowed to this repository. There is no
- * pull request page: a PR is seen through its runs (the Pull request filter in
- * Runs).
+ * either: it lives on the Agent page, narrowed to this repository.
+ *
+ * PULL REQUESTS are a tab beside Runs: the gate's list of this repository's
+ * pull requests with the check each one got. A run of a pull request head is
+ * still a row of Runs; this tab is the list a reviewer reads.
  *
  * The tab is in the URL, so a tab is a place: it can be linked, and a run can
  * hand a flow to the Flows page without either of them owning the other's pane.
@@ -35,19 +37,20 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { PageHeader, ProviderIcon, SideMenu } from '@/preview/ui/bits';
 import { StatusWord, CONCLUSION_TONE } from '@/preview/ui/status-word';
 import { usePreviewState } from '@/preview/shell/preview-state';
-import { PREVIEW_BASE } from '@/preview/shell/PreviewShell';
 import { ContextTab } from './ContextTab';
 import { DependenciesTab } from './DependenciesTab';
 import { DependencyPage } from './DependencyPage';
 import { InterfacePage } from './InterfacePage';
 import { InterfacesTab } from './InterfacesTab';
 import { PipelineTab } from './PipelineTab';
+import { PullsTab } from './PullsTab';
 import { RunPage } from './RunPage';
 import { RunsTab } from './RunsTab';
 import { SettingsTab } from './SettingsTab';
 
 const TABS = [
   { id: 'runs', label: 'Runs', group: 'work' },
+  { id: 'pulls', label: 'Pull requests', group: 'work' },
   { id: 'pipeline', label: 'Pipeline', group: 'work' },
   { id: 'context', label: 'Context', group: 'setup' },
   { id: 'interfaces', label: 'Interfaces', group: 'setup' },
@@ -84,7 +87,7 @@ export default function RepoConsole() {
         body={
           <>
             Nothing is connected under that address.{' '}
-            <Link to={`${PREVIEW_BASE}/code`} className="text-primary hover:underline">
+            <Link to={'/code'} className="text-primary hover:underline">
               Open Code
             </Link>
             .
@@ -97,7 +100,7 @@ export default function RepoConsole() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader
-        crumbs={[{ label: 'Code', to: `${PREVIEW_BASE}/code` }]}
+        crumbs={[{ label: 'Code', to: '/code' }]}
         icon={<ProviderIcon provider={repo.provider} className="mr-1.5 inline-block h-4 w-4 align-text-bottom" />}
         title={repo.fullName}
         subtitle={
@@ -119,7 +122,7 @@ export default function RepoConsole() {
       {llmProvider === 'missing' && (
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-amber-500/30 px-6 py-1.5 text-[11px] text-amber-500">
           No LLM provider configured. The agent cannot run until one is set.
-          <Link to={`${PREVIEW_BASE}/settings/models`} className="font-medium underline">
+          <Link to={'/settings/models'} className="font-medium underline">
             Set one in Settings
           </Link>
         </div>
@@ -131,11 +134,11 @@ export default function RepoConsole() {
           activeId={active}
           groups={[
             {
-              items: TABS.filter((t) => t.group === 'work').map((t) => ({ id: t.id, label: t.label, to: `${PREVIEW_BASE}/repos/${repo.id}/${t.id}` })),
+              items: TABS.filter((t) => t.group === 'work').map((t) => ({ id: t.id, label: t.label, to: `/repos/${repo.id}/${t.id}` })),
             },
             {
               label: 'Setup',
-              items: TABS.filter((t) => t.group === 'setup').map((t) => ({ id: t.id, label: t.label, to: `${PREVIEW_BASE}/repos/${repo.id}/${t.id}` })),
+              items: TABS.filter((t) => t.group === 'setup').map((t) => ({ id: t.id, label: t.label, to: `/repos/${repo.id}/${t.id}` })),
             },
           ]}
         />
@@ -145,16 +148,21 @@ export default function RepoConsole() {
             // The three pieces of work this repository runs, each with what it
             // last did and a way to run it again.
             <PipelineTab repo={repo} />
+          ) : active === 'pulls' ? (
+            // Every pull request the gate checked, over
+            // '/api/ee/github/repos/<owner>/<repo>/runs', one row per pull
+            // request wearing the check its newest head got.
+            <PullsTab repo={repo} />
           ) : active === 'settings' ? (
             <SettingsTab repo={repo} />
           ) : active === 'context' ? (
-            // The sources are the WORKSPACE's, read over `/api/context/sources`,
+            // The sources are the WORKSPACE's, read over '/api/context/sources',
             // and the switches save this repository's links over
-            // `/api/repos/<id>/context/bindings`.
+            // '/api/repos/<id>/context/bindings'.
             <ContextTab repo={repo} />
           ) : active === 'interfaces' ? (
             // The interface catalog is derived from this repository's own tree,
-            // read over `/api/repos/<id>/guard/interfaces`: the full-width
+            // read over '/api/repos/<id>/guard/interfaces': the full-width
             // catalog of screens, operations and commands, and each row as its
             // own page.
             interfaceId ? (
@@ -165,7 +173,7 @@ export default function RepoConsole() {
           ) : active === 'dependencies' ? (
             // The dependency catalog is what this repository's setup stored,
             // joined with the instances registered through this page, over
-            // `/api/repos/<id>/guard/dependencies`.
+            // '/api/repos/<id>/guard/dependencies'.
             dependencyName ? (
               <DependencyPage repo={repo} name={decodeURIComponent(dependencyName)} />
             ) : (
@@ -174,7 +182,7 @@ export default function RepoConsole() {
           ) : (
             // Every run the server stored, the baseline runs and the
             // pull-request head runs the gate wrote, over
-            // `/api/repos/<id>/guard/history?all=1`, and one run's snapshot with
+            // '/api/repos/<id>/guard/history?all=1', and one run's snapshot with
             // its evidence as its own page.
             runId ? (
               <RunPage repo={repo} runId={decodeURIComponent(runId)} />

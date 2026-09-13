@@ -73,10 +73,10 @@ beforeEach(() => {
       store,
       appSlug: 'tc-gate',
       appUrl: 'http://localhost:3000',
-      setupRedirectPath: '/preview?connect=1',
+      setupRedirectPath: '/code?connect=1',
       setupRedirectPaths: {
-        'context-add': '/preview/context?add=repository',
-        'code-connect': '/preview/code?connect=1',
+        'context-add': '/context?add=repository',
+        'code-connect': '/code?connect=1',
       },
       octokitFor: () => stubOctokit,
       lookupInstallationAccount: lookupAccount,
@@ -152,7 +152,7 @@ describe('connect router', () => {
       .get('/api/ee/github/setup')
       .query({ installation_id: '100', state: 'org_A' })
       .expect(302)
-      .expect('location', 'http://localhost:3000/preview?connect=1');
+      .expect('location', 'http://localhost:3000/code?connect=1');
     // Ownership is unchanged.
     expect((await store.getInstallation(100))?.workspaceOrgId).toBe('org_OTHER');
   });
@@ -215,7 +215,7 @@ describe('connect router', () => {
 
   it('lands the setup callback on the path its host declared', async () => {
     await seedInstallation(null);
-    // A second host, whose SPA has no /preview at all.
+    // A second host, declaring a different landing path.
     const eeApp = express();
     eeApp.use(express.json());
     eeApp.use((req, _res, next) => {
@@ -253,7 +253,7 @@ describe('connect router', () => {
       .get('/api/ee/github/setup')
       .query({ installation_id: '100', state: 'org_A:context-add' })
       .expect(302)
-      .expect('location', 'http://localhost:3000/preview/context?add=repository');
+      .expect('location', 'http://localhost:3000/context?add=repository');
     expect((await store.getInstallation(100))?.workspaceOrgId).toBe('org_A');
   });
 
@@ -267,7 +267,7 @@ describe('connect router', () => {
       .get('/api/ee/github/setup')
       .query({ installation_id: '100', state: 'org_A:elsewhere' })
       .expect(302)
-      .expect('location', 'http://localhost:3000/preview?connect=1');
+      .expect('location', 'http://localhost:3000/code?connect=1');
     await request(app)
       .get('/api/ee/github/setup')
       .query({ installation_id: '100', state: 'org_B:context-add' })

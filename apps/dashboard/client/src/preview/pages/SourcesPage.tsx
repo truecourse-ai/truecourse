@@ -8,7 +8,7 @@
  * status word, and a failure carries the source's own `statusNote` verbatim.
  *
  * A row does ONE thing: on a single click it opens the source's own page
- * (`/preview/context/sources/<id>`). What can be DONE to a source — Sync now,
+ * (`/context/sources/<id>`). What can be DONE to a source — Sync now,
  * Pause / Resume, Remove — is that page's header, and nowhere else.
  *
  * There is nothing to narrow a source list along that the search does not
@@ -24,7 +24,7 @@ import {
 } from '@truecourse/shared';
 import { IndexTable } from '@/preview/ui/index-table';
 import { CONTEXT_SYNC_TONE, CONTEXT_SYNC_WORD, StatusWord, tallyOf } from '@/preview/ui/status-word';
-import { formatRelativeTime } from '@/preview/vendor/shared/format/relative-time';
+import { formatRelativeTime } from '@truecourse/shared';
 import { useContextSignal, useContextSources } from '@/preview/shell/use-context';
 import { ContextFrame } from './ContextFrame';
 import { sourceHref } from './context-hrefs';

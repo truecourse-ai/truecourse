@@ -10,7 +10,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { toPreviewRepo } from '@/preview/data/real-repos';
-import type { GuardStatusSummary } from '@/preview/vendor/shared';
+import type { GuardStatusSummary } from '@truecourse/shared';
 import CodePage from '@/preview/pages/CodePage';
 
 const state = vi.hoisted(() => ({ repos: [] as ReturnType<typeof toPreviewRepo>[] }));
@@ -60,10 +60,10 @@ function serve(initial = summary()) {
   return server;
 }
 function renderCode() {
-  return render(<MemoryRouter initialEntries={['/preview/code']}><Routes>
-    <Route path="/preview/code" element={<CodePage />} />
-    <Route path="/preview/repos/:id" element={<p>Console destination</p>} />
-    <Route path="/preview/repos/:id/runs" element={<p>Runs destination</p>} />
+  return render(<MemoryRouter initialEntries={['/code']}><Routes>
+    <Route path="/code" element={<CodePage />} />
+    <Route path="/repos/:id" element={<p>Console destination</p>} />
+    <Route path="/repos/:id/runs" element={<p>Runs destination</p>} />
   </Routes></MemoryRouter>);
 }
 function row() { return within(screen.getByText(repo.fullName).closest('tr')!); }
@@ -112,7 +112,7 @@ describe('Code, the repositories and their stored summaries', () => {
     expect(await screen.findByText('no corpus yet')).toBeInTheDocument();
     expect(row().getAllByText('no baseline yet')).toHaveLength(1);
     expect(row().getByText('—')).toBeInTheDocument();
-    expect(row().getByRole('link')).toHaveAttribute('href', `/preview/agent?repo=${repo.id}`);
+    expect(row().getByRole('link')).toHaveAttribute('href', `/agent?repo=${repo.id}`);
   });
 
   it('reports failed reads instead of claiming there is no corpus, and recovers on reconnect', async () => {

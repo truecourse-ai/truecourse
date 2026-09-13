@@ -1,11 +1,11 @@
 /**
- * The preview's root: the shell, the routes, and the job toasts that announce
+ * The dashboard's root: the shell, the routes, and the job toasts that announce
  * a started job with a link to the agent's page.
  *
- * ROUTING: this is a DESCENDANT route set, mounted at `/preview/*` by the real
- * app's router, so every path here is relative to `/preview` and this component
- * brings no router of its own. That is what lets a test render it under a
- * MemoryRouter, and it is why the shell's links are written absolute.
+ * ROUTING: every address the product has is a route here, and this component
+ * brings no router of its own — {@link App} mounts it under one. That is what
+ * lets a test render it under a MemoryRouter, and it is why the shell's links
+ * are written absolute.
  *
  * A repository address without a tab lands on Runs, and a settings
  * address without a sub-tab lands on Members: the two defaults are expressed as

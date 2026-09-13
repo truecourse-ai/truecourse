@@ -76,11 +76,11 @@ afterEach(() => {
 
 describe('unlinking a repository from its settings', () => {
   it('returns to Home instead of stranding the user on the dead repo route', async () => {
-    window.history.replaceState({}, '', '/preview/repos/spiderhands-filecli/settings');
+    window.history.replaceState({}, '', '/repos/spiderhands-filecli/settings');
     render(
-      <MemoryRouter initialEntries={['/preview/repos/spiderhands-filecli/settings']}>
+      <MemoryRouter initialEntries={['/repos/spiderhands-filecli/settings']}>
         <Routes>
-          <Route path="/preview/*" element={<PreviewApp />} />
+          <Route path="/*" element={<PreviewApp />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -96,11 +96,11 @@ describe('unlinking a repository from its settings', () => {
 
   it('says why when the server refuses, and lets the row come back', async () => {
     refusal = 'Another process is scanning this repository. Wait for it to finish, then disconnect.';
-    window.history.replaceState({}, '', '/preview/repos/spiderhands-filecli/settings');
+    window.history.replaceState({}, '', '/repos/spiderhands-filecli/settings');
     render(
-      <MemoryRouter initialEntries={['/preview/repos/spiderhands-filecli/settings']}>
+      <MemoryRouter initialEntries={['/repos/spiderhands-filecli/settings']}>
         <Routes>
-          <Route path="/preview/*" element={<PreviewApp />} />
+          <Route path="/*" element={<PreviewApp />} />
         </Routes>
       </MemoryRouter>,
     );

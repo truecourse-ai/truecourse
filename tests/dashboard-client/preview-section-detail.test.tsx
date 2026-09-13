@@ -5,8 +5,8 @@
 
 import { describe, it, expect } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
-import type { GuardSectionCoverage } from '@/preview/vendor/shared';
-import { GuardSectionDetail } from '@/preview/vendor/components/guard/GuardSectionDetail';
+import type { GuardSectionCoverage } from '@truecourse/shared';
+import { GuardSectionDetail } from '@/components/guard/GuardSectionDetail';
 
 const section = (over: Partial<GuardSectionCoverage> = {}): GuardSectionCoverage => ({
   anchor: 'cancel',

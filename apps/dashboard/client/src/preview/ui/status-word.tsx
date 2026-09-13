@@ -16,7 +16,7 @@
  */
 
 import type { ContextDocumentStatus, ContextSourceStatus } from '@truecourse/shared';
-import type { GuardCoveragePlainStatus } from '@/preview/vendor/shared';
+import type { GuardCoveragePlainStatus } from '@truecourse/shared';
 import type { WorkStatus } from '@/components/sessions/run-model';
 import { HoverPopover } from '@/preview/ui/hover-popover';
 import type { CheckConclusion } from '@/preview/data/types';

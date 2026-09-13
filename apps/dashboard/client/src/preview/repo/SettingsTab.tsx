@@ -22,7 +22,6 @@ import { useNavigate } from 'react-router-dom';
 import { Facts, PROVIDER_NAME } from '@/preview/ui/bits';
 import type { Repo } from '@/preview/data/types';
 import { usePreviewState } from '@/preview/shell/preview-state';
-import { PREVIEW_BASE } from '@/preview/shell/base';
 
 export function SettingsTab({ repo }: { repo: Repo }) {
   const { unlinkRepo } = usePreviewState();
@@ -83,7 +82,7 @@ export function SettingsTab({ repo }: { repo: Repo }) {
                 unlinkRepo(repo.id);
                 // The repo route below our feet just died — land on Code,
                 // where the repositories are.
-                navigate(`${PREVIEW_BASE}/code`);
+                navigate('/code');
               }}
               className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
             >

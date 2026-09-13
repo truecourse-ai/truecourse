@@ -183,7 +183,7 @@ function renderAt(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/preview/*" element={<PreviewApp />} />
+        <Route path="/*" element={<PreviewApp />} />
       </Routes>
       <Toaster />
     </MemoryRouter>,
@@ -195,14 +195,14 @@ function renderAt(path: string) {
  * connected instances and the whole row is the button.
  */
 async function openGithubRepos() {
-  renderAt('/preview/code?connect=1');
+  renderAt('/code?connect=1');
   const dialog = await screen.findByRole('dialog');
   await userEvent.click(await within(dialog).findByRole('button', { name: /linkwarden/ }));
   return dialog;
 }
 
 beforeEach(() => {
-  window.history.replaceState({}, '', '/preview');
+  window.history.replaceState({}, '', '/');
 });
 
 afterEach(() => {
@@ -265,7 +265,7 @@ describe('connecting a repository through the GitHub App', () => {
         },
       ],
     });
-    renderAt('/preview/code');
+    renderAt('/code');
     const name = await screen.findByText('linkwarden/linkwarden');
     expect(screen.queryByText('local-thing')).toBeNull();
     // Wait for the stored summary before asserting the empty state.
@@ -369,7 +369,7 @@ describe('connecting a repository through the GitHub App', () => {
       installationRepos: { 42: [] },
     });
 
-    renderAt('/preview/code?connect=1');
+    renderAt('/code?connect=1');
     const dialog = await screen.findByRole('dialog');
     const list = await within(dialog).findByRole('list', { name: 'Connected providers' });
     const row = await within(list).findByRole('button', { name: /linkwarden/ });
@@ -388,12 +388,12 @@ describe('connecting a repository through the GitHub App', () => {
   it('ends step one with the one link to Settings, and closes on the way', async () => {
     serve({ installationRepos: { 42: [] } });
 
-    renderAt('/preview/code?connect=1');
+    renderAt('/code?connect=1');
     const dialog = await screen.findByRole('dialog');
     const link = await within(dialog).findByRole('link', {
       name: 'Connect another provider in Settings',
     });
-    expect(link).toHaveAttribute('href', '/preview/settings/repositories?from=code-connect');
+    expect(link).toHaveAttribute('href', '/settings/repositories?from=code-connect');
     // Installing the App is Settings' business, not a control inside a step.
     expect(within(dialog).queryByRole('link', { name: 'Install' })).toBeNull();
     expect(within(dialog).queryByText('Add another')).toBeNull();
@@ -415,7 +415,7 @@ describe('connecting a repository through the GitHub App', () => {
       installationRepos: { 42: [] },
     });
 
-    renderAt('/preview/code?connect=1');
+    renderAt('/code?connect=1');
     const dialog = await screen.findByRole('dialog');
     expect(await within(dialog).findByText('#42')).toBeInTheDocument();
   });
@@ -426,7 +426,7 @@ describe('connecting a repository through the GitHub App', () => {
       'GITHUB_APP_WEBHOOK_SECRET and GITHUB_APP_SLUG, then restart it.';
     serve({ status: () => json({ error: missing }, 503) });
 
-    renderAt('/preview/code?connect=1');
+    renderAt('/code?connect=1');
     const dialog = await screen.findByRole('dialog');
     expect(await within(dialog).findByText(missing)).toBeInTheDocument();
     // Nothing to pick: the fix is on the server. The only way on is Settings.
@@ -438,7 +438,7 @@ describe('connecting a repository through the GitHub App', () => {
   it('says nothing is connected yet when the App is installed nowhere', async () => {
     serve({ status: () => json(status({ installations: [] })) });
 
-    renderAt('/preview/code?connect=1');
+    renderAt('/code?connect=1');
     const dialog = await screen.findByRole('dialog');
     expect(await within(dialog).findByText('No provider connected yet.')).toBeInTheDocument();
     const list = within(dialog).getByRole('list', { name: 'Connected providers' });
@@ -522,7 +522,7 @@ describe('connecting a repository through the GitHub App', () => {
     expect(within(items[1]!).getByRole('checkbox')).not.toBeChecked();
     expect(within(dialog).getByRole('link', { name: 'Add context' })).toHaveAttribute(
       'href',
-      '/preview/context',
+      '/context',
     );
   });
 
@@ -617,7 +617,7 @@ describe('connecting a repository through the GitHub App', () => {
     window.fetch = vi.fn(async () => {
       throw new TypeError('Failed to fetch');
     }) as unknown as typeof window.fetch;
-    renderAt('/preview/code');
+    renderAt('/code');
     expect(await screen.findByText('No repository connected yet.')).toBeInTheDocument();
   });
 });
@@ -642,7 +642,7 @@ describe('the agent page reads the workspace route', () => {
       return json({ error: 'not found' }, 404);
     });
 
-    renderAt('/preview/agent');
+    renderAt('/agent');
 
     expect(
       await screen.findByText("Nothing yet. A repository's first scan starts the agent."),
@@ -660,7 +660,7 @@ describe('the agent page reads the workspace route', () => {
 
   it('gives a connected repository no Activity tab of its own', async () => {
     serve({ registry: [CONNECTED] });
-    renderAt(`/preview/repos/${CONNECTED.id}/runs`);
+    renderAt(`/repos/${CONNECTED.id}/runs`);
 
     const menu = await screen.findByRole('navigation', { name: 'Repository sections' });
     expect(within(menu).queryByRole('link', { name: 'Activity' })).toBeNull();

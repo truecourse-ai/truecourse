@@ -21,7 +21,7 @@ import { useState } from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { EntityList, type EntityListGroup } from '@/components/ui/entity-list';
+import { EntityList, type EntityListGroup } from '@/preview/ui/entity-list';
 
 interface Item {
   id: string;
@@ -172,8 +172,8 @@ describe('EntityList — the filter idiom', () => {
     // Not 13 chips: one input that narrows the options.
     const input = screen.getByLabelText('Type to filter Tags');
     await user.type(input, 'tag-12');
-    expect(screen.getByRole('button', { name: /tag-12/ })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /tag-3/ })).not.toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: /tag-12/ })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /tag-3/ })).not.toBeInTheDocument();
   });
 });
 
@@ -354,11 +354,21 @@ describe('EntityList — rows', () => {
 });
 
 describe('EntityList — states', () => {
-  it('shows the count line with the preview/pin rule as its hover help', () => {
+  it('counts only while a search narrows the list, with the preview/pin rule as its hover help', async () => {
+    const user = userEvent.setup();
     render(
-      <EntityList<Item> {...BASE} items={ITEMS} onOpen={() => {}} noun={{ one: 'item', many: 'items' }} />,
+      <EntityList<Item>
+        {...BASE}
+        items={ITEMS}
+        onOpen={() => {}}
+        noun={{ one: 'item', many: 'items' }}
+        search={{ ariaLabel: 'Search produce', placeholder: 'Search', match: (i, q) => i.title.includes(q) }}
+      />,
     );
-    expect(screen.getByText('3 of 3 items')).toBeInTheDocument();
+    // Nothing narrowed: the count would only restate the rows on screen.
+    expect(screen.queryByText(/of 3 items/)).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText('Search produce'), 'ap');
+    expect(screen.getByText('1 of 3 items')).toBeInTheDocument();
     expect(screen.getByRole('tooltip')).toHaveTextContent('double-click to pin');
   });
 

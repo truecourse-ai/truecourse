@@ -370,8 +370,8 @@ describe('login → callback `next` round-trip', () => {
 
   it('carries a relative `next` through the WorkOS `state` param', async () => {
     const m = makeWorkos();
-    await request(makeApp(m.workos)).get('/api/auth/login?next=/preview').expect(302);
-    expect(m.calls.authorizationUrl[0]?.state).toBe('/preview');
+    await request(makeApp(m.workos)).get('/api/auth/login?next=/code').expect(302);
+    expect(m.calls.authorizationUrl[0]?.state).toBe('/code');
   });
 
   it('drops an absolute or protocol-relative `next` (open-redirect guard)', async () => {
@@ -387,9 +387,9 @@ describe('login → callback `next` round-trip', () => {
   it('redirects the callback to appUrl + state', async () => {
     const m = makeWorkos();
     const res = await request(makeApp(m.workos))
-      .get('/api/auth/callback?code=abc&state=%2Fpreview')
+      .get('/api/auth/callback?code=abc&state=%2Fcode')
       .expect(302);
-    expect(res.headers.location).toBe('http://localhost:3000/preview');
+    expect(res.headers.location).toBe('http://localhost:3000/code');
   });
 
   it('falls back to appUrl when state is missing or unsafe', async () => {

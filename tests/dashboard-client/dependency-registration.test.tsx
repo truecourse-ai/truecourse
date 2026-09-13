@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { DependencyPage } from '@/preview/repo/DependencyPage';
 import type { Repo } from '@/preview/data/types';
-import type { GuardDependenciesView, GuardDependencyRow } from '@/preview/vendor/types/guard-dependencies';
+import type { GuardDependenciesView, GuardDependencyRow } from '@/types/guard-dependencies';
 
 vi.mock('@/lib/socket', () => ({ connectSocket: () => ({ on: vi.fn(), off: vi.fn() }) }));
 

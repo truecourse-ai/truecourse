@@ -222,11 +222,11 @@ export function createGithubConnection(
     appSlug: cfg.appSlug,
     appUrl: process.env.WORKOS_APP_URL || 'http://localhost:3000',
     // Back to the connect dialog, so the new installation is pickable at once.
-    setupRedirectPath: '/preview/settings/repositories',
+    setupRedirectPath: '/settings/repositories',
     setupRedirectPaths: {
-      settings: '/preview/settings/repositories',
-      'code-connect': '/preview/code?connect=1',
-      'context-add': '/preview/context?add=repository',
+      settings: '/settings/repositories',
+      'code-connect': '/code?connect=1',
+      'context-add': '/context?add=repository',
     },
     octokitFor,
     lookupInstallationAccount:

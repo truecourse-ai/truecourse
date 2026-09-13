@@ -131,18 +131,18 @@ function renderAt(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/preview/*" element={<PreviewApp />} />
+        <Route path="/*" element={<PreviewApp />} />
       </Routes>
       <Toaster />
     </MemoryRouter>,
   );
 }
 
-const AGENT = '/preview/agent';
+const AGENT = '/agent';
 
 beforeEach(() => {
   listeners.clear();
-  window.history.replaceState({}, '', '/preview');
+  window.history.replaceState({}, '', '/');
 });
 
 afterEach(() => {
@@ -183,7 +183,7 @@ describe('what a failed run says about itself', () => {
       id: `real-${REAL.id}-${failed().runId}`,
       title: 'Document scan failed on linkwarden/linkwarden',
       body: REASON,
-      href: `/preview/agent/${encodeURIComponent(failed().runId)}`,
+      href: `/agent/${encodeURIComponent(failed().runId)}`,
     });
     // A run that is merely finished is not an announcement.
     expect(toFailure(repo, scan({ status: 'completed' }))).toBeNull();
@@ -218,7 +218,7 @@ describe('the Agent index', () => {
 describe('the failure toast', () => {
   it('fires once when a watched run dies, and carries the reason', async () => {
     const state = serve([scan()]);
-    renderAt('/preview/code');
+    renderAt('/code');
 
     // The world is loaded and the scan is up; NOW it dies.
     await screen.findByText('linkwarden/linkwarden');
@@ -240,7 +240,7 @@ describe('the failure toast', () => {
 
   it('stays silent for a run that was already dead when the page loaded', async () => {
     serve([failed()]);
-    renderAt('/preview/code');
+    renderAt('/code');
 
     await screen.findByText('linkwarden/linkwarden');
     // The row knows; the shell does not shout about it.

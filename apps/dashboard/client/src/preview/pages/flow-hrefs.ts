@@ -9,10 +9,9 @@
  * through the `?repo=` it names.
  */
 
-import { PREVIEW_BASE } from '@/preview/shell/base';
 
 /** Every flow of every connected repository. */
-export const FLOWS_BASE = `${PREVIEW_BASE}/flows`;
+export const FLOWS_BASE = '/flows';
 
 /** The list, narrowed to one repository when a caller has one. */
 export function flowsHref(repoId?: string): string {

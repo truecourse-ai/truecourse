@@ -200,7 +200,7 @@ function renderAt(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/preview/*" element={<PreviewApp />} />
+        <Route path="/*" element={<PreviewApp />} />
       </Routes>
       <Address />
       <Toaster />
@@ -208,10 +208,10 @@ function renderAt(path: string) {
   );
 }
 
-const at = (source: ContextSourceView) => `/preview/context/sources/${source.id}`;
+const at = (source: ContextSourceView) => `/context/sources/${source.id}`;
 
 beforeEach(() => {
-  window.history.replaceState({}, '', '/preview');
+  window.history.replaceState({}, '', '/');
 });
 
 afterEach(() => {
@@ -228,11 +228,11 @@ describe('the source page', () => {
     const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' });
     expect(within(crumbs).getByRole('link', { name: 'Context' })).toHaveAttribute(
       'href',
-      '/preview/context',
+      '/context',
     );
     expect(within(crumbs).getByRole('link', { name: 'Sources' })).toHaveAttribute(
       'href',
-      '/preview/context',
+      '/context',
     );
     expect(screen.getByText('Synced')).toBeInTheDocument();
     // The workspace's own actions ride along, on every Context page.
@@ -242,7 +242,7 @@ describe('the source page', () => {
 
   it('is where a Sources row goes', async () => {
     serve();
-    renderAt('/preview/context');
+    renderAt('/context');
     const user = userEvent.setup();
 
     const table = await screen.findByRole('table', { name: 'Sources' });
@@ -413,7 +413,7 @@ describe('the syncs', () => {
 
     expect(await screen.findByRole('link', { name: '12 documents' })).toHaveAttribute(
       'href',
-      `/preview/context/documents?source=${SITE.id}`,
+      `/context/documents?source=${SITE.id}`,
     );
   });
 
@@ -480,7 +480,7 @@ describe('what the header can do to the source', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
     await waitFor(() => expect(state.calls).toContain(`DELETE /api/context/sources/${SITE.id}`));
     await waitFor(() =>
-      expect(screen.getByTestId('address').textContent).toBe('/preview/context'),
+      expect(screen.getByTestId('address').textContent).toBe('/context'),
     );
   });
 
@@ -496,7 +496,7 @@ describe('what the header can do to the source', () => {
 describe('the documents narrowed to one source', () => {
   it('leads back to the source’s page', async () => {
     serve();
-    renderAt(`/preview/context/documents?source=${SITE.id}`);
+    renderAt(`/context/documents?source=${SITE.id}`);
 
     const crumbs = await screen.findByRole('navigation', { name: 'Breadcrumb' });
     expect(within(crumbs).getByRole('link', { name: 'docs.acme.com' })).toHaveAttribute(

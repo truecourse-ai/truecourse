@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import * as api from '@/preview/vendor/lib/api';
-import { useGuardDependencies } from '@/preview/vendor/hooks/useGuardDependencies';
+import * as api from '@/lib/api';
+import { useGuardDependencies } from '@/hooks/useGuardDependencies';
 import { DependenciesTab } from '@/preview/repo/DependenciesTab';
-import type { GuardDependenciesView, GuardDependencyRow } from '@/preview/vendor/types/guard-dependencies';
+import type { GuardDependenciesView, GuardDependencyRow } from '@/types/guard-dependencies';
 import type { Repo } from '@/preview/data/types';
 
-vi.mock('@/preview/vendor/lib/api', () => ({
+vi.mock('@/lib/api', () => ({
   getGuardDependencies: vi.fn(),
   saveGuardDependency: vi.fn(),
   ApiError: class extends Error {},

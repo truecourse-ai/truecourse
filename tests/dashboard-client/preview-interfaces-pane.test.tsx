@@ -8,9 +8,9 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import type { GuardInterfaceFlowRef, GuardInterfacesView } from '@/preview/vendor/shared';
-import { GuardInterfacesPane } from '@/preview/vendor/components/guard/GuardInterfacesPane';
-import type { GuardTabsState } from '@/preview/vendor/hooks/useGuardTabs';
+import type { GuardInterfaceFlowRef, GuardInterfacesView } from '@truecourse/shared';
+import { GuardInterfacesPane } from '@/components/guard/GuardInterfacesPane';
+import type { GuardTabsState } from '@/hooks/useGuardTabs';
 
 const FLOW_ID = 'task-lifecycle';
 const FLOW_TITLE = 'A user creates a task, sees it listed, and completes it';
@@ -37,8 +37,8 @@ const view = (flows: GuardInterfaceFlowRef[]): GuardInterfacesView => ({
 });
 
 const tabs: GuardTabsState = {
-  activeId: 'cli/tasks-add',
-  openTabs: [{ id: 'cli/tasks-add', pinned: true }],
+  activeId: 'cli:tasks-add',
+  openTabs: [{ id: 'cli:tasks-add', pinned: true }],
   open: () => {},
   close: () => {},
   deselect: () => {},

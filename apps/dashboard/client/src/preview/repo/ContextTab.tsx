@@ -23,7 +23,7 @@ import {
   CONTEXT_SYNC_WORD,
   StatusWord,
 } from '@/preview/ui/status-word';
-import { formatRelativeTime } from '@/preview/vendor/shared/format/relative-time';
+import { formatRelativeTime } from '@truecourse/shared';
 import { useContextSignal, useContextSources } from '@/preview/shell/use-context';
 import { documentsHref, CONTEXT_BASE } from '@/preview/pages/context-hrefs';
 import type { Repo } from '@/preview/data/types';

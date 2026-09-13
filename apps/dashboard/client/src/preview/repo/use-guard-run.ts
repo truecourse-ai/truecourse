@@ -7,8 +7,8 @@
  */
 
 import { useEffect, useState } from 'react';
-import type { GuardLatestWithRunFlows } from '@/preview/vendor/shared';
-import * as api from '@/preview/vendor/lib/api';
+import type { GuardLatestWithRunFlows } from '@truecourse/shared';
+import * as api from '@/lib/api';
 
 export interface GuardRunState {
   run: GuardLatestWithRunFlows | null;

@@ -28,8 +28,8 @@ import {
   tallyOf,
   type StatusTone,
 } from '@/preview/ui/status-word';
-import { GUARD_OUTCOMES, formatGuardTime } from '@/preview/vendor/lib/guard-drifts';
-import { guardStatusMeta } from '@/preview/vendor/lib/guard-status';
+import { GUARD_OUTCOMES, formatGuardTime } from '@/lib/guard-drifts';
+import { guardStatusMeta } from '@/lib/guard-status';
 import { usePreviewState } from '@/preview/shell/preview-state';
 import { jobCommand, jobRepoFullName, waitingFact } from '@/preview/shell/use-active-jobs';
 import type { Repo } from '@/preview/data/types';
@@ -103,7 +103,7 @@ export function RunsTab({ repo }: { repo: Repo }) {
     [rows],
   );
 
-  const openRun = (runId: string) => navigate(`/preview/repos/${repo.id}/runs/${encodeURIComponent(runId)}`);
+  const openRun = (runId: string) => navigate(`/repos/${repo.id}/runs/${encodeURIComponent(runId)}`);
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">

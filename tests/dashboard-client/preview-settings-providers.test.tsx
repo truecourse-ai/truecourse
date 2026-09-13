@@ -78,7 +78,7 @@ function renderAt(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/preview/*" element={<PreviewApp />} />
+        <Route path="/*" element={<PreviewApp />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -91,7 +91,7 @@ function providerRow(name: string): HTMLElement {
 }
 
 beforeEach(() => {
-  window.history.replaceState({}, '', '/preview');
+  window.history.replaceState({}, '', '/');
 });
 
 afterEach(() => {
@@ -101,7 +101,7 @@ afterEach(() => {
 describe('Settings › Repositories', () => {
   it('lists the three providers, GitHub with its installations and what each holds', async () => {
     serve();
-    renderAt('/preview/settings/repositories');
+    renderAt('/settings/repositories');
 
     const list = await screen.findByRole('list', { name: 'Providers' });
     // The provider rows themselves; an installation line is a row of its own list.
@@ -122,7 +122,7 @@ describe('Settings › Repositories', () => {
 
   it('asks for an install link that returns to where the user came from', async () => {
     serve(() => json(status({ installations: [], repos: [] })));
-    renderAt('/preview/settings/repositories?from=context-add');
+    renderAt('/settings/repositories?from=context-add');
 
     const github = providerRow('GitHub');
     await within(github).findByText('Not connected');
@@ -135,7 +135,7 @@ describe('Settings › Repositories', () => {
 
   it('asks for a link that returns here when nobody sent the user', async () => {
     serve(() => json(status({ installations: [], repos: [] })));
-    renderAt('/preview/settings/repositories');
+    renderAt('/settings/repositories');
 
     const github = providerRow('GitHub');
     await within(github).findByText('Not connected');
@@ -147,7 +147,7 @@ describe('Settings › Repositories', () => {
 
   it('offers Connect when the App is installed nowhere', async () => {
     serve(() => json(status({ installations: [], repos: [] })));
-    renderAt('/preview/settings/repositories');
+    renderAt('/settings/repositories');
 
     const github = providerRow('GitHub');
     expect(await within(github).findByText('Not connected')).toBeInTheDocument();
@@ -158,7 +158,7 @@ describe('Settings › Repositories', () => {
   it('says why GitHub could not be read, in the server’s own words', async () => {
     const missing = 'GitHub is not configured on this server. Set GITHUB_APP_ID, then restart it.';
     serve(() => json({ error: missing }, 503));
-    renderAt('/preview/settings/repositories');
+    renderAt('/settings/repositories');
 
     const github = providerRow('GitHub');
     expect(await within(github).findByText(missing)).toBeInTheDocument();
@@ -167,7 +167,7 @@ describe('Settings › Repositories', () => {
 
   it('lists GitLab and Azure DevOps as Coming soon, with nothing to click', async () => {
     serve();
-    renderAt('/preview/settings/repositories');
+    renderAt('/settings/repositories');
     await screen.findByRole('list', { name: 'Providers' });
 
     for (const name of ['GitLab', 'Azure DevOps']) {
@@ -187,7 +187,7 @@ describe('Settings › Repositories', () => {
 describe('Settings › Connections', () => {
   it('lists the six tool connectors, every one of them Coming soon and inert', async () => {
     serve();
-    renderAt('/preview/settings/connections');
+    renderAt('/settings/connections');
 
     const list = await screen.findByRole('list', { name: 'Connectors' });
     const rows = within(list).getAllByRole('listitem');

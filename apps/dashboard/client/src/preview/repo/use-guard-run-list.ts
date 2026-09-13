@@ -6,8 +6,8 @@
  */
 
 import { useEffect, useState } from 'react';
-import type { GuardHistoryEntry } from '@/preview/vendor/shared';
-import * as api from '@/preview/vendor/lib/api';
+import type { GuardHistoryEntry } from '@truecourse/shared';
+import * as api from '@/lib/api';
 
 /** A stored run's verdict: one failure or one error makes the run a failure. */
 export function guardRunVerdict(entry: GuardHistoryEntry): 'pass' | 'fail' {

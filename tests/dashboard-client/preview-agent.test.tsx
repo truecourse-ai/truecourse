@@ -217,7 +217,7 @@ function renderAt(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/preview/*" element={<PreviewApp />} />
+        <Route path="/*" element={<PreviewApp />} />
       </Routes>
       <Address />
       <Toaster />
@@ -236,7 +236,7 @@ function rows() {
 beforeEach(() => {
   listeners.clear();
   (window as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
-  window.history.replaceState({}, '', '/preview');
+  window.history.replaceState({}, '', '/');
 });
 
 afterEach(() => {
@@ -252,7 +252,7 @@ afterEach(() => {
 describe('Agent, the index', () => {
   it('lists the workspace conversations in the order the server sent them', async () => {
     serve([SETUP, SCAN]);
-    renderAt('/preview/agent');
+    renderAt('/agent');
 
     expect(await screen.findByRole('heading', { name: 'Agent' })).toBeInTheDocument();
     await waitFor(() => expect(rows()).toHaveLength(2));
@@ -275,7 +275,7 @@ describe('Agent, the index', () => {
         sessions: [{ sessionId: 's1', kind: 'curate-doc', workItem: 'doc:README.md', status: 'waiting', spent: { turns: 2, tokens: 100, costUsd: 0 } }],
       }),
     ]);
-    renderAt('/preview/agent');
+    renderAt('/agent');
 
     expect(await screen.findByText('Needs you')).toBeInTheDocument();
     expect(screen.queryByText('Running')).toBeNull();
@@ -283,7 +283,7 @@ describe('Agent, the index', () => {
 
   it('narrows to the repository the address names, and says so in a pill', async () => {
     serve([SETUP, SCAN]);
-    renderAt(`/preview/agent?repo=${REPO_B.id}`);
+    renderAt(`/agent?repo=${REPO_B.id}`);
 
     await waitFor(() => expect(rows()).toHaveLength(1));
     expect(within(rows()[0]!).getByText('spiderhands/filecli')).toBeInTheDocument();
@@ -295,7 +295,7 @@ describe('Agent, the index', () => {
 
   it('puts a filter picked through Add filter into the address', async () => {
     serve([SETUP, SCAN]);
-    renderAt('/preview/agent');
+    renderAt('/agent');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(2));
 
@@ -304,12 +304,12 @@ describe('Agent, the index', () => {
     await user.click(await screen.findByRole('option', { name: /Flow setup/ }));
 
     await waitFor(() => expect(rows()).toHaveLength(1));
-    expect(screen.getByTestId('address')).toHaveTextContent('/preview/agent?kind=guard-setup');
+    expect(screen.getByTestId('address')).toHaveTextContent('/agent?kind=guard-setup');
   });
 
   it('searches the command, the repository and the ref', async () => {
     serve([SETUP, SCAN]);
-    renderAt('/preview/agent');
+    renderAt('/agent');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(2));
 
@@ -325,7 +325,7 @@ describe('Agent, the index', () => {
 
   it('says what an empty workspace is waiting for, and what a filter excluded', async () => {
     serve([]);
-    renderAt('/preview/agent');
+    renderAt('/agent');
     const user = userEvent.setup();
 
     expect(
@@ -338,7 +338,7 @@ describe('Agent, the index', () => {
 
   it("shows the workspace's own work with no repository, and still by kind", async () => {
     serve([WORKSPACE_SCAN, SETUP, SCAN]);
-    renderAt('/preview/agent');
+    renderAt('/agent');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(3));
 
@@ -364,7 +364,7 @@ describe('Agent, the index', () => {
 
   it('re-reads when a repository writes its store, without a reload', async () => {
     const state = serve([SCAN]);
-    renderAt('/preview/agent');
+    renderAt('/agent');
     await waitFor(() => expect(rows()).toHaveLength(1));
 
     state.runs = [SETUP, SCAN];
@@ -375,7 +375,7 @@ describe('Agent, the index', () => {
 
   it('re-reads on a run change of the workspace itself, which has no room', async () => {
     const state = serve([SCAN]);
-    renderAt('/preview/agent');
+    renderAt('/agent');
     await waitFor(() => expect(rows()).toHaveLength(1));
 
     state.runs = [WORKSPACE_SCAN, SCAN];
@@ -416,7 +416,7 @@ const HOLDING_JOB = job({
 describe('work waiting its turn', () => {
   it('lists a queued job as a row, saying what it waits for', async () => {
     serve([GENERATING], [HOLDING_JOB, job()]);
-    renderAt('/preview/agent');
+    renderAt('/agent');
 
     await waitFor(() => expect(rows()).toHaveLength(2));
     const [waiting, working] = rows();
@@ -444,7 +444,7 @@ describe('work waiting its turn', () => {
         }),
       ],
     );
-    renderAt('/preview/agent');
+    renderAt('/agent');
     const user = userEvent.setup();
 
     // The body has not written its record yet: the job is still the only row
@@ -473,22 +473,22 @@ describe('work waiting its turn', () => {
     );
     expect(rows()).toHaveLength(1);
     await user.click(rows()[0]!);
-    expect(screen.getByTestId('address')).toHaveTextContent('/preview/agent/run-setup-live');
+    expect(screen.getByTestId('address')).toHaveTextContent('/agent/run-setup-live');
   });
 
   it('opens a queued job where its work will appear', async () => {
     serve([], [job({ type: 'repo.guard-setup' })]);
-    renderAt('/preview/agent');
+    renderAt('/agent');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(1));
 
     await user.click(rows()[0]!);
-    expect(screen.getByTestId('address')).toHaveTextContent(`/preview/repos/${REPO_A.id}/pipeline`);
+    expect(screen.getByTestId('address')).toHaveTextContent(`/repos/${REPO_A.id}/pipeline`);
   });
 
   it('sends a queued document scan to the Context it reads', async () => {
     serve([], [job({ type: 'context.scan', key: 'context.scan' })]);
-    renderAt('/preview/agent');
+    renderAt('/agent');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(1));
 
@@ -498,12 +498,12 @@ describe('work waiting its turn', () => {
     expect(within(row).getByText('waiting in the queue')).toBeInTheDocument();
 
     await user.click(row);
-    expect(screen.getByTestId('address')).toHaveTextContent('/preview/context');
+    expect(screen.getByTestId('address')).toHaveTextContent('/context');
   });
 
   it('counts Queued among the statuses, and narrows to it', async () => {
     serve([GENERATING], [HOLDING_JOB, job()]);
-    renderAt('/preview/agent');
+    renderAt('/agent');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(2));
 
@@ -513,7 +513,7 @@ describe('work waiting its turn', () => {
 
     await waitFor(() => expect(rows()).toHaveLength(1));
     expect(within(rows()[0]!).getByText('Queued')).toBeInTheDocument();
-    expect(screen.getByTestId('address')).toHaveTextContent('/preview/agent?status=queued');
+    expect(screen.getByTestId('address')).toHaveTextContent('/agent?status=queued');
   });
 });
 
@@ -524,7 +524,7 @@ describe('work waiting its turn', () => {
 describe('one conversation', () => {
   it('opens from its row, under a header naming the repository and the ref', async () => {
     serve([SETUP, SCAN]);
-    renderAt('/preview/agent');
+    renderAt('/agent');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(2));
 
@@ -532,7 +532,7 @@ describe('one conversation', () => {
 
     expect(await screen.findByRole('heading', { name: 'Flow setup' })).toBeInTheDocument();
     const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' });
-    expect(within(crumbs).getByRole('link', { name: 'Agent' })).toHaveAttribute('href', '/preview/agent');
+    expect(within(crumbs).getByRole('link', { name: 'Agent' })).toHaveAttribute('href', '/agent');
     expect(screen.getByText('spiderhands/filecli')).toBeInTheDocument();
     expect(screen.getByText('0f1e2d3c')).toBeInTheDocument();
     expect(screen.getByTestId('conversation')).toHaveTextContent('run-setup-2 in filecli');
@@ -540,7 +540,7 @@ describe('one conversation', () => {
 
   it('offers another go at one that ended badly, and starts it', async () => {
     const state = serve([SETUP]);
-    renderAt(`/preview/agent/${SETUP.runId}`);
+    renderAt(`/agent/${SETUP.runId}`);
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole('button', { name: 'Run again' }));
@@ -551,7 +551,7 @@ describe('one conversation', () => {
 
   it('leaves a finished conversation alone', async () => {
     serve([SCAN]);
-    renderAt(`/preview/agent/${SCAN.runId}`);
+    renderAt(`/agent/${SCAN.runId}`);
 
     expect(await screen.findByTestId('conversation')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Run again' })).toBeNull();
@@ -559,7 +559,7 @@ describe('one conversation', () => {
 
   it("opens the workspace's own conversation, which names no repository", async () => {
     serve([WORKSPACE_SCAN]);
-    renderAt(`/preview/agent/${WORKSPACE_SCAN.runId}`);
+    renderAt(`/agent/${WORKSPACE_SCAN.runId}`);
 
     expect(await screen.findByRole('heading', { name: 'Document scan' })).toBeInTheDocument();
     expect(screen.getByTestId('conversation')).toHaveTextContent('run-scan-workspace in');
@@ -577,7 +577,7 @@ describe('one conversation', () => {
       repo: null,
     });
     const state = serve([running]);
-    renderAt(`/preview/agent/${running.runId}`);
+    renderAt(`/agent/${running.runId}`);
     const reads = () =>
       state.calls.filter((c) => c === `/api/sessions/runs/${running.runId}`).length;
 
@@ -600,10 +600,10 @@ describe('one conversation', () => {
 
   it('says so at an address this workspace has nothing at', async () => {
     serve([SCAN]);
-    renderAt('/preview/agent/not-a-run');
+    renderAt('/agent/not-a-run');
 
     expect(await screen.findByText('No such conversation')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Open Agent' })).toHaveAttribute('href', '/preview/agent');
+    expect(screen.getByRole('link', { name: 'Open Agent' })).toHaveAttribute('href', '/agent');
     expect(screen.queryByTestId('conversation')).toBeNull();
   });
 });
@@ -615,16 +615,16 @@ describe('one conversation', () => {
 describe('the way in', () => {
   it('is a workspace nav entry', async () => {
     serve([SCAN]);
-    renderAt('/preview/agent');
+    renderAt('/agent');
 
     const nav = screen.getByRole('navigation', { name: 'Workspace' });
-    expect(within(nav).getByRole('link', { name: 'Agent' })).toHaveAttribute('href', '/preview/agent');
+    expect(within(nav).getByRole('link', { name: 'Agent' })).toHaveAttribute('href', '/agent');
     await waitFor(() => expect(rows()).toHaveLength(1));
   });
 
   it('is no longer a tab of the repository console', async () => {
     serve([SCAN]);
-    renderAt(`/preview/repos/${REPO_A.id}/runs`);
+    renderAt(`/repos/${REPO_A.id}/runs`);
 
     const menu = await screen.findByRole('navigation', { name: 'Repository sections' });
     expect(within(menu).queryByRole('link', { name: 'Activity' })).toBeNull();

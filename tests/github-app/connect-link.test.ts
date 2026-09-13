@@ -43,7 +43,7 @@ function makeApp(hooks: { onRepoLinked?: OnRepoLinked; onRepoUnlinked?: OnRepoUn
       store,
       appSlug: 'tc-app',
       appUrl: 'http://localhost:3000',
-      setupRedirectPath: '/preview?connect=1',
+      setupRedirectPath: '/code?connect=1',
       octokitFor: () => octokit,
       ...hooks,
     }),

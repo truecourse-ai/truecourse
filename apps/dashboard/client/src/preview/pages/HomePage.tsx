@@ -43,7 +43,6 @@ import { EntityList, type EntityListGroup } from '@/preview/ui/entity-list';
 import { StackedArea, type StackedSeries } from '@/preview/ui/stacked-area';
 import { CONTEXT_DOC_TONE, StatusWord, type StatusTone } from '@/preview/ui/status-word';
 import { useOnboarding } from '@/preview/shell/use-onboarding';
-import { PREVIEW_BASE } from '@/preview/shell/base';
 import { documentsHref } from './context-hrefs';
 
 /** The fills each word wears: green, red, the darker blue, grey, the lighter blue. */
@@ -362,7 +361,7 @@ function Dashboard({ signal }: { signal: number }) {
             since its rows carry the longest titles and a reason; the other two
             share the row under it. */}
         <div className="border-b border-border">
-          <Widget title="Needs attention" to={`${PREVIEW_BASE}/agent`} toWord="Agent">
+          <Widget title="Needs attention" to={'/agent'} toWord="Agent">
             {attention.length === 0 ? (
               <Nothing>Nothing is waiting on you.</Nothing>
             ) : (
@@ -504,7 +503,7 @@ function Onboarding({ hasContext, hasRepo }: { hasContext: boolean; hasRepo: boo
             title="Connect your first context"
             line="The documentation that says what the product promises."
             action="Add context"
-            to={`${PREVIEW_BASE}/context?add=1`}
+            to={'/context?add=1'}
           />
           <Checkpoint
             step={2}
@@ -512,7 +511,7 @@ function Onboarding({ hasContext, hasRepo }: { hasContext: boolean; hasRepo: boo
             title="Connect your first repository"
             line="The code that has to keep the promise."
             action="Connect repository"
-            to={`${PREVIEW_BASE}/code?connect=1`}
+            to={'/code?connect=1'}
           />
         </ul>
       </div>

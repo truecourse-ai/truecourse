@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { getSpecCorpus, type SpecCorpusResponse } from '@/lib/api';
 import { connectSocket } from '@/lib/socket';
-import { getGuardStatus } from '@/preview/vendor/lib/api';
-import type { GuardStatusSummary } from '@/preview/vendor/shared';
+import { getGuardStatus } from '@/lib/api';
+import type { GuardStatusSummary } from '@truecourse/shared';
 import type { Repo } from '@/preview/data/types';
 
 export interface RepoSummary {

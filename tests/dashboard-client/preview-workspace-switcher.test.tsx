@@ -125,10 +125,10 @@ function stubAssign(): ReturnType<typeof vi.fn> {
 
 function renderShell() {
   render(
-    <MemoryRouter initialEntries={['/preview']}>
+    <MemoryRouter initialEntries={['/']}>
       <AuthProvider>
         <Routes>
-          <Route path="/preview/*" element={<PreviewApp />} />
+          <Route path="/*" element={<PreviewApp />} />
         </Routes>
       </AuthProvider>
     </MemoryRouter>,
@@ -178,7 +178,7 @@ describe('the workspace switcher', () => {
     await user.click(await screen.findByRole('button', { name: /Northwind Labs/ }));
 
     await waitFor(() => expect(world.switched).toEqual(['org_b']));
-    await waitFor(() => expect(assign).toHaveBeenCalledWith('/preview'));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('/'));
   });
 
   it('creates a workspace from the dialog and starts the app over in it', async () => {
@@ -193,7 +193,7 @@ describe('the workspace switcher', () => {
     await user.click(screen.getByRole('button', { name: 'Create' }));
 
     await waitFor(() => expect(world.created).toEqual(['Third']));
-    await waitFor(() => expect(assign).toHaveBeenCalledWith('/preview'));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('/'));
   });
 
   it('shows the server’s refusal under the field, and stays open', async () => {
@@ -229,9 +229,9 @@ describe('the workspace switcher', () => {
 
   it('draws no switcher with no session', async () => {
     render(
-      <MemoryRouter initialEntries={['/preview']}>
+      <MemoryRouter initialEntries={['/']}>
         <Routes>
-          <Route path="/preview/*" element={<PreviewApp />} />
+          <Route path="/*" element={<PreviewApp />} />
         </Routes>
       </MemoryRouter>,
     );

@@ -143,7 +143,7 @@ function renderAt(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/preview/*" element={<PreviewApp />} />
+        <Route path="/*" element={<PreviewApp />} />
       </Routes>
       <Address />
     </MemoryRouter>,
@@ -158,7 +158,7 @@ function rows() {
 
 beforeEach(() => {
   listeners.clear();
-  window.history.replaceState({}, '', '/preview');
+  window.history.replaceState({}, '', '/');
 });
 
 afterEach(() => {
@@ -168,7 +168,7 @@ afterEach(() => {
 describe('Flows, the index', () => {
   it('lists the flows of every connected repository, each naming the repository it belongs to', async () => {
     const state = serve();
-    renderAt('/preview/flows');
+    renderAt('/flows');
 
     expect(await screen.findByRole('heading', { name: 'Flows' })).toBeInTheDocument();
     await waitFor(() => expect(rows()).toHaveLength(2));
@@ -191,7 +191,7 @@ describe('Flows, the index', () => {
 
   it('puts a filter picked through Add filter into the address', async () => {
     serve();
-    renderAt('/preview/flows');
+    renderAt('/flows');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(2));
 
@@ -200,13 +200,13 @@ describe('Flows, the index', () => {
     await user.click(await screen.findByRole('option', { name: /acme\/web/ }));
 
     await waitFor(() => expect(rows()).toHaveLength(1));
-    expect(screen.getByTestId('address')).toHaveTextContent('/preview/flows?repo=web');
+    expect(screen.getByTestId('address')).toHaveTextContent('/flows?repo=web');
     expect(within(rows()[0]!).getByText('Checks out with a saved card')).toBeInTheDocument();
   });
 
   it('tallies the flows it shows, and the tally follows the narrowing', async () => {
     serve();
-    renderAt('/preview/flows');
+    renderAt('/flows');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(2));
 
@@ -223,7 +223,7 @@ describe('Flows, the index', () => {
 
   it('counts each filter value over what the other filters already keep', async () => {
     serve();
-    renderAt('/preview/flows');
+    renderAt('/flows');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(2));
 
@@ -258,7 +258,7 @@ describe('Flows, the index', () => {
       ],
       webFlows: [CHECKOUT, flow({ flowId: 'signup', title: 'Signs up', drivers: ['web'] })],
     });
-    renderAt('/preview/flows');
+    renderAt('/flows');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(5));
 
@@ -281,7 +281,7 @@ describe('Flows, the index', () => {
 
   it('reads the address it arrives on, and narrows by driver too', async () => {
     serve();
-    renderAt('/preview/flows?driver=cli');
+    renderAt('/flows?driver=cli');
 
     expect(await screen.findByText('Writes a file and reads it back')).toBeInTheDocument();
     expect(rows()).toHaveLength(1);
@@ -293,7 +293,7 @@ describe('Flows, the index', () => {
 
   it('searches the title', async () => {
     serve();
-    renderAt('/preview/flows');
+    renderAt('/flows');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(2));
 
@@ -304,7 +304,7 @@ describe('Flows, the index', () => {
 
   it('says what an empty workspace is waiting for, and what a filter excluded', async () => {
     serve({ cliFlows: [], webFlows: [] });
-    renderAt('/preview/flows');
+    renderAt('/flows');
     const user = userEvent.setup();
 
     expect(await screen.findByText(/No flow generated yet\./)).toBeInTheDocument();
@@ -314,7 +314,7 @@ describe('Flows, the index', () => {
 
   it('re-reads when a generate of a repository lands on the socket', async () => {
     const state = serve();
-    renderAt('/preview/flows');
+    renderAt('/flows');
     await waitFor(() => expect(rows()).toHaveLength(2));
     const reads = () => state.calls.filter((c) => c.endsWith('/guard/flows')).length;
     const before = reads();
@@ -332,7 +332,7 @@ describe('Flows, the index', () => {
 describe('one flow', () => {
   it('opens from its row, through the repository the address names', async () => {
     serve();
-    renderAt('/preview/flows');
+    renderAt('/flows');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(2));
 
@@ -341,13 +341,13 @@ describe('one flow', () => {
 
     await waitFor(() =>
       expect(screen.getByTestId('address')).toHaveTextContent(
-        '/preview/flows/write-then-read?repo=filecli',
+        '/flows/write-then-read?repo=filecli',
       ),
     );
     expect(
       await screen.findByRole('heading', { name: 'Writes a file and reads it back' }),
     ).toBeInTheDocument();
     const crumbs = screen.getAllByRole('navigation', { name: 'Breadcrumb' }).at(-1)!;
-    expect(within(crumbs).getByRole('link', { name: 'Flows' })).toHaveAttribute('href', '/preview/flows');
+    expect(within(crumbs).getByRole('link', { name: 'Flows' })).toHaveAttribute('href', '/flows');
   });
 });

@@ -42,7 +42,7 @@ import {
   StatusWord,
   tallyOf,
 } from '@/preview/ui/status-word';
-import { formatRelativeTime } from '@/preview/vendor/shared/format/relative-time';
+import { formatRelativeTime } from '@truecourse/shared';
 import { useContextDocuments, useContextSignal, useContextSources } from '@/preview/shell/use-context';
 import { ContextFrame } from './ContextFrame';
 import { CONTEXT_BASE, docHref, sourceHref } from './context-hrefs';

@@ -177,7 +177,7 @@ function renderAt(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/preview/*" element={<PreviewApp />} />
+        <Route path="/*" element={<PreviewApp />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -185,7 +185,7 @@ function renderAt(path: string) {
 
 beforeEach(() => {
   listeners.clear();
-  window.history.replaceState({}, '', '/preview');
+  window.history.replaceState({}, '', '/');
 });
 
 afterEach(() => {
@@ -196,7 +196,7 @@ describe('the Runs tab of a connected repository', () => {
   it('shows a short commit while preserving the full hash for hover and search', async () => {
     const commit = '3ec877a68bc423373220f9ee2fda3d93ba368680';
     serve({ history: { runs: [{ ...HISTORY.runs[0], commit }, HISTORY.runs[1]] } });
-    renderAt(`/preview/repos/${REAL.id}/runs`);
+    renderAt(`/repos/${REAL.id}/runs`);
     const user = userEvent.setup();
     const table = await screen.findByRole('table', { name: 'Runs' });
     const shortCommit = await within(table).findByText(commit.slice(0, 8));
@@ -210,7 +210,7 @@ describe('the Runs tab of a connected repository', () => {
 
   it('lists every stored run, newest first, naming its pull request and origin', async () => {
     const calls = serve();
-    renderAt(`/preview/repos/${REAL.id}/runs`);
+    renderAt(`/repos/${REAL.id}/runs`);
 
     const table = await screen.findByRole('table', { name: 'Runs' });
     await within(table).findByText('f00d123');
@@ -225,7 +225,7 @@ describe('the Runs tab of a connected repository', () => {
 
   it('tallies the runs it shows by verdict, and never beside the title', async () => {
     serve();
-    renderAt(`/preview/repos/${REAL.id}/runs`);
+    renderAt(`/repos/${REAL.id}/runs`);
     const user = userEvent.setup();
     const table = await screen.findByRole('table', { name: 'Runs' });
     await within(table).findByText('f00d123');
@@ -242,7 +242,7 @@ describe('the Runs tab of a connected repository', () => {
 
   it('is a full-width search over an opaque sticky head, and no filter row', async () => {
     serve();
-    renderAt(`/preview/repos/${REAL.id}/runs`);
+    renderAt(`/repos/${REAL.id}/runs`);
 
     const table = await screen.findByRole('table', { name: 'Runs' });
     // The search box is the whole toolbar: Origin is a column, and one
@@ -257,7 +257,7 @@ describe('the Runs tab of a connected repository', () => {
 
   it('opens a run as its own page, reading exactly that run', async () => {
     const calls = serve();
-    renderAt(`/preview/repos/${REAL.id}/runs/r-head7`);
+    renderAt(`/repos/${REAL.id}/runs/r-head7`);
 
     await screen.findByRole('heading', { name: 'f00d123' });
     const crumbs = screen.getAllByRole('navigation', { name: 'Breadcrumb' }).at(-1)!;
@@ -284,7 +284,7 @@ describe('the Runs tab of a connected repository', () => {
         }),
       ],
     });
-    renderAt(`/preview/repos/${REAL.id}/runs`);
+    renderAt(`/repos/${REAL.id}/runs`);
 
     const table = await screen.findByRole('table', { name: 'Runs' });
     await within(table).findByText('Running');
@@ -310,7 +310,7 @@ describe('the Runs tab of a connected repository', () => {
         job({ type: 'repo.guard-run', status: 'queued', startedAt: null }),
       ],
     });
-    renderAt(`/preview/repos/${REAL.id}/runs`);
+    renderAt(`/repos/${REAL.id}/runs`);
 
     const table = await screen.findByRole('table', { name: 'Runs' });
     const flight = (await within(table).findByText('Queued')).closest('tr')!;
@@ -326,7 +326,7 @@ describe('the Runs tab of a connected repository', () => {
       },
       jobs: [job({ type: 'repo.guard-run' })],
     });
-    renderAt(`/preview/repos/${REAL.id}/runs`);
+    renderAt(`/repos/${REAL.id}/runs`);
 
     const table = await screen.findByRole('table', { name: 'Runs' });
     await within(table).findByText('a1b2c3d');
@@ -336,7 +336,7 @@ describe('the Runs tab of a connected repository', () => {
 
   it('re-reads the list when a run of the repository lands on the socket', async () => {
     const calls = serve();
-    renderAt(`/preview/repos/${REAL.id}/runs`);
+    renderAt(`/repos/${REAL.id}/runs`);
     const table = await screen.findByRole('table', { name: 'Runs' });
     await within(table).findByText('f00d123');
     const reads = () => calls.filter((c) => c === `/api/repos/${REAL.id}/guard/history?all=1`).length;

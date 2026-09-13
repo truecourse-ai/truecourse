@@ -4,7 +4,7 @@
  *
  * The index is the platform's index shape (search full width, ONE filter row
  * of Add filter, dimension, value, then a one-line table), and one row is one
- * whole piece of work, which opens as one conversation at `/preview/agent/:runId`.
+ * whole piece of work, which opens as one conversation at '/agent/:runId'.
  * Kind, Status and Repository live in the address (`?kind=&status=&repo=`), so a
  * narrowed page is a place: the repository console, Home and the toasts link
  * straight to `?repo=<id>`.
@@ -49,7 +49,6 @@ import { useRunTrigger } from '@/preview/shell/use-run-trigger';
 import { useWorkspaceRuns } from '@/preview/shell/use-workspace-runs';
 import { jobCommand, jobRepoFullName, waitingFact } from '@/preview/shell/use-active-jobs';
 import { conversationHref } from '@/preview/shell/real-runs';
-import { PREVIEW_BASE } from '@/preview/shell/base';
 import { subscribeToServerEvents } from '@/preview/shell/event-stream';
 import type { Repo } from '@/preview/data/types';
 
@@ -136,9 +135,9 @@ function jobRow(
     // for the workspace's own document scan the Context it reads.
     href: fullName
       ? repo
-        ? `${PREVIEW_BASE}/repos/${repo.id}/pipeline`
+        ? `/repos/${repo.id}/pipeline`
         : null
-      : `${PREVIEW_BASE}/context`,
+      : '/context',
   };
 }
 
@@ -422,7 +421,7 @@ function ConversationRoute({ runId }: { runId: string }) {
         body={
           <>
             Nothing of this workspace is at that address.{' '}
-            <Link to={`${PREVIEW_BASE}/agent`} className="text-primary hover:underline">
+            <Link to={'/agent'} className="text-primary hover:underline">
               Open Agent
             </Link>
             .
@@ -442,7 +441,7 @@ function ConversationRoute({ runId }: { runId: string }) {
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <PageHeader
-        crumbs={[{ label: 'Agent', to: `${PREVIEW_BASE}/agent` }]}
+        crumbs={[{ label: 'Agent', to: '/agent' }]}
         title={commandLabel(run.command)}
         right={
           <span className="flex items-center gap-3 text-[11px]">

@@ -18,7 +18,6 @@ import type { NotificationLevel, NotificationView } from '@truecourse/shared';
 import { listNotifications, markNotificationsRead } from '@/lib/api';
 import type { StatusTone } from '@/preview/ui/status-word';
 import type { Repo } from '@/preview/data/types';
-import { PREVIEW_BASE } from './base';
 import { subscribeToServerEvents } from './event-stream';
 
 /** A level as the status idiom says it: one word, one tone. */
@@ -58,18 +57,18 @@ export function notificationHref(n: NotificationView, repos: readonly Repo[]): s
     case 'repo.guard-setup':
     case 'repo.guard-generate':
     case 'context.scan':
-      return runId ? `${PREVIEW_BASE}/agent/${encodeURIComponent(runId)}` : null;
+      return runId ? `/agent/${encodeURIComponent(runId)}` : null;
     case 'repo.guard-run': {
       const guardRunId = text(n.data, 'guardRunId');
       if (!repo) return null;
       return guardRunId
-        ? `${PREVIEW_BASE}/repos/${repo.id}/runs/${encodeURIComponent(guardRunId)}`
-        : `${PREVIEW_BASE}/repos/${repo.id}/runs`;
+        ? `/repos/${repo.id}/runs/${encodeURIComponent(guardRunId)}`
+        : `/repos/${repo.id}/runs`;
     }
     case 'context.sync': {
       const sourceId = text(n.data, 'sourceId');
       return sourceId
-        ? `${PREVIEW_BASE}/context/sources/${encodeURIComponent(sourceId)}`
+        ? `/context/sources/${encodeURIComponent(sourceId)}`
         : null;
     }
     default:

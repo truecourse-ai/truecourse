@@ -17,7 +17,6 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import type { RunStarter } from '@/components/sessions/run-model';
 import { triggerFor } from '@/preview/data/run-triggers';
-import { PREVIEW_BASE } from './base';
 
 /**
  * The one no-provider error toast, shared by every surface that hits the wall:
@@ -29,7 +28,7 @@ export function toastNoLlmProvider(navigate: (to: string) => void, description: 
     description,
     action: {
       label: 'Open Models',
-      onClick: () => navigate(`${PREVIEW_BASE}/settings/models`),
+      onClick: () => navigate('/settings/models'),
     },
   });
 }

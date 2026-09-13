@@ -1,5 +1,5 @@
 /**
- * Per-doc guard coverage join — the section list + statuses the coverage surface
+ * Per-doc guard coverage join, the section list + statuses the coverage surface
  * paints over the doc. Keyed on the selected doc and gated on `enabled` so it
  * only fetches while the Guard tab is open with a doc chosen. Returns `null`
  * coverage when no doc is selected or the doc/store is gone (404).

@@ -201,7 +201,7 @@ function renderAt(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/preview/*" element={<PreviewApp />} />
+        <Route path="/*" element={<PreviewApp />} />
       </Routes>
       <Address />
     </MemoryRouter>,
@@ -209,10 +209,10 @@ function renderAt(path: string) {
 }
 
 const docAt = (ref: string, query = '') =>
-  `/preview/context/doc/${encodeURIComponent(ref)}${query}`;
+  `/context/doc/${encodeURIComponent(ref)}${query}`;
 
 beforeEach(() => {
-  window.history.replaceState({}, '', '/preview');
+  window.history.replaceState({}, '', '/');
 });
 
 afterEach(() => {
@@ -230,7 +230,7 @@ describe('one document of Context', () => {
     expect(within(crumbs).getByRole('link', { name: 'Context' })).toBeInTheDocument();
     expect(within(crumbs).getByRole('link', { name: 'docs.acme.com' })).toHaveAttribute(
       'href',
-      '/preview/context/documents?source=site-docs-acme',
+      '/context/documents?source=site-docs-acme',
     );
     expect(await screen.findByRole('heading', { name: 'Refunds' })).toBeInTheDocument();
 
@@ -281,7 +281,7 @@ describe('one document of Context', () => {
     // And where it could be linked.
     expect(screen.getByRole('link', { name: REPO_A.name })).toHaveAttribute(
       'href',
-      `/preview/repos/${REPO_A.id}/context`,
+      `/repos/${REPO_A.id}/context`,
     );
   });
 
@@ -291,7 +291,7 @@ describe('one document of Context', () => {
     expect(await screen.findByText('No such document')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open Context' })).toHaveAttribute(
       'href',
-      '/preview/context',
+      '/context',
     );
   });
 });
@@ -299,7 +299,7 @@ describe('one document of Context', () => {
 describe('the conflicts of the workspace', () => {
   it('lists every conflict of the workspace corpus, open first', async () => {
     serve();
-    renderAt('/preview/context/conflicts');
+    renderAt('/context/conflicts');
 
     const table = await screen.findByRole('table', { name: 'Conflicts' });
     await waitFor(() => expect(within(table).getAllByRole('row')).toHaveLength(2));
@@ -315,7 +315,7 @@ describe('the conflicts of the workspace', () => {
 
   it('opens the conflict with its resolver, on the workspace corpus', async () => {
     const calls = serve();
-    renderAt('/preview/context/conflicts');
+    renderAt('/context/conflicts');
     const user = userEvent.setup();
 
     const table = await screen.findByRole('table', { name: 'Conflicts' });
@@ -324,7 +324,7 @@ describe('the conflicts of the workspace', () => {
 
     await waitFor(() =>
       expect(screen.getByTestId('address')).toHaveTextContent(
-        '/preview/context/conflicts/overlap%3A%3A',
+        '/context/conflicts/overlap%3A%3A',
       ),
     );
     expect(
@@ -339,7 +339,7 @@ describe('the conflicts of the workspace', () => {
 
   it('says so at an address the corpus has no conflict at', async () => {
     serve();
-    renderAt('/preview/context/conflicts/overlap%3A%3Anope%3A%3Aa%3A%3Ab%3A%3A0000');
+    renderAt('/context/conflicts/overlap%3A%3Anope%3A%3Aa%3A%3Ab%3A%3A0000');
     expect((await screen.findAllByText('No such conflict')).length).toBeGreaterThan(0);
   });
 });

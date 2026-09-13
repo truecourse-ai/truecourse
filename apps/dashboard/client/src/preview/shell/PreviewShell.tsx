@@ -43,9 +43,6 @@ import { CreateWorkspaceDialog } from './CreateWorkspaceDialog';
 import { usePreviewState } from './preview-state';
 import { usePreviewUser } from './use-preview-user';
 import { useOnboarding } from './use-onboarding';
-import { PREVIEW_BASE } from './base';
-
-export { PREVIEW_BASE };
 
 /** The brand wordmark face, the one place the UI uses the logo's font (`.brand-wordmark`). */
 const WORDMARK = { fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace", letterSpacing: '0.01em' } as const;
@@ -53,13 +50,13 @@ const WORDMARK = { fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, 
 // A `disabled` entry is shown but not a link: the page is parked, and hiding
 // it would make the menu lie about what the product has.
 const NAV: { to: string; label: string; icon: LucideIcon; disabled?: boolean }[] = [
-  { to: PREVIEW_BASE, label: 'Home', icon: Home },
-  { to: `${PREVIEW_BASE}/context`, label: 'Context', icon: Layers },
-  { to: `${PREVIEW_BASE}/code`, label: 'Code', icon: GitBranch },
-  { to: `${PREVIEW_BASE}/flows`, label: 'Flows', icon: Route },
-  { to: `${PREVIEW_BASE}/agent`, label: 'Agent', icon: MousePointer2 },
-  { to: `${PREVIEW_BASE}/notifications`, label: 'Notifications', icon: Bell },
-  { to: `${PREVIEW_BASE}/settings`, label: 'Settings', icon: Settings },
+  { to: '/', label: 'Home', icon: Home },
+  { to: '/context', label: 'Context', icon: Layers },
+  { to: '/code', label: 'Code', icon: GitBranch },
+  { to: '/flows', label: 'Flows', icon: Route },
+  { to: '/agent', label: 'Agent', icon: MousePointer2 },
+  { to: '/notifications', label: 'Notifications', icon: Bell },
+  { to: '/settings', label: 'Settings', icon: Settings },
 ];
 
 function rowClass(active: boolean, collapsed: boolean): string {
@@ -233,15 +230,15 @@ function GettingStarted({ collapsed }: { collapsed: boolean }) {
   const { ready, hasContext, hasRepo, done } = useOnboarding();
   if (!ready || done) return null;
   const steps = [
-    { key: 'context', label: 'Connect context', done: hasContext, to: `${PREVIEW_BASE}/context?add=1` },
-    { key: 'repo', label: 'Connect repository', done: hasRepo, to: `${PREVIEW_BASE}/code?connect=1` },
+    { key: 'context', label: 'Connect context', done: hasContext, to: '/context?add=1' },
+    { key: 'repo', label: 'Connect repository', done: hasRepo, to: '/code?connect=1' },
   ];
   const doneCount = steps.filter((step) => step.done).length;
   if (collapsed) {
     return (
       <div className="flex justify-center border-t border-border py-2">
         <Link
-          to={PREVIEW_BASE}
+          to='/'
           aria-label={`Getting started, ${doneCount} of ${steps.length} done`}
           className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-foreground"
         >
@@ -364,11 +361,11 @@ export function PreviewShell({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
 
   const isActive = (to: string) =>
-    to === PREVIEW_BASE
-      ? pathname === PREVIEW_BASE || pathname === `${PREVIEW_BASE}/`
+    to === '/'
+      ? pathname === '/'
       : pathname.startsWith(to) ||
         // A repository page belongs to Code, where the repositories are: it stays lit inside one.
-        (to === `${PREVIEW_BASE}/code` && pathname.startsWith(`${PREVIEW_BASE}/repos/`));
+        (to === '/code' && pathname.startsWith('/repos/'));
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">
@@ -379,7 +376,7 @@ export function PreviewShell({ children }: { children: ReactNode }) {
       >
         <div className={`flex items-center py-3 ${collapsed ? 'justify-center px-0' : 'justify-between px-3'}`}>
           {!collapsed && (
-            <Link to={PREVIEW_BASE} className="flex items-center gap-2">
+            <Link to='/' className="flex items-center gap-2">
               <img src="/logo.svg" alt="" className="h-7 w-7 shrink-0 dark:hidden" />
               <img src="/logo-dark.svg" alt="" className="hidden h-7 w-7 shrink-0 dark:block" />
               <span className="text-sm font-bold" style={WORDMARK}>TrueCourse</span>
@@ -420,10 +417,10 @@ export function PreviewShell({ children }: { children: ReactNode }) {
               </div>
             )}
             <NavRow
-              to={`${PREVIEW_BASE}/admin`}
+              to={'/admin'}
               label="Admin"
               icon={ShieldCheck}
-              active={isActive(`${PREVIEW_BASE}/admin`)}
+              active={isActive('/admin')}
               collapsed={collapsed}
             />
           </div>

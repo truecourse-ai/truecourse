@@ -12,7 +12,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { buildCorpusConflicts } from '@/preview/vendor/shared';
+import { buildCorpusConflicts } from '@truecourse/shared';
 import { getContextCorpus, type SpecCorpusResponse } from '@/lib/api';
 import { IndexTable } from '@/preview/ui/index-table';
 import {

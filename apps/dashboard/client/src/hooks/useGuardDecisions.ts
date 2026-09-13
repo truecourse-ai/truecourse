@@ -3,14 +3,14 @@
  * object: what the user ruled out of testing, plus the writes that change it.
  *
  * TWO TIERS, and they are not interchangeable:
- *  - `dismissedFlows` — the MANUAL unit. A flow is a stable, spec-derived
+ *  - `dismissedFlows`, the MANUAL unit. A flow is a stable, spec-derived
  *    identity, so a dismissal keeps matching after a regenerate. The flow
  *    detail's "don't test this flow" ruling writes it, and the next generate
  *    drops the flow with its tests.
- *  - `dismissedClaims` — the finer, claim-level tier the test detail writes. A
+ *  - `dismissedClaims`, the finer, claim-level tier the test detail writes. A
  *    record marked `auto` was the TOOL's own call (triage), not the user's, and
  *    surfaces render that provenance rather than passing it off as a human
- *    judgment — hence {@link GuardDecisionsState.dismissalFor}, which hands back
+ *    judgment, hence {@link GuardDecisionsState.dismissalFor}, which hands back
  *    the record instead of a boolean.
  *
  * A TEST is never a dismissal unit: its id is generated, so a dismissal would
@@ -40,17 +40,17 @@ export interface GuardFlowDismissalInput {
 }
 
 export interface GuardDecisionsState {
-  /** The recorded dismissal for this claim, or undefined — carries `auto`/`reason`. */
+  /** The recorded dismissal for this claim, or undefined, carries `auto`/`reason`. */
   dismissalFor: (claim: GuardClaimIdentity) => GuardDismissedClaim | undefined;
-  /** Record the dismissal — the next generate rebuilds the flow without the claim. */
+  /** Record the dismissal, the next generate rebuilds the flow without the claim. */
   dismiss: (claim: GuardClaimIdentity) => Promise<void>;
   /** Reverse it. */
   undismiss: (claim: GuardClaimIdentity) => Promise<void>;
   /** The recorded dismissal for this flow, or undefined. */
   flowDismissal: (flowId: string) => GuardDismissedFlow | undefined;
-  /** Every dismissed flow id — what a list marks its rows from. */
+  /** Every dismissed flow id, what a list marks its rows from. */
   dismissedFlowIds: ReadonlySet<string>;
-  /** Rule the whole flow out — the next generate drops it with its tests. */
+  /** Rule the whole flow out, the next generate drops it with its tests. */
   dismissFlow: (flow: GuardFlowDismissalInput) => Promise<void>;
   /** Reverse it. */
   undismissFlow: (flowId: string) => Promise<void>;

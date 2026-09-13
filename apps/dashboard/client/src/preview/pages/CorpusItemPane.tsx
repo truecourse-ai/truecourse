@@ -18,14 +18,14 @@
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { SpecSourceProvider, type SpecSource } from '@/components/spec/spec-source';
-import { useSpecCorpus } from '@/preview/vendor/components/spec/SpecCorpusView';
-import { GuardCoveragePage } from '@/preview/vendor/components/guard/GuardCoveragePage';
-import { useGuardClaims } from '@/preview/vendor/hooks/useGuardClaims';
+import { useSpecCorpus } from '@/components/spec/SpecCorpusView';
+import { GuardCoveragePage } from '@/components/guard/GuardCoveragePage';
+import { useGuardClaims } from '@/hooks/useGuardClaims';
 import {
   useGuardCoverageTabs,
   type GuardCoverageTabsState,
-} from '@/preview/vendor/hooks/useGuardCoverageTabs';
-import { guardUntestableEntries } from '@/preview/vendor/lib/guard-claims';
+} from '@/hooks/useGuardCoverageTabs';
+import { guardUntestableEntries } from '@/lib/guard-claims';
 import { useGuardStaleness } from '@/hooks/useGuardStaleness';
 import { useGuardTabJump } from '@/preview/repo/tab-jump';
 import { conflictHref, docHref } from './context-hrefs';

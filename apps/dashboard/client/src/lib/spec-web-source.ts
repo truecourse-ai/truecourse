@@ -1,16 +1,16 @@
 /**
- * Display mapping for WEB-SOURCE spec docs — pages snapshotted from a registered
+ * Display mapping for WEB-SOURCE spec docs, pages snapshotted from a registered
  * llms.txt site by `truecourse spec source add`.
  *
  * Their corpus ref is the real repo-relative path of the snapshot file
  * (`.truecourse/specs/sources/<sourceId>/<page>.md`), which is what every
- * downstream consumer reads — but it is unreadable in a list. Everything that
+ * downstream consumer reads, but it is unreadable in a list. Everything that
  * shows one to a person renders `<source title> / <page path>` instead, and the
  * ref itself stays the identity (selection, tabs, decisions are unchanged).
  *
  * The source title comes from the corpus payload's enrichment (the server reads
- * `sources.json`); when it is missing — a ref carried by a decision list, or a
- * source that was removed — the id in the ref is used, so a label is always
+ * `sources.json`); when it is missing, a ref carried by a decision list, or a
+ * source that was removed, the id in the ref is used, so a label is always
  * derivable from the ref alone.
  */
 
@@ -55,7 +55,7 @@ export function specDocLabel(
 }
 
 /**
- * True when the last scan has SEEN this ref — kept as a corpus doc, or dropped
+ * True when the last scan has SEEN this ref, kept as a corpus doc, or dropped
  * into "Not included". Either way the Coverage tree carries a row for it, so
  * opening it there lands on something. A null corpus (never scanned, or the read
  * 404'd) knows no ref at all.
@@ -75,7 +75,7 @@ export const SKIP_REASON: Record<string, string> = {
   'fetch-failed': 'could not be fetched',
 };
 
-/** "1 page" / "214 pages" — one phrasing across the sources UI. */
+/** "1 page" / "214 pages", one phrasing across the sources UI. */
 export function pageCount(n: number): string {
   return `${n} page${n === 1 ? '' : 's'}`;
 }

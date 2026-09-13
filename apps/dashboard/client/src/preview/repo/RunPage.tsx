@@ -10,12 +10,12 @@ import { FlaskConical, Loader2 } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { CHIP_CLASS, PageHeader } from '@/preview/ui/bits';
 import { CollapsibleAside } from '@/preview/ui/collapsible-aside';
-import { GuardDriftDetail } from '@/preview/vendor/components/guard/GuardDriftDetail';
-import { GuardDriftList } from '@/preview/vendor/components/guard/GuardDriftList';
-import { useGuardTabs } from '@/preview/vendor/hooks/useGuardTabs';
-import { useGuardView } from '@/preview/vendor/hooks/useGuardView';
-import { formatGuardDuration, formatGuardTime, guardRunRef, orderGuardDrifts } from '@/preview/vendor/lib/guard-drifts';
-import { guardStatusMeta } from '@/preview/vendor/lib/guard-status';
+import { GuardDriftDetail } from '@/components/guard/GuardDriftDetail';
+import { GuardDriftList } from '@/components/guard/GuardDriftList';
+import { useGuardTabs } from '@/hooks/useGuardTabs';
+import { useGuardView } from '@/hooks/useGuardView';
+import { formatGuardDuration, formatGuardTime, guardRunRef, orderGuardDrifts } from '@/lib/guard-drifts';
+import { guardStatusMeta } from '@/lib/guard-status';
 import type { Repo } from '@/preview/data/types';
 import { useGuardTabJump } from './tab-jump';
 import { useGuardRun } from './use-guard-run';
@@ -38,7 +38,7 @@ export function RunPage({ repo, runId }: { repo: Repo; runId: string }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader
-        crumbs={[{ label: 'Runs', to: `/preview/repos/${repo.id}/runs` }]}
+        crumbs={[{ label: 'Runs', to: `/repos/${repo.id}/runs` }]}
         title={<span className="font-mono">{env?.commit ?? runId}</span>}
         subtitle={
           env && (

@@ -4,14 +4,21 @@
  *
  * A detail pane is the ONLY scroll context it has: nothing inside it scrolls on
  * its own. So a long block renders CLAMPED to a head and grows INLINE on one
- * click — the page scrolls, the block never does.
+ * click, the page scrolls, the block never does.
  */
 
 import { useState } from 'react';
-import { PRE } from './detail-styles';
 
 /** How many lines a clamped block shows before the expander. */
 export const GUARD_CLAMP_LINES = 24;
+
+/**
+ * Long DATA wraps, a value with no newlines must read in place, never behind a
+ * horizontal scrollbar. Indentation-sensitive artifacts (the raw YAML view) keep
+ * the unwrapped ARTIFACT_PRE instead.
+ */
+const WRAPPED_PRE =
+  'mt-1 max-w-full whitespace-pre-wrap break-words rounded border border-border bg-muted/20 p-2 font-mono text-[11px] text-foreground';
 
 export function GuardLongText({
   text,
@@ -19,7 +26,7 @@ export function GuardLongText({
   head = GUARD_CLAMP_LINES,
 }: {
   text: string;
-  /** Accessible name of the block — how tests and readers address it. */
+  /** Accessible name of the block, how tests and readers address it. */
   label: string;
   head?: number;
 }) {
@@ -28,7 +35,7 @@ export function GuardLongText({
   const clamped = !open && lines.length > head;
   return (
     <div>
-      <pre className={PRE} aria-label={label}>
+      <pre className={WRAPPED_PRE} aria-label={label}>
         {clamped ? lines.slice(0, head).join('\n') : text}
       </pre>
       {lines.length > head && (

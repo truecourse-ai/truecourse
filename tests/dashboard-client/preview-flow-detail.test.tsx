@@ -7,8 +7,8 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import type { GuardFlowDetail as GuardFlowDetailData } from '@/preview/vendor/shared';
-import { GuardFlowDetail } from '@/preview/vendor/components/guard/GuardFlowDetail';
+import type { GuardFlowDetail as GuardFlowDetailData } from '@truecourse/shared';
+import { GuardFlowDetail } from '@/components/guard/GuardFlowDetail';
 
 const DETAIL: GuardFlowDetailData = {
   flowId: 'write-then-read',

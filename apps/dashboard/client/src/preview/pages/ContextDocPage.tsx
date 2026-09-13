@@ -28,7 +28,6 @@ import { getContextDoc } from '@/lib/api';
 import { CONTEXT_DOC_TONE, StatusWord } from '@/preview/ui/status-word';
 import { usePreviewState } from '@/preview/shell/preview-state';
 import { useContextDocuments, useContextSignal } from '@/preview/shell/use-context';
-import { PREVIEW_BASE } from '@/preview/shell/base';
 import { ContextFrame } from './ContextFrame';
 import { CONTEXT_BASE, documentsHref } from './context-hrefs';
 import { CorpusItemPane } from './CorpusItemPane';
@@ -45,7 +44,7 @@ function Linkable({ row }: { row: ContextDocumentRow }) {
         <span key={repo.id}>
           {i > 0 && ', '}
           <Link
-            to={`${PREVIEW_BASE}/repos/${repo.id}/context`}
+            to={`/repos/${repo.id}/context`}
             className="text-primary hover:underline"
           >
             {repo.fullName}

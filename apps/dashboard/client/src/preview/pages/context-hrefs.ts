@@ -5,10 +5,9 @@
  * page to link to it.
  */
 
-import { PREVIEW_BASE } from '@/preview/shell/base';
 
 /** Context itself: the SOURCES, which is where the section lands. */
-export const CONTEXT_BASE = `${PREVIEW_BASE}/context`;
+export const CONTEXT_BASE = '/context';
 export const DOCUMENTS_BASE = `${CONTEXT_BASE}/documents`;
 export const CONFLICTS_BASE = `${CONTEXT_BASE}/conflicts`;
 

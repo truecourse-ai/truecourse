@@ -43,7 +43,7 @@ import {
 } from '@/lib/api';
 import { SectionTitle } from '@/preview/ui/bits';
 import { CONTEXT_SYNC_TONE, CONTEXT_SYNC_WORD, StatusWord } from '@/preview/ui/status-word';
-import { formatRelativeTime } from '@/preview/vendor/shared/format/relative-time';
+import { formatRelativeTime } from '@truecourse/shared';
 import { usePreviewState } from '@/preview/shell/preview-state';
 import { useContextSignal, useContextSource } from '@/preview/shell/use-context';
 import type { Repo } from '@/preview/data/types';

@@ -150,12 +150,12 @@ function serve(over: Partial<World> = {}) {
 }
 
 function renderMembers() {
-  window.history.replaceState({}, '', '/preview/settings/members');
+  window.history.replaceState({}, '', '/settings/members');
   render(
-    <MemoryRouter initialEntries={['/preview/settings/members']}>
+    <MemoryRouter initialEntries={['/settings/members']}>
       <AuthProvider>
         <Routes>
-          <Route path="/preview/*" element={<PreviewApp />} />
+          <Route path="/*" element={<PreviewApp />} />
         </Routes>
       </AuthProvider>
     </MemoryRouter>,
@@ -331,11 +331,11 @@ describe('Settings › Members', () => {
   });
 
   it('asks nobody about members with no session, and lists none', async () => {
-    window.history.replaceState({}, '', '/preview/settings/members');
+    window.history.replaceState({}, '', '/settings/members');
     render(
-      <MemoryRouter initialEntries={['/preview/settings/members']}>
+      <MemoryRouter initialEntries={['/settings/members']}>
         <Routes>
-          <Route path="/preview/*" element={<PreviewApp />} />
+          <Route path="/*" element={<PreviewApp />} />
         </Routes>
       </MemoryRouter>,
     );

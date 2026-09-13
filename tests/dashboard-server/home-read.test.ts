@@ -326,7 +326,7 @@ describe('GET /api/home', () => {
       expect(page.changed[0]).toMatchObject({
         ref: REFUNDS,
         title: 'Refunds',
-        href: `/preview/context/doc/${encodeURIComponent(REFUNDS)}`,
+        href: `/context/doc/${encodeURIComponent(REFUNDS)}`,
       });
       // The middle run changed nothing about the document: the failure stood.
       expect(page.changed).toHaveLength(2);
@@ -355,7 +355,7 @@ describe('GET /api/home', () => {
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({ title: 'Document scan', status: 'Failed' });
       expect(rows[0]!.fact).toContain('the provider refused');
-      expect(rows[0]!.href).toMatch(/^\/preview\/agent\//);
+      expect(rows[0]!.href).toMatch(/^\/agent\//);
     });
 
     it('names every open conflict of the workspace corpus', async () => {
@@ -366,7 +366,7 @@ describe('GET /api/home', () => {
 
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({ title: 'refund window disagrees', status: 'Conflict' });
-      expect(rows[0]!.href).toMatch(/^\/preview\/context\/conflicts\//);
+      expect(rows[0]!.href).toMatch(/^\/context\/conflicts\//);
     });
 
     it('names every linked document nothing can prove, with its blocked count', async () => {
@@ -377,7 +377,7 @@ describe('GET /api/home', () => {
 
       expect(rows.map((row) => row.title).sort()).toEqual(['Refunds', 'Shipping']);
       expect(rows[0]).toMatchObject({ status: 'Blocked', fact: '1 section blocked' });
-      expect(rows[0]!.href).toMatch(/^\/preview\/context\/doc\//);
+      expect(rows[0]!.href).toMatch(/^\/context\/doc\//);
     });
 
     it('names a source whose last sync failed', async () => {
@@ -395,14 +395,14 @@ describe('GET /api/home', () => {
         title: 'docs.acme.com',
         status: 'Sync failed',
         fact: 'the site answered 404',
-        href: `/preview/context/sources/${SITE}`,
+        href: `/context/sources/${SITE}`,
       });
     });
 
     it('names the missing provider once, and says nothing when one is set', async () => {
       const missing = (await home()).attention.filter((row) => row.kind === 'provider');
       expect(missing).toHaveLength(1);
-      expect(missing[0]).toMatchObject({ status: 'Needs setup', href: '/preview/settings/models' });
+      expect(missing[0]).toMatchObject({ status: 'Needs setup', href: '/settings/models' });
 
       withProvider();
       expect((await home()).attention.filter((row) => row.kind === 'provider')).toEqual([]);

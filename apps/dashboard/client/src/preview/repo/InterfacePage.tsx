@@ -30,14 +30,14 @@ export function InterfacePage({ repo, interfaceId }: { repo: Repo; interfaceId: 
   // An explicit empty member means the user collapsed an action reached through an old task URL.
   const member = params.has('member') ? params.get('member') : legacy?.id ?? null;
   const title = recipeSurface ? `${recipeDriver?.label} recipe` : row ? `${row.method ? `${row.method} ` : ''}${row.title}` : interfaceId;
-  const base = `/preview/repos/${repo.id}/interfaces`;
+  const base = `/repos/${repo.id}/interfaces`;
 
   const tabs = useMemo<GuardTabsState>(() => ({
     activeId: selection,
     openTabs: [{ id: selection, pinned: true }],
     open: (id) => navigate(`${base}/${encodeURIComponent(id)}`),
     close: () => navigate(base),
-    selectOverview: () => navigate(base),
+    deselect: () => navigate(base),
   }), [selection, navigate, base]);
 
   return (
@@ -50,7 +50,6 @@ export function InterfacePage({ repo, interfaceId }: { repo: Repo; interfaceId: 
           loading={interfaces.loading || (!!recipeSurface && flows.loading)}
           error={interfaces.error ?? (recipeSurface ? flows.error : null)}
           tabs={tabs}
-          showTabs={false}
           member={member}
           onMember={(id) => setParams((previous) => {
             const next = new URLSearchParams(previous);

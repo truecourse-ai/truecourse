@@ -1,5 +1,5 @@
 /**
- * One flow, as its own page (`/preview/flows/:flowId?repo=`): the breadcrumb
+ * One flow, as its own page (`/flows/:flowId?repo=`): the breadcrumb
  * back to Flows, then the vendored flow workspace (`GuardFlowsPane`), pinned to
  * this one flow. A scenario or finding the workspace opens rides the same URL
  * tabs it always did. The reads are the server's, re-read
@@ -13,16 +13,16 @@
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageHeader } from '@/preview/ui/bits';
-import { GuardFlowsPane } from '@/preview/vendor/components/guard/GuardFlowsPane';
-import { useGuardClaims } from '@/preview/vendor/hooks/useGuardClaims';
-import { useGuardDecisions } from '@/preview/vendor/hooks/useGuardDecisions';
-import { useGuardFlows } from '@/preview/vendor/hooks/useGuardFlows';
-import { flowTabId, tabFlowId, useGuardFlowTabs } from '@/preview/vendor/hooks/useGuardFlowTabs';
-import { useGuardInterfaces } from '@/preview/vendor/hooks/useGuardInterfaces';
-import { useGuardScenarios } from '@/preview/vendor/hooks/useGuardScenarios';
-import { useGuardView } from '@/preview/vendor/hooks/useGuardView';
-import type { GuardTabsState } from '@/preview/vendor/hooks/useGuardTabs';
-import { guardTestBinds } from '@/preview/vendor/lib/guard-tests';
+import { GuardFlowsPane } from '@/components/guard/GuardFlowsPane';
+import { useGuardClaims } from '@/hooks/useGuardClaims';
+import { useGuardDecisions } from '@/hooks/useGuardDecisions';
+import { useGuardFlows } from '@/hooks/useGuardFlows';
+import { flowTabId, tabFlowId, useGuardFlowTabs } from '@/hooks/useGuardFlowTabs';
+import { useGuardInterfaces } from '@/hooks/useGuardInterfaces';
+import { useGuardScenarios } from '@/hooks/useGuardScenarios';
+import { useGuardView } from '@/hooks/useGuardView';
+import type { GuardTabsState } from '@/hooks/useGuardTabs';
+import { guardTestBinds } from '@/lib/guard-tests';
 import type { Repo } from '@/preview/data/types';
 import { FLOWS_BASE, flowHref, flowsHref } from '@/preview/pages/flow-hrefs';
 import { useGuardTabJump } from './tab-jump';

@@ -3,14 +3,13 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import type { GuardFlowListItem, GuardFlowProgress } from '@truecourse/shared';
-import { GuardProgressSummary } from '@/components/guard/GuardProgressSummary';
 import type { Repo } from '@/preview/data/types';
 
 const state = vi.hoisted(() => ({ flows: [] as unknown[] }));
 vi.mock('@/preview/shell/preview-state', () => ({
   usePreviewState: () => ({ repos: [{ id: 'repo', fullName: 'acme/repo' } as Repo] }),
 }));
-vi.mock('@/preview/vendor/lib/api', () => ({ getGuardFlows: async () => ({ flows: state.flows }) }));
+vi.mock('@/lib/api', () => ({ getGuardFlows: async () => ({ flows: state.flows }) }));
 vi.mock('@/lib/socket', () => ({ connectSocket: () => ({ on: () => {}, off: () => {} }) }));
 
 import FlowsPage from '@/preview/pages/FlowsPage';
@@ -19,12 +18,6 @@ const progress: GuardFlowProgress = { execution: 'passed', scenarios: 1, passed:
 const flow = (title: string, p: GuardFlowProgress): GuardFlowListItem => ({ flowId: title, title, goal: title, status: p.coverage === 'complete' ? 'guarded' : 'blocked-on', bucket: p.coverage === 'complete' ? 'guarded' : 'partial', epic: false, composedOf: [], manual: false, milestoneCount: 1, sectionCount: 1, docs: [], surfaces: [], drivers: ['web'], findings: 0, toolDefects: 0, errors: 0, progress: p });
 
 describe('execution and coverage presentation', () => {
-  it('shows a passing execution beside partial coverage and its generation state', () => {
-    render(<GuardProgressSummary progress={progress} />);
-    expect(screen.getByText('Execution: Passed')).toBeInTheDocument();
-    expect(screen.getByText('Coverage: Partial · 1/2 cases')).toBeInTheDocument();
-    expect(screen.getByText('Incomplete generation')).toBeInTheDocument();
-  });
   it('restores compact status labels and filters without mistaking partial passing tests for complete flows', async () => {
     state.flows = [flow('Search', { ...progress, coverage: 'complete', verified: 2, generation: 'ready' }), flow('Delete', { ...progress, coverage: 'complete', verified: 2, generation: 'ready' }), flow('Create', progress), flow('Validation', progress), flow('SQLite layout', { ...progress, scenarios: 0, passed: 0, execution: 'not-generated', verified: 0, coverage: 'unverified', category: 'system', generation: 'unsupported' })];
     render(<MemoryRouter><FlowsPage /></MemoryRouter>);

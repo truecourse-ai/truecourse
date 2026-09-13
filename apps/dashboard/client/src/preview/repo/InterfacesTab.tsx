@@ -43,7 +43,7 @@ export function InterfacesTab({ repo }: { repo: Repo }) {
   const [params] = useSearchParams();
   const jumpTo = params.get('interface');
   useEffect(() => {
-    if (jumpTo) navigate(`/preview/repos/${repo.id}/interfaces/${encodeURIComponent(jumpTo)}`, { replace: true });
+    if (jumpTo) navigate(`/repos/${repo.id}/interfaces/${encodeURIComponent(jumpTo)}`, { replace: true });
   }, [jumpTo, navigate, repo.id]);
 
   const reloadKey = useGuardRefresh(repo, ['guard-setup']);
@@ -118,7 +118,7 @@ export function InterfacesTab({ repo }: { repo: Repo }) {
   }, [catalog, query, surfaceFilter, originFilter]);
 
   const hidden = catalog.hidden.filter((h) => surfaceFilter.length === 0 || surfaceFilter.includes(h.surface));
-  const rowUrl = (id: string) => `/preview/repos/${repo.id}/interfaces/${encodeURIComponent(id)}`;
+  const rowUrl = (id: string) => `/repos/${repo.id}/interfaces/${encodeURIComponent(id)}`;
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">

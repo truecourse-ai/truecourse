@@ -194,7 +194,7 @@ function renderAt(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/preview/*" element={<PreviewApp />} />
+        <Route path="/*" element={<PreviewApp />} />
       </Routes>
       <Address />
     </MemoryRouter>,
@@ -210,7 +210,7 @@ function rows() {
 beforeEach(() => {
   streams.length = 0;
   (globalThis as { EventSource?: unknown }).EventSource = StubEventSource;
-  window.history.replaceState({}, '', '/preview');
+  window.history.replaceState({}, '', '/');
 });
 
 afterEach(() => {
@@ -226,7 +226,7 @@ afterEach(() => {
 describe('the notification feed', () => {
   it('renders the stored rows in the order the store sent them', async () => {
     serve([RUN, SETUP, SYNC, SCAN_FAILED]);
-    renderAt('/preview/notifications');
+    renderAt('/notifications');
 
     expect(await screen.findByRole('heading', { name: 'Notifications' })).toBeInTheDocument();
     await waitFor(() => expect(rows()).toHaveLength(4));
@@ -249,7 +249,7 @@ describe('the notification feed', () => {
 
   it('reads ONE event stream, however many surfaces of the page watch it', async () => {
     serve([SETUP, SYNC]);
-    renderAt('/preview/notifications');
+    renderAt('/notifications');
     await waitFor(() => expect(rows()).toHaveLength(2));
 
     // The feed, the Context dot and the run list all read the same connection —
@@ -259,7 +259,7 @@ describe('the notification feed', () => {
 
   it('carries an unread title in the foreground weight and a read one muted', async () => {
     serve([SETUP, SYNC]);
-    renderAt('/preview/notifications');
+    renderAt('/notifications');
     await waitFor(() => expect(rows()).toHaveLength(2));
 
     expect(screen.getByText('Flow setup complete')).toHaveClass('font-medium', 'text-foreground');
@@ -270,7 +270,7 @@ describe('the notification feed', () => {
 
   it('counts the unread rows on the sidebar badge', async () => {
     serve([SETUP, RUN, SYNC]);
-    renderAt('/preview/notifications');
+    renderAt('/notifications');
 
     await waitFor(() => expect(rows()).toHaveLength(3));
     const link = screen.getAllByRole('link', { name: /Notifications/ })[0]!;
@@ -279,7 +279,7 @@ describe('the notification feed', () => {
 
   it('says so when nothing has happened, and when a filter excluded everything', async () => {
     serve([]);
-    renderAt('/preview/notifications');
+    renderAt('/notifications');
 
     expect(await screen.findByText('Nothing has happened yet.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Mark all read' })).toBeNull();
@@ -291,7 +291,7 @@ describe('the notification feed', () => {
 
   it('searches the title and the body', async () => {
     serve([SETUP, RUN]);
-    renderAt('/preview/notifications');
+    renderAt('/notifications');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(2));
 
@@ -314,7 +314,7 @@ describe('the notification feed', () => {
 describe('the filters', () => {
   it('narrows to what the address names, and reads AND across dimensions', async () => {
     serve([SETUP, RUN, SYNC, SCAN_FAILED]);
-    renderAt('/preview/notifications?read=unread');
+    renderAt('/notifications?read=unread');
     // Everything but the sync, which is already read.
     await waitFor(() => expect(rows()).toHaveLength(3));
     expect(screen.queryByText('Source synced')).toBeNull();
@@ -322,7 +322,7 @@ describe('the filters', () => {
 
   it('reads OR within one dimension and AND across two', async () => {
     serve([SETUP, RUN, SYNC, SCAN_FAILED]);
-    renderAt('/preview/notifications?status=success&status=error&about=acme%2Fwidgets');
+    renderAt('/notifications?status=success&status=error&about=acme%2Fwidgets');
 
     // success OR error, AND the one repository: the setup alone.
     await waitFor(() => expect(rows()).toHaveLength(1));
@@ -331,7 +331,7 @@ describe('the filters', () => {
 
   it('tallies the feed it shows by level, and counts the values over the rest', async () => {
     serve([SETUP, RUN, SYNC, SCAN_FAILED]);
-    renderAt('/preview/notifications');
+    renderAt('/notifications');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(4));
 
@@ -355,7 +355,7 @@ describe('the filters', () => {
 
   it('puts a Read filter picked through Add filter into the address', async () => {
     serve([SETUP, RUN, SYNC, SCAN_FAILED]);
-    renderAt('/preview/notifications');
+    renderAt('/notifications');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(4));
 
@@ -364,12 +364,12 @@ describe('the filters', () => {
     await user.click(await screen.findByRole('option', { name: /^Read/ }));
 
     await waitFor(() => expect(rows()).toHaveLength(1));
-    expect(screen.getByTestId('address')).toHaveTextContent('/preview/notifications?read=read');
+    expect(screen.getByTestId('address')).toHaveTextContent('/notifications?read=read');
   });
 
   it('puts a Status filter into the address', async () => {
     serve([SETUP, RUN, SYNC, SCAN_FAILED]);
-    renderAt('/preview/notifications');
+    renderAt('/notifications');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(4));
 
@@ -378,13 +378,13 @@ describe('the filters', () => {
     await user.click(await screen.findByRole('option', { name: /Failed/ }));
 
     await waitFor(() => expect(rows()).toHaveLength(1));
-    expect(screen.getByTestId('address')).toHaveTextContent('/preview/notifications?status=error');
+    expect(screen.getByTestId('address')).toHaveTextContent('/notifications?status=error');
     expect(within(rows()[0]!).getByText('Document scan failed')).toBeInTheDocument();
   });
 
   it('puts an About filter into the address, for a repository and for a source', async () => {
     serve([SETUP, RUN, SYNC, SCAN_FAILED]);
-    renderAt('/preview/notifications');
+    renderAt('/notifications');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(4));
 
@@ -396,7 +396,7 @@ describe('the filters', () => {
 
     await waitFor(() => expect(rows()).toHaveLength(2));
     expect(screen.getByTestId('address')).toHaveTextContent(
-      '/preview/notifications?about=acme%2Fwidgets',
+      '/notifications?about=acme%2Fwidgets',
     );
   });
 });
@@ -408,7 +408,7 @@ describe('the filters', () => {
 describe('opening a row', () => {
   it('marks a setup read and opens the run’s own conversation', async () => {
     const state = serve([SETUP]);
-    renderAt('/preview/notifications');
+    renderAt('/notifications');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(1));
 
@@ -416,13 +416,13 @@ describe('opening a row', () => {
 
     await waitFor(() => expect(state.reads).toEqual([{ ids: ['n-1'] }]));
     expect(screen.getByTestId('address')).toHaveTextContent(
-      `/preview/agent/${encodeURIComponent(SETUP_RUN)}`,
+      `/agent/${encodeURIComponent(SETUP_RUN)}`,
     );
   });
 
   it('opens a scan at its conversation too', async () => {
     const state = serve([SCAN_FAILED]);
-    renderAt('/preview/notifications');
+    renderAt('/notifications');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(1));
 
@@ -430,13 +430,13 @@ describe('opening a row', () => {
 
     await waitFor(() => expect(state.reads).toEqual([{ ids: ['n-4'] }]));
     expect(screen.getByTestId('address')).toHaveTextContent(
-      `/preview/agent/${encodeURIComponent(SCAN_RUN)}`,
+      `/agent/${encodeURIComponent(SCAN_RUN)}`,
     );
   });
 
   it('opens a flow run at the repository’s run page', async () => {
     const state = serve([RUN]);
-    renderAt('/preview/notifications');
+    renderAt('/notifications');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(1));
 
@@ -444,7 +444,7 @@ describe('opening a row', () => {
 
     await waitFor(() => expect(state.reads).toEqual([{ ids: ['n-2'] }]));
     expect(screen.getByTestId('address')).toHaveTextContent(
-      `/preview/repos/${REPO.id}/runs/${encodeURIComponent(GUARD_RUN)}`,
+      `/repos/${REPO.id}/runs/${encodeURIComponent(GUARD_RUN)}`,
     );
   });
 
@@ -459,7 +459,7 @@ describe('opening a row', () => {
         data: { jobId: 'job-7', repoFullName: REPO.name },
       }),
     ]);
-    renderAt('/preview/notifications');
+    renderAt('/notifications');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(1));
     expect(rows()[0]).toHaveTextContent('Started');
@@ -467,12 +467,12 @@ describe('opening a row', () => {
     await user.click(rows()[0]!);
 
     await waitFor(() => expect(state.reads).toEqual([{ ids: ['n-7'] }]));
-    expect(screen.getByTestId('address')).toHaveTextContent(`/preview/repos/${REPO.id}/runs`);
+    expect(screen.getByTestId('address')).toHaveTextContent(`/repos/${REPO.id}/runs`);
   });
 
   it('opens a sync at the source’s page', async () => {
     const state = serve([SYNC]);
-    renderAt('/preview/notifications');
+    renderAt('/notifications');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(1));
 
@@ -481,32 +481,32 @@ describe('opening a row', () => {
     // Already read: nothing is posted, and the address is still the source's.
     expect(state.reads).toEqual([]);
     expect(screen.getByTestId('address')).toHaveTextContent(
-      '/preview/context/sources/stripe-docs',
+      '/context/sources/stripe-docs',
     );
   });
 
   it('stays put for a row whose event named no address', async () => {
     const state = serve([NO_ADDRESS]);
-    renderAt('/preview/notifications');
+    renderAt('/notifications');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(1));
 
     await user.click(rows()[0]!);
 
     await waitFor(() => expect(state.reads).toEqual([{ ids: ['n-5'] }]));
-    expect(screen.getByTestId('address')).toHaveTextContent('/preview/notifications');
+    expect(screen.getByTestId('address')).toHaveTextContent('/notifications');
   });
 
   it('stays put for a setup whose event named no run', async () => {
     const state = serve([note({ id: 'n-6', data: { jobId: 'job-6', repoFullName: REPO.name } })]);
-    renderAt('/preview/notifications');
+    renderAt('/notifications');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(1));
 
     await user.click(rows()[0]!);
 
     await waitFor(() => expect(state.reads).toEqual([{ ids: ['n-6'] }]));
-    expect(screen.getByTestId('address')).toHaveTextContent('/preview/notifications');
+    expect(screen.getByTestId('address')).toHaveTextContent('/notifications');
   });
 });
 
@@ -517,7 +517,7 @@ describe('opening a row', () => {
 describe('read state and the live stream', () => {
   it('marks everything read from the header, and the badge clears', async () => {
     const state = serve([SETUP, RUN]);
-    renderAt('/preview/notifications');
+    renderAt('/notifications');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(2));
 
@@ -541,7 +541,7 @@ describe('read state and the live stream', () => {
       createdAt: '2026-09-11T09:00:00.000Z',
     });
     serve([started, SYNC]);
-    renderAt('/preview/notifications');
+    renderAt('/notifications');
     await waitFor(() => expect(rows()).toHaveLength(2));
     expect(rows()[0]).toHaveTextContent('Started');
 
@@ -560,7 +560,7 @@ describe('read state and the live stream', () => {
 
   it('prepends a notification the event stream delivers', async () => {
     serve([SETUP]);
-    renderAt('/preview/notifications');
+    renderAt('/notifications');
     await waitFor(() => expect(rows()).toHaveLength(1));
 
     fireFrame({ type: 'notification', notification: RUN, jobId: 'job-2' });
@@ -574,7 +574,7 @@ describe('read state and the live stream', () => {
 
   it('ignores every other frame on the stream', async () => {
     serve([SETUP]);
-    renderAt('/preview/notifications');
+    renderAt('/notifications');
     await waitFor(() => expect(rows()).toHaveLength(1));
 
     fireFrame({ type: 'job.progress', job: { id: 'job-9' } });
@@ -588,7 +588,7 @@ describe('read state and the live stream', () => {
       throw new TypeError('Failed to fetch');
     }) as unknown as typeof window.fetch;
 
-    renderAt('/preview/notifications');
+    renderAt('/notifications');
 
     expect(await screen.findByText('Nothing has happened yet.')).toBeInTheDocument();
   });
@@ -596,7 +596,7 @@ describe('read state and the live stream', () => {
   it('opens no stream in a runtime that has none', async () => {
     delete (globalThis as { EventSource?: unknown }).EventSource;
     serve([SETUP]);
-    renderAt('/preview/notifications');
+    renderAt('/notifications');
 
     await waitFor(() => expect(rows()).toHaveLength(1));
     expect(streams).toEqual([]);

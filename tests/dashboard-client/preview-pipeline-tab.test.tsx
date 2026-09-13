@@ -182,7 +182,7 @@ function renderAt(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/preview/*" element={<PreviewApp />} />
+        <Route path="/*" element={<PreviewApp />} />
       </Routes>
       <Address />
     </MemoryRouter>,
@@ -207,7 +207,7 @@ function spins(row: HTMLElement): boolean {
 
 beforeEach(() => {
   listeners.clear();
-  window.history.replaceState({}, '', '/preview');
+  window.history.replaceState({}, '', '/');
 });
 
 afterEach(() => {
@@ -217,7 +217,7 @@ afterEach(() => {
 describe('the Pipeline tab of a connected repository', () => {
   it('is one row per piece of work, each with its last outcome and when it was', async () => {
     const calls = serve();
-    renderAt(`/preview/repos/${REAL.id}/pipeline`);
+    renderAt(`/repos/${REAL.id}/pipeline`);
 
     const [setup, generate, run] = await rows();
     expect(within(setup!).getByText('Flow setup')).toBeInTheDocument();
@@ -240,7 +240,7 @@ describe('the Pipeline tab of a connected repository', () => {
 
   it('says Never run for work this repository has never done, and offers Run', async () => {
     serve({ runs: [], setup: null, report: null, history: { runs: [] } });
-    renderAt(`/preview/repos/${REAL.id}/pipeline`);
+    renderAt(`/repos/${REAL.id}/pipeline`);
 
     for (const row of await rows()) {
       expect(within(row).getByText('Never run')).toBeInTheDocument();
@@ -252,7 +252,7 @@ describe('the Pipeline tab of a connected repository', () => {
 
   it('gives the three rows one shape, whatever each has to say', async () => {
     serve({ runs: [], setup: null, report: null, history: { runs: [] } });
-    renderAt(`/preview/repos/${REAL.id}/pipeline`);
+    renderAt(`/repos/${REAL.id}/pipeline`);
 
     const shapes = (await rows()).map((row) => lines(row).map((line) => line.className));
     // Two lines each, the same two: a row with no fact and no time still takes
@@ -290,7 +290,7 @@ describe('the Pipeline tab of a connected repository', () => {
         },
       ],
     });
-    renderAt(`/preview/repos/${REAL.id}/pipeline`);
+    renderAt(`/repos/${REAL.id}/pipeline`);
 
     const [setup, generate, run] = await rows();
     await waitFor(() => expect(within(generate!).getByText('Writing the flows')).toBeInTheDocument());
@@ -306,7 +306,7 @@ describe('the Pipeline tab of a connected repository', () => {
     [2, 'Re-run Flow run', 'guard/run'],
   ])('re-runs %s by enqueuing its own job', async (index, label, route) => {
     const calls = serve();
-    renderAt(`/preview/repos/${REAL.id}/pipeline`);
+    renderAt(`/repos/${REAL.id}/pipeline`);
 
     const row = (await rows())[index as number]!;
     const button = within(row).getByRole('button', { name: label as string });
@@ -318,7 +318,7 @@ describe('the Pipeline tab of a connected repository', () => {
 
   it('waits while this repository is already working, and only for its own work', async () => {
     serve({ runs: [SETUP_RUN, { ...GENERATE_RUN, status: 'running', finishedAt: undefined }] });
-    renderAt(`/preview/repos/${REAL.id}/pipeline`);
+    renderAt(`/repos/${REAL.id}/pipeline`);
 
     const [setup, generate] = await rows();
     await waitFor(() =>
@@ -343,7 +343,7 @@ describe('the Pipeline tab of a connected repository', () => {
         job({ type: 'repo.guard-generate' }),
       ],
     });
-    renderAt(`/preview/repos/${REAL.id}/pipeline`);
+    renderAt(`/repos/${REAL.id}/pipeline`);
 
     const [setup, generate] = await rows();
     await waitFor(() => expect(within(generate!).getByText('Queued')).toBeInTheDocument());
@@ -362,30 +362,30 @@ describe('the Pipeline tab of a connected repository', () => {
 
   it('opens a setup or generation row as its conversation, and the run row as the run', async () => {
     serve();
-    renderAt(`/preview/repos/${REAL.id}/pipeline`);
+    renderAt(`/repos/${REAL.id}/pipeline`);
     const user = userEvent.setup();
 
     await user.click(within((await rows())[0]!).getByText('Flow setup'));
-    expect(screen.getByTestId('address')).toHaveTextContent('/preview/agent/setup-1');
+    expect(screen.getByTestId('address')).toHaveTextContent('/agent/setup-1');
 
-    renderAt(`/preview/repos/${REAL.id}/pipeline`);
+    renderAt(`/repos/${REAL.id}/pipeline`);
     await user.click(within((await rows())[2]!).getByText('Flow run'));
     expect(screen.getAllByTestId('address').at(-1)).toHaveTextContent(
-      `/preview/repos/${REAL.id}/runs/r-main1`,
+      `/repos/${REAL.id}/runs/r-main1`,
     );
   });
 
   it('opens the repository’s work when the row has no conversation to open', async () => {
     serve({ runs: [], setup: null, report: null, history: { runs: [] } });
-    renderAt(`/preview/repos/${REAL.id}/pipeline`);
+    renderAt(`/repos/${REAL.id}/pipeline`);
 
     await userEvent.click(within((await rows())[0]!).getByText('Flow setup'));
-    expect(screen.getByTestId('address')).toHaveTextContent('/preview/agent');
+    expect(screen.getByTestId('address')).toHaveTextContent('/agent');
   });
 
   it('re-reads itself when a guard job of this repository settles', async () => {
     const calls = serve();
-    renderAt(`/preview/repos/${REAL.id}/pipeline`);
+    renderAt(`/repos/${REAL.id}/pipeline`);
     await rows();
     const reads = () => calls.filter((c) => c === `/api/repos/${REAL.id}/guard/setup`).length;
     expect(reads()).toBe(1);
@@ -401,7 +401,7 @@ describe('the Pipeline tab of a connected repository', () => {
 describe('the Runs tab', () => {
   it('keeps its search only: the repository’s actions live on Pipeline', async () => {
     serve();
-    renderAt(`/preview/repos/${REAL.id}/runs`);
+    renderAt(`/repos/${REAL.id}/runs`);
 
     await screen.findByRole('table', { name: 'Runs' });
     expect(screen.getByRole('textbox', { name: 'Search runs' })).toBeInTheDocument();

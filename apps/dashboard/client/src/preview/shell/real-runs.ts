@@ -31,7 +31,6 @@ import { listSessionRuns, listWorkspaceRuns, type PublicSessionRun } from '@/lib
 import { connectSocket, joinRepoRoom, leaveRepoRoom } from '@/lib/socket';
 import { commandLabel, runChecklist } from '@/components/sessions/run-model';
 import type { JobChain, JobStep, Repo } from '@/preview/data/types';
-import { PREVIEW_BASE } from './base';
 import { subscribeToServerEvents } from './event-stream';
 
 /** All the shell needs of a repository to describe its runs. */
@@ -71,11 +70,11 @@ export function relativeTime(iso: string | undefined, now: number = Date.now()):
 
 /** Where a repository's work is watched: the Agent page, narrowed to it. */
 export const activityHref = (repoId: string): string =>
-  `${PREVIEW_BASE}/agent?repo=${encodeURIComponent(repoId)}`;
+  `/agent?repo=${encodeURIComponent(repoId)}`;
 
 /** One piece of work as its own conversation. */
 export const conversationHref = (runId: string): string =>
-  `${PREVIEW_BASE}/agent/${encodeURIComponent(runId)}`;
+  `/agent/${encodeURIComponent(runId)}`;
 
 /**
  * One running run as a job chain. The title says ONBOARDING for a repository's

@@ -39,7 +39,6 @@ import { useAuth } from '@/ee/AuthContext';
 import { useRealRunStream, type RunFailure } from './real-runs';
 import { useActiveJobs } from './use-active-jobs';
 import { useNotifications } from './use-notifications';
-import { PREVIEW_BASE } from './base';
 import type { JobView, NotificationView, WorkspaceSummary } from '@truecourse/shared';
 import type { JobChain, Repo, Workspace } from '@/preview/data/types';
 
@@ -209,12 +208,12 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
       });
       return;
     }
-    window.location.assign(PREVIEW_BASE);
+    window.location.assign('/');
   }, []);
 
   const createWorkspace = useCallback(async (name: string) => {
     await postWorkspace(name);
-    window.location.assign(PREVIEW_BASE);
+    window.location.assign('/');
   }, []);
 
   /**

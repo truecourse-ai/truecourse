@@ -12,7 +12,7 @@
  * routes answer in.
  *
  * `PreviewApp` carries no router: it is mounted as a DESCENDANT route set, the
- * way `App.tsx` mounts it at `/preview/*`, so the test can supply a
+ * way `App.tsx` mounts it at `/*`, so the test can supply a
  * MemoryRouter and drive it by address.
  */
 
@@ -102,7 +102,7 @@ function renderAt(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/preview/*" element={<PreviewApp />} />
+        <Route path="/*" element={<PreviewApp />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -114,16 +114,16 @@ afterEach(() => {
 });
 
 const ROUTES: { path: string; heading: RegExp }[] = [
-  { path: '/preview', heading: /^Home$/ },
-  { path: '/preview/code', heading: /^Code$/ },
-  { path: '/preview/flows', heading: /^Flows$/ },
-  { path: '/preview/context', heading: /^Context$/ },
-  { path: '/preview/context/documents', heading: /^Documents$/ },
-  { path: '/preview/context/conflicts', heading: /^Conflicts$/ },
-  { path: '/preview/settings', heading: /^Settings$/ },
-  { path: '/preview/agent', heading: /^Agent$/ },
-  { path: '/preview/notifications', heading: /^Notifications$/ },
-  { path: '/preview/admin', heading: /^Admin$/ },
+  { path: '/', heading: /^Home$/ },
+  { path: '/code', heading: /^Code$/ },
+  { path: '/flows', heading: /^Flows$/ },
+  { path: '/context', heading: /^Context$/ },
+  { path: '/context/documents', heading: /^Documents$/ },
+  { path: '/context/conflicts', heading: /^Conflicts$/ },
+  { path: '/settings', heading: /^Settings$/ },
+  { path: '/agent', heading: /^Agent$/ },
+  { path: '/notifications', heading: /^Notifications$/ },
+  { path: '/admin', heading: /^Admin$/ },
 ];
 
 describe('the one-product shell', () => {
@@ -135,11 +135,11 @@ describe('the one-product shell', () => {
   }
 
   it('keeps the workspace shell around every route', () => {
-    renderAt('/preview/notifications');
+    renderAt('/notifications');
     expect(screen.getByRole('link', { name: 'Home' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Context' })).toHaveAttribute('href', '/preview/context');
-    expect(screen.getByRole('link', { name: 'Code' })).toHaveAttribute('href', '/preview/code');
-    expect(screen.getByRole('link', { name: 'Flows' })).toHaveAttribute('href', '/preview/flows');
+    expect(screen.getByRole('link', { name: 'Context' })).toHaveAttribute('href', '/context');
+    expect(screen.getByRole('link', { name: 'Code' })).toHaveAttribute('href', '/code');
+    expect(screen.getByRole('link', { name: 'Flows' })).toHaveAttribute('href', '/flows');
     // Knowledge is gone: Context is where the workspace's documents live.
     expect(screen.queryByText('Knowledge')).toBeNull();
     // There is no pull request page anywhere: a PR is seen through its runs.
@@ -153,36 +153,36 @@ describe('the one-product shell', () => {
 
 describe('a workspace with nothing connected', () => {
   it('offers Code the one action there is, over an empty table', async () => {
-    renderAt('/preview/code');
+    renderAt('/code');
     expect(await screen.findByText('No repository connected yet.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Connect repository' })).toBeInTheDocument();
   });
 
   it('has no flow to list', async () => {
-    renderAt('/preview/flows');
+    renderAt('/flows');
     expect(await screen.findByText(/No flow generated yet/)).toBeInTheDocument();
   });
 
   it('has no conversation to list', async () => {
-    renderAt('/preview/agent');
+    renderAt('/agent');
     const table = await screen.findByRole('table', { name: 'Agent conversations' });
     // The header row, and the one row that says there is nothing under it.
     expect(within(table).getAllByRole('row')).toHaveLength(2);
   });
 
   it('has no source to read', async () => {
-    renderAt('/preview/context');
+    renderAt('/context');
     expect(await screen.findByText(/No source yet/)).toBeInTheDocument();
   });
 
   it('has nothing in the notification feed', async () => {
-    renderAt('/preview/notifications');
+    renderAt('/notifications');
     expect(await screen.findByText('Nothing has happened yet.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Mark all read' })).toBeNull();
   });
 
   it('leaves Home its placeholder, and sends the reader to Code', () => {
-    renderAt('/preview');
+    renderAt('/');
     expect(screen.getAllByRole('link', { name: 'Code' }).length).toBeGreaterThan(0);
     // Home holds no repository table.
     expect(screen.queryByRole('button', { name: 'Connect repository' })).toBeNull();
@@ -197,54 +197,54 @@ describe('a connected repository', () => {
   beforeEach(() => serve([REPO]));
 
   it('is a row on Code, opening its console', async () => {
-    renderAt('/preview/code');
+    renderAt('/code');
     expect(await screen.findByText('linkwarden/linkwarden')).toBeInTheDocument();
   });
 
   it('lands an address with no tab on Runs, under the Code crumb', async () => {
-    renderAt('/preview/repos/linkwarden');
+    renderAt('/repos/linkwarden');
     const menu = await screen.findByRole('navigation', { name: 'Repository sections' });
     expect(within(menu).getByRole('link', { name: 'Runs' })).toHaveAttribute('aria-current', 'page');
     const crumbs = screen.getAllByRole('navigation', { name: 'Breadcrumb' })[0]!;
-    expect(within(crumbs).getByRole('link', { name: 'Code' })).toHaveAttribute('href', '/preview/code');
+    expect(within(crumbs).getByRole('link', { name: 'Code' })).toHaveAttribute('href', '/code');
   });
 
   it("has no Corpus and no Sources tab: documentation is the workspace's", async () => {
-    renderAt('/preview/repos/linkwarden/runs');
+    renderAt('/repos/linkwarden/runs');
     const menu = await screen.findByRole('navigation', { name: 'Repository sections' });
     expect(within(menu).queryByRole('link', { name: 'Corpus' })).toBeNull();
     expect(within(menu).queryByRole('link', { name: 'Sources' })).toBeNull();
     expect(within(menu).getByRole('link', { name: 'Context' })).toHaveAttribute(
       'href',
-      '/preview/repos/linkwarden/context',
+      '/repos/linkwarden/context',
     );
   });
 
   it('searches its runs, and says there is no run yet', async () => {
-    renderAt('/preview/repos/linkwarden/runs');
+    renderAt('/repos/linkwarden/runs');
     expect(await screen.findByRole('textbox', { name: 'Search runs' })).toBeInTheDocument();
     expect(await screen.findByText('No run yet.')).toBeInTheDocument();
   });
 
   it('renders its interfaces tab', async () => {
-    renderAt('/preview/repos/linkwarden/interfaces');
+    renderAt('/repos/linkwarden/interfaces');
     expect(await screen.findByRole('heading', { name: 'Interfaces' })).toBeInTheDocument();
   });
 
   it('renders its dependencies tab', async () => {
-    renderAt('/preview/repos/linkwarden/dependencies');
+    renderAt('/repos/linkwarden/dependencies');
     expect(await screen.findByRole('heading', { name: 'Dependencies' })).toBeInTheDocument();
   });
 
   it('offers unlink on its settings tab, and no gate policy nobody stores', async () => {
-    renderAt('/preview/repos/linkwarden/settings');
+    renderAt('/repos/linkwarden/settings');
     expect(await screen.findByRole('button', { name: 'Unlink repository' })).toBeInTheDocument();
     expect(screen.queryByText('Gate policy')).toBeNull();
     expect(screen.queryByRole('textbox', { name: 'Notify e-mail addresses' })).toBeNull();
   });
 
   it('answers an address no repository is under', async () => {
-    renderAt('/preview/repos/no-such-repo/runs');
+    renderAt('/repos/no-such-repo/runs');
     expect(await screen.findByText('No such repository')).toBeInTheDocument();
   });
 });

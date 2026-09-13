@@ -47,7 +47,6 @@ import {
 import { addContextSource, previewContextSource } from '@/lib/api';
 import { fetchGithubStatus, fetchInstallationRepos } from '@/preview/data/real-repos';
 import { Stepper } from '@/preview/ui/stepper';
-import { PREVIEW_BASE } from '@/preview/shell/base';
 import { sourceHref } from './context-hrefs';
 
 const FOOT_BUTTON = 'rounded px-3 py-1.5 text-xs font-medium';
@@ -280,7 +279,7 @@ export function AddContextDialog({
             ))}
             <li>
               <Link
-                to={`${PREVIEW_BASE}/settings/connections`}
+                to={'/settings/connections'}
                 onClick={() => onOpenChange(false)}
                 className="block px-3 py-2.5 text-[13px] text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
               >
@@ -296,7 +295,7 @@ export function AddContextDialog({
               <div>
                 <p className="text-[11px] text-muted-foreground">No GitHub account connected yet.</p>
                 <Link
-                  to={`${PREVIEW_BASE}/settings/repositories?from=context-add`}
+                  to={'/settings/repositories?from=context-add'}
                   onClick={() => onOpenChange(false)}
                   className="mt-1 inline-block text-[11px] text-primary hover:underline"
                 >
@@ -362,7 +361,7 @@ export function AddContextDialog({
                   </select>
                   {reposError && <p className="mt-1 text-[11px] text-destructive">{reposError}</p>}
                   <Link
-                    to={`${PREVIEW_BASE}/settings/repositories?from=context-add`}
+                    to={'/settings/repositories?from=context-add'}
                     onClick={() => onOpenChange(false)}
                     className="mt-1 inline-block text-[11px] text-primary hover:underline"
                   >

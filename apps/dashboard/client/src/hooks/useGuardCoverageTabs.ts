@@ -1,57 +1,107 @@
 /**
- * The Coverage tab's main-pane tab set — Guard's heterogeneous doc/conflict tabs.
+ * The Coverage tab's main-pane tab set, Guard's heterogeneous doc/conflict tabs.
  * A binding over the shared {@link useGuardTabs} reducer (one tab model, not a
  * second implementation) that keeps Coverage's existing params working: a doc tab
  * mirrors `?guard`, a conflict tab `?gconf`. Only one is active at a time, so a
  * link carrying both lands on the conflict (its resolution surface) with the doc
- * opened alongside as a pinned tab. `?gsec` — a within-doc section detail, not a
- * tab — rides alongside: dropped when the active tab changes, preserved when the
- * already-active tab is reselected.
+ * opened alongside as a pinned tab.
+ *
+ * Two WITHIN-doc selections ride alongside the tabs rather than being tabs: the
+ * section detail (`?gsec`) and, inside it, the claim being read (`?gclaim`).
+ * Both are dropped when the active tab changes and preserved when the
+ * already-active tab is reselected; picking another section drops the claim,
+ * because a claim is only ever read inside the section that states it.
  */
 
 import { useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useGuardTabs, type GuardTabsParam, type GuardTabsState } from './useGuardTabs';
-
-/** Conflict tab ids are overlap keys (`overlap::…`); doc tab ids are plain refs. */
-const isOverlap = (id: string): boolean => id.startsWith('overlap::');
+import { isConflictId } from '@truecourse/shared';
+import { useGuardTabs, type GuardTabsParam, type GuardTabsState } from '@/hooks/useGuardTabs';
 
 const COVERAGE_TABS: GuardTabsParam = {
-  read: (p) => p.get('gconf') ?? p.get('guard'),
+  read: (p) => p.get('conflict') ?? p.get('doc'),
   write: (next, id) => {
-    const current = next.get('gconf') ?? next.get('guard');
-    next.delete('guard');
-    next.delete('gconf');
+    const current = next.get('conflict') ?? next.get('doc');
+    next.delete('doc');
+    next.delete('conflict');
     if (id == null) {
-      next.delete('gsec');
+      next.delete('section');
+      next.delete('claim');
       return;
     }
-    if (isOverlap(id)) next.set('gconf', id);
-    else next.set('guard', id);
-    // A different tab takes over — its within-doc section detail doesn't carry.
-    if (id !== current) next.delete('gsec');
+    if (isConflictId(id)) next.set('conflict', id);
+    else next.set('doc', id);
+    // A different tab takes over, its within-doc selections don't carry.
+    if (id !== current) {
+      next.delete('section');
+      next.delete('claim');
+    }
   },
-  deepLinkTabs: (p) => [p.get('guard'), p.get('gconf')].filter((v): v is string => v != null),
+  deepLinkTabs: (p) => [p.get('doc'), p.get('conflict')].filter((v): v is string => v != null),
 };
 
 export interface GuardCoverageTabsState extends GuardTabsState {
-  /** The open within-doc section detail (`?gsec`) — a detail, not a tab. */
+  /** The open within-doc section detail (`?gsec`), a detail, not a tab. */
   section: string | null;
   selectSection: (anchor: string | null) => void;
+  /** The claim being read inside that section (`?gclaim`). */
+  claim: string | null;
+  selectClaim: (claimId: string | null) => void;
+  /**
+   * Land a claim whose doc/section the URL doesn't name yet, a `?claim=` deep
+   * link, or a jump from another surface. ONE param write, so the doc, the
+   * section and the claim can never race each other.
+   */
+  focusClaim: (claimId: string, doc: string, anchor: string) => void;
 }
 
 export function useGuardCoverageTabs(repoId: string | undefined): GuardCoverageTabsState {
   const tabs = useGuardTabs(COVERAGE_TABS, repoId);
   const [params, setParams] = useSearchParams();
+
   const selectSection = useCallback(
     (anchor: string | null) =>
       setParams((prev) => {
         const next = new URLSearchParams(prev);
-        if (anchor) next.set('gsec', anchor);
-        else next.delete('gsec');
+        // Another section is another set of claims, the open one doesn't carry.
+        next.delete('claim');
+        if (anchor) next.set('section', anchor);
+        else next.delete('section');
         return next;
       }),
     [setParams],
   );
-  return { ...tabs, section: params.get('gsec'), selectSection };
+
+  const selectClaim = useCallback(
+    (claimId: string | null) =>
+      setParams((prev) => {
+        const next = new URLSearchParams(prev);
+        if (claimId) next.set('claim', claimId);
+        else next.delete('claim');
+        return next;
+      }),
+    [setParams],
+  );
+
+  const focusClaim = useCallback(
+    (claimId: string, doc: string, anchor: string) =>
+      setParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('conflict');
+        next.set('doc', doc);
+        next.set('section', anchor);
+        next.set('claim', claimId);
+        return next;
+      }),
+    [setParams],
+  );
+
+  return {
+    ...tabs,
+    section: params.get('section'),
+    selectSection,
+    claim: params.get('claim'),
+    selectClaim,
+    focusClaim,
+  };
 }

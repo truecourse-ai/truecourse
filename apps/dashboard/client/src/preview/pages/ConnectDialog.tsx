@@ -5,7 +5,7 @@
  * from Code.
  *
  * STEP 1 IS THE CONNECTED INSTANCES, one row per installation the App has on
- * this workspace (`/api/github/status`), the whole row the button: there is no
+ * this workspace ('/api/github/status'), the whole row the button: there is no
  * provider to pick first, because a provider with nothing connected has
  * nothing to offer here. Connecting one is Settings' job, so the list ends
  * with the single link that goes there, closing the dialog on the way.
@@ -18,7 +18,7 @@
  * repository with `PUT /api/repos/:id/context/bindings` once the link landed.
  *
  * An installation lists what it can see; connecting posts one repository at a
- * time to `/api/github/repos/link` — the row is the connection (the onboarding
+ * time to '/api/github/repos/link' — the row is the connection (the onboarding
  * scan clones for itself in the background), so each request is quick, but the
  * per-repository outcome still matters: a failure leaves the dialog standing
  * rather than swallowing the rest of the batch.
@@ -53,7 +53,6 @@ import {
   linkGithubRepo,
 } from '@/preview/data/real-repos';
 import { usePreviewState } from '@/preview/shell/preview-state';
-import { PREVIEW_BASE } from '@/preview/shell/base';
 import { toastNoLlmProvider } from '@/preview/shell/use-run-trigger';
 
 /** The dialog's four steps, named rather than numbered. */
@@ -384,7 +383,7 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
             )}
             <li>
               <Link
-                to={`${PREVIEW_BASE}/settings/repositories?from=code-connect`}
+                to={'/settings/repositories?from=code-connect'}
                 onClick={() => onOpenChange(false)}
                 className="block px-3 py-2.5 text-[13px] text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
               >
@@ -478,7 +477,7 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
               )}
             </ul>
             <p className="mt-2 text-[11px] text-muted-foreground">
-              <Link to={`${PREVIEW_BASE}/context`} className="text-primary hover:underline">
+              <Link to={'/context'} className="text-primary hover:underline">
                 Add context
               </Link>{' '}
               to connect a source this workspace does not have yet.

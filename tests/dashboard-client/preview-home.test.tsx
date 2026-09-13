@@ -112,7 +112,7 @@ const HOME: HomeResponse = {
       status: 'Failed',
       fact: 'acme/web, the provider refused',
       at: '2026-09-09T09:00:00.000Z',
-      href: '/preview/agent/run-1',
+      href: '/agent/run-1',
     },
     {
       id: 'conflict:c-1',
@@ -121,7 +121,7 @@ const HOME: HomeResponse = {
       status: 'Conflict',
       fact: 'acme/payments',
       at: null,
-      href: '/preview/context/conflicts/c-1',
+      href: '/context/conflicts/c-1',
     },
     {
       id: 'provider',
@@ -130,7 +130,7 @@ const HOME: HomeResponse = {
       status: 'Needs setup',
       fact: 'Nothing can run until this workspace names a provider',
       at: null,
-      href: '/preview/settings/models',
+      href: '/settings/models',
     },
   ],
   changed: [
@@ -139,14 +139,14 @@ const HOME: HomeResponse = {
       title: 'Refunds',
       event: 'Proved',
       at: new Date(Date.now() - 3 * 3_600_000).toISOString(),
-      href: `/preview/context/doc/${encodeURIComponent(REFUNDS)}`,
+      href: `/context/doc/${encodeURIComponent(REFUNDS)}`,
     },
     {
       ref: SHIPPING,
       title: 'Shipping',
       event: 'First read',
       at: new Date(Date.now() - 5 * 86_400_000).toISOString(),
-      href: `/preview/context/doc/${encodeURIComponent(SHIPPING)}`,
+      href: `/context/doc/${encodeURIComponent(SHIPPING)}`,
     },
   ],
 };
@@ -230,12 +230,12 @@ function Address() {
   return <div data-testid="address">{`${pathname}${search}`}</div>;
 }
 
-function renderHome(path = '/preview') {
+function renderHome(path = '/') {
   window.history.replaceState({}, '', path);
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/preview/*" element={<PreviewApp />} />
+        <Route path="/*" element={<PreviewApp />} />
       </Routes>
       <Address />
     </MemoryRouter>,
@@ -249,7 +249,7 @@ const homeCalls = (state: World) => state.calls.filter((call) => call.startsWith
 beforeEach(() => {
   streams.length = 0;
   (globalThis as { EventSource?: unknown }).EventSource = StubEventSource;
-  window.history.replaceState({}, '', '/preview');
+  window.history.replaceState({}, '', '/');
 });
 
 afterEach(() => {
@@ -286,7 +286,7 @@ describe('Home', () => {
     const strip = await screen.findByRole('list', { name: 'Today' });
     await userEvent.click(within(strip).getByRole('listitem', { name: '1 Failed' }));
 
-    expect(address()).toBe('/preview/context/documents?status=failed');
+    expect(address()).toBe('/context/documents?status=failed');
   });
 
   it('opens Documents narrowed to a status from the readout', async () => {
@@ -296,7 +296,7 @@ describe('Home', () => {
     await waitFor(() => expect(chart()).toBeInTheDocument());
     await userEvent.click(within(chart()).getByRole('button', { name: 'Blocked' }));
 
-    expect(address()).toBe('/preview/context/documents?status=blocked');
+    expect(address()).toBe('/context/documents?status=blocked');
   });
 
   it('reads the period the chips ask for', async () => {
@@ -340,7 +340,7 @@ describe('Home', () => {
     const attention = await screen.findByRole('region', { name: 'Needs attention' });
     await userEvent.click(await within(attention).findByText('Flow generation'));
 
-    expect(address()).toBe('/preview/agent/run-1');
+    expect(address()).toBe('/agent/run-1');
   });
 
   it('opens the document a change is about', async () => {
@@ -350,7 +350,7 @@ describe('Home', () => {
     const changed = await screen.findByRole('region', { name: 'Recently changed' });
     await userEvent.click(await within(changed).findByText('Refunds'));
 
-    expect(address()).toBe(`/preview/context/doc/${encodeURIComponent(REFUNDS)}`);
+    expect(address()).toBe(`/context/doc/${encodeURIComponent(REFUNDS)}`);
   });
 
   it('narrows Documents to an area from its strip', async () => {
@@ -360,7 +360,7 @@ describe('Home', () => {
     const areas = await screen.findByRole('region', { name: 'Areas' });
     await userEvent.click(await within(areas).findByText('acme/payments'));
 
-    expect(address()).toBe('/preview/context/documents?area=acme%2Fpayments');
+    expect(address()).toBe('/context/documents?area=acme%2Fpayments');
   });
 
   it('says what an empty workspace has, and draws no chart', async () => {
@@ -393,12 +393,12 @@ describe('Home onboarding', () => {
     within(screen.getByRole('list', { name: 'Getting started' })).getByRole('link', { name });
 
   describe.each([
-    { path: '/preview/code', label: 'Connect repository', dialog: 'Connect a repository', query: 'connect=1' },
-    { path: '/preview/context', label: 'Connect context', dialog: 'Add context', query: 'add=1' },
+    { path: '/code', label: 'Connect repository', dialog: 'Connect a repository', query: 'connect=1' },
+    { path: '/context', label: 'Connect context', dialog: 'Add context', query: 'add=1' },
   ])('$label sidebar action', ({ path, label, dialog, query }) => {
     it.each(['same tab', 'Home'])('opens and reopens the dialog from %s', async (from) => {
       serve({ repos: [], sources: [] });
-      renderHome(from === 'same tab' ? path : '/preview');
+      renderHome(from === 'same tab' ? path : '/');
       const user = userEvent.setup();
       const sidebar = () => within(screen.getByRole('complementary'));
 
@@ -478,8 +478,8 @@ describe('Home onboarding', () => {
     renderHome();
 
     await waitFor(() => expect(rows()).toHaveLength(2));
-    expect(action('Add context')).toHaveAttribute('href', '/preview/context?add=1');
-    expect(action('Connect repository')).toHaveAttribute('href', '/preview/code?connect=1');
+    expect(action('Add context')).toHaveAttribute('href', '/context?add=1');
+    expect(action('Connect repository')).toHaveAttribute('href', '/code?connect=1');
 
     await userEvent.click(action('Add context'));
     expect(await screen.findByRole('dialog', { name: 'Add context' })).toBeInTheDocument();

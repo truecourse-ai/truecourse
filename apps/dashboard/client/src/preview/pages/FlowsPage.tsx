@@ -1,11 +1,11 @@
 /**
  * Flows: every flow of every repository of the workspace, in one place, read
- * over `/api/repos/:id/guard/flows`.
+ * over '/api/repos/:id/guard/flows'.
  *
  * A flow is what the product proves, and it stopped being a tab of one
  * repository: the index is the platform's index shape (search full width, ONE
  * filter row of Add filter, dimension, value, then a one-line table), and a row
- * opens the flow as its own page at `/preview/flows/:flowId?repo=<id>`.
+ * opens the flow as its own page at '/flows/:flowId?repo=<id>'.
  *
  * Status, Driver and Repository live in the address (`?status=&driver=&repo=`),
  * so a narrowed page is a place: the repository console's jumps link straight
@@ -18,24 +18,23 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import type { GuardFlowListItem } from '@/preview/vendor/shared';
-import { guardDriver } from '@/preview/vendor/shared';
+import type { GuardFlowListItem } from '@truecourse/shared';
+import { guardDriver } from '@truecourse/shared';
 import { connectSocket } from '@/lib/socket';
 import { CHIP_CLASS, PageHeader } from '@/preview/ui/bits';
 import { filterKey, selectedValues, type FilterDimension } from '@/preview/ui/filter-builder';
 import { facetDimensions } from '@/preview/ui/filter-facets';
 import { IndexTable, type IndexColumn } from '@/preview/ui/index-table';
 import { GUARD_COVERAGE_TONE, tallyOf } from '@/preview/ui/status-word';
-import { GuardFlowStatusChip } from '@/preview/vendor/components/guard/GuardStatusBadge';
-import * as api from '@/preview/vendor/lib/api';
+import { GuardFlowStatusChip } from '@/components/guard/GuardStatusBadge';
+import * as api from '@/lib/api';
 import {
   GUARD_FLOW_STATUS_ORDER,
   GUARD_FLOW_STATUS_WORD,
   guardFlowPlainStatus,
-} from '@/preview/vendor/lib/guard-flow-status';
+} from '@/lib/guard-flow-status';
 import type { Repo } from '@/preview/data/types';
 import { usePreviewState } from '@/preview/shell/preview-state';
-import { PREVIEW_BASE } from '@/preview/shell/base';
 import { subscribeToServerEvents } from '@/preview/shell/event-stream';
 import { FlowPage } from '@/preview/repo/FlowPage';
 import { flowHref } from './flow-hrefs';
@@ -289,7 +288,7 @@ function FlowsIndex() {
   ) : (
     <>
       No flow generated yet. Generation shows up on{' '}
-      <Link to={`${PREVIEW_BASE}/agent`} className="text-primary hover:underline">
+      <Link to={'/agent'} className="text-primary hover:underline">
         Agent
       </Link>
       .

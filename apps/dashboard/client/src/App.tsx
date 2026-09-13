@@ -1,128 +1,15 @@
-import { Suspense, lazy, useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+/**
+ * The dashboard's root: the capability and auth providers, the router, and the
+ * app itself, mounted at `/`. Every address the product has is a route of
+ * {@link PreviewApp}.
+ */
+
+import { BrowserRouter } from 'react-router-dom';
 import { Toaster } from 'sonner';
-import HomePage from './components/pages/HomePage';
-import RepoPage from './components/pages/RepoPage';
 import { useDarkMode } from './hooks/useDarkMode';
 import { AppProvider } from './contexts/CapabilityContext';
-import { EeModuleProvider, useEeModule } from './ee/EeModuleContext';
 import { AuthProvider, AuthGate } from './ee/AuthContext';
-import { EePageShell } from './ee/EePageShell';
-
-const PreviewApp = lazy(() => import('./preview/PreviewApp'));
-
-/**
- * Route registry: the OSS routes plus any routes contributed by the
- * enterprise client module (capability-filtered, lazy-loaded into their
- * own chunks). ee contributes routes as data — it never edits this file.
- */
-/**
- * Mounts the ee module's persistent shell provider (e.g. the live-notifications
- * SSE connection) ONCE around the whole app, so it survives route changes — then
- * renders children. Until the provider chunk loads (or in community, where there
- * is none) children render directly, so the app is never blocked on it.
- */
-function EeShellProvider({ children }: { children: ReactNode }) {
-  const { shell } = useEeModule();
-  const [Provider, setProvider] = useState<ComponentType<{ children: ReactNode }> | null>(null);
-  useEffect(() => {
-    if (!shell?.provider) {
-      setProvider(null);
-      return;
-    }
-    let cancelled = false;
-    void shell.provider().then((m) => {
-      if (!cancelled) setProvider(() => m.default as ComponentType<{ children: ReactNode }>);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [shell]);
-  return Provider ? <Provider>{children}</Provider> : <>{children}</>;
-}
-
-function AppRoutes() {
-  const { routes: eeRoutes, homeComponent } = useEeModule();
-  const eeElements = useMemo(
-    () =>
-      eeRoutes.map((r) => ({
-        path: r.path,
-        Component: lazy(
-          () => r.load() as Promise<{ default: ComponentType }>,
-        ),
-      })),
-    [eeRoutes],
-  );
-  // Enterprise replaces the OSS home ("/") with the workspace dashboard,
-  // when the ee module provides one.
-  const EeHome = useMemo(
-    () =>
-      homeComponent
-        ? lazy(() => homeComponent() as Promise<{ default: ComponentType }>)
-        : null,
-    [homeComponent],
-  );
-
-  return (
-    <Routes>
-      <Route
-        path="/"
-        element={
-          EeHome ? (
-            <EePageShell>
-              <Suspense>
-                <EeHome />
-              </Suspense>
-            </EePageShell>
-          ) : (
-            <HomePage />
-          )
-        }
-      />
-      <Route
-        path="/repos/:repoId"
-        element={
-          // Enterprise: keep the console shell (left sidebar) around the repo
-          // detail so it stays part of the governance console, not a drop-out
-          // to the OSS chrome. Community renders the repo page standalone.
-          EeHome ? (
-            <EePageShell>
-              <Suspense>
-                <RepoPage />
-              </Suspense>
-            </EePageShell>
-          ) : (
-            <Suspense>
-              <RepoPage />
-            </Suspense>
-          )
-        }
-      />
-      {/* The one-product dashboard, mounted at /preview until it replaces the legacy routes. */}
-      <Route
-        path="/preview/*"
-        element={
-          <Suspense>
-            <PreviewApp />
-          </Suspense>
-        }
-      />
-      {eeElements.map(({ path, Component }) => (
-        <Route
-          key={path}
-          path={path}
-          element={
-            <EePageShell>
-              <Suspense>
-                <Component />
-              </Suspense>
-            </EePageShell>
-          }
-        />
-      ))}
-    </Routes>
-  );
-}
+import PreviewApp from './preview/PreviewApp';
 
 export default function App() {
   // Mirror the Header toggle so sonner's palette flips with the rest
@@ -131,46 +18,42 @@ export default function App() {
 
   return (
     <AppProvider>
-      <EeModuleProvider>
-        <AuthProvider>
+      <AuthProvider>
         <BrowserRouter>
           <AuthGate>
-          <EeShellProvider>
-          <AppRoutes />
-        <Toaster
-          position="bottom-center"
-          theme={isDark ? 'dark' : 'light'}
-          closeButton
-          toastOptions={{
-            // Solid surface (matches `bg-popover` used by HoverPopover)
-            // with a strong tinted border + tinted text per type. Drops
-            // sonner's `richColors` palette in favour of the dashboard's
-            // emerald / amber / red / blue tokens.
-            unstyled: true,
-            duration: 10000,
-            classNames: {
-              toast:
-                'font-sans w-full flex items-start gap-3 rounded-md border px-4 py-3 text-sm shadow-lg bg-popover text-popover-foreground border-border',
-              title: 'font-semibold leading-tight',
-              description: 'mt-0.5 text-xs leading-snug opacity-90',
-              actionButton:
-                'shrink-0 self-center whitespace-nowrap rounded-md bg-primary px-2 py-1 text-xs text-primary-foreground hover:opacity-90',
-              cancelButton:
-                'rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted',
-              closeButton:
-                'absolute right-1.5 top-1.5 rounded p-0.5 text-muted-foreground hover:bg-muted',
-              success: '!text-emerald-700 dark:!text-emerald-300',
-              error: '!text-red-700 dark:!text-red-300',
-              warning: '!text-amber-700 dark:!text-amber-300',
-              info: '!text-blue-700 dark:!text-blue-300',
-            },
-          }}
-        />
-          </EeShellProvider>
+            <PreviewApp />
+            <Toaster
+              position="bottom-center"
+              theme={isDark ? 'dark' : 'light'}
+              closeButton
+              toastOptions={{
+                // Solid surface (matches `bg-popover` used by HoverPopover)
+                // with a strong tinted border + tinted text per type. Drops
+                // sonner's `richColors` palette in favour of the dashboard's
+                // emerald / amber / red / blue tokens.
+                unstyled: true,
+                duration: 10000,
+                classNames: {
+                  toast:
+                    'font-sans w-full flex items-start gap-3 rounded-md border px-4 py-3 text-sm shadow-lg bg-popover text-popover-foreground border-border',
+                  title: 'font-semibold leading-tight',
+                  description: 'mt-0.5 text-xs leading-snug opacity-90',
+                  actionButton:
+                    'shrink-0 self-center whitespace-nowrap rounded-md bg-primary px-2 py-1 text-xs text-primary-foreground hover:opacity-90',
+                  cancelButton:
+                    'rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted',
+                  closeButton:
+                    'absolute right-1.5 top-1.5 rounded p-0.5 text-muted-foreground hover:bg-muted',
+                  success: '!text-emerald-700 dark:!text-emerald-300',
+                  error: '!text-red-700 dark:!text-red-300',
+                  warning: '!text-amber-700 dark:!text-amber-300',
+                  info: '!text-blue-700 dark:!text-blue-300',
+                },
+              }}
+            />
           </AuthGate>
         </BrowserRouter>
-        </AuthProvider>
-      </EeModuleProvider>
+      </AuthProvider>
     </AppProvider>
   );
 }

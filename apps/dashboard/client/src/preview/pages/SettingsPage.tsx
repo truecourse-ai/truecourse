@@ -29,7 +29,6 @@ import { fetchGithubStatus } from '@/preview/data/real-repos';
 import type { ProviderId } from '@/preview/data/types';
 import { MembersTab } from '@/preview/pages/MembersTab';
 import { usePreviewState } from '@/preview/shell/preview-state';
-import { PREVIEW_BASE } from '@/preview/shell/PreviewShell';
 
 const TABS = [
   { id: 'members', label: 'Members' },
@@ -40,7 +39,7 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]['id'];
 
-/** What `/api/github/status` said; null while the read is in flight. */
+/** What '/api/github/status' said; null while the read is in flight. */
 type GithubProviderState = {
   installations: GithubInstallationSummary[];
   /** Where the App is installed. Absent on a server that has no App configured. */
@@ -466,7 +465,7 @@ export default function SettingsPage() {
         <SideMenu
           label="Settings sections"
           activeId={active}
-          items={TABS.map((t) => ({ id: t.id, label: t.label, to: `${PREVIEW_BASE}/settings/${t.id}` }))}
+          items={TABS.map((t) => ({ id: t.id, label: t.label, to: `/settings/${t.id}` }))}
         />
         <div className="min-h-0 min-w-0 flex-1 overflow-auto">
           {active === 'members' && (

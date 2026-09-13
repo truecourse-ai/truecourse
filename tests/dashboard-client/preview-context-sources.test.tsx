@@ -6,7 +6,7 @@
  * and, when a sync failed, the source's own note. What is asserted here is what
  * the page DOES with that answer: the row it draws, the order it draws them in
  * (worst first), the failure it puts on the row, and the source page a row
- * opens. Context LANDS here, so its address is `/preview/context`.
+ * opens. Context LANDS here, so its address is `/context`.
  *
  * A row has no menu: what can be done to a source lives on the source's page.
  */
@@ -151,7 +151,7 @@ function renderAt(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/preview/*" element={<PreviewApp />} />
+        <Route path="/*" element={<PreviewApp />} />
       </Routes>
       <Address />
       <Toaster />
@@ -165,7 +165,7 @@ function rows() {
 }
 
 beforeEach(() => {
-  window.history.replaceState({}, '', '/preview');
+  window.history.replaceState({}, '', '/');
 });
 
 afterEach(() => {
@@ -176,7 +176,7 @@ afterEach(() => {
 describe('Context, the sources', () => {
   it('draws one row per source, in the words the server stored', async () => {
     serve();
-    renderAt('/preview/context');
+    renderAt('/context');
 
     await waitFor(() => expect(rows()).toHaveLength(5));
     // Worst first: failed, never, syncing, paused, synced.
@@ -203,7 +203,7 @@ describe('Context, the sources', () => {
 
   it('puts the worst first: failed, never, syncing, paused, synced', async () => {
     serve();
-    renderAt('/preview/context');
+    renderAt('/context');
 
     await waitFor(() => expect(rows()).toHaveLength(5));
     expect(rows().map((row) => row.querySelector('td')?.textContent)).toEqual([
@@ -217,7 +217,7 @@ describe('Context, the sources', () => {
 
   it('says why a source failed, in the source’s own words', async () => {
     serve();
-    renderAt('/preview/context');
+    renderAt('/context');
 
     await waitFor(() => expect(rows()).toHaveLength(5));
     const failed = rows()[0]!;
@@ -229,7 +229,7 @@ describe('Context, the sources', () => {
 
   it('searches the title', async () => {
     serve();
-    renderAt('/preview/context');
+    renderAt('/context');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(5));
 
@@ -240,7 +240,7 @@ describe('Context, the sources', () => {
 
   it('tallies the sources it shows by sync state, worst first', async () => {
     serve();
-    renderAt('/preview/context');
+    renderAt('/context');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(5));
 
@@ -255,21 +255,21 @@ describe('Context, the sources', () => {
 
   it('opens the page of the source a row names, on a single click', async () => {
     serve();
-    renderAt('/preview/context');
+    renderAt('/context');
     const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(5));
 
     await user.click(rows()[0]!);
     await waitFor(() =>
       expect(screen.getByTestId('address')).toHaveTextContent(
-        `/preview/context/sources/${FAILED.id}`,
+        `/context/sources/${FAILED.id}`,
       ),
     );
   });
 
   it('offers nothing else on a row: a source is acted on from its page', async () => {
     serve();
-    renderAt('/preview/context');
+    renderAt('/context');
     await waitFor(() => expect(rows()).toHaveLength(5));
 
     for (const row of rows()) {
@@ -280,7 +280,7 @@ describe('Context, the sources', () => {
 
   it('says what to do when the workspace has no source at all', async () => {
     serve({ sources: [] });
-    renderAt('/preview/context');
+    renderAt('/context');
 
     expect(
       await screen.findByText('No source yet. Add context to connect one.'),
@@ -289,7 +289,7 @@ describe('Context, the sources', () => {
 
   it("carries the workspace's own actions: Add context, and the Document scan", async () => {
     const state = serve({ sources: [] });
-    renderAt('/preview/context');
+    renderAt('/context');
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole('button', { name: 'Scan' }));
