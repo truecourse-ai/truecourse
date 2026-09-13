@@ -38,6 +38,7 @@ vi.mock('@/lib/socket', () => {
 
 vi.mock('@/components/sessions/RunConversationPage', () => ({
   RunConversationPage: () => <div data-testid="conversation" />,
+  RunElapsed: () => <span />,
 }));
 
 import PreviewApp from '@/preview/PreviewApp';
