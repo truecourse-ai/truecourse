@@ -226,8 +226,6 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
     setContextPrimed(true);
   }, [step, sources, picked, contextPrimed]);
 
-  const toggle = (fullName: string) =>
-    setPicked((prev) => (prev.includes(fullName) ? prev.filter((n) => n !== fullName) : [...prev, fullName]));
 
   /**
    * What the Context step picked, written as each landed repository's bindings:
@@ -410,23 +408,21 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
               )}
               {(installationRepos ?? []).map((r) => {
                 const linked = isLinked(r.fullName);
+                const selected = picked[0] === r.fullName;
                 return (
-                  <li key={r.fullName} className="flex items-center gap-3 px-3 py-2">
-                    <input
-                      type="checkbox"
-                      id={`pick-${r.fullName}`}
+                  <li key={r.fullName}>
+                    <button
+                      type="button"
                       disabled={linked}
-                      checked={picked.includes(r.fullName)}
-                      onChange={() => toggle(r.fullName)}
-                      className="h-3.5 w-3.5 shrink-0 rounded border-border disabled:opacity-40"
-                    />
-                    <label
-                      htmlFor={`pick-${r.fullName}`}
-                      className={`min-w-0 flex-1 ${linked ? 'opacity-60' : 'cursor-pointer'}`}
+                      aria-pressed={selected}
+                      onClick={() => setPicked([r.fullName])}
+                      className={`flex w-full items-center gap-3 px-3 py-2 text-left transition-colors ${
+                        linked ? 'cursor-default opacity-60' : selected ? 'bg-muted/60' : 'hover:bg-muted/40'
+                      }`}
                     >
-                      <span className="block truncate font-mono text-xs text-foreground">{r.fullName}</span>
-                    </label>
-                    <Capsule>{linked ? 'connected' : r.private ? 'private' : 'public'}</Capsule>
+                      <span className="block min-w-0 flex-1 truncate font-mono text-xs text-foreground">{r.fullName}</span>
+                      <Capsule>{linked ? 'connected' : r.private ? 'private' : 'public'}</Capsule>
+                    </button>
                   </li>
                 );
               })}
@@ -484,8 +480,7 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
         {step === 4 && (
           <div className="rounded-md border border-border px-3 py-2.5">
             <p className="text-xs text-foreground">
-              {picked.length} repositor{picked.length === 1 ? 'y' : 'ies'} from{' '}
-              {chosen ? `${PROVIDER_NAME.github} · ${nameOf(chosen)}` : PROVIDER_NAME.github}:
+              Connect from {chosen ? `${PROVIDER_NAME.github} · ${nameOf(chosen)}` : PROVIDER_NAME.github}:
             </p>
             <ul className="mt-1.5 space-y-1">
               {picked.map((name) => (
@@ -544,9 +539,7 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
               onClick={() => void connectGithub()}
               className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
             >
-              {linking === null
-                ? 'Connect and start onboarding'
-                : `Cloning ${linking + 1} of ${picked.length}`}
+              {linking === null ? 'Connect and start onboarding' : 'Connecting'}
             </button>
           )}
         </DialogFooter>

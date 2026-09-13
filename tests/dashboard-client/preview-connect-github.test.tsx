@@ -298,17 +298,15 @@ describe('connecting a repository through the GitHub App', () => {
     });
 
     const dialog = await openGithubRepos();
-    await userEvent.click(await screen.findByLabelText('linkwarden/linkwarden'));
-    await userEvent.click(screen.getByLabelText('linkwarden/docs'));
+    await userEvent.click(await screen.findByRole('button', { name: /linkwarden\/linkwarden/ }));
     await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
-    // The Context step stands between picking repositories and confirming.
+    // The Context step stands between picking the repository and confirming.
     await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
     await userEvent.click(within(dialog).getByRole('button', { name: 'Connect and start onboarding' }));
 
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(posted).toEqual([
       { repoFullName: 'linkwarden/linkwarden', installationId: 42, defaultBranch: 'main' },
-      { repoFullName: 'linkwarden/docs', installationId: 42, defaultBranch: 'trunk' },
     ]);
     expect(await screen.findByText('linkwarden/linkwarden')).toBeInTheDocument();
   });
@@ -323,7 +321,7 @@ describe('connecting a repository through the GitHub App', () => {
     });
 
     const dialog = await openGithubRepos();
-    await userEvent.click(await screen.findByLabelText('linkwarden/linkwarden'));
+    await userEvent.click(await screen.findByRole('button', { name: /linkwarden\/linkwarden/ }));
     await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
     // The Context step stands between picking repositories and confirming.
     await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
@@ -352,13 +350,13 @@ describe('connecting a repository through the GitHub App', () => {
     });
 
     const dialog = await openGithubRepos();
-    await userEvent.click(await screen.findByLabelText('linkwarden/linkwarden'));
+    await userEvent.click(await screen.findByRole('button', { name: /linkwarden\/linkwarden/ }));
     await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
     // The Context step stands between picking repositories and confirming.
     await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
     await userEvent.click(within(dialog).getByRole('button', { name: 'Connect and start onboarding' }));
 
-    expect(await within(dialog).findByRole('button', { name: 'Cloning 1 of 1' })).toBeDisabled();
+    expect(await within(dialog).findByRole('button', { name: 'Connecting' })).toBeDisabled();
     await act(async () => {
       release();
     });
@@ -462,9 +460,9 @@ describe('connecting a repository through the GitHub App', () => {
     });
 
     await openGithubRepos();
-    expect(await screen.findByLabelText('linkwarden/linkwarden')).toBeDisabled();
+    expect(await screen.findByRole('button', { name: /linkwarden\/linkwarden/ })).toBeDisabled();
     expect(screen.getByText('connected')).toBeInTheDocument();
-    expect(screen.getByLabelText('linkwarden/docs')).toBeEnabled();
+    expect(screen.getByRole('button', { name: /linkwarden\/docs/ })).toBeEnabled();
   });
 
   it('keeps the dialog open and names the repository the server refused', async () => {
@@ -475,7 +473,7 @@ describe('connecting a repository through the GitHub App', () => {
           { fullName: 'linkwarden/docs', defaultBranch: 'trunk', private: true },
         ],
       },
-      // The first lands, the second is refused: one failure must not cost the batch.
+      // The picked repository is refused: the dialog stays, and says why.
       link: (body) =>
         body.repoFullName === 'linkwarden/docs'
           ? json({ error: 'repository already connected to another workspace' }, 409)
@@ -483,10 +481,9 @@ describe('connecting a repository through the GitHub App', () => {
     });
 
     const dialog = await openGithubRepos();
-    await userEvent.click(await screen.findByLabelText('linkwarden/linkwarden'));
-    await userEvent.click(screen.getByLabelText('linkwarden/docs'));
+    await userEvent.click(await screen.findByRole('button', { name: /linkwarden\/docs/ }));
     await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
-    // The Context step stands between picking repositories and confirming.
+    // The Context step stands between picking the repository and confirming.
     await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
     await userEvent.click(within(dialog).getByRole('button', { name: 'Connect and start onboarding' }));
 
@@ -495,15 +492,10 @@ describe('connecting a repository through the GitHub App', () => {
     ).toBeInTheDocument();
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Connect and start onboarding' })).toBeEnabled();
-    // Retrying re-clones only what failed: the one that landed is out of the selection.
-    expect(within(dialog).queryByText('linkwarden/linkwarden')).toBeNull();
     await userEvent.click(within(dialog).getByRole('button', { name: 'Connect and start onboarding' }));
-    await waitFor(() => expect(posted).toHaveLength(3));
-    expect(posted.map((p) => p.repoFullName)).toEqual([
-      'linkwarden/linkwarden',
-      'linkwarden/docs',
-      'linkwarden/docs',
-    ]);
+    // Retrying posts the refused repository again.
+    await waitFor(() => expect(posted).toHaveLength(2));
+    expect(posted.map((p) => p.repoFullName)).toEqual(['linkwarden/docs', 'linkwarden/docs']);
   });
 
   it("leads with the picked repository's own documentation, checked and named as such", async () => {
@@ -516,7 +508,7 @@ describe('connecting a repository through the GitHub App', () => {
     });
 
     const dialog = await openGithubRepos();
-    await userEvent.click(await screen.findByLabelText('linkwarden/linkwarden'));
+    await userEvent.click(await screen.findByRole('button', { name: /linkwarden\/linkwarden/ }));
     await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
 
     const list = await within(dialog).findByRole('list', { name: 'Context sources' });
@@ -543,7 +535,7 @@ describe('connecting a repository through the GitHub App', () => {
     });
 
     const dialog = await openGithubRepos();
-    await userEvent.click(await screen.findByLabelText('linkwarden/linkwarden'));
+    await userEvent.click(await screen.findByRole('button', { name: /linkwarden\/linkwarden/ }));
     await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
 
     const list = await within(dialog).findByRole('list', { name: 'Context sources' });
@@ -561,7 +553,7 @@ describe('connecting a repository through the GitHub App', () => {
     });
 
     const dialog = await openGithubRepos();
-    await userEvent.click(await screen.findByLabelText('linkwarden/linkwarden'));
+    await userEvent.click(await screen.findByRole('button', { name: /linkwarden\/linkwarden/ }));
     await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
 
     expect(
@@ -572,7 +564,7 @@ describe('connecting a repository through the GitHub App', () => {
   // What the step picked is written per repository, and a repository's own
   // documentation is its own: the other repository in the same batch never
   // reads it.
-  it('binds what each repository picked, and never another one’s own documentation', async () => {
+  it('binds what the repository picked, and never another repository’s own documentation', async () => {
     const registry: RegistryEntry[] = [];
     const { bound } = serve({
       registry,
@@ -600,22 +592,23 @@ describe('connecting a repository through the GitHub App', () => {
     });
 
     const dialog = await openGithubRepos();
-    await userEvent.click(await screen.findByLabelText('linkwarden/linkwarden'));
-    await userEvent.click(within(dialog).getByLabelText('linkwarden/docs'));
+    // One repository per connect: picking the second replaces the first.
+    await userEvent.click(await screen.findByRole('button', { name: /linkwarden\/docs/ }));
+    await userEvent.click(within(dialog).getByRole('button', { name: /linkwarden\/linkwarden/ }));
+    expect(within(dialog).getByRole('button', { name: /linkwarden\/linkwarden/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(dialog).getByRole('button', { name: /linkwarden\/docs/ })).toHaveAttribute('aria-pressed', 'false');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
 
-    // Both own sources lead the list checked; the site is added, and the docs
-    // repository's own documentation is taken back off.
-    await userEvent.click(await within(dialog).findByLabelText(/docs\.acme\.com/));
-    await userEvent.click(within(dialog).getByLabelText(/linkwarden\/docs/));
+    // Its own source leads the list checked; the site is added; the other
+    // repository's own documentation is an ordinary row, left unchecked.
+    expect(await within(dialog).findByLabelText(/own documentation/)).toBeChecked();
+    expect(within(dialog).getByLabelText(/linkwarden\/docs/)).not.toBeChecked();
+    await userEvent.click(within(dialog).getByLabelText(/docs\.acme\.com/));
     await userEvent.click(within(dialog).getByRole('button', { name: 'Continue' }));
     await userEvent.click(within(dialog).getByRole('button', { name: 'Connect and start onboarding' }));
 
     await waitFor(() =>
-      expect(bound).toEqual([
-        { repoId: 'linkwarden', sourceIds: ['repo-linkwarden-linkwarden', 'site-docs'] },
-        { repoId: 'docs', sourceIds: ['site-docs'] },
-      ]),
+      expect(bound).toEqual([{ repoId: 'linkwarden', sourceIds: ['repo-linkwarden-linkwarden', 'site-docs'] }]),
     );
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
