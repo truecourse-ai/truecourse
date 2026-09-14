@@ -14,6 +14,7 @@
  * nor node builtins; persistence is injected (`SessionPersistence`).
  */
 
+import { z } from 'zod';
 import type { SessionDef, SessionOutcome, SessionTool, ToolContext } from './session-def.js';
 import type {
   DriverResult,
@@ -354,6 +355,7 @@ function startSession<TOutcome>(
     // `execute` runs, in either driver, and owns the ToolContext (drivers
     // pass a ctx of their own; it is ignored).
     const toolCtx: ToolContext = {
+      readEvents: () => [...(input.resume ? persistence.readEvents(input.resume.of) : []), ...persistence.readEvents(sessionId)],
       workItem,
       signal: controller.signal,
       // Orchestrator → worker is the only topology (depth 1). A child
@@ -513,10 +515,22 @@ function startSession<TOutcome>(
 
     // Task-state validation must happen before finalization, including an outcome
     // delivered during wrap-up. A smaller candidate cannot redefine completion.
+    const parseOutcome = (value: unknown) => {
+      try {
+        const resolved = def.resolveOutcome
+          ? def.resolveOutcome(value, [...priorEvents, ...persistence.readEvents(sessionId)])
+          : value;
+        return def.outcomeSchema.safeParse(resolved);
+      } catch (error) {
+        return { success: false as const, error: new z.ZodError([{
+          code: 'custom', path: [], message: error instanceof Error ? error.message : String(error),
+        }]) };
+      }
+    };
     let outcomeRefusals = 0;
     let schemaRepairs = 0;
-    while (result.kind === 'outcome' && (def.validateOutcome || def.outcomeSchemaRepairs)) {
-      const parsed = def.outcomeSchema.safeParse(result.value);
+    while (result.kind === 'outcome' && (def.validateOutcome || def.outcomeSchemaRepairs || def.resolveOutcome)) {
+      const parsed = parseOutcome(result.value);
       let correction: string | undefined;
       if (!parsed.success) {
         if (schemaRepairs >= (def.outcomeSchemaRepairs ?? 0)) break;
@@ -547,7 +561,7 @@ function startSession<TOutcome>(
     // without a structured outcome its schema accepts
     // -----------------------------------------------------------------------
     if (result.kind === 'outcome') {
-      const parsed = def.outcomeSchema.safeParse(result.value);
+      const parsed = parseOutcome(result.value);
       if (parsed.success) {
         append({ type: 'outcome', value: parsed.data, ...presented(def, parsed.data) });
         status = 'completed';

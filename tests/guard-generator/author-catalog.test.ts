@@ -6,8 +6,99 @@ import { createAuthorCatalog, scopedAuthorResources, AUTHOR_SUMMARY_CHARS, AUTHO
 const action = (n: number): Interface => ({ id: `web/action-${String(n).padStart(4, '0')}`, type: 'web', title: `Action ${n}`, entry: { method: 'GET', path: `/screen/${n}` }, steps: [{ kind: 'activate', target: `button "Action ${n}"` }], fingerprint: `fp${n}`, at: 'panel' })
 const resources: Record<string, InterfaceResource[]> = { web: [{ id: 'screen', title: 'Screen', kind: 'screen', address: '/screen' }, { id: 'panel', title: 'Panel', kind: 'panel', of: 'screen', readables: { markers: Array.from({ length: 1200 }, (_, n) => ({ id: `marker-${n}`, text: `Marker ${n}` })) } }] }
 const parse = (r: { content: string }) => JSON.parse(r.content)
+const leaves = (value: unknown): unknown[] => value && typeof value === 'object' ? Object.values(value).flatMap(leaves) : [value]
 
 describe('author catalog', () => {
+  it('returns ordinary definitions whole and omits resource detail on request', () => {
+    const entries = [action(0), action(1)]
+    const catalog = createAuthorCatalog(entries, resources)
+    const result = catalog.get({ ids: entries.map(entry => entry.id), includeResources: false })
+    const body = parse(result)
+    expect(body.complete).toBe(true)
+    expect(body.actionCompleteIds).toEqual(entries.map(entry => entry.id))
+    expect(body.items).toEqual(entries.map(entry => ({ id: entry.id, path: ['interface'], value: entry })))
+    expect(result.content.length).toBeLessThan(1500)
+    expect(result.content).not.toContain('Marker')
+  })
+
+  it('returns a shared resource only once across requested actions', () => {
+    const registry = { web: resources.web.map(({ readables, ...identity }) => identity) }
+    const catalog = createAuthorCatalog([action(0), action(1)], registry)
+    const body = parse(catalog.get({ ids: [action(0).id, action(1).id] }))
+    expect(body.complete).toBe(true)
+    expect(body.items.filter((item: { path: string[] }) => item.path[0] === 'resources'))
+      .toEqual([...registry.web].reverse().map(resource => ({ id: resource.id, path: ['resources', resource.id], value: resource })))
+  })
+
+  it('keeps exact lookup pages valid after unrelated peer writes, but rejects changed requested data or projections', () => {
+    const entry = { ...action(0), title: 't'.repeat(7000), startingState: 's'.repeat(7000) }
+    const before = createAuthorCatalog([entry], resources)
+    const first = parse(before.get({ ids: [entry.id], includeResources: false }))
+    const after = createAuthorCatalog([entry, action(1)], { ...resources, web: [...resources.web, { id: 'unrelated', title: 'Unrelated', kind: 'screen' }] })
+    const continued = parse(after.get({ ids: [entry.id], includeResources: false, cursor: first.nextCursor }))
+    expect(continued.snapshot).toBe(first.snapshot)
+    expect(continued.complete).toBe(true)
+    expect(leaves(continued.items)).toContain(entry.startingState)
+    expect(after.get({ ids: [entry.id], includeResources: true, cursor: first.nextCursor }).isError).toBe(true)
+    expect(createAuthorCatalog([{ ...entry, startingState: 'changed' }], resources)
+      .get({ ids: [entry.id], includeResources: false, cursor: first.nextCursor }).isError).toBe(true)
+  })
+
+  it('keeps filtered search pages valid when a peer adds an unrelated screen', () => {
+    const entries = [action(0), action(1)]
+    const before = createAuthorCatalog(entries, resources)
+    const first = parse(before.search({ query: '', resource: 'panel', limit: 1 }))
+    const after = createAuthorCatalog([...entries, { ...action(2), at: 'elsewhere' }], { web: [...resources.web, { id: 'elsewhere', kind: 'screen', title: 'Elsewhere' }] })
+    const continued = parse(after.search({ query: '', resource: 'panel', limit: 1, cursor: first.nextCursor }))
+    expect(continued.snapshot).toBe(first.snapshot)
+    expect(continued.items.map((item: Interface) => item.id)).toEqual([entries[1].id])
+  })
+
+  it('retrieves states and resources directly, including resources with no authored action', () => {
+    const state = { id: 'signed-in', description: 'The user has authenticated.' }
+    const orphan = { id: 'unused-screen', kind: 'screen' as const, title: 'Not authored yet' }
+    const catalog = createAuthorCatalog([], { web: [orphan] }, [state])
+    expect(parse(catalog.getStates({ ids: [state.id] })).items)
+      .toEqual([{ id: state.id, path: ['states', state.id], value: state }])
+    expect(parse(catalog.getResources({ ids: [orphan.id] })).items)
+      .toEqual([{ id: orphan.id, path: ['resources', orphan.id], value: orphan }])
+    expect(catalog.getResources({ ids: ['missing'] }).isError).toBe(true)
+    expect(catalog.getStates({ ids: [state.id, state.id] }).isError).toBe(true)
+    expect(catalog.getStates({ ids: [] }).isError).toBe(true)
+    expect(catalog.getResources({ ids: [orphan.id], cursor: 'garbage' }).isError).toBe(true)
+  })
+
+  it('pages direct resources losslessly, without mixing state/resource cursors', () => {
+    const resource = resources.web[1]
+    const state = { id: resource.id, description: 'A distinct state with the same spelling.' }
+    const catalog = createAuthorCatalog([], resources, [state])
+    const values: unknown[] = []
+    const rebuilt: Record<string, unknown> = {}
+    let cursor: string | undefined
+    do {
+      const result = catalog.getResources({ ids: [resource.id], cursor })
+      expect(result.isError).toBeUndefined()
+      expect(result.content.length).toBeLessThanOrEqual(AUTHOR_TOOL_RESULT_CHARS)
+      const body = parse(result)
+      values.push(...body.items.flatMap((item: { value: unknown }) => leaves(item.value)))
+      for (const item of body.items as { path: (string | number)[]; value: unknown }[]) {
+        // Rebuild the resource from exact paths, including arrays and complete
+        // subobjects, rather than merely checking that a late string survived.
+        const path = item.path.slice(2)
+        let target: any = rebuilt
+        for (let i = 0; i < path.length - 1; i++) {
+          target[path[i]] ??= typeof path[i + 1] === 'number' ? [] : {}
+          target = target[path[i]]
+        }
+        target[path[path.length - 1]] = item.value
+      }
+      cursor = body.nextCursor
+      if (cursor) expect(catalog.getStates({ ids: [state.id], cursor }).isError).toBe(true)
+    } while (cursor)
+    expect(values.filter(value => value === 'Marker 1199')).toHaveLength(1)
+    expect(rebuilt).toEqual(resource)
+  })
+
   it('marks all requested actions complete before finishing optional resource pages', () => {
     const entries = [action(0), action(1)]
     const catalog = createAuthorCatalog(entries, resources)
@@ -87,7 +178,7 @@ describe('author catalog', () => {
       expect(report.isError).toBeUndefined()
       expect(report.content.length).toBeLessThanOrEqual(AUTHOR_TOOL_RESULT_CHARS)
       const body = parse(report)
-      values.push(...body.items.map((item: { value: unknown }) => item.value))
+      values.push(...body.items.flatMap((item: { value: unknown }) => leaves(item.value)))
       cursor = body.nextCursor
     } while (cursor)
     expect(values).toContain(entries[0].title)
@@ -152,7 +243,7 @@ describe('author catalog', () => {
       expect(result.isError).toBeUndefined()
       expect(result.content.length).toBeLessThanOrEqual(AUTHOR_TOOL_RESULT_CHARS)
       const body = parse(result)
-      values.push(...body.items.map((i: { value: unknown }) => i.value))
+      values.push(...body.items.flatMap((i: { value: unknown }) => leaves(i.value)))
       cursor = body.nextCursor
       pages++
     } while (cursor)

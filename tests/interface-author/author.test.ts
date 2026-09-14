@@ -244,7 +244,7 @@ async function callTool(
       throw new Error('not used')
     },
   })
-  input.onEvent({ type: 'tool-result', toolName: name, content: result.content, isError: result.isError })
+  input.onEvent({ type: 'tool-result', toolName: name, content: result.content, isError: result.isError, artifact: result.artifact })
   return result.content
 }
 
@@ -293,6 +293,46 @@ describe('the work list', () => {
 })
 
 describe('a session that authors', () => {
+  it('keeps same-named local actions and dialogs from two concurrent screens', async () => {
+    const { persistence } = memoryPersistence()
+    const { driver } = scriptedDriver(async (place, input) => {
+      const address = DERIVED.resources!.web.find(r => r.id === place)!.address!
+      const draft: AuthoredFragment = {
+        interfaces: [{ ...HOME_TASK, id: 'web/save', at: 'editor-dialog', entry: { method: 'GET', path: address } }],
+        resources: [{ id: 'editor-dialog', kind: 'dialog', title: 'Editor', of: place }],
+        states: HOME_FRAGMENT.states,
+      }
+      const checked = await callTool(input, 'check_draft', draft)
+      expect(checked).toContain('The draft is valid')
+      const draftId = /"draftId":"([^"]+)"/.exec(checked)![1]
+      return { kind: 'outcome', value: { draftId } }
+    })
+    const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence, concurrency: 2 })
+    expect(result.places.every(p => p.status === 'authored')).toBe(true)
+    const file = readAuthoredFile()
+    expect(file.interfaces).toHaveLength(2)
+    expect(new Set(file.interfaces.map(i => i.id)).size).toBe(2)
+    expect(new Set(file.interfaces.map(i => i.type === 'web' && i.at)).size).toBe(2)
+    expect(file.states?.web).toEqual(HOME_FRAGMENT.states)
+    expect(() => InterfacesFileSchema.parse(mergeInterfaceCatalogs(DERIVED, file))).not.toThrow()
+  })
+
+  it('persists complete checked actions and states from a compact final reference', async () => {
+    const { persistence, events } = memoryPersistence()
+    const { driver } = scriptedDriver(async (_place, input) => {
+      const checked = await callTool(input, 'check_draft', HOME_FRAGMENT)
+      expect(checked).toContain('The draft is valid')
+      const draftId = /"draftId":"([^"]+)"/.exec(checked)![1]
+      input.onEvent({ type: 'assistant-turn', toolCall: { name: 'outcome', args: { draftId } }, usage: usage() })
+      return { kind: 'outcome', value: { draftId } }
+    })
+    const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['root'] })
+    expect(result.authored).toBe(1)
+    expect(readAuthoredFile().interfaces[0]).toMatchObject({ steps: HOME_TASK.steps, at: HOME_TASK.at, endState: HOME_TASK.endState })
+    expect(readAuthoredFile().states?.web).toEqual(HOME_FRAGMENT.states)
+    expect([...events.values()].flat().find(e => e.type === 'outcome')).toMatchObject({ value: { interfaces: [expect.objectContaining({ steps: HOME_TASK.steps })] } })
+  })
+
   it('reads the repo through its tools, checks its draft, and lands it in the committed file', async () => {
     const { persistence, events, index } = memoryPersistence()
     const toolCalls: string[] = []
@@ -776,6 +816,91 @@ describe('a session that skipped `check_draft`', () => {
   })
 })
 
+describe('source and task evidence in the initial session', () => {
+  const context = new Map([['root', {
+    module: 'src/Home.tsx', renders: ['src/Form.tsx'], closure: 2,
+    apiEffects: ['api/post-api-repos'], rpcCalls: [], unjoined: [],
+  }]])
+
+  it('accepts a singleton task from supplied late-line controls with no source tool call', async () => {
+    fs.writeFileSync(path.join(repo, 'src/Home.tsx'), "import { Form } from './Form'; export const Home = Form")
+    fs.writeFileSync(path.join(repo, 'src/Form.tsx'), `${' '.repeat(850)}<form onSubmit={() => api.addRepo(path)}><input aria-label="Repository path"/><button>Add Repository</button></form>`)
+    const { persistence, events } = memoryPersistence()
+    const { driver } = scriptedDriver(async (_place, input) => {
+      const briefing = input.initialMessages.join('\n')
+      expect(input.sharedPrefix).toBeUndefined()
+      expect(briefing).toContain('api.addRepo(path)')
+      expect(briefing).toContain('<button>Add Repository</button>')
+      expect(briefing).toContain('"status":"complete"')
+      expect(await callTool(input, 'check_draft', HOME_FRAGMENT)).toContain('The draft is valid')
+      return { kind: 'outcome', value: HOME_FRAGMENT }
+    }, { checksDraft: false })
+    const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['root'], context })
+    expect(result.places[0].status).toBe('authored')
+    const calls = [...events.values()].flat().filter(event => event.type === 'tool-result').map(event => event.toolName)
+    expect(calls).toEqual(['check_draft'])
+    const saved = readAuthoredInterfaceCatalog(repo)!.interfaces[0]
+    expect(saved.steps).toEqual(HOME_TASK.steps)
+    expect(saved.at).toBe('root')
+    expect(saved.endState).toBe('repository-registered')
+  })
+
+  it('recovers a later editor control using only the supplied continuation', async () => {
+    fs.writeFileSync(path.join(repo, 'src/Home.tsx'), '/*' + '界'.repeat(14_000) + '*/\n<input aria-label="Repository path"/><button>Add Repository</button>')
+    const { persistence } = memoryPersistence()
+    const { driver } = scriptedDriver(async (_place, input) => {
+      let evidence = input.initialMessages.join('\n')
+      expect(evidence).not.toContain('<button>Add Repository</button>')
+      for (let page = 0; page < 5 && !evidence.includes('<button>Add Repository</button>'); page++) {
+        const hint = evidence.match(/Continue with read_file\((.*)\)/)
+        expect(hint).not.toBeNull()
+        evidence = await callTool(input, 'read_file', JSON.parse(hint![1]))
+      }
+      expect(evidence).toContain('<button>Add Repository</button>')
+      expect(await callTool(input, 'check_draft', HOME_FRAGMENT)).toContain('The draft is valid')
+      return { kind: 'outcome', value: HOME_FRAGMENT }
+    }, { checksDraft: false })
+    const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['root'], context })
+    expect(result.places[0].status).toBe('authored')
+  })
+
+  it('supplies exact existing steps for replacement and preserves them on acceptance', async () => {
+    const { persistence } = memoryPersistence()
+    await authorWebInterfaces({ repoRoot: repo, driver: scriptedDriver(async () => ({ kind: 'outcome', value: HOME_FRAGMENT })).driver, persistence, places: ['root'] })
+    const { driver } = scriptedDriver(async (_place, input) => {
+      const briefing = input.initialMessages.join('\n')
+      expect(briefing).toContain(JSON.stringify(HOME_TASK.steps))
+      expect(briefing).toContain('Replacement: preserve surviving ids and exact steps')
+      expect(briefing).toContain('1 complete definitions included, 0 omitted')
+      expect(await callTool(input, 'check_draft', { interfaces: [HOME_TASK] })).toContain('The draft is valid')
+      return { kind: 'outcome', value: { interfaces: [HOME_TASK] } }
+    }, { checksDraft: false })
+    const result = await authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['root'], replace: true, context })
+    expect(result.places[0].status).toBe('authored')
+    expect(readAuthoredInterfaceCatalog(repo)!.interfaces[0].steps).toEqual(HOME_TASK.steps)
+  })
+
+  it('retains the original source snapshot across a transport continuation', async () => {
+    const { persistence } = memoryPersistence()
+    let calls = 0
+    const { driver } = scriptedDriver(async (_place, input) => {
+      calls++
+      if (calls === 1) {
+        expect(input.initialMessages.join('\n')).toContain('<button type="submit">Add Repository</button>')
+        fs.writeFileSync(path.join(repo, 'src/Home.tsx'), '<button>Changed after briefing</button>')
+        return { kind: 'failure', failure: { kind: 'transport', detail: 'retry', class: 'provider', retryability: 'transient' } }
+      }
+      expect(input.initialMessages).toEqual([])
+      const original = input.resume!.events.filter(event => event.type === 'user-message').map(event => event.content).join('\n')
+      expect(original).toContain('<button type="submit">Add Repository</button>')
+      expect(original).not.toContain('Changed after briefing')
+      return { kind: 'outcome', value: { interfaces: [] } }
+    })
+    await authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['root'], context })
+    expect(calls).toBe(2)
+  })
+})
+
 describe('the tools are read-only and bounded to the repository', () => {
   it('refuses a path outside the repo and reports it as a tool error the session can revise on', async () => {
     const { persistence } = memoryPersistence()
@@ -916,7 +1041,7 @@ describe('the places are in the briefing, not a tool', () => {
     })
     await authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['root'] })
 
-    expect(tools).toEqual(['read_file', 'search_repo', 'list_interfaces', 'check_draft'])
+    expect(tools).toEqual(['read_file', 'read_files', 'search_repo', 'list_interfaces', 'search_interfaces', 'get_interfaces', 'get_resources', 'get_states', 'check_draft'])
     expect(briefing).toContain('Every screen this catalog knows')
     expect(briefing).toContain('  root          /')
     expect(briefing).toContain('  repos-repoid  /repos/{repoId}')
@@ -1198,8 +1323,10 @@ describe('sessions run in a pool, the fold does not', () => {
     it('opens every member on the same pack, under the same cluster key', async () => {
       const { persistence } = memoryPersistence()
       const prefixes = new Map<string, SessionRunInput['sharedPrefix']>()
+      const briefings = new Map<string, string>()
       const { driver } = scriptedDriver(async (place, input) => {
         prefixes.set(place, input.sharedPrefix)
+        briefings.set(place, input.initialMessages.join('\n'))
         return { kind: 'outcome', value: { interfaces: [] } }
       })
       await authorWebInterfaces({ repoRoot: repo, driver, persistence, concurrency: 4, context })
@@ -1216,6 +1343,11 @@ describe('sessions run in a pool, the fold does not', () => {
       expect(prefixes.get('settings')).toEqual(shared)
       // A cluster of one shares nothing, so it opens on its briefing alone.
       expect(prefixes.get('rules')).toBeUndefined()
+      expect(shared.messages[0]).not.toContain('Existing tasks owned by this screen')
+      for (const briefing of briefings.values()) expect(briefing).not.toContain('export const Shell =')
+      expect(briefings.get('root')).toContain('export const Grid =')
+      expect(briefings.get('repos-repoid')).toContain('export const Report =')
+      expect(briefings.get('repos-repoid')).not.toContain('export const Grid =')
     })
 
     it('briefs the second member with what the first one authored', async () => {

@@ -72,7 +72,9 @@ import {
 } from './draft.js'
 import { clusterPlaces, orderClustersLongestFirst, type PlaceCluster } from './cluster.js'
 import type { AuthorFinding } from './findings.js'
-import { clusterPack } from './pack.js'
+import { clusterPack, type ClusterPack } from './pack.js'
+import { placeSourcePack } from './place-pack.js'
+import { ownTaskContext } from './catalog-context.js'
 import { interfaceAuthorSessionDef, placeBriefing, placeWorkItem } from './session.js'
 import { writeAuthoredCatalog } from './write.js'
 
@@ -295,14 +297,14 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
   // the same bytes, which is what makes it a shared prefix rather than a
   // per-session copy of the same files. Members run serially, so "first member"
   // is well-defined and the read happens when the cluster starts, not before.
-  const packs = new Map<string, SharedPromptPrefix | undefined>()
-  const prefixOf = (placeId: string): SharedPromptPrefix | undefined => {
+  const packs = new Map<string, { pack?: ClusterPack; prefix?: SharedPromptPrefix }>()
+  const packOf = (placeId: string) => {
     const cluster = clusterOf.get(placeId)!
     if (!packs.has(cluster.id)) {
       const pack = clusterPack(opts.repoRoot, cluster)
-      packs.set(cluster.id, pack ? { messages: [pack.text], cacheKey: cluster.id } : undefined)
+      packs.set(cluster.id, pack ? { pack, prefix: { messages: [pack.text], cacheKey: cluster.id } } : {})
     }
-    return packs.get(cluster.id)
+    return packs.get(cluster.id)!
   }
 
   // Per-session captures, keyed by place: the catalog each session was BRIEFED
@@ -317,7 +319,7 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
     items: scheduled,
     workItem: (item) => placeWorkItem(item.place.id),
     serialKey: (item) => clusterOf.get(item.place.id)!.id,
-    sharedPrefix: (item) => prefixOf(item.place.id),
+    sharedPrefix: (item) => packOf(item.place.id).prefix,
     session: (item) => {
       // An explicit `--replace` re-author may replace THIS place's own tasks and
       // nothing else: every other authored entry is somebody else's work.
@@ -368,6 +370,8 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
           place: item.place,
           existing: item.existing,
           replaceTasks: Boolean(opts.replace),
+          ownTaskContext: ownTaskContext({ derived, authored: briefedWith, screenId: item.place.id, replace: Boolean(opts.replace) }),
+          sourcePack: placeSourcePack(opts.repoRoot, opts.context?.get(item.place.id), packOf(item.place.id).pack?.modules)?.text,
           states: registryStates(derived, briefedWith),
           screens: screenTable(places),
           nested: placesOn(item.place.id, places),

@@ -233,6 +233,7 @@ export const SessionEventBodySchema = z.discriminatedUnion('type', [
     toolName: z.string(),
     content: z.string(),
     isError: z.boolean().optional(),
+    artifact: z.unknown().optional(),
   }),
   z.object({ type: z.literal('question-asked'), question: UserInputQuestionSchema }),
   z.object({

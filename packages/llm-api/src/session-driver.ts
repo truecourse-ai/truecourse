@@ -395,6 +395,7 @@ async function runApiSession(input: SessionRunInput, rt: SessionRuntime): Promis
           toolName: call.toolName,
           content: toolResult.content,
           ...(toolResult.isError !== undefined ? { isError: toolResult.isError } : {}),
+          ...(toolResult.artifact !== undefined ? { artifact: toolResult.artifact } : {}),
         });
       } catch (err) {
         // Name-based check: the shell may be a different module instance of
@@ -708,7 +709,7 @@ function buildToolset(def: SessionDef): {
   add(
     OUTCOME_TOOL_NAME,
     'Report the final structured outcome of this session. Call exactly once, when the work is done.',
-    def.outcomeSchema as unknown as ZodTypeAny,
+    (def.outcomeInputSchema ?? def.outcomeSchema) as unknown as ZodTypeAny,
   );
   return { toolset, widenedByTool };
 }

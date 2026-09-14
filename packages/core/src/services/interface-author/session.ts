@@ -22,6 +22,8 @@
 
 import type { SessionBudget, SessionDef } from '@truecourse/agent-loop'
 import type { WebPlaceContext } from '@truecourse/interface-mapper'
+import { CheckedDraftReferenceSchema, resolveCheckedDraft } from './checked-draft.js'
+import { screenIdentityGuidance } from './identity.js'
 import type { InterfaceResource, InterfaceState, InterfacesFile } from '@truecourse/shared'
 import { AuthoredFragmentSchema, type AuthoredFragment } from './draft.js'
 import { buildAuthorTools } from './tools.js'
@@ -60,6 +62,9 @@ export function interfaceAuthorSessionDef(input: AuthorSessionInput): SessionDef
     systemPrompt: SYSTEM_PROMPT,
     tools: buildAuthorTools(input),
     outcomeSchema: AuthoredFragmentSchema,
+    outcomeInputSchema: CheckedDraftReferenceSchema,
+    resolveOutcome: resolveCheckedDraft,
+    outcomeSchemaRepairs: 2,
     budget: INTERFACE_AUTHOR_BUDGET,
     // The structural half of "run check_draft" (01 step 2k). The prompt already
     // demands it in the strongest available terms and did not carry it: across
@@ -88,6 +93,8 @@ export interface PlaceBriefingInput {
   existing: readonly string[]
   /** Explicit re-authoring may replace tasks; enrichment preserves them. */
   replaceTasks?: boolean
+  ownTaskContext?: string
+  sourcePack?: string
   /** What the AST pass knows about this place, when it knows anything. */
   context?: WebPlaceContext
   /** The worlds the catalog already names — the ids this session reuses. */
@@ -129,6 +136,8 @@ export function placeBriefing({
   place,
   existing,
   replaceTasks = false,
+  ownTaskContext,
+  sourcePack,
   context,
   states,
   screens,
@@ -140,6 +149,8 @@ export function placeBriefing({
     `  place    ${place.id} (${place.kind})`,
     `  address  ${place.address ?? '— (this place has no address of its own; it sits on one)'}`,
     `  title    ${place.title}`,
+    ``,
+    screenIdentityGuidance({ screenId: place.id, address: place.address }),
     ``,
     ...(context ? contextLines(context) : []),
     `Every task you author is performed HERE: \`at: "${place.id}"\`, or at a dialog`,
@@ -163,12 +174,16 @@ export function placeBriefing({
     `Return resource enrichments even when no new task is needed (interfaces: []).`,
     `Omitted readable kinds stay unknown or retain existing facts; [] establishes none.`,
   )
+  if (ownTaskContext) lines.push('', ownTaskContext)
+  if (sourcePack) lines.push('', sourcePack)
   lines.push(...nestedLines(place.id, nested))
   lines.push(...screenLines(screens))
   lines.push(...registryLines(states))
   lines.push(
     ``,
-    context
+    sourcePack
+      ? `Start with the supplied source and its coverage manifest. Continue partial files before drawing conclusions about their`
+      : context
       ? `Start from the module above and the modules it renders. Then account for their`
       : `Start by finding the module that renders this place. Then account for its`,
     `controls and rendered content, including conditional content and repeated rows.`,
@@ -371,7 +386,7 @@ Each task carries:
 1. **Locators are roles and accessible names, never selectors.** Every \`target\` is \`<role> "<accessible name>"\` — \`button "Add Repository"\`, \`textbox "Repository path"\`, \`switch "Enable rule"\`. The role is a real ARIA role. If an element has no role and no accessible name, it is NOT authorable: say so in \`unresolved\` rather than inventing a locator.
 2. **A task is reachable.** Either it says where it happens (\`at\`), or its first step navigates to its entry address.
 3. **The entry is the address the task starts at.** When the first step navigates, \`entry.path\` equals that route; when the task is \`at\` a place, \`entry.path\` is the address of the screen that place sits on.
-4. **One task, one entry.** Two tasks with the same entry and the same steps are one task. Never author a task \`list_interfaces\` already shows.
+4. **One task, one entry.** Two tasks with the same entry and the same steps are one task. Never author a task the existing catalog already defines; compare exact steps with \`get_interfaces\`.
 5. **A state is a WORLD, not a place.** "a rule is silenced" is a state; "the rules dialog is open" is a place — that belongs in \`at\`/\`to\`. Every state id you reference is defined once — either it is already in the registry the briefing lists, and you reference it and define nothing, or it is new and you define it in \`states\` with one line saying what world it names. Redefining a registry id with different words is refused: other places' tasks already chain to it.
 6. **Nothing is guessed.** Every step target, every route, every api effect comes from something you READ in the source. What you cannot establish goes in \`unresolved\`, one line each.
 
@@ -417,12 +432,13 @@ The catalog follows the CODE regardless: author the task as the source has it, a
 
 # How to work
 
-- The BRIEFING already names the module that is this place and the modules it renders. Read those first; \`search_repo\` is for what they lead to, not for finding them again.
+- The BRIEFING already names the module that is this place and the modules it renders. Use supplied complete source first and follow continuations for partial files; \`search_repo\` is for what they lead to, not for finding them again.
 - The PLACES are in the briefing — every screen with its address, and the dialogs and panels on this one. There is no tool for them: what the briefing states is what the catalog has.
-- \`list_interfaces\` — what is already catalogued (web ids so you never author a duplicate; the api list is there to confirm an id, not to hunt for one).
-- \`search_repo\` and \`read_file\` — the application's source. The accessible names are in the JSX (\`aria-label\`, button text, label elements); when a name is an i18n key, the locale file holds the string a user actually reads.
+- \`search_interfaces\` and \`get_interfaces\` — paged web catalog metadata and compact exact action definitions. Request includeResources only when you need their readable details. Follow nextCursor until required fields are complete; restart if those results changed. Use get_resources and get_states for exact registry definitions. Do not use source search to find hidden catalog files.
+- \`list_interfaces\` — API/CLI summaries, including confirming a known API id. Web duplicate checks use the paged catalog tools.
+- \`search_repo\` uses real glob paths such as **/*.tsx; pathContains is a literal path filter. Distinguish no matching files from no matching content. \`read_file\` reads one source span; use \`read_files\` for independent known paths or continuations in one bounded request. Complete source units include their branches; inspect explicitly omitted units when needed. The accessible names are in JSX (\`aria-label\`, button text, label elements); when a name is an i18n key, the locale file holds the rendered string.
 - \`check_draft\` — the exact rules the write path enforces, run against a draft. **Run it EARLY**: as soon as you have read the briefing's module, draft the first task or two and check them, before you read anything further. A misreading — the wrong address, a locator shape that is refused, a task located at another screen — comes back in one turn instead of at the outcome, where a fragment that breaks a rule is dropped whole and the place is left with nothing. Then run it again on the complete draft, before you produce the outcome.
-- Then produce the outcome: the tasks, any new states, resource enrichments and new places with their readables, \`unresolved\`, and \`findings\`.
+- When the complete draft passes check_draft, finish with outcome: {"draftId":"the exact returned id"}. Do not regenerate its JSON. The engine restores the checked tasks, states, resources, unresolved and findings from this session and validates them against the current catalog. If corrections are needed, check the corrected complete draft and finalize its new id.
 
 # What good looks like
 

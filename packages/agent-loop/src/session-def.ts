@@ -6,7 +6,7 @@
  */
 
 import type { z } from 'zod';
-import type { BudgetSpent, SessionFailure, UserInputQuestion } from './session-events.js';
+import type { BudgetSpent, SessionFailure, UserInputQuestion, SessionEvent } from './session-events.js';
 import type { KnownDisplayBlock, ToolDisplay } from './session-presentation.js';
 
 /** What a tool hands back to the model. An error result is an observation
@@ -14,10 +14,14 @@ import type { KnownDisplayBlock, ToolDisplay } from './session-presentation.js';
 export interface SessionToolResult {
   content: string;
   isError?: boolean;
+  /** Durable tool evidence, recorded for resume but not sent back to the model. */
+  artifact?: unknown;
 }
 
 /** Per-invocation context the shell provides to a tool's `execute`. */
 export interface ToolContext {
+  /** Durable events from this session and its explicit resume parent only. */
+  readEvents?(): readonly SessionEvent[];
   /** The work item this session serves (a doc path, an area, a flow id). */
   workItem: string;
   signal: AbortSignal;
@@ -93,6 +97,9 @@ export interface SessionDef<TOutcome = unknown> {
   tools: readonly SessionTool[];
   /** A session cannot end without an outcome this schema accepts. */
   outcomeSchema: z.ZodType<TOutcome>;
+  /** Optional compact wire representation; the shell still validates the resolved outcome. */
+  outcomeInputSchema?: z.ZodTypeAny;
+  resolveOutcome?(value: unknown, events: readonly SessionEvent[]): unknown;
   /** Opt-in bounded repair of malformed terminal objects, under the same budget. */
   outcomeSchemaRepairs?: number;
   /** Validate live task state before accepting a schema-valid terminal outcome.
