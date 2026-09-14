@@ -58,6 +58,13 @@ export const guardRuns = pgTable(
      * summary could not be derived, which Home's trend leaves out.
      */
     sections: jsonb('sections').$type<unknown>(),
+    /**
+     * The run's FLOW SUMMARY `{ "<flowId>": status }`, what every flow of the
+     * repository was worth at that moment, written beside `sections`. It is
+     * what Home's trend counts. Null for a run stored before flows were
+     * recorded, and for one whose flow corpus could not be read.
+     */
+    flows: jsonb('flows').$type<unknown>(),
     /** True for default-branch runs — the baseline / trend selector (see file header). */
     isBaseline: boolean('is_baseline').notNull().default(false),
     ranAt: ts('ran_at').notNull(),

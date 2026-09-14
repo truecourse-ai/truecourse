@@ -45,7 +45,7 @@ import type {
 import {
   setGuardStore as setGuardStoreByPackage,
   resetGuardStore as resetGuardStoreByPackage,
-  type GuardRunSections,
+  type GuardRunCoverage,
   type GuardStore,
   type RepoRef,
   type SaveScenariosResult,
@@ -171,16 +171,16 @@ export class WorkTreeGuardStore implements GuardStore {
     fileAppendGuardHistory(repoPath, entry);
   }
 
-  // The section summaries live beside the run snapshots, one derived file per
+  // The coverage summaries live beside the run snapshots, one derived file per
   // run: `guard/sections/<runId>.json`, gitignored like `guard/runs/`.
-  async writeGuardRunSections(repoPath: string, run: GuardRunSections): Promise<void> {
+  async writeGuardRunCoverage(repoPath: string, run: GuardRunCoverage): Promise<void> {
     if (!SAFE_SEGMENT.test(run.runId)) return;
     const file = guardSectionsPath(repoPath, run.runId);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, JSON.stringify(run, null, 2) + '\n');
   }
 
-  async readGuardRunSections(repoPath: string): Promise<GuardRunSections[]> {
+  async readGuardRunCoverage(repoPath: string): Promise<GuardRunCoverage[]> {
     const dir = path.join(guardDir(repoPath), SECTIONS_DIR);
     let names: string[];
     try {
@@ -188,12 +188,14 @@ export class WorkTreeGuardStore implements GuardStore {
     } catch {
       return [];
     }
-    const runs: GuardRunSections[] = [];
+    const runs: GuardRunCoverage[] = [];
     for (const name of names) {
       if (!name.endsWith('.json')) continue;
       try {
-        const parsed = JSON.parse(fs.readFileSync(path.join(dir, name), 'utf-8')) as GuardRunSections;
-        if (parsed && typeof parsed.runId === 'string' && parsed.sections) runs.push(parsed);
+        const parsed = JSON.parse(fs.readFileSync(path.join(dir, name), 'utf-8')) as GuardRunCoverage;
+        if (parsed && typeof parsed.runId === 'string' && parsed.sections) {
+          runs.push({ ...parsed, flows: parsed.flows ?? null });
+        }
       } catch {
         // A half-written or hand-edited file names no run.
       }

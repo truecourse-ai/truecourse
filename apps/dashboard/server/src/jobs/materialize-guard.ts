@@ -54,10 +54,13 @@ import {
   writeGuardLatest,
   writeGuardResult,
   writeGuardResultEvidence,
-  writeGuardRunSections,
+  writeGuardRunCoverage,
   type RepoRef,
 } from '@truecourse/core/lib/guard-store';
-import { readGuardRunSectionSummary } from '@truecourse/core/commands/guard-read';
+import {
+  readGuardRunFlowSummary,
+  readGuardRunSectionSummary,
+} from '@truecourse/core/commands/guard-read';
 import { log } from '@truecourse/core/lib/logger';
 import { assertSafeRel, safeJoin } from '@truecourse/core/lib/safe-path';
 
@@ -147,9 +150,9 @@ async function persistBirthEvidence(
 /**
  * Lift a completed run out of `treeDir` into the store: the snapshot the runner
  * left as the repo's BASELINE run (keyed by the clone's commit), its SECTION
- * SUMMARY, then every scenario's evidence bundle, which attaches to that run
- * row. The snapshot is written first, since the evidence manifest lives on it, and
- * the summary is derived against the run that is now stored.
+ * and FLOW summaries, then every scenario's evidence bundle, which attaches to
+ * that run row. The snapshot is written first, since the evidence manifest lives
+ * on it, and the summaries are derived against the run that is now stored.
  */
 export async function persistGuardRun(
   ref: RepoRef,
@@ -159,7 +162,7 @@ export async function persistGuardRun(
   // The stored record says where it ran: this is the hosted runner's run.
   const latest: GuardLatest = { ...run, run: { ...run.run, origin: 'hosted' } };
   await writeGuardLatest(ref.repoKey, latest);
-  await recordGuardRunSections(ref.repoKey, latest);
+  await recordGuardRunCoverage(ref.repoKey, latest);
   const runId = latest.run.runId;
   for (const scenario of latest.scenarios) {
     if (!scenario.evidencePath) continue;
@@ -170,13 +173,18 @@ export async function persistGuardRun(
 }
 
 /**
- * Derive and store ONE run's section summary, which is what Home's trend reads a run
- * as. A run whose summary cannot be derived (no document body to join, nothing
- * the scenario set names) is left without one and said so: history simply does
- * not carry it, and nothing is guessed in its place. Never fails the run that
- * produced it.
+ * Derive and store ONE run's coverage summaries, which is what Home reads a run
+ * as: its SECTIONS, which the changes widget follows, and its FLOWS, which the
+ * trend counts.
+ *
+ * The section summary is what puts the run in history at all — a run without one
+ * (no document body to join, nothing the scenario set names) is left out and said
+ * so, and nothing is guessed in its place. The flow summary is allowed to be
+ * absent on its own: a repository whose flow corpus cannot be read still has a
+ * run worth recording, and it is simply not a point of the flow trend. Never
+ * fails the run that produced it.
  */
-export async function recordGuardRunSections(
+export async function recordGuardRunCoverage(
   repoKey: string,
   latest: GuardLatest,
 ): Promise<boolean> {
@@ -188,16 +196,23 @@ export async function recordGuardRunSections(
       );
       return false;
     }
-    await writeGuardRunSections(repoKey, {
+    const flows = await readGuardRunFlowSummary(repoKey, latest);
+    if (!flows) {
+      log.warn(
+        `[Guard] no flow summary could be derived for ${repoKey} run ${latest.run.runId}; it stays out of the flow trend`,
+      );
+    }
+    await writeGuardRunCoverage(repoKey, {
       runId: latest.run.runId,
       ranAt: latest.run.ranAt,
       commit: latest.run.commit,
       sections,
+      flows,
     });
     return true;
   } catch (err) {
     log.warn(
-      `[Guard] the section summary for ${repoKey} run ${latest.run.runId} failed: ${(err as Error).message}`,
+      `[Guard] the coverage summary for ${repoKey} run ${latest.run.runId} failed: ${(err as Error).message}`,
     );
     return false;
   }

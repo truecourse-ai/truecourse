@@ -2,10 +2,11 @@
  * `GET /api/home`, the product owner's dashboard in one answer.
  *
  * Everything here is a fold of stored things, so what is pinned is the folding:
- * today's sections across the repositories that read a document, the trend
- * across the baseline runs (and what a repository that had not run yet
- * contributes, which is nothing), the areas' order, the five kinds of attention
- * row, the changes a run made and the period the whole page is read through.
+ * today's FLOWS across every repository, the flow trend across the baseline
+ * runs (and what a repository that had not run yet contributes, which is
+ * nothing), the SECTIONS the areas are composed of and their order, the five
+ * kinds of attention row, the changes a run made and the period the whole page
+ * is read through.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -38,7 +39,7 @@ import {
   type ContextStore,
 } from '@truecourse/core/lib/context-store';
 import { resetSpecStore, saveWorkspaceSpec, setSpecStore } from '@truecourse/core/lib/spec-store';
-import { writeGuardRunSections } from '@truecourse/core/lib/guard-store';
+import { writeGuardRunCoverage } from '@truecourse/core/lib/guard-store';
 import { createStoredSessionRun } from '@truecourse/core/lib/sessions-store';
 import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
 import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
@@ -233,14 +234,42 @@ describe('GET /api/home', () => {
     expect(page.period).toBe('30d');
     expect(page.today).toEqual({
       total: 0,
-      byStatus: { proved: 0, failed: 0, blocked: 0, 'not-testable': 0, 'not-run': 0 },
+      byStatus: { succeeded: 0, failed: 0, blocked: 0, 'not-testable': 0, 'never-run': 0 },
     });
     expect(page.trend).toEqual([]);
     expect(page.areas).toEqual([]);
     expect(page.changed).toEqual([]);
   });
 
-  it('counts the sections of linked documents, folded across every repository that reads them', async () => {
+  it('counts every repository’s flows, in the Flows page’s words', async () => {
+    // Nothing has been generated: there is no flow to count, and the headline
+    // says zero of zero rather than nothing at all.
+    expect((await home()).today.total).toBe(0);
+
+    await setContextBindings(TEST_ORG, repoA.project.name, [SITE]);
+    storedRun(repoA.repoPath);
+
+    // The two flows of the one repository that has run: the failing scenario's
+    // and the passing one's. The other repository has generated nothing and so
+    // contributes nothing, rather than a row of never-run guesses.
+    expect((await home()).today).toEqual({
+      total: 2,
+      byStatus: { succeeded: 1, failed: 1, blocked: 0, 'not-testable': 0, 'never-run': 0 },
+    });
+  });
+
+  it('counts a flow whether or not its repository reads a document', async () => {
+    // The headline is the workspace's proving, so an unlinked repository's
+    // flows still count — unlike its sections, which are nobody's promise.
+    storedRun(repoA.repoPath);
+
+    const page = await home();
+
+    expect(page.today.total).toBe(2);
+    expect(page.areas).toEqual([]);
+  });
+
+  it('composes the areas out of the sections of linked documents, folded across every repository that reads them', async () => {
     await setContextBindings(TEST_ORG, repoA.project.name, [SITE]);
     await setContextBindings(TEST_ORG, repoB.project.name, [SITE]);
     storedRun(repoA.repoPath);
@@ -249,23 +278,26 @@ describe('GET /api/home', () => {
 
     // Two sections, two repositories. A failed one outranks the other
     // repository's silence; a passed one does not, because the repository that
-    // ran nothing has nothing proven.
-    expect(page.today).toEqual({
-      total: 2,
-      byStatus: { proved: 0, failed: 1, blocked: 1, 'not-testable': 0, 'not-run': 0 },
+    // ran nothing has nothing proven. The areas keep the Documents view's words.
+    expect(
+      Object.fromEntries(page.areas.map((area) => [area.area, area.byStatus])),
+    ).toEqual({
+      'acme/payments': { proved: 0, failed: 1, blocked: 0, 'not-testable': 0, 'not-run': 0 },
+      'acme/logistics': { proved: 0, failed: 0, blocked: 1, 'not-testable': 0, 'not-run': 0 },
     });
   });
 
-  it('counts only the documents a repository reads', async () => {
+  it('counts only the documents a repository reads into an area', async () => {
     // Nothing is linked: every document is somebody's to link, nobody's promise.
-    expect((await home()).today.total).toBe(0);
+    expect((await home()).areas).toEqual([]);
 
     await setContextBindings(TEST_ORG, repoA.project.name, [SITE]);
     storedRun(repoA.repoPath);
-    expect((await home()).today).toEqual({
-      total: 2,
-      byStatus: { proved: 1, failed: 1, blocked: 0, 'not-testable': 0, 'not-run': 0 },
-    });
+    expect(
+      Object.fromEntries(
+        (await home()).areas.map((area) => [area.area, area.total]),
+      ),
+    ).toEqual({ 'acme/payments': 1, 'acme/logistics': 1 });
   });
 
   it('sorts the areas by the share of failed and blocked', async () => {
@@ -287,37 +319,63 @@ describe('GET /api/home', () => {
     beforeEach(async () => {
       await setContextBindings(TEST_ORG, repoA.project.name, [SITE]);
       await setContextBindings(TEST_ORG, repoB.project.name, [SITE]);
-      await writeGuardRunSections(repoA.repoPath, {
+      await writeGuardRunCoverage(repoA.repoPath, {
         runId: 'a-1',
         ranAt: daysAgo(40),
         commit: 'aaa',
         sections: { [`${REFUNDS}#refunds`]: 'failed' },
+        flows: { f1: 'failed' },
       });
-      await writeGuardRunSections(repoB.repoPath, {
+      await writeGuardRunCoverage(repoB.repoPath, {
         runId: 'b-1',
         ranAt: daysAgo(20),
         commit: 'bbb',
         sections: { [`${REFUNDS}#refunds`]: 'succeeded' },
+        flows: { g1: 'succeeded' },
       });
-      await writeGuardRunSections(repoA.repoPath, {
+      await writeGuardRunCoverage(repoA.repoPath, {
         runId: 'a-2',
         ranAt: daysAgo(2),
         commit: 'aab',
         sections: { [`${REFUNDS}#refunds`]: 'succeeded' },
+        flows: { f1: 'succeeded' },
       });
     });
 
-    it('draws one point per baseline run, folded across the runs standing at that moment', async () => {
+    it('draws one point per baseline run, over the flows standing at that moment', async () => {
       const page = await home('?period=all');
 
       expect(page.trend).toHaveLength(3);
       // The first moment: only one repository has ever run, and the other
       // contributes nothing rather than a guess.
-      expect(page.trend[0]!.byStatus).toMatchObject({ failed: 1, proved: 0 });
-      // The second: the other repository proves it, but the failure stands.
-      expect(page.trend[1]!.byStatus).toMatchObject({ failed: 1, proved: 0 });
-      // The third: the failure is gone, so the section is proved.
-      expect(page.trend[2]!.byStatus).toMatchObject({ failed: 0, proved: 1 });
+      expect(page.trend[0]!.byStatus).toMatchObject({ failed: 1, succeeded: 0 });
+      // The second: the other repository's flow succeeds beside the failure —
+      // flows are counted, not folded, so both stand.
+      expect(page.trend[1]!.byStatus).toMatchObject({ failed: 1, succeeded: 1 });
+      // The third: the failing flow is fixed, so both succeed.
+      expect(page.trend[2]!.byStatus).toMatchObject({ failed: 0, succeeded: 2 });
+    });
+
+    it('draws no point before any run has recorded its flows, and still reports its changes', async () => {
+      const older = await setupTestFixture();
+      await setContextBindings(TEST_ORG, older.project.name, [SITE]);
+      await writeGuardRunCoverage(older.repoPath, {
+        runId: 'c-1',
+        ranAt: daysAgo(50),
+        commit: 'ccc',
+        sections: { [`${SHIPPING}#shipping`]: 'succeeded' },
+        flows: null,
+      });
+
+      const page = await home('?period=all');
+
+      // Four runs are stored, but the oldest recorded no flows and nothing had
+      // recorded any yet, so it is not a moment the trend can draw: a zero
+      // there would read as a workspace that had no flows, not one whose flows
+      // were never written down.
+      expect(page.trend).toHaveLength(3);
+      // Its sections still moved a document, which the changes widget reports.
+      expect(page.changed.some((row) => row.ref === SHIPPING)).toBe(true);
     });
 
     it('reads the period asked for, and 30d when none is', async () => {

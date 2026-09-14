@@ -13,6 +13,7 @@
 import type { LoadedScenarios } from '@truecourse/guard-runner';
 import type {
   GuardDecisions,
+  GuardRunFlowSummary,
   GuardRunSectionSummary,
   GuardGenerateReport,
   GuardHistory,
@@ -44,15 +45,21 @@ export interface SaveScenariosResult {
 }
 
 /**
- * ONE baseline run's section history: when it ran and what every section of the
- * documents its scenario set covered was worth then. The trend on Home is these
- * rows and nothing else. A run without one is absent from history.
+ * ONE baseline run's coverage history: when it ran, and what every section and
+ * every flow it covered was worth then. The trend on Home is these rows and
+ * nothing else. A run without one is absent from history.
  */
-export interface GuardRunSections {
+export interface GuardRunCoverage {
   runId: string;
   ranAt: string;
   commit: string | null;
   sections: GuardRunSectionSummary;
+  /**
+   * The run's flows, which is what Home's trend counts. Null on a run stored
+   * before flows were recorded, and on one whose manifest could not be read:
+   * such a run is simply not a point of the flow trend.
+   */
+  flows: GuardRunFlowSummary | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -77,15 +84,15 @@ export interface GuardStore {
   readGuardHistory(repoPath: string, opts?: GuardHistoryReadOptions): Promise<GuardHistory>;
   appendGuardHistory(repoPath: string, entry: GuardHistoryEntry): Promise<void>;
   /**
-   * Record a stored run's SECTION SUMMARY, written beside the run when it is
-   * persisted. Re-writing one replaces it.
+   * Record a stored run's SECTION and FLOW summaries, written beside the run
+   * when it is persisted. Re-writing one replaces it.
    */
-  writeGuardRunSections(repoPath: string, run: GuardRunSections): Promise<void>;
+  writeGuardRunCoverage(repoPath: string, run: GuardRunCoverage): Promise<void>;
   /**
    * Every BASELINE run that carries a section summary, oldest first. A run
    * whose summary could not be derived is simply not here.
    */
-  readGuardRunSections(repoPath: string): Promise<GuardRunSections[]>;
+  readGuardRunCoverage(repoPath: string): Promise<GuardRunCoverage[]>;
   /**
    * The `guard generate` report at `commitSha`, or the newest stored one.
    */
@@ -241,10 +248,10 @@ export const readGuardHistory = (
 ): Promise<GuardHistory> => getGuardStore().readGuardHistory(repoPath, opts);
 export const appendGuardHistory = (repoPath: string, entry: GuardHistoryEntry): Promise<void> =>
   getGuardStore().appendGuardHistory(repoPath, entry);
-export const writeGuardRunSections = (repoPath: string, run: GuardRunSections): Promise<void> =>
-  getGuardStore().writeGuardRunSections(repoPath, run);
-export const readGuardRunSections = (repoPath: string): Promise<GuardRunSections[]> =>
-  getGuardStore().readGuardRunSections(repoPath);
+export const writeGuardRunCoverage = (repoPath: string, run: GuardRunCoverage): Promise<void> =>
+  getGuardStore().writeGuardRunCoverage(repoPath, run);
+export const readGuardRunCoverage = (repoPath: string): Promise<GuardRunCoverage[]> =>
+  getGuardStore().readGuardRunCoverage(repoPath);
 export const readGuardResult = (
   repoKey: string,
   commitSha?: string,

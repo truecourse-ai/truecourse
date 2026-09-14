@@ -80,16 +80,16 @@ const HOME: HomeResponse = {
   period: '30d',
   today: {
     total: 5,
-    byStatus: { proved: 2, failed: 1, blocked: 1, 'not-testable': 0, 'not-run': 1 },
+    byStatus: { succeeded: 2, failed: 1, blocked: 1, 'not-testable': 0, 'never-run': 1 },
   },
   trend: [
     {
       at: '2026-09-01T10:00:00.000Z',
-      byStatus: { proved: 1, failed: 2, blocked: 1, 'not-testable': 0, 'not-run': 1 },
+      byStatus: { succeeded: 1, failed: 2, blocked: 1, 'not-testable': 0, 'never-run': 1 },
     },
     {
       at: '2026-09-09T10:00:00.000Z',
-      byStatus: { proved: 2, failed: 1, blocked: 1, 'not-testable': 0, 'not-run': 1 },
+      byStatus: { succeeded: 2, failed: 1, blocked: 1, 'not-testable': 0, 'never-run': 1 },
     },
   ],
   areas: [
@@ -175,7 +175,10 @@ const REPO = {
 
 const EMPTY: HomeResponse = {
   period: '30d',
-  today: { total: 0, byStatus: { proved: 0, failed: 0, blocked: 0, 'not-testable': 0, 'not-run': 0 } },
+  today: {
+    total: 0,
+    byStatus: { succeeded: 0, failed: 0, blocked: 0, 'not-testable': 0, 'never-run': 0 },
+  },
   trend: [],
   areas: [],
   attention: [],
@@ -243,7 +246,7 @@ function renderHome(path = '/') {
 }
 
 const address = () => screen.getByTestId('address').textContent;
-const chart = () => screen.getByRole('region', { name: 'Sections over time' });
+const chart = () => screen.getByRole('region', { name: 'Flows over time' });
 const homeCalls = (state: World) => state.calls.filter((call) => call.startsWith('/api/home'));
 
 beforeEach(() => {
@@ -259,44 +262,45 @@ afterEach(() => {
 });
 
 describe('Home', () => {
-  it('draws today’s numbers in the strip above the chart, the proved share first', async () => {
+  it('draws today’s FLOWS in the strip above the chart, the succeeded share first', async () => {
     serve();
     renderHome();
 
     const strip = await screen.findByRole('list', { name: 'Today' });
     expect(within(strip).getByText('40%')).toBeInTheDocument();
     // The leading cell names what is counted and how much of it there is; the
-    // status cells beside it stay bare.
-    expect(within(strip).getByText('2 of 5 sections proved')).toBeInTheDocument();
-    expect(within(strip).getByRole('listitem', { name: '2 Proved' })).toBeInTheDocument();
+    // status cells beside it stay bare. Flows wear the Flows page's words, so
+    // the same flow reads the same here and there.
+    expect(within(strip).getByText('2 of 5 flows succeeded')).toBeInTheDocument();
+    expect(within(strip).getByRole('listitem', { name: '2 Succeeded' })).toBeInTheDocument();
     expect(within(strip).getByRole('listitem', { name: '1 Failed' })).toBeInTheDocument();
     expect(within(strip).getByRole('listitem', { name: '1 Blocked' })).toBeInTheDocument();
     expect(within(strip).getByRole('listitem', { name: '0 Not testable' })).toBeInTheDocument();
-    expect(within(strip).getByRole('listitem', { name: '1 Not run' })).toBeInTheDocument();
+    expect(within(strip).getByRole('listitem', { name: '1 Never run' })).toBeInTheDocument();
     // The chart's readout is the legend; its numbers appear under the pointer only.
     await waitFor(() => expect(chart()).toBeInTheDocument());
-    expect(within(chart()).getByRole('button', { name: 'Proved' })).toBeInTheDocument();
-    expect(within(chart()).queryByRole('button', { name: '2 Proved' })).toBeNull();
+    expect(within(chart()).getByRole('button', { name: 'Succeeded' })).toBeInTheDocument();
+    expect(within(chart()).queryByRole('button', { name: '2 Succeeded' })).toBeNull();
   });
 
-  it('opens Documents narrowed to a status from the strip', async () => {
+  it('opens Flows narrowed to a status from the strip', async () => {
     serve();
     renderHome();
 
     const strip = await screen.findByRole('list', { name: 'Today' });
     await userEvent.click(within(strip).getByRole('listitem', { name: '1 Failed' }));
 
-    expect(address()).toBe('/context/documents?status=failed');
+    expect(address()).toBe('/flows?status=failed');
   });
 
-  it('opens Documents narrowed to a status from the readout', async () => {
+  it('opens Flows narrowed to a status from the readout', async () => {
     serve();
     renderHome();
 
     await waitFor(() => expect(chart()).toBeInTheDocument());
     await userEvent.click(within(chart()).getByRole('button', { name: 'Blocked' }));
 
-    expect(address()).toBe('/context/documents?status=blocked');
+    expect(address()).toBe('/flows?status=blocked');
   });
 
   it('reads the period the chips ask for', async () => {

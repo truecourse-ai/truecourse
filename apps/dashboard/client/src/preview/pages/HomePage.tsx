@@ -1,17 +1,26 @@
 /**
  * Home, for the product owner: a dashboard over `GET /api/home`.
  *
- * The hero is SECTIONS OVER TIME, a full-width stacked area of the workspace's
- * sections by status across the baseline runs of the chosen period, whose right
+ * The hero is FLOWS OVER TIME, a full-width stacked area of the workspace's
+ * flows by status across the baseline runs of the chosen period, whose right
  * edge is today's composition and whose readout doubles as the legend and the
- * current tally, each word a door into Documents narrowed to that status.
+ * current tally, each word a door into Flows narrowed to that status. A flow is
+ * what the engine proves and what can be proved on its own, which is why it is
+ * the headline: a section is worth the worst thing in it, so one blocked
+ * scenario would erase every proof beside it.
+ *
  * Beneath it three equal widgets, each one question with its own rows and its
  * own door:
  *
  *   Needs attention    the conversations that ended badly, the open conflicts,
  *                      the blocked documents, the failed syncs, the provider
- *   Areas              one composition strip per area, worst share first
- *   Recently changed   the documents a run moved, grouped by day
+ *   Areas              one composition strip per area, over its SECTIONS
+ *   Recently changed   the DOCUMENTS a run moved, grouped by day
+ *
+ * The two of them that count documentation keep the Documents view's words
+ * (Proved, Not run) while the headline keeps the Flows page's (Succeeded, Never
+ * run): the vocabulary follows the UNIT, so no number on this page says a
+ * different word than the page it opens. Each widget names what it counts.
  *
  * Nothing is composed here: the server folded every number and computed every
  * address, so this page draws what it was told and invents no row. It re-reads
@@ -28,10 +37,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Check, ClipboardList } from 'lucide-react';
 import {
+  HOME_FLOW_STATUS_ORDER,
+  HOME_FLOW_STATUS_WORD,
   HOME_STATUS_ORDER,
   HOME_STATUS_WORD,
   type HomeAttentionRow,
   type HomeChangeRow,
+  type HomeFlowStatus,
   type HomePeriod,
   type HomeResponse,
   type HomeStatus,
@@ -44,24 +56,37 @@ import { StackedArea, type StackedSeries } from '@/preview/ui/stacked-area';
 import { CONTEXT_DOC_TONE, StatusWord, type StatusTone } from '@/preview/ui/status-word';
 import { useOnboarding } from '@/preview/shell/use-onboarding';
 import { documentsHref } from './context-hrefs';
+import { flowsStatusHref } from './flow-hrefs';
 
-/** The fills each word wears: green, red, the darker blue, grey, the lighter blue. */
-const FILL: Record<HomeStatus, { fill: string; dot: string }> = {
-  proved: { fill: 'fill-emerald-500', dot: 'bg-emerald-500' },
+/**
+ * The fills the five states wear: green, red, amber, grey, blue. ONE colour per
+ * state under both vocabularies — a flow's Succeeded and a section's Proved are
+ * the same green, because they are the same state counted in two units.
+ */
+const FLOW_FILL: Record<HomeFlowStatus, { fill: string; dot: string }> = {
+  succeeded: { fill: 'fill-emerald-500', dot: 'bg-emerald-500' },
   failed: { fill: 'fill-red-500', dot: 'bg-red-500' },
-  blocked: { fill: 'fill-sky-600', dot: 'bg-sky-600' },
+  blocked: { fill: 'fill-amber-500', dot: 'bg-amber-500' },
   'not-testable': { fill: 'fill-slate-400', dot: 'bg-slate-400' },
-  'not-run': { fill: 'fill-sky-400', dot: 'bg-sky-400' },
+  'never-run': { fill: 'fill-sky-400', dot: 'bg-sky-400' },
 };
 
-/** Bottom first: proved is the ground, the worst news sits on top. */
-const STACK: HomeStatus[] = ['proved', 'not-run', 'not-testable', 'blocked', 'failed'];
+const SECTION_FILL: Record<HomeStatus, { fill: string; dot: string }> = {
+  proved: FLOW_FILL.succeeded,
+  failed: FLOW_FILL.failed,
+  blocked: FLOW_FILL.blocked,
+  'not-testable': FLOW_FILL['not-testable'],
+  'not-run': FLOW_FILL['never-run'],
+};
 
-const SERIES: StackedSeries<HomeStatus>[] = STACK.map((status) => ({
+/** Bottom first: what is proved is the ground, the worst news sits on top. */
+const STACK: HomeFlowStatus[] = ['succeeded', 'never-run', 'not-testable', 'blocked', 'failed'];
+
+const SERIES: StackedSeries<HomeFlowStatus>[] = STACK.map((status) => ({
   key: status,
-  label: HOME_STATUS_WORD[status],
-  fill: FILL[status].fill,
-  dot: FILL[status].dot,
+  label: HOME_FLOW_STATUS_WORD[status],
+  fill: FLOW_FILL[status].fill,
+  dot: FLOW_FILL[status].dot,
 }));
 
 /** The chart's periods, as the filter idiom's chips. */
@@ -115,11 +140,14 @@ function useHome(period: HomePeriod, signal: number): { home: HomeResponse | nul
 /** A dashboard rectangle: one question, its rows, one door at the top right. */
 function Widget({
   title,
+  unit,
   to,
   toWord = 'All',
   children,
 }: {
   title: string;
+  /** What the widget counts, when the page counts more than one thing. */
+  unit?: string;
   to?: string;
   toWord?: string;
   children: React.ReactNode;
@@ -130,7 +158,10 @@ function Widget({
       className="flex h-80 min-w-0 flex-col overflow-hidden bg-background"
     >
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-6 py-2">
-        <SectionTitle>{title}</SectionTitle>
+        <span className="flex min-w-0 items-baseline gap-1.5">
+          <SectionTitle>{title}</SectionTitle>
+          {unit && <span className="text-[11px] text-muted-foreground">{unit}</span>}
+        </span>
         {to && (
           <Link to={to} className="text-[11px] font-medium text-primary hover:underline">
             {toWord}
@@ -201,7 +232,7 @@ function AreaBar({
         <span className="flex shrink-0 items-center gap-x-2.5">
           {shown.map((status) => (
             <span key={status} className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-              <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${FILL[status].dot}`} />
+              <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${SECTION_FILL[status].dot}`} />
               <span className="tabular-nums text-foreground">{area.byStatus[status]}</span>
             </span>
           ))}
@@ -212,7 +243,7 @@ function AreaBar({
         {shown.map((status) => (
           <span
             key={status}
-            className={`${FILL[status].dot} min-w-[4px]`}
+            className={`${SECTION_FILL[status].dot} min-w-[4px]`}
             style={{ flexGrow: area.byStatus[status], flexBasis: 0 }}
           />
         ))}
@@ -281,15 +312,16 @@ function Dashboard({ signal }: { signal: number }) {
     );
   }
 
-  const provenShare = today && today.total > 0 ? Math.round((today.byStatus.proved / today.total) * 100) : 0;
+  const provenShare =
+    today && today.total > 0 ? Math.round((today.byStatus.succeeded / today.total) * 100) : 0;
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <PageHeader title="Home" />
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {/* Today's numbers, once: the proved share, which is the one cell that
-            names what is being counted and how much of it there is, then every
-            status of today's sections, each a door into Documents narrowed to
+        {/* Today's numbers, once: the succeeded share, which is the one cell
+            that names what is being counted and how much of it there is, then
+            every status of today's flows, each a door into Flows narrowed to
             it. */}
         {today && (
           <div
@@ -300,22 +332,22 @@ function Dashboard({ signal }: { signal: number }) {
             <div role="listitem" className="bg-background px-6 py-4">
               <span className="block text-2xl font-semibold tabular-nums text-foreground">{provenShare}%</span>
               <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                {`${today.byStatus.proved} of ${today.total} ${today.total === 1 ? 'section' : 'sections'} proved`}
+                {`${today.byStatus.succeeded} of ${today.total} ${today.total === 1 ? 'flow' : 'flows'} succeeded`}
               </span>
             </div>
-            {HOME_STATUS_ORDER.map((status) => (
+            {HOME_FLOW_STATUS_ORDER.map((status) => (
               <button
                 key={status}
                 type="button"
                 role="listitem"
-                aria-label={`${today.byStatus[status]} ${HOME_STATUS_WORD[status]}`}
-                onClick={() => navigate(documentsHref({ status }))}
+                aria-label={`${today.byStatus[status]} ${HOME_FLOW_STATUS_WORD[status]}`}
+                onClick={() => navigate(flowsStatusHref(status))}
                 className="bg-background px-6 py-4 text-left transition-colors hover:bg-muted/30"
               >
                 <span className="block text-2xl font-semibold tabular-nums text-foreground">{today.byStatus[status]}</span>
                 <span className="mt-0.5 inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${FILL[status].dot}`} />
-                  {HOME_STATUS_WORD[status]}
+                  <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${FLOW_FILL[status].dot}`} />
+                  {HOME_FLOW_STATUS_WORD[status]}
                 </span>
               </button>
             ))}
@@ -324,15 +356,17 @@ function Dashboard({ signal }: { signal: number }) {
         <div className="border-b border-border px-6 py-5">
           {points.length === 0 ? (
             <p className="py-6 text-center text-xs text-muted-foreground">
-              Nothing has run yet, so there is nothing to draw.
+              {today && today.total > 0
+                ? 'No run has recorded its flows yet, so there is no trend to draw.'
+                : 'Nothing has run yet, so there is nothing to draw.'}
             </p>
           ) : (
-            <StackedArea<HomeStatus>
-              label="Sections over time"
+            <StackedArea<HomeFlowStatus>
+              label="Flows over time"
               series={SERIES}
               points={points}
               numbersAtRest={false}
-              onPickSeries={(status) => navigate(documentsHref({ status }))}
+              onPickSeries={(status) => navigate(flowsStatusHref(status))}
               controls={
                 <span role="group" aria-label="Period" className="flex items-center gap-1">
                   {PERIODS.map((p) => (
@@ -381,7 +415,7 @@ function Dashboard({ signal }: { signal: number }) {
           </Widget>
         </div>
         <div className="grid grid-cols-1 border-b border-border lg:grid-cols-2 [&>*]:border-b [&>*]:border-border lg:[&>*]:border-b-0 lg:[&>*]:border-r lg:[&>*:last-child]:border-r-0">
-          <Widget title="Areas" to={documentsHref({})} toWord="Documents">
+          <Widget title="Areas" unit="by section" to={documentsHref({})} toWord="Documents">
             {(home?.areas ?? []).length === 0 ? (
               <Nothing>No document is read by a repository yet.</Nothing>
             ) : (
@@ -395,7 +429,12 @@ function Dashboard({ signal }: { signal: number }) {
             )}
           </Widget>
 
-          <Widget title="Recently changed" to={documentsHref({ status: 'failed' })} toWord="Failed">
+          <Widget
+            title="Recently changed"
+            unit="documents"
+            to={documentsHref({ status: 'failed' })}
+            toWord="Failed"
+          >
             <EntityList<HomeChangeRow>
               variant="embedded"
               label="Recently changed"

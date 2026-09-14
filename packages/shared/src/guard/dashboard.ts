@@ -1393,6 +1393,15 @@ export type GuardClaimsView = z.infer<typeof GuardClaimsViewSchema>
  */
 export type GuardRunSectionSummary = Record<string, GuardCoveragePlainStatus>
 
+/**
+ * ONE run's FLOW SUMMARY: every flow of the repository as the word it wore at
+ * that moment, keyed by flow id. The flow twin of {@link GuardRunSectionSummary},
+ * written beside it and for the same reason — a run snapshot says which
+ * SCENARIOS passed, and turning that back into flows needs the manifest and the
+ * corpus as they were. It is what Home's trend counts.
+ */
+export type GuardRunFlowSummary = Record<string, GuardCoveragePlainStatus>
+
 /** The address of ONE section of ONE document: `<docRef>#<anchor>`. */
 export function guardSectionRef(doc: string, anchor: string): string {
   return `${doc}#${anchor}`

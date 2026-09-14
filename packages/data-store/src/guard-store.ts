@@ -63,7 +63,7 @@ import {
 import { guardEvidenceVisual } from '@truecourse/shared';
 import type {
   GuardHistoryReadOptions,
-  GuardRunSections,
+  GuardRunCoverage,
   GuardStore,
   RepoRef,
   SaveScenariosResult,
@@ -79,6 +79,7 @@ import {
   type GuardHistoryEntry,
   type GuardLatest,
   type GuardManifest,
+  type GuardRunFlowSummary,
   type GuardRunSectionSummary,
 } from '@truecourse/shared';
 import {
@@ -206,25 +207,26 @@ export class PgGuardStore implements GuardStore {
   // History is derived from the baseline rows — nothing to append.
   async appendGuardHistory(): Promise<void> {}
 
-  /** Record a run's section summary on its own row, addressed by run id. */
-  async writeGuardRunSections(repoKey: string, run: GuardRunSections): Promise<void> {
+  /** Record a run's section and flow summaries on its own row, by run id. */
+  async writeGuardRunCoverage(repoKey: string, run: GuardRunCoverage): Promise<void> {
     if (!SAFE_SEGMENT.test(run.runId)) {
       throw new Error(`[data-store] unsafe guard run id: ${run.runId}`);
     }
     await this.db
       .update(guardRuns)
-      .set({ sections: run.sections })
+      .set({ sections: run.sections, flows: run.flows })
       .where(and(eq(guardRuns.repoKey, repoKey), eq(guardRuns.runId, run.runId)));
   }
 
   /** Every baseline run carrying a section summary, oldest first. */
-  async readGuardRunSections(repoKey: string): Promise<GuardRunSections[]> {
+  async readGuardRunCoverage(repoKey: string): Promise<GuardRunCoverage[]> {
     const rows = await this.db
       .select({
         runId: guardRuns.runId,
         ranAt: guardRuns.ranAt,
         commitSha: guardRuns.commitSha,
         sections: guardRuns.sections,
+        flows: guardRuns.flows,
       })
       .from(guardRuns)
       .where(
@@ -240,6 +242,7 @@ export class PgGuardStore implements GuardStore {
       ranAt: r.ranAt,
       commit: r.commitSha,
       sections: r.sections as GuardRunSectionSummary,
+      flows: (r.flows as GuardRunFlowSummary | null) ?? null,
     }));
   }
 

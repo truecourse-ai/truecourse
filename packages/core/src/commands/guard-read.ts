@@ -43,6 +43,7 @@ import { CuratedCorpusSchema, type CuratedCorpus } from '@truecourse/spec-consol
 import {
   GUARD_COVERAGE_PLAIN_ORDER,
   guardSectionRef,
+  type GuardRunFlowSummary,
   type GuardRunSectionSummary,
   scenarioMilestoneProof,
   coversFlowMilestones,
@@ -167,6 +168,7 @@ import {
   readRecipeRaw,
   readScenarioFile,
   writeGuardDecisions as writeGuardDecisionsStore,
+  type GuardRunCoverage,
 } from '../lib/guard-store.js'
 import { readGuardExternalSetupIndex } from './guard-externals.js'
 import { readRepoDoc } from '../lib/repo-doc-reader.js'
@@ -447,11 +449,7 @@ export async function readGuardRunSectionSummary(
   repoKey: string,
   latest: GuardLatest,
 ): Promise<GuardRunSectionSummary | null> {
-  const runCommit = latest.run.commit ?? undefined
-  const commit =
-    runCommit && (await readManifestStore(repoKey, runCommit))
-      ? runCommit
-      : ((await getGuardStore().readGuardBaselineCommit(repoKey)) ?? runCommit)
+  const commit = await runSummaryCommit(repoKey, latest)
 
   const sources: GuardCoverageSources = {
     scenarios: (await getGuardStore().loadScenarios({ repoKey, commitSha: commit ?? '' })).scenarios,
@@ -482,6 +480,74 @@ export async function readGuardRunSectionSummary(
     }
   }
   return Object.keys(summary).length > 0 ? summary : null
+}
+
+/**
+ * WHICH COMMIT a run's summaries are derived at: the run's own when the store
+ * holds a manifest there, else the baseline set — the set a hosted run
+ * materializes into its clone before running.
+ */
+async function runSummaryCommit(
+  repoKey: string,
+  latest: GuardLatest,
+): Promise<string | undefined> {
+  const runCommit = latest.run.commit ?? undefined
+  if (runCommit && (await readManifestStore(repoKey, runCommit))) return runCommit
+  return (await getGuardStore().readGuardBaselineCommit(repoKey)) ?? runCommit
+}
+
+/**
+ * The FLOW SUMMARY of one run: every flow of the repository as the word it wore
+ * then. Written beside the section summary when the run is persisted, and read
+ * back as the trend on Home, so a point of it costs no re-derivation.
+ *
+ * The word comes from {@link flowListItem} through {@link guardFlowPlainStatus},
+ * which is the derivation the Flows page itself reads — Home's number and the
+ * Flows list can only ever agree about a flow. The corpus is read at the commit
+ * the store holds it under, and the OUTCOMES from this run rather than from
+ * whatever run is stored at that commit. A repository with no flow corpus at
+ * all answers null, which the caller records as "not derivable".
+ */
+export async function readGuardRunFlowSummary(
+  repoKey: string,
+  latest: GuardLatest,
+): Promise<GuardRunFlowSummary | null> {
+  const view = await loadFlowView(repoKey, await runSummaryCommit(repoKey, latest), latest)
+  if (!view) return null
+  const summary: GuardRunFlowSummary = {}
+  for (const flowId of allFlowIds(view)) {
+    summary[flowId] = guardFlowPlainStatus(flowListItem(flowId, view))
+  }
+  return Object.keys(summary).length > 0 ? summary : null
+}
+
+/**
+ * A repository's baseline runs as Home reads them, with the FLOW SUMMARY of any
+ * run that predates flows being recorded DERIVED AND WRITTEN BACK.
+ *
+ * A run stores its own snapshot, so its flows can be recomputed exactly as the
+ * run itself would have: its own outcomes, against the corpus the store holds.
+ * Refusing to would cost every existing workspace the trend it already had, for
+ * a number that was recoverable all along. It is derived once — the fill is
+ * stored, so the next read is a plain read — and a run whose snapshot is gone,
+ * or that has nothing to call a flow, is left as it is and simply stays out of
+ * the flow trend.
+ */
+export async function readGuardCoverageHistory(repoKey: string): Promise<GuardRunCoverage[]> {
+  const store = getGuardStore()
+  const history = await store.readGuardRunCoverage(repoKey)
+  const filled: GuardRunCoverage[] = []
+  for (const run of history) {
+    if (run.flows) {
+      filled.push(run)
+      continue
+    }
+    const snapshot = await store.readGuardRun(repoKey, run.runId)
+    const flows = snapshot ? await readGuardRunFlowSummary(repoKey, snapshot) : null
+    if (flows) await store.writeGuardRunCoverage(repoKey, { ...run, flows })
+    filled.push({ ...run, flows })
+  }
+  return filled
 }
 
 /**
@@ -1274,14 +1340,24 @@ interface FlowViewSources {
   scenarios: GuardScenario[]
 }
 
-async function loadFlowView(repoKey: string, ref?: string): Promise<FlowViewSources | null> {
+async function loadFlowView(
+  repoKey: string,
+  ref?: string,
+  /**
+   * The run the view reads outcomes from, when the caller HAS one. Recording a
+   * run's flow summary needs this: its corpus may be read at the baseline
+   * commit, and the run stored there is not the run being recorded.
+   */
+  runOverride?: GuardLatest,
+): Promise<FlowViewSources | null> {
   const corpus = await loadGuardCorpusForView(repoKey, ref)
   if (!corpus) return null
-  const [flowsFile, latest, result] = await Promise.all([
+  const [flowsFile, storedRun, result] = await Promise.all([
     readGuardFlowsFile(repoKey, corpus.commit),
-    readGuardRunForView(repoKey, ref),
+    runOverride ? Promise.resolve(runOverride) : readGuardRunForView(repoKey, ref),
     readGuardResultForView(repoKey, ref),
   ])
+  const latest = storedRun
   return {
     ...(corpus.commit !== undefined ? { commit: corpus.commit } : {}),
     join: buildFlowJoin({
