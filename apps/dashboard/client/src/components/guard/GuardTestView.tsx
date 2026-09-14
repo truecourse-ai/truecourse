@@ -1038,11 +1038,11 @@ function CollapsibleSection({
 
 /**
  * The verdict's paint, the product-wide status dot at display size, echoed by
- * the card's border. Same four-colour vocabulary as every guard chip
+ * the card's border. Same colour vocabulary as every guard chip
  * (`lib/guard-status.ts`): red is a verdict someone must act on, green is
- * proven, blue is "no verdict yet, and someone can move it", grey is nobody's
- * to-do. The dot and border carry the colour and the word says the fact; the
- * card's background stays unwashed.
+ * proven, amber is "no verdict yet, and someone can move it", blue is waiting
+ * on nobody, grey is nobody's to-do. The dot and border carry the colour and the
+ * word says the fact; the card's background stays unwashed.
  */
 const VERDICT_TONE: Record<
   GuardTestStatusView["plain"],
@@ -1050,7 +1050,7 @@ const VERDICT_TONE: Record<
 > = {
   failed: { dot: "bg-red-500", border: "border-red-500/35" },
   succeeded: { dot: "bg-emerald-500", border: "border-emerald-500/35" },
-  blocked: { dot: "bg-sky-500", border: "border-sky-500/35" },
+  blocked: { dot: "bg-amber-500", border: "border-amber-500/35" },
   "never-run": { dot: "bg-sky-500", border: "border-sky-500/35" },
   "not-testable": { dot: "bg-slate-400", border: "border-border" },
 };

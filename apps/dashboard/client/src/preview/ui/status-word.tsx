@@ -42,9 +42,9 @@ const DOT: Record<StatusTone, string> = {
   // Amber for the states that want a reader rather than a fix: an interrupted
   // conversation, one holding a question.
   attention: 'bg-amber-500',
-  // Guard's one blue: nothing has ruled here yet and someone can move it. Guard
-  // bans amber, so its Blocked and its Never run wear this rather than the
-  // amber Context's Blocked wears.
+  // The one blue: nothing has ruled here yet and nobody is asked to act. It is
+  // what Never run wears; a state someone CAN move is Blocked, and wears the
+  // amber every blocked thing wears.
   unproven: 'bg-sky-500',
   neutral: 'bg-muted-foreground',
   // Not a colour but a shape: a document the corpus does not hold is outside

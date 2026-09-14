@@ -2,8 +2,8 @@
  * NEEDS SETUP in the UI — the blocked gap that is a to-do.
  *
  * Three things must be true wherever it renders: it is told APART from a failure
- * and from the grey blocked wall (the Blocked blue, never a severity colour of its
- * own), it NAMES the third party, and it carries the one action that clears it
+ * and from the grey blocked wall (the Blocked amber, never a severity colour of
+ * its own), it NAMES the third party, and it carries the one action that clears it
  * — a link to the named service's card on the Dependencies page, or, once the
  * account exists, the re-generate command instead.
  *
@@ -178,8 +178,10 @@ describe('GuardSectionDetail — the needs-setup CTA', () => {
     expect(screen.getByText(guardNeedsSetupHeadline(section().needsSetup!))).toBeInTheDocument();
     const cta = screen.getByRole('button', { name: /Provide open-meteo/ });
     expect(cta).toHaveTextContent('Dependencies');
-    expect(cta.className).toContain('sky');
-    expect(cta.className).toContain('dark:text-sky-300');
+    // Needs setup is the blocked family, so the call to action wears the amber
+    // every blocked thing wears rather than a colour of its own.
+    expect(cta.className).toContain('amber');
+    expect(cta.className).toContain('dark:text-amber-300');
     await userEvent.click(cta);
     expect(onOpenExternals).toHaveBeenCalledWith('open-meteo');
   });
@@ -290,9 +292,10 @@ describe('GuardFlowDetail — the needs-setup why-no-test row', () => {
     expect(within(row).getByRole('button', { name: /Provide open-meteo/ })).toHaveTextContent(
       'Dependencies',
     );
-    // It stays visually apart from a real test row, and never says the same thing
-    // twice — the CTA's own sentence replaces the why-no-test line.
-    expect(row.className).toContain('sky');
+    // It stays visually apart from a real test row, in the blocked amber, and
+    // never says the same thing twice — the CTA's own sentence replaces the
+    // why-no-test line.
+    expect(row.className).toContain('amber');
     expect(
       within(row).queryByText(guardWhyNoTest(NEEDS_SETUP_GAP)),
     ).not.toBeInTheDocument();

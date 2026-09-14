@@ -132,9 +132,9 @@ const GUARD_STATUS_COLOUR: Record<GuardSectionCoverageStatus, GuardStatusColour>
   },
   ...AWAITING_DRIVER_COLOUR,
   // Held back on an unregistered supplied dependency, one registration away from
-  // a verdict. Blue: a to-do, not a failure and not a mute gap.
+  // a verdict. Amber: a to-do, not a failure and not a mute gap.
   blocked: BLOCKED_COLOUR,
-  // The ATTENTION gap: a third party the user can provide today. Blue, not the
+  // The ATTENTION gap: a third party the user can provide today. Amber, not the
   // gaps' grey (it is actionable) and not fail's red (nothing failed).
   'needs-setup': BLOCKED_COLOUR,
   // Generate tried to author a test here and failed. Red like a problem, the
@@ -146,8 +146,8 @@ const GUARD_STATUS_COLOUR: Record<GuardSectionCoverageStatus, GuardStatusColour>
     badge: 'bg-red-500/15 text-red-600 dark:text-red-400',
   },
   // Named blockers a user can clear, the credentials the recipe wants, the code
-  // path nothing maps yet. Blue, and `blocked-on` is what the five-word "Blocked"
-  // chip borrows its paint from (see BADGE_SOURCE), so BLOCKED IS BLUE everywhere.
+  // path nothing maps yet. Amber, and `blocked-on` is what the five-word "Blocked"
+  // chip borrows its paint from (see BADGE_SOURCE), so BLOCKED IS AMBER everywhere.
   'blocked-on': BLOCKED_COLOUR,
   'no-interface': BLOCKED_COLOUR,
   // Settled answers: nothing here can be proven, by anybody. Grey, nobody's to-do.

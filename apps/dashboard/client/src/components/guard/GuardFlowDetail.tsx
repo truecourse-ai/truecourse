@@ -225,7 +225,7 @@ function WhyNoTest({
     <div
       role="group"
       aria-label="Why there is no test yet"
-      className={`rounded border border-border px-3 py-2 ${needsSetup ? "bg-sky-500/[0.07]" : "bg-muted/20"}`}
+      className={`rounded border border-border px-3 py-2 ${needsSetup ? "bg-amber-500/[0.07]" : "bg-muted/20"}`}
     >
       <GuardFlowStatusChip status={guardPlainStatus(row.status)} />
       {needsSetup ? (

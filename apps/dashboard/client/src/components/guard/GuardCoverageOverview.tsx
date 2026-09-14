@@ -13,11 +13,10 @@
  * carries the SHAPE. Segments keep a 2px surface gap (the mark spec, and the
  * secondary encoding that keeps the near-pairs legal).
  *
- * Palette: the guard four-colour vocabulary (red wrong / green proven / blue
- * waiting / grey nobody's-to-do), validated for adjacency in both modes. The
- * blue tier splits into two steps HERE ONLY (sky-600 vs sky-400) because two
- * blue buckets sit adjacent inside one bar, everywhere else they deliberately
- * share one blue and are never adjacent fills.
+ * Palette: the guard colour vocabulary (red wrong / green proven / amber
+ * somebody's to-do / blue waiting on nobody / grey nobody's-to-do), validated
+ * for adjacency in both modes. `blocked` wears the amber every blocked thing
+ * wears, so one state cannot change colour with the surface a reader is on.
  *
  * Every number is a straight read of a store the page already trusts:
  * `specs/corpus.json` (documents), `guard/status` (sections, flows, tests,
@@ -56,12 +55,12 @@ export interface Segment {
   fill: string;
 }
 
-/** The five coverage words in their own worst-first order, in the four-colour
- *  vocabulary (blue split into two steps, see the file comment). */
+/** The five coverage words in their own worst-first order, in the palette the
+ *  file comment describes. */
 const PLAIN_FILL: Record<GuardCoveragePlainStatus, string> = {
   failed: 'bg-red-500',
-  blocked: 'bg-sky-600',
-  'never-run': 'bg-sky-400',
+  blocked: 'bg-amber-500',
+  'never-run': 'bg-sky-500',
   succeeded: 'bg-emerald-500',
   'not-testable': 'bg-slate-400',
 };
@@ -219,7 +218,7 @@ export function GuardCoverageOverview({
         { word: 'Error', count: lastRun.summary.error, fill: 'bg-red-400' },
         { word: 'Stale', count: lastRun.summary.stale, fill: 'bg-sky-600' },
         { word: 'Orphaned', count: lastRun.summary.orphaned, fill: 'bg-sky-600' },
-        { word: 'Blocked', count: lastRun.summary.blocked, fill: 'bg-sky-400' },
+        { word: 'Blocked', count: lastRun.summary.blocked, fill: 'bg-amber-500' },
         { word: 'Passed', count: lastRun.summary.pass, fill: 'bg-emerald-500' },
       ]
     : lastGenerate

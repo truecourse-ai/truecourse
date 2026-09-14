@@ -15,6 +15,7 @@
  */
 
 import type { GuardDependencyRow, GuardDependencyState } from '@/types/guard-dependencies';
+import type { StatusTone } from '@/preview/ui/status-word';
 
 export interface GuardDependencyPaint {
   label: string;
@@ -87,14 +88,24 @@ export const GUARD_DEPENDENCY_STATE: Record<GuardDependencyState, GuardDependenc
   },
   incomplete: {
     label: 'Incomplete',
-    dot: 'bg-sky-500',
+    dot: 'bg-amber-500',
     hint: 'Part of the registration is missing, so a run stops rather than test against half a world.',
   },
   unprovided: {
     label: 'Unprovided',
-    dot: 'bg-sky-500',
+    dot: 'bg-amber-500',
     hint: 'Nothing is registered yet, the flows that bind it stay blocked until something is.',
   },
+};
+
+/**
+ * The tone each state wears in a tally. A dependency nothing is registered for
+ * is a to-do somebody can clear, so it reads as Blocked does everywhere.
+ */
+export const GUARD_DEPENDENCY_STATE_TONE: Record<GuardDependencyState, StatusTone> = {
+  provided: 'success',
+  incomplete: 'blocked',
+  unprovided: 'blocked',
 };
 
 /**

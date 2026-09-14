@@ -173,9 +173,9 @@ export function GuardTotalsStrip({
         <div
           role="group"
           aria-label="Needs setup"
-          className="flex flex-wrap items-center gap-1.5 border-t border-sky-500/30 bg-sky-500/[0.07] px-3 py-1.5"
+          className="flex flex-wrap items-center gap-1.5 border-t border-amber-500/30 bg-amber-500/[0.07] px-3 py-1.5"
         >
-          <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-sky-600 dark:text-sky-400">
+          <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400">
             Needs setup
           </span>
           {needsSetupServices.map(({ service, count, provided }) => (
@@ -197,14 +197,14 @@ export function GuardTotalsStrip({
                 // its card. The one synthetic key has no card, it lands the tab.
                 onClick={() => onOpenExternals?.(service === MISSING_DATA_NOUN ? undefined : service)}
                 disabled={!onOpenExternals}
-                className="inline-flex items-center gap-1 rounded border border-sky-500/40 bg-sky-500/10 px-1.5 py-0.5 text-[11px] text-sky-700 transition-colors hover:bg-sky-500/20 disabled:cursor-default disabled:hover:bg-sky-500/10 dark:text-sky-300"
+                className="inline-flex items-center gap-1 rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-700 transition-colors hover:bg-amber-500/20 disabled:cursor-default disabled:hover:bg-amber-500/10 dark:text-amber-300"
               >
                 <span className="font-medium">{guardSetupServiceLabel(service)}</span>
-                <span className="text-sky-600/80 dark:text-sky-400/80">
+                <span className="text-amber-600/80 dark:text-amber-400/80">
                   {count} {count === 1 ? 'section' : 'sections'}
                 </span>
                 {provided ? (
-                  <span className="text-sky-600/80 dark:text-sky-400/80">· re-generate</span>
+                  <span className="text-amber-600/80 dark:text-amber-400/80">· re-generate</span>
                 ) : (
                   <ArrowUpRight className="h-3 w-3" />
                 )}
