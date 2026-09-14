@@ -152,8 +152,10 @@ describe('guard status treatments', () => {
     expect(guardBandClasses('pass')).toContain('emerald');
     // Not yet, and someone can move it.
     expect(guardBandClasses('guarded')).toContain('sky');
-    expect(guardBandClasses('blocked-on')).toContain('sky');
-    expect(guardBandClasses('unguarded')).toContain('sky');
+    // Blocked: someone has to act, and it wears the same amber wherever it
+    // appears, guard's surfaces and Context's alike.
+    expect(guardBandClasses('blocked-on')).toContain('amber');
+    expect(guardBandClasses('unguarded')).toContain('amber');
     // Nothing to act on: the settled non-testables and the two unknowns.
     expect(guardBandClasses('stale')).toContain('muted');
     expect(guardBandClasses('orphaned')).toContain('muted');
@@ -162,10 +164,13 @@ describe('guard status treatments', () => {
     expect(guardBandClasses('tui')).toContain('dashed');
   });
 
-  it('never paints a guard status amber or orange', () => {
+  it('spends amber on the blocked states and nothing else', () => {
+    const blocked = new Set(['blocked', 'needs-setup', 'blocked-on', 'no-interface', 'unguarded']);
     for (const status of statuses) {
       const meta = guardStatusMeta(status);
-      expect(`${meta.band} ${meta.dot} ${meta.badge}`).not.toMatch(/amber|orange/);
+      const paint = `${meta.band} ${meta.dot} ${meta.badge}`;
+      if (blocked.has(status)) expect(paint).toMatch(/amber/);
+      else expect(paint).not.toMatch(/amber|orange/);
     }
   });
 });

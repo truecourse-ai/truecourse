@@ -162,7 +162,7 @@ export const VERDICT_WORD: Record<'passed' | 'failed' | 'blocked', string> = {
  */
 export const GUARD_COVERAGE_TONE: Record<GuardCoveragePlainStatus, StatusTone> = {
   failed: 'failure',
-  blocked: 'unproven',
+  blocked: 'blocked',
   'never-run': 'unproven',
   succeeded: 'success',
   'not-testable': 'neutral',

@@ -255,11 +255,13 @@ describe('the Pipeline tab of a connected repository', () => {
     renderAt(`/repos/${REAL.id}/pipeline`);
 
     const shapes = (await rows()).map((row) => lines(row).map((line) => line.className));
-    // Two lines each, the same two: a row with no fact and no time still takes
-    // the line, so the column never steps.
+    // Two lines each, the same two, and the second is a FIXED height: a row with
+    // no fact and no time takes exactly as much room as one with both, so the
+    // status word sits on the same line down the column.
     expect(shapes.map((shape) => shape.length)).toEqual([2, 2, 2]);
     expect(new Set(shapes.map((shape) => shape.join('|'))).size).toBe(1);
-    expect(shapes[0]![1]).toContain('min-h-4');
+    expect(shapes[0]![1]).toContain('h-4');
+    expect(shapes[0]![1]).not.toContain('min-h-4');
 
     const [setup] = await rows();
     const [top, bottom] = lines(setup!);

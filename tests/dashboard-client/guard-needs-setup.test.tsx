@@ -73,16 +73,16 @@ describe('needs-setup vocabulary and paint', () => {
     expect(guardStatusWord('blocked-on')).toBe('Blocked');
   });
 
-  it('is the Blocked blue in BOTH themes — not fail red, not the gaps’ grey', () => {
+  it('is the Blocked amber in BOTH themes — not fail red, not the gaps’ grey', () => {
     const meta = guardStatusMeta('needs-setup');
-    expect(meta.badge).toContain('sky');
-    expect(meta.badge).toContain('dark:text-sky-400');
-    expect(meta.band).toContain('sky');
-    expect(meta.dot).toBe('bg-sky-500');
+    expect(meta.badge).toContain('amber');
+    expect(meta.badge).toContain('dark:text-amber-400');
+    expect(meta.band).toContain('amber');
+    expect(meta.dot).toBe('bg-amber-500');
     expect(guardStatusMeta('fail').badge).toContain('red');
     expect(guardStatusMeta('stale').badge).toContain('muted');
-    // Amber and orange are banned across every guard surface.
-    expect(`${meta.badge} ${meta.band} ${meta.dot}`).not.toMatch(/amber|orange/);
+    // The blue belongs to what nobody is asked to act on.
+    expect(guardStatusMeta('never-run').dot).toBe('bg-sky-500');
   });
 
   it('names the SERVICE in the surface chip instead of a generic need', () => {

@@ -198,7 +198,7 @@ function PipelineRow({
           <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">{title}</span>
           <StatusWord tone={tone} word={word} />
         </span>
-        <span className="flex min-h-4 w-full items-center gap-2 text-[11px] text-muted-foreground">
+        <span className="flex h-4 w-full items-center gap-2 text-[11px] text-muted-foreground">
           <span className="min-w-0 flex-1 truncate">{fact}</span>
           <span className="shrink-0">{at ? relativeTime(at) : ''}</span>
         </span>

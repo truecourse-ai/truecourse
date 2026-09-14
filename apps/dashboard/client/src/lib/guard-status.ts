@@ -72,16 +72,17 @@ const GAP_COLOUR: GuardStatusColour = {
 };
 
 /**
- * BLOCKED, the one blue. A state nothing has ruled on yet AND someone can move:
- * register the dependency, provide the account, map the interface, run the tests.
- * It is deliberately the same blue as `never-run` and `guarded`: all of them are
- * "no verdict here yet", and a reader scanning for colour must not read one of
- * them as a result. The WORD tells them apart.
+ * BLOCKED, amber. A state nothing has ruled on yet AND someone can move:
+ * register the dependency, provide the account, map the interface, run the
+ * tests. It wears the amber every blocked thing wears — Context paints its own
+ * Blocked the same — because one state must not change colour with the surface
+ * a reader happens to be on. `never-run` keeps the blue: nobody is asked to act
+ * on it.
  */
 const BLOCKED_COLOUR: GuardStatusColour = {
-  band: 'border-sky-500 bg-sky-500/10',
-  dot: 'bg-sky-500',
-  badge: 'bg-sky-500/15 text-sky-600 dark:text-sky-400',
+  band: 'border-amber-500 bg-amber-500/10',
+  dot: 'bg-amber-500',
+  badge: 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
 };
 
 /**
