@@ -16,11 +16,61 @@ import { promptLlmEstimate } from "./llm-prompt.js";
 import { showFirstRunNotice } from "../telemetry.js";
 import { recordAnalyzeAndMaybePrompt } from "../community-prompts.js";
 
-async function resolveOrInitProject(): Promise<RegistryEntry> {
-  const repoDir = resolveRepoDir(process.cwd()) ?? process.cwd();
+async function resolveOrInitProject(projectPath = process.cwd()): Promise<RegistryEntry> {
+  const requestedPath = validateProjectPath(projectPath);
+  const repoDir = resolveRepoDir(requestedPath) ?? requestedPath;
   ensureRepoTruecourseDir(repoDir);
   return registerProject(repoDir);
 }
+
+/**
+ * Validate the directory supplied to `analyze` before creating any project
+ * state or starting the analysis pipeline.
+ */
+export function validateProjectPath(projectPath: string): string {
+  const resolvedPath = path.resolve(projectPath);
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(resolvedPath);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") {
+      throw new Error(`Project path does not exist: ${projectPath}`);
+    }
+    if (code === "EACCES" || code === "EPERM") {
+      throw new Error(`Project path is not readable: ${projectPath}`);
+    }
+    throw new Error(`Unable to access project path ${projectPath}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  if (!stat.isDirectory()) {
+    throw new Error(`Project path is not a directory: ${projectPath}`);
+  }
+
+  try {
+    fs.accessSync(resolvedPath, fs.constants.R_OK | fs.constants.X_OK);
+  } catch {
+    throw new Error(`Project path is not readable: ${projectPath}`);
+  }
+
+  return resolvedPath;
+}
+
+function resolveRequestedProjectPath(projectPath: string | undefined): string {
+  if (projectPath) return projectPath;
+  try {
+    return process.cwd();
+  } catch {
+    throw new Error("Unable to determine the current project path; pass a readable directory to analyze.");
+  }
+}
+
+function exitForInvalidProjectPath(error: unknown): never {
+  console.error(`error: ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+  throw error;
+}
+
 
 /**
  * Cheap check: does the repo contain any C# source? Decides whether the
@@ -152,6 +202,8 @@ function stopSpinner(): void {
  * Same shape as `installSkills` below.
  */
 export interface AnalyzeOptions {
+  /** Directory to analyze; defaults to the current working directory. */
+  projectPath?: string;
   /** Override `enableLlmRules` for this run (whether LLM rules run at all). */
   llm?: boolean;
   /**
@@ -258,10 +310,16 @@ export async function resolveStashDecision(
 }
 
 export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
+  let project: RegistryEntry;
+  try {
+    project = await resolveOrInitProject(resolveRequestedProjectPath(options.projectPath));
+  } catch (error) {
+    exitForInvalidProjectPath(error);
+  }
+
   p.intro("Analyzing repository");
   showFirstRunNotice();
 
-  const project = await resolveOrInitProject();
   p.log.step(`Repository: ${project.name}`);
 
   // First-time setup convenience: offer to install Claude Code skills if
@@ -384,13 +442,19 @@ export async function runAnalyze(options: AnalyzeOptions = {}): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export async function runAnalyzeDiff(options: AnalyzeOptions = {}): Promise<void> {
+  let project: RegistryEntry;
+  try {
+    project = await resolveOrInitProject(resolveRequestedProjectPath(options.projectPath));
+  } catch (error) {
+    exitForInvalidProjectPath(error);
+  }
+
   const { diffInProcess } = await import("@truecourse/core/commands/diff-in-process");
   const { renderDiffResultsSummary } = await import("./helpers.js");
 
   p.intro("Running diff check");
   showFirstRunNotice();
 
-  const project = await resolveOrInitProject();
   p.log.step(`Repository: ${project.name}`);
 
   // Same first-run skill convenience as `runAnalyze`.

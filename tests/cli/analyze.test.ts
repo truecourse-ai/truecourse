@@ -165,7 +165,7 @@ for (const c of E2E_CASES) {
 // exit with a clear message; absent flag + clean does nothing.
 // ---------------------------------------------------------------------------
 
-import { resolveStashDecision } from '../../tools/cli/src/commands/analyze';
+import { resolveStashDecision, validateProjectPath, runAnalyze } from '../../tools/cli/src/commands/analyze';
 
 describe('resolveStashDecision', () => {
   let workDir: string;
@@ -250,6 +250,53 @@ describe('resolveStashDecision', () => {
       expect(result).toEqual({ skipStash: false });
     } finally {
       fs.rmSync(nonGitDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('analyze project path validation', () => {
+  it('rejects a missing path before initializing project state', () => {
+    const missing = path.join(os.tmpdir(), `truecourse-missing-${Date.now()}-${Math.random()}`);
+    expect(() => validateProjectPath(missing)).toThrow(`Project path does not exist: ${missing}`);
+  });
+
+  it('rejects a regular file as a project path', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'truecourse-invalid-project-'));
+    const file = path.join(dir, 'project.txt');
+    fs.writeFileSync(file, 'not a directory\n');
+    try {
+      expect(() => validateProjectPath(file)).toThrow(`Project path is not a directory: ${file}`);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a directory that cannot be read', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'truecourse-unreadable-project-'));
+    const accessSpy = vi.spyOn(fs, 'accessSync').mockImplementationOnce(() => {
+      throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+    });
+    try {
+      expect(() => validateProjectPath(dir)).toThrow(`Project path is not readable: ${dir}`);
+    } finally {
+      accessSpy.mockRestore();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reports invalid input through the CLI error path with a nonzero exit', async () => {
+    const missing = path.join(os.tmpdir(), `truecourse-missing-${Date.now()}-${Math.random()}`);
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('process.exit called');
+    }) as never);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await expect(runAnalyze({ projectPath: missing, llm: false })).rejects.toThrow('process.exit called');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(errorSpy).toHaveBeenCalledWith(`error: Project path does not exist: ${missing}`);
+    } finally {
+      exitSpy.mockRestore();
+      errorSpy.mockRestore();
     }
   });
 });

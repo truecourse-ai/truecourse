@@ -176,8 +176,8 @@ function resolveInstallSkills(
 }
 
 program
-  .command("analyze")
-  .description("Analyze the current repository")
+  .command("analyze [project-path]")
+  .description("Analyze a repository (defaults to the current directory)")
   .option("--diff", "Run diff check against latest analysis")
   // `--llm` and `--no-llm` are auto-paired by commander — they both control
   // `options.llm`. Passing `--llm` → true, `--no-llm` → false, neither →
@@ -190,11 +190,11 @@ program
   .option("--no-stash", "Analyze the working tree as-is without stashing")
   .option("--install-skills", "Install Claude Code skills without prompting")
   .option("--no-skills", "Skip the Claude Code skills prompt")
-  .action(async (options) => {
+  .action(async (projectPath, options) => {
     const llm: boolean | undefined = typeof options.llm === "boolean" ? options.llm : undefined;
     const stash: boolean | undefined = typeof options.stash === "boolean" ? options.stash : undefined;
     const installSkills = resolveInstallSkills(options);
-    const common = { llm, stash, installSkills, llmTransport: options.llmTransport, io: options.io };
+    const common = { projectPath, llm, stash, installSkills, llmTransport: options.llmTransport, io: options.io };
     if (options.diff) {
       await runAnalyzeDiff(common);
     } else {
