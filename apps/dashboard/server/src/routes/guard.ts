@@ -45,7 +45,6 @@ import {
   readGuardResultForView,
   readGuardReport,
   readGuardRun,
-  readGuardHistoryForPr,
   readGuardScenarioSource,
   readGuardInterfaceRaw,
   readGuardFlowRaw,
@@ -56,7 +55,7 @@ import {
   readGuardEvidenceAt,
   listGuardEvidenceVisuals,
   readGuardEvidenceVisual,
-  getGuardDecisions,
+  readGuardDecisions,
   computeGuardStaleness,
   composeDocCoverage,
   listGuardScenarios,
@@ -78,8 +77,7 @@ import { hostedDependenciesView } from './guard-dependencies-hosted.js';
 import { readGuardSetup } from '@truecourse/core/commands/guard-setup';
 import { readBundleGuardSetup } from '@truecourse/core/services/guard-setup/bundle';
 import { loadGuardSetupBundle } from '@truecourse/core/lib/guard-store';
-import { getGuardGatePendingLookup } from '@truecourse/core/lib/guard-gate-pending';
-import { prOf, refOf } from './route-params.js';
+import { refOf } from './route-params.js';
 
 const router: Router = Router();
 
@@ -106,9 +104,9 @@ router.get('/:id/guard/status', async (req: Request, res: Response, next: NextFu
 });
 
 // The last run's materialized state. No ref → the repo baseline (404 until a run
-// exists, the empty-state CTA). With `ref` (a PR head) → the run stored at THAT
-// commit; when none is stored the response is an explicit pending/empty envelope
-// (`{ latest: null, pending }`) — never the baseline under a PR header.
+// exists, the empty-state CTA). With `ref` (a commit) → the run stored at THAT
+// commit, `{ latest: null }` when none is — never the baseline under another
+// commit's header.
 //
 // Both shapes carry `runFlows`: the milestone chains of the flows THIS run's
 // results reference, so the Runs tab paints a result as a flow instance without a
@@ -126,14 +124,11 @@ router.get('/:id/guard/latest', async (req: Request, res: Response, next: NextFu
       res.json({ ...latest, runFlows: await readGuardRunFlows(repo.path, latest, ref) });
       return;
     }
-    if (latest) {
-      const runFlows = await readGuardRunFlows(repo.path, latest, ref);
-      res.json({ latest: { ...latest, runFlows }, pending: null });
+    if (!latest) {
+      res.json({ latest: null });
       return;
     }
-    // No run at this commit — surface an in-flight gate (EE) or a plain empty state.
-    const pending = (await getGuardGatePendingLookup()?.(repo.path, ref)) ?? null;
-    res.json({ latest: null, pending });
+    res.json({ latest: { ...latest, runFlows: await readGuardRunFlows(repo.path, latest, ref) } });
   } catch (e) {
     next(e);
   }
@@ -142,16 +137,9 @@ router.get('/:id/guard/latest', async (req: Request, res: Response, next: NextFu
 router.get('/:id/guard/history', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
-    // `?pr=` (EE): the PR's own run timeline — one run per pushed head, via the
-    // gate-heads seam — never the repo baseline history under a PR view. `?all=1`:
-    // every run the store holds, baseline and pull-request heads alike, each
-    // naming its pull request — the Runs list of a connected repository.
-    const pr = prOf(req);
-    res.json(
-      pr !== undefined
-        ? await readGuardHistoryForPr(repo.path, pr)
-        : await readGuardHistory(repo.path, { all: req.query.all === '1' }),
-    );
+    // `?all=1`: every run the store holds, not just the baseline trend — the Runs
+    // list of a connected repository.
+    res.json(await readGuardHistory(repo.path, { all: req.query.all === '1' }));
   } catch (e) {
     next(e);
   }
@@ -518,10 +506,7 @@ router.get('/:id/guard/finding-evidence', async (req: Request, res: Response, ne
 router.get('/:id/guard/decisions', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
-    const pr = prOf(req);
-    // With `pr` (EE) the PR overlay is merged over the repo row; OSS has no overlay
-    // dimension, so the driver ignores it there (the file store rejects a PR scope).
-    res.json(await getGuardDecisions(repo.path, pr !== undefined ? { pr } : undefined));
+    res.json(await readGuardDecisions(repo.path));
   } catch (e) {
     next(e);
   }

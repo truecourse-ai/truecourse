@@ -62,7 +62,7 @@ export function useGuardScenarios(
     let cancelled = false;
     setLoading(true);
     setError(null);
-    // `ref` (a PR head) scopes both the committed inventory and the run it joins to.
+    // `ref` (a commit) scopes both the committed inventory and the run it joins to.
     Promise.all([api.getGuardScenarios(repoId, ref), api.getGuardLatest(repoId, ref)])
       .then(([inventory, { latest }]) => {
         if (cancelled) return;

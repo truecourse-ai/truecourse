@@ -368,9 +368,9 @@ export function getGuardStaleness(repoId: string, ref?: string): Promise<GuardSt
 
 /**
  * The guard run for the view. No `ref` → the repo baseline (or null when never
- * run). With `ref` (a PR head, EE) → the run stored at that commit, else an
- * explicit pending/empty envelope — never the baseline under a PR header. Always
- * resolves to a `{ latest, pending }` envelope so callers handle both uniformly.
+ * run). With `ref` (a commit) → the run stored at that commit, never the
+ * baseline. Always resolves to a `{ latest }` envelope so callers handle both
+ * uniformly.
  */
 export async function getGuardLatest(repoId: string, ref?: string): Promise<GuardLatestResponse> {
   try {
@@ -378,23 +378,17 @@ export async function getGuardLatest(repoId: string, ref?: string): Promise<Guar
       withRef(`/api/repos/${repoId}/guard/latest`, ref),
     );
     // With a ref the server returns the envelope; without one, a raw run.
-    return ref ? (body as GuardLatestResponse) : { latest: body as GuardLatestWithRunFlows, pending: null };
+    return ref ? (body as GuardLatestResponse) : { latest: body as GuardLatestWithRunFlows };
   } catch (e) {
-    if (e instanceof ApiError && e.status === 404) return { latest: null, pending: null };
+    if (e instanceof ApiError && e.status === 404) return { latest: null };
     throw e;
   }
 }
 
-/** The append-only run-summary history (empty `{ runs: [] }` until a run exists).
- *  With `pr` (EE), the PR's own run timeline — one run per pushed head. */
-export function getGuardHistory(
-  repoId: string,
-  pr?: number,
-  opts: { all?: boolean } = {},
-): Promise<GuardHistory> {
-  // `all`: every stored run of the repository, pull-request heads included.
-  const qs = pr !== undefined ? `?pr=${pr}` : opts.all ? '?all=1' : '';
-  return fetchApi<GuardHistory>(`/api/repos/${repoId}/guard/history${qs}`);
+/** The append-only run-summary history (empty `{ runs: [] }` until a run exists). */
+export function getGuardHistory(repoId: string, opts: { all?: boolean } = {}): Promise<GuardHistory> {
+  // `all`: every stored run of the repository, not just the baseline trend.
+  return fetchApi<GuardHistory>(`/api/repos/${repoId}/guard/history${opts.all ? '?all=1' : ''}`);
 }
 
 /** One past run's materialized state by id; null on 404 (unknown run). */
@@ -639,16 +633,10 @@ export async function getGuardFindingEvidence(
   return res.text();
 }
 
-/** EE PR scope for the guard decisions routes: `?pr=<n>` (no ref — decisions are
- *  keyed by PR alone). Empty outside a PR view, so OSS URLs are unchanged. */
-function guardPrQuery(pr?: number): string {
-  return pr !== undefined ? `?pr=${pr}` : '';
-}
-
 /** The committable guard decisions (dismissed claims) — always 200 (empty until
  *  the user dismisses anything). */
-export function getGuardDecisions(repoId: string, pr?: number): Promise<GuardDecisions> {
-  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/decisions${guardPrQuery(pr)}`);
+export function getGuardDecisions(repoId: string): Promise<GuardDecisions> {
+  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/decisions`);
 }
 
 /** The identity a dismissal keys on: doc + section anchor + the extracted claim's
@@ -656,28 +644,23 @@ export function getGuardDecisions(repoId: string, pr?: number): Promise<GuardDec
 export type { GuardClaimIdentity };
 
 /** Dismiss a finding's claim — writes `scenarios/decisions.json`; returns the
- *  updated decisions so the caller re-derives dismissed state without a GET. With
- *  `pr` the write targets that PR's overlay and the response is the merged effective
- *  view (EE) — mirrors {@link getGuardDecisions}. */
+ *  updated decisions so the caller re-derives dismissed state without a GET. */
 export function dismissGuardClaim(
   repoId: string,
   claim: GuardClaimIdentity & { note?: string },
-  pr?: number,
 ): Promise<GuardDecisions> {
-  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/dismiss${guardPrQuery(pr)}`, {
+  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/dismiss`, {
     method: 'POST',
     body: JSON.stringify(claim),
   });
 }
 
-/** Reverse a dismissal by its identity; returns the updated decisions. With `pr`
- *  the write targets that PR's overlay and the response is the merged effective view. */
+/** Reverse a dismissal by its identity; returns the updated decisions. */
 export function undismissGuardClaim(
   repoId: string,
   claim: GuardClaimIdentity,
-  pr?: number,
 ): Promise<GuardDecisions> {
-  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/undismiss${guardPrQuery(pr)}`, {
+  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/undismiss`, {
     method: 'POST',
     body: JSON.stringify(claim),
   });
@@ -685,25 +668,20 @@ export function undismissGuardClaim(
 
 /** Dismiss a whole FLOW — the manual dismissal unit (a generated test's id moves
  *  on regenerate, so a test is never one). `title` is display copy carried into the
- *  decisions file. Returns the updated decisions; `pr` scopes it like the claim pair. */
+ *  decisions file. Returns the updated decisions. */
 export function dismissGuardFlow(
   repoId: string,
   flow: { flowId: string; title: string; note?: string },
-  pr?: number,
 ): Promise<GuardDecisions> {
-  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/flows/dismiss${guardPrQuery(pr)}`, {
+  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/flows/dismiss`, {
     method: 'POST',
     body: JSON.stringify(flow),
   });
 }
 
 /** Reverse a flow dismissal by its id; returns the updated decisions. */
-export function undismissGuardFlow(
-  repoId: string,
-  flowId: string,
-  pr?: number,
-): Promise<GuardDecisions> {
-  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/flows/undismiss${guardPrQuery(pr)}`, {
+export function undismissGuardFlow(repoId: string, flowId: string): Promise<GuardDecisions> {
+  return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/flows/undismiss`, {
     method: 'POST',
     body: JSON.stringify({ flowId }),
   });

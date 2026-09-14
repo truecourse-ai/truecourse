@@ -21,8 +21,7 @@
  *                         hosted run's settle spine survives its ephemeral clone.
  *
  * The mutable guard decisions ledger (`dismissedClaims`) is NOT here — it reuses the
- * generic `decisions` table under a `guard:<repoKey>` (+ `#pr/<n>` overlay) scope,
- * mirroring how the spec store routes its decisions.
+ * generic `decisions` table under a `guard:<repoKey>` scope, one row per repository.
  */
 
 import {

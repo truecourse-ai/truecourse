@@ -519,28 +519,12 @@ export interface GuardStaleness {
 }
 
 /**
- * An in-flight hosted guard gate for a PR head — surfaced by the PR-scoped
- * `/guard/latest?ref=` when no run is stored at that commit yet, so the view can
- * say "queued/running" instead of showing baseline data under a PR header. EE-only
- * (an active `guard.gate` job); OSS always resolves this to null.
- */
-export interface GuardGatePending {
-  /** The job's lifecycle: enqueued (`queued`) or executing (`running`). */
-  status: 'queued' | 'running'
-  /** The background job id, so the view can subscribe to its progress popup. */
-  jobId: string
-}
-
-/**
- * The PR-scoped `/guard/latest?ref=<headSha>` response. `latest` is the run stored
- * at that exact commit (never the baseline — a PR must not show baseline data);
- * `null` with `pending` set means the gate is still running for this head, `null`
- * with `pending` null means no run and no in-flight gate (a plain empty state).
+ * The ref-scoped `/guard/latest?ref=<commit>` response: the run stored at that
+ * exact commit, never the baseline. `null` when the store holds no run there.
  */
 export interface GuardLatestResponse {
   /** The run, with its flow join ({@link GuardLatestWithRunFlows}) when served. */
   latest: GuardLatestWithRunFlows | null
-  pending: GuardGatePending | null
 }
 
 /**

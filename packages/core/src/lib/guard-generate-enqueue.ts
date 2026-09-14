@@ -5,7 +5,7 @@
  * block that stopped an earlier generate — the guard store still holds an
  * `open-conflicts` report and no scenarios. The decision routes hand that repo
  * off through this seam so scenarios finally get authored (a sibling adapter
- * over core — same rule as `guard-gate-pending` / `repo-doc-reader`).
+ * over core — same rule as `repo-doc-reader`).
  *
  * Keyed by `repoKey` alone: the job resolves everything else it needs from the
  * repository's own rows. Unset (tests, a process with no worker) → the caller

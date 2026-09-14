@@ -146,9 +146,6 @@ import {
   type GuardSectionCoverage,
   type GuardSectionCoverageStatus,
   type GuardSectionFlow,
-  type GuardHistory,
-  guardHistoryEntryOf,
-  type GuardHistoryEntry,
   type GuardSectionScenario,
   type GuardStaleness,
   type GuardStepActual,
@@ -170,10 +167,8 @@ import {
   readRecipeRaw,
   readScenarioFile,
   writeGuardDecisions as writeGuardDecisionsStore,
-  deleteGuardDecisions as deleteGuardDecisionsStore,
 } from '../lib/guard-store.js'
 import { readGuardExternalSetupIndex } from './guard-externals.js'
-import { getGuardGateHeadsLookup } from '../lib/guard-gate-pending.js'
 import { readRepoDoc } from '../lib/repo-doc-reader.js'
 
 // The dashboard reads the whole guard surface through core (never guard-runner /
@@ -1966,7 +1961,7 @@ export async function readGuardClaims(repoKey: string, ref?: string): Promise<Gu
   const [claimsFile, flowsFile, decisions, latest] = await Promise.all([
     readGuardClaimsFile(repoKey, commit),
     readGuardFlowsFile(repoKey, commit),
-    getGuardDecisions(repoKey),
+    readGuardDecisionsStore(repoKey),
     readGuardRunForView(repoKey, ref),
   ])
   if (!claimsFile) return EMPTY_CLAIMS_VIEW
@@ -2540,27 +2535,6 @@ export function readGuardRunForView(repoKey: string, ref?: string): Promise<Guar
 }
 
 /**
- * The PR run timeline — one entry per pushed head the gate ran, oldest-first
- * (the GuardHistory convention; the panel orders for display). Heads come from
- * the gate-heads seam (EE installs it; unset ⇒ empty, the OSS answer) and join
- * to the run stored at each head; a head whose gate never stored a run (errored
- * before the run landed) is skipped — the list holds only selectable runs.
- * Baseline runs never appear: they are not this PR's heads.
- */
-export async function readGuardHistoryForPr(repoKey: string, pr: number): Promise<GuardHistory> {
-  const lookup = getGuardGateHeadsLookup()
-  if (!lookup) return { runs: [] }
-  const runs: GuardHistoryEntry[] = []
-  for (const head of new Set(await lookup(repoKey, pr))) {
-    const run = await readGuardRunForCommitStore(repoKey, head)
-    if (!run) continue
-    runs.push(guardHistoryEntryOf(run))
-  }
-  runs.sort((a, b) => a.ranAt.localeCompare(b.ranAt))
-  return { runs }
-}
-
-/**
  * WHERE a scenario's recorded actuals live: under a run (`runId`), or at the evidence
  * directory a birth finding stored (`evidenceDir`). The two addressing modes the
  * evidence reads already have — the actuals ride in the same bundle.
@@ -2858,47 +2832,34 @@ export async function readGuardEvidenceVisual(
 }
 
 // ---------------------------------------------------------------------------
-// Decisions — dismiss/undismiss (composition over the store) + PR overlay API.
+// Decisions — dismiss/undismiss (composition over the store).
 // ---------------------------------------------------------------------------
 
 /**
  * Add a dismissal (idempotent on doc+anchor+title identity — a re-dismiss refreshes
- * `dismissedAt`/`note` in place, never duplicates), returning the updated file. With
- * `opts.pr` the write targets the PR overlay scope ONLY (enterprise-only — the OSS
- * file store rejects it): inherited repo dismissals are never read into or copied
- * onto the overlay, so the merged view is the caller's job (see {@link getGuardDecisions}).
+ * `dismissedAt`/`note` in place, never duplicates), returning the updated file.
  */
 export async function dismissGuardClaim(
   repoRoot: string,
   claim: GuardDismissedClaim,
-  opts?: { pr?: number },
 ): Promise<GuardDecisions> {
-  const scope = opts?.pr !== undefined ? prGuardDecisionsRef(opts.pr) : undefined
-  const decisions = await readGuardDecisionsStore(repoRoot, scope)
+  const decisions = await readGuardDecisionsStore(repoRoot)
   const key = dismissedClaimKey(claim.doc, claim.anchor, claim.title)
   const dismissedClaims = decisions.dismissedClaims.filter(
     (d) => dismissedClaimKey(d.doc, d.anchor, d.title) !== key,
   )
   dismissedClaims.push(claim)
   const next: GuardDecisions = { ...decisions, dismissedClaims }
-  await writeGuardDecisionsStore(repoRoot, next, scope)
+  await writeGuardDecisionsStore(repoRoot, next)
   return next
 }
 
-/**
- * Remove a dismissal by identity (no-op when absent), returning the updated file.
- * With `opts.pr` the read+write target the PR overlay scope ONLY (enterprise-only —
- * the OSS file store rejects it), never the merged view. Un-dismissing a claim that
- * was dismissed at the repo scope is therefore a no-op on the overlay: the merged
- * view still shows it dismissed. Accepted v1 behavior.
- */
+/** Remove a dismissal by identity (no-op when absent), returning the updated file. */
 export async function undismissGuardClaim(
   repoRoot: string,
   identity: GuardClaimIdentity,
-  opts?: { pr?: number },
 ): Promise<GuardDecisions> {
-  const scope = opts?.pr !== undefined ? prGuardDecisionsRef(opts.pr) : undefined
-  const decisions = await readGuardDecisionsStore(repoRoot, scope)
+  const decisions = await readGuardDecisionsStore(repoRoot)
   const key = dismissedClaimKey(identity.doc, identity.anchor, identity.title)
   const next: GuardDecisions = {
     ...decisions,
@@ -2906,7 +2867,7 @@ export async function undismissGuardClaim(
       (d) => dismissedClaimKey(d.doc, d.anchor, d.title) !== key,
     ),
   }
-  await writeGuardDecisionsStore(repoRoot, next, scope)
+  await writeGuardDecisionsStore(repoRoot, next)
   return next
 }
 
@@ -2916,102 +2877,33 @@ export async function undismissGuardClaim(
  * The next `guard generate` drops the flow whole, with its scenarios, and settles
  * it as an explicit `dismissed` coverage gap; this write does not touch the current
  * report. The FLOW is the manual dismissal unit — a generated test's identity moves
- * on regenerate, so dismissing one would silently stop matching. `opts.pr` scopes
- * the write exactly as it does for a claim (enterprise-only).
+ * on regenerate, so dismissing one would silently stop matching.
  */
 export async function dismissGuardFlow(
   repoRoot: string,
   flow: GuardDismissedFlow,
-  opts?: { pr?: number },
 ): Promise<GuardDecisions> {
-  const scope = opts?.pr !== undefined ? prGuardDecisionsRef(opts.pr) : undefined
-  const decisions = await readGuardDecisionsStore(repoRoot, scope)
+  const decisions = await readGuardDecisionsStore(repoRoot)
   const dismissedFlows = decisions.dismissedFlows.filter((d) => d.flowId !== flow.flowId)
   dismissedFlows.push(flow)
   const next: GuardDecisions = { ...decisions, dismissedFlows }
-  await writeGuardDecisionsStore(repoRoot, next, scope)
+  await writeGuardDecisionsStore(repoRoot, next)
   return next
 }
 
-/**
- * Remove a flow dismissal by its `flowId` (no-op when absent), returning the
- * updated file. With `opts.pr` the read+write target the PR overlay ONLY, so a
- * repo-scope dismissal survives the merged view — the same accepted v1 behavior
- * {@link undismissGuardClaim} documents.
- */
+/** Remove a flow dismissal by its `flowId` (no-op when absent), returning the
+ *  updated file. */
 export async function undismissGuardFlow(
   repoRoot: string,
   flowId: string,
-  opts?: { pr?: number },
 ): Promise<GuardDecisions> {
-  const scope = opts?.pr !== undefined ? prGuardDecisionsRef(opts.pr) : undefined
-  const decisions = await readGuardDecisionsStore(repoRoot, scope)
+  const decisions = await readGuardDecisionsStore(repoRoot)
   const next: GuardDecisions = {
     ...decisions,
     dismissedFlows: decisions.dismissedFlows.filter((d) => d.flowId !== flowId),
   }
-  await writeGuardDecisionsStore(repoRoot, next, scope)
+  await writeGuardDecisionsStore(repoRoot, next)
   return next
-}
-
-/** The PR-overlay sentinel scope for guard decisions (`_pr/<number>`, EE-only).
- *  Exported so the EE gate/regen paths read the same overlay the writes target. */
-export const prGuardDecisionsRef = (pr: number): string => `_pr/${pr}`
-
-/**
- * Merge a PR's guard decisions overlay over the repo row. Pure. `dismissedClaims`
- * union by their `dismissedClaimKey` identity (doc+anchor+title) and
- * `dismissedFlows` by their `flowId`; the overlay wins on a colliding identity.
- */
-export function mergeGuardDecisions(base: GuardDecisions, overlay: GuardDecisions): GuardDecisions {
-  const byKey = new Map<string, GuardDismissedClaim>()
-  for (const c of base.dismissedClaims) byKey.set(dismissedClaimKey(c.doc, c.anchor, c.title), c)
-  for (const c of overlay.dismissedClaims) byKey.set(dismissedClaimKey(c.doc, c.anchor, c.title), c)
-  const flowsById = new Map<string, GuardDismissedFlow>()
-  for (const f of base.dismissedFlows) flowsById.set(f.flowId, f)
-  for (const f of overlay.dismissedFlows) flowsById.set(f.flowId, f)
-  return {
-    version: 1,
-    dismissedClaims: [...byKey.values()],
-    dismissedFlows: [...flowsById.values()],
-  }
-}
-
-/**
- * The repo's current guard decisions (dashboard read) — file in OSS, Postgres in
- * EE. With `pr`, returns the effective decisions for that PR: the repo row merged
- * with the PR's overlay (the overlay wins — see {@link mergeGuardDecisions}). A PR
- * scope is enterprise-only; the OSS file store rejects it.
- */
-export async function getGuardDecisions(
-  repoRoot: string,
-  opts?: { pr?: number },
-): Promise<GuardDecisions> {
-  if (opts?.pr === undefined) return readGuardDecisionsStore(repoRoot)
-  const [base, overlay] = await Promise.all([
-    readGuardDecisionsStore(repoRoot),
-    readGuardDecisionsStore(repoRoot, prGuardDecisionsRef(opts.pr)),
-  ])
-  return mergeGuardDecisions(base, overlay)
-}
-
-/**
- * Promote a PR's guard decisions overlay onto the repo row on merge. Idempotent:
- * an empty overlay returns false and does nothing; otherwise merges the overlay
- * onto the repo row, persists it, drops the overlay, and returns true. EE-only.
- */
-export async function promoteGuardDecisionsOverlay(repoRoot: string, pr: number): Promise<boolean> {
-  const overlay = await readGuardDecisionsStore(repoRoot, prGuardDecisionsRef(pr))
-  if (overlay.dismissedClaims.length === 0) return false
-  const merged = mergeGuardDecisions(await readGuardDecisionsStore(repoRoot), overlay)
-  await writeGuardDecisionsStore(repoRoot, merged)
-  await deleteGuardDecisionsStore(repoRoot, prGuardDecisionsRef(pr))
-  return true
-}
-
-/** Discard a PR's guard decisions overlay (unmerged close). Idempotent. EE-only. */
-export async function discardGuardDecisionsOverlay(repoRoot: string, pr: number): Promise<void> {
-  await deleteGuardDecisionsStore(repoRoot, prGuardDecisionsRef(pr))
 }
 
 // ---------------------------------------------------------------------------

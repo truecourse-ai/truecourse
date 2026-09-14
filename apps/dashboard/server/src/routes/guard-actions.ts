@@ -60,14 +60,12 @@ import {
   undismissGuardClaim,
   dismissGuardFlow,
   undismissGuardFlow,
-  getGuardDecisions,
+  readGuardDecisions,
   readGuardInterfaces,
   readGuardResultForView,
 } from '@truecourse/core/commands/guard-read';
 import { mapInterfaces } from '@truecourse/core/services/interface';
 import { getGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
-import { getGuardPrRegenEnqueue } from '@truecourse/core/lib/guard-pr-regen-enqueue';
-import { getGuardGateHeadsLookup } from '@truecourse/core/lib/guard-gate-pending';
 import {
   writeGuardExternals,
   GuardExternalsWriteError,
@@ -88,7 +86,6 @@ import { dismissedClaimKey, openConflicts, type GuardDecisions } from '@truecour
 import {
   emitSpecComplete,
 } from '../socket/handlers.js';
-import { parsePr } from './route-params.js';
 import { requireJobs } from '../jobs/current.js';
 import {
   LlmNotConfiguredError,
@@ -99,26 +96,23 @@ import {
 
 const router: Router = Router();
 
-// Shared write tail for the two decisions mutations: run the overlay-aware write,
-// the optional post-write side effect (the hosted regen dispatch on the last
-// dismissal), then respond with the write result (repo scope) or the merged
-// effective view (PR scope — the same shape `GET /guard/decisions?pr=` returns).
+// Shared write tail for the decisions mutations: run the write, the optional
+// post-write side effect (the hosted regen dispatch on the last dismissal), then
+// respond with the updated decisions.
 async function mutateGuardDecisions(
-  repoPath: string,
-  pr: number | undefined,
   res: Response,
-  mutate: (opts?: { pr?: number }) => Promise<GuardDecisions>,
+  mutate: () => Promise<GuardDecisions>,
   afterWrite?: () => Promise<void>,
 ): Promise<void> {
-  const written = await mutate(pr !== undefined ? { pr } : undefined);
+  const written = await mutate();
   if (afterWrite) await afterWrite();
-  res.json(pr !== undefined ? await getGuardDecisions(repoPath, { pr }) : written);
+  res.json(written);
 }
 
-// A repo-scope dismissal that suppresses the LAST active finding: an earlier
-// generate's scenario corpus should regenerate honoring the dismissal so the
-// suppressed claim no longer surfaces (the hosted analog of resolving a spec
-// conflict). Enqueue a hosted guard generate through the core seam ONLY when the
+// A dismissal that suppresses the LAST active finding: an earlier generate's
+// scenario corpus should regenerate honoring the dismissal so the suppressed
+// claim no longer surfaces (the hosted analog of resolving a spec conflict).
+// Enqueue a hosted guard generate through the core seam ONLY when the
 // write leaves ZERO active (non-dismissed) findings — while any finding is still
 // active the dismissals batch, and the last one fires exactly one generate. The
 // same shared derivation the coverage view uses decides "active": a finding is
@@ -133,36 +127,14 @@ async function regenerateIfLastFindingDismissed(repoPath: string): Promise<void>
   if (!enqueue) return;
   try {
     const report = await readGuardResultForView(repoPath);
-    if (!allFindingsDismissed(report, await getGuardDecisions(repoPath))) return;
+    if (!allFindingsDismissed(report, await readGuardDecisions(repoPath))) return;
     await enqueue(repoPath);
   } catch {
     /* best-effort — the decision is already saved */
   }
 }
 
-// The PR analog of regenerateIfLastFindingDismissed: a PR-scoped dismissal that
-// suppresses the PR's LAST active finding enqueues a hosted regenerate of the PR
-// HEAD's scenarios (the durable spec-regen job, honoring the overlay). The PR's
-// report is pinned at its latest GATED head — the same gate-records resolution
-// (heads lookup seam) the PR view reads through — and "active" derives from the
-// MERGED decisions (repo row ∪ PR overlay), matching what the Scenarios tab
-// shows. EE installs both seams; OSS never has a PR scope. Best-effort: a failed
-// resolution or enqueue never fails the decision save.
-async function regenerateIfLastPrFindingDismissed(repoPath: string, pr: number): Promise<void> {
-  const enqueue = getGuardPrRegenEnqueue();
-  if (!enqueue) return;
-  try {
-    const head = (await getGuardGateHeadsLookup()?.(repoPath, pr))?.[0];
-    if (!head) return;
-    const report = await readGuardResultForView(repoPath, head);
-    if (!allFindingsDismissed(report, await getGuardDecisions(repoPath, { pr }))) return;
-    await enqueue(repoPath, pr);
-  } catch {
-    /* best-effort — the decision is already saved */
-  }
-}
-
-// The "this write left zero active findings" gate both regen hooks share: true
+// The "this write left zero active findings" gate the regen hook applies: true
 // when the report exists, has findings, and every finding's claim is dismissed —
 // i.e. the dismissal that just landed was the last active one. A finding with no
 // extracted claim can never be dismissed, so it keeps the result false.
@@ -326,40 +298,27 @@ router.post('/:id/guard/run', async (req: Request, res: Response, next: NextFunc
 // is the extracted claim's stable text (the finding's `claim`). Idempotent; returns
 // the updated decisions file so the client re-derives dismissed state without a
 // second GET. The next `guard generate` skips the claim and settles it as a
-// `dismissed` gap — this write does NOT touch the current report snapshot. With
-// `?pr=N` the write targets the PR overlay (EE) and the response is the MERGED
-// effective view (repo ∪ overlay) — the same shape `GET /guard/decisions?pr=` returns.
+// `dismissed` gap — this write does NOT touch the current report snapshot.
 router.post('/:id/guard/dismiss', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
-    const parsed = parsePr(req);
-    if ('error' in parsed) {
-      res.status(400).json({ error: parsed.error });
-      return;
-    }
     const body = (req.body ?? {}) as { doc?: string; anchor?: string; title?: string; note?: string };
     const { doc, anchor, title, note } = body;
     if (!doc || !anchor || !title) {
       res.status(400).json({ error: 'dismiss requires { doc, anchor, title }.' });
       return;
     }
-    const pr = parsed.pr;
     await mutateGuardDecisions(
-      repo.path,
-      pr,
       res,
-      (opts) =>
-        dismissGuardClaim(
-          repo.path,
-          { doc, anchor, title, dismissedAt: new Date().toISOString(), ...(note ? { note } : {}) },
-          opts,
-        ),
-      // Each scope regenerates its own corpus: a repo-scope last dismissal fires
-      // the hosted repo generate, a PR-scope last dismissal fires the PR head's
-      // spec-regen (both best-effort, both only when zero findings stay active).
-      pr === undefined
-        ? () => regenerateIfLastFindingDismissed(repo.path)
-        : () => regenerateIfLastPrFindingDismissed(repo.path, pr),
+      () =>
+        dismissGuardClaim(repo.path, {
+          doc,
+          anchor,
+          title,
+          dismissedAt: new Date().toISOString(),
+          ...(note ? { note } : {}),
+        }),
+      () => regenerateIfLastFindingDismissed(repo.path),
     );
   } catch (e) {
     next(e);
@@ -367,24 +326,18 @@ router.post('/:id/guard/dismiss', async (req: Request, res: Response, next: Next
 });
 
 // POST — reverse a dismissal by its identity `{ doc, anchor, title }`. No-op when
-// absent; returns the updated decisions file. With `?pr=N` the write targets the PR
-// overlay (EE) and the response is the MERGED effective view (see /dismiss).
+// absent; returns the updated decisions file.
 router.post('/:id/guard/undismiss', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
-    const parsed = parsePr(req);
-    if ('error' in parsed) {
-      res.status(400).json({ error: parsed.error });
-      return;
-    }
     const body = (req.body ?? {}) as { doc?: string; anchor?: string; title?: string };
     const { doc, anchor, title } = body;
     if (!doc || !anchor || !title) {
       res.status(400).json({ error: 'undismiss requires { doc, anchor, title }.' });
       return;
     }
-    await mutateGuardDecisions(repo.path, parsed.pr, res, (opts) =>
-      undismissGuardClaim(repo.path, { doc, anchor, title }, opts),
+    await mutateGuardDecisions(res, () =>
+      undismissGuardClaim(repo.path, { doc, anchor, title }),
     );
   } catch (e) {
     next(e);
@@ -397,30 +350,25 @@ router.post('/:id/guard/undismiss', async (req: Request, res: Response, next: Ne
 // client re-derives dismissed state without a second GET. The next `guard
 // generate` drops the flow with its tests and settles it as a `dismissed` gap —
 // this write does NOT touch the current report, and never runs the engine.
-// `?pr=N` behaves exactly as it does for a claim dismissal.
 //
 // A TEST is deliberately not dismissable: its id is generated, so a dismissal
 // would silently stop matching the moment the flow is re-authored.
 router.post('/:id/guard/flows/dismiss', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
-    const parsed = parsePr(req);
-    if ('error' in parsed) {
-      res.status(400).json({ error: parsed.error });
-      return;
-    }
     const body = (req.body ?? {}) as { flowId?: string; title?: string; note?: string };
     const { flowId, title, note } = body;
     if (!flowId || !title) {
       res.status(400).json({ error: 'flow dismiss requires { flowId, title }.' });
       return;
     }
-    await mutateGuardDecisions(repo.path, parsed.pr, res, (opts) =>
-      dismissGuardFlow(
-        repo.path,
-        { flowId, title, dismissedAt: new Date().toISOString(), ...(note ? { note } : {}) },
-        opts,
-      ),
+    await mutateGuardDecisions(res, () =>
+      dismissGuardFlow(repo.path, {
+        flowId,
+        title,
+        dismissedAt: new Date().toISOString(),
+        ...(note ? { note } : {}),
+      }),
     );
   } catch (e) {
     next(e);
@@ -428,24 +376,16 @@ router.post('/:id/guard/flows/dismiss', async (req: Request, res: Response, next
 });
 
 // POST — reverse a flow dismissal by its `{ flowId }`. No-op when absent; returns
-// the updated decisions file. With `?pr=N` the write targets the PR overlay (EE)
-// and the response is the MERGED effective view (see /guard/flows/dismiss).
+// the updated decisions file.
 router.post('/:id/guard/flows/undismiss', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
-    const parsed = parsePr(req);
-    if ('error' in parsed) {
-      res.status(400).json({ error: parsed.error });
-      return;
-    }
     const { flowId } = (req.body ?? {}) as { flowId?: string };
     if (!flowId) {
       res.status(400).json({ error: 'flow undismiss requires { flowId }.' });
       return;
     }
-    await mutateGuardDecisions(repo.path, parsed.pr, res, (opts) =>
-      undismissGuardFlow(repo.path, flowId, opts),
-    );
+    await mutateGuardDecisions(res, () => undismissGuardFlow(repo.path, flowId));
   } catch (e) {
     next(e);
   }

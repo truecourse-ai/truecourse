@@ -31,7 +31,6 @@ import {
   writeGuardLatest as fileWriteGuardLatest,
   writeGuardResult as fileWriteGuardResult,
   writeGuardRun as fileWriteGuardRun,
-  guardDecisionsPath,
   type LoadedScenarios,
 } from '@truecourse/guard-runner';
 import { GuardLatestSchema } from '@truecourse/shared';
@@ -109,13 +108,6 @@ function confinedEvidenceFile(
   if (!fs.existsSync(full) || !fs.statSync(full).isFile()) return null;
   return full;
 }
-
-/** The PR-overlay sentinel scope (`_pr/<number>`) — enterprise-only. */
-function isPrScope(scope: string | undefined): boolean {
-  return /^_pr\/\d+$/.test(scope ?? '');
-}
-const PR_DECISIONS_FILE_ERROR =
-  '[guard-store] PR-scoped guard decisions require the enterprise store';
 
 /** Recursively collect `*.yaml` / `*.yml` under `dir` (absolute paths, sorted). */
 function collectYamlFiles(dir: string): string[] {
@@ -344,27 +336,12 @@ export class WorkTreeGuardStore implements GuardStore {
     return Object.keys(files).length > 0 ? files : null;
   }
 
-  async readGuardDecisions(repoPath: string, scope?: string): Promise<GuardDecisions> {
-    if (isPrScope(scope)) throw new Error(PR_DECISIONS_FILE_ERROR);
+  async readGuardDecisions(repoPath: string): Promise<GuardDecisions> {
     return fileReadGuardDecisions(repoPath);
   }
 
-  async writeGuardDecisions(
-    repoPath: string,
-    decisions: GuardDecisions,
-    scope?: string,
-  ): Promise<void> {
-    if (isPrScope(scope)) throw new Error(PR_DECISIONS_FILE_ERROR);
+  async writeGuardDecisions(repoPath: string, decisions: GuardDecisions): Promise<void> {
     fileWriteGuardDecisions(repoPath, decisions);
-  }
-
-  async deleteGuardDecisions(repoPath: string, scope?: string): Promise<void> {
-    if (isPrScope(scope)) throw new Error(PR_DECISIONS_FILE_ERROR);
-    try {
-      fs.unlinkSync(guardDecisionsPath(repoPath));
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-    }
   }
 }
 

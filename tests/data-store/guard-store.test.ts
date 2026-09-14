@@ -3,7 +3,7 @@
  * verify/contract/pr-decisions suites. Exercises the public `GuardStore` interface:
  * run-state (baseline vs PR-head, readGuardRun by id, history), generate-result,
  * evidence through the content pool, the scenario corpus (walk → materialize →
- * browse), and the decisions ledger (repo vs `_pr/<n>` overlay).
+ * browse), and the decisions ledger (one row per repository).
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import os from 'node:os';
@@ -577,30 +577,17 @@ describe('PgGuardStore — decisions (pglite)', () => {
     ],
   });
 
-  it('absent decisions read as EMPTY_GUARD_DECISIONS (never null), for repo + PR scopes', async () => {
+  it('absent decisions read as EMPTY_GUARD_DECISIONS, never null', async () => {
     expect(await store.readGuardDecisions(REPO)).toEqual(EMPTY_GUARD_DECISIONS);
-    expect(await store.readGuardDecisions(REPO, '_pr/7')).toEqual(EMPTY_GUARD_DECISIONS);
   });
 
-  it('routes the repo row and a PR overlay to independent scopes', async () => {
+  it('a write upserts the repository row, and another repo keeps its own', async () => {
     await store.writeGuardDecisions(REPO, claim('repo-claim'));
-    await store.writeGuardDecisions(REPO, claim('pr-claim'), '_pr/7');
     expect((await store.readGuardDecisions(REPO)).dismissedClaims[0]!.title).toBe('repo-claim');
-    expect((await store.readGuardDecisions(REPO, '_pr/7')).dismissedClaims[0]!.title).toBe('pr-claim');
-    // two PRs are independent
-    await store.writeGuardDecisions(REPO, claim('pr8'), '_pr/8');
-    expect((await store.readGuardDecisions(REPO, '_pr/8')).dismissedClaims[0]!.title).toBe('pr8');
-    // repo row untouched by the overlays
+    await store.writeGuardDecisions(REPO, claim('re-ruled'));
     expect((await store.readGuardDecisions(REPO)).dismissedClaims).toHaveLength(1);
-  });
-
-  it('delete drops only the addressed scope and is idempotent', async () => {
-    await store.writeGuardDecisions(REPO, claim('repo-claim'));
-    await store.writeGuardDecisions(REPO, claim('pr-claim'), '_pr/7');
-    await store.deleteGuardDecisions(REPO, '_pr/7');
-    expect(await store.readGuardDecisions(REPO, '_pr/7')).toEqual(EMPTY_GUARD_DECISIONS);
-    expect((await store.readGuardDecisions(REPO)).dismissedClaims[0]!.title).toBe('repo-claim');
-    // deleting an absent scope is a no-op
-    await expect(store.deleteGuardDecisions(REPO, '_pr/7')).resolves.toBeUndefined();
+    expect((await store.readGuardDecisions(REPO)).dismissedClaims[0]!.title).toBe('re-ruled');
+    await store.writeGuardDecisions('acme/other', claim('other-claim'));
+    expect((await store.readGuardDecisions(REPO)).dismissedClaims[0]!.title).toBe('re-ruled');
   });
 });

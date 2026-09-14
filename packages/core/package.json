@@ -149,20 +149,10 @@
       "types": "./dist/lib/guard-executor.d.ts",
       "import": "./dist/lib/guard-executor.js"
     },
-    "./lib/guard-gate-pending": {
-      "truecourse-source": "./src/lib/guard-gate-pending.ts",
-      "types": "./dist/lib/guard-gate-pending.d.ts",
-      "import": "./dist/lib/guard-gate-pending.js"
-    },
     "./lib/guard-generate-enqueue": {
       "truecourse-source": "./src/lib/guard-generate-enqueue.ts",
       "types": "./dist/lib/guard-generate-enqueue.d.ts",
       "import": "./dist/lib/guard-generate-enqueue.js"
-    },
-    "./lib/guard-pr-regen-enqueue": {
-      "truecourse-source": "./src/lib/guard-pr-regen-enqueue.ts",
-      "types": "./dist/lib/guard-pr-regen-enqueue.d.ts",
-      "import": "./dist/lib/guard-pr-regen-enqueue.js"
     },
     "./lib/repo-lifecycle": {
       "truecourse-source": "./src/lib/repo-lifecycle.ts",

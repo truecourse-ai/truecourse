@@ -198,11 +198,9 @@ export interface GuardStore {
   ): Promise<Record<string, string> | null>;
 
   // --- Decisions ------------------------------------------------------------
-  // `scope` (optional) selects a PR-scoped overlay (the `_pr/<n>` sentinel);
-  // omitted → the repo-scoped decisions.
-  readGuardDecisions(repoPath: string, scope?: string): Promise<GuardDecisions>;
-  writeGuardDecisions(repoPath: string, decisions: GuardDecisions, scope?: string): Promise<void>;
-  deleteGuardDecisions(repoPath: string, scope?: string): Promise<void>;
+  // The repository's dismissal ledger, one row per repo.
+  readGuardDecisions(repoPath: string): Promise<GuardDecisions>;
+  writeGuardDecisions(repoPath: string, decisions: GuardDecisions): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -314,12 +312,9 @@ export const loadGuardSetupBundle = (
   commitSha?: string,
 ): Promise<Record<string, string> | null> => getGuardStore().loadGuardSetupBundle(repoKey, commitSha);
 
-export const readGuardDecisions = (repoPath: string, scope?: string): Promise<GuardDecisions> =>
-  getGuardStore().readGuardDecisions(repoPath, scope);
+export const readGuardDecisions = (repoPath: string): Promise<GuardDecisions> =>
+  getGuardStore().readGuardDecisions(repoPath);
 export const writeGuardDecisions = (
   repoPath: string,
   decisions: GuardDecisions,
-  scope?: string,
-): Promise<void> => getGuardStore().writeGuardDecisions(repoPath, decisions, scope);
-export const deleteGuardDecisions = (repoPath: string, scope?: string): Promise<void> =>
-  getGuardStore().deleteGuardDecisions(repoPath, scope);
+): Promise<void> => getGuardStore().writeGuardDecisions(repoPath, decisions);

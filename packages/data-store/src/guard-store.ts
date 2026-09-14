@@ -41,10 +41,8 @@
  *     result under its commit after.
  *
  *   - DECISIONS — the mutable `dismissedClaims` ledger reuses the generic
- *     `decisions` table under a `guard:<repo>` scope (`#pr/<n>` for a PR overlay),
- *     mirroring how `PgSpecStore` routes its decisions scopes. An absent row reads
- *     as `EMPTY_GUARD_DECISIONS` (never null) — core's overlay promotion keys the
- *     "no overlay" signal on `dismissedClaims.length === 0`.
+ *     `decisions` table under a `guard:<repo>` scope, one row per repository. An
+ *     absent row reads as `EMPTY_GUARD_DECISIONS`, never null.
  *
  * In EE the `repoPath` argument carries the stable repo key (as in the other EE
  * stores), never an on-disk path.
@@ -133,6 +131,9 @@ function parseEvidenceDir(evidenceDir: string): { runId: string; scenarioSeg: st
   if (!SAFE_SEGMENT.test(runId) || !SAFE_SEGMENT.test(scenarioSeg)) return null;
   return { runId, scenarioSeg };
 }
+
+/** The repository's row in the generic `decisions` table. */
+const decisionsScope = (repoKey: string): string => `guard:${repoKey}`;
 
 export class PgGuardStore implements GuardStore {
   private readonly content: ContentStore;
@@ -767,34 +768,20 @@ export class PgGuardStore implements GuardStore {
 
   // --- Decisions ------------------------------------------------------------
 
-  async readGuardDecisions(repoKey: string, scope?: string): Promise<GuardDecisions> {
+  async readGuardDecisions(repoKey: string): Promise<GuardDecisions> {
     const rows = await this.db
       .select({ payload: decisions.payload })
       .from(decisions)
-      .where(eq(decisions.scope, this.decisionsScope(repoKey, scope)))
+      .where(eq(decisions.scope, decisionsScope(repoKey)))
       .limit(1);
     return rows[0] ? (rows[0].payload as GuardDecisions) : EMPTY_GUARD_DECISIONS;
   }
 
-  async writeGuardDecisions(
-    repoKey: string,
-    guardDecisions: GuardDecisions,
-    scope?: string,
-  ): Promise<void> {
+  async writeGuardDecisions(repoKey: string, guardDecisions: GuardDecisions): Promise<void> {
     const now = new Date().toISOString();
     await this.db
       .insert(decisions)
-      .values({ scope: this.decisionsScope(repoKey, scope), payload: guardDecisions, updatedAt: now })
+      .values({ scope: decisionsScope(repoKey), payload: guardDecisions, updatedAt: now })
       .onConflictDoUpdate({ target: [decisions.scope], set: { payload: guardDecisions, updatedAt: now } });
-  }
-
-  async deleteGuardDecisions(repoKey: string, scope?: string): Promise<void> {
-    await this.db.delete(decisions).where(eq(decisions.scope, this.decisionsScope(repoKey, scope)));
-  }
-
-  /** `guard:<repo>` for the repo row; `guard:<repo>#pr/<n>` for the `_pr/<n>` overlay. */
-  private decisionsScope(repoKey: string, scope?: string): string {
-    const m = /^_pr\/(\d+)$/.exec(scope ?? '');
-    return m ? `guard:${repoKey}#pr/${m[1]}` : `guard:${repoKey}`;
   }
 }

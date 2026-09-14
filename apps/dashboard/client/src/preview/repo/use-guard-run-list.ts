@@ -30,7 +30,7 @@ export function useGuardRunList(repoId: string, reloadKey = 0): GuardRunListStat
     setLoading(true);
     setError(null);
     api
-      .getGuardHistory(repoId, undefined, { all: true })
+      .getGuardHistory(repoId, { all: true })
       .then((history) => {
         if (!cancelled) setRuns(history.runs);
       })

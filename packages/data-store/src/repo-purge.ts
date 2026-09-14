@@ -19,7 +19,7 @@
  * pools (`spec:ws:<org>`, `context:ws:<org>`) are never named here.
  */
 
-import { eq, inArray, or, sql } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import {
   activityRuns,
   contextBindings,
@@ -34,9 +34,6 @@ import {
 } from '@truecourse/db';
 import { contentScope } from './content-store.js';
 import { touchContextWorkspace } from './context-store.js';
-
-/** Escape LIKE wildcards so a repo key containing `_` or `%` matches literally. */
-const likeLiteral = (s: string): string => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 
 export async function purgeRepoData(db: Db, repoKey: string): Promise<void> {
   // The workspaces whose Context this purge changed — stamped after the
@@ -57,14 +54,9 @@ export async function purgeRepoData(db: Db, repoKey: string): Promise<void> {
     await tx.delete(guardScenarioSets).where(eq(guardScenarioSets.repoKey, repoKey));
     await tx.delete(guardSetupSets).where(eq(guardSetupSets.repoKey, repoKey));
     await tx.delete(guardDependencyOverlays).where(eq(guardDependencyOverlays.repoKey, repoKey));
-    // The decisions ledger: the repo's guard scopes (the spec decisions it reads
+    // The decisions ledger: the repo's guard row (the spec decisions it reads
     // are the workspace's and survive a disconnect).
-    await tx.delete(decisions).where(
-      or(
-        eq(decisions.scope, `guard:${repoKey}`),
-        sql`${decisions.scope} LIKE ${`guard:${likeLiteral(repoKey)}#pr/%`}`,
-      ),
-    );
+    await tx.delete(decisions).where(eq(decisions.scope, `guard:${repoKey}`));
     // Content-addressed bodies the manifests above pointed into.
     await tx.delete(content).where(
       inArray(content.scope, [

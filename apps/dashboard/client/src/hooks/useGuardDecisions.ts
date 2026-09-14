@@ -17,9 +17,8 @@
  * silently stop matching the moment the flow is re-authored.
  *
  * The write routes answer with the updated file, so a mutation lands the new
- * state without a follow-up GET. While `enabled` is false (guard reads are off,
- * or an unresolved PR scope) the hook neither reads nor writes: a ruling the user
- * could not have seen must never reach an overlay.
+ * state without a follow-up GET. While `enabled` is false (guard reads are off)
+ * the hook neither reads nor writes.
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -60,22 +59,20 @@ export function useGuardDecisions(
   repoId: string | undefined,
   enabled: boolean,
   reloadKey = 0,
-  pr?: number,
 ): GuardDecisionsState {
   const [decisions, setDecisions] = useState<GuardDecisions>(EMPTY_GUARD_DECISIONS);
 
   useEffect(() => {
     if (!repoId || !enabled) return;
     let cancelled = false;
-    // With `pr` (EE) the PR's overlay is merged over the repo row.
     api
-      .getGuardDecisions(repoId, pr)
+      .getGuardDecisions(repoId)
       .then((d) => !cancelled && setDecisions(d))
       .catch(() => !cancelled && setDecisions(EMPTY_GUARD_DECISIONS));
     return () => {
       cancelled = true;
     };
-  }, [repoId, enabled, reloadKey, pr]);
+  }, [repoId, enabled, reloadKey]);
 
   const claimsByKey = useMemo(
     () =>
@@ -94,22 +91,22 @@ export function useGuardDecisions(
   // ONE write tail for both tiers: run the route, land the decisions it answers
   // with. A disabled hook writes nothing at all.
   const write = useCallback(
-    async (run: (repoId: string, pr?: number) => Promise<GuardDecisions>) => {
+    async (run: (repoId: string) => Promise<GuardDecisions>) => {
       if (!repoId || !enabled) return;
-      setDecisions(await run(repoId, pr));
+      setDecisions(await run(repoId));
     },
-    [repoId, enabled, pr],
+    [repoId, enabled],
   );
 
   return useMemo<GuardDecisionsState>(
     () => ({
       dismissalFor: (claim) => claimsByKey.get(dismissedClaimKey(claim.doc, claim.anchor, claim.title)),
-      dismiss: (claim) => write((id, p) => api.dismissGuardClaim(id, claim, p)),
-      undismiss: (claim) => write((id, p) => api.undismissGuardClaim(id, claim, p)),
+      dismiss: (claim) => write((id) => api.dismissGuardClaim(id, claim)),
+      undismiss: (claim) => write((id) => api.undismissGuardClaim(id, claim)),
       flowDismissal: (flowId) => flowsById.get(flowId),
       dismissedFlowIds: new Set(flowsById.keys()),
-      dismissFlow: (flow) => write((id, p) => api.dismissGuardFlow(id, flow, p)),
-      undismissFlow: (flowId) => write((id, p) => api.undismissGuardFlow(id, flowId, p)),
+      dismissFlow: (flow) => write((id) => api.dismissGuardFlow(id, flow)),
+      undismissFlow: (flowId) => write((id) => api.undismissGuardFlow(id, flowId)),
     }),
     [claimsByKey, flowsById, write],
   );

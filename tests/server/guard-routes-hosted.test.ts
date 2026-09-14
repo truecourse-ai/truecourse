@@ -2,8 +2,8 @@
  * Guard dashboard read routes over a HOSTED store (PgGuardStore + PgSpecStore).
  * The same OSS Express routes, but with the enterprise stores installed and an
  * injected repo-doc reader — so the guard tabs render Pg-backed data with NO local
- * filesystem access, scope to the PR head via `?ref=`, and surface an explicit
- * pending/empty envelope (never baseline data) when no run is stored at that head.
+ * filesystem access, scope to a commit via `?ref=`, and answer an empty envelope
+ * (never baseline data) when no run is stored at that commit.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
@@ -24,7 +24,6 @@ import { setGuardStore, resetGuardStore } from '@truecourse/core/lib/guard-store
 import { setSpecStore, resetSpecStore } from '@truecourse/core/lib/spec-store';
 import { setGuardOverlayStore, resetGuardOverlayStore } from '@truecourse/core/lib/guard-overlays';
 import { setRepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
-import { setGuardGatePendingLookup } from '@truecourse/core/lib/guard-gate-pending';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
 import { createTestApp } from '../helpers/test-app';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
@@ -118,12 +117,11 @@ afterEach(async () => {
   resetSpecStore();
   resetGuardOverlayStore();
   setRepoDocReader(async () => null);
-  setGuardGatePendingLookup(null);
   await client.close();
   await teardownTestFixture(fixture.project.slug);
 });
 
-describe('Guard routes — hosted, PR-scoped', () => {
+describe('Guard routes — hosted, commit-scoped', () => {
   it('scenarios?ref= returns the PR head set with headings joined via the doc reader (no FS)', async () => {
     await saveSet(HEAD, [['a1', 'alpha']]);
     await saveSet(OTHER, [['z9', 'beta']]);
@@ -132,27 +130,18 @@ describe('Guard routes — hosted, PR-scoped', () => {
     expect(res.body.scenarios[0].headingText).toBe('Alpha');
   });
 
-  it('latest?ref= returns the run stored at that head', async () => {
+  it('latest?ref= returns the run stored at that commit', async () => {
     await guardStore.writeGuardRun(repoKey, runAt(HEAD, 'a1', 'fail'));
     const res = await request(app).get(url(`latest?ref=${HEAD}`)).expect(200);
-    expect(res.body.pending).toBeNull();
     expect(res.body.latest.run.commit).toBe(HEAD);
     expect(res.body.latest.scenarios[0].outcome).toBe('fail');
   });
 
-  it('latest?ref= with no run at the head returns an empty envelope, NOT the baseline', async () => {
-    // A baseline run exists — it must not leak into a PR-head view.
+  it('latest?ref= with no run at that commit returns an empty envelope, NOT the baseline', async () => {
+    // A baseline run exists — it must not leak into another commit's view.
     await guardStore.writeGuardLatest(repoKey, runAt('baselinesha', 'a1', 'pass'));
     const res = await request(app).get(url(`latest?ref=${HEAD}`)).expect(200);
-    expect(res.body).toEqual({ latest: null, pending: null });
-  });
-
-  it('latest?ref= labels an in-flight gate via the pending lookup', async () => {
-    setGuardGatePendingLookup(async (_repo, headSha) =>
-      headSha === HEAD ? { status: 'running', jobId: 'job_abc' } : null,
-    );
-    const res = await request(app).get(url(`latest?ref=${HEAD}`)).expect(200);
-    expect(res.body).toEqual({ latest: null, pending: { status: 'running', jobId: 'job_abc' } });
+    expect(res.body).toEqual({ latest: null });
   });
 
   it('staleness?ref= reflects Pg state (scenarios present, never run → runStale)', async () => {
