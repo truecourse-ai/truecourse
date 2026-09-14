@@ -15,7 +15,7 @@
  * that number over; the header never carries a number.
  */
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { FilterBuilder, type FilterDimension } from './filter-builder';
 import { StatusTally, type TallyItem } from './status-word';
 
@@ -124,9 +124,11 @@ export function IndexTable<T>({
   rowId,
   columns,
   onOpen,
+  openable,
   query,
   onQuery,
   searchPlaceholder,
+  searchLabel,
   dimensions = [],
   selected = [],
   onSelect = () => {},
@@ -135,15 +137,25 @@ export function IndexTable<T>({
   tally,
   total,
   empty,
+  belowFilters,
+  belowTable,
 }: {
   label: string;
   rows: T[];
   rowId: (row: T) => string;
   columns: IndexColumn<T>[];
   onOpen: (row: T) => void;
+  /**
+   * Whether a row can be opened at all. A row that cannot — a job still in
+   * flight, with no page yet — takes no click, no focus and no pointer, so it
+   * never offers something that does not happen.
+   */
+  openable?: (row: T) => boolean;
   query: string;
   onQuery: (next: string) => void;
   searchPlaceholder: string;
+  /** The search box's accessible name; the placeholder when it needs no hint. */
+  searchLabel?: string;
   /** The dimensions the filter row narrows along; none means no filter row. */
   dimensions?: FilterDimension[];
   selected?: string[];
@@ -160,6 +172,10 @@ export function IndexTable<T>({
   total?: number;
   /** The one line under an empty table: nothing at all, or nothing that matches. */
   empty: ReactNode;
+  /** A surface's own strip between the filter row and the table. */
+  belowFilters?: ReactNode;
+  /** A surface's own note under the table, above the tally. */
+  belowTable?: ReactNode;
 }) {
   const { widths, resizeBetween } = useColumnWidths(columns);
   return (
@@ -168,7 +184,7 @@ export function IndexTable<T>({
         <input
           value={query}
           onChange={(e) => onQuery(e.target.value)}
-          aria-label={searchPlaceholder}
+          aria-label={searchLabel ?? searchPlaceholder}
           placeholder={searchPlaceholder}
           className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
         />
@@ -176,6 +192,7 @@ export function IndexTable<T>({
       {dimensions.length > 0 && (
         <FilterBuilder label={filterLabel} ariaLabel={filterAriaLabel ?? label} dimensions={dimensions} selected={selected} onChange={onSelect} />
       )}
+      {belowFilters}
       {/* Fixed layout: the sized columns take their width, the first column
           takes what they leave, and a cell truncates rather than pushing the
           table wider. The page never scrolls sideways. The line between two
@@ -198,15 +215,21 @@ export function IndexTable<T>({
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
+            {rows.map((row) => {
+              const opens = openable ? openable(row) : true;
+              return (
               <tr
                 key={rowId(row)}
-                tabIndex={0}
-                onClick={() => onOpen(row)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') onOpen(row);
-                }}
-                className="cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/40 focus:bg-muted/40 focus:outline-none"
+                {...(opens
+                  ? {
+                      tabIndex: 0,
+                      onClick: () => onOpen(row),
+                      onKeyDown: (e: KeyboardEvent) => {
+                        if (e.key === 'Enter') onOpen(row);
+                      },
+                    }
+                  : {})}
+                className={`border-b border-border/60 transition-colors ${opens ? 'cursor-pointer hover:bg-muted/40 focus:bg-muted/40 focus:outline-none' : ''}`}
               >
                 {columns.map((c, i) => (
                   <td
@@ -217,7 +240,8 @@ export function IndexTable<T>({
                   </td>
                 ))}
               </tr>
-            ))}
+              );
+            })}
             {rows.length === 0 && (
               <tr>
                 <td colSpan={columns.length} className="px-6 py-8 text-center text-muted-foreground">
@@ -227,6 +251,7 @@ export function IndexTable<T>({
             )}
           </tbody>
         </table>
+        {belowTable}
       </div>
       {tally && (
         <StatusTally

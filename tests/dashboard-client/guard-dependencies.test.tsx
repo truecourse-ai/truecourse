@@ -47,7 +47,9 @@ describe('user-facing dependencies', () => {
     vi.mocked(api.getGuardDependencies).mockResolvedValue(view(internal));
     render(<MemoryRouter><DependenciesTab repo={{ id: 'repo' } as Repo} /></MemoryRouter>);
     expect(await screen.findByText('No dependencies to configure.')).toBeInTheDocument();
-    expect(screen.getByText('0')).toBeInTheDocument();
+    // The count never rides beside the title: an empty list says so in its one
+    // line, and the tally names no word no row wears.
+    expect(screen.queryByText('0')).not.toBeInTheDocument();
     expect(screen.queryByText('expense')).not.toBeInTheDocument();
     expect(screen.queryByText('sample-data')).not.toBeInTheDocument();
   });

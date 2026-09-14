@@ -1,7 +1,10 @@
 /**
- * Full-width catalog of screens, operations and commands. Rows open their own
- * detail page. The toolbar is the platform's: the search box across the top,
- * then ONE Add-filter row over both dimensions, never a chip bar per dimension.
+ * Full-width catalog of screens, operations and commands, in the platform's
+ * index table — the same resizable columns, and the same refusal to scroll
+ * sideways, as every other list. Rows open their own detail page. The toolbar
+ * is the platform's too: the search box across the top, then ONE Add-filter row
+ * over both dimensions, never a chip bar per dimension. What the catalog holds
+ * is the TALLY at the bottom, by kind, never a number beside the title.
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -12,8 +15,11 @@ import { GuardMethodLabel } from '@/components/guard/GuardMethodLabel';
 import { useGuardFlows } from '@/hooks/useGuardFlows';
 import { catalogOrigins, catalogUsage, interfaceCatalog } from './interface-catalog';
 import { CHIP_CLASS, PageHeader } from '@/preview/ui/bits';
-import { FilterBuilder, selectedValues, type FilterDimension } from '@/preview/ui/filter-builder';
+import { selectedValues, type FilterDimension } from '@/preview/ui/filter-builder';
 import { facetDimensions } from '@/preview/ui/filter-facets';
+import { IndexTable, type IndexColumn } from '@/preview/ui/index-table';
+import { tallyOf } from '@/preview/ui/status-word';
+import type { CatalogRow } from './interface-catalog';
 import { useGuardInterfaces } from '@/hooks/useGuardInterfaces';
 import type { Repo } from '@/preview/data/types';
 import { useGuardTabJump } from './tab-jump';
@@ -34,6 +40,16 @@ function emptyCatalogReason(view: GuardInterfacesView | null): string {
     ? `Setup read ${read.join(', ')} and derived no interfaces.`
     : 'Setup derived no interfaces.';
 }
+
+/** The kinds a catalog row can be, in the order the tally lists them. */
+const KINDS = ['screen', 'operation', 'command', 'entries'] as const;
+
+const KIND_WORD: Record<(typeof KINDS)[number], string> = {
+  screen: 'Screen',
+  operation: 'Operation',
+  command: 'Command',
+  entries: 'Entry points',
+};
 
 export function InterfacesTab({ repo }: { repo: Repo }) {
   useGuardTabJump();
@@ -120,99 +136,135 @@ export function InterfacesTab({ repo }: { repo: Repo }) {
   const hidden = catalog.hidden.filter((h) => surfaceFilter.length === 0 || surfaceFilter.includes(h.surface));
   const rowUrl = (id: string) => `/repos/${repo.id}/interfaces/${encodeURIComponent(id)}`;
 
+  const tally = useMemo(
+    () => tallyOf(rows, KINDS, (row) => row.kind, (kind) => ({ word: KIND_WORD[kind], tone: 'neutral' as const })),
+    [rows],
+  );
+
+  const columns = useMemo<IndexColumn<CatalogRow>[]>(
+    () => [
+      {
+        key: 'interface',
+        label: 'Interface',
+        wrap: true,
+        cell: (row) => (
+          <Link
+            to={rowUrl(row.id)}
+            className="block rounded-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            <span className="flex items-baseline gap-2">
+              {row.method && <GuardMethodLabel method={row.method} fixed size="md" />}
+              <span
+                title={row.title}
+                className={`min-w-0 truncate ${row.kind === 'operation' || row.kind === 'command' ? 'font-mono' : ''}`}
+              >
+                {row.title}
+              </span>
+            </span>
+            <span title={row.hint} className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+              {row.hint}
+            </span>
+          </Link>
+        ),
+      },
+      {
+        key: 'surface',
+        label: 'Surface',
+        width: '7rem',
+        cell: (row) => <span className={CHIP_CLASS}>{guardDriver(row.surface)?.label ?? row.surface}</span>,
+      },
+      {
+        key: 'kind',
+        label: 'Kind',
+        width: '8rem',
+        className: 'text-muted-foreground',
+        cell: (row) => KIND_WORD[row.kind],
+      },
+      {
+        key: 'members',
+        label: 'Interfaces',
+        width: '7rem',
+        align: 'right',
+        cell: (row) => row.members.length,
+      },
+      {
+        key: 'origin',
+        label: 'Origin',
+        width: '8rem',
+        wrap: true,
+        cell: (row) => (
+          <span className="flex flex-wrap gap-1">
+            {catalogOrigins(row).map((origin) => (
+              <span key={origin} className={CHIP_CLASS}>
+                {origin}
+              </span>
+            ))}
+          </span>
+        ),
+      },
+      {
+        key: 'usedBy',
+        label: 'Used by',
+        width: '7rem',
+        align: 'right',
+        className: 'whitespace-nowrap',
+        cell: (row) => `${catalogUsage(row)} ${catalogUsage(row) === 1 ? 'test' : 'tests'}`,
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [repo.id],
+  );
+
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <PageHeader
-        title="Interfaces"
-        subtitle={(['screen', 'operation', 'command', 'entries'] as const).flatMap((kind) => {
-          const matching = rows.filter((r) => r.kind === kind);
-          const count = kind === 'entries' ? matching.reduce((n, r) => n + r.members.length, 0) : matching.length;
-          return count ? [`${count} ${kind === 'entries' ? `entry point${count === 1 ? '' : 's'}` : `${kind}${count === 1 ? '' : 's'}`}`] : [];
-        }).join(' · ') || '0 interfaces'}
-      />
-      <div className="min-w-0 shrink-0 border-b border-border px-6 py-2">
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          aria-label="Search interfaces"
-          placeholder="Search interfaces"
-          className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-        />
-      </div>
-      <FilterBuilder
-        label="Filter"
-        ariaLabel="Filter interfaces"
+      <PageHeader title="Interfaces" />
+      <IndexTable<CatalogRow>
+        label="Interfaces"
+        rows={rows}
+        rowId={(row) => row.id}
+        columns={columns}
+        onOpen={(row) => navigate(rowUrl(row.id))}
+        query={query}
+        onQuery={setQuery}
+        searchPlaceholder="Search interfaces"
         dimensions={dimensions}
         selected={filters}
-        onChange={setFilters}
-      />
-
-      {flows.view?.recipe && (
-        <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-6 py-2 text-xs">
-          <span className="text-muted-foreground">Preparation</span>
-          {surfaces.filter((s) => surfaceFilter.length === 0 || surfaceFilter.includes(s.key)).map((s) => (
-            <Link key={s.key} to={rowUrl(`recipe:${s.key}`)} className="rounded-sm text-foreground underline decoration-border underline-offset-4 hover:decoration-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">{s.label} recipe</Link>
-          ))}
-        </div>
-      )}
-      <div className="min-h-0 flex-1 overflow-auto">
-        <table className="w-full min-w-[48rem] table-fixed border-collapse text-[13px]" aria-label="Interfaces">
-          <colgroup>
-            <col />
-            <col className="w-20" />
-            <col className="w-24" />
-            <col className="w-28" />
-            <col className="w-28" />
-            <col className="w-28" />
-          </colgroup>
-          <thead className="sticky top-0 z-10 bg-card">
-            <tr className="border-b border-border text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              <th className="px-6 py-2 text-left font-semibold">Interface</th>
-              <th className="px-3 py-2 text-left font-semibold">Surface</th>
-              <th className="px-3 py-2 text-left font-semibold">Kind</th>
-              <th className="px-3 py-2 text-right font-semibold">Interfaces</th>
-              <th className="px-3 py-2 text-left font-semibold">Origin</th>
-              <th className="px-6 py-2 text-right font-semibold">Used by</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.id} onClick={(event) => {
-                if (!(event.target as HTMLElement).closest('a')) navigate(rowUrl(row.id));
-              }} className="cursor-pointer border-b border-border/60 transition-colors hover:bg-muted/40 focus-within:bg-muted/40">
-                <td className="px-6 py-2.5">
-                  <Link to={rowUrl(row.id)} className="block rounded-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-                    <span className="flex items-baseline gap-2">
-                      {row.method && <GuardMethodLabel method={row.method} fixed size="md" />}
-                      <span title={row.title} className={`min-w-0 truncate ${row.kind === 'operation' || row.kind === 'command' ? 'font-mono' : ''}`}>{row.title}</span>
-                    </span>
-                    <span title={row.hint} className="mt-0.5 block truncate text-[11px] text-muted-foreground">{row.hint}</span>
+        onSelect={setFilters}
+        filterAriaLabel="Filter interfaces"
+        tally={tally}
+        belowFilters={
+          flows.view?.recipe && (
+            <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-6 py-2 text-xs">
+              <span className="text-muted-foreground">Preparation</span>
+              {surfaces
+                .filter((s) => surfaceFilter.length === 0 || surfaceFilter.includes(s.key))
+                .map((s) => (
+                  <Link
+                    key={s.key}
+                    to={rowUrl(`recipe:${s.key}`)}
+                    className="rounded-sm text-foreground underline decoration-border underline-offset-4 hover:decoration-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    {s.label} recipe
                   </Link>
-                </td>
-                <td className="px-3 py-2.5"><span className={CHIP_CLASS}>{guardDriver(row.surface)?.label ?? row.surface}</span></td>
-                <td className="px-3 py-2.5 text-muted-foreground">{row.kind === 'entries' ? 'Entry points' : row.kind === 'screen' ? 'Screen' : row.kind === 'operation' ? 'Operation' : 'Command'}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{row.members.length}</td>
-                <td className="px-3 py-2.5"><div className="flex flex-wrap gap-1">{catalogOrigins(row).map((origin) => <span key={origin} className={CHIP_CLASS}>{origin}</span>)}</div></td>
-                <td className="px-6 py-2.5 text-right tabular-nums whitespace-nowrap">{catalogUsage(row)} {catalogUsage(row) === 1 ? 'test' : 'tests'}</td>
-              </tr>
-            ))}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={6} className="px-6 py-8 text-center text-muted-foreground">
-                  {interfaces.loading
-                    ? 'Loading interfaces.'
-                    : interfaces.error
-                      ? interfaces.error
-                      : all.length === 0
-                        ? emptyCatalogReason(interfaces.view)
-                        : 'No interface matches.'}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-        {hidden.length > 0 && <p className="px-6 py-3 text-xs text-muted-foreground">{hidden.map((h) => h.text).join(' · ')}</p>}
-      </div>
+                ))}
+            </div>
+          )
+        }
+        belowTable={
+          hidden.length > 0 && (
+            <p className="px-6 py-3 text-xs text-muted-foreground">{hidden.map((h) => h.text).join(' \u00b7 ')}</p>
+          )
+        }
+        empty={
+          interfaces.loading
+            ? 'Loading interfaces.'
+            : interfaces.error
+              ? interfaces.error
+              : all.length === 0
+                ? emptyCatalogReason(interfaces.view)
+                : 'No interface matches.'
+        }
+      />
     </div>
   );
 }
