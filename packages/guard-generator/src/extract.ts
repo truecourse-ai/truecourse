@@ -109,8 +109,8 @@ export type PriorExtraction = DocClaims
  * `@truecourse/core`) owns the session cache's key recipe; tests inject a map.
  */
 export interface ReuseExtractionSeam {
-  lookup(doc: GuardDoc, priorContentHash: string): Promise<PriorExtraction | null>
-  reuse(doc: GuardDoc, priorContentHash: string): Promise<void>
+  lookup(doc: GuardDoc, priorContentHash: string, prerequisiteTargets?: readonly GuardPrerequisiteTarget[]): Promise<PriorExtraction | null>
+  reuse(doc: GuardDoc, priorContentHash: string, prerequisiteTargets?: readonly GuardPrerequisiteTarget[]): Promise<void>
 }
 
 // ---------------------------------------------------------------------------

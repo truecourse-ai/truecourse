@@ -50,6 +50,7 @@ import {
   matchAll,
   matchBy,
   cliInterface,
+  apiInterface,
   interfacesOf,
   sessionSummary,
   EXTRACT_KIND,
@@ -2118,3 +2119,33 @@ describe('generateGuards: the step facts', () => {
     expect(res.written).toEqual([])
   }, 60_000)
 })
+
+it('admits a recipe-only controlled provider to matching and briefs the worker with its declared wiring', async () => {
+  const r = seed()
+  writeRecipe(r, { api: { serve: ['node', '-e', 'setInterval(() => {}, 1000)'], healthPath: '/health', externals: { currencybeacon: { baseUrlEnv: 'DECLARED_BASE', env: { PROVIDER_KEY: {} } } } } })
+  let matches = 0
+  const briefings: string[] = []
+  const ticks: unknown[] = []
+  await runGenerate({ repoRoot: r,
+    interfaces: interfacesOf(r, apiInterface('GET', '/quote')),
+    extractSession: extractSessionBy({ background: { untestable: 'background' }, version: [{ driver: 'api', claim: 'A controlled rate sets the quote', verification: {
+      method: 'behavior', scope: 'api', observable: 'chosen provider rate', cases: [{ id: 'quote', claim: 'chosen rate', method: 'behavior', requires: ['http', 'provider-control'], conditions: [], prerequisites: [], providerControls: [{ service: 'CurrencyBeacon', operations: ['response'] }] }],
+    } }] }),
+    matchRunner: async ctx => {
+      matches++
+      expect(ctx.providerControls).toEqual([{ service: 'currencybeacon', realization: 'stub', baseUrlEnvs: ['DECLARED_BASE'], credentialEnv: ['PROVIDER_KEY'], operations: ['response'] }])
+      if (matches === 1) return { gaps: ctx.milestones.map(m => ({ milestone: m.order, checks: m.verification!.cases!.map(c => c.id), kind: 'capability', reason: 'No provider-control interface is mapped or available' })) }
+      expect(ctx.issues?.gapErrors?.join()).toContain('contradicts the runner registry')
+      return matchAll()(ctx)
+    },
+    flowWorkerSession: submitWorkerSessions(() => ({ blocked: [{ order: 1, capability: 'fixture worker intentionally stops after inspecting its briefing' }] }), { onBriefing: (_task, text) => briefings.push(text) }),
+    onMatchProgress: progress => ticks.push(progress),
+  })
+  expect(matches).toBe(2)
+  expect(ticks.at(-1)).toMatchObject({ done: 1, total: 1, matched: 1, unmatched: 0, blocked: 0 })
+  expect(briefings).toHaveLength(1)
+  expect(briefings[0]).toContain('currencybeacon: stub (setup.http)')
+  expect(briefings[0]).toContain('DECLARED_BASE')
+  expect(briefings[0]).toContain('PROVIDER_KEY')
+  expect(briefings[0]).toContain('providerControls')
+}, 60000)

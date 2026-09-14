@@ -207,7 +207,7 @@ async function callTool(
       throw new Error('depth-1 children are not part of extraction')
     },
   })
-  input.onEvent({ type: 'tool-result', toolName: name, content: result.content, isError: result.isError })
+  input.onEvent({ type: 'tool-result', toolName: name, content: result.content, isError: result.isError, artifact: result.artifact })
   return result
 }
 
@@ -227,7 +227,7 @@ describe('guard-generate.extract — the session def through the loop', () => {
           cases: [{
             id: 'stale-conversion-response-ignored',
             claim: 'A late conversion response does not replace the current conversion state.',
-            method, requires: ['browser', 'request-control'], conditions: ['request-pending'],
+            method, requires: ['browser', 'own-request-control'], conditions: ['request-pending'],
           }],
         },
       })],
@@ -532,7 +532,7 @@ describe('suppression', () => {
 
 /** Prime the per-doc session cache with a raw (un-snapped) outcome. */
 async function primeExtractCache(r: string, doc: GuardDoc, value: ExtractOutcome): Promise<void> {
-  await setCacheEntry(r, EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey(doc), value)
+  await setCacheEntry(r, EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey(doc, TARGETS), value)
 }
 
 describe('the extract seam', () => {
@@ -856,4 +856,35 @@ describe('source-grounded observation boundaries', () => {
     const merged = { ...empty, verification: { ...empty.verification!, cases: [...empty.verification!.cases!, ...filtered.verification!.cases!] } }
     expect(validateExtractDraft({ claims: [merged], untestable: [] }, doc, TARGETS).join(' ')).toContain('different starting')
   })
+})
+
+describe('extraction cache declaration context', () => {
+  it('ignores target order, account availability and values, but keys names and provider wiring', () => {
+    const doc = { content: 'Provider response contract', suppressedQuotes: [] }
+    const target = { ...TARGETS[0], providers: [{ service: 'vendor', baseUrlEnvs: ['BASE', 'AUTH'] }] }
+    const other = { ...TARGETS[0], name: 'another' }
+    const key = extractSessionCacheKey(doc, [target, other])
+    expect(extractSessionCacheKey(doc, [other, { ...target, state: 'provided', providers: [{ service: 'vendor', baseUrlEnvs: ['AUTH', 'BASE'] }] }])).toBe(key)
+    expect(extractSessionCacheKey(doc, [other, { ...target, name: 'renamed' }])).not.toBe(key)
+    expect(extractSessionCacheKey(doc, [other, { ...target, providers: [{ service: 'vendor', baseUrlEnvs: ['NEW_BASE'] }] }])).not.toBe(key)
+    expect(extractSessionCacheKey(doc, [])).not.toBe(key)
+  })
+})
+
+it('requires the request boundary in draft checks and final extraction before accepting provider count evidence', () => {
+  const doc = docsOf(docRepo())[0]
+  const draft: ExtractOutcome = { claims: [claim(CREATING, { driver: 'web', verification: {
+    scope: 'web', method: 'behavior', observable: 'Request count', cases: [{
+      id: 'convert-click-calls-once', claim: 'Clicking Convert calls the conversion endpoint once.', method: 'behavior', requires: ['browser', 'provider-control'], conditions: [], prerequisites: [], providerControls: [{ service: 'currencybeacon', operations: ['call-count'] }],
+    }],
+  } })], untestable: [] }
+  const def = extractSessionDef({ doc, universe: buildGuardDocUniverse([doc]), prerequisiteTargets: TARGETS })
+  expect(validateExtractDraft(draft, doc, TARGETS).join()).toContain('declare requestBoundary')
+  expect(def.outcomeSchema.safeParse(draft).success).toBe(false)
+  const c = draft.claims[0].verification!.cases![0]
+  c.requestBoundary = 'browser-to-app'
+  expect(def.outcomeSchema.safeParse(draft).success).toBe(false)
+  c.requires.push('own-request-control')
+  expect(validateExtractDraft(draft, doc, TARGETS)).toEqual([])
+  expect(def.outcomeSchema.safeParse(draft).success).toBe(true)
 })

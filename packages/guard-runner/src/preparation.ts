@@ -79,6 +79,10 @@ export function validateScenarioPreparation(
   const conflicts = Object.keys(scenario.setup?.env ?? {}).filter((key) =>
     owned.has(key),
   );
+  for (const service of Object.keys(scenario.setup?.externals ?? {})) {
+    const external = recipe.api?.externals?.[service];
+    if (external) conflicts.push(...[external.baseUrlEnv, ...Object.keys(external.endpoints ?? {})].filter(key => owned.has(key)));
+  }
   for (const step of [...scenario.steps, ...(scenario.teardown ?? [])]) {
     if (typeof step === 'object' && 'env' in step && step.env) {
       conflicts.push(...Object.keys(step.env).filter((key) => owned.has(key)));

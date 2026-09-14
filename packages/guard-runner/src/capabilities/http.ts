@@ -34,6 +34,7 @@ import type { GuardHttpStub, GuardHttpStubRoute, GuardSetup } from '@truecourse/
 import { CapabilityError } from './index.js'
 import { lookupJsonPath, JSON_PATH_MISS } from '../api/vars.js'
 import { jsonEquals } from '../api/expect.js'
+import { sendScriptedResponse } from './scripted-response.js'
 
 /** The capability name, as it appears in a {@link CapabilityError} message. */
 const CAPABILITY = 'http'
@@ -116,8 +117,10 @@ export async function startHttpStubs(
   const servers: StubServer[] = []
   const origins = new Map<string, string>()
   let currentStep: number | undefined
+  const lifetime = new AbortController()
 
   const closeAll = async (): Promise<void> => {
+    lifetime.abort()
     await Promise.all(
       servers.map(
         (s) =>
@@ -134,7 +137,9 @@ export async function startHttpStubs(
     records.set(name, [])
     callCounts.set(name, declaration.routes.map(() => 0))
     const server = http.createServer((req, res) => {
+      res.on('error', () => {})
       handleStubRequest({
+        signal: lifetime.signal,
         name,
         declaration,
         req,
@@ -205,6 +210,7 @@ function listen(server: http.Server): Promise<void> {
 }
 
 interface HandleParams {
+  signal: AbortSignal
   name: string
   declaration: GuardHttpStub
   req: http.IncomingMessage
@@ -222,6 +228,7 @@ function handleStubRequest(p: HandleParams): void {
     if (body.length < STUB_EXCERPT_LIMIT * 4) body += chunk.toString('utf-8')
   })
   p.req.on('end', () => {
+    if (p.signal.aborted || p.res.destroyed) return
     const method = (p.req.method ?? 'GET').toUpperCase()
     const rawUrl = p.req.url ?? '/'
     const url = new URL(rawUrl, 'http://stub.invalid')
@@ -232,7 +239,7 @@ function handleStubRequest(p: HandleParams): void {
     }
 
     const routeIndex = p.declaration.routes.findIndex(
-      (route) => route.method === method && pathMatches(route.path, url.pathname),
+      (route, index) => !(route.once && p.counts[index] > 0) && route.method === method && pathMatches(route.path, url.pathname),
     )
     if (p.records.length < MAX_RECORDED_REQUESTS) {
       p.records.push({
@@ -294,14 +301,7 @@ function handleStubRequest(p: HandleParams): void {
 
     // The scripted response is served regardless: the scenario's own steps must
     // still run to their conclusion, and the violation settles at scenario end.
-    const status = route.status ?? 200
-    const payload =
-      route.json !== undefined ? JSON.stringify(route.json) : (route.body ?? '')
-    const responseHeaders: Record<string, string> = {
-      ...(route.json !== undefined ? { 'content-type': 'application/json' } : {}),
-      ...(route.headers ?? {}),
-    }
-    respond(p.res, status, responseHeaders, payload)
+    void sendScriptedResponse(p.res, route, p.signal).catch(() => p.res.destroy())
   })
 }
 

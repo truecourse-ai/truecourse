@@ -1,3 +1,4 @@
+import http from 'node:http';
 import { qualifyFixtureRecipe } from './preparation-qualification-fixture';
 import { observeApiExpect } from '../../packages/guard-runner/src/api/expect';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -675,4 +676,49 @@ describe('runner-owned preparation profiles', () => {
       result.latest.scenarios.every((s) => s.preparation?.profile === 'ledger'),
     ).toBe(true);
   }, 60_000);
+});
+
+for (const driver of ['api', 'web'] as const) for (const provided of [false, true]) it(`private ${driver}/${provided ? 'proxy' : 'stub'} control starts after baseline checks and keeps its own call count`, async () => {
+  const { root, recipe } = fixture();
+  let liveHits = 0;
+  const live = http.createServer((_req, res) => { liveHits++; res.end('99'); });
+  await new Promise<void>(r => live.listen(0, '127.0.0.1', r));
+  try {
+    const origin = `http://127.0.0.1:${(live.address() as import('node:net').AddressInfo).port}`;
+    recipe.api!.externals = { provider: { baseUrlEnv: 'PROVIDER_BASE', ...(provided ? { baseUrl: origin } : {}) } };
+    const file = path.join(root, 'scripts/server.mjs');
+    fs.writeFileSync(file, fs.readFileSync(file, 'utf8')
+      .replace("    let state =", "    const upstream = env.PROVIDER_BASE ? await (await fetch(env.PROVIDER_BASE)).text() : 'none';\n    let state =")
+      .replace('<h1>Ledger</h1>', '<h1>Ledger</h1><p>Provider: ${upstream}</p>')
+      .replace('JSON.stringify({count:', 'JSON.stringify({upstream,count:'));
+    writeSpecDoc(root);
+    const setup = provided ? { preparation: 'ledger', externals: { provider: { unmatched: 'error', calls: 1, faults: [{ respond: { status: 200, body: '7' } }] } } } : {
+      preparation: 'ledger', env: { PROVIDER_BASE: '${HTTP_STUB:provider}' }, http: { provider: { routes: [{ method: 'GET', path: '/', body: '7', calls: 1 }] } },
+    };
+    writeScenario(root, 'controlled.yaml', GuardScenarioSchema.parse({ id: 'controlled', title: 'Controlled private world', binds: specBinds('spec/section'), setup,
+      steps: driver === 'api' ? [{ request: { method: 'GET', path: '/rows', headers: { 'x-world-token': '{{cred:owner}}' } }, expect: { status: 200, json: { upstream: { equals: '7' }, count: { equals: 8 } } } }] : [
+        { driver: 'web', credential: 'owner' }, { driver: 'web', navigate: '/', expect: { text: { contains: 'Provider: 7' } } },
+      ],
+    }));
+    const result = await runGuard({ repoRoot: root, recipe, skipBuild: true });
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok') throw new Error(JSON.stringify(result));
+    expect(result.latest.scenarios[0].outcome, JSON.stringify(result.latest.scenarios)).toBe('pass');
+    if (provided) expect(liveHits).toBeGreaterThan(0); // Baseline reads used the live account; the scenario asserted exactly one scripted call.
+    else expect(liveHits).toBe(0);
+  } finally { await new Promise<void>(r => live.close(() => r())); }
+}, 60000);
+
+it('refuses an automatic provided proxy that would overwrite a preparation-owned environment binding', async () => {
+  const { root, recipe } = fixture();
+  recipe.api!.externals = { provider: { baseUrlEnv: 'DATA_FILE', baseUrl: 'http://127.0.0.1:1' } };
+  writeSpecDoc(root);
+  writeScenario(root, 'collision.yaml', GuardScenarioSchema.parse({ id: 'collision', title: 'Private binding ownership', binds: specBinds('spec/section'), setup: { preparation: 'ledger' },
+    steps: [{ request: { method: 'GET', path: '/rows' }, expect: { status: 200 } }],
+  }));
+  const result = await runGuard({ repoRoot: root, recipe, skipBuild: true });
+  expect(result.status).toBe('ok');
+  if (result.status !== 'ok') throw new Error(JSON.stringify(result));
+  expect(result.latest.scenarios[0].outcome).toBe('error');
+  expect(result.latest.scenarios[0].failure?.actual).toContain('cannot override a preparation-owned binding');
 });

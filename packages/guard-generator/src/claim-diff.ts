@@ -1,3 +1,4 @@
+import type { GuardPrerequisiteTarget } from '@truecourse/shared'
 /**
  * The claim-diff gate: before extraction, decide per EDITED document whether
  * its edits changed any obligation. When every edited section of a document is
@@ -52,6 +53,7 @@ export interface ReuseCosmeticExtractionsInput {
   /** Every document extraction is about to read (the whole universe). */
   docs: readonly GuardDoc[]
   priorManifest: GuardManifest | null
+  prerequisiteTargets?: readonly GuardPrerequisiteTarget[]
   seam: ReuseExtractionSeam
   runner: ClaimDiffRunner
 }
@@ -115,7 +117,7 @@ export async function reuseCosmeticExtractions(input: ReuseCosmeticExtractionsIn
     if (doc.sections.some((s) => priorFingerprints.get(flowSectionKey(s.doc, s.anchor)) === undefined)) continue
 
     const changed = doc.sections.filter((s) => priorFingerprints.get(flowSectionKey(s.doc, s.anchor)) !== s.fingerprint)
-    const prior = await input.seam.lookup(doc, priorHash)
+    const prior = await input.seam.lookup(doc, priorHash, input.prerequisiteTargets)
     if (!prior) continue
     const snapped = snapExtraction(prior, doc.sections)
 
@@ -153,7 +155,7 @@ export async function reuseCosmeticExtractions(input: ReuseCosmeticExtractionsIn
     }
     if (!allCosmetic) continue
 
-    await input.seam.reuse(doc, priorHash)
+    await input.seam.reuse(doc, priorHash, input.prerequisiteTargets)
     result.reusedDocs.push(doc.doc)
     for (const section of changed) {
       result.cosmetic.set(flowSectionKey(section.doc, section.anchor), priorFingerprints.get(flowSectionKey(section.doc, section.anchor))!)

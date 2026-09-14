@@ -20,6 +20,15 @@ export interface GuardPrerequisiteTarget {
   /** Credential variable names only; never values. */
   credentialEnv: readonly string[]
   protectedEnv?: readonly string[]
+  /** Declared external services, never registration values. Local datastores have none. */
+  providers?: readonly { service: string; baseUrlEnvs: readonly string[] }[]
+}
+
+export function guardProviderTargets(targets: readonly GuardPrerequisiteTarget[]): GuardPrerequisiteTarget[] {
+  return targets.flatMap(target => (target.providers ?? []).map(provider => ({
+    ...target, name: provider.service, aliases: [...new Set([target.name, ...target.aliases])],
+    providers: [provider],
+  })))
 }
 
 export type GuardPrerequisiteResolution =

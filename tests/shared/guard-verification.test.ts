@@ -69,3 +69,30 @@ describe('case observation boundaries', () => {
     expect(GuardCoverageGapSchema.parse({ doc: 'spec.md', anchor: 'list', kind: 'no-interface', reason: 'missing', milestones: [1], obligations }).obligations).toEqual(obligations)
   })
 })
+
+describe('request cardinality proof boundary', () => {
+  const base = { method: 'behavior' as const, scope: 'web' as const, observable: 'Convert request count', cases: [
+    { id: 'convert-click-calls-once', claim: 'Clicking Convert calls the conversion endpoint once.', method: 'behavior' as const, requires: ['browser' as const, 'provider-control' as const], conditions: [], providerControls: [{ service: 'currencybeacon', operations: ['call-count' as const] }] },
+  ] }
+  it('keeps ambiguous historical cases readable but blocks their proof until re-extraction', async () => {
+    const { GuardVerificationSchema, verificationBoundaryProblems } = await import('@truecourse/shared')
+    const parsed = GuardVerificationSchema.parse(base)
+    expect(verificationCapabilityGap(parsed, 'web')).toContain('Re-extract')
+    expect(verificationBoundaryProblems(parsed, true, ['web']).join()).toContain('declare requestBoundary')
+  })
+  it('requires own-request-control for app endpoint counts even when a provider is controlled', async () => {
+    const { GuardVerificationSchema } = await import('@truecourse/shared')
+    const c = { ...base.cases[0], requestBoundary: 'browser-to-app' }
+    expect(GuardVerificationSchema.safeParse({ ...base, cases: [c] }).success).toBe(false)
+    const parsed = GuardVerificationSchema.parse({ ...base, cases: [{ ...c, requires: [...c.requires, 'own-request-control'] }] })
+    expect(verificationCapabilityGap(parsed, 'web')).toContain('own-request-control')
+  })
+  it('supports explicit upstream counts and leaves independent visible results eligible', async () => {
+    const { GuardVerificationSchema } = await import('@truecourse/shared')
+    const upstream = { ...base.cases[0], id: 'provider-count', claim: 'Opening the page makes no provider request.', requestBoundary: 'app-to-provider' }
+    const visible = { id: 'visible', claim: 'Converted amount is displayed', method: 'behavior', requires: ['browser'], conditions: [] }
+    const parsed = GuardVerificationSchema.parse({ ...base, cases: [base.cases[0], upstream, visible] })
+    expect(verificationCapabilityGap(parsed, 'web', ['provider-count', 'visible'])).toBeUndefined()
+    expect(verificationCapabilityGap(parsed, 'web', ['convert-click-calls-once'])).toContain('requestBoundary')
+  })
+})

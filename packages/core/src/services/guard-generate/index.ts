@@ -17,6 +17,7 @@ export {
   extractDocContentHash,
   extractSessionWorkItem,
   extractSessionDef,
+  extractContextSchema,
   extractSessionBriefing,
   validateExtractDraft,
   type ExtractSessionInput,

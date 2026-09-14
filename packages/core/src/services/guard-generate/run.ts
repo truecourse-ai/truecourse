@@ -81,6 +81,7 @@ import {
   EXTRACT_SESSION_CACHE_NAME,
   EXTRACT_SESSION_KIND,
   extractSessionBriefing,
+  extractContextSchema,
   extractSessionCacheKey,
   extractSessionCacheKeyForContentHash,
   extractSessionDef,
@@ -463,8 +464,8 @@ export function createGuardGenerateSessionSeams(
       cacheName: EXTRACT_SESSION_CACHE_NAME,
       items: input.docs,
       workItem: (doc) => extractSessionWorkItem(doc.doc),
-      cacheKey: (doc) => extractSessionCacheKey(doc),
-      schema: ExtractOutcomeSchema,
+      cacheKey: (doc) => extractSessionCacheKey(doc, input.prerequisiteTargets),
+      schema: extractContextSchema(input.prerequisiteTargets),
       session: (doc) => extractSessionDef({ doc, universe, prerequisiteTargets: input.prerequisiteTargets }),
       briefing: (doc) => extractSessionBriefing(doc, input.prerequisiteTargets),
       driver: acquire,
@@ -828,23 +829,24 @@ export function createGuardGenerateSessionSeams(
   // the cache through the same key recipe the pool uses, so a prompt edit
   // (which re-keys every doc) naturally finds no prior and re-extracts.
   const reuseExtraction: ReuseExtractionSeam = {
-    async lookup(doc, priorContentHash) {
+    async lookup(doc, priorContentHash, targets = []) {
       const cached = await getCacheEntry(
         opts.repoRoot,
         EXTRACT_SESSION_CACHE_NAME,
-        extractSessionCacheKeyForContentHash(priorContentHash, doc.suppressedQuotes),
+        extractSessionCacheKeyForContentHash(priorContentHash, doc.suppressedQuotes, targets),
       ).catch(() => null)
-      const parsed = ExtractOutcomeSchema.safeParse(cached)
+      const parsed = extractContextSchema(targets).safeParse(cached)
       return parsed.success ? parsed.data : null
     },
-    async reuse(doc, priorContentHash) {
+    async reuse(doc, priorContentHash, targets = []) {
       const cached = await getCacheEntry(
         opts.repoRoot,
         EXTRACT_SESSION_CACHE_NAME,
-        extractSessionCacheKeyForContentHash(priorContentHash, doc.suppressedQuotes),
+        extractSessionCacheKeyForContentHash(priorContentHash, doc.suppressedQuotes, targets),
       ).catch(() => null)
-      if (cached === null) return
-      await setCacheEntry(opts.repoRoot, EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey(doc), cached).catch(
+      const parsed = extractContextSchema(targets).safeParse(cached)
+      if (!parsed.success) return
+      await setCacheEntry(opts.repoRoot, EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey(doc, targets), parsed.data).catch(
         () => undefined,
       )
     },

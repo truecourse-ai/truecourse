@@ -122,3 +122,23 @@ describe('the reuse-extraction seam', () => {
     expect(await getCacheEntry(r, EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey(doc))).toBeNull()
   })
 })
+
+it('keeps prior-content reuse in the current declaration context and rejects invalid cached prerequisites', async () => {
+  const r = docRepo(CONTENT), before = docOf(r)
+  const targets = [{ name: 'vendor', aliases: ['Vendor'], state: 'unprovided' as const, credentialEnv: ['KEY'], registerIn: 'local', providers: [{ service: 'vendor', baseUrlEnvs: ['BASE'] }] }]
+  const priorHash = extractDocContentHash(before.content)
+  await setCacheEntry(r, EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey(before, targets), OUTCOME)
+  writeDoc(r, DOC, EDITED)
+  const after = docOf(r), seams = createGuardGenerateSessionSeams({ repoRoot: r, transport: 'api' })
+  expect(await seams.reuseExtraction.lookup(after, priorHash, targets)).toEqual(OUTCOME)
+  const renamed = [{ ...targets[0], name: 'new-vendor' }]
+  expect(await seams.reuseExtraction.lookup(after, priorHash, renamed)).toBeNull()
+  await seams.reuseExtraction.reuse(after, priorHash, renamed)
+  expect(await getCacheEntry(r, EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey(after, renamed))).toBeNull()
+  await seams.reuseExtraction.reuse(after, priorHash, targets)
+  expect(await getCacheEntry(r, EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey(after, targets))).toEqual(OUTCOME)
+  const invalid = structuredClone(OUTCOME)
+  invalid.claims[0].verification = { method: 'behavior', observable: 'supplied data', cases: [{ id: 'value', claim: 'read value', method: 'behavior', requires: ['http'], conditions: [], prerequisites: [{ dependency: 'removed', mode: 'provided' }] }] }
+  await setCacheEntry(r, EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey(before, targets), invalid)
+  expect(await seams.reuseExtraction.lookup(after, priorHash, targets)).toBeNull()
+})

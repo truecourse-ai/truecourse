@@ -106,6 +106,7 @@ import {
   buildFlowAreas,
   buildSurfaceCatalogs,
   readCachedMatch,
+  matchProviderControls,
   realizationAssignmentFingerprint,
   partitionPlanPreparations,
   readFlowsFile,
@@ -129,6 +130,7 @@ import {
   EXTRACT_SESSION_KIND,
   EXTRACT_SESSION_SYSTEM_PROMPT,
   extractSessionBriefing,
+  extractContextSchema,
   extractSessionCacheKey,
   FLOWS_SESSION_BUDGET,
   FLOWS_SESSION_CACHE_NAME,
@@ -676,8 +678,8 @@ async function planGuardSessionStages(repoRoot: string, plan: GuardWorkPlan): Pr
     const cached = await probeSessionCache(
       repoRoot,
       EXTRACT_SESSION_CACHE_NAME,
-      extractSessionCacheKey(doc),
-      ExtractOutcomeSchema,
+      extractSessionCacheKey(doc, prerequisites.targets),
+      extractContextSchema(prerequisites.targets),
     );
     if (!cached) {
       extractItems++;
@@ -847,7 +849,7 @@ async function planGuardRealizationStages(
         if (!flowDriversToMatch(flow).includes(catalog.surface)) continue;
         const eligibleFlow = recipe ? partitionFlowPrerequisites(flow, catalog.surface, prerequisites.targets, recipe).flow : flow;
         if (!eligibleFlow.milestones.length) continue;
-        const cached = await readCachedMatch(repoRoot, eligibleFlow, catalog);
+        const cached = await readCachedMatch(repoRoot, eligibleFlow, catalog, undefined, recipe ? matchProviderControls(eligibleFlow, catalog.surface, prerequisites.targets, recipe) : []);
         if (!cached) {
           matchCalls++;
           unknown = true;
@@ -873,7 +875,7 @@ async function planGuardRealizationStages(
       plannedPairs.sort((a, b) => Number(previousDrivers.includes(b.surface)) - Number(previousDrivers.includes(a.surface)) || a.surface.localeCompare(b.surface));
       plannedPairs.splice(1);
       interfaceFingerprints.push(...plannedPairs.flatMap(p => p.fingerprints));
-      interfaceFingerprints.push(flowPrerequisiteStateMaterial(flow, prerequisites.targets));
+      interfaceFingerprints.push(flowPrerequisiteStateMaterial(flow, prerequisites.targets, recipe));
       const sectionKeys = flow.bindings.map((b) => sectionKeyOf.get(`${b.doc} ${b.anchor}`) ?? b.fingerprint);
       const inputsHash = flowGenerationInputsHash({
         flowFingerprint: flow.fingerprint,

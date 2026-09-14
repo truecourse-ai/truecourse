@@ -25,6 +25,7 @@ import { defineSessionTool, type SessionBudget, type SessionDef, type SessionToo
 import {
   verificationBoundaryProblems,
   resolveGuardPrerequisiteNormalized,
+  guardProviderTargets,
   ExtractOutcomeSchema,
   type ExtractOutcome,
   type GuardPrerequisiteTarget,
@@ -76,7 +77,7 @@ claim, method, requires (observation capabilities), and conditions (an array).
 Preserve per-case prerequisites as [{dependency,mode:"provided"|"absent",evidence,originalNames?}].
 \`dependency\` names one of the briefing's DECLARED DEPENDENCIES, copied verbatim; a name matching none of them refuses the outcome. When the source requires an account no declared dependency covers, leave the case's prerequisites empty and carry the requirement in the claim's needs.
 A case needs mode provided ONLY when its contract requires a real authenticated service interaction, including earlier setup that must actually use that service. Evidence must identify that source requirement.
-Controlled responses, synthetic invalid keys, timeout/quota/error injection, rounding with chosen rates, response validation, and redaction checks do not require a real provider account. Use prerequisites: [] for those cases and requires: [the observation driver, "request-control"] when response control is needed. A fixture key used with an isolated controlled provider is test input, not a supplied account. Do not require registration before fault control. If a case also genuinely requires live authenticated setup, split the independently provable controlled and live contracts where the source permits; otherwise preserve both requirements.
+Controlled responses, synthetic invalid keys, timeout/quota/error injection, rounding with chosen rates, response validation, and redaction checks do not require a real provider account. Use prerequisites: [] for those cases and requires: [the observation driver, "provider-control"] and providerControls: [{service, operations}] when provider control is needed. Name the declared external service; operations are response, header-delay, body-delay, reset, sequence, request-assertions, call-count. Preserve an unresolved provider name if no declaration covers it so generation can report a wiring gap. Provider control cannot observe or intercept browser-to-app requests. Those cases require own-request-control and stay unsupported. For every case asserting request counts or inspecting requests, declare requestBoundary: "browser-to-app" or "app-to-provider", using the boundary named by the source. This field describes the CLAIM, not the fixture. "Clicking Convert calls the conversion endpoint once" is browser-to-app and requires own-request-control, even if a provider fixture can count outbound calls. "No provider request on opening or changing currency" is app-to-provider and uses provider-control with call-count. Do not turn app-endpoint cardinality into provider cardinality. Split claims covering both boundaries into separate cases. Use call-count and request-assertions operations only when the claim needs that evidence, not merely because the runner requires fixture call assertions. Legacy request-control is not allowed for new cases. A fixture key used with an isolated controlled provider is test input, not a supplied account. Do not require registration before fault control. If a case also genuinely requires live authenticated setup, split the independently provable controlled and live contracts where the source permits; otherwise preserve both requirements.
 Successful application behavior alone does not imply live-provider verification. Distinguish an application response contract proved with controlled provider data from a contract explicitly requiring the real service. Never turn unavailable request control into a credentials requirement.
 A missing-key error branch uses mode absent, never provided. Account-free cases explicitly carry prerequisites: [].
 Declare prerequisites on every case; claim-level needs are context, not requirements inherited by every case. Only external accounts belong in prerequisites. Build outputs, ordinary environment settings, local databases and seeded rows belong in invocation, preparation or needs, not account registration.
@@ -84,7 +85,7 @@ Keep credential environment identifiers in need.detail as source evidence so exi
 Cross-browser-timezone invariance requires browser-timezone-control, currently unsupported. Server TZ does not establish browser timezone.
 Only for a documented server-startup/configuration guarantee verified through web or HTTP, add invocation: {command,address?}. Preserve the exact server startup command and fixed address; production readiness does not prove development startup. Ordinary CLI behavior (for example relkit --version) is proved by its CLI steps and must not receive server invocation metadata.
 Capabilities: browser, http, process, filesystem, datastore, concurrency,
-implementation, request-control, browser-timezone-control. Conditions: fresh-state, request-failure,
+implementation, provider-control, own-request-control, browser-timezone-control. Conditions: fresh-state, request-failure,
 request-pending. Use [] when no special condition is required.
 A case is an independently falsifiable acceptance or boundary case, not an example
 input. Enumerate named search semantics, boundary conditions and error classes;
@@ -112,8 +113,9 @@ Keep each case's required transition and starting state explicit after splitting
 All cases of one claim must share scope, method and conditions. Split a mixed
 sentence BEFORE submitting: ordinary reads vs retry after failure; returned cents
 vs SQLite column types; normal startup vs exact file placement.
-Web claims require browser observations only (and request-control for controlled
-UI failure or loading). A fresh instance is preparation, not datastore observation.
+Web claims require browser observations, with provider-control for upstream-controlled
+UI behavior or own-request-control for app-request failure or loading. Never replace a claim
+about requests to the app endpoint with counts at the provider. A fresh instance is preparation, not datastore observation.
 An unchanged record after rejection is observed by subsequent API/UI reads. Preserve
 an explicit guarantee about ALL internal tables as a separate implementation claim.
 A UI error state may use a controlled response; it need not damage a real database.
@@ -207,8 +209,8 @@ export const EXTRACT_SESSION_PROMPT_FINGERPRINT = promptFingerprint(EXTRACT_SESS
  * conflict re-keys exactly the losing doc]. Coarser than the legacy per-view
  * key, by decision.
  */
-export function extractSessionCacheKey(doc: Pick<GuardDoc, 'content' | 'suppressedQuotes'>): string {
-  return extractSessionCacheKeyForContentHash(extractDocContentHash(doc.content), doc.suppressedQuotes)
+export function extractSessionCacheKey(doc: Pick<GuardDoc, 'content' | 'suppressedQuotes'>, targets: readonly GuardPrerequisiteTarget[] = []): string {
+  return extractSessionCacheKeyForContentHash(extractDocContentHash(doc.content), doc.suppressedQuotes, targets)
 }
 
 /** The doc-content half of the extract cache key — hex sha256 over the bytes.
@@ -219,8 +221,11 @@ export function extractDocContentHash(content: string): string {
 }
 
 /** {@link extractSessionCacheKey} from an already-computed content hash. */
-export function extractSessionCacheKeyForContentHash(contentHash: string, suppressedQuotes: readonly string[]): string {
-  const base = `${EXTRACT_SESSION_PROMPT_FINGERPRINT}::${contentHash}`
+export function extractSessionCacheKeyForContentHash(contentHash: string, suppressedQuotes: readonly string[], targets: readonly GuardPrerequisiteTarget[] = []): string {
+  const context = targets.map(t => [t.name, [...t.aliases].sort(), [...t.credentialEnv].sort(),
+    (t.providers ?? []).map(p => [p.service, [...p.baseUrlEnvs].sort()]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))])
+    .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
+  const base = `${EXTRACT_SESSION_PROMPT_FINGERPRINT}::${contentHash}${context.length ? `::${JSON.stringify(context)}` : ''}`
   const suppression = suppressionKey(suppressedQuotes)
   return createHash('sha256').update(suppression ? `${base}::${suppression}` : base).digest('hex')
 }
@@ -287,6 +292,7 @@ function extractPrerequisiteProblems(
   const problems: string[] = []
   for (const c of draft.claims) {
     for (const item of c.verification?.cases ?? []) {
+      if (item.requires.includes('request-control')) problems.push(`claim "${c.claim}", case "${item.id}": Replace legacy request-control with provider-control and a named provider, or own-request-control.`)
       for (const p of item.prerequisites ?? []) {
         const resolution = resolveGuardPrerequisiteNormalized(p.dependency, targets)
         if (resolution.kind === 'resolved') continue
@@ -321,10 +327,15 @@ function canonicalizeExtractPrerequisites(
             verification: {
               ...c.verification,
               cases: c.verification.cases.map((item) =>
-                item.prerequisites
+                item.prerequisites || item.providerControls
                   ? {
                       ...item,
-                      prerequisites: item.prerequisites.map((p) => {
+                      ...(item.providerControls ? { providerControls: item.providerControls.map(p => {
+                        const resolution = resolveGuardPrerequisiteNormalized(p.service, guardProviderTargets(targets))
+                        return resolution.kind === 'resolved' && resolution.target.name !== p.service
+                          ? { ...p, service: resolution.target.name, originalNames: [...new Set([...(p.originalNames ?? []), p.service])] } : p
+                      }) } : {}),
+                      prerequisites: item.prerequisites?.map((p) => {
                         const resolution = resolveGuardPrerequisiteNormalized(p.dependency, targets)
                         if (resolution.kind !== 'resolved' || resolution.target.name === p.dependency) return p
                         return {
@@ -341,6 +352,13 @@ function canonicalizeExtractPrerequisites(
         : c,
     ),
   }
+}
+
+/** Cached and fresh outcomes use the same dependency vocabulary. */
+export function extractContextSchema(targets: readonly GuardPrerequisiteTarget[]) {
+  return ExtractOutcomeSchema.superRefine((draft, ctx) => {
+    for (const message of extractPrerequisiteProblems(draft, targets)) ctx.addIssue({ code: 'custom', message })
+  }).transform(draft => canonicalizeExtractPrerequisites(draft, targets))
 }
 
 /** Rechecked on the final outcome, even when the model changes a checked draft. */
@@ -442,6 +460,8 @@ export function extractSessionBriefing(
   }
   lines.push(
     '',
+    'DECLARED PROVIDERS: ' + JSON.stringify(guardProviderTargets(prerequisiteTargets).flatMap(t => t.providers ?? [])),
+    'Provider controls name these services and never require an account just to script a reply.',
     'DECLARED DEPENDENCIES — the closed vocabulary a case prerequisite may name.',
     ...(prerequisiteTargets.length
       ? [

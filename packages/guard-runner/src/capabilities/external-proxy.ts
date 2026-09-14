@@ -40,7 +40,8 @@ import type { Socket } from 'node:net'
 import type { AddressInfo } from 'node:net'
 import type { GuardExternal, GuardExternalFault, GuardSetup } from '@truecourse/shared'
 import { CapabilityError } from './index.js'
-import { pathMatches } from './http.js'
+import { pathMatches, evaluateStubExpect } from './http.js'
+import { sendScriptedResponse, waitForReply } from './scripted-response.js'
 import type { ExternalProxyTarget } from '../externals.js'
 
 /** The capability name, as it appears in a {@link CapabilityError} message. */
@@ -83,15 +84,15 @@ export interface ExternalCallRecord {
   /** Raw request body (truncated to {@link CALL_EXCERPT_LIMIT}). */
   body: string
   /** How the proxy answered: forwarded upstream, or the fault rule that fired. */
-  outcome: 'passthrough' | 'respond' | 'refuse'
+  outcome: 'passthrough' | 'respond' | 'refuse' | 'unmatched'
   /** Index of the fault rule that fired; absent on a passthrough. */
   faultIndex?: number
 }
 
-/** A scenario-failing externals finding. Only `calls` can fail — faults cannot. */
+/** Request assertion, strict routing, or call-count evidence can fail; scripted replies themselves cannot. */
 export interface ExternalProxyViolation {
   service: string
-  kind: 'calls'
+  kind: 'calls' | 'expect' | 'unmatched'
   expected: string
   actual: string
   /** Multi-line evidence (the calls received, excerpted). */
@@ -105,8 +106,8 @@ export interface ExternalProxiesHandle {
   records(): readonly ExternalCallRecord[]
   /**
    * The FIRST violation the scenario should fail on, or `null`. Called at scenario
-   * end: only `calls` assertions can fail — a scripted fault is the declared world,
-   * never a finding.
+   * end: request/count assertions and strict unmatched traffic can fail. A scripted
+   * reply or refusal is the declared world, never a finding.
    */
   settle(): ExternalProxyViolation | null
   /** Close every proxy server. Idempotent. */
@@ -138,6 +139,7 @@ interface ServiceState {
   /** Total calls received — counted even past {@link MAX_RECORDED_CALLS}. */
   count: number
   consumed: Set<number>
+  violations: ExternalProxyViolation[]
 }
 
 /**
@@ -156,12 +158,24 @@ export async function startExternalProxies(
 ): Promise<ExternalProxiesHandle | null> {
   const scripts = opts.scripts ?? {}
   const provided = new Map(opts.targets.map((t) => [t.service, t]))
+  const overridden = new Set(opts.overriddenEnv ?? [])
 
   // A fault script for a service the run cannot reach is a scenario defect: the
   // scenario believes it is controlling a live dependency that is not there. Loud,
   // exactly like `${HTTP_STUB:…}` naming an undeclared stub.
   for (const service of Object.keys(scripts)) {
-    if (provided.has(service)) continue
+    const target = provided.get(service)
+    if (target) {
+      for (const fault of scripts[service].faults ?? []) {
+        if (fault.match?.endpoint && !target.endpoints.some(e => e.envVar === fault.match!.endpoint)) {
+          throw new CapabilityError(CAPABILITY, `Unknown endpoint ${fault.match.endpoint} for external service "${service}"`)
+        }
+      }
+      if (scripts[service].unmatched === 'error' && target.endpoints.some(e => overridden.has(e.envVar))) {
+        throw new CapabilityError(CAPABILITY, `Controlled external service "${service}" cannot override its proxy endpoint`)
+      }
+      continue
+    }
     throw new CapabilityError(
       CAPABILITY,
       `setup.externals references "${service}", but no external service named "${service}" is declared in the recipe's api.externals AND provided on this machine` +
@@ -173,12 +187,13 @@ export async function startExternalProxies(
 
   if (opts.targets.length === 0) return null
 
-  const overridden = new Set(opts.overriddenEnv ?? [])
   const states = new Map<string, ServiceState>()
   const servers: EndpointServer[] = []
   const env: Record<string, string> = {}
+  const lifetime = new AbortController()
 
   const closeAll = async (): Promise<void> => {
+    lifetime.abort()
     await Promise.all(
       servers.map(
         (s) =>
@@ -197,6 +212,7 @@ export async function startExternalProxies(
       calls: [],
       count: 0,
       consumed: new Set(),
+      violations: [],
     }
     states.set(target.service, state)
     for (const endpoint of target.endpoints) {
@@ -206,13 +222,14 @@ export async function startExternalProxies(
       const sockets = new Set<Socket>()
       const server = http.createServer((req, res) => {
         void handleProxyRequest({
+          signal: lifetime.signal,
           service: target.service,
           envVar: endpoint.envVar,
           upstream: endpoint.url,
           state,
           req,
           res,
-        })
+        }).catch(() => res.destroy())
       })
       server.on('connection', (socket) => {
         sockets.add(socket)
@@ -239,6 +256,7 @@ export async function startExternalProxies(
     records: () => [...states.values()].flatMap((s) => s.calls),
     settle() {
       for (const [service, state] of states) {
+        if (state.violations.length) return state.violations[0]
         const expected = state.script?.calls
         if (expected === undefined || expected === state.count) continue
         return {
@@ -272,6 +290,7 @@ function listen(server: http.Server): Promise<void> {
 }
 
 interface ProxyParams {
+  signal: AbortSignal
   service: string
   envVar: string
   upstream: string
@@ -292,6 +311,7 @@ async function handleProxyRequest(p: ProxyParams): Promise<void> {
   p.res.on('error', () => {})
   p.req.on('error', () => {})
   const body = await readBody(p.req)
+  if (p.signal.aborted || p.res.destroyed) return
   const method = (p.req.method ?? 'GET').toUpperCase()
   const rawUrl = p.req.url ?? '/'
   const headers: Record<string, string> = {}
@@ -301,7 +321,8 @@ async function handleProxyRequest(p: ProxyParams): Promise<void> {
   }
 
   p.state.count += 1
-  const fault = selectFault(p.state, method, rawUrl)
+  const fault = selectFault(p.state, method, rawUrl, p.envVar)
+  const unmatched = !fault && p.state.script?.unmatched === 'error'
   const record: ExternalCallRecord = {
     service: p.service,
     envVar: p.envVar,
@@ -309,14 +330,26 @@ async function handleProxyRequest(p: ProxyParams): Promise<void> {
     url: rawUrl,
     headers,
     body: body.toString('utf-8').slice(0, CALL_EXCERPT_LIMIT),
-    outcome: fault?.rule.refuse ? 'refuse' : fault?.rule.respond ? 'respond' : 'passthrough',
+    outcome: unmatched ? 'unmatched' : fault?.rule.refuse ? 'refuse' : fault?.rule.respond ? 'respond' : 'passthrough',
     ...(fault ? { faultIndex: fault.index } : {}),
   }
   if (p.state.calls.length < MAX_RECORDED_CALLS) p.state.calls.push(record)
+  const failure = fault?.rule.expect && evaluateStubExpect(fault.rule.expect, {
+    method, url: new URL(rawUrl, 'http://external.invalid'), headers, body: body.toString('utf8'),
+  })
+  if ((failure || unmatched) && p.state.violations.length < MAX_RECORDED_CALLS) {
+    p.state.violations.push({
+      service: p.service, kind: unmatched ? 'unmatched' : 'expect',
+      expected: failure?.expected ?? `external service "${p.service}" to receive only scripted requests`,
+      actual: failure?.actual ?? `${p.envVar}: ${method} ${rawUrl}`,
+      detail: describeCalls([record]),
+    })
+  }
+  if (unmatched) { p.res.destroy(); return }
 
   // `delayMs` composes with everything: delay-then-respond scripts a slow error,
   // delay-then-forward scripts an upstream slower than the app's own timeout.
-  if (fault?.rule.delayMs) await sleep(fault.rule.delayMs)
+  if (!await waitForReply(p.res, fault?.rule.delayMs, p.signal)) return
 
   if (fault?.rule.refuse) {
     // Unanswered and destroyed — the app sees a reset connection, which is what a
@@ -328,13 +361,7 @@ async function handleProxyRequest(p: ProxyParams): Promise<void> {
 
   const respond = fault?.rule.respond
   if (respond) {
-    const payload =
-      respond.json !== undefined ? JSON.stringify(respond.json) : (respond.body ?? '')
-    p.res.writeHead(respond.status, {
-      ...(respond.json !== undefined ? { 'content-type': 'application/json' } : {}),
-      ...(respond.headers ?? {}),
-    })
-    p.res.end(payload)
+    await sendScriptedResponse(p.res, { ...respond, bodyDelayMs: fault?.rule.bodyDelayMs }, p.signal)
     return
   }
 
@@ -348,11 +375,8 @@ function readBody(req: http.IncomingMessage): Promise<Buffer> {
     req.on('data', (chunk: Buffer) => chunks.push(chunk))
     req.on('end', () => resolve(Buffer.concat(chunks)))
     req.on('error', () => resolve(Buffer.concat(chunks)))
+    req.on('close', () => resolve(Buffer.concat(chunks)))
   })
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 /**
@@ -367,18 +391,17 @@ function selectFault(
   state: ServiceState,
   method: string,
   rawUrl: string,
+  endpoint: string,
 ): { rule: GuardExternalFault; index: number } | null {
   const faults = state.script?.faults ?? []
   const pathname = new URL(rawUrl, 'http://external.invalid').pathname
   for (const [index, rule] of faults.entries()) {
     if (state.consumed.has(index)) continue
+    if (rule.match?.endpoint && rule.match.endpoint !== endpoint) continue
     if (rule.match?.method && rule.match.method !== method) continue
     if (rule.match?.path && !pathMatches(rule.match.path, pathname)) continue
     if (rule.once) state.consumed.add(index)
     // A match-only rule is an explicit passthrough: consumed, but nothing to do.
-    if (rule.respond === undefined && rule.refuse === undefined && rule.delayMs === undefined) {
-      return null
-    }
     return { rule, index }
   }
   return null
@@ -386,6 +409,7 @@ function selectFault(
 
 /** Forward the call to the real service and stream its answer straight back. */
 function forward(p: ProxyParams, method: string, rawUrl: string, body: Buffer): void {
+  if (p.signal.aborted || p.res.destroyed) return
   const upstream = new URL(p.upstream)
   // A base URL may carry a PATH PREFIX (`https://api.vendor.com/v1`); the app's own
   // request path is appended to it, never resolved against it (which would discard
@@ -413,6 +437,7 @@ function forward(p: ProxyParams, method: string, rawUrl: string, body: Buffer): 
       headers: outboundHeaders,
     },
     (upstreamRes) => {
+      if (p.signal.aborted || p.res.destroyed) { upstreamRes.destroy(); return }
       const responseHeaders: Record<string, string | string[]> = {}
       for (const [name, value] of Object.entries(upstreamRes.headers)) {
         if (value === undefined || HOP_BY_HOP.has(name.toLowerCase())) continue
@@ -422,6 +447,13 @@ function forward(p: ProxyParams, method: string, rawUrl: string, body: Buffer): 
       upstreamRes.pipe(p.res)
     },
   )
+  const abort = () => { request.destroy() }
+  p.signal.addEventListener('abort', abort, { once: true })
+  p.res.once('close', abort)
+  request.once('close', () => {
+    p.signal.removeEventListener('abort', abort)
+    p.res.removeListener('close', abort)
+  })
   request.on('error', () => {
     // The REAL service is unreachable. The app must see what it would have seen
     // talking to it directly — a broken connection, not a proxy-invented 502 that

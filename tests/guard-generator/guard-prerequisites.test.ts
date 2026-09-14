@@ -67,7 +67,7 @@ function flow(): GuardFlow {
         anchor: 'convert',
         claimTitle: 'Convert',
         proofDrivers: ['web'],
-        verification: bindClaimPrerequisites(verification, needs, targets),
+        verification: bindClaimPrerequisites(structuredClone(verification), needs, targets),
       },
     ],
   }
@@ -294,4 +294,41 @@ describe('regeneration after account setup', () => {
       h.rmrf(repoRoot)
     }
   })
+})
+
+describe('provider cases reach matching without live account requirements', () => {
+  const providerTargets = [{ ...targets[0], providers: [{ service: 'currencybeacon', baseUrlEnvs: ['CURRENCYBEACON_BASE_URL'] }] }]
+  const recipe = { web: { serve: ['node', 'app.js'] }, api: { externals: { currencybeacon: { baseUrlEnv: 'CURRENCYBEACON_BASE_URL' } } } }
+  function controlledFlow(): GuardFlow {
+    const f = flow()
+    f.milestones[0].verification = { method: 'behavior', scope: 'web', observable: 'controlled rate', cases: [
+      { id: 'rate', claim: 'rate controls total', method: 'behavior', requires: ['browser', 'provider-control'], conditions: [], prerequisites: [], providerControls: [{ service: 'CurrencyBeacon', operations: ['response'] }] },
+      { id: 'loading', claim: 'loading while own request pending', method: 'behavior', requires: ['browser', 'own-request-control'], conditions: ['request-pending'], prerequisites: [] },
+    ] }
+    f.milestones[0].verification = bindClaimPrerequisites(f.milestones[0].verification, needs, providerTargets)
+    return f
+  }
+  it('keeps only the provider case and preserves its canonical metadata', () => {
+    const result = partitionFlowPrerequisites(controlledFlow(), 'web', providerTargets, recipe)
+    expect(result.flow.milestones[0].verification?.cases?.map(c => c.id)).toEqual(['rate'])
+    expect(result.flow.milestones[0].verification?.cases?.[0]).toMatchObject({ prerequisites: [], providerControls: [{ service: 'currencybeacon', operations: ['response'], originalNames: ['CurrencyBeacon'] }] })
+    expect(result.gaps).toHaveLength(1)
+    expect(result.gaps[0]).toMatchObject({ obligations: [{ milestone: 1, caseId: 'loading' }], blocker: { kind: 'unsupported-capability', capabilities: ['own-request-control'] } })
+  })
+  it('reports an undeclared provider wiring gap and rejects replay without a strict script', () => {
+    const f = controlledFlow()
+    const result = partitionFlowPrerequisites(f, 'web', targets, recipe)
+    expect(result.flow.milestones).toEqual([])
+    expect(result.gaps.find(g => g.obligations?.[0].caseId === 'rate')?.reason).toContain('no declared external')
+    expect(scenarioCasePrerequisiteProblems(f, scenario('rate'), providerTargets, {}, recipe).map(p => p.reason).join()).toContain('CURRENCYBEACON_BASE_URL')
+  })
+})
+
+it('rejects saved provider-counter evidence for an ambiguous or browser-to-app case during reuse and authoring', () => {
+  const f = flow()
+  f.milestones[0].verification!.cases = [{ id: 'count', claim: 'Clicking Convert calls the conversion endpoint once', method: 'behavior', requires: ['browser', 'provider-control'], conditions: [], providerControls: [{ service: 'currencybeacon', operations: ['call-count'] }] }]
+  expect(scenarioCasePrerequisiteProblems(f, scenario('count'), targets)[0].reason).toContain('Re-extract')
+  f.milestones[0].verification!.cases[0].requestBoundary = 'browser-to-app'
+  f.milestones[0].verification!.cases[0].requires.push('own-request-control')
+  expect(scenarioCasePrerequisiteProblems(f, scenario('count'), targets)[0].reason).toContain('own-request-control')
 })

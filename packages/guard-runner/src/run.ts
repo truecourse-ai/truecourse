@@ -1,6 +1,8 @@
+import { scenarioProviderControlProblems } from './provider-control.js'
+import { preparationOwnedEnvKeys } from './preparation-postgres.js'
 import { buildCredentialRedactor } from './api/redact.js'
 import { readGuardFlowsCorpus } from './store.js'
-import { scenarioMilestoneProof } from '@truecourse/shared'
+import { scenarioMilestoneProof, verificationCapabilityGap } from '@truecourse/shared'
 import { resolvePrerequisites, scenarioAccountEnvironment, scenarioPrerequisiteBlock } from './prerequisites.js'
 import { prepareScenario, validateScenarioPreparation, type PreparedScenarioWorld } from './preparation.js'
 /**
@@ -442,6 +444,8 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   // the fold from per-bind resolutions to the one scenario verdict.
   const docIndexes = indexRepoDocs(repoRoot, new Set(selected.flatMap((s) => s.binds.map((b) => b.doc))))
   const indexFor = (doc: string): DocSectionIndex | null => docIndexes.indexes.get(doc) ?? null
+  const currentFlows = readGuardFlowsCorpus(repoRoot)?.flows ?? []
+  const sourceFlowFor = (scenario: GuardScenario) => currentFlows.find(f => f.id === scenario.flow?.id)
   const planned = selected.map((scenario) => ({
     scenario,
     verdict: resolveScenarioBinds(scenario.binds, indexFor),
@@ -583,7 +587,7 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
     verdict: ScenarioBindingVerdict
     block: DependencyBlock
   }[] = []
-  const currentFlows = readGuardFlowsCorpus(repoRoot)?.flows ?? []
+  const capabilityBlocked: { scenario: GuardScenario; verdict: ScenarioBindingVerdict; reason: string }[] = []
   const runnable = prepared.filter((p) => {
     const preparation = p.scenario.setup?.preparation;
     const preparationNeeds = preparation ? loaded.recipe.preparations?.[preparation]?.needs ?? [] : [];
@@ -595,8 +599,17 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
         prerequisites: [...(p.scenario.prerequisites ?? []), ...suppliedNeeds.map(dependency => ({ dependency, mode: 'provided' as const }))],
       }
     }
-    const flow = currentFlows.find(flow => flow.id === p.scenario.flow?.id)
+    const flow = sourceFlowFor(p.scenario)
     if (flow) {
+      const reasons = scenarioMilestoneProof(p.scenario.steps).flatMap(proof => {
+        const verification = flow.milestones.find(m => m.order === proof.milestone)?.verification
+        const reason = verificationCapabilityGap(verification, proof.driver, proof.checks)
+        return reason ? [reason] : []
+      })
+      if (reasons.length) {
+        capabilityBlocked.push({ ...p, reason: [...new Set(reasons)].join(' ') })
+        return false
+      }
       const prerequisites = scenarioMilestoneProof(p.scenario.steps).flatMap(proof => flow.milestones.find(m => m.order === proof.milestone)?.verification?.cases?.filter(c => !proof.checks || proof.checks.includes(c.id)).flatMap(c => c.prerequisites ?? []) ?? [])
       if (prerequisites.length) p.scenario = { ...p.scenario, prerequisites: [...(p.scenario.prerequisites ?? []), ...prerequisites] }
     }
@@ -1076,6 +1089,22 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       opts.onScenarioSettled?.(settled, selected.length, result)
     }
 
+    // Saved cases with unavailable or ambiguous evidence never become green by
+    // executing assertions at a different request boundary.
+    for (const { scenario, verdict, reason } of capabilityBlocked) {
+      const result: GuardScenarioResult = {
+        id: scenario.id, title: scenario.title, binds: scenario.binds[0],
+        ...(scenario.flow ? { flowId: scenario.flow.id } : {}),
+        outcome: 'blocked', durationMs: 0,
+        failure: { step: 1, expected: 'supported observations for every selected case', actual: reason },
+        ...(verdict.kind === 'executable' && verdict.remappedTo ? { remappedTo: verdict.remappedTo } : {}),
+        ...annotate(scenario),
+      }
+      results.push(result)
+      settled += 1
+      opts.onScenarioSettled?.(settled, selected.length, result)
+    }
+
     // Scenarios held back by the dependency gate settle as `blocked` — a
     // non-executed outcome like stale/orphaned, not a verdict about the repo. The
     // `failure` carries the same sentence for every surface that already renders a
@@ -1230,6 +1259,17 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       const startedAt = Date.now()
       const account = scenarioAccountEnvironment(scenario, resolvedPrerequisites)
       try {
+      const sourceFlow = sourceFlowFor(scenario)
+      if (sourceFlow) for (const proof of scenarioMilestoneProof(scenario.steps)) {
+        const controls = sourceFlow.milestones.find(m => m.order === proof.milestone)?.verification?.cases
+          ?.filter(c => !proof.checks || proof.checks.includes(c.id)).flatMap(c => c.providerControls ?? []) ?? []
+        const problems = scenarioProviderControlProblems(controls, proof.driver, resolvedPrerequisites.targets, loaded.recipe, scenario)
+        if (problems.length) throw new Error(problems.join(' '))
+      }
+      const profile = scenario.setup?.preparation && loaded.recipe.preparations?.[scenario.setup.preparation]
+      if (profile && externalTargets.some(t => t.endpoints.some(e => preparationOwnedEnvKeys(profile).has(e.envVar)))) {
+        throw new Error('Provider proxy cannot override a preparation-owned binding.')
+      }
       const preparationError = validateScenarioPreparation(loaded.recipe, scenario)
       if (preparationError) throw new Error(preparationError)
       if (scenario.setup?.preparation) privateWorld = await prepareScenario({
@@ -1239,6 +1279,10 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
         signal: cancel.signal, timeoutMs: opts.buildTimeoutMs,
       })
       const executionSecrets = new Map([...account.secrets, ...(privateWorld?.secrets ?? [])]);
+      for (const target of resolvedPrerequisites.targets) for (const key of target.credentialEnv) {
+        const value = scenario.setup?.env?.[key]
+        if (value) executionSecrets.set(`scenario:${key}`, value)
+      }
       const privateCredentials = privateWorld && new Map([...privateWorld.credentials].map(([name, c]) => [name, c.value]))
       const privateCredentialView = (serverName: string) => {
         const credentials = new Map<string, string>()
@@ -1287,7 +1331,8 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               unique: scenarioUnique(runNonce, scenario.id),
               resolvedEntry: resolvedEntry!,
               externalSecrets: executionSecrets,
-              recipeEnv: { ...loaded.recipe.env, ...account.env, ...(privateWorld?.env ?? {}) },
+              externalTargets,
+              recipeEnv: { ...loaded.recipe.env, ...webSurface?.env, ...account.env, ...(privateWorld?.env ?? {}) },
               ...(loaded.recipe.expose ? { expose: loaded.recipe.expose } : {}),
               // Every binding is `provided` by construction — the gate above kept the
               // rest out of `runnable` — so this only ever materializes real instances.
