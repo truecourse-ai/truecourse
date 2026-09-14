@@ -268,3 +268,130 @@ describe('GET /api/context/documents', () => {
     expect(res.body.corpusAt).toBe('2026-01-01T00:00:00Z');
   });
 });
+
+/**
+ * The documents the corpus does NOT hold have rows here too, because a document
+ * with no row anywhere cannot be decided about. Three states, and the route
+ * says which each document is in and why: the scan's own words for skipping
+ * one, and nothing invented for one a reader dropped.
+ */
+describe('GET /api/context/documents, the documents outside the corpus', () => {
+  const EXTRA = 'site-docs-extra';
+  const CHANGELOG = ref(EXTRA, 'changelog.md');
+  const LEGACY = ref(EXTRA, 'legacy.md');
+
+  /** A second site whose two documents the corpus does not hold. */
+  async function seedOutside(): Promise<void> {
+    await context.createSource(TEST_ORG, {
+      id: EXTRA,
+      kind: 'site',
+      title: 'docs.extra.com',
+      config: { llmsTxtUrl: 'https://docs.extra.com/llms.txt' },
+    });
+    await context.writeDocuments(TEST_ORG, EXTRA, {
+      documents: [
+        {
+          docId: 'https://docs.extra.com/changelog',
+          docPath: 'changelog.md',
+          title: 'Changelog',
+          url: null,
+          contentHash: 'hash-changelog',
+          updatedAt: '2026-01-05T00:00:00.000Z',
+          body: BODY,
+        },
+        {
+          docId: 'https://docs.extra.com/legacy',
+          docPath: 'legacy.md',
+          title: 'Legacy',
+          url: null,
+          contentHash: 'hash-legacy',
+          updatedAt: '2026-01-06T00:00:00.000Z',
+          body: BODY,
+        },
+      ],
+      removed: [],
+    });
+    await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', {
+      ...corpus(),
+      skippedDocs: [
+        { ref: CHANGELOG, reason: 'a changelog, not a specification', category: 'changelog' },
+      ],
+    } as CuratedCorpus);
+  }
+
+  const rowFor = async (ref: string): Promise<ContextDocumentRow> =>
+    (await rows()).find((row) => row.ref === ref)!;
+
+  beforeEach(seedOutside);
+
+  it('answers the document the scan skipped, with the reason it gave', async () => {
+    const row = await rowFor(CHANGELOG);
+    expect(row).toMatchObject({
+      title: 'Changelog',
+      sourceTitle: 'docs.extra.com',
+      inCorpus: false,
+      inclusion: 'not-included',
+      decision: null,
+      skipReason: 'a changelog, not a specification',
+      status: null,
+      repositories: [],
+      readings: [],
+    });
+  });
+
+  it('answers a document the corpus holds as in the corpus, with its coverage word', async () => {
+    await setContextBindings(TEST_ORG, repoA.project.name, [SITE]);
+    expect(await rowFor(REFUNDS)).toMatchObject({
+      inCorpus: true,
+      inclusion: 'in-corpus',
+      decision: null,
+      skipReason: null,
+      status: 'blocked',
+    });
+  });
+
+  it('carries the decision a reader just made, which no scan has applied', async () => {
+    await request(app).post('/api/context/includes').send({ ref: CHANGELOG }).expect(200);
+    expect(await rowFor(CHANGELOG)).toMatchObject({
+      inCorpus: false,
+      decision: 'include',
+      inclusion: 'not-included',
+    });
+
+    await request(app).post('/api/context/excludes').send({ ref: REFUNDS }).expect(200);
+    // Still in the corpus until a scan runs, so it keeps its coverage word.
+    expect(await rowFor(REFUNDS)).toMatchObject({
+      inCorpus: true,
+      decision: 'exclude',
+      inclusion: 'excluded',
+      status: 'not-linked',
+    });
+  });
+
+  it('answers a document the scan dropped whole off the decision alone', async () => {
+    await request(app).post('/api/context/excludes').send({ ref: LEGACY }).expect(200);
+    expect(await rowFor(LEGACY)).toMatchObject({
+      title: 'Legacy',
+      inCorpus: false,
+      decision: 'exclude',
+      inclusion: 'excluded',
+      skipReason: null,
+      status: null,
+    });
+  });
+
+  it('narrows by inclusion, and answers no status with a document that has none', async () => {
+    await request(app).post('/api/context/excludes').send({ ref: LEGACY }).expect(200);
+
+    expect((await rows('?inclusion=not-included')).map((r) => r.ref)).toEqual([CHANGELOG]);
+    expect((await rows('?inclusion=excluded')).map((r) => r.ref)).toEqual([LEGACY]);
+    expect((await rows('?inclusion=in-corpus')).map((r) => r.ref).sort()).toEqual(
+      [ORPHAN, REFUNDS].sort(),
+    );
+    // AND across dimensions, as every other pair of them reads.
+    expect(await rows(`?inclusion=not-included&source=${SITE}`)).toEqual([]);
+    expect((await rows('?status=not-linked')).map((r) => r.ref).sort()).toEqual(
+      [ORPHAN, REFUNDS].sort(),
+    );
+  });
+});

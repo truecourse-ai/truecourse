@@ -111,6 +111,13 @@ export interface ContextStore {
    * changed. ISO-8601 with a `Z`, so the comparison is a string comparison.
    */
   changedAt(org: string): Promise<string | null>;
+
+  /**
+   * Move that stamp forward by hand, for a change the store itself never sees:
+   * an inclusion decision, which is the workspace's and lives with the spec,
+   * yet changes which documents the next corpus should hold.
+   */
+  markChanged(org: string, at?: string): Promise<void>;
 }
 
 /** Reaching the store before boot installed it is a bug — say so, don't invent. */
@@ -163,6 +170,9 @@ class UninstalledContextStore implements ContextStore {
     this.fail();
   }
   changedAt(): Promise<string | null> {
+    this.fail();
+  }
+  markChanged(): Promise<void> {
     this.fail();
   }
 }
@@ -237,6 +247,9 @@ export const listContextBindings = (org: string): Promise<ContextBinding[]> =>
   active.listBindings(org);
 
 export const contextChangedAt = (org: string): Promise<string | null> => active.changedAt(org);
+
+export const markContextChanged = (org: string, at?: string): Promise<void> =>
+  active.markChanged(org, at);
 
 /**
  * One document's body by its corpus ref (`context/<sourceId>/<docPath>`), or

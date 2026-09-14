@@ -15,7 +15,12 @@ import {
   type ContextRowDocument,
   type ContextRowSource,
 } from '@truecourse/core/services/context';
-import type { GuardCoveragePlainStatus } from '@truecourse/shared';
+import {
+  CONTEXT_DOCUMENT_STATUS_ORDER,
+  contextDecisionPending,
+  type ContextDocumentRow,
+  type GuardCoveragePlainStatus,
+} from '@truecourse/shared';
 import type { CuratedCorpus } from '@truecourse/spec-consolidator';
 
 const REPO = (path: string): string => `context/repo-acme-web/${path}`;
@@ -258,5 +263,144 @@ describe('narrowing the rows', () => {
 
   it('keeps everything when no dimension is named', () => {
     expect(filterContextDocumentRows(rows, {})).toHaveLength(3);
+  });
+});
+
+/**
+ * INCLUSION, the dimension coverage is not. The rows widen past the corpus only
+ * when the caller hands the decisions in, because a document with no row
+ * anywhere cannot be decided about — and Home, which counts what is proven,
+ * hands none in and sees the corpus alone.
+ */
+describe('where a document stands with the corpus', () => {
+  const CHANGELOG = SITE('changelog.md');
+  const LEGACY = SITE('legacy.md');
+
+  const WIDE_LEDGER: ContextRowDocument[] = [
+    ...LEDGER,
+    {
+      sourceId: 'site-docs-acme',
+      docPath: 'changelog.md',
+      title: 'Changelog',
+      updatedAt: '2026-09-04T10:00:00.000Z',
+    },
+    {
+      sourceId: 'site-docs-acme',
+      docPath: 'legacy.md',
+      title: 'Legacy',
+      updatedAt: '2026-09-05T10:00:00.000Z',
+    },
+  ];
+
+  /** The corpus with one document the scan skipped, and its words for it. */
+  function skipped(): CuratedCorpus {
+    return {
+      ...corpus(),
+      skippedDocs: [
+        { ref: CHANGELOG, reason: 'a changelog, not a specification', category: 'changelog' },
+      ],
+    } as CuratedCorpus;
+  }
+
+  const compose = (
+    over: Partial<Parameters<typeof composeContextDocumentRows>[0]> = {},
+  ): ReturnType<typeof composeContextDocumentRows> =>
+    composeContextDocumentRows({
+      corpus: skipped(),
+      sources: SOURCES,
+      documents: WIDE_LEDGER,
+      bindings: [{ repoFullName: 'acme/web', sourceId: 'site-docs-acme' }],
+      coverage: coverage({ 'acme/web': { [SITE('webhooks.md')]: 'failed' } }),
+      ...over,
+    });
+
+  const find = (
+    rows: ReturnType<typeof composeContextDocumentRows>,
+    ref: string,
+  ): ContextDocumentRow | undefined => rows.find((row) => row.ref === ref);
+
+  it('holds to the corpus when no decisions are handed in', () => {
+    const rows = compose();
+    expect(rows).toHaveLength(3);
+    expect(rows.every((row) => row.inCorpus)).toBe(true);
+    expect(rows.every((row) => row.inclusion === 'in-corpus')).toBe(true);
+    expect(rows.every((row) => row.status !== null)).toBe(true);
+  });
+
+  it('gives the document the scan skipped a row, with the scan’s own reason', () => {
+    const row = find(compose({ decisions: {} }), CHANGELOG)!;
+    expect(row.title).toBe('Changelog');
+    expect(row.inCorpus).toBe(false);
+    expect(row.inclusion).toBe('not-included');
+    expect(row.skipReason).toBe('a changelog, not a specification');
+    // Nothing reads what the corpus does not hold, so nothing has a reading.
+    expect(row.status).toBeNull();
+    expect(row.repositories).toEqual([]);
+    expect(row.readings).toEqual([]);
+  });
+
+  it('says a force-include stands that the corpus has not applied', () => {
+    const row = find(compose({ decisions: { manualIncludes: [CHANGELOG] } }), CHANGELOG)!;
+    expect(row.decision).toBe('include');
+    expect(row.inclusion).toBe('not-included');
+    expect(contextDecisionPending(row)).toBe(true);
+  });
+
+  it('reads a force-include a scan has since applied as in the corpus', () => {
+    const row = find(
+      compose({ decisions: { manualIncludes: [SITE('webhooks.md')] } }),
+      SITE('webhooks.md'),
+    )!;
+    expect(row.decision).toBe('include');
+    expect(row.inclusion).toBe('in-corpus');
+    expect(contextDecisionPending(row)).toBe(false);
+  });
+
+  it('reads an exclusion the corpus still holds as excluded, keeping its coverage word', () => {
+    const row = find(
+      compose({ decisions: { manualExcludes: [SITE('webhooks.md')] } }),
+      SITE('webhooks.md'),
+    )!;
+    expect(row.inclusion).toBe('excluded');
+    expect(row.inCorpus).toBe(true);
+    expect(row.status).toBe('failed');
+    expect(contextDecisionPending(row)).toBe(true);
+  });
+
+  it('gives a document the scan dropped whole a row off the ledger alone', () => {
+    const row = find(compose({ decisions: { manualExcludes: [LEGACY] } }), LEGACY)!;
+    expect(row.title).toBe('Legacy');
+    expect(row.inclusion).toBe('excluded');
+    expect(row.inCorpus).toBe(false);
+    expect(row.status).toBeNull();
+    // The scan said nothing about it: the decision is the whole reason.
+    expect(row.skipReason).toBeNull();
+    expect(contextDecisionPending(row)).toBe(false);
+  });
+
+  it('names no document the ledger has forgotten', () => {
+    const rows = compose({ decisions: { manualExcludes: [SITE('gone.md')] } });
+    expect(find(rows, SITE('gone.md'))).toBeUndefined();
+  });
+
+  it('sorts every document the corpus does not hold after every one it does', () => {
+    const rows = compose({ decisions: { manualExcludes: [LEGACY] } });
+    expect(rows.map((row) => row.status === null)).toEqual([false, false, false, true, true]);
+    expect(rows.slice(3).map((row) => row.title)).toEqual(['Changelog', 'Legacy']);
+  });
+
+  it('narrows by inclusion, and never answers a status with what has none', () => {
+    const rows = compose({ decisions: { manualExcludes: [LEGACY] } });
+    expect(
+      filterContextDocumentRows(rows, { inclusion: ['not-included'] }).map((r) => r.ref),
+    ).toEqual([CHANGELOG]);
+    expect(filterContextDocumentRows(rows, { inclusion: ['excluded'] }).map((r) => r.ref)).toEqual([
+      LEGACY,
+    ]);
+    expect(filterContextDocumentRows(rows, { inclusion: ['in-corpus'] })).toHaveLength(3);
+    // The two statusless rows answer no coverage question, not even Not linked.
+    expect(
+      filterContextDocumentRows(rows, { status: [...CONTEXT_DOCUMENT_STATUS_ORDER] }),
+    ).toHaveLength(3);
   });
 });

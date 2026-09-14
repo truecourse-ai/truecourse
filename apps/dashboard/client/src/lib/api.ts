@@ -971,6 +971,7 @@ export function listContextDocuments(query: {
   status?: string[];
   source?: string[];
   repo?: string[];
+  inclusion?: string[];
 } = {}): Promise<ContextDocumentsViewResponse> {
   const params = new URLSearchParams();
   for (const [key, values] of Object.entries(query)) {

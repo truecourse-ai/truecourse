@@ -158,6 +158,53 @@ describe('the staleness comparison', () => {
   });
 });
 
+/**
+ * A decision about WHICH documents the corpus should hold changes nothing until
+ * the next scan applies it — so recording one has to light the amber dot that
+ * says a scan is what is missing. Anything less records a decision that looks
+ * like it took effect and did not.
+ */
+describe('an inclusion decision says a scan is needed', () => {
+  const stamp = async (): Promise<{ changedAt: string | null; stale: boolean }> =>
+    (await request(app).get('/api/context/staleness').expect(200)).body;
+
+  it('moves the workspace’s changed-at stamp, on each of the four writes', async () => {
+    await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', corpus());
+    expect(await stamp()).toMatchObject({ changedAt: null, stale: false });
+
+    const writes = [
+      ['post', '/api/context/includes'],
+      ['delete', '/api/context/includes'],
+      ['post', '/api/context/excludes'],
+      ['delete', '/api/context/excludes'],
+    ] as const;
+    let previous: string | null = null;
+    for (const [verb, path] of writes) {
+      await request(app)[verb](path).send({ ref: ref(SRC_A, 'one.md') }).expect(200);
+      const { changedAt } = await stamp();
+      expect(changedAt).not.toBeNull();
+      if (previous) expect(changedAt! >= previous).toBe(true);
+      previous = changedAt;
+    }
+    expect((await stamp()).stale).toBe(true);
+  });
+
+  it('leaves the stamp alone for a conflict verdict, which a scan does not apply', async () => {
+    await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', corpus());
+    await request(app)
+      .post('/api/context/conflict-resolution')
+      .send({
+        docA: ref(SRC_A, 'one.md'),
+        anchorA: 'Cancellation',
+        docB: ref(SRC_B, 'site.md'),
+        anchorB: 'Cancellation',
+        verdict: 'a',
+      })
+      .expect(200);
+    expect(await stamp()).toMatchObject({ changedAt: null, stale: false });
+  });
+});
+
 // ---------------------------------------------------------------------------
 // GET /api/context/corpus + the workspace decisions
 // ---------------------------------------------------------------------------

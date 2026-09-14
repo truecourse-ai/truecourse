@@ -344,6 +344,16 @@ describe('changedAt', () => {
     expect(await store.changedAt(ORG)).toBe('2026-09-20T10:00:00.000Z');
   });
 
+  // An inclusion decision is stored with the spec, so it passes none of the
+  // writes above — the one stamp is moved by hand, or the corpus looks current
+  // while a decision waits for the scan that applies it.
+  it('moves when a change this store never sees is marked', async () => {
+    await store.markChanged(ORG, '2026-09-11T10:00:00.000Z');
+    expect(await store.changedAt(ORG)).toBe('2026-09-11T10:00:00.000Z');
+    await store.markChanged(ORG, '2026-09-01T10:00:00.000Z');
+    expect(await store.changedAt(ORG)).toBe('2026-09-11T10:00:00.000Z');
+  });
+
   it('belongs to the asking workspace alone', async () => {
     await store.setBindings(ORG, 'acme/api', ['docs']);
     expect(await store.changedAt(OTHER)).toBeNull();

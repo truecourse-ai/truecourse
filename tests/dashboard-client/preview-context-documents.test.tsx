@@ -99,6 +99,10 @@ const REFUNDS: ContextDocumentRow = {
     { repository: REPO_A.name, status: 'proved' },
   ],
   status: 'failed',
+  inCorpus: true,
+  decision: null,
+  inclusion: 'in-corpus',
+  skipReason: null,
   updatedAt: '2026-09-01T10:00:00.000Z',
 };
 
@@ -112,7 +116,39 @@ const ONBOARDING: ContextDocumentRow = {
   repositories: [],
   readings: [],
   status: 'not-linked',
+  inCorpus: true,
+  decision: null,
+  inclusion: 'in-corpus',
+  skipReason: null,
   updatedAt: '2026-08-20T10:00:00.000Z',
+};
+
+/** A document the scan left out: no coverage to speak of, and a reason instead. */
+const CHANGELOG: ContextDocumentRow = {
+  ref: 'context/repo-acme-web/CHANGELOG.md',
+  title: 'Changelog',
+  area: '',
+  sourceId: REPO_SOURCE.id,
+  sourceTitle: REPO_SOURCE.title,
+  sourceKind: 'repository',
+  repositories: [],
+  readings: [],
+  status: null,
+  inCorpus: false,
+  decision: null,
+  inclusion: 'not-included',
+  skipReason: 'a changelog, not a specification',
+  updatedAt: '2026-08-19T10:00:00.000Z',
+};
+
+/** One a reader dropped, which a scan has since applied. */
+const LEGACY: ContextDocumentRow = {
+  ...CHANGELOG,
+  ref: 'context/repo-acme-web/docs/legacy.md',
+  title: 'Legacy',
+  decision: 'exclude',
+  inclusion: 'excluded',
+  skipReason: null,
 };
 
 function json(body: unknown, status = 200): Response {
@@ -341,6 +377,77 @@ describe('Context, the documents', () => {
       expect(screen.getByTestId('address')).toHaveTextContent(
         '/context/doc/context%2Fsite-docs-acme%2Frefunds.md',
       ),
+    );
+  });
+});
+
+/**
+ * Every document Context knows has a row, not only the ones the corpus kept.
+ * The five coverage words say nothing about a document nothing was asked to
+ * prove, so one the corpus does not hold wears its INCLUSION word instead, and
+ * says why underneath it.
+ */
+describe('the documents the corpus does not hold', () => {
+  const world = { documents: [REFUNDS, ONBOARDING, CHANGELOG, LEGACY] };
+
+  it('draws them with their standing and the reason, never a coverage word', async () => {
+    serve(world);
+    renderAt('/context/documents');
+
+    await waitFor(() => expect(rows()).toHaveLength(4));
+    const [, , changelog, legacy] = rows();
+    expect(within(changelog!).getByText('Changelog')).toBeInTheDocument();
+    expect(within(changelog!).getByText('Not included')).toBeInTheDocument();
+    expect(within(changelog!).getByText('a changelog, not a specification')).toBeInTheDocument();
+    expect(within(legacy!).getByText('Excluded')).toBeInTheDocument();
+  });
+
+  it('says what the next scan will do with a decision it has not applied', async () => {
+    serve({
+      documents: [
+        { ...CHANGELOG, decision: 'include' as const },
+        { ...REFUNDS, decision: 'exclude' as const, inclusion: 'excluded' as const },
+      ],
+    });
+    renderAt('/context/documents');
+
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    expect(screen.getByText('Excluded at the next scan')).toBeInTheDocument();
+    expect(screen.getByText('Included at the next scan')).toBeInTheDocument();
+    // The one the corpus still holds keeps the coverage word it earned.
+    expect(screen.getByText('Failed')).toBeInTheDocument();
+  });
+
+  it('narrows by inclusion, in the address, and a status filter leaves them out', async () => {
+    serve(world);
+    renderAt('/context/documents');
+    const user = userEvent.setup();
+    await waitFor(() => expect(rows()).toHaveLength(4));
+
+    await user.click(screen.getByRole('button', { name: 'Add filter' }));
+    await user.click(await screen.findByRole('option', { name: /Inclusion/ }));
+    await user.click(await screen.findByRole('option', { name: /Not included/ }));
+
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    expect(screen.getByTestId('address')).toHaveTextContent(
+      '/context/documents?inclusion=not-included',
+    );
+    expect(within(rows()[0]!).getByText('Changelog')).toBeInTheDocument();
+  });
+
+  it('never answers a coverage filter with a document that has no coverage', async () => {
+    serve(world);
+    renderAt('/context/documents?status=not-linked');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    expect(within(rows()[0]!).getByText('Onboarding')).toBeInTheDocument();
+  });
+
+  it('counts the new states in the one tally', async () => {
+    serve(world);
+    renderAt('/context/documents');
+    await waitFor(() => expect(rows()).toHaveLength(4));
+    expect(screen.getByRole('group', { name: 'Documents tally' }).textContent).toBe(
+      '1 Failed1 Not linked1 Not included1 Excluded4 total',
     );
   });
 });

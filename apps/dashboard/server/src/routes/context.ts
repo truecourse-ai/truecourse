@@ -12,6 +12,7 @@
  *   GET    /api/context/sources/:id/documents its ledger
  *   GET    /api/context/doc?ref=              one document's body, by its corpus ref
  *   GET    /api/context/documents             the rows of the Documents view, status folded
+ *                                             and inclusion said, corpus or not
  *   POST   /api/context/scan                  the workspace Document scan; 202 { jobId }
  *   GET    /api/context/staleness             has the context moved since the corpus?
  *   GET    /api/context/corpus                the workspace corpus + its decisions
@@ -43,6 +44,7 @@ import {
   listContextDocuments,
   listContextSources,
   listContextSyncs,
+  markContextChanged,
   readContextDocByRef,
   removeContextSource,
   setContextBindings,
@@ -420,8 +422,13 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
    * repositories read it. A document no repository reads is answered without
    * reading its body at all.
    *
-   * `?area=&status=&source=&repo=` narrow the answer, repeatable, AND across
-   * dimensions and OR within one — the same reading the page's filter row has.
+   * The rows are every document Context knows, not only the kept ones: the
+   * decisions ride in, so a document the scan skipped and a document a reader
+   * excluded each get a row saying where it stands and why.
+   *
+   * `?area=&status=&source=&repo=&inclusion=` narrow the answer, repeatable,
+   * AND across dimensions and OR within one — the same reading the page's
+   * filter row has.
    */
   router.get('/documents', async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -431,10 +438,11 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
         res.json({ documents: [], corpusAt: null });
         return;
       }
-      const [sources, documents, bindings] = await Promise.all([
+      const [sources, documents, bindings, decisions] = await Promise.all([
         listContextSources(org),
         listContextDocuments(org),
         listContextBindings(org),
+        getWorkspaceDecisions(org),
       ]);
 
       // The repositories a row may name: the ones this caller can see, by the
@@ -492,6 +500,10 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
         bindings,
         coverage,
         visibleRepos: new Set(visible.keys()),
+        decisions: {
+          manualIncludes: decisions.manualIncludes ?? [],
+          manualExcludes: decisions.manualExcludes ?? [],
+        },
       });
       res.json({
         documents: filterContextDocumentRows(rows, {
@@ -499,6 +511,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
           status: req.query.status === undefined ? [] : queryValues(req.query.status),
           source: req.query.source === undefined ? [] : queryValues(req.query.source),
           repo: req.query.repo === undefined ? [] : queryValues(req.query.repo),
+          inclusion: req.query.inclusion === undefined ? [] : queryValues(req.query.inclusion),
         }),
         corpusAt: corpus.generatedAt ?? null,
       });
@@ -584,10 +597,26 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
     return ref.trim();
   }
 
+  /**
+   * An INCLUSION decision, on top of {@link settled}: it changes which
+   * documents the corpus should hold, and only a scan can apply it. So the
+   * workspace's changed-at stamp moves and the change is announced — which is
+   * what lights the amber dot on Scan and says a scan is what is missing.
+   *
+   * A conflict verdict is not one of these: it is applied at Test generation,
+   * so it leaves the corpus's own document set alone.
+   */
+  async function decided(org: string, write: () => Promise<DecisionsFile>): Promise<DecisionsFile> {
+    const decisions = await settled(org, write);
+    await markContextChanged(org);
+    await emitContextChanged(org, { change: 'documents' });
+    return decisions;
+  }
+
   router.post('/includes', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);
-      res.json(includeAck(await settled(org, () => addWorkspaceManualInclude(org, readRef(req)))));
+      res.json(includeAck(await decided(org, () => addWorkspaceManualInclude(org, readRef(req)))));
     } catch (e) {
       respond(res, next, e);
     }
@@ -596,7 +625,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   router.delete('/includes', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);
-      res.json(includeAck(await settled(org, () => removeWorkspaceManualInclude(org, readRef(req)))));
+      res.json(includeAck(await decided(org, () => removeWorkspaceManualInclude(org, readRef(req)))));
     } catch (e) {
       respond(res, next, e);
     }
@@ -605,7 +634,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   router.post('/excludes', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);
-      res.json(includeAck(await settled(org, () => addWorkspaceManualExclude(org, readRef(req)))));
+      res.json(includeAck(await decided(org, () => addWorkspaceManualExclude(org, readRef(req)))));
     } catch (e) {
       respond(res, next, e);
     }
@@ -614,7 +643,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   router.delete('/excludes', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);
-      res.json(includeAck(await settled(org, () => removeWorkspaceManualExclude(org, readRef(req)))));
+      res.json(includeAck(await decided(org, () => removeWorkspaceManualExclude(org, readRef(req)))));
     } catch (e) {
       respond(res, next, e);
     }

@@ -15,7 +15,11 @@
  * status or a job state becomes a colour.
  */
 
-import type { ContextDocumentStatus, ContextSourceStatus } from '@truecourse/shared';
+import type {
+  ContextDocumentInclusion,
+  ContextDocumentStatus,
+  ContextSourceStatus,
+} from '@truecourse/shared';
 import type { GuardCoveragePlainStatus } from '@truecourse/shared';
 import type { WorkStatus } from '@/components/sessions/run-model';
 import { HoverPopover } from '@/preview/ui/hover-popover';
@@ -94,6 +98,17 @@ export const CONTEXT_DOC_TONE: Record<ContextDocumentStatus, StatusTone> = {
   'not-run': 'neutral',
   'not-testable': 'neutral',
   'not-linked': 'neutral',
+};
+
+/**
+ * Where a document stands with the corpus. Neutral throughout: a document the
+ * scan did not include, and one a reader excluded, are nobody's to-do — they
+ * are a standing of their own, never a verdict on proof.
+ */
+export const CONTEXT_INCLUSION_TONE: Record<ContextDocumentInclusion, StatusTone> = {
+  'in-corpus': 'neutral',
+  'not-included': 'neutral',
+  excluded: 'neutral',
 };
 
 /** A source's sync state as a status word, everywhere a source appears. */

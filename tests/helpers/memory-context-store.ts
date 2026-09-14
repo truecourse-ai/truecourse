@@ -2,7 +2,8 @@
  * The workspace context store, in memory — what a route, job or hook test needs
  * from it without a database. Same contract as `PgContextStore`, staleness
  * included: ONE workspace stamp, moved by a sync that reconciled something, by
- * a link set that actually differs, and by a source being removed.
+ * a link set that actually differs, by a source being removed, and by hand
+ * (`markChanged`) for the inclusion decisions this store never sees.
  */
 
 import type {
@@ -174,6 +175,10 @@ export function memoryContextStore(clock: () => string = () => new Date().toISOS
 
     async changedAt(org) {
       return stale.get(org) ?? null;
+    },
+
+    async markChanged(org, at) {
+      touch(org, at);
     },
   };
 

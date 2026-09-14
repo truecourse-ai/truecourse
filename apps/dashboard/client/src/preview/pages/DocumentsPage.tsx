@@ -1,14 +1,21 @@
 /**
- * Context › Documents: ONE table, one row per document of the workspace
- * corpus, worst first. A source is a filter over it, a repository is a reading
+ * Context › Documents: ONE table, one row per document the workspace's Context
+ * knows, worst first. A source is a filter over it, a repository is a reading
  * of it, and the status a row wears is the server's fold across every
  * repository that reads the document (`GET /api/context/documents`) — nothing
  * here computes a status, and nothing here writes a word the server did not.
  *
- * ONE filter row narrows it along four dimensions — Area, Status, Source and
- * Repository — and every narrowing rides the address (`?area=`, `?status=`,
- * `?source=`, `?repo=`), so a narrowed page is a place: the Sources list and
- * the repository's Context tab link straight to `?source=<id>`.
+ * The documents the corpus does NOT hold have rows here too, because a document
+ * with no row anywhere cannot be decided about: one the scan skipped reads Not
+ * included, one a reader dropped reads Excluded, and either says why. Inclusion
+ * is its own dimension, never a sixth coverage word — the deciding itself is on
+ * the document's own page.
+ *
+ * ONE filter row narrows it along five dimensions — Area, Status, Inclusion,
+ * Source and Repository — and every narrowing rides the address (`?area=`,
+ * `?status=`, `?inclusion=`, `?source=`, `?repo=`), so a narrowed page is a
+ * place: the Sources list and the repository's Context tab link straight to
+ * `?source=<id>`.
  *
  * Narrowed to exactly ONE source, the header carries that source's sync status
  * word and the crumb trail leads back through the source's own page — which is
@@ -23,6 +30,9 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   CONTEXT_DOCUMENT_STATUS_ORDER,
   CONTEXT_DOCUMENT_STATUS_WORD,
+  CONTEXT_INCLUSION_ORDER,
+  CONTEXT_INCLUSION_WORD,
+  type ContextDocumentInclusion,
   type ContextDocumentRow,
   type ContextDocumentStatus,
   type ContextSourceView,
@@ -36,7 +46,6 @@ import {
 } from '@/preview/ui/filter-builder';
 import { facetDimensions } from '@/preview/ui/filter-facets';
 import {
-  CONTEXT_DOC_TONE,
   CONTEXT_SYNC_TONE,
   CONTEXT_SYNC_WORD,
   StatusWord,
@@ -46,26 +55,39 @@ import { formatRelativeTime } from '@truecourse/shared';
 import { useContextDocuments, useContextSignal, useContextSources } from '@/preview/shell/use-context';
 import { ContextFrame } from './ContextFrame';
 import { CONTEXT_BASE, docHref, sourceHref } from './context-hrefs';
+import {
+  CONTEXT_ROW_WORD_ORDER,
+  contextRowFact,
+  contextRowWord,
+  contextRowWordKey,
+} from './context-inclusion';
 
 /** The dimensions the one filter row narrows along, each its own address parameter. */
-const DIMENSIONS = ['area', 'status', 'source', 'repo'] as const;
+const DIMENSIONS = ['area', 'status', 'inclusion', 'source', 'repo'] as const;
 type Dimension = (typeof DIMENSIONS)[number];
 const DIMENSION_WORD: Record<Dimension, string> = {
   area: 'Area',
   status: 'Status',
+  inclusion: 'Inclusion',
   source: 'Source',
   repo: 'Repository',
 };
 const isDimension = (key: string): key is Dimension =>
   (DIMENSIONS as readonly string[]).includes(key);
 
-/** The values a row has along one dimension (a document may read in several repositories). */
+/**
+ * The values a row has along one dimension (a document may read in several
+ * repositories). A document the corpus does not hold has no coverage status, so
+ * it carries no value along that dimension and no status filter answers with it.
+ */
 function valuesOf(row: ContextDocumentRow, dimension: Dimension): string[] {
   switch (dimension) {
     case 'area':
       return [row.area];
     case 'status':
-      return [row.status];
+      return row.status ? [row.status] : [];
+    case 'inclusion':
+      return [row.inclusion];
     case 'source':
       return [row.sourceId];
     case 'repo':
@@ -179,6 +201,15 @@ export default function DocumentsPage() {
           hideEmpty: true,
         },
         {
+          key: 'inclusion',
+          label: DIMENSION_WORD.inclusion,
+          valuesOf: values('inclusion'),
+          values: CONTEXT_INCLUSION_ORDER.map((inclusion: ContextDocumentInclusion) => ({
+            value: inclusion,
+            label: CONTEXT_INCLUSION_WORD[inclusion],
+          })),
+        },
+        {
           key: 'source',
           label: DIMENSION_WORD.source,
           valuesOf: values('source'),
@@ -200,11 +231,7 @@ export default function DocumentsPage() {
   );
 
   const tally = useMemo(
-    () =>
-      tallyOf(rows, CONTEXT_DOCUMENT_STATUS_ORDER, (row) => row.status, (status) => ({
-        word: CONTEXT_DOCUMENT_STATUS_WORD[status],
-        tone: CONTEXT_DOC_TONE[status],
-      })),
+    () => tallyOf(rows, CONTEXT_ROW_WORD_ORDER, contextRowWordKey, contextRowWord),
     [rows],
   );
 
@@ -281,13 +308,22 @@ export default function DocumentsPage() {
           {
             key: 'status',
             label: 'Status',
-            width: '7.5rem',
-            cell: (row) => (
-              <StatusWord
-                tone={CONTEXT_DOC_TONE[row.status]}
-                word={CONTEXT_DOCUMENT_STATUS_WORD[row.status]}
-              />
-            ),
+            width: '9rem',
+            wrap: true,
+            cell: (row) => {
+              const { word, tone } = contextRowWord(contextRowWordKey(row));
+              const fact = contextRowFact(row);
+              return (
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <StatusWord tone={tone} word={word} />
+                  {fact && (
+                    <span className="break-words text-[11px] leading-snug text-muted-foreground">
+                      {fact}
+                    </span>
+                  )}
+                </span>
+              );
+            },
           },
           {
             key: 'updated',
