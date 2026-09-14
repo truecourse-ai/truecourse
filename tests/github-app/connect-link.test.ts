@@ -18,12 +18,12 @@ import {
   type OnRepoUnlinked,
 } from '../../packages/github-app/src/connect';
 import type { OctokitClient } from '../../packages/github-app/src/octokit';
-import { MemoryGateStore } from './memory-store';
+import { MemoryInstallationStore } from './memory-store';
 
 const ORG = 'org_A';
 const REPO = 'mushgev/truecourse-gate-test';
 
-let store: MemoryGateStore;
+let store: MemoryInstallationStore;
 const octokit = { id: 'octokit-for-42' } as unknown as OctokitClient;
 
 function makeApp(hooks: { onRepoLinked?: OnRepoLinked; onRepoUnlinked?: OnRepoUnlinked } = {}): Express {
@@ -65,7 +65,7 @@ function unlink(app: Express, repoFullName = REPO) {
 }
 
 beforeEach(async () => {
-  store = new MemoryGateStore();
+  store = new MemoryInstallationStore();
   await store.saveInstallation({
     installationId: 42,
     accountLogin: 'mushgev',

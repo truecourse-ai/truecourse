@@ -1,16 +1,9 @@
 /**
- * `mergeDecisions` folds a PR's decisions overlay over the repo row — the
- * overlay wins on every dimension — and the decisions helpers read and write
- * that row through the spec store.
+ * `mergeDecisions` folds one decisions layer over another — the overlay wins on
+ * every dimension. It is what the workspace-inheritance fold is built on.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import {
-  mergeDecisions,
-  addManualInclude,
-  getDecisions,
-} from '../../packages/core/src/commands/spec-in-process';
-import { setSpecStore, resetSpecStore } from '../../packages/core/src/lib/spec-store';
-import { memorySpecStore } from '../helpers/memory-spec-store';
+import { describe, it, expect } from 'vitest';
+import { mergeDecisions } from '../../packages/core/src/commands/spec-in-process';
 import type { DecisionsFile } from '@truecourse/spec-consolidator';
 
 const empty: DecisionsFile = {
@@ -130,17 +123,5 @@ describe('mergeDecisions — scope verdicts and instructions (v2)', () => {
     expect(merged.version).toBe(2);
     expect(merged.scopeVerdicts).toEqual([]);
     expect(merged.instructions).toEqual([]);
-  });
-});
-
-describe('decisions through the store', () => {
-  const repo = 'acme/widgets';
-  beforeEach(() => setSpecStore(memorySpecStore()));
-  afterEach(() => resetSpecStore());
-
-  it('getDecisions without a PR opt is the repo row', async () => {
-    await addManualInclude(repo, 'a.md');
-    const d = await getDecisions(repo);
-    expect(d.manualIncludes).toEqual(['a.md']);
   });
 });

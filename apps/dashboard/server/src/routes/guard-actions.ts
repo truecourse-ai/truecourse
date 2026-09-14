@@ -54,7 +54,7 @@ import {
   estimateGuard,
   OpenConflictsError,
 } from '@truecourse/core/commands/guard-in-process';
-import { getCorpus, getDecisions } from '@truecourse/core/commands/spec-in-process';
+import { readRepoCorpusSlice } from '../services/repo-corpus.service.js';
 import {
   dismissGuardClaim,
   undismissGuardClaim,
@@ -234,9 +234,9 @@ router.post('/:id/guard/generate', async (req: Request, res: Response, next: Nex
     // Extracting both sides of an unresolved overlap births a paid finding that
     // is really the dispute. Answered BEFORE the provider check: nothing about a
     // blocked corpus is fixed by a provider, and the full report is the remedy.
-    const corpus = await getCorpus(repo.path);
+    const { corpus, decisions } = await readRepoCorpusSlice(orgOf(req), repo.path);
     if (corpus) {
-      const open = openConflicts(corpus, await getDecisions(repo.path));
+      const open = openConflicts(corpus, decisions);
       if (open.length > 0) {
         res.status(422).json({ error: new OpenConflictsError(open).message });
         return;

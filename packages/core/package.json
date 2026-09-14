@@ -189,11 +189,6 @@
       "types": "./dist/lib/repo-doc-reader.d.ts",
       "import": "./dist/lib/repo-doc-reader.js"
     },
-    "./lib/background-tasks": {
-      "truecourse-source": "./src/lib/background-tasks.ts",
-      "types": "./dist/lib/background-tasks.d.ts",
-      "import": "./dist/lib/background-tasks.js"
-    },
     "./lib/repo-ref": {
       "truecourse-source": "./src/lib/repo-ref.ts",
       "types": "./dist/lib/repo-ref.d.ts",

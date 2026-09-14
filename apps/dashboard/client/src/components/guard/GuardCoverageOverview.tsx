@@ -300,11 +300,6 @@ export function GuardCoverageOverview({
                 {lastRun.branch ? ` on ${lastRun.branch}` : ''}
               </p>
             )}
-            {staleness.generateStale && (
-              <p className="text-[11px] text-sky-600 dark:text-sky-400">
-                The spec corpus changed since the last generate.
-              </p>
-            )}
             {staleness.runStale && (
               <p className="text-[11px] text-sky-600 dark:text-sky-400">
                 The tests changed since the last run.

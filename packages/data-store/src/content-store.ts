@@ -1,13 +1,14 @@
 /**
  * Content-addressed store over the `content` table — the single dedup pool for
- * immutable bodies in the hosted edition: immutable spec artifacts (corpus,
- * decisions) and LLM trace payloads. One row per (scope, sha): identical content
- * under a scope is written once; manifests / refs elsewhere point in by sha.
+ * immutable bodies: the workspace's spec artifacts and documents, and a
+ * repository's guard tree and evidence. One row per (scope, sha): identical
+ * content under a scope is written once; manifests / refs elsewhere point in by
+ * sha.
  *
  * `scope` is the dedup + tenant-isolation namespace. We prefix by data TYPE so
- * each type's GC stays independent (`spec:`, `trace:`), and by the owning key
- * (a repo key, or `ws:<org>` for workspace-shared, or an org for traces). There
- * is no cross-scope dedup.
+ * each type's GC stays independent (`spec:`, `guard:`), and by the owning key
+ * (a repo key, or `ws:<org>` for workspace-shared). There is no cross-scope
+ * dedup.
  */
 
 import { and, eq, inArray } from 'drizzle-orm';
@@ -16,7 +17,6 @@ import { sha256 } from './pack.js';
 
 /** Scope builders — keep the namespacing in one place. */
 export const contentScope = {
-  spec: (repoKey: string): string => `spec:${repoKey}`,
   workspaceSpec: (org: string): string => `spec:ws:${org}`,
   /** Synced source-doc bodies for workspace Knowledge (sha = the ledger's contentHash). */
   knowledge: (org: string): string => `knowledge:ws:${org}`,

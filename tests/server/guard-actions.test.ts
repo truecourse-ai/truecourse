@@ -54,10 +54,9 @@ import { setGuardPrRegenEnqueue } from '@truecourse/core/lib/guard-pr-regen-enqu
 import { setGuardGateHeadsLookup } from '@truecourse/core/lib/guard-gate-pending';
 import type { GuardGenerateReport } from '@truecourse/shared';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
-import { installWorkTreeGuardStore, WORK_TREE_COMMIT } from '../helpers/work-tree-guard-store';
+import { installWorkTreeGuardStore } from '../helpers/work-tree-guard-store';
 import { installMemoryGuardOverlays, resetGuardOverlayStore } from '../helpers/memory-guard-overlays';
 import { installMemorySpecStore, resetSpecStore } from '../helpers/memory-spec-store';
-import type { SpecStore } from '@truecourse/core/lib/spec-store';
 
 
 
@@ -69,7 +68,6 @@ describe('Guard action routes', () => {
   let fixture: TestFixture;
   let root: string;
   let jobs: StubJobs;
-  let specs: SpecStore;
 
   const write = (rel: string, content: string) => {
     const f = path.join(root, rel);
@@ -81,8 +79,8 @@ describe('Guard action routes', () => {
 
   // A corpus with one doc + the doc on disk, and NO scenarios manifest → every
   // section is "changed", so the estimate carries stages (a non-trivial estimate).
-  async function seedCorpus() {
-    await specs.saveSpec({ repoKey: root, commitSha: WORK_TREE_COMMIT }, 'corpus', {
+  function seedCorpus(): void {
+    writeJson('.truecourse/specs/corpus.json', {
       version: 3,
       generatedAt: '2026-01-01T00:00:00Z',
       docs: [{ ref: DOC, kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['cli'] }],
@@ -95,7 +93,7 @@ describe('Guard action routes', () => {
   beforeEach(async () => {
     installWorkTreeGuardStore();
     installMemoryGuardOverlays();
-    specs = installMemorySpecStore();
+    installMemorySpecStore();
     fixture = await setupTestFixture();
     root = fixture.repoPath;
     vi.mocked(guardGenerateInProcess).mockReset();
@@ -114,7 +112,7 @@ describe('Guard action routes', () => {
   // --- Estimate: the CLI-identical shape ------------------------------------
 
   it('GET /guard/estimate returns the same estimateGuard payload the CLI renders', async () => {
-    await seedCorpus();
+    seedCorpus();
     const res = await request(app).get(url('estimate')).expect(200);
     const direct = JSON.parse(JSON.stringify(await estimateGuard(root)));
     // Byte-identical to a direct estimateGuard call — no re-derivation.

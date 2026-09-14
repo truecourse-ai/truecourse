@@ -4,8 +4,8 @@
  * these rows are keyed by the WorkOS organization id (`workspace_org_id`, the
  * same convention as `repositories`) rather than `repo_key`.
  *
- * Always-latest: one current row per `(workspace_org_id, artifact)` with NO
- * commit dimension, unlike the per-commit repo `spec_sets`.
+ * Always-latest: one current row per `(workspace_org_id, artifact)`, with no
+ * commit dimension.
  */
 
 import { pgTable, text, timestamp, primaryKey } from 'drizzle-orm/pg-core';

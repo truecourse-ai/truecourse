@@ -175,7 +175,6 @@ import {
 import { readGuardExternalSetupIndex } from './guard-externals.js'
 import { getGuardGateHeadsLookup } from '../lib/guard-gate-pending.js'
 import { readRepoDoc } from '../lib/repo-doc-reader.js'
-import { loadSpec } from '../lib/spec-store.js'
 
 // The dashboard reads the whole guard surface through core (never guard-runner /
 // the store directly), mirroring how spec routes read through spec-in-process.
@@ -351,16 +350,6 @@ export function composeDocCoverage(
   }
 }
 
-/** The curated corpus a (possibly PR-scoped) view reads, or null when none was scanned. */
-async function readCorpusForView(repoKey: string, ref?: string): Promise<CuratedCorpus | null> {
-  return readPinnedWithBaselineFallback(repoKey, ref, async (commit) => {
-    const raw = await loadSpec({ repoKey, commitSha: commit ?? '' }, 'corpus')
-    if (raw == null) return null
-    const parsed = CuratedCorpusSchema.safeParse(raw)
-    return parsed.success ? parsed.data : null
-  })
-}
-
 /**
  * Everything the coverage join reads for ONE repository, in one place: seven
  * store reads that do not depend on which document is being joined. A caller
@@ -504,10 +493,8 @@ export async function readGuardRunSectionSummary(
  * Every kept doc's sections counted under the five coverage words, through the
  * same per-section derivation the doc view renders ({@link composeDocCoverage})
  * — the constraint: no summary may classify a section differently than the doc
- * view does. The doc universe is the curated corpus, read through the spec
- * store at the view's commit (the file in OSS, the scan's stored artifact in a
- * hosted repo); without one it falls back to the docs the guard stores name,
- * and null means nothing to count.
+ * view does. The doc universe is the docs the guard stores name, and null means
+ * nothing to count.
  */
 export async function readGuardSectionTotals(
   repoKey: string,
@@ -515,16 +502,12 @@ export async function readGuardSectionTotals(
 ): Promise<GuardSectionTotals | null> {
   const sources = await readGuardCoverageSources(repoKey, ref)
 
-  const corpusDocs = (await readCorpusForView(repoKey, ref))?.docs.map((d) => d.ref)
-  const docs =
-    corpusDocs && corpusDocs.length > 0
-      ? corpusDocs
-      : [
-          ...(sources.claims?.claims.map((c) => c.doc) ?? []),
-          ...(sources.claims?.untestable.map((u) => u.doc) ?? []),
-          ...(sources.flows?.flows.flatMap((f) => f.milestones.map((m) => m.doc)) ?? []),
-          ...guardManifestSections(sources.manifest).map((m) => m.doc),
-        ]
+  const docs = [
+    ...(sources.claims?.claims.map((c) => c.doc) ?? []),
+    ...(sources.claims?.untestable.map((u) => u.doc) ?? []),
+    ...(sources.flows?.flows.flatMap((f) => f.milestones.map((m) => m.doc)) ?? []),
+    ...guardManifestSections(sources.manifest).map((m) => m.doc),
+  ]
   if (docs.length === 0) return null
 
   const byStatus = Object.fromEntries(
@@ -3032,15 +3015,13 @@ export async function discardGuardDecisionsOverlay(repoRoot: string, pr: number)
 }
 
 // ---------------------------------------------------------------------------
-// Staleness — the two amber-dot signals for the Guard tab.
+// Staleness — the amber-dot signal for the Guard tab.
 // ---------------------------------------------------------------------------
 
 /**
- * Compute the guard staleness signals (the two amber dots), composed from store
- * reads at the resolved ref (a PR head, or the baseline). `generateStale`: spec
- * corpus present but never generated. `runStale`: scenarios present but never
- * run, OR the generate is newer than the run (regenerated scenarios not yet
- * re-run).
+ * Compute the guard staleness signal, composed from store reads at the resolved
+ * ref. `runStale`: scenarios present but never run, OR the generate is newer
+ * than the run (regenerated scenarios not yet re-run).
  */
 export async function computeGuardStaleness(repoKey: string, ref?: string): Promise<GuardStaleness> {
   const scope = await resolveGuardScope(repoKey, ref)
@@ -3051,9 +3032,7 @@ export async function computeGuardStaleness(repoKey: string, ref?: string): Prom
 }
 
 const EMPTY_STALENESS: GuardStaleness = {
-  generateStale: false,
   runStale: false,
-  hasCorpus: false,
   hasScenarios: false,
   hasGenerated: false,
   hasRun: false,
@@ -3068,45 +3047,39 @@ const EMPTY_STALENESS: GuardStaleness = {
  * the repo-level view (baseline commit) may still fall back to the baseline row
  * (a guard run recorded at a different commit than the verify baseline).
  *
- * The GENERATE-side stores (corpus / manifest / scenario files / result) DO fall
- * back — per store — from a pinned PR head to the baseline commit: a gate run
- * executes the baseline's scenario set against the head, so those inputs ARE
- * established for the PR view even though nothing re-persisted them at the head
- * (a code-only PR). Never "newest by createdAt" — only the explicit baseline.
+ * The GENERATE-side stores (manifest / scenario files / result) DO fall back —
+ * per store — from a pinned head to the baseline commit, so those inputs ARE
+ * established for that view even though nothing re-persisted them at the head.
+ * Never "newest by createdAt" — only the explicit baseline.
  */
 async function storeGuardStaleness(
   repoKey: string,
   commit: string,
   refPinned: boolean,
 ): Promise<GuardStaleness> {
-  const [result, manifest, corpus, runAtCommit, baseline, scenarioFiles] = await Promise.all([
+  const [result, manifest, runAtCommit, baseline, scenarioFiles] = await Promise.all([
     readGuardResultStore(repoKey, commit),
     readManifestStore(repoKey, commit),
-    loadSpec(({ repoKey, commitSha: commit }), 'corpus'),
     readGuardRunForCommitStore(repoKey, commit),
     refPinned ? Promise.resolve(null) : readGuardLatestStore(repoKey),
     listScenarioFiles(repoKey, commit),
   ])
   const base = refPinned ? await guardBaselineCommit(repoKey) : undefined
   const fallback = base !== undefined && base !== commit
-  const [resultF, manifestF, corpusF, scenarioFilesF] = await Promise.all([
+  const [resultF, manifestF, scenarioFilesF] = await Promise.all([
     fallback && result == null ? readGuardResultStore(repoKey, base) : Promise.resolve(result),
     fallback && manifest == null ? readManifestStore(repoKey, base) : Promise.resolve(manifest),
-    fallback && corpus == null ? loadSpec({ repoKey, commitSha: base }, 'corpus') : Promise.resolve(corpus),
     fallback && scenarioFiles.length === 0 ? listScenarioFiles(repoKey, base) : Promise.resolve(scenarioFiles),
   ])
   const run = runAtCommit ?? baseline
-  const hasCorpus = corpusF != null
   const hasScenarios = (manifestF?.flows?.length ?? 0) > 0 || scenarioFilesF.length > 0
   const hasGenerated = resultF != null
   const hasRun = run != null
   const generatedAt = resultF?.generatedAt ?? null
   const ranAt = run?.run.ranAt ?? null
   return {
-    generateStale: hasCorpus && !hasGenerated,
     runStale:
       hasScenarios && (!hasRun || (generatedAt != null && ranAt != null && generatedAt > ranAt)),
-    hasCorpus,
     hasScenarios,
     hasGenerated,
     hasRun,

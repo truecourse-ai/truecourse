@@ -5,12 +5,10 @@ import { migrate } from 'drizzle-orm/pglite/migrator';
 import {
   schema,
   MIGRATIONS_DIR,
-  specSets,
   guardRuns,
   guardSetupSets,
   decisions,
   content,
-  ghBaselines,
   contextSources,
   contextBindings,
   contextWorkspaces,
@@ -35,14 +33,6 @@ const NOW = '2026-01-01T00:00:00.000Z';
 
 /** Seed one row per representative table for `repoKey`. */
 async function seed(repoKey: string): Promise<void> {
-  await db.insert(specSets).values({
-    repoKey,
-    commitSha: 'c1',
-    artifact: 'corpus',
-    contentSha: 'sha',
-    createdAt: NOW,
-    updatedAt: NOW,
-  });
   await db.insert(guardRuns).values({
     repoKey,
     commitSha: 'c1',
@@ -62,12 +52,11 @@ async function seed(repoKey: string): Promise<void> {
     updatedAt: NOW,
   });
   await db.insert(decisions).values([
-    { scope: repoKey, payload: {}, updatedAt: NOW },
-    { scope: `${repoKey}#pr/3`, payload: {}, updatedAt: NOW },
+    { scope: `ws:org_${repoKey}`, payload: {}, updatedAt: NOW },
     { scope: `guard:${repoKey}`, payload: {}, updatedAt: NOW },
+    { scope: `guard:${repoKey}#pr/3`, payload: {}, updatedAt: NOW },
   ]);
-  await db.insert(content).values({ scope: `spec:${repoKey}`, sha: 'sha', body: '{}', createdAt: NOW });
-  await db.insert(ghBaselines).values({ repoFullName: repoKey, commitSha: 'c1', capturedAt: NOW });
+  await db.insert(content).values({ scope: `guard:${repoKey}`, sha: 'sha', body: '{}', createdAt: NOW });
 }
 
 const scopesOf = async (): Promise<string[]> =>
@@ -81,15 +70,19 @@ describe('purgeRepoData', () => {
     await purgeRepoData(db, 'acme/api');
 
     // Target: gone everywhere.
-    expect(await db.select().from(specSets)).toHaveLength(1);
     expect(await db.select().from(guardRuns)).toHaveLength(1);
     expect(await db.select().from(guardSetupSets)).toHaveLength(1);
-    expect(await db.select().from(ghBaselines)).toHaveLength(1);
-    expect(await scopesOf()).toEqual(['acme/web', 'acme/web#pr/3', 'guard:acme/web']);
+    // The workspace's own decisions survive a repository disconnect.
+    expect(await scopesOf()).toEqual([
+      'guard:acme/web',
+      'guard:acme/web#pr/3',
+      'ws:org_acme/api',
+      'ws:org_acme/web',
+    ]);
     const contentRows = await db.select({ scope: content.scope }).from(content);
-    expect(contentRows).toEqual([{ scope: 'spec:acme/web' }]);
+    expect(contentRows).toEqual([{ scope: 'guard:acme/web' }]);
     // The survivors all belong to the other repo.
-    expect((await db.select().from(specSets))[0]?.repoKey).toBe('acme/web');
+    expect((await db.select().from(guardRuns))[0]?.repoKey).toBe('acme/web');
   });
 
   it('takes the repository’s context LINKS and leaves the workspace’s sources', async () => {
@@ -123,15 +116,15 @@ describe('purgeRepoData', () => {
   });
 
   it('treats LIKE wildcards in the repo key literally', async () => {
-    // `_` in a repo name must not wildcard-match another repo's PR overlays:
-    // `acme/a_b#pr/%` as a raw pattern would also match `acme/aXb#pr/1`.
+    // `_` in a repo name must not wildcard-match another repo's guard overlays:
+    // `guard:acme/a_b#pr/%` as a raw pattern would also match `guard:acme/aXb#pr/1`.
     await db.insert(decisions).values([
-      { scope: 'acme/a_b#pr/1', payload: {}, updatedAt: NOW },
-      { scope: 'acme/aXb#pr/1', payload: {}, updatedAt: NOW },
+      { scope: 'guard:acme/a_b#pr/1', payload: {}, updatedAt: NOW },
+      { scope: 'guard:acme/aXb#pr/1', payload: {}, updatedAt: NOW },
     ]);
 
     await purgeRepoData(db, 'acme/a_b');
 
-    expect(await scopesOf()).toEqual(['acme/aXb#pr/1']);
+    expect(await scopesOf()).toEqual(['guard:acme/aXb#pr/1']);
   });
 });

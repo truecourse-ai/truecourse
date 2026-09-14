@@ -229,9 +229,9 @@ describe('the doc reader', () => {
     expect(await readStoredRepoDoc('someone/else', ref(SRC_B, 'site.md'))).toBeNull();
   });
 
-  it('leaves a repository-relative ref to the per-repository snapshot', async () => {
-    const { saveSpecDocs } = await import('@truecourse/core/lib/spec-store');
-    await saveSpecDocs({ repoKey: REPO, commitSha: 'abc' }, { 'docs/local.md': '# Local\n' });
-    expect(await readStoredRepoDoc(REPO, 'docs/local.md')).toBe('# Local\n');
+  // Every document is the workspace's, addressed `context/<sourceId>/<path>`.
+  // A repository-relative ref names no document at all.
+  it('answers absent for a repository-relative ref', async () => {
+    expect(await readStoredRepoDoc(REPO, 'docs/local.md')).toBeNull();
   });
 });

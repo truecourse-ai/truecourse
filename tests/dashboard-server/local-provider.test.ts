@@ -22,7 +22,7 @@ import {
   setWorkTreeProvider,
 } from '../../apps/dashboard/server/src/services/work-tree.service';
 import { removeRepoRunState } from '../../apps/dashboard/server/src/services/repo-removal.service';
-import { MemoryGateStore } from '../github-app/memory-store';
+import { MemoryInstallationStore } from '../github-app/memory-store';
 
 // A folder has no webhook, so the provider watches it. Chokidar's own event
 // timing is not what these cases are about — that a folder is watched while it
@@ -36,7 +36,7 @@ vi.mock('../../apps/dashboard/server/src/services/watcher.service', () => ({
 
 const ORG = 'org_local';
 
-let store: MemoryGateStore;
+let store: MemoryInstallationStore;
 let mount: LocalMount;
 let app: Express;
 let setups: string[];
@@ -56,7 +56,7 @@ function folder(name: string, files: Record<string, string> = { 'README.md': '# 
 }
 
 beforeEach(() => {
-  store = new MemoryGateStore();
+  store = new MemoryInstallationStore();
   setups = [];
   roots = [];
   watching.started = [];

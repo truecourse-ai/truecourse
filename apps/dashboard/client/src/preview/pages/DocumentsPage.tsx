@@ -318,7 +318,15 @@ export default function DocumentsPage() {
               // the next one will do with it, is a sentence and belongs on the
               // document's own page. It rides the word on hover so the list
               // stays one line per document.
-              return fact ? <HoverPopover portal content={fact}>{status}</HoverPopover> : status;
+                            // Narrow and right-aligned: the column sits at the table's edge,
+              // so the surface wraps and hangs inward instead of off screen.
+              return fact ? (
+                <HoverPopover portal width="narrow" align="end" content={fact}>
+                  {status}
+                </HoverPopover>
+              ) : (
+                status
+              );
             },
           },
           {

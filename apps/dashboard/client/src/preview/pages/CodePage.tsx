@@ -166,7 +166,7 @@ export default function CodePage() {
                   <td className="px-6 py-2.5 text-muted-foreground">
                     {!loaded ? 'Loading…' : loaded.corpusError ? 'Baseline unavailable' : loaded.corpus ? (
                       <>
-                        <span title={loaded.corpus.corpusCommit} className="font-mono text-[12px] text-foreground">{loaded.corpus.corpusCommit?.slice(0, 7) ?? repo.defaultBranch}</span>
+                        <span className="font-mono text-[12px] text-foreground">{repo.defaultBranch}</span>
                         {' · '}{relativeTime(loaded.corpus.corpus.generatedAt)}
                       </>
                     ) : 'no baseline yet'}

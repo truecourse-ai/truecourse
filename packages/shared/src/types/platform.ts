@@ -94,19 +94,6 @@ export interface GithubRepoSummary {
   notifications: GithubNotificationPrefs
   /** Project slug for the repo's dashboard detail route (`/repos/:slug`); null until registered. */
   slug: string | null
-  /** Unresolved spec conflicts on the latest scan; `>0` ⇒ needs review. */
-  openConflicts: number
-}
-
-/** Summary of one gate run on a PR. */
-export interface GithubRunSummary {
-  id: string
-  prNumber: number
-  headSha: string
-  conclusion: 'success' | 'failure' | 'neutral'
-  addedCount: number
-  resolvedCount: number
-  createdAt: string
 }
 
 /**

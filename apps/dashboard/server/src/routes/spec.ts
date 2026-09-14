@@ -2,11 +2,9 @@
  * Spec Consolidation routes — the dashboard surface for the curated-corpus
  * spec scan (Module 1).
  *
- *   GET    /api/repos/:id/spec/corpus       read corpus.json. 404 if no scan.
+ *   GET    /api/repos/:id/spec/corpus       the repository's slice of the workspace corpus.
  *   GET    /api/repos/:id/spec/doc?ref=...  a doc's markdown (for the prose Spec tab).
- *   GET    /api/repos/:id/spec/staleness    cheap mtime probe powering the amber dots.
- *   POST|DELETE /api/repos/:id/spec/{includes,excludes,conflict-resolution}?pr=&ref=
- *                                           a decision on ONE pull request's corpus.
+ *   GET    /api/repos/:id/spec/staleness    cheap probe powering the amber dots.
  *
  * There is NO scan here. Documentation belongs to the workspace, so the
  * Document scan is `POST /api/context/scan` and nothing starts one per
@@ -15,8 +13,7 @@
  * Nor is there a repository-scoped DECISION. The corpus a repository reads is
  * its slice of the workspace's, folded with the workspace's decisions, so a
  * force-include, a force-exclude and a conflict verdict are written through
- * `/api/context/*` — the decision routes below serve the pull request gate's
- * own overlay and refuse anything else.
+ * `/api/context/*`.
  */
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
@@ -27,34 +24,15 @@ import {
   type DecisionsFile,
 } from '@truecourse/spec-consolidator';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
-import {
-  loadLatestSpec,
-  loadSpec,
-  loadWorkspaceSpec,
-} from '@truecourse/core/lib/spec-store';
-import { contextBindings, contextChangedAt } from '@truecourse/core/lib/context-store';
-import { sliceCorpus } from '@truecourse/core/services/context';
+import { loadWorkspaceSpec } from '@truecourse/core/lib/spec-store';
+import { contextChangedAt } from '@truecourse/core/lib/context-store';
 import { readRepoDoc } from '@truecourse/core/lib/repo-doc-reader';
-import { getBackgroundTaskRunner } from '@truecourse/core/lib/background-tasks';
-import {
-  addConflictResolution,
-  addManualExclude,
-  addManualInclude,
-  getDecisions,
-  getWorkspaceDecisions,
-  recuratePrCorpus,
-  removeConflictResolution,
-  removeManualExclude,
-  removeManualInclude,
-} from '@truecourse/core/commands/spec-in-process';
+import { getWorkspaceDecisions } from '@truecourse/core/commands/spec-in-process';
+import { readRepoCorpusSlice } from '../services/repo-corpus.service.js';
 import { orgOf } from '../services/workspace-llm.service.js';
 import { contextIsStale } from '../services/context-scan.service.js';
 
 const router: Router = Router();
-
-// ---------------------------------------------------------------------------
-// Corpus path (spec-scan redesign) — corpus.json.
-// ---------------------------------------------------------------------------
 
 interface SpecCorpusPayload {
   corpus: CuratedCorpus | null;
@@ -63,87 +41,6 @@ interface SpecCorpusPayload {
   /** Section-scoped conflict verdicts — the client re-derives resolved/
    *  dismissed/orphaned conflict state from these via the shared derivation. */
   conflictResolutions: ConflictResolution[];
-  /** The commit whose corpus was returned (EE), when different from what was asked. */
-  corpusCommit?: string;
-}
-
-/**
- * Resolve the corpus for a (possibly PR-scoped) view. A live tree has no commit
- * dimension, so it always reads `corpus.json`. Stored sets read at the requested
- * `ref`; without one — or when that commit stored no corpus — the newest stored
- * corpus IS the current one, which holds because nothing here scans anything but
- * the default branch.
- */
-async function loadCorpusForRef(
-  repoPath: string,
-  ref?: string,
-): Promise<{ corpus: CuratedCorpus | null; corpusCommit?: string }> {
-  if (ref) {
-    const corpus = await loadSpec<CuratedCorpus>({ repoKey: repoPath, commitSha: ref }, 'corpus');
-    if (corpus) return { corpus, corpusCommit: ref };
-  }
-  const latest = await loadLatestSpec<CuratedCorpus>(repoPath, 'corpus');
-  if (latest) return { corpus: latest };
-  return { corpus: null };
-}
-
-/**
- * The repository's SLICE of the workspace corpus (hosted), or null when the
- * workspace has never been scanned — in which case the caller answers exactly
- * as it does for a repository that never scanned.
- *
- * A slice has no commit: the workspace corpus is not keyed by one, and the
- * documents in it come from several repositories and sites. So `corpusCommit`
- * is absent, and the decisions folded in are the workspace's — a conflict is
- * settled once, for everyone who reads those documents (plan §2).
- */
-async function workspaceSlicePayload(
-  org: string,
-  repoKey: string,
-): Promise<SpecCorpusPayload | null> {
-  const corpus = await loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId: org }, 'corpus');
-  if (!corpus) return null;
-  const [sourceIds, decisions] = await Promise.all([
-    contextBindings(org, repoKey),
-    getWorkspaceDecisions(org),
-  ]);
-  return {
-    corpus: sliceCorpus(corpus, sourceIds),
-    manualIncludes: decisions.manualIncludes ?? [],
-    manualExcludes: decisions.manualExcludes ?? [],
-    conflictResolutions: decisions.conflictResolutions ?? [],
-  };
-}
-
-async function corpusPayload(repoPath: string, ref?: string, pr?: number): Promise<SpecCorpusPayload> {
-  const { corpus, corpusCommit } = await loadCorpusForRef(repoPath, ref);
-  // PR view: fold the PR's decisions overlay so resolved conflicts render.
-  const decisions = await getDecisions(repoPath, pr !== undefined ? { pr } : undefined);
-  return {
-    corpus,
-    manualIncludes: decisions.manualIncludes ?? [],
-    manualExcludes: decisions.manualExcludes ?? [],
-    conflictResolutions: decisions.conflictResolutions ?? [],
-    corpusCommit,
-  };
-}
-
-// The PR-scoped payload for a mutation response: the freshly re-curated corpus
-// (saved at the PR head) + the effective decisions folding the PR overlay.
-async function prCorpusPayload(
-  repoPath: string,
-  pr: number,
-  ref: string,
-  corpus: CuratedCorpus | null,
-): Promise<SpecCorpusPayload> {
-  const decisions = await getDecisions(repoPath, { pr });
-  return {
-    corpus,
-    manualIncludes: decisions.manualIncludes ?? [],
-    manualExcludes: decisions.manualExcludes ?? [],
-    conflictResolutions: decisions.conflictResolutions ?? [],
-    corpusCommit: corpus ? ref : undefined,
-  };
 }
 
 router.get(
@@ -151,24 +48,22 @@ router.get(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const repo = await resolveProjectForRequest(req.params.id as string);
-      const ref = req.query.ref ? String(req.query.ref) : undefined;
-      let pr: number | undefined;
-      if (req.query.pr !== undefined) {
-        pr = Number(req.query.pr);
-        if (!Number.isInteger(pr) || pr <= 0) {
-          res.status(400).json({ error: 'pr must be a positive integer.' });
-          return;
-        }
-      }
       // The repository's corpus IS the workspace corpus cut down to the sources
       // it reads, which is what it runs against and so what it shows; a
       // workspace that has never scanned answers like a never-scanned
-      // repository.
-      const payload = await workspaceSlicePayload(orgOf(req), repo.path);
-      if (!payload?.corpus) {
+      // repository. The decisions folded in are the workspace's — a conflict is
+      // settled once, for everyone who reads those documents.
+      const { corpus, decisions } = await readRepoCorpusSlice(orgOf(req), repo.path);
+      if (!corpus) {
         res.status(404).json({ error: 'No corpus has been scanned yet.' });
         return;
       }
+      const payload: SpecCorpusPayload = {
+        corpus,
+        manualIncludes: decisions.manualIncludes ?? [],
+        manualExcludes: decisions.manualExcludes ?? [],
+        conflictResolutions: decisions.conflictResolutions ?? [],
+      };
       res.json(payload);
     } catch (e) {
       next(e);
@@ -192,242 +87,13 @@ router.get(
         res.status(400).json({ error: 'ref escapes the repository.' });
         return;
       }
-      // Read through the seam: the scan snapshot that kept the document.
-      // `commit` pins the revision (a PR view).
-      const commit = req.query.commit ? String(req.query.commit) : undefined;
-      const content = await readRepoDoc(repo.path, ref, commit ? { commit } : undefined);
+      // Read through the seam: the workspace document the corpus names.
+      const content = await readRepoDoc(repo.path, ref);
       if (content == null) {
         res.status(404).json({ error: `Doc not found: ${ref}` });
         return;
       }
       res.json({ ref, content });
-    } catch (e) {
-      next(e);
-    }
-  },
-);
-
-// A PR-scoped decision edit: the client sends `?pr=<number>` plus
-// `?ref=<PR head SHA>` (the same head it reads the tabs at). The overlay + the
-// re-curate both need the head, so require them together.
-interface PrScope {
-  pr: number;
-  ref: string;
-}
-
-function parsePrScope(req: Request): { scope: PrScope | null } | { error: string } {
-  if (req.query.pr === undefined) return { scope: null };
-  const pr = Number(req.query.pr);
-  if (!Number.isInteger(pr) || pr <= 0) return { error: 'pr must be a positive integer.' };
-  const ref = req.query.ref ? String(req.query.ref) : '';
-  if (!ref) return { error: 'pr requires ref (the PR head commit SHA).' };
-  return { scope: { pr, ref } };
-}
-
-// A PR-scoped edit that clears the PR's last conflict: force a targeted re-gate of
-// just that PR.
-async function enqueuePrRegate(repoKey: string, prNumber: number): Promise<void> {
-  const runner = getBackgroundTaskRunner();
-  if (!runner) return;
-  try {
-    await runner({ type: 'pr.regate', repoKey, prNumber });
-  } catch {
-    /* best-effort — the decision is already saved */
-  }
-}
-
-// EE PR scope: write the overlay (the mutate closure passes `{ pr }` through), then
-// re-curate the PR head corpus in-process (saved at the PR head — never the base
-// view or another PR), and — only if that PR is now conflict-free — enqueue a
-// targeted re-gate of it. Returns the fresh PR-scoped corpus + effective decisions.
-async function mutateSpecDecisionPr(
-  repoPath: string,
-  scope: PrScope,
-  res: Response,
-  mutate: (opts?: { pr?: number }) => Promise<unknown>,
-): Promise<void> {
-  await mutate({ pr: scope.pr });
-  const result = await recuratePrCorpus(repoPath, scope.ref, scope.pr);
-  if (result && result.openConflicts === 0 && result.corpus.docs.length > 0) {
-    await enqueuePrRegate(repoPath, scope.pr);
-  }
-  res.json(await prCorpusPayload(repoPath, scope.pr, scope.ref, result?.corpus ?? null));
-}
-
-// Dispatch a decision edit. A repository has ONE decisions ledger of its own —
-// the pull request's overlay — so a PR-scoped edit (`?pr` + `?ref`) writes that
-// overlay and re-curates the PR head. Everything else is the workspace's: the
-// documents belong to it, `GET /spec/corpus` folds its decisions, and a decision
-// written here would be one nothing reads back. Those are refused, pointing at
-// the route that does hold them.
-async function applySpecMutation(
-  req: Request,
-  res: Response,
-  repoPath: string,
-  workspaceRoute: string,
-  mutate: (opts?: { pr?: number }) => Promise<DecisionsFile>,
-): Promise<void> {
-  const parsed = parsePrScope(req);
-  if ('error' in parsed) {
-    res.status(400).json({ error: parsed.error });
-    return;
-  }
-  if (!parsed.scope) {
-    res.status(400).json({
-      error: `This decision belongs to the workspace, not to one repository. Write it through ${workspaceRoute}.`,
-    });
-    return;
-  }
-  await mutateSpecDecisionPr(repoPath, parsed.scope, res, mutate);
-}
-
-// Force-include / un-include a relevance-dropped doc on a pull request, then
-// re-curate so the PR's corpus + overlaps reflect it immediately.
-router.post(
-  '/:id/spec/includes',
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const repo = await resolveProjectForRequest(req.params.id as string);
-      const body = req.body as { ref?: string };
-      if (!body.ref) {
-        res.status(400).json({ error: 'Missing ref.' });
-        return;
-      }
-      const ref = body.ref;
-      await applySpecMutation(req, res, repo.path, 'POST /api/context/includes', (opts) =>
-        addManualInclude(repo.path, ref, opts),
-      );
-    } catch (e) {
-      next(e);
-    }
-  },
-);
-
-router.delete(
-  '/:id/spec/includes',
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const repo = await resolveProjectForRequest(req.params.id as string);
-      const body = req.body as { ref?: string };
-      if (!body.ref) {
-        res.status(400).json({ error: 'Missing ref.' });
-        return;
-      }
-      const ref = body.ref;
-      await applySpecMutation(req, res, repo.path, 'DELETE /api/context/includes', (opts) =>
-        removeManualInclude(repo.path, ref, opts),
-      );
-    } catch (e) {
-      next(e);
-    }
-  },
-);
-
-// Force-exclude / restore an otherwise-kept doc on a pull request, then
-// re-curate. Excluding a doc removes it (and any conflicts it drives).
-router.post(
-  '/:id/spec/excludes',
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const repo = await resolveProjectForRequest(req.params.id as string);
-      const body = req.body as { ref?: string };
-      if (!body.ref) {
-        res.status(400).json({ error: 'Missing ref.' });
-        return;
-      }
-      const ref = body.ref;
-      await applySpecMutation(req, res, repo.path, 'POST /api/context/excludes', (opts) =>
-        addManualExclude(repo.path, ref, opts),
-      );
-    } catch (e) {
-      next(e);
-    }
-  },
-);
-
-router.delete(
-  '/:id/spec/excludes',
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const repo = await resolveProjectForRequest(req.params.id as string);
-      const body = req.body as { ref?: string };
-      if (!body.ref) {
-        res.status(400).json({ error: 'Missing ref.' });
-        return;
-      }
-      const ref = body.ref;
-      await applySpecMutation(req, res, repo.path, 'DELETE /api/context/excludes', (opts) =>
-        removeManualExclude(repo.path, ref, opts),
-      );
-    } catch (e) {
-      next(e);
-    }
-  },
-);
-
-// ---------------------------------------------------------------------------
-// Section-scoped conflict verdicts — pick-a-side / dismissal.
-//
-// A verdict resolves ONE flagged disagreement of a pull request's corpus: the
-// PR overlay takes the verdict and the PR head is re-curated. The workspace's
-// own verdicts are `/api/context/conflict-resolution`.
-// ---------------------------------------------------------------------------
-
-const CONFLICT_VERDICTS = ['a', 'b', 'dismissed'] as const;
-
-router.post(
-  '/:id/spec/conflict-resolution',
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const repo = await resolveProjectForRequest(req.params.id as string);
-      const body = req.body as Partial<ConflictResolution>;
-      if (!body.docA || !body.docB || body.docA === body.docB) {
-        res.status(400).json({ error: 'docA and docB are required and must differ.' });
-        return;
-      }
-      if (!body.verdict || !CONFLICT_VERDICTS.includes(body.verdict)) {
-        res.status(400).json({ error: `verdict must be one of ${CONFLICT_VERDICTS.join(', ')}.` });
-        return;
-      }
-      const resolution: ConflictResolution = {
-        docA: body.docA,
-        anchorA: body.anchorA ?? null,
-        quoteA: body.quoteA,
-        docB: body.docB,
-        anchorB: body.anchorB ?? null,
-        quoteB: body.quoteB,
-        verdict: body.verdict,
-        resolvedAt: new Date().toISOString(),
-        note: body.note,
-      };
-      await applySpecMutation(req, res, repo.path, 'POST /api/context/conflict-resolution', (opts) =>
-        addConflictResolution(repo.path, resolution, opts),
-      );
-    } catch (e) {
-      next(e);
-    }
-  },
-);
-
-router.delete(
-  '/:id/spec/conflict-resolution',
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const repo = await resolveProjectForRequest(req.params.id as string);
-      const body = req.body as { docA?: string; anchorA?: string | null; docB?: string; anchorB?: string | null };
-      if (!body.docA || !body.docB) {
-        res.status(400).json({ error: 'docA and docB are required.' });
-        return;
-      }
-      const input = {
-        docA: body.docA,
-        anchorA: body.anchorA ?? null,
-        docB: body.docB,
-        anchorB: body.anchorB ?? null,
-      };
-      await applySpecMutation(req, res, repo.path, 'DELETE /api/context/conflict-resolution', (opts) =>
-        removeConflictResolution(repo.path, input, opts),
-      );
     } catch (e) {
       next(e);
     }
@@ -471,7 +137,6 @@ router.get(
   },
 );
 
-
 // The decisions half of the scan-staleness signal: a decision pends when the
 // stored corpus still keeps an excluded doc or still skips an included one.
 function hasUnabsorbedDecisions(corpus: CuratedCorpus, decisions: DecisionsFile): boolean {
@@ -482,7 +147,5 @@ function hasUnabsorbedDecisions(corpus: CuratedCorpus, decisions: DecisionsFile)
     (decisions.manualIncludes ?? []).some((ref) => skipped.has(ref))
   );
 }
-
-
 
 export default router;

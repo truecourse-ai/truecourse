@@ -9,7 +9,6 @@ import { installWorkTreeGuardStore, resetGuardStore, WORK_TREE_COMMIT } from '..
 import { installMemoryGuardOverlays, resetGuardOverlayStore } from '../helpers/memory-guard-overlays';
 import { installWorkTreeDocReader, resetRepoDocReader } from '../helpers/work-tree-doc-reader';
 import { installMemorySpecStore, resetSpecStore } from '../helpers/memory-spec-store';
-import type { SpecStore } from '@truecourse/core/lib/spec-store';
 
 
 
@@ -96,7 +95,6 @@ describe('Guard routes', () => {
   let app: Express;
   let fixture: TestFixture;
   let root: string;
-  let specs: SpecStore;
 
   const write = (rel: string, content: string) => {
     const f = path.join(root, rel);
@@ -148,10 +146,6 @@ describe('Guard routes', () => {
     write(`.truecourse/guard/evidence/${RUN_ID}/a1/transcript.txt`, 'hello evidence\n');
   }
 
-  /** The curated corpus, where it lives now: the spec store, at the read's commit. */
-  const seedCorpus = () =>
-    specs.saveSpec({ repoKey: root, commitSha: WORK_TREE_COMMIT }, 'corpus', {});
-
   // Adds a recipe + a hand-written scenario on top of the base seed.
   function seedInventory() {
     seed();
@@ -163,7 +157,7 @@ describe('Guard routes', () => {
     installWorkTreeGuardStore();
     installMemoryGuardOverlays();
     installWorkTreeDocReader();
-    specs = installMemorySpecStore();
+    installMemorySpecStore();
     fixture = await setupTestFixture();
     root = fixture.repoPath;
     app = createTestApp();
@@ -693,43 +687,36 @@ describe('Guard routes', () => {
   /**
    * Staleness is composed from the STORES at the resolved commit — presence, plus
    * one generate-vs-run timestamp compare. There is no working tree to probe and
-   * no mtimes: a corpus nothing generated from lights the generate dot, and
-   * scenarios nothing ran (or a generate newer than the last run) light the run one.
+   * no mtimes: scenarios nothing ran (or a generate newer than the last run)
+   * light the run dot.
    */
-  it('staleness lights both dots when a corpus was never generated from and its scenarios never ran', async () => {
+  it('staleness lights the run dot when scenarios exist and nothing ran them', async () => {
     write(DOC, '# Alpha\nbody a\n');
     writeJson('.truecourse/scenarios/manifest.json', MANIFEST);
     write('.truecourse/scenarios/core/a1.yaml', SCENARIO_YAML);
-    await seedCorpus();
     const res = await request(app).get(url('staleness')).expect(200);
     expect(res.body).toEqual({
-      generateStale: true,
       runStale: true,
-      hasCorpus: true,
       hasScenarios: true,
       hasGenerated: false,
       hasRun: false,
     });
   });
 
-  it('staleness lights the run dot alone when the generate is newer than the last run', async () => {
+  it('staleness lights the run dot when the generate is newer than the last run', async () => {
     seed();
-    await seedCorpus();
     // A generate that landed AFTER the run: the committed scenarios have not been
     // re-run since they were re-authored.
     writeJson('.truecourse/guard/result.json', { ...RESULT, generatedAt: '2026-07-08T00:00:00.000Z' });
     const res = await request(app).get(url('staleness')).expect(200);
-    expect(res.body).toMatchObject({ generateStale: false, runStale: true, hasCorpus: true, hasGenerated: true, hasRun: true });
+    expect(res.body).toMatchObject({ runStale: true, hasGenerated: true, hasRun: true });
   });
 
   it('staleness stays dark when the generate and the run are both behind nothing', async () => {
     seed();
-    await seedCorpus();
     const res = await request(app).get(url('staleness')).expect(200);
     expect(res.body).toEqual({
-      generateStale: false,
       runStale: false,
-      hasCorpus: true,
       hasScenarios: true,
       hasGenerated: true,
       hasRun: true,
@@ -750,7 +737,7 @@ describe('Guard routes', () => {
 
   it('staleness is 200 all-false on a fresh repo', async () => {
     const res = await request(app).get(url('staleness')).expect(200);
-    expect(res.body).toEqual({ generateStale: false, runStale: false, hasCorpus: false, hasScenarios: false, hasGenerated: false, hasRun: false });
+    expect(res.body).toEqual({ runStale: false, hasScenarios: false, hasGenerated: false, hasRun: false });
   });
 
   it('scenarios is 200 with empty list + null recipe on a fresh repo', async () => {

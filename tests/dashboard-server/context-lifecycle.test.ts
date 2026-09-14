@@ -31,7 +31,7 @@ import {
 } from '../../apps/dashboard/server/src/services/context-lifecycle.service';
 import { setContextEventPublisher } from '../../apps/dashboard/server/src/services/context.service';
 import { memoryContextStore, type MemoryContextStore } from '../helpers/memory-context-store';
-import { MemoryGateStore } from '../github-app/memory-store';
+import { MemoryInstallationStore } from '../github-app/memory-store';
 
 const ORG = 'org_A';
 const REPO = 'acme/api';
@@ -46,7 +46,7 @@ const APP_ENV = {
 } as const;
 
 let store: MemoryContextStore;
-let gate: MemoryGateStore;
+let gate: MemoryInstallationStore;
 /** Every context sync the hooks asked for, in order. */
 let syncs: { orgId: string; sourceId: string; source: string }[];
 
@@ -60,7 +60,7 @@ beforeEach(async () => {
   store = memoryContextStore();
   setContextStore(store);
   setContextEventPublisher(() => {});
-  gate = new MemoryGateStore();
+  gate = new MemoryInstallationStore();
   syncs = [];
   await gate.saveInstallation({
     installationId: INSTALLATION_ID,

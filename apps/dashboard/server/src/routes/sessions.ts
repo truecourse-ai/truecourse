@@ -263,8 +263,8 @@ export default router;
 
 /**
  * Just enough of the repository store to scope a workspace's runs: which
- * repositories it connected. Structural, so the real `GateStore` satisfies it
- * without this module depending on the GitHub package.
+ * repositories it connected. Structural, so the real `RepositoryStore` satisfies it
+ * without this module depending on the store package.
  */
 export interface WorkspaceRepoLinks {
   listReposForWorkspace(workspaceOrgId: string): Promise<{ repoFullName: string }[]>;

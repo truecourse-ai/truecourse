@@ -26,7 +26,6 @@ import { WorkspaceBadge } from '@/components/spec/WorkspaceBadge';
 import { createRepoSpecSource, useSpecSource } from '@/components/spec/spec-source';
 
 /** Shown on resolution actions while a PR is being viewed before its gate has run. */
-const PR_GATE_HINT = 'Available after the PR gate runs.';
 
 /** Caption above a detail card, the label grammar the guard detail panes read in. */
 const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
@@ -38,8 +37,6 @@ export function SpecOverlapDetail({
   docB,
   conflict,
   data,
-  prNumber = null,
-  prRef,
   onResolved,
   onConflictChange,
   onDecision,
@@ -57,13 +54,9 @@ export function SpecOverlapDetail({
    */
   conflict: CorpusConflict<SpecOverlap> | undefined;
   data: SpecCorpusResponse;
-  /** EE PR view: scope the resolution to this PR. Repo view when null/undefined. */
-  prNumber?: number | null;
-  /** EE PR view: the PR head SHA, also the commit the docs are read at. */
-  prRef?: string;
-  /** An EE PR re-curate returns the full corpus; the page applies it. */
+  /** A source that answers a verdict with the whole corpus; the page applies it. */
   onResolved: (res?: SpecCorpusResponse) => void;
-  /** OSS verdict ack: the new conflict-resolution list, so the page can update the corpus data. */
+  /** The verdict ack: the new conflict-resolution list, so the page can update the corpus data. */
   onConflictChange?: (list: SpecConflictResolution[]) => void;
   /** Fired after a verdict is recorded, so the page can refresh the Rescan dot. */
   onDecision?: () => void;
@@ -143,14 +136,9 @@ export function SpecOverlapDetail({
   const lastTouched = new Map(data.corpus.docs.map((d) => [d.ref, d.lastTouched] as const));
   const newerDoc = (lastTouched.get(docB) ?? '') >= (lastTouched.get(docA) ?? '') ? docB : docA;
 
-  // EE PR view: scope the resolution to the PR + head SHA. With no gate run yet
-  // (no head SHA) the resolution can't be scoped, so the actions are disabled.
-  const prScope = prNumber != null && prRef ? { pr: prNumber, ref: prRef } : undefined;
-  const decisionsDisabled = prNumber != null && !prRef;
-
-  // A provided (workspace) source wins; otherwise the repo default scoped to the PR.
+  // A provided (workspace) source wins; otherwise the repo default.
   const ctxSource = useSpecSource();
-  const repoSource = useMemo(() => createRepoSpecSource(repoId, prScope), [repoId, prNumber, prRef]); // eslint-disable-line react-hooks/exhaustive-deps
+  const repoSource = useMemo(() => createRepoSpecSource(repoId), [repoId]);
   const source = ctxSource ?? repoSource;
 
   // Build the persisted verdict from the flagged sections (heading + verbatim quote
@@ -228,8 +216,7 @@ export function SpecOverlapDetail({
             review={review}
             winner={recVerdict === 'a' ? titleOf(docA) : recVerdict === 'b' ? titleOf(docB) : null}
             canApply={open && recVerdict !== null}
-            applyDisabled={busy !== null || decisionsDisabled}
-            applyDisabledReason={decisionsDisabled ? PR_GATE_HINT : null}
+            applyDisabled={busy !== null}
             applying={recVerdict !== null && busy === recVerdict}
             onApply={() => recVerdict && recordVerdict(recVerdict)}
           />
@@ -258,16 +245,14 @@ export function SpecOverlapDetail({
             {resolution.resolvedBy === 'auto' && (
               <ConfidenceBar confidence="high" testId="auto-applied-badge" />
             )}
-            <HoverPopover content={decisionsDisabled ? PR_GATE_HINT : null}>
-              <button
-                type="button"
-                onClick={undoVerdict}
-                disabled={busy !== null || decisionsDisabled}
-                className="text-muted-foreground underline hover:text-foreground disabled:opacity-50"
-              >
-                {busy === 'undo' ? 'Undoing…' : 'Undo'}
-              </button>
-            </HoverPopover>
+            <button
+              type="button"
+              onClick={undoVerdict}
+              disabled={busy !== null}
+              className="text-muted-foreground underline hover:text-foreground disabled:opacity-50"
+            >
+              {busy === 'undo' ? 'Undoing…' : 'Undo'}
+            </button>
           </div>
         ) : excludedRef ? (
           <div className="mt-2 text-xs text-emerald-600 dark:text-emerald-400">
@@ -280,28 +265,24 @@ export function SpecOverlapDetail({
               <VerdictButton
                 doc={titleOf(docA)}
                 busy={busy === 'a'}
-                disabled={busy !== null || decisionsDisabled}
-                disabledReason={decisionsDisabled ? PR_GATE_HINT : null}
+                disabled={busy !== null}
                 onClick={() => recordVerdict('a')}
               />
               <VerdictButton
                 doc={titleOf(docB)}
                 busy={busy === 'b'}
-                disabled={busy !== null || decisionsDisabled}
-                disabledReason={decisionsDisabled ? PR_GATE_HINT : null}
+                disabled={busy !== null}
                 onClick={() => recordVerdict('b')}
               />
-              <HoverPopover content={decisionsDisabled ? PR_GATE_HINT : null} side="top">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={busy !== null || decisionsDisabled}
-                  onClick={() => recordVerdict('dismissed')}
-                >
-                  {busy === 'dismissed' ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
-                  Not a real conflict
-                </Button>
-              </HoverPopover>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy !== null}
+                onClick={() => recordVerdict('dismissed')}
+              >
+                {busy === 'dismissed' ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                Not a real conflict
+              </Button>
             </div>
             <p className="text-[11px] text-muted-foreground/70">
               Or fix the doc itself and rescan, the Rescan button lights up when a doc changes.
@@ -316,7 +297,6 @@ export function SpecOverlapDetail({
             docRef={docA}
             title={docMeta.get(docA)?.title}
             url={docMeta.get(docA)?.url}
-            commit={prRef}
             badge={docA === newerDoc ? 'Newer' : 'Older'}
             scrollTo={scrollA}
             highlight={sectionsFor(docA)}
@@ -329,7 +309,6 @@ export function SpecOverlapDetail({
             docRef={docB}
             title={docMeta.get(docB)?.title}
             url={docMeta.get(docB)?.url}
-            commit={prRef}
             badge={docB === newerDoc ? 'Newer' : 'Older'}
             scrollTo={scrollB}
             highlight={sectionsFor(docB)}
@@ -366,7 +345,6 @@ function ConflictAssessment({
   winner,
   canApply,
   applyDisabled,
-  applyDisabledReason,
   applying,
   onApply,
 }: {
@@ -374,7 +352,6 @@ function ConflictAssessment({
   winner: string | null;
   canApply: boolean;
   applyDisabled: boolean;
-  applyDisabledReason: string | null;
   applying: boolean;
   onApply: () => void;
 }) {
@@ -395,12 +372,10 @@ function ConflictAssessment({
             </span>
             {confidence && <ConfidenceBar confidence={confidence} />}
             {canApply && (
-              <HoverPopover content={applyDisabledReason} side="top">
-                <Button size="sm" disabled={applyDisabled} onClick={onApply}>
-                  {applying ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
-                  Apply recommendation
-                </Button>
-              </HoverPopover>
+              <Button size="sm" disabled={applyDisabled} onClick={onApply}>
+                {applying ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                Apply recommendation
+              </Button>
             )}
           </div>
           <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{rationale}</p>
@@ -476,17 +451,15 @@ function VerdictButton({
   doc,
   busy,
   disabled,
-  disabledReason,
   onClick,
 }: {
   doc: string;
   busy: boolean;
   disabled: boolean;
-  disabledReason: string | null;
   onClick: () => void;
 }) {
   return (
-    <HoverPopover content={disabledReason ?? doc} side="top">
+    <HoverPopover content={doc} side="top">
       <Button size="sm" variant="outline" disabled={disabled} onClick={onClick} className="max-w-[18rem]">
         {busy ? <Loader2 className="h-3 w-3 shrink-0 animate-spin" /> : null}
         <span className="truncate">{doc}</span>

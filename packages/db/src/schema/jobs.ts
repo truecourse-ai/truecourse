@@ -1,10 +1,9 @@
 /**
  * Background jobs + notifications for the hosted edition.
  *
- * Long-running work (connector sync today; analyze/verify/gate later) is enqueued
- * to a Postgres-backed queue (graphile-worker) and tracked here in `jobs` — a
- * UI-facing status row (graphile-worker's own tables aren't meant for app
- * queries). `notifications` is the durable feed shown in the bell/notifications
+ * Long-running work is enqueued to a Postgres-backed queue (graphile-worker)
+ * and tracked here in `jobs` — a UI-facing status row (graphile-worker's own
+ * tables aren't meant for app queries). `notifications` is the durable feed shown in the bell/notifications
  * page; it is the source of truth for history (SSE/NOTIFY is only the live push).
  *
  * Both are workspace-scoped by `workspace_org_id` (the WorkOS organization id,
@@ -20,7 +19,6 @@ import {
   pgTable,
   text,
   integer,
-  bigint,
   jsonb,
   timestamp,
   index,
@@ -46,10 +44,9 @@ export const jobs = pgTable(
     progressMessage: text('progress_message'),
     /**
      * The enqueue request the job was created with (no `jobId` — that's the row
-     * id). Persisted so boot recovery can settle side effects a crashed run left
-     * dangling — e.g. complete a reaped `guard.gate`'s in-progress PR Check,
-     * which needs the payload's installation/checkRun ids. Null for jobs whose
-     * creators don't pass one (nothing to settle).
+     * id). Persisted so boot recovery can settle side effects a crashed run
+     * left dangling. Null for jobs whose creators don't pass one (nothing to
+     * settle).
      */
     payload: jsonb('payload').$type<Record<string, unknown>>(),
     /** Type-specific success payload, e.g. `{ synced: 4 }`. */
@@ -68,21 +65,6 @@ export const jobs = pgTable(
       .where(sql`status in ('queued','running')`),
   ],
 );
-
-// Coalesced follow-up guard-baseline refreshes. `enqueueGuardBaseline`
-// single-flights one baseline run per
-// repo; a refresh whose enqueue loses that race (a rapid second merge, or the
-// generate→baseline chain racing a merge) is recorded here (latest commit wins —
-// one row per repo) instead of being dropped, then replayed when the running
-// baseline settles (or at next boot after a crash). Holds the full enqueue request.
-export const pendingGuardBaselines = pgTable('pending_guard_baselines', {
-  repoFullName: text('repo_full_name').primaryKey(),
-  installationId: bigint('installation_id', { mode: 'number' }).notNull(),
-  defaultBranch: text('default_branch').notNull(),
-  commitSha: text('commit_sha').notNull(),
-  workspaceOrgId: text('workspace_org_id').notNull(),
-  updatedAt: ts('updated_at').notNull(),
-});
 
 export const notifications = pgTable(
   'notifications',

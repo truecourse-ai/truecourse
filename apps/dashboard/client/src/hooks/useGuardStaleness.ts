@@ -1,9 +1,9 @@
 /**
- * The Guard tab's two amber-dot signals (generate / run staleness) plus the
- * pipeline-stage flags the coverage view uses to pick its onboarding empty
- * state. RepoPage calls `refetch()` on tab entry and after guard socket events
- * so the indicators stay in sync without polling. The probe is advisory — a
- * failure is swallowed, never blocking the page.
+ * The Guard tab's run-staleness amber dot plus the pipeline-stage flags the
+ * coverage view uses to pick its onboarding empty state. RepoPage calls
+ * `refetch()` on tab entry and after guard socket events so the indicators stay
+ * in sync without polling. The probe is advisory — a failure is swallowed,
+ * never blocking the page.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -11,9 +11,7 @@ import type { GuardStaleness } from '@truecourse/shared';
 import * as api from '@/lib/api';
 
 const EMPTY: GuardStaleness = {
-  generateStale: false,
   runStale: false,
-  hasCorpus: false,
   hasScenarios: false,
   hasGenerated: false,
   hasRun: false,

@@ -7,19 +7,16 @@ import {
   resolveLatestEvent,
   type LatestEventKind,
 } from '../../packages/core/src/commands/repo-events';
-import { saveSpec, setSpecStore, resetSpecStore } from '../../packages/core/src/lib/spec-store';
-import { memorySpecStore } from '../helpers/memory-spec-store';
 import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
 import type { GuardGenerateReport, GuardLatest } from '../../packages/shared/src/index';
 
 // Distinct timestamps, oldest → newest, so "newest wins" is unambiguous.
 const AT: Record<LatestEventKind, string> = {
-  scanned: '2026-07-02T00:00:00.000Z',
   generated: '2026-07-05T00:00:00.000Z',
   guarded: '2026-07-06T00:00:00.000Z', // newest of all
 };
 
-const ALL_KINDS: LatestEventKind[] = ['scanned', 'generated', 'guarded'];
+const ALL_KINDS: LatestEventKind[] = ['generated', 'guarded'];
 
 function guardLatest(ranAt: string): GuardLatest {
   return {
@@ -58,15 +55,9 @@ function seed(repo: string, rel: string, obj: unknown): void {
 }
 
 /** Seed exactly one lifecycle source, stamped at `at`, through its own store. */
-async function seedSource(repo: string, kind: LatestEventKind, at: string): Promise<void> {
-  switch (kind) {
-    case 'scanned':
-      return saveSpec({ repoKey: repo, commitSha: 'c1' }, 'corpus', { version: 3, generatedAt: at });
-    case 'generated':
-      return seed(repo, 'guard/result.json', guardReport(at));
-    case 'guarded':
-      return seed(repo, 'guard/LATEST.json', guardLatest(at));
-  }
+function seedSource(repo: string, kind: LatestEventKind, at: string): void {
+  if (kind === 'generated') seed(repo, 'guard/result.json', guardReport(at));
+  else seed(repo, 'guard/LATEST.json', guardLatest(at));
 }
 
 describe('pickLatestEvent (newest-wins, pure)', () => {
@@ -74,7 +65,6 @@ describe('pickLatestEvent (newest-wins, pure)', () => {
     const event = pickLatestEvent([
       { kind: 'generated', at: AT.generated },
       { kind: 'guarded', at: AT.guarded },
-      { kind: 'scanned', at: AT.scanned },
     ]);
     expect(event).toEqual({ kind: 'guarded', at: AT.guarded });
   });
@@ -83,24 +73,24 @@ describe('pickLatestEvent (newest-wins, pure)', () => {
     const event = pickLatestEvent([
       { kind: 'guarded', at: null },
       { kind: 'generated', at: '' },
-      { kind: 'scanned', at: 'not-a-date' },
+      { kind: 'guarded', at: 'not-a-date' },
       { kind: 'generated', at: AT.generated },
     ]);
     expect(event).toEqual({ kind: 'generated', at: AT.generated });
   });
 
   it('returns null when nothing is valid', () => {
-    expect(pickLatestEvent([{ kind: 'scanned', at: 'x' }])).toBeNull();
+    expect(pickLatestEvent([{ kind: 'generated', at: 'x' }])).toBeNull();
     expect(pickLatestEvent([])).toBeNull();
   });
 
   it('breaks exact ties by candidate order (first wins)', () => {
     const same = '2026-07-07T12:00:00.000Z';
     const event = pickLatestEvent([
-      { kind: 'scanned', at: same },
+      { kind: 'generated', at: same },
       { kind: 'guarded', at: same },
     ]);
-    expect(event).toEqual({ kind: 'scanned', at: same });
+    expect(event).toEqual({ kind: 'generated', at: same });
   });
 });
 
@@ -110,49 +100,29 @@ describe('resolveLatestEvent (per-repo store composition)', () => {
   beforeEach(() => {
     repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-repo-events-'));
     fs.mkdirSync(path.join(repo, '.truecourse'), { recursive: true });
-    setSpecStore(memorySpecStore());
     installWorkTreeGuardStore();
   });
 
   afterEach(() => {
-    resetSpecStore();
     resetGuardStore();
     fs.rmSync(repo, { recursive: true, force: true });
   });
 
   it.each(ALL_KINDS)('maps a lone %s source to its kind + timestamp', async (kind) => {
-    await seedSource(repo, kind, AT[kind]);
+    seedSource(repo, kind, AT[kind]);
     await expect(resolveLatestEvent(repo)).resolves.toEqual({ kind, at: AT[kind] });
   });
 
   it('returns the newest event when every source is present', async () => {
-    for (const kind of ALL_KINDS) await seedSource(repo, kind, AT[kind]);
+    for (const kind of ALL_KINDS) seedSource(repo, kind, AT[kind]);
     // guarded is newest.
     await expect(resolveLatestEvent(repo)).resolves.toEqual({ kind: 'guarded', at: AT.guarded });
-  });
-
-  it('returns the newest among the present subset', async () => {
-    await seedSource(repo, 'scanned', AT.scanned);
-    await seedSource(repo, 'generated', AT.generated);
-    await expect(resolveLatestEvent(repo)).resolves.toEqual({ kind: 'generated', at: AT.generated });
   });
 
   it('skips an unreadable source and still resolves from the rest', async () => {
     // A garbage guard LATEST (newest kind) must not win, nor throw.
     seedRaw(repo, 'guard/LATEST.json', '{ not json');
-    await seedSource(repo, 'scanned', AT.scanned);
-    await expect(resolveLatestEvent(repo)).resolves.toEqual({ kind: 'scanned', at: AT.scanned });
-  });
-
-  it('skips a source whose store throws, and still resolves from the rest', async () => {
-    const store = memorySpecStore();
-    setSpecStore({
-      ...store,
-      loadLatest: async () => {
-        throw new Error('store is down');
-      },
-    });
-    await seedSource(repo, 'generated', AT.generated);
+    seedSource(repo, 'generated', AT.generated);
     await expect(resolveLatestEvent(repo)).resolves.toEqual({ kind: 'generated', at: AT.generated });
   });
 

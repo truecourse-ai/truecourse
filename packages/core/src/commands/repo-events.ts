@@ -10,13 +10,13 @@
  */
 
 import { readGuardLatest, readGuardResult } from '../lib/guard-store.js';
-import { loadLatestSpec } from '../lib/spec-store.js';
 
 /**
  * The lifecycle verbs a repo card can show. `generated` is `guard generate` (the
- * scenario set); `guarded` is a `guard run`.
+ * scenario set); `guarded` is a `guard run`. The scan is the WORKSPACE's, so it
+ * is not one of a repository's own events.
  */
-export type LatestEventKind = 'scanned' | 'generated' | 'guarded';
+export type LatestEventKind = 'generated' | 'guarded';
 
 export interface LatestEvent {
   kind: LatestEventKind;
@@ -63,10 +63,6 @@ function toEpochMs(at: string | null | undefined): number | null {
  */
 export async function resolveLatestEvent(repoPath: string): Promise<LatestEvent | null> {
   const candidates: EventCandidate[] = [
-    {
-      kind: 'scanned',
-      at: await safe(async () => (await loadLatestSpec<{ generatedAt?: string }>(repoPath, 'corpus'))?.generatedAt),
-    },
     { kind: 'generated', at: await safe(async () => (await readGuardResult(repoPath))?.generatedAt) },
     { kind: 'guarded', at: await safe(async () => (await readGuardLatest(repoPath))?.run.ranAt) },
   ];

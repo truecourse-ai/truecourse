@@ -30,13 +30,11 @@ import { createTestApp, TEST_ORG } from '../helpers/test-app';
 import { memoryContextStore } from '../helpers/memory-context-store';
 import { resetContextStore, setContextStore } from '@truecourse/core/lib/context-store';
 import { curateInProcess } from '@truecourse/core/commands/spec-in-process';
-import { setBackgroundTaskRunner } from '@truecourse/core/lib/background-tasks';
 import {
   setSpecStore,
   resetSpecStore,
   saveWorkspaceSpec,
   type SpecStore,
-  type RepoRef,
   type SpecArtifact,
   type WorkspaceRef,
 } from '@truecourse/core/lib/spec-store';
@@ -65,47 +63,19 @@ import {
 
 /**
  * A minimal in-memory `SpecStore` — the shape boot actually installs, Map-backed
- * so the route paths (which read and write through the ACTIVE spec store) work
- * without a real database. Workspace scope is a third map: the corpus and the
- * decisions are the WORKSPACE's now.
+ * so the route paths (which read through the ACTIVE spec store) work without a
+ * real database. Everything in it is the WORKSPACE's: the corpus, the decisions
+ * and the documents a scan kept.
  */
 function makeMemSpecStore(): SpecStore {
-  const byRef = new Map<string, unknown>(); // (repoKey, commitSha, artifact) → json
-  const latest = new Map<string, unknown>(); // (repoKey, artifact) → json
   const workspace = new Map<string, unknown>(); // (org, artifact) → json
   const workspaceDocs = new Map<string, string>(); // (org, ref) → body
-  const rk = (ref: RepoRef, a: SpecArtifact) => `${ref.repoKey}\x00${ref.commitSha}\x00${a}`;
-  const lk = (repoKey: string, a: SpecArtifact) => `${repoKey}\x00${a}`;
   return {
-    async saveSpec(ref, artifact, json) {
-      byRef.set(rk(ref, artifact), json);
-      latest.set(lk(ref.repoKey, artifact), json);
-    },
-    async loadSpec<T = unknown>(ref: RepoRef, artifact: SpecArtifact) {
-      return (byRef.get(rk(ref, artifact)) as T) ?? null;
-    },
-    async deleteSpec(ref, artifact) {
-      byRef.delete(rk(ref, artifact));
-    },
-    async loadLatest<T = unknown>(repoKey: string, artifact: SpecArtifact) {
-      return (latest.get(lk(repoKey, artifact)) as T) ?? null;
-    },
-    async latestCommit() {
-      return null;
-    },
     async saveWorkspaceSpec(ref, artifact, json) {
       workspace.set(`${ref.workspaceOrgId}\x00${artifact}`, json);
     },
     async loadWorkspaceSpec<T = unknown>(ref: WorkspaceRef, artifact: SpecArtifact) {
       return (workspace.get(`${ref.workspaceOrgId}\x00${artifact}`) as T) ?? null;
-    },
-    async saveSpecDocs(ref, files) {
-      for (const [docRef, body] of Object.entries(files)) {
-        workspaceDocs.set(`${ref.repoKey}\x00${docRef}`, body);
-      }
-    },
-    async loadSpecDoc(repoKey: string, docRef: string) {
-      return workspaceDocs.get(`${repoKey}\x00${docRef}`) ?? null;
     },
     async saveWorkspaceSpecDocs(ref, files) {
       for (const [docRef, body] of Object.entries(files)) {
@@ -238,7 +208,6 @@ describe('corpus routes (spec-scan redesign)', () => {
     app = createTestApp();
   });
   afterEach(async () => {
-    setBackgroundTaskRunner(null);
     resetSpecStore();
     resetContextStore();
     resetRepoDocReader();
@@ -402,7 +371,6 @@ describe('spec docs-content staleness', () => {
     await setContextBindings(TEST_ORG, fixture.repoPath, [SOURCE]);
   });
   afterEach(async () => {
-    setBackgroundTaskRunner(null);
     resetSpecStore();
     resetContextStore();
     await teardownTestFixture(fixture.project.slug);
@@ -425,35 +393,22 @@ describe('spec docs-content staleness', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Section-scoped conflict verdicts — POST/DELETE /spec/conflict-resolution
+// The repository decision routes are gone: a repository reads its SLICE of the
+// workspace corpus folded with the WORKSPACE decisions, so there is nothing
+// repository-scoped to decide, and the writes live at `/api/context/*`.
 // ---------------------------------------------------------------------------
 
-describe('the repository decision routes without a pull request', () => {
+describe('no repository decision routes', () => {
   let app: Express;
   let fixture: TestFixture;
 
-  const VERDICT = {
-    docA: 'docs/v1.md',
-    anchorA: 'Cancellation',
-    docB: 'docs/v2.md',
-    anchorB: 'Cancellation policy',
-    verdict: 'a' as const,
-  };
-  const DISPUTE = {
-    docA: 'docs/v1.md',
-    anchorA: 'Cancellation',
-    docB: 'docs/v2.md',
-    anchorB: 'Cancellation policy',
-  };
-
-  /** Every decision route, with a body that passes its own validation. */
-  const ROUTES: Array<{ method: 'post' | 'delete'; path: string; body: object; writes: string }> = [
-    { method: 'post', path: 'includes', body: { ref: 'docs/v1.md' }, writes: 'POST /api/context/includes' },
-    { method: 'delete', path: 'includes', body: { ref: 'docs/v1.md' }, writes: 'DELETE /api/context/includes' },
-    { method: 'post', path: 'excludes', body: { ref: 'docs/v2.md' }, writes: 'POST /api/context/excludes' },
-    { method: 'delete', path: 'excludes', body: { ref: 'docs/v2.md' }, writes: 'DELETE /api/context/excludes' },
-    { method: 'post', path: 'conflict-resolution', body: VERDICT, writes: 'POST /api/context/conflict-resolution' },
-    { method: 'delete', path: 'conflict-resolution', body: DISPUTE, writes: 'DELETE /api/context/conflict-resolution' },
+  const DECISIONS: Array<{ method: 'post' | 'delete'; path: string }> = [
+    { method: 'post', path: 'includes' },
+    { method: 'delete', path: 'includes' },
+    { method: 'post', path: 'excludes' },
+    { method: 'delete', path: 'excludes' },
+    { method: 'post', path: 'conflict-resolution' },
+    { method: 'delete', path: 'conflict-resolution' },
   ];
 
   beforeEach(async () => {
@@ -469,34 +424,11 @@ describe('the repository decision routes without a pull request', () => {
     await teardownTestFixture(fixture.project.slug);
   });
 
-  // A repository reads its SLICE of the workspace corpus folded with the
-  // WORKSPACE decisions, so a decision written at repository scope would be one
-  // no read ever opens. Without a pull request to scope it to there is nothing
-  // repository-scoped to decide, and the refusal says where the decision goes.
-  it.each(ROUTES)('$method /spec/$path refuses and names $writes', async ({ method, path, body, writes }) => {
-    const res = await request(app)
+  it.each(DECISIONS)('$method /spec/$path answers 404', async ({ method, path }) => {
+    await request(app)
       [method](`/api/repos/${fixture.project.slug}/spec/${path}`)
-      .send(body)
-      .expect(400);
-    expect(res.body.error).toContain(writes);
+      .send({ ref: 'docs/v1.md' })
+      .expect(404);
     expect(vi.mocked(curateInProcess)).not.toHaveBeenCalled();
-  });
-
-  it('refuses a malformed body before it ever looks at the scope', async () => {
-    await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/includes`)
-      .send({})
-      .expect(400)
-      .expect((res) => expect(res.body.error).toMatch(/missing ref/i));
-    await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`)
-      .send({ ...VERDICT, docB: VERDICT.docA })
-      .expect(400)
-      .expect((res) => expect(res.body.error).toMatch(/must differ/i));
-    await request(app)
-      .post(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`)
-      .send({ ...VERDICT, verdict: 'bogus' })
-      .expect(400)
-      .expect((res) => expect(res.body.error).toMatch(/verdict must be one of/i));
   });
 });

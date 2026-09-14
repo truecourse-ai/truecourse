@@ -9,7 +9,7 @@ import type {
 import { createConnectRouter } from '../../packages/github-app/src/index';
 import type { ConnectDeps } from '../../packages/github-app/src/connect';
 import type { OctokitClient } from '../../packages/github-app/src/octokit';
-import { MemoryGateStore } from './memory-store';
+import { MemoryInstallationStore } from './memory-store';
 // Shared via the bare specifier so this overrides the singleton `connect.ts` uses.
 import {
   setRegistryStore,
@@ -19,7 +19,7 @@ import {
 
 type AccountLookup = NonNullable<ConnectDeps['lookupInstallationAccount']>;
 
-let store: MemoryGateStore;
+let store: MemoryInstallationStore;
 let app: Express;
 let currentOrg: string | null;
 // The App-level account lookup the host injects. A row that already carries a
@@ -46,7 +46,7 @@ const stubRegistry: RegistryStore = {
 };
 
 beforeEach(() => {
-  store = new MemoryGateStore();
+  store = new MemoryInstallationStore();
   currentOrg = 'org_A';
   installRepos = [
     { full_name: 'acme/api', default_branch: 'main', private: true },
@@ -278,14 +278,12 @@ describe('connect router', () => {
     expect((await store.getInstallation(100))?.workspaceOrgId).toBe('org_A');
   });
 
-  it('skips the per-repo spec reads on ?slim=1', async () => {
+  it('skips the per-repo slug read on ?slim=1', async () => {
     await seedInstallation('org_A');
     await request(app)
       .post('/api/ee/github/repos/link')
       .send({ repoFullName: 'acme/api', installationId: 100, defaultBranch: 'main' })
       .expect(201);
-
-    const getBaseline = vi.spyOn(store, 'getBaseline');
 
     const slim = await request(app)
       .get('/api/ee/github/status')
@@ -296,14 +294,8 @@ describe('connect router', () => {
     expect(body.installUrl).toContain('state=org_A');
     expect(body.installations.map((i) => i.installationId)).toEqual([100]);
     expect(body.repos.map((r) => r.repoFullName)).toEqual(['acme/api']);
-    // The enrichment did not run: no baseline read, so no corpus read either.
-    expect(getBaseline).not.toHaveBeenCalled();
+    // The enrichment did not run.
     expect(body.repos[0]!.slug).toBeNull();
-    expect(body.repos[0]!.openConflicts).toBe(0);
-
-    // The full read still enriches.
-    await request(app).get('/api/ee/github/status').expect(200);
-    expect(getBaseline).toHaveBeenCalledWith('acme/api');
   });
 
   it('rejects an invalid link payload with 400', async () => {

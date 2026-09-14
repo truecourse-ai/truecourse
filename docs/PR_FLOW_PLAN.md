@@ -34,24 +34,33 @@ syncs the source, runs the workspace scan and ripples generation to every
 repository whose slice moved. The pull request check is a preview of exactly
 that, through the same engine.
 
-## 3. What exists today (verified 2026-09-14, on PR #902)
+## 3. What exists today (2026-09-14, after the gate was deleted on PR #902)
 
-- The webhook receives `pull_request` events, verifies them and resolves the
-  installation, then DROPS them: nothing supplies the handler since the
-  enterprise server was deleted (`packages/github-app/src/webhook.ts`, the
-  `onPullRequest` hook).
-- The pull-request-scoped write path survives in `apps/dashboard/server/src/routes/spec.ts`
-  (`?pr=` + `?ref=`, the decisions overlay, `recuratePrCorpus`, the `pr.regate`
-  enqueue) but is inert: no client calls it, and nothing installs the background
-  runner the enqueue needs.
-- The tables are kept for this epic and are NOT to be dropped: `gh_runs`,
-  `gh_prs`, `gh_baselines`, and the per-commit corpus in `spec_sets`.
-- There is no client surface at all: the Pull requests tab was removed with the
-  route it read.
+The gate is GONE. It was all unreachable — nothing wrote its tables, no client
+read them — so carrying a half-wired version helped nobody, and the epic starts
+from a clean floor rather than from someone else's half-built one.
 
-So this epic starts with: a webhook that authenticates and routes, a place to
-hang the handler, a working per-commit corpus writer, storage for gate runs and
-checks, one job runner, and no user interface.
+What survives, and is what the epic builds on:
+
+- **The webhook**, whole: it verifies a signature, resolves the installation and
+  handles `installation`, `installation_repositories` and `push`. A
+  `pull_request` or `issue_comment` event is received and ignored. Wiring a
+  handler back is where this epic starts.
+- **The workspace scan**, its corpus, its decisions and the ripple — the engine
+  the overlay will run.
+- **The jobs queue**, its single-flight and its heavy lane.
+- **The run pipeline**: setup, generation and runs, already clone-and-copy.
+
+What was deleted with it, and must be rebuilt rather than revived: the
+pull-request-scoped write path in the spec routes, the per-pull-request corpus
+re-curation, the decisions overlay scoped to a pull request, the re-gate task,
+the baseline/runs/pull-request half of the App's store, the client's
+pull-request plumbing, and five tables — `gh_baselines`, `gh_runs`, `gh_prs`,
+`spec_sets` and `pending_guard_baselines`. There is no client surface.
+
+One piece of the old gate is still in the tree and wants its own sweep: the
+GUARD decisions overlay scoped to a pull request (`guard:<repo>#pr/<n>`), which
+is unreachable but roughly as large again as the deletion above.
 
 ## 4. What the check reports, in order of value
 
@@ -77,8 +86,8 @@ checks, one job runner, and no user interface.
 - **Cost.** An overlay scan on every push to every pull request is real money.
   Proposed: run only when the pull request touches files inside that source's
   scope, and only for the latest head.
-- **Where the temporary state lives.** `spec_sets` is keyed by repository and
-  commit; an overlay is a WORKSPACE corpus at a source's commit. Either widen
-  that key or give the pull request its own table. The same question applies to
-  the scenario set and the setup bundle a pull request produces, and to how all
-  of it is swept when the pull request closes or merges.
+- **Where the temporary state lives.** There is no storage for it any more:
+  an overlay is a WORKSPACE corpus at a source's commit, and the scenario set
+  and setup bundle a pull request produces are per-pull-request too. Design the
+  keys with their sweep in mind, since everything a pull request makes is
+  discarded when it closes or merges.

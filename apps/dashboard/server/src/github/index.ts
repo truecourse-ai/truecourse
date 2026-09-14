@@ -29,9 +29,9 @@ import {
   installationOctokit,
   loadGithubAppConfig,
   installationOf,
-  PostgresGateStore,
+  PostgresInstallationStore,
   splitRepo,
-  type GateStore,
+  type InstallationStore,
   type GithubAuth,
   type OctokitClient,
 } from '@truecourse/github-app';
@@ -55,8 +55,8 @@ export interface GithubMount {
   webhook: Router;
   /** Dashboard connect API — workspace-scoped, so it mounts BELOW the gate. */
   connect: Router;
-  /** The App's own rows: its installations, and the pull request gate's. */
-  store: GateStore;
+  /** The App's own rows: its installations. */
+  store: InstallationStore;
   /** How Context resolves the installation a repository source reads through. */
   access: ContextGithubAccess;
 }
@@ -65,7 +65,7 @@ export interface GithubConnectionOverrides {
   /** The connected repositories, whichever provider brought them. */
   repos: RepositoryStore;
   /** The App's own store. Default: Postgres, on the server's one connection. */
-  store?: GateStore;
+  store?: InstallationStore;
   /** Installation-scoped GitHub client. Default: a real Octokit. */
   octokitFor?: (installationId: number) => OctokitClient;
   /** Who an installation belongs to. Default: the App API (app-level auth). */
@@ -105,7 +105,7 @@ export function createGithubConnection(
   const cfg = loadGithubAppConfig();
   if (!cfg) return null;
 
-  const store = overrides.store ?? new PostgresGateStore(getDb());
+  const store = overrides.store ?? new PostgresInstallationStore(getDb());
   const repos = overrides.repos;
   const octokitFor =
     overrides.octokitFor ?? ((installationId: number) => installationOctokit(cfg, installationId));
@@ -185,8 +185,7 @@ export function createGithubConnection(
     secret: cfg.webhookSecret,
     store,
     repos,
-    // A connected repository's push. (The gate's baseline refresh arrives
-    // separately.)
+    // A connected repository's push.
     onBaseline: (trigger) => {
       syncSourceAfterPush(trigger.workspaceOrgId, trigger.repoFullName);
     },

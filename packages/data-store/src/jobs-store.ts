@@ -15,7 +15,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { and, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
-import { jobs, notifications, pendingGuardBaselines, type Db } from '@truecourse/db';
+import { jobs, notifications, type Db } from '@truecourse/db';
 import type { JobView, JobStatus, NotificationLevel, NotificationView } from '@truecourse/shared';
 
 /** Thrown by `JobStore.create` when an active job already holds the (org, key). */
@@ -239,84 +239,6 @@ export class JobStore {
         key: jobs.key,
         payload: jobs.payload,
       });
-  }
-}
-
-/** A deferred guard-baseline enqueue (the full request, minus the added job id). */
-export interface PendingGuardBaselineInput {
-  repoFullName: string;
-  installationId: number;
-  defaultBranch: string;
-  commitSha: string;
-  workspaceOrgId: string;
-}
-
-/** A stored pending guard-baseline row — the request plus when it was last set. */
-export interface PendingGuardBaselineView extends PendingGuardBaselineInput {
-  updatedAt: string;
-}
-
-type PendingGuardBaselineRow = typeof pendingGuardBaselines.$inferSelect;
-
-function toPendingGuardView(r: PendingGuardBaselineRow): PendingGuardBaselineView {
-  return {
-    repoFullName: r.repoFullName,
-    installationId: r.installationId,
-    defaultBranch: r.defaultBranch,
-    commitSha: r.commitSha,
-    workspaceOrgId: r.workspaceOrgId,
-    updatedAt: r.updatedAt,
-  };
-}
-
-/**
- * The coalesce-then-rerun buffer behind `enqueueGuardBaseline`. One row per
- * repo (the PK): when a
- * baseline run is already in flight, the follow-up refresh is recorded here and
- * replayed when the running run settles, so a rapid second merge is never lost.
- * `upsert` = latest wins; `take`/`drain` are read-and-delete (replay is one-shot).
- */
-export class PendingGuardBaselineStore {
-  constructor(private readonly db: Db) {}
-
-  /** Record (or replace) the repo's pending follow-up guard baseline — latest wins. */
-  async upsert(input: PendingGuardBaselineInput): Promise<void> {
-    const row = {
-      repoFullName: input.repoFullName,
-      installationId: input.installationId,
-      defaultBranch: input.defaultBranch,
-      commitSha: input.commitSha,
-      workspaceOrgId: input.workspaceOrgId,
-      updatedAt: new Date().toISOString(),
-    };
-    await this.db
-      .insert(pendingGuardBaselines)
-      .values(row)
-      .onConflictDoUpdate({
-        target: pendingGuardBaselines.repoFullName,
-        set: {
-          installationId: row.installationId,
-          defaultBranch: row.defaultBranch,
-          commitSha: row.commitSha,
-          workspaceOrgId: row.workspaceOrgId,
-          updatedAt: row.updatedAt,
-        },
-      });
-  }
-
-  /** Read-and-delete the repo's pending row (atomic), or null if none. */
-  async take(repoFullName: string): Promise<PendingGuardBaselineView | null> {
-    const [row] = await this.db
-      .delete(pendingGuardBaselines)
-      .where(eq(pendingGuardBaselines.repoFullName, repoFullName))
-      .returning();
-    return row ? toPendingGuardView(row) : null;
-  }
-
-  /** Read-and-delete every pending row — boot recovery after a crash. */
-  async drain(): Promise<PendingGuardBaselineView[]> {
-    const rows = await this.db.delete(pendingGuardBaselines).returning();
-    return rows.map(toPendingGuardView);
   }
 }
 

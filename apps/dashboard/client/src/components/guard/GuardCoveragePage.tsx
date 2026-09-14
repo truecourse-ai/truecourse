@@ -51,7 +51,6 @@ export function GuardCoveragePage({
   corpus,
   staleness,
   staleLoaded,
-  prNumber = null,
   prRef,
   reloadKey = 0,
   tabs,
@@ -67,9 +66,7 @@ export function GuardCoveragePage({
   claims?: GuardClaimsView | null;
   /** The refused statements with the ids `?gclaim` addresses them by. */
   untestable?: GuardUntestableEntry[];
-  /** EE PR view: scope conflict resolution to this PR. Repo view when null. */
-  prNumber?: number | null;
-  /** EE PR view: the PR head SHA. Undefined in the OSS repo view. */
+  /** Read the guard state pinned at this commit. Undefined reads the baseline. */
   prRef?: string;
   /** Bumped on a guard generate/run completion → refetch the per-doc coverage. */
   reloadKey?: number;
@@ -245,8 +242,6 @@ export function GuardCoveragePage({
           docB={activeConflictRecord?.b ?? overlapSel!.b}
           conflict={activeConflictRecord}
           data={corpus.data!}
-          prNumber={prNumber}
-          prRef={prRef}
           onResolved={(res) => {
             if (res) corpus.apply(res);
             else void corpus.refetch();

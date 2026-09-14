@@ -93,7 +93,7 @@ import { installMemoryGuardOverlays, resetGuardOverlayStore } from '../helpers/m
 import { installMemorySpecStore, resetSpecStore } from '../helpers/memory-spec-store';
 import { resetContextStore, setContextStore } from '@truecourse/core/lib/context-store';
 import type { OctokitClient } from '../../packages/github-app/src/octokit';
-import { MemoryGateStore } from '../github-app/memory-store';
+import { MemoryInstallationStore } from '../github-app/memory-store';
 import { memoryContextStore } from '../helpers/memory-context-store';
 
 const ORG = 'org_A';
@@ -149,7 +149,7 @@ const verify: AuthVerifier = async (cookieHeader) => {
  * The registry as production runs it: a live view of the repositories, exactly
  * what RepositoriesRegistryStore derives from them. Mutations are no-ops.
  */
-function derivedRegistry(gate: MemoryGateStore): RegistryStore {
+function derivedRegistry(gate: MemoryInstallationStore): RegistryStore {
   const toEntry = (repoFullName: string, defaultBranch: string | null): RegistryEntry => ({
     slug: slugify(repoFullName, []),
     name: repoFullName,
@@ -176,7 +176,7 @@ interface MountOptions {
   ) => Promise<{ accountLogin: string; accountType: string } | null>;
 }
 
-let store: MemoryGateStore;
+let store: MemoryInstallationStore;
 /** The workspace's Context, so a test can plant a source and read it back. */
 let contextStore: ReturnType<typeof memoryContextStore>;
 
@@ -224,7 +224,7 @@ beforeEach(async () => {
   installWorkTreeGuardStore();
   installMemoryGuardOverlays();
   installMemorySpecStore();
-  store = new MemoryGateStore();
+  store = new MemoryInstallationStore();
   // A push looks for the source that scopes the repository, so the workspace
   // store has to exist for the push hook to do anything.
   contextStore = memoryContextStore();

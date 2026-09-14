@@ -301,19 +301,12 @@ export interface SpecCorpusResponse {
   skipped?: SpecSkippedSummary;
   /** Set by the scan endpoint: true when the rescan found no doc changes (0 LLM calls). */
   noChanges?: boolean;
-  /**
-   * EE PR view: the commit whose corpus was actually returned. When it differs
-   * from the requested `ref`, the server fell back to the baseline corpus (e.g.
-   * a code-only PR whose head was never spec-scanned).
-   */
-  corpusCommit?: string;
 }
 
 /**
- * OSS include/exclude ack: the persisted decision lists only. The corpus is
- * unchanged by an OSS decision (no re-curate), so no corpus is returned — the
- * client keeps its optimistic row move until the next Scan. PR scope (EE) returns
- * the full re-curated `SpecCorpusResponse` instead.
+ * Include/exclude ack: the persisted decision lists only. The corpus is
+ * unchanged by a decision (no re-curate), so no corpus is returned — the client
+ * keeps its optimistic row move until the next Scan.
  */
 export interface SpecDecisionAck {
   manualIncludes: string[];
@@ -321,34 +314,17 @@ export interface SpecDecisionAck {
 }
 
 /**
- * OSS conflict-verdict ack: the persisted verdicts only (no corpus — a verdict
+ * Conflict-verdict ack: the persisted verdicts only (no corpus — a verdict
  * doesn't re-curate). The client re-derives resolved/dismissed state from these.
- * PR scope (EE) returns the full re-curated `SpecCorpusResponse` instead.
  */
 export interface SpecConflictAck {
   conflictResolutions: SpecConflictResolution[];
 }
 
-/**
- * EE PR scope for the spec decision routes: `?pr=<n>&ref=<headSha>` (both
- * required together). Empty outside a PR view, so OSS URLs are unchanged.
- */
-function prScopeQuery(opts?: { pr?: number; ref?: string }): string {
-  return opts?.pr != null && opts.ref ? `?pr=${opts.pr}&ref=${encodeURIComponent(opts.ref)}` : '';
-}
-
-/** Read the persisted corpus, or null on 404 (no scan yet). */
-export async function getSpecCorpus(
-  repoId: string,
-  ref?: string,
-  pr?: number,
-): Promise<SpecCorpusResponse | null> {
-  const params = new URLSearchParams();
-  if (ref) params.set('ref', ref);
-  if (pr != null) params.set('pr', String(pr));
-  const q = params.size > 0 ? `?${params.toString()}` : '';
+/** Read the repository's slice of the corpus, or null on 404 (no scan yet). */
+export async function getSpecCorpus(repoId: string): Promise<SpecCorpusResponse | null> {
   try {
-    return await fetchApi<SpecCorpusResponse>(`/api/repos/${repoId}/spec/corpus${q}`);
+    return await fetchApi<SpecCorpusResponse>(`/api/repos/${repoId}/spec/corpus`);
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return null;
     throw e;
@@ -367,11 +343,10 @@ export function startContextScan(): Promise<{ jobId: string }> {
   return fetchApi<{ jobId: string }>('/api/context/scan', { method: 'POST' });
 }
 
-/** A source doc's markdown (for the prose Spec tab). `commit` reads it at a PR head (EE). */
-export function getSpecDoc(repoId: string, ref: string, commit?: string): Promise<{ ref: string; content: string }> {
-  const c = commit ? `&commit=${encodeURIComponent(commit)}` : '';
+/** A source doc's markdown (for the prose Spec tab). */
+export function getSpecDoc(repoId: string, ref: string): Promise<{ ref: string; content: string }> {
   return fetchApi<{ ref: string; content: string }>(
-    `/api/repos/${repoId}/spec/doc?ref=${encodeURIComponent(ref)}${c}`,
+    `/api/repos/${repoId}/spec/doc?ref=${encodeURIComponent(ref)}`,
   );
 }
 
@@ -754,83 +729,6 @@ export function triggerGuardGenerate(repoId: string): Promise<{ jobId: string }>
 export function triggerGuardRun(repoId: string): Promise<{ jobId: string }> {
   return fetchApi<{ jobId: string }>(`/api/repos/${repoId}/guard/run`, { method: 'POST' });
 }
-
-// The optional `scope` on every spec decision mutation is the EE PR view
-// (`?pr=&ref=`); in PR scope the server re-curates the PR head and returns the
-// fresh corpus. Repo scope is unchanged — no query.
-type SpecMutationScope = { pr?: number; ref?: string };
-
-// OSS records the decision and returns a `SpecDecisionAck` (no re-curate); PR scope
-// (EE) re-curates and returns the full `SpecCorpusResponse`.
-
-/** Force-include a relevance-dropped doc. */
-export function addSpecInclude(repoId: string, ref: string, scope?: SpecMutationScope): Promise<SpecCorpusResponse | SpecDecisionAck> {
-  return fetchApi<SpecCorpusResponse | SpecDecisionAck>(`/api/repos/${repoId}/spec/includes${prScopeQuery(scope)}`, {
-    method: 'POST',
-    body: JSON.stringify({ ref }),
-  });
-}
-
-/** Remove a force-include override. */
-export function removeSpecInclude(repoId: string, ref: string, scope?: SpecMutationScope): Promise<SpecCorpusResponse | SpecDecisionAck> {
-  return fetchApi<SpecCorpusResponse | SpecDecisionAck>(`/api/repos/${repoId}/spec/includes${prScopeQuery(scope)}`, {
-    method: 'DELETE',
-    body: JSON.stringify({ ref }),
-  });
-}
-
-/** Force-exclude an otherwise-kept doc (drops it + its conflicts on the next Scan). */
-export function addSpecExclude(repoId: string, ref: string, scope?: SpecMutationScope): Promise<SpecCorpusResponse | SpecDecisionAck> {
-  return fetchApi<SpecCorpusResponse | SpecDecisionAck>(`/api/repos/${repoId}/spec/excludes${prScopeQuery(scope)}`, {
-    method: 'POST',
-    body: JSON.stringify({ ref }),
-  });
-}
-
-/** Remove a force-exclude override (restore the doc). */
-export function removeSpecExclude(repoId: string, ref: string, scope?: SpecMutationScope): Promise<SpecCorpusResponse | SpecDecisionAck> {
-  return fetchApi<SpecCorpusResponse | SpecDecisionAck>(`/api/repos/${repoId}/spec/excludes${prScopeQuery(scope)}`, {
-    method: 'DELETE',
-    body: JSON.stringify({ ref }),
-  });
-}
-
-/**
- * Record a section-scoped conflict verdict (pick-a-side / dismissal). OSS returns
- * a `SpecConflictAck` (no re-curate); PR scope (EE) returns the full re-curated corpus.
- */
-export function postSpecConflictResolution(
-  repoId: string,
-  payload: {
-    docA: string;
-    anchorA: string | null;
-    quoteA?: string;
-    docB: string;
-    anchorB: string | null;
-    quoteB?: string;
-    verdict: 'a' | 'b' | 'dismissed';
-    note?: string;
-  },
-  scope?: SpecMutationScope,
-): Promise<SpecConflictAck | SpecCorpusResponse> {
-  return fetchApi<SpecConflictAck | SpecCorpusResponse>(
-    `/api/repos/${repoId}/spec/conflict-resolution${prScopeQuery(scope)}`,
-    { method: 'POST', body: JSON.stringify(payload) },
-  );
-}
-
-/** Remove a conflict verdict by dispute identity. Repo scope returns the ack; PR the corpus. */
-export function deleteSpecConflictResolution(
-  repoId: string,
-  payload: { docA: string; anchorA: string | null; docB: string; anchorB: string | null },
-  scope?: SpecMutationScope,
-): Promise<SpecConflictAck | SpecCorpusResponse> {
-  return fetchApi<SpecConflictAck | SpecCorpusResponse>(
-    `/api/repos/${repoId}/spec/conflict-resolution${prScopeQuery(scope)}`,
-    { method: 'DELETE', body: JSON.stringify(payload) },
-  );
-}
-
 
 // ---------------------------------------------------------------------------
 // Agent sessions (the Activity tab) — the sessions-store read surface.

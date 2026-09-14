@@ -13,7 +13,7 @@
 
 import type { DbHandle } from '@truecourse/db';
 import { log } from '@truecourse/core/lib/logger';
-import { loadSpecDoc, loadWorkspaceSpecDoc, setSpecStore } from '@truecourse/core/lib/spec-store';
+import { loadWorkspaceSpecDoc, setSpecStore } from '@truecourse/core/lib/spec-store';
 import { isContextDocRef } from '@truecourse/core/lib/context-ref';
 import { readContextDocByRef } from '@truecourse/core/lib/context-store';
 import { setRepoDocReader, type RepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
@@ -44,23 +44,19 @@ export interface InstallDbStoresOptions {
 }
 
 /**
- * One document's body, however it is addressed.
+ * One document's body.
  *
- * A `context/<sourceId>/<docPath>` ref is a WORKSPACE document — the workspace
- * corpus names it, and no repository holds it — so it is read from the context
- * store (the live body) and, when a source has stopped yielding it, from the
- * scan's own snapshot, which is what keeps a document readable after it is
- * gone. The workspace a ref belongs to is the one that has it: a ref names no
- * workspace of its own, and a reader that was handed a repository key is asking
- * on behalf of a repository whose workspace is resolved here.
- *
- * Every other ref is a repository document, read from the scan snapshot that
- * kept it (a pinned commit reads that commit's).
+ * Every document is a WORKSPACE document, addressed
+ * `context/<sourceId>/<docPath>` — the workspace corpus names it, and no
+ * repository holds it — so it is read from the context store (the live body)
+ * and, when a source has stopped yielding it, from the scan's own snapshot,
+ * which is what keeps a document readable after it is gone. The workspace a ref
+ * belongs to is the one that has it: a ref names no workspace of its own, and a
+ * reader that was handed a repository key is asking on behalf of a repository
+ * whose workspace is resolved here. Any other ref names no document at all.
  */
-export const readStoredRepoDoc: RepoDocReader = async (repoKey, docPath, opts) =>
-  isContextDocRef(docPath)
-    ? readWorkspaceDoc(repoKey, docPath)
-    : loadSpecDoc(repoKey, docPath, opts?.commit);
+export const readStoredRepoDoc: RepoDocReader = async (repoKey, docPath) =>
+  isContextDocRef(docPath) ? readWorkspaceDoc(repoKey, docPath) : null;
 
 /**
  * A workspace document, read through the workspace that reads `repoKey`. The
@@ -130,11 +126,9 @@ export function installDbStores(
   // yielded (bodies content-addressed under `context:ws:<org>`), the syncs and
   // the repositories that read them.
   setContextStore(new PgContextStore(db));
-  // A document body is read from the scan's snapshot, never from a tree: the
-  // doc page, the coverage join and the spec reads all go through this seam,
-  // and a connected repository has no working tree to read from. The commit
-  // pins a snapshot (a PR view); without one the newest scan answers. A
-  // `context/` ref is the workspace's and is read from the context store.
+  // A document body is read from the context store, never from a tree: the doc
+  // page, the coverage join and the spec reads all go through this seam, and a
+  // connected repository has no working tree to read from.
   setRepoDocReader(readStoredRepoDoc);
   // Guard run store + scenario corpus + dismissedClaims decisions.
   setGuardStore(new PgGuardStore(db));

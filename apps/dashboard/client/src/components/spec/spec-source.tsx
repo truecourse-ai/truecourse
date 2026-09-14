@@ -11,8 +11,8 @@
  * workspace-wide read.
  *
  * A component resolves its source with `useSpecSource()` (the context value) and
- * falls back to a repo source built from its `repoId`/PR-scope props when there
- * is no provider — so existing repo callers (and their tests) need no wrapper.
+ * falls back to a repo source built from its `repoId` when there is no
+ * provider — so existing repo callers (and their tests) need no wrapper.
  *
  * Capability flags the components vary on ride the source: `supportsScan` (repo
  * curates on demand via the header Scan button; the workspace equivalent is
@@ -64,10 +64,9 @@ export interface DeleteConflictPayload {
 
 /**
  * The ~8 data-access calls the corpus components make, plus the capability flags
- * they vary on. An include/exclude/verdict write returns the OSS ack (decision
- * lists / verdict list only) in the repo/workspace batch model, or the full
- * re-curated `SpecCorpusResponse` in the EE PR flow — the caller branches on
- * `'corpus' in res`, exactly as before.
+ * they vary on. An include/exclude/verdict write returns the decision-list ack;
+ * the caller branches on `'corpus' in res` for a source that answers with a
+ * whole corpus instead.
  */
 export interface SpecSource {
   /** Repo curates on demand (header Scan button + scan-oriented empty state). The
@@ -97,12 +96,6 @@ export interface SpecSource {
   scan(): Promise<void>;
 }
 
-/** EE PR view scope (`?pr=&ref=`), baked into a repo source so callers stay scope-free. */
-export interface SpecPrScope {
-  pr?: number;
-  ref?: string;
-}
-
 /** The half of a source that RECORDS a decision, as opposed to reading one. */
 export type SpecDecisionWriters = Pick<
   SpecSource,
@@ -129,18 +122,6 @@ export const workspaceDecisionWriters: SpecDecisionWriters = {
   deleteConflictResolution: (payload) => api.deleteContextConflictResolution(payload),
 };
 
-/** The pull-request gate's own overlay: the one ledger that is not the workspace's. */
-function prDecisionWriters(repoId: string, scope: SpecPrScope): SpecDecisionWriters {
-  return {
-    addInclude: (ref) => api.addSpecInclude(repoId, ref, scope),
-    removeInclude: (ref) => api.removeSpecInclude(repoId, ref, scope),
-    addExclude: (ref) => api.addSpecExclude(repoId, ref, scope),
-    removeExclude: (ref) => api.removeSpecExclude(repoId, ref, scope),
-    postConflictResolution: (payload) => api.postSpecConflictResolution(repoId, payload, scope),
-    deleteConflictResolution: (payload) => api.deleteSpecConflictResolution(repoId, payload, scope),
-  };
-}
-
 /** Case-insensitive filter + slice a skipped array (the repo `listSkipped` impl). */
 export function sliceSkipped(all: SpecSkippedDoc[], q: SkippedQuery): SkippedPage {
   let docs = all;
@@ -160,25 +141,21 @@ export function sliceSkipped(all: SpecSkippedDoc[], q: SkippedQuery): SkippedPag
  * which is the ledger `GET /spec/corpus` folds, so a decision made here is a
  * decision the next read shows. `listSkipped` slices the `skippedDocs` the last
  * corpus read returned (client-side, no extra request).
- *
- * A PR scope (`?pr=&ref=`) is the exception: the pull-request gate keeps its own
- * decisions overlay, so a scoped source writes to the repository's PR routes.
  */
-export function createRepoSpecSource(repoId: string, prScope?: SpecPrScope): SpecSource {
-  const scope = prScope?.pr != null && prScope.ref ? prScope : undefined;
+export function createRepoSpecSource(repoId: string): SpecSource {
   let lastSkipped: SpecSkippedDoc[] = [];
   return {
     supportsScan: true,
     async getCorpus() {
-      const r = await api.getSpecCorpus(repoId, prScope?.ref, prScope?.pr);
+      const r = await api.getSpecCorpus(repoId);
       lastSkipped = r?.corpus.skippedDocs ?? [];
       return r;
     },
-    getDoc: (ref) => api.getSpecDoc(repoId, ref, prScope?.ref),
+    getDoc: (ref) => api.getSpecDoc(repoId, ref),
     async listSkipped(q) {
       return sliceSkipped(lastSkipped, q);
     },
-    ...(scope ? prDecisionWriters(repoId, scope) : workspaceDecisionWriters),
+    ...workspaceDecisionWriters,
     // Documentation is the workspace's: the one scan is the workspace Document
     // scan, whichever repository's corpus the reader was looking at.
     scan: async () => {

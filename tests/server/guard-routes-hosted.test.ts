@@ -211,8 +211,7 @@ describe('Guard routes — hosted, PR-scoped', () => {
     expect(res.body.lastGenerate).toMatchObject({ generatedAt: '2026-07-01T00:00:00.000Z' });
   });
 
-  it('status counts sections of every corpus doc from the stored corpus, not only the docs with scenarios', async () => {
-    const OTHER_DOC = 'docs/other.md';
+  it('status counts the sections of every doc the guard stores name', async () => {
     // The baseline generate report anchors the repo view's commit, as the hosted job writes it.
     await guardStore.writeGuardResult(
       { repoKey, commitSha: 'baselinesha' },
@@ -233,23 +232,11 @@ describe('Guard routes — hosted, PR-scoped', () => {
       { baseline: true },
     );
     await saveSet('baselinesha', [['a1', 'alpha']]);
-    // The scan's corpus lives in the spec store; a hosted repo has no corpus.json.
-    await specStore.saveSpec({ repoKey, commitSha: 'baselinesha' }, 'corpus', {
-      version: 3,
-      generatedAt: '2026-01-01T00:00:00Z',
-      docs: [
-        { ref: DOC, kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['cli'] },
-        { ref: OTHER_DOC, kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['cli'] },
-      ],
-      areas: [{ id: 'cli', product: 'cli', concern: 'cli', docRefs: [DOC, OTHER_DOC], overlaps: [] }],
-    });
-    setRepoDocReader(async (_repoKey, docPath) =>
-      docPath === DOC ? DOC_CONTENT : docPath === OTHER_DOC ? '# Gamma\nbody c\n' : null,
-    );
+    setRepoDocReader(async (_repoKey, docPath) => (docPath === DOC ? DOC_CONTENT : null));
     const res = await request(app).get(url('status')).expect(200);
-    // Alpha (proven) + Beta from the doc the scenarios bind, Gamma from the doc
-    // nothing binds yet; the two without a scenario read as blocked.
-    expect(res.body.sections).toMatchObject({ total: 3, byStatus: { succeeded: 1, blocked: 2 } });
+    // Alpha (proven) + Beta, both sections of the doc the scenarios bind; the
+    // one without a scenario reads as blocked.
+    expect(res.body.sections).toMatchObject({ total: 2, byStatus: { succeeded: 1, blocked: 1 } });
   });
 
   it('coverage?ref= paints sections from the PR head run (not the baseline)', async () => {

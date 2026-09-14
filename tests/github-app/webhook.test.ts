@@ -8,7 +8,7 @@ import {
   type SourcePushTrigger,
 } from '../../packages/github-app/src/index';
 import type { RepositoryRecord } from '@truecourse/shared';
-import { MemoryGateStore } from './memory-store';
+import { MemoryInstallationStore } from './memory-store';
 
 const SECRET = 'whsec';
 
@@ -16,20 +16,16 @@ function sign(body: string, secret = SECRET): string {
   return 'sha256=' + crypto.createHmac('sha256', secret).update(body).digest('hex');
 }
 
-let store: MemoryGateStore;
+let store: MemoryInstallationStore;
 let baselineCalls: BaselineTrigger[];
 let sourcePushCalls: SourcePushTrigger[];
-let prCalls: unknown[];
-let commentCalls: unknown[];
 let removedCalls: RepositoryRecord[];
 let app: Express;
 
 beforeEach(() => {
-  store = new MemoryGateStore();
+  store = new MemoryInstallationStore();
   baselineCalls = [];
   sourcePushCalls = [];
-  prCalls = [];
-  commentCalls = [];
   removedCalls = [];
   app = express();
   app.use(
@@ -50,8 +46,6 @@ beforeEach(() => {
       onRepoRemoved: async (link) => {
         removedCalls.push(link);
       },
-      onPullRequest: (p) => prCalls.push(p),
-      onCommentEdited: (p) => commentCalls.push(p),
     }),
   );
 });
@@ -240,17 +234,25 @@ describe('webhook router', () => {
     ]);
   });
 
-  it('routes pull_request to onPullRequest', async () => {
+  // The pull request flow is an epic of its own, not yet built. Until it is,
+  // a pull_request delivery is authenticated, acknowledged and dropped: nothing
+  // is baselined, no source is synced, and no repository is disconnected.
+  it('receives a pull_request event and ignores it', async () => {
+    await store.linkRepo(repoLink('acme/api', 5));
     await post('pull_request', {
       action: 'opened',
       number: 3,
+      pull_request: { head: { sha: 'head1', ref: 'feature' }, base: { sha: 'base1', ref: 'main' } },
       repository: { full_name: 'acme/api', default_branch: 'main' },
       installation: { id: 5 },
     }).expect(202);
-    expect(prCalls).toHaveLength(1);
+    expect(baselineCalls).toEqual([]);
+    expect(sourcePushCalls).toEqual([]);
+    expect(removedCalls).toEqual([]);
+    expect(await store.getRepo('acme/api')).not.toBeNull();
   });
 
-  it('routes issue_comment to onCommentEdited', async () => {
+  it('receives an issue_comment event and ignores it', async () => {
     await post('issue_comment', {
       action: 'edited',
       comment: { id: 1, body: 'hi', user: { type: 'Bot', login: 'tc[bot]' } },
@@ -258,6 +260,7 @@ describe('webhook router', () => {
       repository: { full_name: 'acme/api' },
       installation: { id: 5 },
     }).expect(202);
-    expect(commentCalls).toHaveLength(1);
+    expect(baselineCalls).toEqual([]);
+    expect(sourcePushCalls).toEqual([]);
   });
 });

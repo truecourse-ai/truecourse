@@ -117,19 +117,6 @@ describe('the source a document page reads through one repository', () => {
       'POST /api/context/conflict-resolution',
     ]);
   });
-
-  it('keeps a pull request’s decisions on the pull request', async () => {
-    const calls = serve();
-    const source = createRepoSpecSource('web', { pr: 42, ref: 'headsha' });
-
-    await source.addInclude(DOC_A);
-    await source.postConflictResolution(VERDICT);
-
-    expect(calls).toEqual([
-      'POST /api/repos/web/spec/includes?pr=42&ref=headsha',
-      'POST /api/repos/web/spec/conflict-resolution?pr=42&ref=headsha',
-    ]);
-  });
 });
 
 describe('a verdict recorded on a finding of a repository’s run', () => {

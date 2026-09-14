@@ -1,18 +1,15 @@
 /**
  * Injectable seam: enqueue a hosted guard-scenario GENERATE for a repo.
  *
- * A repo-scope spec decision that brings the open-conflict count to 0 clears the
+ * A decision that brings a repository's open-conflict count to 0 clears the
  * block that stopped an earlier generate — the guard store still holds an
- * `open-conflicts` report and no scenarios. The dashboard spec routes hand that
- * repo off through this seam so scenarios finally get authored, without importing
- * any EE package (it's a sibling adapter over core — same rule as
- * `background-tasks` / `guard-gate-pending` / `repo-doc-reader`).
+ * `open-conflicts` report and no scenarios. The decision routes hand that repo
+ * off through this seam so scenarios finally get authored (a sibling adapter
+ * over core — same rule as `guard-gate-pending` / `repo-doc-reader`).
  *
- * Keyed by `repoKey` alone: the enterprise edition resolves installation / default
- * branch / baseline commit / workspace org from its stored gate records (the same
- * resolution the manual "Generate" route does). Unset (OSS, or EE without the
- * worker) → the caller runs nothing; OSS regenerates via the manual Generate step.
- * Best-effort: a failed enqueue never fails the decision save.
+ * Keyed by `repoKey` alone: the job resolves everything else it needs from the
+ * repository's own rows. Unset (tests, a process with no worker) → the caller
+ * runs nothing. Best-effort: a failed enqueue never fails the decision save.
  */
 
 /** Enqueue a hosted guard generate for `repoKey`. Best-effort — resolves silently. */

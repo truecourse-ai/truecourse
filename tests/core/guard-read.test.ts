@@ -369,9 +369,7 @@ describe('hosted repo-level view with NO baseline — empty, never the newest se
   it('computeGuardStaleness with no ref and no baseline is all-false (no newest-set probe)', async () => {
     await saveSet('prheadonly12', [['pr1', 'alpha']]);
     expect(await computeGuardStaleness(REPO)).toEqual({
-      generateStale: false,
       runStale: false,
-      hasCorpus: false,
       hasScenarios: false,
       hasGenerated: false,
       hasRun: false,
@@ -533,19 +531,11 @@ describe('readGuardReport — commit-scoped (hosted)', () => {
 describe('computeGuardStaleness — hosted (store-composed, no FS)', () => {
   it('nothing stored at the ref → all-false', async () => {
     expect(await computeGuardStaleness(REPO, 'shaA1234567')).toEqual({
-      generateStale: false,
       runStale: false,
-      hasCorpus: false,
       hasScenarios: false,
       hasGenerated: false,
       hasRun: false,
     });
-  });
-
-  it('corpus present but never generated → generateStale + hasCorpus', async () => {
-    await new PgSpecStore(db).saveSpec({ repoKey: REPO, commitSha: 'shaA1234567' }, 'corpus', { keptDocs: [] });
-    const s = await computeGuardStaleness(REPO, 'shaA1234567');
-    expect(s).toMatchObject({ hasCorpus: true, hasGenerated: false, generateStale: true });
   });
 
   it('scenarios present but never run → runStale + hasScenarios', async () => {
@@ -554,9 +544,8 @@ describe('computeGuardStaleness — hosted (store-composed, no FS)', () => {
     expect(s).toMatchObject({ hasScenarios: true, hasRun: false, runStale: true });
   });
 
-  it('generated + run present and fresh → both dots dark', async () => {
+  it('generated + run present and fresh → the run dot is dark', async () => {
     await saveSet('shaA1234567', [['a1', 'alpha']]);
-    await new PgSpecStore(db).saveSpec({ repoKey: REPO, commitSha: 'shaA1234567' }, 'corpus', { keptDocs: [] });
     await guardStore.writeGuardResult({ repoKey: REPO, commitSha: 'shaA1234567' }, REPORT());
     await guardStore.writeGuardRun(REPO, {
       run: { runId: 'run1', ranAt: '2026-07-08T00:00:00.000Z', branch: 'main', commit: 'shaA1234567', recipeFingerprint: 'sha256:r' },
@@ -565,7 +554,7 @@ describe('computeGuardStaleness — hosted (store-composed, no FS)', () => {
       sections: [],
     });
     const s = await computeGuardStaleness(REPO, 'shaA1234567');
-    expect(s).toMatchObject({ hasCorpus: true, hasScenarios: true, hasGenerated: true, hasRun: true, generateStale: false, runStale: false });
+    expect(s).toMatchObject({ hasScenarios: true, hasGenerated: true, hasRun: true, runStale: false });
   });
 
   it('an explicit ref with no run at that commit reports hasRun:false — no baseline-run fallback', async () => {
@@ -581,42 +570,24 @@ describe('computeGuardStaleness — hosted (store-composed, no FS)', () => {
     expect(s).toMatchObject({ hasScenarios: true, hasRun: false, runStale: true });
   });
 
-  it('a PR head with only a gate run falls back to the baseline for the generate-side stores', async () => {
-    // The PR-gate shape: corpus + scenarios + generate result live at the
-    // BASELINE commit; the head stores only the gate's run. The staleness gate
-    // must see the baseline inputs (per-store fallback) AND the head's run.
+  it('a head with only a run falls back to the baseline for the generate-side stores', async () => {
+    // Scenarios + the generate result live at the BASELINE commit; the head
+    // stores only its run. The staleness gate must see the baseline inputs
+    // (per-store fallback) AND the head's run.
     const repo = await makeBaselineRepo('baseline9999');
     try {
       await saveSetFor(repo, 'baseline9999', [['a1', 'alpha']]);
-      await new PgSpecStore(db).saveSpec({ repoKey: repo, commitSha: 'baseline9999' }, 'corpus', { keptDocs: [] });
       await guardStore.writeGuardResult({ repoKey: repo, commitSha: 'baseline9999' }, REPORT(), {
         baseline: true,
       });
       await guardStore.writeGuardRun(repo, RUN('run-pr', 'prhead0000'));
 
       expect(await computeGuardStaleness(repo, 'prhead0000')).toEqual({
-        generateStale: false,
         runStale: false,
-        hasCorpus: true,
         hasScenarios: true,
         hasGenerated: true,
         hasRun: true,
       });
-    } finally {
-      fs.rmSync(repo, { recursive: true, force: true });
-    }
-  });
-
-  it('falls back per store: a head-rescanned corpus wins while scenarios still come from the baseline', async () => {
-    const repo = await makeBaselineRepo('baseline9999');
-    try {
-      // The PR re-scanned specs (corpus stored at the head) but never regenerated
-      // scenarios — corpus reads at the head, scenarios fall back independently.
-      await new PgSpecStore(db).saveSpec({ repoKey: repo, commitSha: 'prhead0000' }, 'corpus', { keptDocs: [] });
-      await saveSetFor(repo, 'baseline9999', [['a1', 'alpha']]);
-
-      const s = await computeGuardStaleness(repo, 'prhead0000');
-      expect(s).toMatchObject({ hasCorpus: true, hasScenarios: true });
     } finally {
       fs.rmSync(repo, { recursive: true, force: true });
     }

@@ -19,7 +19,6 @@ export function SpecDocViewer({
   docRef,
   title,
   url,
-  commit,
   badge,
   scrollTo,
   highlight,
@@ -34,8 +33,6 @@ export function SpecDocViewer({
   title?: string;
   /** Deep link to the original doc: the ledger's (workspace) or the fetched page's (web). */
   url?: string | null;
-  /** EE PR view: read the doc's markdown at this commit (the PR head). */
-  commit?: string;
   /** Optional role label shown before the doc name (e.g. "Older" / "Newer"). */
   badge?: string;
   /** Scroll the rendered doc to the heading whose text matches this, re-applied
@@ -58,13 +55,10 @@ export function SpecDocViewer({
   const [loading, setLoading] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // A provided (workspace) source wins; otherwise the repo default reading at the
-  // given commit (EE PR view). Workspace docs re-fetch transiently from their source.
+  // A provided (workspace) source wins; otherwise the repo default. Workspace
+  // docs re-fetch transiently from their source.
   const ctxSource = useSpecSource();
-  const repoSource = useMemo(
-    () => createRepoSpecSource(repoId, commit ? { ref: commit } : undefined),
-    [repoId, commit],
-  );
+  const repoSource = useMemo(() => createRepoSpecSource(repoId), [repoId]);
   const source = ctxSource ?? repoSource;
 
   useEffect(() => {

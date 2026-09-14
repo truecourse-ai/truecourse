@@ -12,19 +12,13 @@ import type {
   RepositoryStore,
 } from '@truecourse/shared';
 import type {
-  GateStore,
+  InstallationStore,
   InstallationRecord,
-  BaselineRecord,
-  GateRunRecord,
-  PrRecord,
 } from '../../packages/github-app/src/store/types';
 
-export class MemoryGateStore implements GateStore, RepositoryStore {
+export class MemoryInstallationStore implements InstallationStore, RepositoryStore {
   private installations = new Map<number, InstallationRecord>();
   private repos = new Map<string, RepositoryRecord>();
-  private baselines = new Map<string, BaselineRecord>();
-  private runs: GateRunRecord[] = [];
-  private prs = new Map<string, PrRecord>();
 
   async saveInstallation(rec: InstallationRecord): Promise<void> {
     this.installations.set(rec.installationId, { ...rec });
@@ -82,33 +76,6 @@ export class MemoryGateStore implements GateStore, RepositoryStore {
   /** Every repository row, regardless of workspace — what a derived registry reads. */
   async listRepos(): Promise<RepositoryRecord[]> {
     return [...this.repos.values()];
-  }
-
-  async saveBaseline(rec: BaselineRecord): Promise<void> {
-    this.baselines.set(rec.repoFullName, { ...rec });
-  }
-
-  async getBaseline(repoFullName: string): Promise<BaselineRecord | null> {
-    return this.baselines.get(repoFullName) ?? null;
-  }
-
-  async recordRun(rec: GateRunRecord): Promise<void> {
-    this.runs.push({ ...rec });
-  }
-
-  async listRuns(repoFullName: string, limit = 50): Promise<GateRunRecord[]> {
-    return this.runs
-      .filter((r) => r.repoFullName === repoFullName)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-      .slice(0, limit);
-  }
-
-  async upsertPr(rec: PrRecord): Promise<void> {
-    this.prs.set(`${rec.repoFullName}#${rec.prNumber}`, { ...rec });
-  }
-
-  async listPrs(repoFullName: string): Promise<PrRecord[]> {
-    return [...this.prs.values()].filter((p) => p.repoFullName === repoFullName);
   }
 }
 

@@ -31,7 +31,7 @@ vi.mock('@/lib/socket', () => ({
 }));
 
 const repo = toPreviewRepo({ id: 'expense-tracker', name: 'expenses', path: '/expenses', remoteUrl: 'https://github.com/spiderhands/expense-tracker' });
-const corpus = { corpus: { version: 3, generatedAt: new Date().toISOString(), docs: [], areas: [] }, corpusCommit: '58899f746bc470cfafb802d1cb27b35893631ad6' };
+const corpus = { corpus: { version: 3, generatedAt: new Date().toISOString(), docs: [], areas: [] } };
 const empty: GuardStatusSummary = { sections: null, coverage: null, lastRun: null, lastGenerate: null };
 const counts = { failed: 1, blocked: 1, 'never-run': 1, succeeded: 3, 'not-testable': 0 };
 function summary(): GuardStatusSummary {
@@ -81,7 +81,7 @@ describe('Code, the repositories and their stored summaries', () => {
     expect(screen.queryByText(/sections · /)).toBeNull();
     expect(screen.queryByRole('img', { name: /^Flows:/ })).toBeNull();
     expect(row().getByText('Failing')).toBeInTheDocument();
-    expect(row().getByText('58899f7')).toHaveAttribute('title', corpus.corpusCommit);
+    expect(row().getByText('main')).toBeInTheDocument();
     expect(row().queryByText('no corpus yet')).toBeNull();
     await userEvent.click(row().getByRole('link'));
     expect(screen.getByText('Runs destination')).toBeInTheDocument();

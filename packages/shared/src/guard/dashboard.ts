@@ -507,18 +507,12 @@ export interface GuardDocCoverage {
 }
 
 /**
- * The two amber-dot signals for the Guard tab, mtime-based (the guard analogue of
- * the spec/verify staleness probe):
- *  - `generateStale` — the spec corpus is newer than the last `guard generate`
- *    (generate would author new scenarios), or the corpus exists and nothing was
- *    ever generated.
+ * The Guard tab's amber-dot signal and the pipeline-stage flags beside it:
  *  - `runStale` — the scenarios are newer than the last `guard run` (a re-run would
  *    re-test), or scenarios exist and nothing was ever run.
  */
 export interface GuardStaleness {
-  generateStale: boolean
   runStale: boolean
-  hasCorpus: boolean
   hasScenarios: boolean
   hasGenerated: boolean
   hasRun: boolean

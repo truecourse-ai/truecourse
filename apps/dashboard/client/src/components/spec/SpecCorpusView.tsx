@@ -31,7 +31,6 @@ import { formatRelativeTime } from '@truecourse/shared';
 import { WorkspaceBadge } from '@/components/spec/WorkspaceBadge';
 
 /** Shown on decision actions while a PR is being viewed before its gate has run. */
-const PR_GATE_HINT = 'Available after the PR gate runs.';
 
 // Docs are listed once (keyed by their plain ref). A conflict is keyed by the id
 // `buildCorpusConflicts` stamps on it, NEVER rebuilt here, because the pair alone
@@ -98,42 +97,31 @@ export interface SpecCorpusState {
   hydrating: boolean;
   scanning: boolean;
   error: string | null;
-  /** EE PR view: the commit whose corpus was returned (≠ ref → baseline fallback). */
-  corpusCommit: string | null;
   /** Run a fresh corpus scan (curate), wired to the page header's Scan/Rescan. */
   scan: () => Promise<void>;
   /** Re-read the corpus after an inline resolution. */
   refetch: () => Promise<void>;
-  /** Replace corpus data from a mutation response (PR-scoped re-curate, or a scan). */
+  /** Replace corpus data from a mutation response (a scan). */
   apply: (res: SpecCorpusResponse) => void;
-  /** Reconcile the decision lists onto the current corpus (OSS include/exclude ack, no re-curate). */
+  /** Reconcile the decision lists onto the current corpus (the include/exclude ack, no re-curate). */
   applyDecisions: (dec: SpecDecisionAck) => void;
-  /** Reconcile the section-verdict list onto the current corpus (OSS conflict ack, no re-curate). */
+  /** Reconcile the section-verdict list onto the current corpus (the conflict ack, no re-curate). */
   applyConflictResolutions: (list: SpecConflictResolution[]) => void;
 }
 
 /**
  * Owns the corpus fetch + scan for one repo. `enabled` gates the initial read so
- * the page doesn't fetch a corpus until the Spec tab is actually shown. `ref`
- * (EE PR view) reads the corpus at a PR head, a change re-fetches. `pr` folds
- * the PR's decisions overlay into the returned corpus, so resolutions made
- * in the PR view render as resolved conflicts.
+ * the page doesn't fetch a corpus until the Spec tab is actually shown.
  */
-export function useSpecCorpus(
-  repoId: string,
-  enabled: boolean,
-  ref?: string,
-  pr?: number,
-): SpecCorpusState {
+export function useSpecCorpus(repoId: string, enabled: boolean): SpecCorpusState {
   const [data, setData] = useState<SpecCorpusResponse | null>(null);
   const [hydrating, setHydrating] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // A provided (workspace) source wins; otherwise the repo default keyed to this
-  // repo + PR scope. Recreated when the read scope changes so a ref change refetches.
+  // A provided (workspace) source wins; otherwise the repo default.
   const ctxSource = useSpecSource();
-  const repoSource = useMemo(() => createRepoSpecSource(repoId, { pr, ref }), [repoId, pr, ref]);
+  const repoSource = useMemo(() => createRepoSpecSource(repoId), [repoId]);
   const source = ctxSource ?? repoSource;
 
   useEffect(() => {
@@ -203,7 +191,6 @@ export function useSpecCorpus(
     hydrating,
     scanning,
     error,
-    corpusCommit: data?.corpusCommit ?? null,
     scan,
     refetch,
     apply,
@@ -219,8 +206,6 @@ export function SpecCorpusView({
   onOpen,
   onDecision,
   onOpenSources,
-  prNumber = null,
-  prRef,
 }: {
   repoId: string;
   corpus: SpecCorpusState;
@@ -228,17 +213,13 @@ export function SpecCorpusView({
   activeKey: string | null;
   /** Open a doc ref / overlap key in the right pane (pinned on double-click). */
   onOpen: (key: string, pinned: boolean) => void;
-  /** Fired after an OSS include/exclude is recorded, so the parent can refresh the Rescan dot. */
+  /** Fired after an include/exclude is recorded, so the parent can refresh the Rescan dot. */
   onDecision?: () => void;
   /**
    * Jump to the Sources page. Passed only where that page exists (an OSS repo
    * view); its absence is what keeps the pre-scan pointer off a hosted corpus.
    */
   onOpenSources?: () => void;
-  /** EE PR view: scope decisions to this PR. Repo view when null/undefined. */
-  prNumber?: number | null;
-  /** EE PR view: the PR head SHA. Undefined until the gate runs. */
-  prRef?: string;
 }) {
   const { data, hydrating, scanning } = corpus;
   // Declared before the early returns to satisfy the rules of hooks.
@@ -247,19 +228,10 @@ export function SpecCorpusView({
   // disabled (one write at a time) and this ref's row shows a spinner.
   const [busyRef, setBusyRef] = useState<string | null>(null);
 
-  // EE PR view: every decision is scoped to the PR + head SHA. With no gate run
-  // yet (no head SHA) reads fall back to baseline but writes can't be scoped, so
-  // the decision actions are disabled. Repo view is unscoped (byte-identical).
-  const prScope = useMemo(
-    () => (prNumber != null && prRef ? { pr: prNumber, ref: prRef } : undefined),
-    [prNumber, prRef],
-  );
-  const decisionsDisabled = prNumber != null && !prRef;
-
   // A provided (workspace) source wins; otherwise the repo default. Mutations +
-  // the skipped listing route through it (repo behavior is byte-identical).
+  // the skipped listing route through it.
   const ctxSource = useSpecSource();
-  const repoSource = useMemo(() => createRepoSpecSource(repoId, prScope), [repoId, prScope]);
+  const repoSource = useMemo(() => createRepoSpecSource(repoId), [repoId]);
   const source = ctxSource ?? repoSource;
 
   // Web sources are a REPO concern: the snapshot is real files in the working
@@ -378,9 +350,6 @@ export function SpecCorpusView({
   const decidedRefs = new Set([...includedSet, ...excludedSet]);
   const skippedDocs = (c.skippedDocs ?? []).filter((s) => !decidedRefs.has(s.ref));
   const skippedSummary = data.skipped ?? null;
-  // PR view fell back to the base corpus because this PR changed no docs.
-  const baselineFallback = !!prRef && !!data.corpusCommit && data.corpusCommit !== prRef;
-  const decisionsHint = decisionsDisabled ? PR_GATE_HINT : null;
   // Single-product repos tag everything `core/*`; drop the redundant product in
   // area/tag labels so they read as their concern (e.g. "auth", not "core/auth").
   const showProduct = new Set(c.areas.map((a) => a.product)).size > 1;
@@ -529,7 +498,6 @@ export function SpecCorpusView({
               hiddenRefs={decidedRefs}
               activeKey={activeKey}
               busy={busyRef !== null}
-              disabledReason={decisionsHint}
               onOpen={onOpen}
               onInclude={(ref) => setInclude(ref, true)}
             />
@@ -576,11 +544,6 @@ export function SpecCorpusView({
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>{corpus.error}</AlertDescription>
           </Alert>
-        </div>
-      )}
-      {baselineFallback && (
-        <div className="border-b border-border bg-card/40 px-4 py-1.5 text-[11px] text-muted-foreground">
-          Showing the base spec \u2014 this PR changed no docs.
         </div>
       )}
       <EntityList<CorpusRow>
@@ -632,7 +595,6 @@ export function SpecCorpusView({
               tags={row.tags}
               workspace={row.workspace}
               busy={busyRef !== null}
-              disabledReason={decisionsHint}
               onSkip={() => setExclude(row.id, true)}
               change={data.version?.docChanges[row.id]?.change}
             />
@@ -645,7 +607,6 @@ export function SpecCorpusView({
               actionLabel={row.kind === 'skipped' ? 'include' : row.kind === 'included' ? 'remove' : 'restore'}
               busy={busyRef !== null}
               pending={row.kind !== 'skipped' && row.pending}
-              disabledReason={decisionsHint}
               onAction={() =>
                 row.kind === 'excluded' ? setExclude(row.id, false) : setInclude(row.id, row.kind === 'skipped')
               }
@@ -701,7 +662,6 @@ function DocRowContent({
   tags,
   workspace = false,
   busy,
-  disabledReason,
   onSkip,
   change,
 }: {
@@ -710,8 +670,6 @@ function DocRowContent({
   /** Hosted repo view: this doc is inherited from the workspace Knowledge corpus. */
   workspace?: boolean;
   busy: boolean;
-  /** When set, the inline action is disabled and the reason shows on hover. */
-  disabledReason?: string | null;
   onSkip: () => void;
   /** What the viewed version did to this document against its parent. */
   change?: 'added' | 'edited' | 'removed';
@@ -721,10 +679,10 @@ function DocRowContent({
       <span className="flex w-full min-w-0 items-center gap-2">
         <span className="min-w-0 flex-1 truncate text-foreground">{doc.title ?? doc.ref}</span>
         {workspace && <WorkspaceBadge />}
-        <HoverPopover content={disabledReason ?? 'Exclude this doc from the corpus'} side="top" align="end">
+        <HoverPopover content="Exclude this doc from the corpus" side="top" align="end">
           <button
             type="button"
-            disabled={busy || !!disabledReason}
+            disabled={busy}
             onClick={(e) => {
               e.stopPropagation();
               onSkip();
@@ -766,7 +724,6 @@ function IncludeRowContent({
   actionLabel,
   busy,
   pending = false,
-  disabledReason,
   onAction,
 }: {
   docRef: string;
@@ -777,8 +734,6 @@ function IncludeRowContent({
   busy: boolean;
   /** The decision is recorded but not yet materialized, shows a "pending rescan" hint. */
   pending?: boolean;
-  /** When set, the inline action is disabled and the reason shows on hover. */
-  disabledReason?: string | null;
   onAction: () => void;
 }) {
   return (
@@ -788,19 +743,17 @@ function IncludeRowContent({
         {reason && <span className="truncate text-[10px] text-muted-foreground/70">{reason}</span>}
         {pending && <span className="text-[10px] italic text-muted-foreground/60">pending rescan</span>}
       </span>
-      <HoverPopover content={disabledReason ?? null} side="top" align="end">
-        <button
-          type="button"
-          disabled={busy || !!disabledReason}
-          onClick={(e) => {
-            e.stopPropagation();
-            onAction();
-          }}
-          className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-primary hover:bg-primary/10 disabled:opacity-50"
-        >
-          {actionLabel}
-        </button>
-      </HoverPopover>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={(e) => {
+          e.stopPropagation();
+          onAction();
+        }}
+        className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-primary hover:bg-primary/10 disabled:opacity-50"
+      >
+        {actionLabel}
+      </button>
     </div>
   );
 }
@@ -823,7 +776,6 @@ function SkippedSection({
   hiddenRefs,
   activeKey,
   busy,
-  disabledReason,
   onOpen,
   onInclude,
 }: {
@@ -831,7 +783,6 @@ function SkippedSection({
   hiddenRefs: Set<string>;
   activeKey: string | null;
   busy: boolean;
-  disabledReason?: string | null;
   onOpen: (key: string, pinned: boolean) => void;
   onInclude: (ref: string) => void;
 }) {
@@ -927,7 +878,6 @@ function SkippedSection({
             {...(doc.reason ? { reason: doc.reason } : {})}
             actionLabel="include"
             busy={busy}
-            disabledReason={disabledReason}
             onAction={() => onInclude(doc.ref)}
           />
         )}

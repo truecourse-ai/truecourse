@@ -102,14 +102,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
-import {
-  saveSpec,
-  loadSpec,
-  deleteSpec,
-  loadLatestSpec,
-  saveWorkspaceSpec,
-  loadWorkspaceSpec,
-} from '../lib/spec-store.js';
+import { saveWorkspaceSpec, loadWorkspaceSpec } from '../lib/spec-store.js';
 import { readRepoDoc } from '../lib/repo-doc-reader.js';
 import { getSpecInheritanceHook } from '../lib/spec-inheritance-hook.js';
 import { withEstimatePhase, type EstimatePhase, type StepTracker } from '../progress.js';
@@ -753,9 +746,9 @@ export function corpusContentSha(corpus: CuratedCorpus | null): string {
 // ---------------------------------------------------------------------------
 // Decisions, routed through the SpecStore seam.
 //
-// OSS: the on-disk files via the IL (byte-identical). EE: Postgres `spec_sets`.
-// Decisions are the user's accumulated resolutions — a single per-repo "current"
-// document, not a per-commit snapshot. The dashboard read/edit routes use these.
+// The user's accumulated resolutions — a single always-latest document per
+// WORKSPACE, since the documents they resolve belong to the workspace and every
+// repository reads a slice of them.
 // ---------------------------------------------------------------------------
 
 /** An empty decisions document (all lists empty) — the "no resolutions yet" base. */
@@ -768,50 +761,8 @@ export const EMPTY_DECISIONS: DecisionsFile = {
   scopeVerdicts: [],
   instructions: [],
 };
-/** Sentinel commit for the per-repo "current" decisions document. */
-const DECISIONS_REF = '_repo';
-/** Sentinel commit for a PR-scoped decisions overlay (`_pr/<number>`). */
-const prDecisionsRef = (pr: number): string => `_pr/${pr}`;
-/** The sentinel commit addressing the repo row or a PR overlay. */
-const decisionsRef = (pr?: number): string =>
-  pr === undefined ? DECISIONS_REF : prDecisionsRef(pr);
-
-async function loadDecisions(repoKey: string, opts?: { pr?: number }): Promise<DecisionsFile> {
-  return (
-    (await loadSpec<DecisionsFile>(
-      { repoKey, commitSha: decisionsRef(opts?.pr) },
-      'decisions',
-    )) ?? EMPTY_DECISIONS
-  );
-}
-
-async function storeDecisions(
-  repoKey: string,
-  next: DecisionsFile,
-  opts?: { pr?: number },
-): Promise<void> {
-  await saveSpec({ repoKey, commitSha: decisionsRef(opts?.pr) }, 'decisions', next);
-}
-
 /**
- * The repo's current decisions (the dashboard read). With `pr`, the effective
- * decisions for that PR: the repo row merged with the PR's overlay (the overlay
- * wins — see {@link mergeDecisions}).
- */
-export async function getDecisions(
-  repoKey: string,
-  opts?: { pr?: number },
-): Promise<DecisionsFile> {
-  if (opts?.pr === undefined) return loadDecisions(repoKey);
-  const [base, overlay] = await Promise.all([
-    loadDecisions(repoKey),
-    loadDecisions(repoKey, { pr: opts.pr }),
-  ]);
-  return mergeDecisions(base, overlay);
-}
-
-/**
- * Merge a PR's decisions overlay over the repo row. Pure. The overlay wins on
+ * Merge one decisions layer over another. Pure. The overlay wins on
  * every dimension:
  *   - manualIncludes / manualExcludes: union by path, but the overlay's verb wins
  *     per path — a path the overlay excludes is dropped from includes and vice
@@ -868,107 +819,6 @@ export function mergeDecisions(base: DecisionsFile, overlay: DecisionsFile): Dec
 
 function uniqueStrings(items: string[]): string[] {
   return [...new Set(items)];
-}
-
-/**
- * Promote a PR's decisions overlay onto the repo row on merge. Idempotent: when
- * no overlay exists returns false and does nothing (the merge flow may call this
- * twice — closed handler + baseline). Otherwise merges the overlay onto the repo
- * row, persists it, drops the overlay row, and returns true.
- */
-export async function promoteDecisionsOverlay(repoKey: string, pr: number): Promise<boolean> {
-  const overlay = await loadSpec<DecisionsFile>(
-    { repoKey, commitSha: prDecisionsRef(pr) },
-    'decisions',
-  );
-  if (!overlay) return false;
-  const merged = mergeDecisions(await loadDecisions(repoKey), overlay);
-  await storeDecisions(repoKey, merged);
-  await deleteSpec({ repoKey, commitSha: prDecisionsRef(pr) }, 'decisions');
-  return true;
-}
-
-/** Discard a PR's decisions overlay (unmerged close). Idempotent. */
-export async function discardDecisionsOverlay(repoKey: string, pr: number): Promise<void> {
-  await deleteSpec({ repoKey, commitSha: prDecisionsRef(pr) }, 'decisions');
-}
-
-/**
- * The repo's current curated corpus (dashboard read), or null when no scan has
- * run. Corpus-path analog of {@link getScanState}. OSS reads
- * `specs/corpus.json`; EE reads the store (Phase 6).
- */
-export function getCorpus(repoKey: string): Promise<CuratedCorpus | null> {
-  return loadLatestSpec<CuratedCorpus>(repoKey, 'corpus');
-}
-
-/**
- * Build a curate `docSource` from the store, for editions with no live working
- * tree (EE). The doc universe is the corpus's own known docs (kept + relevance-
- * dropped) plus the decision toggles — a force include/exclude never introduces a
- * NEW file, so there's nothing to re-discover. Each doc's body is fetched through
- * the repo-doc seam (`readRepoDoc` → GitHub in EE), and the `contentHash` is
- * computed exactly as `discoverDocs` does (`sha256` of the utf-8 body) so the
- * per-doc stage caches HIT: an unchanged doc re-derives its tags from cache
- * instead of calling the LLM — which is what makes a restore cheap.
- */
-export function buildStoredDocSource(
-  repoKey: string,
-  corpus: CuratedCorpus,
-  decisions: DecisionsFile,
-  commit?: string,
-): () => Promise<DocCandidate[]> {
-  const lastTouchedByRef = new Map(corpus.docs.map((d) => [d.ref, d.lastTouched]));
-  const refs = new Set<string>();
-  for (const d of corpus.docs) refs.add(d.ref);
-  for (const s of corpus.skippedDocs ?? []) refs.add(s.ref);
-  for (const p of decisions.manualExcludes ?? []) refs.add(p);
-  for (const p of decisions.manualIncludes ?? []) refs.add(p);
-  const readOpts = commit ? { commit } : undefined;
-  return async () => {
-    const docs: DocCandidate[] = [];
-    for (const ref of refs) {
-      const content = await readRepoDoc(repoKey, ref, readOpts);
-      if (content == null) continue; // deleted upstream — drop it from the set
-      docs.push({
-        path: ref,
-        absPath: '',
-        content,
-        kind: classifyDoc(ref, content),
-        preview: content.split(/\r?\n/).slice(0, 200).join('\n'),
-        lastTouched: lastTouchedByRef.get(ref) ?? '',
-        contentHash: createHash('sha256').update(content).digest('hex'),
-        size: Buffer.byteLength(content, 'utf-8'),
-      });
-    }
-    return docs;
-  };
-}
-
-/**
- * Re-curate a PR's corpus after a PR-scoped decision edit, scoped to one PR:
- * the doc universe is the corpus scanned at the PR head, doc bodies are read at the PR head, the
- * effective decisions fold the PR overlay ({@link getDecisions} with `pr`), and
- * the result is saved at the PR head — so it never touches the base repo view or
- * another PR. Returns the fresh corpus + open-conflict count, or null when the
- * PR head stored no corpus.
- */
-export async function recuratePrCorpus(
-  repoKey: string,
-  prHeadSha: string,
-  prNumber: number,
-): Promise<{ corpus: CuratedCorpus; openConflicts: number } | null> {
-  const corpus = await loadSpec<CuratedCorpus>({ repoKey, commitSha: prHeadSha }, 'corpus');
-  if (!corpus) return null;
-  const decisions = await getDecisions(repoKey, { pr: prNumber });
-  const { curate: result } = await curateInProcess(repoKey, {
-    docSource: buildStoredDocSource(repoKey, corpus, decisions, prHeadSha),
-    decisions,
-    skipGit: true,
-    skipCorpusWrite: true,
-  });
-  await saveSpec({ repoKey, commitSha: prHeadSha }, 'corpus', result.corpus);
-  return { corpus: result.corpus, openConflicts: openConflicts(result.corpus, decisions).length };
 }
 
 // ---------------------------------------------------------------------------
@@ -1097,99 +947,10 @@ function applyRemoveConflictResolution(
   };
 }
 
-/**
- * Force-include a doc the relevance filter skipped. Idempotent.
- */
-export async function addManualInclude(
-  repoRoot: string,
-  docPath: string,
-  opts?: { pr?: number },
-): Promise<DecisionsFile> {
-  const existing = await loadDecisions(repoRoot, opts);
-  const next = applyAddManualInclude(existing, docPath);
-  if (next !== existing) await storeDecisions(repoRoot, next, opts);
-  return next;
-}
-
-/**
- * Remove a force-include override. Idempotent.
- */
-export async function removeManualInclude(
-  repoRoot: string,
-  docPath: string,
-  opts?: { pr?: number },
-): Promise<DecisionsFile> {
-  const next = applyRemoveManualInclude(await loadDecisions(repoRoot, opts), docPath);
-  await storeDecisions(repoRoot, next, opts);
-  return next;
-}
-
-/**
- * Force-exclude a doc the relevance filter would keep — drops it from the corpus
- * on the next curate. Clears any force-include for the same path. Idempotent.
- */
-export async function addManualExclude(
-  repoRoot: string,
-  docPath: string,
-  opts?: { pr?: number },
-): Promise<DecisionsFile> {
-  const existing = await loadDecisions(repoRoot, opts);
-  const next = applyAddManualExclude(existing, docPath);
-  if (next !== existing) await storeDecisions(repoRoot, next, opts);
-  return next;
-}
-
-/**
- * Remove a force-exclude override (restore the doc). Idempotent.
- */
-export async function removeManualExclude(
-  repoRoot: string,
-  docPath: string,
-  opts?: { pr?: number },
-): Promise<DecisionsFile> {
-  const next = applyRemoveManualExclude(await loadDecisions(repoRoot, opts), docPath);
-  await storeDecisions(repoRoot, next, opts);
-  return next;
-}
-
-/**
- * Record a SECTION-scoped conflict verdict — pick-a-side ('a'/'b') or
- * dismissal — for one flagged dispute. Replaces any prior verdict for the same
- * dispute identity. This does NOT re-curate: the
- * corpus is unchanged (the overlap stays flagged), and the shared resolved-
- * derivation reads the verdict live, so a single later scan applies any batch.
- * Self-pairs are rejected.
- */
-export async function addConflictResolution(
-  repoRoot: string,
-  input: ConflictResolution,
-  opts?: { pr?: number },
-): Promise<DecisionsFile> {
-  const next = applyAddConflictResolution(await loadDecisions(repoRoot, opts), input);
-  await storeDecisions(repoRoot, next, opts);
-  return next;
-}
-
-/**
- * Remove a conflict verdict by dispute identity (unordered doc pair + section
- * anchors). Idempotent.
- */
-export async function removeConflictResolution(
-  repoRoot: string,
-  input: { docA: string; anchorA: string | null; docB: string; anchorB: string | null },
-  opts?: { pr?: number },
-): Promise<DecisionsFile> {
-  const next = applyRemoveConflictResolution(await loadDecisions(repoRoot, opts), input);
-  await storeDecisions(repoRoot, next, opts);
-  return next;
-}
-
 // ---------------------------------------------------------------------------
-// Workspace decisions (enterprise) — the org-scoped analog of the repo decision
-// mutations above. Same pure DecisionsFile transforms, persisted under WORKSPACE
-// scope (the `workspace_spec_sets` `decisions` artifact, keyed by org, no commit).
-// The EE Knowledge page's decision endpoints call these; a workspace has no PR
-// overlay dimension, so there is no `pr` opt. Each write is followed (by the
+// Workspace decisions — the pure DecisionsFile transforms above, persisted
+// under WORKSPACE scope (the `decisions` artifact, keyed by org, no commit).
+// Context's decision endpoints call these; each write is followed (by the
 // caller) with a re-process so the corpus reflects the decision.
 // ---------------------------------------------------------------------------
 
