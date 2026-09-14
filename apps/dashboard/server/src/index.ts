@@ -24,8 +24,10 @@ import { stopAllRunTails } from './services/session-tailer.service.js';
 import { wipeLegacyPostgresData, getLogDir } from '@truecourse/core/config/paths';
 import { getProjectByPath, slugify } from '@truecourse/core/config/registry';
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
-import { closeLogger, configureLogger, log } from '@truecourse/core/lib/logger';
+import { closeLogger, FileLogTransport, setLogTransport, log } from '@truecourse/core/lib/logger';
 import { publishEvent } from '@truecourse/jobs';
+import { initSentry, flushSentry } from './observability/sentry.js';
+import { ServerLogTransport } from './observability/log-transport.js';
 
 const port = parseInt(process.env.PORT || '3001', 10);
 
@@ -38,10 +40,11 @@ async function main() {
   //    even when the service runs as a system account whose `os.homedir()`
   //    differs from the invoking user's.
   const logDir = process.env.TRUECOURSE_LOG_DIR ?? getLogDir();
-  configureLogger({
+  initSentry();
+  setLogTransport(new ServerLogTransport(new FileLogTransport({
     filePath: path.join(logDir, 'dashboard.log'),
     tee: process.env.TRUECOURSE_DEV === '1',
-  });
+  })));
 
   // 1. One-time cleanup of the pre-0.4 embedded-postgres data dir
   if (wipeLegacyPostgresData()) {
@@ -237,9 +240,12 @@ async function main() {
   process.on('SIGTERM', shutdown);
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
   // Fatal boot failure — logger may not be configured; fall back to stderr so
   // the operator always sees it. Then exit.
   process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
+  log.error('[Server] Failed to start', err);
+  await closeLogger();
+  await flushSentry();
   process.exit(1);
 });

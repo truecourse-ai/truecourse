@@ -115,15 +115,13 @@ When bumping the package version, update all four places — `package.json` alon
 
 The internal packages (`@truecourse/dashboard-client`, `@truecourse/analyzer`, `@truecourse/shared`) are marked `private: true` and never published — leave their versions at `0.1.0`.
 
-npm publishing is automated via `.github/workflows/publish.yml`, which has two triggers — both run the same publish steps, so never `npm publish` manually:
-- **Push a git tag `vX.Y.Z`** (after merging to `main`) — the manual / prerelease path.
-- **Merge a campaign-close PR** (labelled `*fp-campaign-complete`) — the fp-automation path. The workflow verifies the four version locations agree, then creates the `vX.Y.Z` tag on the merge commit and publishes. The `fp-campaign-close` routine does **not** push the tag (routine sessions can't push `v*` refs — issue #752); CI owns tagging. See `docs/fp-automation/README.md` → "Release on merge".
+There is no npm publishing. Creating a GitHub Release (a stable `vX.Y.Z` tag) on a `main` commit deploys production; **Deploy (prod)** dispatch on `main` re-rolls main's HEAD. Both refuse commits not on `main`. Staging deploys from a `deploy-dev` PR label or dispatch (`.github/workflows/deploy-{dev,prod}.yml`). See `infra/azure/vm/DEPLOYMENT.md`.
 
 ## Testing
 
 - When running tests, save the full output to a file and read from it — do NOT run tests multiple times with different grep patterns. For example: `pnpm test 2>&1 | tee /tmp/test-output.txt` then read the file.
 - The full suite needs `pnpm build` run once first (tests resolve workspace packages from `dist/`), the C# Roslyn host built (`dotnet build -c Release tools/csharp-roslyn-host`, once per checkout/worktree) — without the host the C# e2e test fails hard and the Roslyn semantic-rule tests skip — and Playwright's Chromium (`pnpm --filter @truecourse/guard-runner exec playwright-core install chromium`): the guard web-driver suites fail hard without it, by design. CI installs all three in `.github/actions/setup`.
-- CI runs the suite in 4 shards (`vitest --shard=i/4`) across both `test.yml` and `publish.yml`, which share `.github/actions/setup`. Shard assignment is a hash of the file path, so tests must not depend on running in the same process as another file — they already can't, since vitest isolates every file.
+- CI runs the suite in 4 shards (`vitest --shard=i/4`) in `test.yml`. Shard assignment is a hash of the file path, so tests must not depend on running in the same process as another file — they already can't, since vitest isolates every file.
 - The Roslyn rule suites (`tests/analyzer/roslyn-rules-*.test.ts`) share one host process per file via `useRoslynHost()` in `tests/analyzer/helpers.ts`. Each snippet is still its own `analyze` request (its own Roslyn compilation); only the ~0.8s process boot is amortized. Never call `runRoslynHost` per assertion — that is what made these files take ~6 minutes.
 - `tests/setup.ts` hides the developer's global/system git config from the whole suite (`GIT_CONFIG_GLOBAL=/dev/null`), so host settings like `commit.gpgsign` can't leak into temp fixture repos. Tests that commit must set `user.name`/`user.email` per-repo.
 

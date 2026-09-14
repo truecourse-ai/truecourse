@@ -1,0 +1,70 @@
+name: Deploy application to Azure VM
+description: Build the checked-out source in the environment's ACR and release it on its VM.
+inputs:
+  environment:
+    description: Azure environment, dev or prod
+    required: true
+outputs:
+  url:
+    description: The environment's public URL
+    value: ${{ steps.vm.outputs.url }}
+  image:
+    description: The released image, by tag and digest
+    value: ${{ steps.build.outputs.image }}
+runs:
+  using: composite
+  steps:
+    - name: Check deployment configuration
+      shell: bash
+      env:
+        DEPLOY_ENV: ${{ inputs.environment }}
+      run: |
+        [[ "$DEPLOY_ENV" =~ ^(dev|prod)$ ]]
+        test "$AZURE_VM_DEPLOYMENT_ENABLED" = true || { echo 'Enable VM deployments in this GitHub environment after manual VM setup.'; exit 1; }
+
+    - uses: azure/login@v2
+      with:
+        client-id: ${{ env.AZURE_CLIENT_ID }}
+        tenant-id: ${{ env.AZURE_TENANT_ID }}
+        subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+    - name: Read provisioned VM settings
+      id: vm
+      shell: bash
+      env:
+        DEPLOY_ENV: ${{ inputs.environment }}
+      run: |
+        az deployment group show --subscription "$AZURE_SUBSCRIPTION_ID" \
+          --resource-group "rg-truecourse-$DEPLOY_ENV" --name "truecourse-vm-$DEPLOY_ENV" \
+          --query properties.outputs --output json > "$RUNNER_TEMP/vm-deployment.json"
+        REGISTRY=$(jq -r .releaseConfig.value.registryName "$RUNNER_TEMP/vm-deployment.json")
+        [[ "$REGISTRY" =~ ^[a-z0-9]+$ ]]
+        echo "registry=$REGISTRY" >> "$GITHUB_OUTPUT"
+        echo "url=$(jq -r .releaseConfig.value.url "$RUNNER_TEMP/vm-deployment.json")" >> "$GITHUB_OUTPUT"
+
+    # Tagged by what was built (`pr-42-abc1234`, `main-abc1234`) so the registry
+    # is readable on its own; the VM still receives the immutable digest.
+    - name: Build application artifact
+      id: build
+      shell: bash
+      env:
+        ACR: ${{ steps.vm.outputs.registry }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        REF_NAME: ${{ github.ref_name }}
+      run: |
+        if [ -n "$PR_NUMBER" ]; then TAG="pr-${PR_NUMBER}-${GITHUB_SHA::7}"; else TAG="${REF_NAME}-${GITHUB_SHA::7}"; fi
+        TAG="${TAG//\//-}"   # ref names can contain slashes; tags can't
+        az acr build --subscription "$AZURE_SUBSCRIPTION_ID" --registry "$ACR" \
+          --image "truecourse:$TAG" --file Dockerfile .
+        DIGEST=$(az acr repository show --subscription "$AZURE_SUBSCRIPTION_ID" \
+          --name "$ACR" --image "truecourse:$TAG" --query digest --output tsv)
+        [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+        echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+        echo "image=truecourse:$TAG ($DIGEST)" >> "$GITHUB_OUTPUT"
+
+    - name: Release application and enable alerts
+      shell: bash
+      env:
+        DEPLOY_ENV: ${{ inputs.environment }}
+        DIGEST: ${{ steps.build.outputs.digest }}
+      run: python3 .github/scripts/vm-deploy.py "$DEPLOY_ENV" "$RUNNER_TEMP/vm-deployment.json" "$DIGEST"

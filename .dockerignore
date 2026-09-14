@@ -1,4 +1,9 @@
 # Build artifacts + deps are produced fresh inside the builder stage.
+# Explicit root entries also cover Azure CLI's context packer.
+node_modules
+dist
+.turbo
+*.tsbuildinfo
 **/node_modules
 **/dist
 **/.turbo
@@ -9,15 +14,24 @@
 .gitignore
 .github
 .claude
+.codex
+.agents
 .vscode
 
 # Local data, logs, secrets — never into the build context
+out
+**/*.dump
+**/*.backup
+.truecourse
 **/.truecourse
 *.log
+**/*.log
 **/coverage
+coverage
 .env
 **/.env
 .env.*
+**/.env.*
 
 # Internal docs (kept local, not shipped in the image)
 docs/EE_*.md
