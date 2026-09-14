@@ -86,6 +86,7 @@ import {
   contextIsStale,
   recordFailedWorkspaceScanRun,
 } from '../services/context-scan.service.js';
+import { unblockWorkspaceGenerates } from '../services/guard-unblock.service.js';
 import {
   CONTEXT_SOURCE_KINDS,
   type ContextSource,
@@ -223,6 +224,21 @@ function queryValues(raw: unknown): string[] {
 
 /** The verdicts a conflict resolution may carry — the repository route's set. */
 const CONFLICT_VERDICTS = ['a', 'b', 'dismissed'] as const;
+
+/**
+ * Write one workspace decision, then start the Test generation it unblocked in
+ * every repository whose conflicts it settled. Every decision goes through here:
+ * whether one clears the last conflict of a repository's slice is what the
+ * derivation answers, not something a route can tell from the verb it served.
+ */
+async function settled(
+  org: string,
+  write: () => Promise<DecisionsFile>,
+): Promise<DecisionsFile> {
+  const decisions = await write();
+  await unblockWorkspaceGenerates(org);
+  return decisions;
+}
 
 /**
  * Start the workspace Document scan after a change to WHICH documents the
@@ -551,6 +567,10 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   // and a conflict verdict are settled ONCE here rather than per repository.
   // Each write persists the decisions artifact and acks it; the corpus itself
   // is unchanged until the next scan, which is what the staleness dot says.
+  //
+  // What a decision DOES move right away is a Test generation that stopped on
+  // an open conflict, in every repository the decision left with none —
+  // `settled` is that pass (see guard-unblock.service).
 
   const includeAck = (decisions: DecisionsFile): Record<string, unknown> => ({
     manualIncludes: decisions.manualIncludes ?? [],
@@ -567,7 +587,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   router.post('/includes', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);
-      res.json(includeAck(await addWorkspaceManualInclude(org, readRef(req))));
+      res.json(includeAck(await settled(org, () => addWorkspaceManualInclude(org, readRef(req)))));
     } catch (e) {
       respond(res, next, e);
     }
@@ -576,7 +596,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   router.delete('/includes', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);
-      res.json(includeAck(await removeWorkspaceManualInclude(org, readRef(req))));
+      res.json(includeAck(await settled(org, () => removeWorkspaceManualInclude(org, readRef(req)))));
     } catch (e) {
       respond(res, next, e);
     }
@@ -585,7 +605,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   router.post('/excludes', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);
-      res.json(includeAck(await addWorkspaceManualExclude(org, readRef(req))));
+      res.json(includeAck(await settled(org, () => addWorkspaceManualExclude(org, readRef(req)))));
     } catch (e) {
       respond(res, next, e);
     }
@@ -594,7 +614,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   router.delete('/excludes', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);
-      res.json(includeAck(await removeWorkspaceManualExclude(org, readRef(req))));
+      res.json(includeAck(await settled(org, () => removeWorkspaceManualExclude(org, readRef(req)))));
     } catch (e) {
       respond(res, next, e);
     }
@@ -604,25 +624,28 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
     try {
       const org = orgOf(req);
       const body = (req.body ?? {}) as Partial<ConflictResolution>;
-      if (!body.docA || !body.docB || body.docA === body.docB) {
+      const { docA, docB, verdict } = body;
+      if (!docA || !docB || docA === docB) {
         res.status(400).json({ error: 'docA and docB are required and must differ.' });
         return;
       }
-      if (!body.verdict || !CONFLICT_VERDICTS.includes(body.verdict)) {
+      if (!verdict || !CONFLICT_VERDICTS.includes(verdict)) {
         res.status(400).json({ error: `verdict must be one of ${CONFLICT_VERDICTS.join(', ')}.` });
         return;
       }
-      const decisions = await addWorkspaceConflictResolution(org, {
-        docA: body.docA,
-        anchorA: body.anchorA ?? null,
-        quoteA: body.quoteA,
-        docB: body.docB,
-        anchorB: body.anchorB ?? null,
-        quoteB: body.quoteB,
-        verdict: body.verdict,
-        resolvedAt: new Date().toISOString(),
-        note: body.note,
-      });
+      const decisions = await settled(org, () =>
+        addWorkspaceConflictResolution(org, {
+          docA,
+          anchorA: body.anchorA ?? null,
+          quoteA: body.quoteA,
+          docB,
+          anchorB: body.anchorB ?? null,
+          quoteB: body.quoteB,
+          verdict,
+          resolvedAt: new Date().toISOString(),
+          note: body.note,
+        }),
+      );
       res.json({ conflictResolutions: decisions.conflictResolutions ?? [] });
     } catch (e) {
       respond(res, next, e);
@@ -642,12 +665,15 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
         res.status(400).json({ error: 'docA and docB are required.' });
         return;
       }
-      const decisions = await removeWorkspaceConflictResolution(org, {
-        docA: body.docA,
-        anchorA: body.anchorA ?? null,
-        docB: body.docB,
-        anchorB: body.anchorB ?? null,
-      });
+      const { docA, docB } = body;
+      const decisions = await settled(org, () =>
+        removeWorkspaceConflictResolution(org, {
+          docA,
+          docB,
+          anchorA: body.anchorA ?? null,
+          anchorB: body.anchorB ?? null,
+        }),
+      );
       res.json({ conflictResolutions: decisions.conflictResolutions ?? [] });
     } catch (e) {
       respond(res, next, e);

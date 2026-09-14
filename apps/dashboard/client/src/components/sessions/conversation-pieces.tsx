@@ -263,23 +263,18 @@ export function FindingResolveProvider({
   };
   const resolveCtx: FindingResolveCtx = {
     resolutions,
-    resolve: async (d, verdict) =>
-      applyAck(
-        repoId
-          ? await api.postSpecConflictResolution(repoId, { ...d, verdict })
-          : await api.postContextConflictResolution({ ...d, verdict }),
-      ),
+    // The verdict is the WORKSPACE's however the finding was reached: the
+    // repository read above is only its slice of those documents, and the
+    // decisions folded into it are the workspace's.
+    resolve: async (d, verdict) => applyAck(await api.postContextConflictResolution({ ...d, verdict })),
     undo: async (d) => {
-      const dispute = {
-        docA: d.docA,
-        anchorA: d.anchorA,
-        docB: d.docB,
-        anchorB: d.anchorB,
-      };
       applyAck(
-        repoId
-          ? await api.deleteSpecConflictResolution(repoId, dispute)
-          : await api.deleteContextConflictResolution(dispute),
+        await api.deleteContextConflictResolution({
+          docA: d.docA,
+          anchorA: d.anchorA,
+          docB: d.docB,
+          anchorB: d.anchorB,
+        }),
       );
     },
     // Link the dispute's EXACT Coverage record: match against the same derived

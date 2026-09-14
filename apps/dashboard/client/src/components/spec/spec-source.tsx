@@ -5,10 +5,10 @@
  * hook) read the corpus, one doc's markdown, and record decisions
  * (includes/excludes/conflict-resolution) through a `SpecSource` rather than
  * calling `@/lib/api` directly. The DEFAULT is the repo implementation
- * (`createRepoSpecSource`) — repo pages behave identically, byte-for-byte the
- * same requests. The enterprise Knowledge page supplies a WORKSPACE source via
- * `SpecSourceProvider` that targets `/api/ee/knowledge/spec/*` instead, so the
- * exact same components render the cross-repo corpus.
+ * (`createRepoSpecSource`), which READS the repository — its slice of the
+ * corpus, its documents — and WRITES its decisions where those reads come from:
+ * the workspace. `createWorkspaceContextSource` is the same six writers over a
+ * workspace-wide read.
  *
  * A component resolves its source with `useSpecSource()` (the context value) and
  * falls back to a repo source built from its `repoId`/PR-scope props when there
@@ -103,6 +103,44 @@ export interface SpecPrScope {
   ref?: string;
 }
 
+/** The half of a source that RECORDS a decision, as opposed to reading one. */
+export type SpecDecisionWriters = Pick<
+  SpecSource,
+  | 'addInclude'
+  | 'removeInclude'
+  | 'addExclude'
+  | 'removeExclude'
+  | 'postConflictResolution'
+  | 'deleteConflictResolution'
+>;
+
+/**
+ * The decision writers at WORKSPACE scope. Documentation belongs to the
+ * workspace, so a force-include, a force-exclude and a conflict verdict are
+ * settled once for every repository that reads the documents — and that ledger
+ * is the one every corpus read folds, whichever repository it was read through.
+ */
+export const workspaceDecisionWriters: SpecDecisionWriters = {
+  addInclude: (ref) => api.addContextInclude(ref),
+  removeInclude: (ref) => api.removeContextInclude(ref),
+  addExclude: (ref) => api.addContextExclude(ref),
+  removeExclude: (ref) => api.removeContextExclude(ref),
+  postConflictResolution: (payload) => api.postContextConflictResolution(payload),
+  deleteConflictResolution: (payload) => api.deleteContextConflictResolution(payload),
+};
+
+/** The pull-request gate's own overlay: the one ledger that is not the workspace's. */
+function prDecisionWriters(repoId: string, scope: SpecPrScope): SpecDecisionWriters {
+  return {
+    addInclude: (ref) => api.addSpecInclude(repoId, ref, scope),
+    removeInclude: (ref) => api.removeSpecInclude(repoId, ref, scope),
+    addExclude: (ref) => api.addSpecExclude(repoId, ref, scope),
+    removeExclude: (ref) => api.removeSpecExclude(repoId, ref, scope),
+    postConflictResolution: (payload) => api.postSpecConflictResolution(repoId, payload, scope),
+    deleteConflictResolution: (payload) => api.deleteSpecConflictResolution(repoId, payload, scope),
+  };
+}
+
 /** Case-insensitive filter + slice a skipped array (the repo `listSkipped` impl). */
 export function sliceSkipped(all: SpecSkippedDoc[], q: SkippedQuery): SkippedPage {
   let docs = all;
@@ -117,10 +155,14 @@ export function sliceSkipped(all: SpecSkippedDoc[], q: SkippedQuery): SkippedPag
 }
 
 /**
- * The default (repo) source: the current `@/lib/api` calls, with the PR scope (if
- * any) applied to every mutation — so a repo page behaves exactly as before.
- * `listSkipped` slices the `skippedDocs` the last corpus read returned (client-
- * side, no extra request), matching how the repo Spec tab has always shown them.
+ * The default (repo) source: the corpus slice, the documents and the skipped
+ * listing of ONE repository, with its decisions written at workspace scope —
+ * which is the ledger `GET /spec/corpus` folds, so a decision made here is a
+ * decision the next read shows. `listSkipped` slices the `skippedDocs` the last
+ * corpus read returned (client-side, no extra request).
+ *
+ * A PR scope (`?pr=&ref=`) is the exception: the pull-request gate keeps its own
+ * decisions overlay, so a scoped source writes to the repository's PR routes.
  */
 export function createRepoSpecSource(repoId: string, prScope?: SpecPrScope): SpecSource {
   const scope = prScope?.pr != null && prScope.ref ? prScope : undefined;
@@ -136,12 +178,7 @@ export function createRepoSpecSource(repoId: string, prScope?: SpecPrScope): Spe
     async listSkipped(q) {
       return sliceSkipped(lastSkipped, q);
     },
-    addInclude: (ref) => api.addSpecInclude(repoId, ref, scope),
-    removeInclude: (ref) => api.removeSpecInclude(repoId, ref, scope),
-    addExclude: (ref) => api.addSpecExclude(repoId, ref, scope),
-    removeExclude: (ref) => api.removeSpecExclude(repoId, ref, scope),
-    postConflictResolution: (payload) => api.postSpecConflictResolution(repoId, payload, scope),
-    deleteConflictResolution: (payload) => api.deleteSpecConflictResolution(repoId, payload, scope),
+    ...(scope ? prDecisionWriters(repoId, scope) : workspaceDecisionWriters),
     // Documentation is the workspace's: the one scan is the workspace Document
     // scan, whichever repository's corpus the reader was looking at.
     scan: async () => {

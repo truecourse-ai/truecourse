@@ -5,15 +5,22 @@
  *   GET    /api/repos/:id/spec/corpus       read corpus.json. 404 if no scan.
  *   GET    /api/repos/:id/spec/doc?ref=...  a doc's markdown (for the prose Spec tab).
  *   GET    /api/repos/:id/spec/staleness    cheap mtime probe powering the amber dots.
+ *   POST|DELETE /api/repos/:id/spec/{includes,excludes,conflict-resolution}?pr=&ref=
+ *                                           a decision on ONE pull request's corpus.
  *
  * There is NO scan here. Documentation belongs to the workspace, so the
  * Document scan is `POST /api/context/scan` and nothing starts one per
  * repository.
+ *
+ * Nor is there a repository-scoped DECISION. The corpus a repository reads is
+ * its slice of the workspace's, folded with the workspace's decisions, so a
+ * force-include, a force-exclude and a conflict verdict are written through
+ * `/api/context/*` — the decision routes below serve the pull request gate's
+ * own overlay and refuse anything else.
  */
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import path from 'node:path';
-import { openConflicts } from '@truecourse/shared';
 import {
   type ConflictResolution,
   type CuratedCorpus,
@@ -29,13 +36,10 @@ import { contextBindings, contextChangedAt } from '@truecourse/core/lib/context-
 import { sliceCorpus } from '@truecourse/core/services/context';
 import { readRepoDoc } from '@truecourse/core/lib/repo-doc-reader';
 import { getBackgroundTaskRunner } from '@truecourse/core/lib/background-tasks';
-import { getGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
-import { readGuardResultForView } from '@truecourse/core/commands/guard-read';
 import {
   addConflictResolution,
   addManualExclude,
   addManualInclude,
-  getCorpus,
   getDecisions,
   getWorkspaceDecisions,
   recuratePrCorpus,
@@ -203,36 +207,6 @@ router.get(
   },
 );
 
-// A repo-scope decision that clears the last open conflict unblocks a guard
-// generate that stopped on those conflicts: when the repo's current generate
-// report is `open-conflicts`, enqueue a hosted guard generate through the core
-// seam (the DB-mode server installs it; file mode and tests leave it unset →
-// no-op). A decision is NOT a corpus change: the open set derives from the stored
-// corpus plus the decisions through the same derivation the gate and the client
-// use, so nothing is re-curated and no scan runs. It fires off ANY decision that
-// clears the last conflict — a verdict/dismissal OR an exclude — since either can
-// be the one that resolves it. Best-effort: a failed enqueue never fails the
-// decision save.
-//
-// The guard-store read is gated on an empty open set so the hot path (conflicts
-// still remain) never touches it. The report is the REPO-level view read (the
-// baseline commit's row) — never the store's newest row, which a PR head's
-// regenerated `ok` report would shadow, silently skipping the unblock generate.
-async function regenIfConflictsResolved(repoKey: string, decisions: DecisionsFile): Promise<void> {
-  const corpus = await getCorpus(repoKey);
-  if (!corpus || corpus.docs.length === 0) return;
-  if (openConflicts(corpus, decisions).length > 0) return;
-  const report = await readGuardResultForView(repoKey);
-  if (report?.status !== 'open-conflicts') return;
-  const enqueue = getGuardGenerateEnqueue();
-  if (!enqueue) return;
-  try {
-    await enqueue(repoKey);
-  } catch {
-    /* best-effort — the decision is already saved */
-  }
-}
-
 // A PR-scoped decision edit: the client sends `?pr=<number>` plus
 // `?ref=<PR head SHA>` (the same head it reads the tabs at). The overlay + the
 // re-curate both need the head, so require them together.
@@ -280,34 +254,17 @@ async function mutateSpecDecisionPr(
   res.json(await prCorpusPayload(repoPath, scope.pr, scope.ref, result?.corpus ?? null));
 }
 
-// A doc include/exclude mutation, edition-aware.
-//
-// The decision is persisted and acked WITHOUT re-curating: the corpus is unchanged
-// by this call, so a single later Scan materializes any batch of queued decisions
-// (a full re-curate per click re-ran the set-level LLM stages every time). The
-// client moves the row optimistically and the Rescan dot lights via
-// `decisionsPending`. No git gate: a decision write needs no working tree. It
-// also checks whether this decision cleared the repository's last open conflict
-// and unblocks a stalled guard generate (see regenIfConflictsResolved).
-async function mutateSpecDecision(
-  repoPath: string,
-  res: Response,
-  mutate: () => Promise<DecisionsFile>,
-): Promise<void> {
-  const decisions = await mutate();
-  await regenIfConflictsResolved(repoPath, decisions);
-  res.json({
-    manualIncludes: decisions.manualIncludes ?? [],
-    manualExcludes: decisions.manualExcludes ?? [],
-  });
-}
-
-// Dispatch an include/exclude mutation: a PR-scoped edit (EE, `?pr` + `?ref`)
-// writes the PR overlay and re-curates the PR head; otherwise the repo-scope path.
+// Dispatch a decision edit. A repository has ONE decisions ledger of its own —
+// the pull request's overlay — so a PR-scoped edit (`?pr` + `?ref`) writes that
+// overlay and re-curates the PR head. Everything else is the workspace's: the
+// documents belong to it, `GET /spec/corpus` folds its decisions, and a decision
+// written here would be one nothing reads back. Those are refused, pointing at
+// the route that does hold them.
 async function applySpecMutation(
   req: Request,
   res: Response,
   repoPath: string,
+  workspaceRoute: string,
   mutate: (opts?: { pr?: number }) => Promise<DecisionsFile>,
 ): Promise<void> {
   const parsed = parsePrScope(req);
@@ -315,15 +272,17 @@ async function applySpecMutation(
     res.status(400).json({ error: parsed.error });
     return;
   }
-  if (parsed.scope) {
-    await mutateSpecDecisionPr(repoPath, parsed.scope, res, mutate);
+  if (!parsed.scope) {
+    res.status(400).json({
+      error: `This decision belongs to the workspace, not to one repository. Write it through ${workspaceRoute}.`,
+    });
     return;
   }
-  await mutateSpecDecision(repoPath, res, () => mutate());
+  await mutateSpecDecisionPr(repoPath, parsed.scope, res, mutate);
 }
 
-// Force-include / un-include a relevance-dropped doc, then re-curate so the
-// corpus + overlaps reflect it immediately.
+// Force-include / un-include a relevance-dropped doc on a pull request, then
+// re-curate so the PR's corpus + overlaps reflect it immediately.
 router.post(
   '/:id/spec/includes',
   async (req: Request, res: Response, next: NextFunction) => {
@@ -335,7 +294,7 @@ router.post(
         return;
       }
       const ref = body.ref;
-      await applySpecMutation(req, res, repo.path, (opts) =>
+      await applySpecMutation(req, res, repo.path, 'POST /api/context/includes', (opts) =>
         addManualInclude(repo.path, ref, opts),
       );
     } catch (e) {
@@ -355,7 +314,7 @@ router.delete(
         return;
       }
       const ref = body.ref;
-      await applySpecMutation(req, res, repo.path, (opts) =>
+      await applySpecMutation(req, res, repo.path, 'DELETE /api/context/includes', (opts) =>
         removeManualInclude(repo.path, ref, opts),
       );
     } catch (e) {
@@ -364,8 +323,8 @@ router.delete(
   },
 );
 
-// Force-exclude / restore an otherwise-kept doc, then re-curate. Excluding a doc
-// removes it (and any conflicts it drives) from the corpus.
+// Force-exclude / restore an otherwise-kept doc on a pull request, then
+// re-curate. Excluding a doc removes it (and any conflicts it drives).
 router.post(
   '/:id/spec/excludes',
   async (req: Request, res: Response, next: NextFunction) => {
@@ -377,7 +336,7 @@ router.post(
         return;
       }
       const ref = body.ref;
-      await applySpecMutation(req, res, repo.path, (opts) =>
+      await applySpecMutation(req, res, repo.path, 'POST /api/context/excludes', (opts) =>
         addManualExclude(repo.path, ref, opts),
       );
     } catch (e) {
@@ -397,7 +356,7 @@ router.delete(
         return;
       }
       const ref = body.ref;
-      await applySpecMutation(req, res, repo.path, (opts) =>
+      await applySpecMutation(req, res, repo.path, 'DELETE /api/context/excludes', (opts) =>
         removeManualExclude(repo.path, ref, opts),
       );
     } catch (e) {
@@ -409,45 +368,12 @@ router.delete(
 // ---------------------------------------------------------------------------
 // Section-scoped conflict verdicts — pick-a-side / dismissal.
 //
-// A verdict resolves ONE flagged disagreement without re-curating: the corpus is
-// unchanged (the overlap stays flagged), and the shared resolved-derivation reads
-// the verdict live, so a single later Scan applies any batch (mirrors the OSS
-// include/exclude ack). Repo scope returns the persisted `conflictResolutions`
-// (no corpus) in both editions; a PR-scoped edit writes the PR overlay +
-// re-curates the PR head.
+// A verdict resolves ONE flagged disagreement of a pull request's corpus: the
+// PR overlay takes the verdict and the PR head is re-curated. The workspace's
+// own verdicts are `/api/context/conflict-resolution`.
 // ---------------------------------------------------------------------------
 
 const CONFLICT_VERDICTS = ['a', 'b', 'dismissed'] as const;
-
-async function mutateConflictResolution(
-  repoPath: string,
-  res: Response,
-  mutate: () => Promise<DecisionsFile>,
-): Promise<void> {
-  // Instant decision-write, NO re-curate — ack the persisted verdicts, and
-  // unblock a stalled guard generate when this was the last open conflict.
-  const decisions = await mutate();
-  await regenIfConflictsResolved(repoPath, decisions);
-  res.json({ conflictResolutions: decisions.conflictResolutions ?? [] });
-}
-
-async function applyConflictResolution(
-  req: Request,
-  res: Response,
-  repoPath: string,
-  mutate: (opts?: { pr?: number }) => Promise<DecisionsFile>,
-): Promise<void> {
-  const parsed = parsePrScope(req);
-  if ('error' in parsed) {
-    res.status(400).json({ error: parsed.error });
-    return;
-  }
-  if (parsed.scope) {
-    await mutateSpecDecisionPr(repoPath, parsed.scope, res, mutate);
-    return;
-  }
-  await mutateConflictResolution(repoPath, res, () => mutate());
-}
 
 router.post(
   '/:id/spec/conflict-resolution',
@@ -474,7 +400,7 @@ router.post(
         resolvedAt: new Date().toISOString(),
         note: body.note,
       };
-      await applyConflictResolution(req, res, repo.path, (opts) =>
+      await applySpecMutation(req, res, repo.path, 'POST /api/context/conflict-resolution', (opts) =>
         addConflictResolution(repo.path, resolution, opts),
       );
     } catch (e) {
@@ -499,7 +425,7 @@ router.delete(
         docB: body.docB,
         anchorB: body.anchorB ?? null,
       };
-      await applyConflictResolution(req, res, repo.path, (opts) =>
+      await applySpecMutation(req, res, repo.path, 'DELETE /api/context/conflict-resolution', (opts) =>
         removeConflictResolution(repo.path, input, opts),
       );
     } catch (e) {

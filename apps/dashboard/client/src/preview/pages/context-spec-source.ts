@@ -7,22 +7,20 @@
  * what lets Context point them at the workspace: one corpus, one set of
  * decisions, settled once for every repository that reads the documents.
  *
+ * Only the READ half is this source's own: the decisions are the workspace's
+ * wherever they are made, so the writers are the shared ones a repository
+ * source uses too.
+ *
  * `supportsScan` is false: the Document scan starts on Context's own header and
  * nowhere else (plan §5), so the pane offers no second Scan button of its own.
  */
 
+import { getContextCorpus, getContextDoc, type SpecSkippedDoc } from '@/lib/api';
 import {
-  addContextExclude,
-  addContextInclude,
-  deleteContextConflictResolution,
-  getContextCorpus,
-  getContextDoc,
-  postContextConflictResolution,
-  removeContextExclude,
-  removeContextInclude,
-  type SpecSkippedDoc,
-} from '@/lib/api';
-import { sliceSkipped, type SpecSource } from '@/components/spec/spec-source';
+  sliceSkipped,
+  workspaceDecisionWriters,
+  type SpecSource,
+} from '@/components/spec/spec-source';
 
 export function createWorkspaceContextSource(): SpecSource {
   let lastSkipped: SpecSkippedDoc[] = [];
@@ -37,12 +35,7 @@ export function createWorkspaceContextSource(): SpecSource {
     async listSkipped(q) {
       return sliceSkipped(lastSkipped, q);
     },
-    addInclude: (ref) => addContextInclude(ref),
-    removeInclude: (ref) => removeContextInclude(ref),
-    addExclude: (ref) => addContextExclude(ref),
-    removeExclude: (ref) => removeContextExclude(ref),
-    postConflictResolution: (payload) => postContextConflictResolution(payload),
-    deleteConflictResolution: (payload) => deleteContextConflictResolution(payload),
+    ...workspaceDecisionWriters,
     // The workspace has no on-demand scan from inside a pane: Context's header
     // owns it, and a source with nothing to do says nothing rather than lying.
     scan: async () => {},
