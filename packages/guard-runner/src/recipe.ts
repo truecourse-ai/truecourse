@@ -1,3 +1,5 @@
+import { forEachInlineSecret } from './recipe-secrets.js';
+import { PreparationQualificationSchema, observationSource } from './preparation-observation.js';
 /**
  * The preparation recipe (`.truecourse/scenarios/recipe.json`) — how to turn the
  * working tree into something scenarios can drive. `build` runs once per run in
@@ -199,6 +201,7 @@ export const RecipePreparationScriptSchema = z.object({
 /** Runner-executed, unfiltered collection reads. Expected values are known inputs,
  * not values captured from the application response being checked. */
 export const RecipePreparationBaselineCheckSchema = z.object({
+  qualification: PreparationQualificationSchema.optional(),
   path: z.string().regex(/^\/(?!\/)/).refine(p => !/[?#[\]\\\s]/.test(p), 'baseline paths must omit query/fragment; use query for transport parameters'),
   query: z.record(z.string().min(1), z.string()).optional(),
   server: z.string().min(1).optional(),
@@ -1065,8 +1068,18 @@ export function loadRecipe(repoRoot: string, recipeFile: string): LoadedRecipe |
 
 /** Version preparation semantics independently so cached unsupported outcomes can be retried once. */
 export function computePreparationFingerprint(repoRoot: string): string {
-  return crypto.createHash('sha256').update('guard-preparations:4-dependency-availability\n')
-    .update(computeRecipeFingerprint(repoRoot)).digest('hex');
+  const hash = crypto.createHash('sha256').update('guard-preparations:5-qualified-observations-runtime-diagnostics\n')
+    .update(computeRecipeFingerprint(repoRoot));
+  try {
+    const recipe = RecipeSchema.parse(JSON.parse(fs.readFileSync(recipePath(repoRoot), 'utf8')));
+    const paths = new Set(Object.values(recipe.preparations ?? {}).flatMap(p =>
+      (p.baselineChecks ?? []).flatMap(c => (c.qualification?.sources ?? []).map(s => s.path))));
+    for (const relative of [...paths].sort()) {
+      hash.update(relative);
+      try { hash.update(observationSource(repoRoot, relative).sha256); } catch { hash.update('missing'); }
+    }
+  } catch { hash.update('no-qualified-recipe'); }
+  return hash.digest('hex');
 }
 
 /** Hash the present discovery-input files (sorted, path-tagged) into one digest. */
@@ -1187,34 +1200,6 @@ export function hashableRecipeText(raw: string): string {
  * leaves the reader's screen in one edit: {@link hashableRecipeText} deletes what
  * it visits, {@link maskedRecipeText} masks it.
  */
-function forEachInlineSecret(parsed: unknown, visit: (holder: Record<string, unknown>) => void): void {
-  const api = (parsed as {
-    api?: {
-      credentials?: Record<string, unknown>
-      externals?: Record<string, { env?: Record<string, unknown> } | null>
-    }
-  })?.api
-  const externals = api?.externals
-  if (externals && typeof externals === 'object') {
-    for (const external of Object.values(externals)) {
-      const env = external?.env
-      if (!env || typeof env !== 'object') continue
-      for (const entry of Object.values(env)) {
-        if (entry && typeof entry === 'object' && 'value' in entry) {
-          visit(entry as Record<string, unknown>)
-        }
-      }
-    }
-  }
-  const creds = api?.credentials
-  if (creds && typeof creds === 'object') {
-    for (const cred of Object.values(creds)) {
-      if (cred && typeof cred === 'object' && 'value' in cred) {
-        visit(cred as Record<string, unknown>)
-      }
-    }
-  }
-}
 
 /**
  * How much of a secret any surface may show: bullets to its length, capped so a

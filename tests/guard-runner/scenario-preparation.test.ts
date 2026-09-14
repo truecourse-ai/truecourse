@@ -1,21 +1,34 @@
+import { qualifyFixtureRecipe } from './preparation-qualification-fixture';
 import { observeApiExpect } from '../../packages/guard-runner/src/api/expect';
 import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import {
-  prepareScenario,
+  prepareScenario as runPreparedScenario,
   validateScenarioPreparation,
   RecipeSchema,
   computeRecipeFingerprint,
-  runGuard,
+  runGuard as runReviewedGuard,
   type Recipe,
 } from '@truecourse/guard-runner';
 import { GuardScenarioSchema, GuardSetupSchema } from '@truecourse/shared';
 import { app } from '../fixtures/guard-preparation/server.mjs';
 import { scenario, specBinds, writeSpecDoc, writeScenario } from './helpers.js';
 
+// These tests exercise runtime numeric/isolation checks after a fresh source
+// review of the fixture. Stale/missing qualification tests use the real entry
+// directly in preparation-observation.test.ts.
+const prepareScenario: typeof runPreparedScenario = options => {
+  qualifyFixtureRecipe(options.repoRoot, options.recipe);
+  return runPreparedScenario(options);
+};
+const runGuard: typeof runReviewedGuard = options => {
+  if (options.recipe) qualifyFixtureRecipe(options.repoRoot, options.recipe);
+  return runReviewedGuard(options);
+};
 const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0))
@@ -57,6 +70,7 @@ function fixture(): { root: string; recipe: Recipe } {
       empty: { ...preparation, baseline: 'empty', baselineChecks: [{ path: '/rows', credential: 'owner', counts: { count: 0 }, totals: { total: 0 } }] },
     },
   };
+  qualifyFixtureRecipe(root, recipe);
   return { root, recipe };
 }
 async function serve(world: Awaited<ReturnType<typeof prepareScenario>>) {
@@ -471,9 +485,11 @@ describe('runner-owned preparation profiles', () => {
       recipe,
       profile: 'ledger',
     });
+    fs.mkdirSync(path.join(root, 'node_modules'), {recursive:true});
+    fs.symlinkSync(path.dirname(createRequire(import.meta.url).resolve('tsx/package.json')), path.join(root, 'node_modules/tsx'), 'dir');
     fs.writeFileSync(
       path.join(root, 'scripts/wait.mjs'),
-      "import fs from 'node:fs';fs.writeFileSync(process.env.READY_FILE,'ready');setInterval(()=>{},1000)",
+      "import {pathToFileURL} from 'node:url'; const {runTypeScript}=await import(pathToFileURL(process.env.GUARD_PREPARATION_RUNTIME).href); await runTypeScript({imports: `import fs from 'node:fs';`, body: `fs.writeFileSync(process.env.READY_FILE!, 'ready'); await new Promise(() => setInterval(()=>{},1000));`});",
     );
     recipe.preparations!.empty.seed.script = 'scripts/wait.mjs';
     const controller = new AbortController();
@@ -492,6 +508,7 @@ describe('runner-owned preparation profiles', () => {
     } finally {
       watcher.close();
     }
+    expect(fs.readdirSync(root).filter(name=>name.startsWith('.guard-preparation-'))).toEqual([]);
     const server = await serve(sibling);
     try {
       expect((await server.read()).count).toBe(8);

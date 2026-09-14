@@ -3,8 +3,8 @@ import type { GuardScenario } from '@truecourse/shared'
 
 /** Eligibility is deliberately narrower than general preparation support: a
  * private database does not isolate a supplied account or an external service. */
-export function privateAuthoringProfiles(recipe: Recipe, localDependencies: ReadonlySet<string>): Set<string> {
-  return new Set(preparationCatalog(recipe).filter(({ name }) => {
+export function privateAuthoringProfiles(recipe: Recipe, localDependencies: ReadonlySet<string>, repoRoot?: string): Set<string> {
+  return new Set(preparationCatalog(recipe, repoRoot).filter(({ name }) => {
     const profile = recipe.preparations![name]!
     return profile.postgres?.isolation === 'database' && profile.needs !== undefined &&
       profile.needs.every(name => localDependencies.has(name))

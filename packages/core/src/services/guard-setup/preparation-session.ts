@@ -10,6 +10,9 @@ import type {
 } from '@truecourse/guard-generator';
 import {
   RecipePreparationSchema,
+  PREPARATION_RUNTIME_GUIDANCE,
+  observationBinding,
+  assertObservationQualification,
   preparationDependencyBriefing,
   resolvePreparationDependencies,
   PREPARATION_VERIFY_INPUTS_SOURCE,
@@ -24,7 +27,10 @@ import {
   type Recipe,
 } from '@truecourse/guard-runner';
 import { runSessionPool } from '../agent/session-pool.js';
-import { readFileTool, searchTool } from '../agent/repo-tools.js';
+import { preparationContext } from './preparation-context.js';
+import { preparationObservationSession, qualifyObservations, type ObservationReview } from './preparation-observation.js';
+import { preparationDiagnostic, preparationDiagnosticTool } from './preparation-diagnostics.js';
+import { readFileTool, readFilesTool, searchTool } from '../agent/repo-tools.js';
 import {
   describeSessionFailure,
   type GuardSetupSessionContext,
@@ -79,8 +85,10 @@ export async function verifyPreparationDraft(
   if (new Set(draft.profiles.map((p) => p.name)).size !== draft.profiles.length)
     throw new Error('Preparation names must be unique');
   // Check every profile before staging scripts or executing any earlier profile.
-  for (const profile of draft.profiles)
+  for (const profile of draft.profiles) {
     resolvePreparationDependencies(input.repoRoot, input.recipe, profile.needs);
+    for (const check of profile.baselineChecks) assertObservationQualification(input.repoRoot, input.recipe, check);
+  }
   const snapshots = new Map<string, Buffer | null>();
   const record = (file: string, body: string) => {
     if (!snapshots.has(file))
@@ -163,6 +171,18 @@ export function buildPreparationSession(
     let verified: string | undefined;
     let verificationFailure: string | undefined;
     const secrets = new Map(Object.entries({ ...input.recipe.env, ...input.recipe.api?.env }));
+    for (const [name, server] of Object.entries(input.recipe.api?.servers ?? {}))
+      for (const [key, value] of Object.entries(server.env ?? {})) secrets.set(`server.${name}.${key}`, value);
+    for (const [key, value] of Object.entries(input.recipe.web?.env ?? {})) secrets.set(`web.${key}`, value);
+    for (const [name, credential] of Object.entries(input.recipe.api?.credentials ?? {})) {
+      const value = credential.value ?? (credential.valueFromEnv ? process.env[credential.valueFromEnv] : undefined);
+      if (value) secrets.set(`credential.${name}`, value);
+    }
+    for (const [name, external] of Object.entries(input.recipe.api?.externals ?? {}))
+      for (const [key, binding] of Object.entries(external.env ?? {})) {
+        const value = binding.value ?? (binding.valueFromEnv ? process.env[binding.valueFromEnv] : undefined);
+        if (value) secrets.set(`external.${name}.${key}`, value);
+      }
     for (const [key, value] of [...secrets]) {
       try {
         const password = new URL(value).password;
@@ -173,11 +193,53 @@ export function buildPreparationSession(
       } catch { /* Non-URL environment values are already covered. */ }
     }
     const redact = buildCredentialRedactor(secrets);
+    // Diagnostics mask every supplied value. The briefing must retain ordinary
+    // configuration such as UPLOAD_TRANSPORT=database, otherwise even catalog
+    // names and source identifiers become unusable. Mask declared credentials,
+    // secret-bearing env names and concrete URLs there.
+    const redactContext = buildCredentialRedactor(new Map([...secrets].filter(([key, value]) =>
+      /^(credential|external)\./.test(key) ||
+      /secret|token|password|credential|authorization|cookie|(?:^|[._])(?:key|pwd|pw|dsn)(?:[._]|$)/i.test(key) ||
+      /^[a-z][a-z0-9+.-]*:\/\//i.test(value))));
     const failure = (stage: string, result: BuildResult) => ({
       status: 'failed' as const,
       reason: `${stage} failed before private preparation verification (${opts.signal?.aborted ? 'cancelled' : result.timedOut ? 'timed out' : `exit ${result.exitCode ?? 'unknown'}`}):\n${redact(result.output).trim().slice(-4000) || 'No command output was captured.'}`,
     });
     try {
+      if (opts.signal?.aborted) return { status: 'failed', reason: 'Preparation authoring cancelled' };
+      input.onPhase?.('qualifying instance-wide observations', 'observation-review');
+      const { driver, persistence } = await context.acquire();
+      const runtimeContext = preparationContext(input.repoRoot, input.recipe, redactContext);
+      const reviewed = await runSessionPool<typeof input, ObservationReview>({
+        items: [input], workItem: () => 'preparation-observations',
+        session: () => preparationObservationSession(input.repoRoot, input.recipe),
+        briefing: () => [redactContext(JSON.stringify({ recipe: JSON.parse(hashableRecipeText(JSON.stringify(input.recipe))), runtimeContext,
+          dependencyAvailability: preparationDependencyBriefing(input.repoRoot, input.recipe), specExcerpts: input.specExcerpts }))],
+        driver, persistence, concurrency: 1, ...(opts.signal ? { signal: opts.signal } : {}), fold: () => {},
+      });
+      const review = reviewed[0]?.outcome;
+      if (!review) return { status: 'failed', reason: 'Observation review did not start' };
+      context.note(review.status); context.addSpend(1, review.spent);
+      if (review.status !== 'completed') return { status: 'failed', reason: describeSessionFailure(review.failure) };
+      const approvals = qualifyObservations(input.repoRoot, input.recipe, review.output);
+      if (!approvals.size) {
+        // Retain prior scripts/declarations, but do not advertise a now-unqualified profile.
+        if (input.recipe.preparations) {
+          const updated = structuredClone(input.recipe);
+          for (const p of Object.values(updated.preparations ?? {})) for (const c of p.baselineChecks ?? []) delete c.qualification;
+          fs.writeFileSync(recipePath(input.repoRoot), JSON.stringify(updated, null, 2) + '\n');
+        }
+        return { status: 'skipped', reason: 'No instance-wide baseline observation established. ' + review.output.findings.join('; '), findings: review.output.findings, sessionRunId: context.runId() };
+      }
+      const bindDraft = (draft: PreparationDraft): PreparationDraft => ({ ...draft, profiles: draft.profiles.map(p => ({ ...p,
+        baselineChecks: p.baselineChecks.map(check => {
+          const qualification = approvals.get(observationBinding(check));
+          if (!qualification) throw Error('Baseline observation was not qualified by the source review. Use an approved endpoint, query, credential and numeric paths.');
+          const bound = { ...check, qualification };
+          assertObservationQualification(input.repoRoot, input.recipe, bound);
+          return bound;
+        }),
+      })) });
       // A targeted hosted run starts in a fresh clone; replaying recipe/seed
       // artifacts does not install the application's dependencies there.
       if (input.recipe.install) {
@@ -207,7 +269,6 @@ export function buildPreparationSession(
         servicesStarted = true;
       }
       input.onPhase?.('authoring and verifying private starting states', 'preparations');
-      const { driver, persistence } = await context.acquire();
       const def: SessionDef<PreparationDraft> = {
         kind: PREPARATION_SESSION_KIND,
         display: { title: 'Preparations' },
@@ -215,7 +276,9 @@ export function buildPreparationSession(
         budget: PREPARATION_SESSION_BUDGET,
         tools: [
           readFileTool(input.repoRoot),
+          readFilesTool(input.repoRoot),
           searchTool(input.repoRoot),
+          preparationDiagnosticTool(),
           defineSessionTool({
             name: 'verify_preparations',
             description:
@@ -228,6 +291,7 @@ export function buildPreparationSession(
               if (!draft.profiles.length)
                 return { isError: true, content: 'verify_preparations requires at least one profile; an empty draft cannot resolve a verification failure.' };
               try {
+                draft = bindDraft(draft);
                 await verifyPreparationDraft(input, draft, {
                   signal: opts.signal,
                 });
@@ -239,10 +303,11 @@ export function buildPreparationSession(
                 };
               } catch (error) {
                 verified = undefined;
-                verificationFailure = redact(error instanceof Error ? error.message : String(error));
+                const artifact = preparationDiagnostic(error, redact);
+                verificationFailure = artifact.message;
                 return {
-                  content: `Preparation verification refused: ${verificationFailure}`,
-                  isError: true,
+                  content: `Preparation verification refused: ${verificationFailure}\nDiagnostic ${artifact.id}: read_preparation_diagnostic retrieves retained output. Displayed credential masking never changes executed source.`,
+                  artifact, isError: true,
                 };
               }
             },
@@ -250,6 +315,7 @@ export function buildPreparationSession(
         ],
         outcomeSchema: PreparationDraftSchema,
         validateOutcome(outcome) {
+          try { outcome = bindDraft(outcome); } catch (error) { return error instanceof Error ? error.message : String(error); }
           if (verificationFailure)
             return `Repair the failed preparation and pass verify_preparations before ending. Returning no profiles cannot turn a verification failure into unsupported isolation. Last failure: ${verificationFailure}`;
           return (outcome.profiles.length > 0 || verified !== undefined) && identity(outcome) !== verified
@@ -265,14 +331,16 @@ export function buildPreparationSession(
         workItem: () => 'preparations',
         session: () => def,
         briefing: () => [
-          JSON.stringify({
+          redactContext(JSON.stringify({
             recipe: JSON.parse(
               hashableRecipeText(JSON.stringify(input.recipe)),
             ),
             dependencyAvailability: preparationDependencyBriefing(input.repoRoot, input.recipe),
             specExcerpts: input.specExcerpts,
             repoRoot: input.repoRoot,
-          }),
+            runtimeContext,
+            qualifiedObservations: review.output.candidates.filter(c => c.decision === 'instance').map(c => c.check),
+          })),
         ],
         driver,
         persistence,
@@ -296,8 +364,8 @@ export function buildPreparationSession(
             : describeSessionFailure(result.failure),
         };
       if (opts.signal?.aborted)
-        return { status: 'failed', reason: 'Preparation authoring aborted' };
-      await verifyPreparationDraft(input, result.output, {
+        return { status: 'failed', reason: 'Preparation authoring cancelled' };
+      await verifyPreparationDraft(input, bindDraft(result.output), {
         persist: true,
         signal: opts.signal,
       });
@@ -324,7 +392,9 @@ export function buildPreparationSession(
   };
 }
 
-export const PREPARATION_PROMPT = `Author private starting states supported by THIS application's actual configuration. Read the datastore path/URL/schema handling and business specs. Preserve existing main seed, interfaces, dependencies, credentials and profiles. Return no profiles with precise findings when the application cannot isolate the actual query scope. A tenant cannot establish instance-wide totals.
+export const PREPARATION_PROMPT = `${PREPARATION_RUNTIME_GUIDANCE}
+Use only the qualifiedObservations supplied by the independent source review. Do not change their endpoint, query, credential or numeric paths. Set expected counts/totals from your independently authored seed inputs.
+Author private starting states supported by THIS application's actual configuration. Read the datastore path/URL/schema handling and business specs. Preserve existing main seed, interfaces, dependencies, credentials and profiles. Return no profiles with precise findings when the application cannot isolate the actual query scope. A tenant cannot establish instance-wide totals.
 Use named profiles with baseline empty or seeded, instance scope, and environment bindings using \${directory} or \${namespace}. For SQLite use the app's supported path variable pointing inside \${directory}. For PostgreSQL use postgres:{isolation:'database',urlEnvs:['APP_DATABASE_URL','APP_DIRECT_URL']} with the ACTUAL app env names; env may be empty in this case. The runner derives private URLs from the resolved recipe/account bindings, preserving connection options and selecting the allocated database name. Read datasource configuration, all runtime/direct clients, migration commands and SQL before authoring. Prisma schema parameters alone do NOT isolate migrations or raw SQL that names public explicitly. No global resets or unsupported MySQL isolation.
 The briefing includes dependencyAvailability resolved from the dependency catalog and the local registrations, including catalog-only services. Treat provided, incomplete and unprovided states as constraints. Each profile MUST declare needs: ['canonical-catalog-name'] for every supplied dependency used by its seed, baseline reads, verifier mutations or cleanup; use needs: [] only when none are used. Do not assume an SDK import, API schema or recipe declaration means an account is provided. An unrelated unavailable service must not block local preparation. Select operations supported by the recipe's actual configuration without that service. Before selecting an observation or mutation, read its IMPLEMENTATION and follow its dependency and configuration guards; an API contract alone is insufficient. For example, database-backed upload storage cannot use an S3-only document endpoint when S3 is unprovided. Do not switch transports, fabricate accounts or omit a dependency to make the gate pass. Supplied path/config-directory instances cannot currently be materialized by preparation scripts; use a supported alternative or report the limitation. Choose mutations affecting the business records whose isolation you are proving, not an unrelated entity merely because it is easy to mutate.
 An empty profile contains ZERO business records. Provision schema and required credentials only; never copy the main seed's business fixtures into it. Keep example expenses, orders, or other business records in a separate seeded profile.

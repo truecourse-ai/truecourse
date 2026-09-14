@@ -29,12 +29,11 @@ import { DEFAULT_BUILD_TIMEOUT_MS } from '../build.js'
 import { PORT_PLACEHOLDER } from './server.js'
 import { warnCredentialShapes, type RecipeApiSeed, type ResolvedCredential } from '../recipe.js'
 import { buildCredentialRedactor } from './redact.js'
+import { SeedOutputCapture, seedDiagnosticSummary, type SeedDiagnostic } from './seed-diagnostic.js'
 
 /** The env var naming the file the seed command writes its manifest JSON to. */
 export const SEED_OUT_ENV = 'GUARD_SEED_OUT'
 
-/** How much of the seed's combined output rides a failure message (the tail is the useful part). */
-const OUTPUT_TAIL = 2_000
 
 /** `Object.prototype.hasOwnProperty` guard — never trust prototype-chain keys on parsed JSON. */
 function own(obj: object, key: string): boolean {
@@ -43,7 +42,7 @@ function own(obj: object, key: string): boolean {
 
 /** A seed stage failed — a hard run stop (never a silent skip). */
 export class SeedError extends Error {
-  constructor(message: string) {
+  constructor(message: string, public readonly diagnostic?: SeedDiagnostic) {
     super(message)
     this.name = 'SeedError'
   }
@@ -127,20 +126,25 @@ export async function runSeed(opts: RunSeedOptions): Promise<SeedResult> {
       collectSecrets(opts.knownCredentials, outFile),
       opts.externalSecrets,
     )
-    if (run.timedOut) {
-      throw new SeedError(redact(`seed command \`${seed.command}\` timed out${tail(run.output)}`))
-    }
-    if (run.exitCode !== 0) {
+    const output = redact(run.output);
+    const diagnostic: SeedDiagnostic = {
+      version: 1, output, totalBytes: run.totalBytes,
+      retainedBytes: Buffer.byteLength(output), omittedBytes: run.omittedBytes,
+      exitCode: run.exitCode, signal: run.signal, timedOut: run.timedOut,
+    };
+    if (run.timedOut || run.exitCode !== 0) {
+      const reason = run.timedOut ? 'timed out' : `exited ${run.exitCode ?? '(killed, no exit code)'}`;
       throw new SeedError(
-        redact(`seed command \`${seed.command}\` exited ${run.exitCode ?? '(killed, no exit code)'}${tail(run.output)}`),
-      )
+        redact(`seed command \`${seed.command}\` ${reason}`) + '\n' + seedDiagnosticSummary(output) +
+          (run.omittedBytes ? `\n[${run.omittedBytes} output bytes omitted]` : ''), diagnostic,
+      );
     }
     try {
       return resolveManifest(seed, readManifest(seed.command, outFile))
     } catch (e) {
       // Validation/parse messages carry names, not secrets — but redact uniformly so a
       // fixture value that happens to equal a secret can never slip through either.
-      if (e instanceof SeedError) throw new SeedError(redact(e.message))
+      if (e instanceof SeedError) throw new SeedError(redact(e.message), diagnostic)
       throw e
     }
   } finally {
@@ -249,13 +253,10 @@ function warnExtraKeys(kind: string, emitted: string[], declared: Record<string,
   }
 }
 
-/** The trailing combined output appended to a seed failure message (empty adds nothing). */
-function tail(output: string): string {
-  const trimmed = output.trimEnd()
-  return trimmed ? `\n${trimmed.slice(-OUTPUT_TAIL)}` : ''
-}
-
 interface SeedRun {
+  totalBytes: number
+  omittedBytes: number
+  signal: string | null
   exitCode: number | null
   timedOut: boolean
   /** Combined stdout + stderr, in arrival order — the seed's full diagnostic voice. */
@@ -276,7 +277,7 @@ function spawnSeed(
   timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<SeedRun> {
-  if (signal?.aborted) return Promise.resolve({ exitCode: null, timedOut: false, output: '' })
+  if (signal?.aborted) return Promise.resolve({ exitCode: null, timedOut: false, output: '', signal: null, totalBytes: 0, omittedBytes: 0 })
   return new Promise<SeedRun>((resolve) => {
     const child = spawn(command, {
       cwd: repoRoot,
@@ -285,21 +286,22 @@ function spawnSeed(
       detached: process.platform !== 'win32',
       stdio: ['ignore', 'pipe', 'pipe'],
     })
-    let output = ''
+    const output = new SeedOutputCapture()
     let settled = false
     const kill = armChildKill(child, timeoutMs, signal, { processGroup: true })
-    const finish = (exitCode: number | null): void => {
+    const finish = (exitCode: number | null, signal: string | null = null): void => {
       if (settled) return
       settled = true
       kill.disarm()
-      resolve({ exitCode, timedOut: kill.timedOut, output })
+      const captured = output.finish()
+      resolve({ exitCode, signal, timedOut: kill.timedOut, output: captured, totalBytes: output.totalBytes, omittedBytes: output.omittedBytes })
     }
-    child.stdout.on('data', (c: Buffer) => (output += c.toString('utf-8')))
-    child.stderr.on('data', (c: Buffer) => (output += c.toString('utf-8')))
+    child.stdout.on('data', (c: Buffer) => output.push('stdout', c))
+    child.stderr.on('data', (c: Buffer) => output.push('stderr', c))
     child.on('error', (err) => {
-      output += `\n${err.message}`
+      output.push('stderr', Buffer.from(`\n${err.message}`))
       finish(null)
     })
-    child.on('close', (code) => finish(code))
+    child.on('close', (code, signal) => finish(code, signal))
   })
 }

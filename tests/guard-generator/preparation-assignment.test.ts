@@ -1,3 +1,4 @@
+import { qualifyFixtureRecipe } from '../guard-runner/preparation-qualification-fixture';
 import fs from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -30,6 +31,7 @@ function seed(withProfile = false) {
     recipe.preparations = { known: { baseline: 'seeded', scope: 'instance', env: { DATA_FILE: '${directory}/ledger.json' },
       baselineChecks: [{ path: '/rows', counts: { count: 8 } }],
       seed: { script: 'prepare.mjs', provides: { fixtures: {} } }, verify: { script: 'prepare.mjs' } } }
+    qualifyFixtureRecipe(root, recipe, 'ledger.cjs')
     fs.writeFileSync(filename, JSON.stringify(recipe))
   }
   return root
@@ -92,6 +94,7 @@ it('retains the same complete scenario but revokes its proof when only its prepa
     seed: { script: 'scripts/seed.mjs', provides: { credentials: { owner: { header: 'x-world-token' } }, fixtures: { inputs: ['count', 'total', 'rows'] } } },
     verify: { script: 'scripts/verify.mjs' }, cleanup: { script: 'scripts/cleanup.mjs' },
   }
+  qualifyFixtureRecipe(root, recipe)
   fs.writeFileSync(recipeFile, JSON.stringify(recipe))
   const complete = scenarioYaml(raw('Inspect the ledger', ['record', 'total'].map(id => ({
     run: ['--version'], milestone: 1, checks: [id], expect: { stdout: { contains: id } },

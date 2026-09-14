@@ -43,6 +43,17 @@ const SEED: RecipeApiSeed = {
 }
 
 describe('runSeed', () => {
+  it('executes secret-like identifiers unchanged while masking diagnostic text', async () => {
+    const r = repo();
+    const source = "import fs from 'node:fs'; const password = 42; fs.writeFileSync('executed', String(password)); console.error('password'); throw Error('intentional failure');";
+    writeSeedScript(r, source);
+    const failure = await runSeed({repoRoot:r, seed:SEED, knownCredentials:new Map([['token','password']])}).catch(error=>error);
+    expect(failure).toBeInstanceOf(SeedError);
+    expect(failure.diagnostic.output).not.toContain('password');
+    expect(failure.diagnostic.output).toContain('«cred:token»');
+    expect(fs.readFileSync(path.join(r,'executed'),'utf8')).toBe('42');
+    expect(fs.readFileSync(path.join(r,'seed.mjs'),'utf8')).toBe(source);
+  });
   it('keeps port-bearing primary and peer configuration only for verifiers that allocate ports', async () => {
     const r = repo();
     writeSeedScript(r, `import fs from 'node:fs';

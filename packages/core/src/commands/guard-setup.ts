@@ -319,7 +319,7 @@ const GUARD_SETUP_STEP_SESSION_KINDS: Record<string, readonly string[]> = {
   catalog: [DEPENDENCY_CATALOG_SESSION_KIND],
   interfaces: [RECONCILE_INTERFACES_SESSION_KIND, INTERFACE_AUTHOR_SESSION_KIND],
   seed: [SEED_SESSION_KIND],
-  preparations: [PREPARATION_SESSION_KIND],
+  preparations: ['guard-setup.preparation-observations', PREPARATION_SESSION_KIND],
   auth: [AUTH_PROOF_SESSION_KIND],
 };
 

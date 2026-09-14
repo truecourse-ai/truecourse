@@ -31,6 +31,9 @@ export function buildCredentialRedactor(
   const push = (value: string, mask: string): void => {
     if (value.length === 0) return
     needles.push({ needle: value, mask })
+    // Diagnostics may retain disjoint complete lines. Mask each line of a
+    // multiline secret as well so retained fragments cannot disclose it.
+    for (const line of value.split(/\r?\n/)) if (line && line !== value) needles.push({ needle: line, mask })
     const escaped = JSON.stringify(value).slice(1, -1)
     if (escaped !== value) needles.push({ needle: escaped, mask })
   }
@@ -38,9 +41,11 @@ export function buildCredentialRedactor(
   for (const [label, value] of externalSecrets ?? []) push(value, `«external:${label}»`)
   if (needles.length === 0) return (text) => text
   needles.sort((a, b) => b.needle.length - a.needle.length)
-  return (text) => {
-    let out = text
-    for (const { needle, mask } of needles) out = out.split(needle).join(mask)
-    return out
-  }
+  const masks = new Map<string, string>()
+  for (const { needle, mask } of needles) if (!masks.has(needle)) masks.set(needle, mask)
+  const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  // Consume existing markers atomically. Replacing original input in a single
+  // pass prevents both nested labels and a replacement becoming another needle.
+  const pattern = new RegExp('«(?:cred|external):[^«»\\r\\n]+»|' + [...masks.keys()].map(escape).join('|'), 'g')
+  return (text) => text.replace(pattern, (match) => masks.get(match) ?? match)
 }

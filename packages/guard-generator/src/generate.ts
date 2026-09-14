@@ -1876,7 +1876,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             continue
           }
         }
-        const prepared = partitionPlanPreparations(flow, outcome.plan, preparationCatalog(recipe))
+        const prepared = partitionPlanPreparations(flow, outcome.plan, preparationCatalog(recipe, repoRoot))
         for (const row of prepared.missing) gaps.push({ surface, kind: 'blocked-on', milestones: [row.milestone],
           obligations: [{ milestone: row.milestone, caseId: row.caseId }],
           blocker: { kind: 'configuration', action: `Refresh Guard Setup preparations to provide a verified ${row.requirement} private starting state.` },
@@ -2595,7 +2595,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       const privateMutatorRefs = new Set<string>()
       const localDependencies = new Set(prerequisiteResolution.dependencies.dependencies
         .filter(d => d.state === null && d.entry.class !== 'supplied').map(d => d.name))
-      const privateProfiles = privateAuthoringProfiles(recipe, localDependencies)
+      const privateProfiles = privateAuthoringProfiles(recipe, localDependencies, repoRoot)
 
       /**
        * The DETERMINISTIC mutator gate, enforced where execution happens — the
@@ -3177,6 +3177,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                 : []
             const ctx: AuthorUserContext = {
               ...assembleAuthorCtx({
+                repoRoot,
                 task,
                 recipe,
                 probes,
@@ -4812,6 +4813,7 @@ function compositionDefectOf(scenario: RawGeneratedScenario, recipe: Recipe): st
  * procedure-bearing interface (item 12, `buildSurfaceCatalogs`).
  */
 function assembleAuthorCtx(opts: {
+  repoRoot: string
   task: AuthorTask
   recipe: Recipe
   probes: ProbeTranscript[]
@@ -4833,6 +4835,7 @@ function assembleAuthorCtx(opts: {
     : opts.apiInterfaces
   const other = buildOtherOperationHints(reachableInterfaces, interfaceContracts)
   const ctx = buildAuthorCtx(
+    opts.repoRoot,
     task.work,
     task.surface,
     task.plan,
@@ -4978,6 +4981,7 @@ function workerFidelityBriefing(work: FlowWork, candidate: BirthCandidate, captu
 /** The authoring context for one (flow, surface): the claims + section texts
  *  (WHAT to assert) and the realization plan translated to driver verbs (HOW). */
 function buildAuthorCtx(
+  repoRoot: string,
   work: FlowWork,
   surface: GuardDriverId,
   plan: RealizationPlan,
@@ -5057,7 +5061,7 @@ function buildAuthorCtx(
       : surface === 'web'
         ? webPreparationCtx(recipe)
         : { recipeEntry: recipe.entry }),
-    preparations: preparationCatalog(recipe),
+    preparations: preparationCatalog(recipe, repoRoot),
     recipeBuild: recipe.build,
     probes,
   }
