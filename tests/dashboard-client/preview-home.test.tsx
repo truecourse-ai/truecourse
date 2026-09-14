@@ -230,10 +230,10 @@ function Address() {
   return <div data-testid="address">{`${pathname}${search}`}</div>;
 }
 
-function renderHome() {
-  window.history.replaceState({}, '', '/preview');
+function renderHome(path = '/preview') {
+  window.history.replaceState({}, '', path);
   render(
-    <MemoryRouter initialEntries={['/preview']}>
+    <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/preview/*" element={<PreviewApp />} />
       </Routes>
@@ -391,6 +391,34 @@ describe('Home onboarding', () => {
   // The page's own checkpoints; the side menu tracks the same two under the same words.
   const action = (name: string) =>
     within(screen.getByRole('list', { name: 'Getting started' })).getByRole('link', { name });
+
+  describe.each([
+    { path: '/preview/code', label: 'Connect repository', dialog: 'Connect a repository', query: 'connect=1' },
+    { path: '/preview/context', label: 'Connect context', dialog: 'Add context', query: 'add=1' },
+  ])('$label sidebar action', ({ path, label, dialog, query }) => {
+    it.each(['same tab', 'Home'])('opens and reopens the dialog from %s', async (from) => {
+      serve({ repos: [], sources: [] });
+      renderHome(from === 'same tab' ? path : '/preview');
+      const user = userEvent.setup();
+      const sidebar = () => within(screen.getByRole('complementary'));
+
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await user.click(await sidebar().findByRole('link', { name: label }));
+        expect(await screen.findByRole('dialog', { name: dialog })).toBeInTheDocument();
+        await waitFor(() => expect(address()).toBe(path));
+        await user.keyboard('{Escape}');
+        await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      }
+    });
+
+    it('opens on a direct link and preserves unrelated query parameters', async () => {
+      serve({ repos: [], sources: [] });
+      renderHome(`${path}?${query}&keep=1`);
+
+      expect(await screen.findByRole('dialog', { name: dialog })).toBeInTheDocument();
+      await waitFor(() => expect(address()).toBe(`${path}?keep=1`));
+    });
+  });
 
   it('asks for both when the workspace has neither, Add context first', async () => {
     serve({ repos: [], sources: [] });

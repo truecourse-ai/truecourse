@@ -55,6 +55,7 @@ export default function CodePage() {
   const [connectOpen, setConnectOpen] = useState(searchParams.get('connect') === '1');
   useEffect(() => {
     if (searchParams.get('connect') !== '1') return;
+    setConnectOpen(true);
     const next = new URLSearchParams(searchParams);
     next.delete('connect');
     setSearchParams(next, { replace: true });

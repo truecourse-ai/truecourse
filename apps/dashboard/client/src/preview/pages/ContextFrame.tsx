@@ -113,6 +113,8 @@ export function ContextFrame({
   useEffect(() => {
     const value = searchParams.get('add');
     if (value !== 'repository' && value !== '1') return;
+    setAddKind(value === 'repository' ? 'repository' : null);
+    setAdding(true);
     const next = new URLSearchParams(searchParams);
     next.delete('add');
     setSearchParams(next, { replace: true });
