@@ -6,7 +6,7 @@ import { resolvePrerequisites } from '@truecourse/guard-runner';
  * The engine half lives in `@truecourse/guard-runner`
  * (`externals.ts`: the recipe declaration ∪ the gitignored local overlay →
  * provided / incomplete / unprovided). THIS module is the adapter the dashboard
- * page and the interactive CLI both call:
+ * page calls:
  *
  *   {@link readGuardExternalsView}  — the joined view: what the analyzer DETECTED
  *      (`guard/setup.json`'s detection snapshot — setup runs BEFORE the
@@ -466,7 +466,7 @@ export function externalSetupIndex(view: GuardExternalsView): GuardExternalSetup
  *
  * It is never carried as `unprovided`. That state's CTA is a link to the External
  * APIs page, and there is no row there for a seed — a repo with no seed keeps its
- * plain `blocked-on` gap and is pointed at `truecourse guard setup` instead.
+ * plain `blocked-on` gap and is pointed at Flow setup instead.
  */
 export function readGuardExternalSetupIndex(repoRoot: string, opts: GuardExternalsReadOptions = {}): GuardExternalSetupIndex {
   const index: Record<string, GuardExternalSetupState> = {
@@ -514,8 +514,7 @@ export interface GuardNeedsSetupService {
 /**
  * The services with flows waiting on them, worst-first: the ones still to provide
  * (most blocked flows first), then the ones already provided whose flows the next
- * `guard generate` will author. The CLI's status line and the dashboard's CTA rows
- * are the same list — one derivation, two renderers.
+ * `guard generate` will author. The dashboard's CTA rows render this list.
  */
 export function guardNeedsSetupServices(view: GuardExternalsView): GuardNeedsSetupService[] {
   return view.services
@@ -688,7 +687,7 @@ export function writeGuardExternals(
   const recipeFile = recipePath(repoRoot);
   if (!fs.existsSync(recipeFile)) {
     throw new GuardExternalsWriteError(
-      'No .truecourse/scenarios/recipe.json — run `truecourse guard setup` before declaring external services.',
+      'No scenarios/recipe.json — Flow setup must discover one before external services can be declared.',
     );
   }
   const rawRecipe = fs.readFileSync(recipeFile, 'utf-8');

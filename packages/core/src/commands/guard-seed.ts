@@ -3,8 +3,8 @@
  *
  * The engine half lives in `@truecourse/guard-generator` (`seed-draft.ts`: gate →
  * draft → verify by RUNNING it → write two reviewable artifacts), and the ONE caller
- * that drives it is now `truecourse guard setup`. This module is what remains: the
- * read model behind `truecourse guard seed`.
+ * that drives it is now Flow setup. This module is what remains: the read model
+ * behind the seed view.
  *
  *   {@link readGuardSeedView} — what the recipe declares today, whether the script
  *      file it names is really there, and what the last generate left blocked on
@@ -26,7 +26,7 @@ import {
   parseBlockedOnClaim,
 } from '@truecourse/shared';
 
-/** Everything `truecourse guard seed` (no flags) prints, in one read. */
+/** Everything the seed view shows, in one read. */
 export interface GuardSeedView {
   /** Absolute path to recipe.json — shown whether or not it exists. */
   recipePath: string;
@@ -44,8 +44,8 @@ export interface GuardSeedView {
   blocked: SeedBlockedFlow[];
 }
 
-/** The joined seed view for `repoRoot`. Every input is optional — this is the
- *  command a user runs BEFORE any of them exist. */
+/** The joined seed view for `repoRoot`. Every input is optional — this view is
+ *  read BEFORE any of them exist. */
 export function readGuardSeedView(repoRoot: string): GuardSeedView {
   const recipeFile = recipePath(repoRoot);
   let recipe = null;

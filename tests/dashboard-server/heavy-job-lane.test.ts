@@ -37,11 +37,9 @@ import type { JobStatus, JobView } from '@truecourse/shared';
 import { resetGuardStore, setGuardStore } from '@truecourse/core/lib/guard-store';
 import { resetContextStore, setContextStore } from '@truecourse/core/lib/context-store';
 import { resetSpecStore, setSpecStore } from '@truecourse/core/lib/spec-store';
-import {
-  resetSessionsRootResolver,
-  setSessionsRootResolver,
-} from '@truecourse/core/lib/sessions-store';
 import { memoryContextStore } from '../helpers/memory-context-store';
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
+import { installMemoryGuardOverlays, resetGuardOverlayStore } from '../helpers/memory-guard-overlays';
 import { memorySpecStore } from '../helpers/memory-spec-store';
 import { createServerJobs, type JobsMount } from '../../apps/dashboard/server/src/jobs/index';
 import { setWorkTreeProvider } from '../../apps/dashboard/server/src/services/work-tree.service';
@@ -232,17 +230,12 @@ const generateRequest = (repoFullName: string, org = ORG) => ({
 
 beforeAll(async () => {
   home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'tc-lane-home-')));
-  process.env.TRUECOURSE_HOME = home;
-  // The production layout: one transcript root per repository identity, so one
-  // repository's run is never read as another's.
-  setSessionsRootResolver((key) => path.join(home, 'sessions', key.replace('/', '__')));
   client = new PGlite();
   db = drizzle(client, { schema }) as unknown as Db;
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
 });
 
 afterAll(async () => {
-  resetSessionsRootResolver();
   await client.close();
   fs.rmSync(home, { recursive: true, force: true });
 });
@@ -257,6 +250,8 @@ beforeEach(() => {
   running = [];
   enqueued = [];
   acquisitions = [];
+  installMemorySessionRuns();
+  installMemoryGuardOverlays();
   setGuardStore(new PgGuardStore(db));
   setContextStore(memoryContextStore());
   setSpecStore(memorySpecStore());
@@ -274,7 +269,8 @@ afterEach(async () => {
   resetGuardStore();
   resetContextStore();
   resetSpecStore();
-  fs.rmSync(path.join(home, 'sessions'), { recursive: true, force: true });
+  resetSessionRuns();
+  resetGuardOverlayStore();
 });
 
 describe('two repositories of one workspace, generated together', () => {

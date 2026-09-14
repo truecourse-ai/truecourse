@@ -11,7 +11,7 @@ runs:
     # `cache: pnpm` needs pnpm on PATH, so this must follow action-setup.
     #
     # The version comes from the committed `.node-version` — the single source
-    # local shells (fnm/nvm/asdf), the Dockerfile and both workflows all read,
+    # local shells (fnm/nvm/asdf), the Dockerfile and the workflow all read,
     # so CI cannot drift from what a contributor is running.
     - uses: actions/setup-node@v4
       with:

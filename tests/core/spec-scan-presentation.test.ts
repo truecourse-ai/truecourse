@@ -11,9 +11,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { resetKvCacheStore } from '@truecourse/llm'
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache'
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs'
 import { KnownDisplayBlockSchema, RunRecordSchema } from '../../packages/agent-loop/src/index'
 import { CURATE_STEPS, curateInProcess } from '../../packages/core/src/commands/spec-in-process'
+import { listStoredSessionRuns } from '../../packages/core/src/lib/sessions-store'
 import { StepTracker } from '../../packages/core/src/progress'
 import {
   ScanScopeOutcomeSchema,
@@ -33,7 +35,7 @@ import { buildScanUniverse } from '../../packages/core/src/services/spec-scan/to
 import type { DocCandidate } from '../../packages/spec-consolidator/src/index.js'
 import { outcome, stubDriver, toolResult } from './spec-scan-session-stub'
 
-const emptyScope = () => buildScanScopeUniverse(buildScanUniverse([]), [])
+const emptyScope = () => buildScanScopeUniverse(buildScanUniverse([]))
 
 const doc = (path: string): DocCandidate => ({
   path,
@@ -358,13 +360,15 @@ describe('spec-scan.settle-areas — presentOutcome', () => {
 describe('spec scan run record — the checklist block', () => {
   let repo: string
   beforeEach(() => {
-    resetKvCacheStore()
+    installMemoryKvCache()
+    installMemorySessionRuns()
     repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-scan-kinds-'))
     fs.mkdirSync(path.join(repo, 'docs'), { recursive: true })
     fs.writeFileSync(path.join(repo, 'docs', 'alpha.md'), '# Orders alpha\nCancel up to 24h before.')
   })
   afterEach(() => {
     resetKvCacheStore()
+    resetSessionRuns()
     fs.rmSync(repo, { recursive: true, force: true })
   })
 
@@ -388,7 +392,6 @@ describe('spec scan run record — the checklist block', () => {
     }).driver
 
     const tracker = new StepTracker(() => {}, [...CURATE_STEPS])
-    let runDir = ''
     await curateInProcess(repo, {
       skipGit: true,
       skipCorpusWrite: true,
@@ -410,14 +413,10 @@ describe('spec scan run record — the checklist block', () => {
           resolvedBy: 'user' as const,
         })),
       },
-      onRunStarted: (info) => {
-        runDir = info.dir
-      },
     })
 
-    const record = RunRecordSchema.parse(
-      JSON.parse(fs.readFileSync(path.join(runDir, 'run.json'), 'utf-8')),
-    )
+    const [stored] = await listStoredSessionRuns(repo, 'spec-scan')
+    const record = RunRecordSchema.parse(stored)
     // No bespoke run-level field: the checklist is one block among whatever
     // else the run chooses to say.
     // An injected driver states what it ran on too: a hosted run whose record
@@ -442,7 +441,8 @@ describe('spec scan run record — the checklist block', () => {
 describe('spec scan progress — the overlap step says what it counts', () => {
   let repo: string
   beforeEach(() => {
-    resetKvCacheStore()
+    installMemoryKvCache()
+    installMemorySessionRuns()
     repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-scan-overlap-counts-'))
     fs.mkdirSync(path.join(repo, 'docs'), { recursive: true })
     // Two docs sharing rare identifiers: one collision cluster, one area.
@@ -451,6 +451,7 @@ describe('spec scan progress — the overlap step says what it counts', () => {
   })
   afterEach(() => {
     resetKvCacheStore()
+    resetSessionRuns()
     fs.rmSync(repo, { recursive: true, force: true })
   })
 

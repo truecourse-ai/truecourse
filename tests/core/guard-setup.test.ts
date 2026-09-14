@@ -9,7 +9,7 @@ import { PREPARATION_SESSION_BUDGET } from '../../packages/core/src/services/gua
  * `guard status` read back.
  *
  * The engine itself is covered in `tests/guard-generator/setup.test.ts`. Here
- * the SESSION DRIVER is stubbed at `createConfiguredSessionDriver` — the same
+ * the SESSION DRIVER is stubbed at `createClaudeCodeSessionDriver` — the same
  * seam production resolves the transport at — so a run really goes through the
  * loop (tools, outcome schema, the fold) without a provider, and the transport
  * a run resolves is observable.
@@ -47,68 +47,34 @@ import type { GuardSetupReport, InterfacesFile } from '@truecourse/shared';
 // The API transport, stubbed one step short of the provider: the saved config is
 // still validated by the real builder (an unusable one throws exactly as it does in
 // production), but the transport it yields records requests instead of calling out.
-const { apiTransport } = vi.hoisted(() => ({
-  apiTransport: {
-    configs: [] as { provider: string; model: string }[],
-    requests: [] as { stage: string; model?: string }[],
-    reply: '',
-  },
-}));
-vi.mock('../../packages/core/src/services/llm/install-transport.js', async (importOriginal) => {
-  const real =
-    await importOriginal<typeof import('../../packages/core/src/services/llm/install-transport.js')>();
-  const { readApiLlmConfig } = await import('../../packages/core/src/config/global-config.js');
-  return {
-    ...real,
-    createConfiguredApiTransport: () => {
-      const cfg = real.buildProviderConfig(readApiLlmConfig());
-      apiTransport.configs.push(cfg);
-      return async (req: { stage: string; model?: string }) => {
-        apiTransport.requests.push({ stage: req.stage, model: req.model });
-        return apiTransport.reply;
-      };
-    },
-  };
-});
-
 /**
- * The SESSION driver seam. The mock keeps the real transport RESOLUTION (the
- * saved selection, and a `--llm-transport` flag over it) and replaces only the
- * backend with a scripted one, so a test can still see which transport a run
- * resolved and which model it would have run on.
+ * The SESSION driver seam — the AMBIENT one, this process's own Claude Code.
+ * The backend is replaced with a scripted driver, so a test can see that a run
+ * with no injected driver built this one, and on which model.
  */
 const { sessionDriver } = vi.hoisted(() => ({
   sessionDriver: {
-    built: [] as { transport?: string; mode: string; model: string }[],
+    built: [] as { mode: string; model: string }[],
     script: null as null | ((call: { kind: string; emit: (body: unknown) => Promise<void> }) => unknown),
   },
 }));
 vi.mock('../../packages/core/src/services/llm/session-driver.js', async (importOriginal) => {
   const real =
     await importOriginal<typeof import('../../packages/core/src/services/llm/session-driver.js')>();
-  const { effectiveLlmMode, readApiLlmConfig } = await import(
-    '../../packages/core/src/config/global-config.js'
-  );
   const { stubDriver } = await import('./spec-scan-session-stub.js');
   return {
     ...real,
-    createConfiguredSessionDriver: (opts: { transport?: 'cli' | 'api' } = {}) => {
-      const mode = effectiveLlmMode(opts.transport);
-      const model = mode === 'api' ? (readApiLlmConfig()?.model ?? '(unconfigured)') : 'opus';
-      sessionDriver.built.push({ transport: opts.transport, mode, model });
+    createClaudeCodeSessionDriver: () => {
+      sessionDriver.built.push({ mode: 'claude-code', model: 'opus' });
       const { driver } = stubDriver((call) => {
         if (!sessionDriver.script) throw new Error(`no scripted answer for ${call.kind}`);
         return sessionDriver.script(call) as never;
       });
-      return { driver, mode, attribution: { provider: mode === 'api' ? 'openai' : 'anthropic', model } };
+      return { driver, mode: 'claude-code', attribution: { provider: 'anthropic', model: 'opus' } };
     },
   };
 });
 
-import {
-  writeGlobalConfig,
-  type GlobalApiLlmConfig,
-} from '../../packages/core/src/config/global-config.js';
 import {
   guardSetupInProcess,
   estimateGuardSetupCost,
@@ -118,8 +84,10 @@ import {
   GUARD_SETUP_STEPS,
 } from '../../packages/core/src/commands/guard-setup.js';
 import { StepTracker } from '../../packages/core/src/progress.js';
-import { createSessionRun, listSessionRuns } from '../../packages/core/src/lib/sessions-store.js';
+import { createStoredSessionRun, listStoredSessionRuns, sessionRunDir } from '../../packages/core/src/lib/sessions-store.js';
 import { forbiddenDriver, outcome, stubDriver, toolResult } from './spec-scan-session-stub.js';
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache.js';
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs.js';
 
 /** One assistant turn, priced — what the loop counts `spent.turns`/tokens off. */
 const assistantTurn = (text: string, tokens = 1_000): { type: 'assistant-turn'; text: string; usage: Record<string, unknown> } => ({
@@ -140,35 +108,16 @@ const PROPOSABLE_FIXTURE = fileURLToPath(
   new URL('../fixtures/recipe-propose/speced-api-mini', import.meta.url),
 );
 
-// The LLM selection these tests write lives in the USER-level config, so they run
-// against a throwaway TRUECOURSE_HOME — never the developer's real one.
-const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-core-setup-home-'));
-beforeAll(() => {
-  process.env.TRUECOURSE_HOME = HOME;
-});
-afterAll(() => {
-  delete process.env.TRUECOURSE_HOME;
-  fs.rmSync(HOME, { recursive: true, force: true });
-});
-
-/** Select API mode with a provider model no `claude` binary would ever accept. */
-function useApiMode(over: Partial<GlobalApiLlmConfig> = {}): void {
-  writeGlobalConfig({
-    llm: {
-      transport: 'api',
-      api: { provider: 'openai', model: 'gpt-5.5', apiKey: 'sk-test', ...over },
-    },
-  });
-}
-
 const repos: string[] = [];
+beforeEach(() => {
+  installMemoryKvCache();
+  installMemorySessionRuns();
+});
 afterEach(() => {
+  resetKvCacheStore();
+  resetSessionRuns();
   while (repos.length) fs.rmSync(repos.pop()!, { recursive: true, force: true });
   setDefaultTransport(undefined);
-  fs.rmSync(path.join(HOME, 'config.json'), { force: true });
-  apiTransport.configs.length = 0;
-  apiTransport.requests.length = 0;
-  apiTransport.reply = '';
   sessionDriver.built.length = 0;
   sessionDriver.script = null;
 });
@@ -427,29 +376,16 @@ describe('estimateGuardSetupCost', () => {
     expect(authoring(replaced)).toBeGreaterThan(0);
   });
 
-  // ONE MODEL for every session: in API mode the configured flagship, in
-  // Claude Code mode the pinned tier — never the old per-stage tier mix.
-  it('prices one model for every session — the configured one in API mode', async () => {
+  // ONE MODEL for every session: the one the run's own driver names, and the
+  // pinned Claude Code tier when the caller names none.
+  it('prices one model for every session — the one the caller names', async () => {
     const r = fixtureRepo();
-    useApiMode();
 
-    const estimate = await estimateGuardSetupCost(r, { mode: 'api' });
+    const named = await estimateGuardSetupCost(r, { sessionModel: 'gpt-5.5' });
+    expect([...new Set((named.stages ?? []).map((s) => s.model))]).toEqual(['gpt-5.5']);
 
-    expect([...new Set((estimate.stages ?? []).map((s) => s.model))]).toEqual(['gpt-5.5']);
-  });
-
-  it('keeps a saved provider model out of Claude Code mode', async () => {
-    const r = fixtureRepo();
-    writeGlobalConfig({
-      llm: {
-        transport: 'claude-code',
-        api: { provider: 'openai', model: 'gpt-5.5', apiKey: 'sk-test' },
-      },
-    });
-
-    const estimate = await estimateGuardSetupCost(r);
-
-    expect([...new Set((estimate.stages ?? []).map((s) => s.model))]).toEqual(['opus']);
+    const ambient = await estimateGuardSetupCost(r);
+    expect([...new Set((ambient.stages ?? []).map((s) => s.model))]).toEqual(['opus']);
   });
 });
 
@@ -564,7 +500,7 @@ describe('guardSetupInProcess', () => {
     const catalog = report.steps.find((s) => s.key === 'catalog');
     expect(catalog?.status).toBe('ok');
     expect(catalog?.sessionRunId).toBeTruthy();
-    expect(listSessionRuns(r).map((run) => run.runId)).toContain(catalog?.sessionRunId);
+    expect((await listStoredSessionRuns(r)).map((run) => run.runId)).toContain(catalog?.sessionRunId);
     // The catalog fold really landed the entry.
     expect(JSON.parse(fs.readFileSync(dependenciesPath(r), 'utf-8')).dependencies).toEqual([
       expect.objectContaining({ name: 'app-database', class: 'seedable' }),
@@ -593,7 +529,7 @@ describe('guardSetupInProcess', () => {
     // Lazy to the end: a settled run never builds a backend it will not call.
     expect(sessionDriver.built).toEqual([]);
     // …and never opens a second sessions-store run.
-    expect(listSessionRuns(r)).toHaveLength(1);
+    expect(await listStoredSessionRuns(r)).toHaveLength(1);
   }, 120_000);
 
   // Setup's steps are minutes of real work behind one label each. The phase inside
@@ -681,89 +617,20 @@ describe('guardSetupInProcess — the transport the sessions run on', () => {
   // TRANSPORT, so it spawned `claude --model gpt-5.5` — a deterministic error. The
   // configured model must ride the configured transport, and the suite-wide
   // tripwire binary means a run that reached for `claude` could not have gotten here.
-  it('runs its sessions on the configured API transport — nothing spawns `claude`', async () => {
+  it('runs its sessions on this process\u2019s own Claude Code when the caller injects none', async () => {
     const r = fixtureRepo();
     writeRecipe(r);
-    useApiMode();
     scriptCatalogSession();
-
-    const { report } = await guardSetupInProcess(r, { interfaces: interfaces(), ...inertSeams });
-
-    expect(report.status).toBe('ok');
-    expect(sessionDriver.built).toEqual([{ transport: undefined, mode: 'api', model: 'gpt-5.5' }]);
-  }, 120_000);
-
-  // The gate is the API configuration itself: unusable ⇒ the same no-provider
-  // refusal a missing binary raises, named after what is actually wrong, and raised
-  // before anyone is asked to spend.
-  it('refuses an unusable API configuration before the estimate', async () => {
-    const r = fixtureRepo();
-    useApiMode({ apiKey: undefined, apiKeyEnv: 'TC_TEST_MISSING_KEY' });
-    let asked = false;
-
-    const run = guardSetupInProcess(r, {
-      recipeRunner: neverCalled,
-      ...inertSeams,
-      onLlmEstimate: async () => {
-        asked = true;
-        return true;
-      },
-    });
-
-    await expect(run).rejects.toThrow(NoLlmProviderError);
-    await expect(run).rejects.toThrow(/`TC_TEST_MISSING_KEY` is unset/);
-    expect(asked).toBe(false);
-  });
-
-  // `--llm-transport api` overrides the saved selection, like every sibling
-  // command: Claude Code is selected and no binary exists, yet the run goes through.
-  it('honors an explicit `api` transport over the saved Claude Code selection', async () => {
-    const r = fixtureRepo();
-    writeRecipe(r);
-    writeGlobalConfig({
-      llm: {
-        transport: 'claude-code',
-        api: { provider: 'openai', model: 'gpt-5.5', apiKey: 'sk-test' },
-      },
-    });
-    scriptCatalogSession();
-
-    const { report } = await guardSetupInProcess(r, {
-      llm: 'api',
-      interfaces: interfaces(),
-      ...inertSeams,
-    });
-
-    expect(report.status).toBe('ok');
-    expect(sessionDriver.built).toEqual([{ transport: 'api', mode: 'api', model: 'gpt-5.5' }]);
-  }, 120_000);
-
-  // The inverse, and the failure the flag exists to prevent: `api` is SAVED, the run
-  // forces `cli`, and the sessions run on the Claude Code driver — which must be
-  // handed the pinned tier, never `gpt-5.5`.
-  it('keeps the api-configured model off the sessions under an explicit `cli` transport', async () => {
-    const r = fixtureRepo();
-    writeRecipe(r);
-    useApiMode();
-    scriptCatalogSession();
-    // Step 0 demands the binary of exactly the runs that SPAWN it; node stands in
-    // for the `claude` this run would otherwise be refused for not having.
+    // Step 0 demands the binary of exactly the runs that SPAWN it; node stands
+    // in for the `claude` the suite-wide tripwire otherwise refuses this run for.
     const tripwire = process.env.CLAUDE_CODE_BINARY;
     process.env.CLAUDE_CODE_BINARY = process.execPath;
 
     try {
-      const { report } = await guardSetupInProcess(r, {
-        llm: 'cli',
-        interfaces: interfaces(),
-        ...inertSeams,
-      });
+      const { report } = await guardSetupInProcess(r, { interfaces: interfaces(), ...inertSeams });
 
       expect(report.status).toBe('ok');
-      expect(sessionDriver.built).toEqual([
-        { transport: 'cli', mode: 'claude-code', model: 'opus' },
-      ]);
-      // And the API provider was never even built — one config, read once, or not at all.
-      expect(apiTransport.configs).toEqual([]);
+      expect(sessionDriver.built).toEqual([{ mode: 'claude-code', model: 'opus' }]);
     } finally {
       if (tripwire === undefined) delete process.env.CLAUDE_CODE_BINARY;
       else process.env.CLAUDE_CODE_BINARY = tripwire;
@@ -772,13 +639,12 @@ describe('guardSetupInProcess — the transport the sessions run on', () => {
 
   // Step 0 exists so a missing provider is found BEFORE the install, build, server
   // boot and analysis pass setup runs.
-  it('refuses an explicit `cli` transport when `claude` is not on PATH, before step 1', async () => {
+  it('refuses a run that would spawn `claude` when it is not on PATH, before step 1', async () => {
     const r = fixtureRepo();
     writeRecipe(r);
     let asked = false;
 
     const run = guardSetupInProcess(r, {
-      llm: 'cli',
       interfaces: interfaces(),
       recipeRunner: neverCalled,
       ...inertSeams,
@@ -845,10 +711,10 @@ describe('guardSetupInProcess — hosted injection', () => {
     expect(sessionDriver.built).toEqual([]);
     expect(report.usage?.sessions?.count).toBe(1);
     // The run lives under the KEY; the work tree keeps no sessions at all.
-    const runs = listSessionRuns(key, 'guard-setup');
+    const runs = await listStoredSessionRuns(key, 'guard-setup');
     expect(runs).toHaveLength(1);
-    expect(listSessionRuns(r)).toEqual([]);
-    expect(sessionsRunDirs[0].startsWith(key)).toBe(true);
+    expect(await listStoredSessionRuns(r)).toEqual([]);
+    expect(sessionsRunDirs).toEqual([sessionRunDir(key, 'guard-setup', runs[0].runId)]);
     // …and the record quotes the injected driver's own attribution.
     expect(runs[0].llm).toEqual({ mode: 'api', provider: 'test', model: 'scripted' });
     expect(runs[0].status).toBe('completed');
@@ -858,7 +724,7 @@ describe('guardSetupInProcess — hosted injection', () => {
     const r = fixtureRepo();
     writeRecipe(r);
     const key = sessionsHome();
-    const parent = injected ? createSessionRun(key, { command: 'guard-setup', gitRef: 'abc', activityStream: true }) : undefined;
+    const parent = injected ? await createStoredSessionRun(key, { command: 'guard-setup', gitRef: 'abc' }) : undefined;
     fs.mkdirSync(path.dirname(guardInterfacesPath(r)), { recursive: true });
     fs.writeFileSync(guardInterfacesPath(r), JSON.stringify({
       version: 2, generatedAt: '2026-09-10T00:00:00Z',
@@ -879,11 +745,11 @@ describe('guardSetupInProcess — hosted injection', () => {
       sessionRun: parent, tracker, onRunStarted, interfaces: interfaces(),
       seedSession: async () => {
         // Interfaces must not close the run before setup's later steps execute.
-        expect(listSessionRuns(key)[0].status).toBe('running');
+        expect((await listStoredSessionRuns(key))[0].status).toBe('running');
         return { status: 'skipped', reason: 'stubbed in this test' };
       },
     });
-    const runs = listSessionRuns(key);
+    const runs = await listStoredSessionRuns(key);
     expect(runs).toHaveLength(1);
     const [run] = runs;
     expect(run.command).toBe('guard-setup');
@@ -893,10 +759,10 @@ describe('guardSetupInProcess — hosted injection', () => {
     expect(checklistOf(run).find(row => row.key === 'interfaces')?.sessionKinds).toContain(run.sessions[0].kind);
     expect(report.steps.find(step => step.key === 'interfaces')?.sessionRunId).toBe(run.runId);
     expect(report.usage?.sessions?.count).toBe(1);
-    expect(sessionsRunDirs).toEqual([path.join(key, '.truecourse/sessions/guard-setup', run.runId)]);
+    expect(sessionsRunDirs).toEqual([sessionRunDir(key, 'guard-setup', run.runId)]);
     expect(onRunStarted).toHaveBeenCalledTimes(1);
     expect(onRunStarted.mock.calls[0][0].command).toBe('guard-setup');
-    expect(listSessionRuns(r)).toEqual([]);
+    expect(await listStoredSessionRuns(r)).toEqual([]);
   }, 120_000);
 
   // An eager run is VISIBLE from the moment it starts — including one that dies
@@ -919,7 +785,7 @@ describe('guardSetupInProcess — hosted injection', () => {
     });
 
     expect(report.status).toBe('failed');
-    const [run] = listSessionRuns(key, 'guard-setup');
+    const [run] = await listStoredSessionRuns(key, 'guard-setup');
     expect(run.sessions).toEqual([]);
     expect(run.status).toBe('failed');
     expect(run.error).toEqual({ message: report.reason, kind: 'setup' });

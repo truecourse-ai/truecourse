@@ -13,9 +13,12 @@ import { manifestPath } from '@truecourse/guard-runner';
 import type { GuardLatest } from '@truecourse/shared';
 import { readGuardRunSections } from '@truecourse/core/lib/guard-store';
 import { log } from '@truecourse/core/lib/logger';
-import { readRegistry, unregisterProject } from '@truecourse/core/config/registry';
+import { clearTestRegistry } from '../helpers/test-fixture';
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
+import { installMemoryGuardOverlays, resetGuardOverlayStore } from '../helpers/memory-guard-overlays';
+import { installWorkTreeDocReader, resetRepoDocReader } from '../helpers/work-tree-doc-reader';
 import { persistGuardRun } from '../../apps/dashboard/server/src/jobs/materialize-guard';
-import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
+import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
 
 const DOC = 'context/site-docs-acme/refunds.md';
 const BODY = '# Refunds\n\nA refund settles within two business days.\n\n# Timing\n\nWithin two days.\n';
@@ -68,14 +71,20 @@ function run(runId: string, ranAt: string): GuardLatest {
 }
 
 beforeEach(async () => {
-  for (const entry of await readRegistry()) await unregisterProject(entry.slug);
+  installWorkTreeGuardStore();
+  installMemoryGuardOverlays();
+  installWorkTreeDocReader();
+  clearTestRegistry();
   repo = await setupTestFixture();
   fs.mkdirSync(path.join(repo.repoPath, path.dirname(DOC)), { recursive: true });
   fs.writeFileSync(path.join(repo.repoPath, DOC), BODY);
 });
 
 afterEach(async () => {
-  await unregisterProject(repo.project.slug);
+  clearTestRegistry();
+  resetGuardStore();
+  resetGuardOverlayStore();
+  resetRepoDocReader();
   await teardownTestFixture();
   vi.restoreAllMocks();
 });

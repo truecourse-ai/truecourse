@@ -69,21 +69,6 @@ describe('PgSpecStore — workspace scope (pglite)', () => {
   });
 });
 
-describe('FileSpecStore — workspace scope is enterprise-only (OSS unaffected)', () => {
-  beforeEach(() => resetSpecStore());
-  afterEach(() => resetSpecStore());
-
-  it('saveWorkspaceSpec throws (a caller that reached here is mis-wired)', async () => {
-    await expect(
-      saveWorkspaceSpec({ workspaceOrgId: ORG_A }, 'claims', {}),
-    ).rejects.toThrow(/require the enterprise store/);
-  });
-
-  it('loadWorkspaceSpec returns null (so effective reads degrade to repo-only)', async () => {
-    expect(await loadWorkspaceSpec({ workspaceOrgId: ORG_A }, 'claims')).toBeNull();
-  });
-});
-
 describe('spec-store delegators route to the installed store', () => {
   let client: PGlite;
   afterEach(async () => {

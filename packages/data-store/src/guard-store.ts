@@ -47,7 +47,7 @@
  *     "no overlay" signal on `dismissedClaims.length === 0`.
  *
  * In EE the `repoPath` argument carries the stable repo key (as in the other EE
- * stores), not an on-disk path — `materializesInPlace` is false.
+ * stores), never an on-disk path.
  */
 
 import os from 'node:os';
@@ -92,6 +92,7 @@ import {
 } from '@truecourse/guard-runner';
 import { ContentStore, contentScope } from './content-store.js';
 import { assertSafeRel, mapLimit, safeJoin, sha256, sortKeys } from './pack.js';
+import { WORK_TREE_DIR, scenariosDir } from '@truecourse/shared/work-tree';
 
 const OBJECT_CONCURRENCY = 16;
 
@@ -115,7 +116,7 @@ interface Manifest {
 }
 
 /** Evidence pointer prefix (`evidenceRelPath` shape): `.truecourse/guard/evidence/`. */
-const EVIDENCE_PREFIX_SEGMENTS = ['.truecourse', 'guard', 'evidence'];
+const EVIDENCE_PREFIX_SEGMENTS = [WORK_TREE_DIR, 'guard', 'evidence'];
 
 /**
  * A repo-relative evidence dir (`.truecourse/guard/evidence/<runId>/<scenarioSeg>`)
@@ -134,7 +135,6 @@ function parseEvidenceDir(evidenceDir: string): { runId: string; scenarioSeg: st
 }
 
 export class PgGuardStore implements GuardStore {
-  readonly materializesInPlace = false;
   private readonly content: ContentStore;
 
   constructor(private readonly db: Db) {
@@ -591,7 +591,7 @@ export class PgGuardStore implements GuardStore {
     const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'tc-guard-scenarios-'));
     try {
       const scope = contentScope.guard(ref.repoKey);
-      const scenariosRoot = path.join(root, '.truecourse', 'scenarios');
+      const scenariosRoot = scenariosDir(root);
       await mapLimit(Object.entries(manifest.files ?? {}), OBJECT_CONCURRENCY, async ([rel, sha]) => {
         const dest = safeJoin(scenariosRoot, rel);
         const body = await this.content.get(scope, sha);

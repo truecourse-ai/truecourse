@@ -23,7 +23,7 @@ let sessionScript: StubScript = () => {
 vi.mock('../../packages/core/dist/services/llm/session-driver.js', () => ({
   SESSION_MODEL_CLAUDE_CODE: 'opus',
   assertSessionBackendReady: async () => {},
-  createConfiguredSessionDriver: () => {
+  createClaudeCodeSessionDriver: () => {
     const { driver } = stubDriver((call) => sessionScript(call))
     return { driver, mode: 'claude-code', attribution: driver.attribution }
   },
@@ -54,14 +54,24 @@ import {
   scenarioDoc,
 } from './guard-adjudicate-helpers'
 import { memoryPersistence, outcome, stubDriver, type StubCall, type StubScript } from './spec-scan-session-stub'
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store'
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs'
+import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache'
 
 const repos: string[] = []
 beforeEach(() => {
+  installWorkTreeGuardStore()
+  installMemorySessionRuns()
+  installMemoryKvCache()
   sessionScript = () => {
     throw new Error('no session script installed for this case')
   }
 })
 afterEach(() => {
+  resetGuardStore()
+  resetSessionRuns()
+  resetKvCacheStore()
   while (repos.length) rmrf(repos.pop()!)
 })
 function repo(): string {
@@ -86,8 +96,11 @@ const DRIFT = {
   findings: [],
 }
 
-const cachePath = (r: string, key: string): string =>
-  path.join(r, '.truecourse', '.cache', ADJUDICATE_CACHE_NAME, `${key}.json`)
+/** Seed / read the verdict cache through the KV seam the command uses. */
+const seedCache = (r: string, key: string, value: unknown): Promise<void> =>
+  setCacheEntry(r, ADJUDICATE_CACHE_NAME, key, value)
+const readCache = (r: string, key: string): Promise<unknown | null> =>
+  getCacheEntry(r, ADJUDICATE_CACHE_NAME, key)
 
 /** Write a committed scenario yaml so the run joins it to the row. */
 function commitScenario(r: string, id: string, steps?: unknown): void {
@@ -171,8 +184,7 @@ describe('runGuardAdjudication — the verdict cache', () => {
 
   it('serves an identical failure from the cache, spending no session', async () => {
     const { r, key } = seedOneFailure()
-    fs.mkdirSync(path.dirname(cachePath(r, key)), { recursive: true })
-    fs.writeFileSync(cachePath(r, key), JSON.stringify(DRIFT))
+    await seedCache(r, key, DRIFT)
 
     const run = await runGuardAdjudication({ repoRoot: r })
 
@@ -184,8 +196,7 @@ describe('runGuardAdjudication — the verdict cache', () => {
 
   it('re-adjudicates once the scenario’s behavior moves', async () => {
     const { r, key } = seedOneFailure()
-    fs.mkdirSync(path.dirname(cachePath(r, key)), { recursive: true })
-    fs.writeFileSync(cachePath(r, key), JSON.stringify(DRIFT))
+    await seedCache(r, key, DRIFT)
     expect((await planGuardAdjudication(r)).cached).toBe(1)
 
     // The same failure, a different test: the behavior hash is in the key.
@@ -204,8 +215,7 @@ describe('runGuardAdjudication — the verdict cache', () => {
    */
   it('re-adjudicates an explicitly scoped row instead of serving its cached verdict', async () => {
     const { r, key } = seedOneFailure()
-    fs.mkdirSync(path.dirname(cachePath(r, key)), { recursive: true })
-    fs.writeFileSync(cachePath(r, key), JSON.stringify(DRIFT))
+    await seedCache(r, key, DRIFT)
     commitEvidence(r, 'scn.a')
 
     const plan = await planGuardAdjudication(r, { scenarios: ['scn.a'] })
@@ -237,8 +247,7 @@ describe('runGuardAdjudication — the verdict cache', () => {
     commitScenario(r, 'scn.a')
     commitEvidence(r, 'scn.a')
     const key = adjudicationCacheKey(item({ flowId: 'flow.a', scenario: scenarioDoc('scn.a') }))
-    fs.mkdirSync(path.dirname(cachePath(r, key)), { recursive: true })
-    fs.writeFileSync(cachePath(r, key), JSON.stringify(prior))
+    await seedCache(r, key, prior)
 
     let briefing = ''
     sessionScript = async (call) => {
@@ -264,7 +273,7 @@ describe('runGuardAdjudication — the verdict cache', () => {
     expect(briefing).toContain('authoring-defect')
     expect(briefing).toContain('the assertion was mis-authored')
     // The stale memory is replaced, so the next DEFAULT run cannot serve it back.
-    expect(JSON.parse(fs.readFileSync(cachePath(r, key), 'utf-8'))).toMatchObject({ class: 'drift' })
+    expect(await readCache(r, key)).toMatchObject({ class: 'drift' })
     const latest = JSON.parse(fs.readFileSync(path.join(r, '.truecourse', 'guard', 'LATEST.json'), 'utf-8'))
     expect(latest.scenarios[0].adjudication.class).toBe('drift')
   }, 30_000)
@@ -298,11 +307,8 @@ describe('runGuardAdjudication — the verdict cache', () => {
   /** A cached entry that would be REFUSED at the fold must not be served. */
   it('treats a structurally invalid cached verdict as a miss', async () => {
     const { r, key } = seedOneFailure()
-    fs.mkdirSync(path.dirname(cachePath(r, key)), { recursive: true })
-    fs.writeFileSync(
-      cachePath(r, key),
-      JSON.stringify({ ...DRIFT, class: 'bug', confidence: 'low' }), // `bug` with no `code`
-    )
+    // `bug` with no `code`
+    await seedCache(r, key, { ...DRIFT, class: 'bug', confidence: 'low' })
 
     expect(await planGuardAdjudication(r)).toMatchObject({ failures: 1, cached: 0, sessions: 1 })
   })
@@ -331,8 +337,7 @@ describe('planGuardAdjudication', () => {
     const cachedKey = adjudicationCacheKey(
       item({ row: failRow('scn.cached'), flowId: 'flow.cached', scenario: scenarioDoc('scn.cached') }),
     )
-    fs.mkdirSync(path.dirname(cachePath(r, cachedKey)), { recursive: true })
-    fs.writeFileSync(cachePath(r, cachedKey), JSON.stringify(DRIFT))
+    await seedCache(r, cachedKey, DRIFT)
 
     expect(await planGuardAdjudication(r)).toMatchObject({
       failures: 3,
@@ -489,7 +494,7 @@ describe('runGuardAdjudication — a refused verdict costs a re-run, never a cac
     expect(run.scenarios[0].failed).toContain('verdict refused')
     expect(run.scenarios[0].failed).toContain('downgrade the class')
     // Nothing refused may be cached, and nothing refused may reach the board.
-    expect(fs.existsSync(cachePath(r, key))).toBe(false)
+    expect(await readCache(r, key)).toBeNull()
     const latest = JSON.parse(fs.readFileSync(path.join(r, '.truecourse', 'guard', 'LATEST.json'), 'utf-8'))
     expect(latest.scenarios[0].adjudication).toBeUndefined()
     expect(run.usage.sessions.count).toBe(1)
@@ -521,7 +526,7 @@ describe('runGuardAdjudication — a refused verdict costs a re-run, never a cac
     expect(run.scenarios[0]).toMatchObject({ scenarioId: 'scn.a', source: 'session' })
     expect(run.scenarios[0].verdict?.class).toBe('drift')
     expect(run.scenarios[0].verdict?.sessionId).toBeTruthy()
-    expect(JSON.parse(fs.readFileSync(cachePath(r, key), 'utf-8'))).toMatchObject({ class: 'drift' })
+    expect(await readCache(r, key)).toMatchObject({ class: 'drift' })
     // The findings ledger is the doc-bug feed, appended per run.
     expect(run.findingsLedger?.appended).toBe(1)
     expect(fs.readFileSync(path.join(r, '.truecourse', 'guard', 'adjudicate.findings.md'), 'utf-8')).toContain(

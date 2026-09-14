@@ -14,7 +14,6 @@ import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
  * on `@truecourse/core`.
  */
 
-import fs from 'node:fs'
 import path from 'node:path'
 import yaml from 'js-yaml'
 import {
@@ -24,19 +23,14 @@ import {
   guardClaimsPath,
   dependenciesPath,
   guardFlowsPath,
-  guardLatestPath,
-  guardResultPath,
-  manifestPath,
   guardAuthoredInterfacesPath,
   guardInterfacesPath,
   maskedRecipeText,
   mergeInterfaceCatalogs,
-  readInterfaceCatalogRaw,
   readMergedInterfaceCatalog,
   recipePath,
   RecipeSchema,
   resolveApiServers,
-  scenariosDir,
   type DocSection,
   type DocSectionIndex,
 } from '@truecourse/guard-runner'
@@ -45,7 +39,7 @@ import {
   GUARD_SETUP_DEPENDENCIES_FILE,
   GUARD_SETUP_INTERFACES_FILE,
 } from '../services/guard-setup/bundle.js'
-import { corpusFilePath, CuratedCorpusSchema, type CuratedCorpus } from '@truecourse/spec-consolidator'
+import { CuratedCorpusSchema, type CuratedCorpus } from '@truecourse/spec-consolidator'
 import {
   GUARD_COVERAGE_PLAIN_ORDER,
   guardSectionRef,
@@ -161,7 +155,6 @@ import {
 } from '@truecourse/shared'
 import {
   getGuardStore,
-  guardsMaterializeInPlace,
   loadGuardSetupBundle,
   listScenarioFiles,
   readGuardDecisions as readGuardDecisionsStore,
@@ -211,30 +204,26 @@ async function guardBaselineCommit(repoKey: string): Promise<string | undefined>
 
 /**
  * The resolved read scope for a guard view:
- *  - `live`   — OSS (the in-place file store): the working tree, commit-free.
- *  - `commit` — hosted: the explicit `ref` (a PR head) or, absent one, the
+ *  - `commit` — the explicit `ref` (a PR head) or, absent one, the
  *    default-branch baseline commit.
- *  - `empty`  — hosted with NOTHING resolvable (no ref, no baseline yet). Reads
- *    MUST come back absent, never the store's newest-set fallback: the newest
- *    stored set can be a PR's regenerated corpus, which must not leak into the
- *    repo-level view (the approved no-"newest by createdAt" decision).
+ *  - `empty`  — NOTHING resolvable (no ref, no baseline yet). Reads MUST come
+ *    back absent, never the store's newest-set fallback: the newest stored set
+ *    can be a PR's regenerated corpus, which must not leak into the repo-level
+ *    view (the approved no-"newest by createdAt" decision).
  */
 type GuardReadScope =
-  | { kind: 'live'; commit?: undefined }
   | { kind: 'commit'; commit: string }
   | { kind: 'empty'; commit?: undefined }
 
 async function resolveGuardScope(repoKey: string, ref?: string): Promise<GuardReadScope> {
-  if (guardsMaterializeInPlace()) return { kind: 'live' }
   const commit = ref ?? (await guardBaselineCommit(repoKey))
   return commit ? { kind: 'commit', commit } : { kind: 'empty' }
 }
 
-/** Resolve named setup actions against the same account state as execution.
- * Hosted reads materialize their stored overlay and never borrow the server env.
- */
+/** Resolve named setup actions against the same account state as execution. The
+ * read materializes the repository's stored overlay and never borrows the
+ * server env. */
 export async function guardExternalSetupIndexForView(repoKey: string, ref?: string): Promise<GuardExternalSetupIndex> {
-  if (guardsMaterializeInPlace()) return readGuardExternalSetupIndex(repoKey)
   return withGuardReadTree(repoKey, ref, tree => readGuardExternalSetupIndex(tree, { env: {} }))
 }
 
@@ -1849,9 +1838,7 @@ export async function readGuardRunFlows(
  * its Map CTA, never a null check.
  */
 export async function readGuardInterfaces(repoKey: string, ref?: string): Promise<GuardInterfacesView> {
-  const catalog = guardsMaterializeInPlace()
-    ? readMergedInterfaceCatalog(repoKey)
-    : await bundledInterfaceCatalog(repoKey, ref)
+  const catalog = await bundledInterfaceCatalog(repoKey, ref)
   if (catalog === undefined) return { ...emptyInterfacesView(), unavailable: 'no-working-tree' }
   if (!catalog) return emptyInterfacesView()
 
@@ -2424,7 +2411,7 @@ async function readPinnedWithBaselineFallback<T>(
     return load(scope.commit)
   }
   const value = await load(ref)
-  if (value != null || guardsMaterializeInPlace()) return value
+  if (value != null) return value
   const base = await guardBaselineCommit(repoKey)
   if (base === undefined || base === ref) return value
   return load(base)
@@ -2528,17 +2515,8 @@ export async function readGuardRecipeCard(repoKey: string, commit?: string): Pro
       ...(web ? { web } : {}),
     },
   }
-  if (!guardsMaterializeInPlace()) {
-    const run = await readGuardRunForView(repoKey, commit)
-    return { ...card, fingerprint: run?.run.recipeFingerprint ?? '', stale: null }
-  }
-  const fingerprint = computeRecipeFingerprint(repoKey)
-  const latest = await readGuardLatestStore(repoKey)
-  return {
-    ...card,
-    fingerprint,
-    stale: latest ? fingerprint !== latest.run.recipeFingerprint : null,
-  }
+  const run = await readGuardRunForView(repoKey, commit)
+  return { ...card, fingerprint: run?.run.recipeFingerprint ?? '', stale: null }
 }
 
 /** Map each committed scenario id → its repo-relative YAML path (first sorted file wins, matching the loader's dedup). */
@@ -2713,47 +2691,31 @@ function artifactSlice(
 }
 
 /**
- * One interface's entry, sliced out of WHICHEVER half of the catalog holds it —
- * the derived `guard/interfaces.json` or the committed
- * `guard/interfaces.authored.json`.
+ * One interface's entry, sliced out of WHICHEVER half of the stored catalog
+ * holds it — the derived `guard/interfaces.json` or the authored
+ * `guard/interfaces.authored.json`, both carried by setup's bundle.
  *
- * The file is resolved first and only then sliced, rather than the merge being
- * serialized back out: this reading exists to show the bytes that are actually on
- * disk, so a reader sees a real file at a real path (the `file` label is what they
- * would open) and none of the fields the merge stamps on top — `origin` in
- * particular is computed, and a raw view that showed it would be showing a field
- * no file contains. The authored half is looked at LAST for the same reason it wins
- * the merge: where both name one id, it is the entry the view beside this one
- * rendered.
- *
- * Both halves live in the working tree, so a hosted repo has no file to show and
- * answers `null`, exactly as {@link readGuardInterfaces} reports `no-working-tree`.
+ * The document is resolved first and only then sliced, rather than the merge
+ * being serialized back out: this reading exists to show the bytes that were
+ * stored, so a reader sees the real document at its real path (the `file`
+ * label) and none of the fields the merge stamps on top — `origin` in
+ * particular is computed, and a raw view that showed it would be showing a
+ * field no document contains. The authored half is looked at LAST for the same
+ * reason it wins the merge: where both name one id, it is the entry the view
+ * beside this one rendered.
  */
 export async function readGuardInterfaceRaw(
   repoKey: string,
   id: string,
+  ref?: string,
 ): Promise<GuardArtifactSource | null> {
-  if (!guardsMaterializeInPlace()) return null
-  const halves: [string, () => string | null][] = [
-    [guardInterfacesPath(repoKey), () => readInterfaceCatalogRaw(repoKey)],
-    [guardAuthoredInterfacesPath(repoKey), () => readFileTextOr(guardAuthoredInterfacesPath(repoKey))],
-  ]
+  const bundle = await loadGuardSetupBundle(repoKey, ref)
+  if (!bundle) return null
   let found: GuardArtifactSource | null = null
-  for (const [file, read] of halves) {
-    const rel = path.relative(repoKey, file).split(path.sep).join('/')
-    found = artifactSlice(read(), rel, 'interfaces', id) ?? found
+  for (const rel of [GUARD_SETUP_INTERFACES_FILE, GUARD_SETUP_AUTHORED_INTERFACES_FILE]) {
+    found = artifactSlice(bundle[rel] ?? null, rel, 'interfaces', id) ?? found
   }
   return found
-}
-
-/** A file's text, or `null` when it is absent or unreadable — the raw readings
- *  never fail a view, they simply have nothing to show. */
-function readFileTextOr(file: string): string | null {
-  try {
-    return fs.readFileSync(file, 'utf-8')
-  } catch {
-    return null
-  }
 }
 
 /**
@@ -2802,7 +2764,7 @@ export async function readGuardDependencyRaw(
   const fromSet = await readPinnedWithBaselineFallback(repoKey, ref, async (commit) =>
     artifactSlice(await readScenarioFile(repoKey, rel, commit), rel, 'dependencies', name, 'name'),
   )
-  if (fromSet || guardsMaterializeInPlace()) return fromSet
+  if (fromSet) return fromSet
   // The catalog is setup's artifact: a hosted repo that has not generated yet has
   // no scenario set, and the setup bundle is where setup left it.
   const bundle = await loadGuardSetupBundle(repoKey, ref)
@@ -2816,7 +2778,7 @@ export async function readGuardDependencyRaw(
  * by nothing: the id echoed back is the file's own path.
  *
  * Inline secrets are MASKED. The recipe is committed, so what a reader may see of
- * it is exactly what `truecourse guard recipe` prints — one mask
+ * it is exactly what the recipe CARD shows — one mask
  * ({@link maskedRecipeText}) behind both. A file that does not parse reads as
  * absent rather than unmasked, matching {@link readGuardRecipeCard}, which reads
  * an invalid recipe as no card at all.
@@ -2928,7 +2890,6 @@ export async function dismissGuardClaim(
   claim: GuardDismissedClaim,
   opts?: { pr?: number },
 ): Promise<GuardDecisions> {
-  assertNoGuardPrInPlace(opts?.pr)
   const scope = opts?.pr !== undefined ? prGuardDecisionsRef(opts.pr) : undefined
   const decisions = await readGuardDecisionsStore(repoRoot, scope)
   const key = dismissedClaimKey(claim.doc, claim.anchor, claim.title)
@@ -2953,7 +2914,6 @@ export async function undismissGuardClaim(
   identity: GuardClaimIdentity,
   opts?: { pr?: number },
 ): Promise<GuardDecisions> {
-  assertNoGuardPrInPlace(opts?.pr)
   const scope = opts?.pr !== undefined ? prGuardDecisionsRef(opts.pr) : undefined
   const decisions = await readGuardDecisionsStore(repoRoot, scope)
   const key = dismissedClaimKey(identity.doc, identity.anchor, identity.title)
@@ -2981,7 +2941,6 @@ export async function dismissGuardFlow(
   flow: GuardDismissedFlow,
   opts?: { pr?: number },
 ): Promise<GuardDecisions> {
-  assertNoGuardPrInPlace(opts?.pr)
   const scope = opts?.pr !== undefined ? prGuardDecisionsRef(opts.pr) : undefined
   const decisions = await readGuardDecisionsStore(repoRoot, scope)
   const dismissedFlows = decisions.dismissedFlows.filter((d) => d.flowId !== flow.flowId)
@@ -3002,7 +2961,6 @@ export async function undismissGuardFlow(
   flowId: string,
   opts?: { pr?: number },
 ): Promise<GuardDecisions> {
-  assertNoGuardPrInPlace(opts?.pr)
   const scope = opts?.pr !== undefined ? prGuardDecisionsRef(opts.pr) : undefined
   const decisions = await readGuardDecisionsStore(repoRoot, scope)
   const next: GuardDecisions = {
@@ -3016,13 +2974,6 @@ export async function undismissGuardFlow(
 /** The PR-overlay sentinel scope for guard decisions (`_pr/<number>`, EE-only).
  *  Exported so the EE gate/regen paths read the same overlay the writes target. */
 export const prGuardDecisionsRef = (pr: number): string => `_pr/${pr}`
-
-/** PR-scoped decisions live only in EE — a live-tree (OSS) store can't hold them. */
-function assertNoGuardPrInPlace(pr?: number): void {
-  if (pr !== undefined && guardsMaterializeInPlace()) {
-    throw new Error('[guard] PR-scoped guard decisions require the enterprise store')
-  }
-}
 
 /**
  * Merge a PR's guard decisions overlay over the repo row. Pure. `dismissedClaims`
@@ -3054,7 +3005,6 @@ export async function getGuardDecisions(
   opts?: { pr?: number },
 ): Promise<GuardDecisions> {
   if (opts?.pr === undefined) return readGuardDecisionsStore(repoRoot)
-  assertNoGuardPrInPlace(opts.pr)
   const [base, overlay] = await Promise.all([
     readGuardDecisionsStore(repoRoot),
     readGuardDecisionsStore(repoRoot, prGuardDecisionsRef(opts.pr)),
@@ -3068,7 +3018,6 @@ export async function getGuardDecisions(
  * onto the repo row, persists it, drops the overlay, and returns true. EE-only.
  */
 export async function promoteGuardDecisionsOverlay(repoRoot: string, pr: number): Promise<boolean> {
-  assertNoGuardPrInPlace(pr)
   const overlay = await readGuardDecisionsStore(repoRoot, prGuardDecisionsRef(pr))
   if (overlay.dismissedClaims.length === 0) return false
   const merged = mergeGuardDecisions(await readGuardDecisionsStore(repoRoot), overlay)
@@ -3079,26 +3028,24 @@ export async function promoteGuardDecisionsOverlay(repoRoot: string, pr: number)
 
 /** Discard a PR's guard decisions overlay (unmerged close). Idempotent. EE-only. */
 export async function discardGuardDecisionsOverlay(repoRoot: string, pr: number): Promise<void> {
-  assertNoGuardPrInPlace(pr)
   await deleteGuardDecisionsStore(repoRoot, prGuardDecisionsRef(pr))
 }
 
 // ---------------------------------------------------------------------------
-// Staleness (mtime probe) — the two amber-dot signals for the Guard tab.
+// Staleness — the two amber-dot signals for the Guard tab.
 // ---------------------------------------------------------------------------
 
 /**
- * Compute the guard staleness signals (the two amber dots). OSS reads store mtimes
- * off the working tree (unchanged); EE composes the same shape from store reads at
- * the same ref (a PR head, or the baseline) — no filesystem, no mtimes. `generateStale`:
- * spec corpus present but never generated. `runStale`: scenarios present but never
- * run, OR the generate is newer than the run (regenerated scenarios not yet re-run).
+ * Compute the guard staleness signals (the two amber dots), composed from store
+ * reads at the resolved ref (a PR head, or the baseline). `generateStale`: spec
+ * corpus present but never generated. `runStale`: scenarios present but never
+ * run, OR the generate is newer than the run (regenerated scenarios not yet
+ * re-run).
  */
 export async function computeGuardStaleness(repoKey: string, ref?: string): Promise<GuardStaleness> {
   const scope = await resolveGuardScope(repoKey, ref)
-  if (scope.kind === 'live') return fileGuardStaleness(repoKey)
-  // Hosted with nothing resolvable: nothing is established — all-false, never
-  // a probe against the store's newest set.
+  // Nothing resolvable: nothing is established — all-false, never a probe
+  // against the store's newest set.
   if (scope.kind === 'empty') return EMPTY_STALENESS
   return storeGuardStaleness(repoKey, scope.commit, ref !== undefined)
 }
@@ -3113,8 +3060,8 @@ const EMPTY_STALENESS: GuardStaleness = {
 }
 
 /**
- * Hosted (Pg store) staleness — composed from store reads at the resolved commit
- * (the PR head, else the baseline). Presence + a generate-vs-run timestamp
+ * Staleness composed from store reads at the resolved commit (the PR head, else
+ * the baseline). Presence + a generate-vs-run timestamp
  * compare; no working tree, no mtimes. With an explicit ref (`refPinned`), the
  * run presence is decided by THAT commit's row alone — no baseline-run fallback
  * (a never-run PR head must report hasRun:false, agreeing with `/latest?ref=`);
@@ -3163,55 +3110,5 @@ async function storeGuardStaleness(
     hasScenarios,
     hasGenerated,
     hasRun,
-  }
-}
-
-/** OSS (file store) staleness — store mtimes off the working tree (unchanged). */
-function fileGuardStaleness(repoRoot: string): GuardStaleness {
-  const corpusMtime = mtimeIfExists(corpusFilePath(repoRoot))
-  const generatedMtime = mtimeIfExists(guardResultPath(repoRoot))
-  const runMtime = mtimeIfExists(guardLatestPath(repoRoot))
-  const scenariosMtime = newestScenarioMtime(repoRoot)
-
-  return {
-    generateStale: corpusMtime !== null && (generatedMtime === null || corpusMtime > generatedMtime),
-    runStale: scenariosMtime !== null && (runMtime === null || scenariosMtime > runMtime),
-    hasCorpus: corpusMtime !== null,
-    hasScenarios: scenariosMtime !== null,
-    hasGenerated: generatedMtime !== null,
-    hasRun: runMtime !== null,
-  }
-}
-
-/** Newest mtime among the scenario YAMLs and the manifest — the "scenarios changed" marker. */
-function newestScenarioMtime(repoRoot: string): number | null {
-  let newest = mtimeIfExists(manifestPath(repoRoot))
-  for (const file of collectYamlFiles(scenariosDir(repoRoot))) {
-    const m = mtimeIfExists(file)
-    if (m !== null && (newest === null || m > newest)) newest = m
-  }
-  return newest
-}
-
-// ---------------------------------------------------------------------------
-// Small fs helpers.
-// ---------------------------------------------------------------------------
-
-function collectYamlFiles(dir: string): string[] {
-  if (!fs.existsSync(dir)) return []
-  const out: string[] = []
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name)
-    if (entry.isDirectory()) out.push(...collectYamlFiles(full))
-    else if (entry.isFile() && /\.ya?ml$/i.test(entry.name)) out.push(full)
-  }
-  return out
-}
-
-function mtimeIfExists(file: string): number | null {
-  try {
-    return fs.statSync(file).mtimeMs
-  } catch {
-    return null
   }
 }

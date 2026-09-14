@@ -10,7 +10,8 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import type { GuardBaselinePipeline } from '@truecourse/ee-github-app';
-import { JobStore, NotificationStore } from '../../ee/packages/data-store/src/index';
+import { JobStore, NotificationStore, PgGuardStore } from '../../ee/packages/data-store/src/index';
+import { setGuardStore, resetGuardStore } from '@truecourse/core/lib/guard-store';
 import {
   GUARD_BASELINE_TASK,
   guardBaselineJobKey,
@@ -37,6 +38,9 @@ beforeEach(async () => {
   client = new PGlite();
   db = drizzle(client, { schema }) as unknown as Db;
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
+  // The pipeline reads and writes guard state through the seam; here it is the
+  // same database the job's own rows live in.
+  setGuardStore(new PgGuardStore(db));
   savedEnv = {};
   for (const [k, v] of Object.entries(GITHUB_ENV)) {
     savedEnv[k] = process.env[k];
@@ -49,6 +53,7 @@ afterEach(async () => {
     if (savedEnv[k] === undefined) delete process.env[k];
     else process.env[k] = savedEnv[k];
   }
+  resetGuardStore();
   await client.close();
 });
 

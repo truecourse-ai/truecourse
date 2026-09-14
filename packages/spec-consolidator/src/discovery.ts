@@ -24,12 +24,6 @@
  * markdown matching one of its globs enters the universe. `.truecourseignore`
  * is still applied first, so it always subtracts — an include glob can never
  * resurrect an ignored path. Absent/empty scope → everything (unchanged).
- *
- * Web sources: the markdown snapshot of every registered docs site
- * (`specs/sources.json`) joins the universe after the walk. It lives under the
- * `.truecourse/` the walk hard-skips, so it is enumerated from the registry
- * instead — and it is exempt from both the include-scope and `.truecourseignore`,
- * because registering the source IS the opt-in.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -38,10 +32,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   loadTcIgnore,
-  loadSpecScope,
   DOC_DISCOVERY_SKIP_DIRS as SKIP_DIRS,
   hasMarkdownExtension,
   stripMarkdownExtension,
+  buildSpecScope,
   type SpecScope,
 } from '@truecourse/shared';
 import {
@@ -53,7 +47,6 @@ import {
   OPENAPI_MAX_BYTES,
 } from '@truecourse/shared/openapi';
 import { nodeRefContext } from '@truecourse/shared/openapi-node';
-import { readSourcesFile, sourceDirPath, sourceDocAbsPath, sourceDocRef } from './sources/store.js';
 import type { DocKind } from './types.js';
 
 export interface DocCandidate {
@@ -126,18 +119,10 @@ export interface DiscoveryOptions {
    */
   skipGit?: boolean;
   /**
-   * Include-scope override. Defaults to the repo's `spec.include` read from
-   * `.truecourse/config.json`. Callers that already loaded the scope pass it
-   * here so discovery and their own scope checks agree without re-reading.
+   * Include-scope: a path must match one of its globs to enter the universe.
+   * Absent (or empty) is INACTIVE — the walk looks at everything.
    */
   scope?: SpecScope;
-  /**
-   * Whether the repository's registered llms.txt sources join the universe
-   * after the walk (the default, what the per-repository scan reads). A
-   * workspace Repository source is the walk alone: its sites are sources of
-   * their own, never files of the repository.
-   */
-  registeredSources?: boolean;
 }
 
 /**
@@ -153,7 +138,7 @@ export function discoverDocs(rootDir: string, opts: DiscoveryOptions = {}): DocC
   const tcIgnore = loadTcIgnore(rootDir);
   // Opt-in include-scope (`spec.include`). Inactive ⇒ everything, and the guard
   // below is skipped, so a no-config repo walks byte-identically to before.
-  const scope = opts.scope ?? loadSpecScope(rootDir);
+  const scope = opts.scope ?? buildSpecScope([]);
 
   const visit = (dir: string): void => {
     let entries: fs.Dirent[];
@@ -213,36 +198,7 @@ export function discoverDocs(rootDir: string, opts: DiscoveryOptions = {}): DocC
     }
   };
   visit(rootDir);
-  if (opts.registeredSources !== false) out.push(...discoverSourceDocs(rootDir, previewLines, opts));
   return out;
-}
-
-/**
- * The snapshot docs of every registered web source, as ordinary candidates —
- * appended after the walk, sorted among themselves by ref.
- *
- * Enumerated from `sources.json` (the registry owns the tree), so a registry
- * entry whose file is gone is skipped silently: it comes back on the next
- * `spec source refresh`. A corrupt registry throws `SourcesFileError` rather than
- * scanning without docs the user registered — a repo that never added a source
- * has no registry file at all and takes the empty path.
- */
-function discoverSourceDocs(
-  rootDir: string,
-  previewLines: number,
-  opts: DiscoveryOptions,
-): DocCandidate[] {
-  const out: DocCandidate[] = [];
-  for (const source of readSourcesFile(rootDir).sources) {
-    const dir = sourceDirPath(rootDir, source.id);
-    for (const doc of source.docs) {
-      const absPath = sourceDocAbsPath(dir, doc.path);
-      if (!absPath) continue;
-      const candidate = makeCandidate(absPath, rootDir, previewLines, opts, sourceDocRef(source.id, doc.path));
-      if (candidate) out.push(candidate);
-    }
-  }
-  return out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }
 
 function makeCandidate(
@@ -250,8 +206,6 @@ function makeCandidate(
   rootDir: string,
   previewLines: number,
   opts: DiscoveryOptions,
-  /** Ref to record instead of the path relative to `rootDir` (web sources). */
-  ref?: string,
 ): DocCandidate | null {
   let content: string;
   let stat: fs.Stats;
@@ -262,7 +216,7 @@ function makeCandidate(
     return null;
   }
 
-  const rel = ref ?? path.relative(rootDir, absPath).split(path.sep).join('/');
+  const rel = path.relative(rootDir, absPath).split(path.sep).join('/');
   const preview = content.split(/\r?\n/).slice(0, previewLines).join('\n');
   const contentHash = createHash('sha256').update(content).digest('hex');
   const lastTouched = opts.skipGit

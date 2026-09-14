@@ -1214,9 +1214,8 @@ export function secretBullets(value: string): string {
 /**
  * ONE inline secret as it may be shown: bullets to the value's length (capped),
  * labelled so it can never be mistaken for the value itself. The single spelling
- * behind every reading of a recipe — the terminal's (`truecourse guard recipe`)
- * and the dashboard's raw JSON — so neither can drift into printing more than
- * the other.
+ * behind every reading of a recipe — the recipe card and the raw JSON beside
+ * it — so neither can drift into showing more than the other.
  */
 export function maskRecipeSecret(value: string): string {
   return `${secretBullets(value)} (inline value, masked)`
@@ -1224,9 +1223,9 @@ export function maskRecipeSecret(value: string): string {
 
 /**
  * A stored recipe as a READER may see it: the file's own JSON, pretty-printed,
- * with every inline secret replaced by {@link maskRecipeSecret}. Exactly what the
- * terminal prints — an env-var NAME is a capability and stays, an inline `value`
- * IS the secret and never leaves the file.
+ * with every inline secret replaced by {@link maskRecipeSecret} — an env-var NAME
+ * is a capability and stays, an inline `value` IS the secret and never leaves
+ * the file.
  *
  * Everything else is the file's own: key order, and any field no schema knows
  * about (unlike {@link hashableRecipeText}, which canonicalizes for hashing). This

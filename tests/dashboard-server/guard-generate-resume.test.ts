@@ -2,9 +2,11 @@ import { beforeEach, afterEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import path from 'node:path';
 import type { Express } from 'express';
-import { createSessionRun } from '@truecourse/core/lib/sessions-store';
+import { createStoredSessionRun } from '@truecourse/core/lib/sessions-store';
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
+import { installMemorySpecStore, resetSpecStore } from '../helpers/memory-spec-store';
 import { createTestApp, stubJobs, type StubJobs } from '../helpers/test-app';
-import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
+import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
 
 describe('guard generate resume route', () => {
   let fixture: TestFixture;
@@ -12,14 +14,16 @@ describe('guard generate resume route', () => {
   let jobs: StubJobs;
   const url = () => `/api/repos/${fixture.project.slug}/guard/generate`;
   beforeEach(async () => {
+    installMemorySessionRuns();
+    installMemorySpecStore();
     fixture = await setupTestFixture();
     jobs = stubJobs();
     app = createTestApp({ jobs: jobs.mount });
   });
-  afterEach(async () => { await teardownTestFixture(fixture.project.slug); });
+  afterEach(async () => { await teardownTestFixture(fixture.project.slug); resetSessionRuns(); resetSpecStore(); });
 
   it('enqueues the saved run identity, ignoring client-supplied completed steps', async () => {
-    const run = createSessionRun(fixture.repoPath, { command: 'guard-generate', gitRef: 'a'.repeat(40) });
+    const run = await createStoredSessionRun(fixture.repoPath, { command: 'guard-generate', gitRef: 'a'.repeat(40) });
     run.finish('interrupted');
     await request(app).post(url()).send({ resumeRunId: run.runId, completedSteps: ['author'] }).expect(202);
     expect(jobs.guardGenerates).toEqual([expect.objectContaining({ resumeRunId: run.runId })]);
@@ -27,21 +31,21 @@ describe('guard generate resume route', () => {
   });
 
   it.each(['running', 'completed'] as const)('does not resume a %s run', async status => {
-    const run = createSessionRun(fixture.repoPath, { command: 'guard-generate', gitRef: 'a'.repeat(40) });
+    const run = await createStoredSessionRun(fixture.repoPath, { command: 'guard-generate', gitRef: 'a'.repeat(40) });
     if (status === 'completed') run.finish(status);
     await request(app).post(url()).send({ resumeRunId: run.runId }).expect(422);
     expect(jobs.guardGenerates).toEqual([]);
   });
 
   it('does not find another command under the generation namespace', async () => {
-    const run = createSessionRun(fixture.repoPath, { command: 'spec-scan', gitRef: 'a'.repeat(40) });
+    const run = await createStoredSessionRun(fixture.repoPath, { command: 'spec-scan', gitRef: 'a'.repeat(40) });
     run.finish('interrupted');
     await request(app).post(url()).send({ resumeRunId: run.runId }).expect(404);
     expect(jobs.guardGenerates).toEqual([]);
   });
 
   it('does not resume a run owned by another repository', async () => {
-    const run = createSessionRun(path.join(fixture.repoPath, 'another-repo'), { command: 'guard-generate', gitRef: 'a'.repeat(40) });
+    const run = await createStoredSessionRun(path.join(fixture.repoPath, 'another-repo'), { command: 'guard-generate', gitRef: 'a'.repeat(40) });
     run.finish('interrupted');
     await request(app).post(url()).send({ resumeRunId: run.runId }).expect(404);
     expect(jobs.guardGenerates).toEqual([]);

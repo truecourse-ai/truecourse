@@ -175,8 +175,7 @@ export function worstCoverageStatus(
 
 /**
  * What a reader is told about coverage: a doc section, a flow, an overview
- * counter, a filter and a chip each wear exactly ONE of these five, everywhere,
- * on the CLI and in the dashboard alike.
+ * counter, a filter and a chip each wear exactly ONE of these five, everywhere.
  *
  *  - `succeeded` — the claims' scenarios passed;
  *  - `failed` — a scenario contradicted the spec (drift), or could not complete;
@@ -328,7 +327,7 @@ export interface GuardSectionScenario {
 
 /**
  * Why a flow has no scenario on one surface — the manifest/report gap, with the
- * label both the CLI and the dashboard render (see `guardGapLabel`).
+ * label every surface renders (see `guardGapLabel`).
  */
 export const GuardFlowGapSchema = z
   .object({
@@ -596,8 +595,8 @@ export interface GuardLatestWithRunFlows extends GuardLatest {
  * them (the View mode's primary rendering) and the raw YAML behind them (the YAML
  * mode). `steps` is empty when the file doesn't parse — the detail then shows the
  * source alone rather than a half-rendered guess. The step list is derived
- * SERVER-SIDE from the parsed file, so the dashboard and the CLI read one source,
- * and each row names its own driver ({@link GuardScenarioStepView.kind}).
+ * SERVER-SIDE from the parsed file, so the parse happens in one place, and each
+ * row names its own driver ({@link GuardScenarioStepView.kind}).
  */
 export interface GuardScenarioSource {
   id: string
@@ -862,9 +861,8 @@ export const GuardFlowListItemSchema = z
 export type GuardFlowListItem = z.infer<typeof GuardFlowListItemSchema>
 
 /**
- * A flow's coverage status in the five words — the ONE derivation the CLI list and
- * the dashboard list both read, so `guard flows` and the Flows tab can never
- * disagree about a flow.
+ * A flow's coverage status in the five words — the ONE derivation every flow
+ * list reads, so no two of them can disagree about a flow.
  *
  * FAILED means a test ran and was contradicted (at birth or in a run): guard
  * commits failing tests, so a birth failure reaches the list as a `fail` surface

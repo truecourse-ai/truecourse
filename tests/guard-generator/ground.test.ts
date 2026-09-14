@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import { resolveEntry } from '@truecourse/guard-runner'
 import {
   captureProbes,
@@ -9,9 +9,14 @@ import {
   type AuthorUserContext,
 } from '@truecourse/guard-generator'
 import { makeTempRepo, rmrf, FIXTURE_BIN } from './helpers.js'
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache.js'
 
 const repos: string[] = []
+beforeEach(() => {
+  installMemoryKvCache()
+})
 afterEach(() => {
+  resetKvCacheStore()
   while (repos.length) rmrf(repos.pop()!)
 })
 function repo(): string {

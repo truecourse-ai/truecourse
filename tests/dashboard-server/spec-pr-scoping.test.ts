@@ -37,7 +37,7 @@ import { recuratePrCorpus, getDecisions } from '@truecourse/core/commands/spec-i
 import { setSpecStore, resetSpecStore } from '@truecourse/core/lib/spec-store';
 import { setRepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
 import { setBackgroundTaskRunner, type BackgroundTask } from '@truecourse/core/lib/background-tasks';
-import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
+import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
 
 async function makeDb(client: PGlite): Promise<Db> {
   const db = drizzle(client, { schema });

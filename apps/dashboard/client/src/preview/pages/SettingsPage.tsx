@@ -415,7 +415,7 @@ function ModelsTab() {
           )}
 
           <p className="pt-1 text-[11px] text-muted-foreground">
-            The engine calls the model from the hosted product only. The CLI never makes an LLM call.
+            The engine calls the model with this provider's credentials, and only from a run this workspace started.
           </p>
 
           <div className="flex flex-wrap items-center gap-3 pt-1">

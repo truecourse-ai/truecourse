@@ -7,26 +7,14 @@ import {
 } from '@truecourse/core/progress';
 import { SessionCommandSchema } from '@truecourse/agent-loop';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
-import {
-  acquireRunTail,
-  acquireRunsWatch,
-  releaseRunTail,
-  releaseRunsWatch,
-  type RunTailTarget,
-} from '../services/session-tailer.service.js';
+import { acquireRunsWatch, releaseRunsWatch } from '../services/run-watch.service.js';
 
 // Track in-progress runs so a client joining mid-run gets the current step.
 const activeSpec = new Map<string, AnalysisProgressPayload>();
 
-// The run tails each socket holds (joinRun without leaveRun), released on
-// disconnect so an abandoned viewer never pins a watcher.
-const heldTails = new Map<string, Map<string, RunTailTarget>>();
-// The runs-list watches each socket holds via joinRepo (repoId → repoPath),
-// released on leaveRepo/disconnect for the same reason.
+// The runs watches each socket holds via joinRepo (repoId → repoPath), released
+// on leaveRepo/disconnect so an abandoned viewer never pins one.
 const heldRunsWatches = new Map<string, Map<string, string>>();
-
-/** One agent-sessions run's socket room. */
-const runRoom = (repoId: string, runId: string): string => `run:${repoId}:${runId}`;
 
 
 export function setupHandlers(io: SocketServer): void {
@@ -43,8 +31,8 @@ export function setupHandlers(io: SocketServer): void {
         socket.emit('spec:progress', { repoId, ...specProgress });
       }
 
-      // Watch the repo's sessions store so a CLI-started run (or any run.json
-      // rewrite) prompts the room to re-read its runs list — no page refresh.
+      // Follow the repository's runs so any run write prompts the room to
+      // re-read its runs list — no page refresh.
       try {
         const held = heldRunsWatches.get(socket.id) ?? new Map<string, string>();
         if (!held.has(repoId)) {
@@ -72,55 +60,8 @@ export function setupHandlers(io: SocketServer): void {
       }
     });
 
-    // Live tail of one agent-sessions run. The client joins BEFORE its
-    // REST snapshot read and dedups by seq, so the tail's from-now-on offsets
-    // lose nothing. Payload: { repoId, command, runId }.
-    socket.on(
-      'joinRun',
-      async (payload: { repoId: string; command: string; runId: string }) => {
-        const command = SessionCommandSchema.safeParse(payload?.command);
-        if (!command.success || !payload.repoId || !payload.runId) return;
-        let repoPath: string;
-        try {
-          repoPath = (await resolveProjectForRequest(payload.repoId)).path;
-        } catch {
-          return; // unknown slug — nothing to tail
-        }
-        const { repoId, runId } = payload;
-        const target: RunTailTarget = { repoPath, command: command.data, runId };
-        await socket.join(runRoom(repoId, runId));
-        acquireRunTail(target, {
-          onEvent: (sessionId, event) =>
-            getIO().to(runRoom(repoId, runId)).emit('session:event', { repoId, runId, sessionId, event }),
-          onRunUpdated: (run) =>
-            getIO().to(runRoom(repoId, runId)).emit('session:run-updated', { repoId, runId, run }),
-        });
-        const held = heldTails.get(socket.id) ?? new Map<string, RunTailTarget>();
-        held.set(runRoom(repoId, runId), target);
-        heldTails.set(socket.id, held);
-        log.info(`[Socket] ${socket.id} tailing ${runRoom(repoId, runId)}`);
-      },
-    );
-
-    socket.on('leaveRun', async (payload: { repoId: string; runId: string }) => {
-      if (!payload?.repoId || !payload.runId) return;
-      const room = runRoom(payload.repoId, payload.runId);
-      await socket.leave(room);
-      const held = heldTails.get(socket.id);
-      const target = held?.get(room);
-      if (held && target) {
-        held.delete(room);
-        releaseRunTail(target);
-      }
-    });
-
     socket.on('disconnect', () => {
       log.info(`[Socket] Client disconnected: ${socket.id}`);
-      const held = heldTails.get(socket.id);
-      if (held) {
-        heldTails.delete(socket.id);
-        for (const target of held.values()) releaseRunTail(target);
-      }
       const heldWatches = heldRunsWatches.get(socket.id);
       if (heldWatches) {
         heldRunsWatches.delete(socket.id);

@@ -24,7 +24,7 @@ import type { GuardNeedsSetup } from '@truecourse/shared';
 import { MISSING_DATA_NOUN, needsSetupIsDone } from '@truecourse/shared';
 import {
   GUARD_NEEDS_SETUP_NEXT,
-  GUARD_REGENERATE_COMMAND,
+  GUARD_REGENERATE_ACTION,
   guardNeedsSetupCta,
   guardNeedsSetupHeadline,
   guardProvideServiceCta,
@@ -91,13 +91,11 @@ export function GuardNeedsSetupCta({
       )}
       {done ? (
         <p className="mt-1 text-[11px] text-muted-foreground">
-          Run <code className="rounded bg-muted px-1 py-0.5">{GUARD_REGENERATE_COMMAND}</code> to author
-          them.
+          {GUARD_REGENERATE_ACTION} authors them.
         </p>
       ) : seedOnly ? (
         <p className="mt-1 text-[11px] text-muted-foreground">
-          Extend the seed script to create it, then run{' '}
-          <code className="rounded bg-muted px-1 py-0.5">{GUARD_REGENERATE_COMMAND}</code>.
+          Extend the seed script to create it, then re-run {GUARD_REGENERATE_ACTION}.
         </p>
       ) : (
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">

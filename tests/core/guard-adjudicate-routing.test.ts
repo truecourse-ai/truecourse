@@ -23,15 +23,18 @@ import {
 } from '@truecourse/shared'
 import { claimIdentity, persistAdjudication } from '../../packages/core/src/services/guard-adjudicate/fold'
 import type { AdjudicationItem } from '../../packages/core/src/services/guard-adjudicate/pre-pass'
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store'
 
 let repo: string
 
 beforeEach(() => {
+  installWorkTreeGuardStore()
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-adjudicate-routing-'))
   // A board holding the row, so the persist half has something to patch.
   writeGuardLatest(repo, board())
 })
 afterEach(() => {
+  resetGuardStore()
   fs.rmSync(repo, { recursive: true, force: true })
 })
 

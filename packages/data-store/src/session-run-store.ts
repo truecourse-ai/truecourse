@@ -3,9 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, gt, inArray, sql, getTableColumns } from 'drizzle-orm';
 import { activityRuns, activityEvents, type Db, type Pool, type PoolClient } from '@truecourse/db';
 import {
-  SessionRunNotFoundError, createSessionRun, listSessionRuns, openSessionRun, parseSessionRunCursor,
-  sessionRunDir, toPublicRunRecord,
-  type TranscriptPageOptions, type TranscriptPage, type ActivityPage, type RepoRunRecord, type SessionRunBackend, type SessionRunQuery, type SessionRunStore,
+  SessionRunNotFoundError, parseSessionRunCursor, sessionRunDir, toPublicRunRecord,
+  type CreateSessionRunOptions, type TranscriptPageOptions, type TranscriptPage, type ActivityPage, type RepoRunRecord, type SessionRunBackend, type SessionRunQuery, type SessionRunStore,
 } from '@truecourse/core/lib/sessions-store';
 import { publishActivityProgress, publishCommittedActivity, readActivityEvents, retireActivityProgress } from '@truecourse/core/lib/activity-journal';
 import { ActivityEventSchema, type ActivityEvent, type ActivityEventBody } from '@truecourse/shared/activity-stream';
@@ -43,7 +42,6 @@ function decodeActivityEvent(body: { [key: string]: unknown }, cursor: number): 
 export class PgSessionRunStore implements SessionRunBackend {
   private readonly owner = randomUUID();
   private readonly live = new Map<string, SessionRunStore>();
-  private readonly imports = new Map<string, Promise<void>>();
   private readonly watchers = new Map<string, Set<() => void>>();
   private readonly runListeners = new Set<(repoKey: string, runId: string) => void>();
   private listener: PoolClient | undefined;
@@ -131,50 +129,7 @@ export class PgSessionRunStore implements SessionRunBackend {
     if (this.listener) { const client = this.listener; this.listener = undefined; client.release(true); }
   }
 
-  private prepare(repoKey: string): Promise<void> {
-    let pending = this.imports.get(repoKey);
-    if (!pending) {
-      pending = this.importLegacy(repoKey).catch(error => { this.imports.delete(repoKey); throw error; });
-      this.imports.set(repoKey, pending);
-    }
-    return pending;
-  }
-
-  /** Import old journals without changing their reconnect cursors. Files remain
-   * as a backup; conflict-safe inserts make a restart/retry idempotent. */
-  private async importLegacy(repoKey: string): Promise<void> {
-    const importedIds = new Set((await this.db.select({ id: activityRuns.runId }).from(activityRuns).where(eq(activityRuns.repoKey, repoKey))).map(row => row.id));
-    for (const record of listSessionRuns(repoKey)) {
-      if (importedIds.has(record.runId)) continue;
-      const run = openSessionRun(repoKey, record.command, record.runId);
-      const events = readActivityEvents(run.dir);
-      let cursor = events.length ? events[events.length - 1]!.cursor + 1 : 0;
-      const seen = new Set(events.filter(e => e.kind === 'session-event').map(e => `${e.sessionId}:${e.event.seq}`));
-      for (const file of fs.readdirSync(run.dir)) {
-        if (!file.endsWith('.jsonl') || file === 'activity.jsonl') continue;
-        const sessionId = file.slice(0, -6);
-        for (const event of run.persistence.readEvents(sessionId)) {
-          if (!seen.has(`${sessionId}:${event.seq}`)) events.push({ cursor: cursor++, kind: 'session-event', sessionId, event });
-        }
-      }
-      const imported = { ...toPublicRunRecord(record), activityStream: 'ai-sdk-v1' as const };
-      events.push({ cursor: cursor++, kind: 'run', run: imported });
-      await this.db.transaction(async tx => {
-        const inserted = await tx.insert(activityRuns).values({
-          runId: record.runId, repoKey, command: record.command, record: imported, nextCursor: cursor,
-          leaseUntil: record.status === 'running' ? new Date().toISOString() : null,
-        }).onConflictDoNothing().returning({ id: activityRuns.runId });
-        if (!inserted.length) return;
-        // Bounded inserts avoid PostgreSQL's parameter limit on long histories.
-        for (let i = 0; i < events.length; i += 200) {
-          await tx.insert(activityEvents).values(events.slice(i, i + 200).map(({ cursor, ...body }) => ({ runId: record.runId, cursor, body: encodeActivityBody(body) })));
-        }
-      });
-    }
-  }
-
-  async create(repoKey: string, opts: Parameters<typeof createSessionRun>[1]): Promise<SessionRunStore> {
-    await this.prepare(repoKey);
+  async create(repoKey: string, opts: CreateSessionRunOptions): Promise<SessionRunStore> {
     await this.reconcile([repoKey]);
     const record: Record = {
       command: opts.command, runId: randomUUID(), gitRef: opts.gitRef,
@@ -196,7 +151,6 @@ export class PgSessionRunStore implements SessionRunBackend {
   }
 
   async open(repoKey: string, command: Command, runId: string): Promise<SessionRunStore> {
-    await this.prepare(repoKey);
     await this.reconcile([repoKey]);
     const [row] = await this.db.select().from(activityRuns).where(and(eq(activityRuns.repoKey, repoKey), eq(activityRuns.command, command), eq(activityRuns.runId, runId)));
     if (!row) throw new SessionRunNotFoundError();
@@ -207,7 +161,6 @@ export class PgSessionRunStore implements SessionRunBackend {
   }
 
   async list(repoKey: string, command?: Command): Promise<Record[]> {
-    await this.prepare(repoKey);
     await this.reconcile([repoKey]);
     const rows = await this.db.select().from(activityRuns).where(and(eq(activityRuns.repoKey, repoKey), command ? eq(activityRuns.command, command) : undefined));
     return rows.map(row => clone(row.record) as Record).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
@@ -217,14 +170,13 @@ export class PgSessionRunStore implements SessionRunBackend {
    * Every named repository's runs as one newest-first page: one query over
    * `repo_key`, ordered by the record's `startedAt` with the run id as the
    * tiebreak, and `before` as the keyset cursor of the previous page's last
-   * row. Every repository is prepared (memoized per repository) and then swept
-   * in ONE pass, for the same reason `list` sweeps: a listing must never show a
-   * dead run as running. The index re-reads on every job event, so the sweep is
-   * one transaction however many repositories a workspace has.
+   * row. Every repository is swept in ONE pass, for the same reason `list`
+   * sweeps: a listing must never show a dead run as running. The index re-reads
+   * on every job event, so the sweep is one transaction however many
+   * repositories a workspace has.
    */
   async listForRepos(repoKeys: string[], opts: SessionRunQuery): Promise<RepoRunRecord[]> {
     if (!repoKeys.length) return [];
-    for (const repoKey of repoKeys) await this.prepare(repoKey);
     await this.reconcile(repoKeys);
     let before: { startedAt: string; runId: string } | undefined;
     if (opts.before !== undefined) {
@@ -243,15 +195,26 @@ export class PgSessionRunStore implements SessionRunBackend {
     return rows.map(row => ({ ...(clone(row.record) as Record), repoKey: row.repoKey }));
   }
 
+  /**
+   * The BOOT SWEEP over every repository at once: a process that died left its
+   * runs `running` on a lease nobody renews, and the job rows beside them are
+   * settled `interrupted` by the same boot. Called once, before anything reads.
+   */
+  async reconcileAll(): Promise<void> {
+    return this.reconcile(null);
+  }
+
   /** A lease is machine-independent; a reused PID cannot keep a dead run alive.
-   *  Every named repository is swept in one transaction; each recovered row
-   *  publishes and notifies under the repository that owns it. */
-  private async reconcile(repoKeys: string[]): Promise<void> {
-    if (!repoKeys.length) return;
+   *  Every named repository (or every repository, for `null`) is swept in one
+   *  transaction; each recovered row publishes and notifies under the repository
+   *  that owns it. */
+  private async reconcile(repoKeys: string[] | null): Promise<void> {
+    if (repoKeys !== null && !repoKeys.length) return;
     const recovered: { repoKey: string; event: ActivityEvent }[] = [];
     await this.db.transaction(async tx => {
       const rows = await tx.select().from(activityRuns).where(and(
-        inArray(activityRuns.repoKey, repoKeys), sql`${activityRuns.record}->>'status' = 'running'`,
+        repoKeys === null ? undefined : inArray(activityRuns.repoKey, repoKeys),
+        sql`${activityRuns.record}->>'status' = 'running'`,
         sql`${activityRuns.leaseUntil} < CURRENT_TIMESTAMP`,
       )).for('update');
       for (const row of rows) {

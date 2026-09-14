@@ -60,12 +60,9 @@ import {
 } from '@truecourse/core/lib/context-store';
 import { memoryContextStore } from '../helpers/memory-context-store';
 import {
-  listSessionRuns,
   listStoredSessionRuns,
   openStoredSessionRun,
   setSessionRunBackend,
-  setSessionsRootResolver,
-  resetSessionsRootResolver,
 } from '@truecourse/core/lib/sessions-store';
 import { guardSetupInProcess } from '@truecourse/core/commands/guard-setup';
 import { OpenConflictsError } from '@truecourse/core/commands/guard-in-process';
@@ -162,17 +159,6 @@ function fakeWorker(only?: readonly string[]): StartWorker<Record<string, unknow
 /** The inert event backplane — this suite reads rows, not the live stream. */
 const hub = { start: async () => {}, stop: async () => {}, subscribe: () => () => {} };
 
-beforeAll(() => {
-  process.env.TRUECOURSE_HOME = makeTmpDir('tc-onboarding-home-');
-  // The production sessions layout: transcripts keyed by repo identity under the
-  // global dir, so they exist independent of any work tree.
-  setSessionsRootResolver((key) =>
-    path.isAbsolute(key)
-      ? path.join(key, '.truecourse', 'sessions')
-      : path.join(process.env.TRUECOURSE_HOME as string, 'sessions', key.replace('/', '__')),
-  );
-});
-
 beforeEach(async () => {
   client = new PGlite();
   db = drizzle(client, { schema }) as unknown as Db;
@@ -180,6 +166,8 @@ beforeEach(async () => {
   setGuardStore(new PgGuardStore(db));
   setGuardOverlayStore(new PgGuardOverlayStore(db, 'master-secret-at-least-32-chars-long!!'));
   setSpecStore(new PgSpecStore(db));
+  // One backend, the real one: a run's record and its journal are rows.
+  setSessionRunBackend(new PgSessionRunStore(db));
   // Documentation is the WORKSPACE's: the jobs materialize the repository's
   // slice of the workspace corpus, so the workspace store has to exist.
   setContextStore(memoryContextStore());
@@ -197,15 +185,9 @@ afterEach(async () => {
   await jobs.stop();
   setSessionRunBackend(undefined);
   await client.close();
-  fs.rmSync(path.join(process.env.TRUECOURSE_HOME as string, 'sessions'), {
-    recursive: true,
-    force: true,
-  });
 });
 
 afterAll(() => {
-  resetSessionsRootResolver();
-  delete process.env.TRUECOURSE_HOME;
   for (const dir of tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -381,8 +363,7 @@ describe('the guard setup job', () => {
     await jobs.start();
   });
 
-  it.each(['file', 'postgres'])('saves the bundle and records a watchable run with %s history', async storage => {
-    if (storage === 'postgres') setSessionRunBackend(new PgSessionRunStore(db));
+  it('saves the bundle and records a watchable run', async () => {
     const outcome = await jobs.enqueueGuardSetup(request);
     expect(outcome.status).toBe('queued');
     await Promise.all(running);
@@ -496,8 +477,7 @@ describe('the guard setup job', () => {
     expect(note?.data).toMatchObject({ repoFullName: REPO, runId: setupRun!.runId });
   }, 60_000);
 
-  it.each(['file', 'postgres'])('persists a preparation failure, fails the job and Activity, and chains nothing with %s history', async storage => {
-    if (storage === 'postgres') setSessionRunBackend(new PgSessionRunStore(db));
+  it('persists a preparation failure, fails the job and Activity, and chains nothing', async () => {
     preparationError = 'Application install failed before private preparation verification (exit 7):\nfixture dependency missing';
     await jobs.enqueueGuardSetup(request);
     await Promise.all(running);
@@ -775,7 +755,6 @@ describe('the guard generate job', () => {
   });
 
   it('resumes from Postgres history after the original clone and backend instance are gone', async () => {
-    setSessionRunBackend(new PgSessionRunStore(db));
     const savedTree = path.join(makeTmpDir('tc-resume-input-'), 'tree');
     generateImpl = async (repoRoot, options) => {
       fs.cpSync(repoRoot, savedTree, { recursive: true });
@@ -791,7 +770,6 @@ describe('the guard generate job', () => {
     expect(source.status).toBe('failed');
     expect(fs.existsSync(clone)).toBe(false);
 
-    setSessionRunBackend(new PgSessionRunStore(db));
     setWorkTreeProvider(async () => {
       fs.cpSync(savedTree, clone, { recursive: true });
       return { dir: clone, dispose: () => fs.rmSync(clone, { recursive: true, force: true }) };
@@ -829,8 +807,7 @@ describe('the guard generate job', () => {
     expect((await jobsOfType('repo.guard-generate')).some(job => job.error?.includes('commit has changed'))).toBe(true);
   });
 
-  it.each(['file', 'postgres'])('materializes and persists generated results with %s activity history', async storage => {
-    if (storage === 'postgres') setSessionRunBackend(new PgSessionRunStore(db));
+  it('materializes and persists generated results', async () => {
     await saveSetupBundle();
     await writeGuardDecisions(REPO, { dismissedClaims: [DISMISSED], dismissedFlows: [] });
 
@@ -878,8 +855,7 @@ describe('the guard generate job', () => {
     expect(enqueuedPayloads[1]).toMatchObject({ repoFullName: REPO, workspaceOrgId: ORG, source: 'chain' });
   });
 
-  it.each(['file', 'postgres'])('saves partial extraction results but fails the job and %s activity without chaining', async storage => {
-    if (storage === 'postgres') setSessionRunBackend(new PgSessionRunStore(db));
+  it('saves partial extraction results but fails the job and Activity without chaining', async () => {
     await saveSetupBundle();
     const extractionFailures = [{ doc: 'docs/app.md', reason: 'outcome failed schema: invalid web verification method' }];
     generateImpl = async (repoRoot, options) => {
@@ -985,7 +961,6 @@ describe('the guard generate job', () => {
 
   it('keeps Postgres activity running until results save and records a persistence failure', async () => {
     await saveSetupBundle();
-    setSessionRunBackend(new PgSessionRunStore(db));
     let checked = false;
     class FailingResults extends PgGuardStore {
       override async writeGuardResult(): Promise<void> {
@@ -1186,7 +1161,6 @@ describe('the guard run job', () => {
   });
 
   it('runs the stored set over setup’s recipe, then saves the baseline run and its evidence', async () => {
-    setSessionRunBackend(new PgSessionRunStore(db));
     await storeGeneratedSet();
     await saveSetupBundle();
 

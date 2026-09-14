@@ -13,7 +13,7 @@
  * working sandbox never outlives the session.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -36,13 +36,18 @@ import {
   type GuardSetupSessionContext,
 } from '../../packages/core/src/services/guard-setup/index.js';
 import { stubDriver, forbiddenDriver, memoryPersistence, outcome, toolResult, transportFailure } from './spec-scan-session-stub.js';
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache.js';
 
 const FIXTURE_BIN = fileURLToPath(
   new URL('../fixtures/guard-fixture-cli/bin.mjs', import.meta.url),
 );
 
 const cleanup: (() => void)[] = [];
+beforeEach(() => {
+  installMemoryKvCache();
+});
 afterEach(() => {
+  resetKvCacheStore();
   while (cleanup.length) cleanup.pop()!();
 });
 

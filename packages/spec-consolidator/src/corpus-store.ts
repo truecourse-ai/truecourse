@@ -16,11 +16,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { CuratedCorpusSchema, type Area, type CorpusDoc, type CuratedCorpus, type SkippedDoc } from './corpus-types.js';
+import { corpusFilePath as workTreeCorpusPath } from '@truecourse/shared/work-tree';
 
 const CORPUS_FILE = 'corpus.json';
 
 export function corpusFilePath(repoRoot: string): string {
-  return path.join(repoRoot, '.truecourse', 'specs', CORPUS_FILE);
+  return workTreeCorpusPath(repoRoot);
 }
 
 export function hasCorpus(repoRoot: string): boolean {

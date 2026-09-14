@@ -800,7 +800,7 @@ const OPERATION: InterfaceContract = {
       ],
     },
     consumes: {
-      env: [{ var: 'TRUECOURSE_HOME' }],
+      env: [{ var: 'TRUECOURSE_RUNTIME_DIR' }],
       reads: [{ path: '~/.truecourse/registry.json' }],
     },
     produces: {

@@ -17,8 +17,9 @@
  *   answer "is this still true" by deleting the question. Plain append, not
  *   the store's write-tmp-and-rename — a rename would rewrite the whole file
  *   and two worktrees would each drop the other's history.
- * - **Committed.** What a ledger holds is a report about the REPOSITORY, not a
- *   record of a run — keep any new ledger path out of `GITIGNORE_CONTENTS`.
+ * - **A report about the REPOSITORY, not a record of a run.** A ledger travels
+ *   with the repository's stored state, so it is collected back out of a run's
+ *   work tree rather than discarded with it.
  * - **Deduped within the run only.** The identity of a finding is its LINE:
  *   two work items reporting the same sentence are one bug, and one bullet is
  *   the honest count of it; across runs the repetition is the signal that

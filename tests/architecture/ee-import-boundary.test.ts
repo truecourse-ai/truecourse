@@ -28,7 +28,6 @@ const OSS_ROOTS = [
   'apps/dashboard/server/src',
   'apps/landing/src',
   'packages',
-  'tools',
 ];
 
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.next', 'out', '.turbo']);

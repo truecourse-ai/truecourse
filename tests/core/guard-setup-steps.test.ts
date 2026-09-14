@@ -45,13 +45,13 @@ import { StepTracker, type AnalysisStep } from '../../packages/core/src/progress
 const FIXTURE = fileURLToPath(new URL('../fixtures/seed-draft', import.meta.url));
 
 // Setup reads (and would write) the user-level LLM config; these run against a
-// throwaway TRUECOURSE_HOME rather than the developer's real one.
+// throwaway runtime dir rather than the developer's real one.
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-setup-steps-home-'));
 beforeAll(() => {
-  process.env.TRUECOURSE_HOME = HOME;
+  process.env.TRUECOURSE_RUNTIME_DIR = HOME;
 });
 afterAll(() => {
-  delete process.env.TRUECOURSE_HOME;
+  delete process.env.TRUECOURSE_RUNTIME_DIR;
   fs.rmSync(HOME, { recursive: true, force: true });
 });
 
@@ -173,10 +173,10 @@ function factTracker(): { tracker: StepTracker; facts: (key: string) => string[]
 }
 
 // ---------------------------------------------------------------------------
-// --only-recipe
+// only: recipe
 // ---------------------------------------------------------------------------
 
-describe('--only-recipe', () => {
+describe('only: recipe', () => {
   it('runs the recipe step, keeps the free detect pass, and starts nothing after it', async () => {
     const r = fixtureRepo();
     writeRecipe(r);
@@ -202,10 +202,10 @@ describe('--only-recipe', () => {
 });
 
 // ---------------------------------------------------------------------------
-// --only-catalog — the recipe replays from recipe.json
+// only: catalog — the recipe replays from recipe.json
 // ---------------------------------------------------------------------------
 
-describe('--only-catalog', () => {
+describe('only: catalog', () => {
   it('replays the recipe from disk — no discovery, no live probe — and stops after the catalog', async () => {
     const r = fixtureRepo();
     writeRecipe(r);
@@ -227,7 +227,7 @@ describe('--only-catalog', () => {
     expect(stepKeys(r)).toEqual(['detect', 'catalog']);
   }, 120_000);
 
-  it('refuses when there is no recipe at all, naming --only-recipe', async () => {
+  it('refuses when there is no recipe at all, naming only: recipe', async () => {
     const r = fixtureRepo();
     const s = seams();
 
@@ -240,7 +240,7 @@ describe('--only-catalog', () => {
 
     expect(error).toBeInstanceOf(SetupStepNotReadyError);
     expect((error as SetupStepNotReadyError).step).toBe('recipe');
-    expect((error as SetupStepNotReadyError).message).toContain('--only-recipe');
+    expect((error as SetupStepNotReadyError).message).toContain('recipe step');
     // Nothing was spent, and no half-written record was left behind.
     expect(s.reached).toEqual([]);
     expect(readGuardSetup(r)).toBeNull();
@@ -252,7 +252,7 @@ describe('--only-catalog', () => {
 // ---------------------------------------------------------------------------
 
 describe('a prior step not yet run', () => {
-  it('--only-seed before any catalog run throws for the catalog step', async () => {
+  it('only: seed before any catalog run throws for the catalog step', async () => {
     const r = fixtureRepo();
     writeRecipe(r);
     const s = seams();
@@ -266,7 +266,7 @@ describe('a prior step not yet run', () => {
 
     expect(error).toBeInstanceOf(SetupStepNotReadyError);
     expect((error as SetupStepNotReadyError).step).toBe('catalog');
-    expect((error as SetupStepNotReadyError).message).toContain('--only-catalog');
+    expect((error as SetupStepNotReadyError).message).toContain('catalog step');
     expect(s.reached).toEqual([]);
   }, 120_000);
 });
@@ -356,7 +356,7 @@ describe('estimateGuardSetupCost({ only })', () => {
   });
 });
 
-describe('--only-preparations', () => {
+describe('only: preparations', () => {
   it('fails the run and checklist, preserves other setup results, and retries the failed preparation', async () => {
     const r = fixtureRepo(); writeRecipe(r);
     await guardSetupInProcess(r, { interfaces: interfaces(), recipeRunner: neverCalled, ...seams() });

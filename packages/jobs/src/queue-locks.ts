@@ -10,7 +10,7 @@
  * then would sit queued behind a run that no longer exists.
  *
  * So the boot that fails the orphaned job rows also frees the locks those dead
- * runs left, on the same assumption `failOrphaned` already makes: the worker is
+ * runs left, on the same assumption `interruptOrphaned` already makes: the worker is
  * in-process, so a restart abandoned everything that was running. The unlocked
  * jobs themselves stay unrunnable (they are enqueued `maxAttempts: 1`, so a
  * claimed job has already spent its attempt); what comes back is the queue.

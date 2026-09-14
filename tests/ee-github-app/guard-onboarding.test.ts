@@ -17,6 +17,7 @@ import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import { PgSpecStore, PgGuardStore } from '../../ee/packages/data-store/src/index';
 import { setSpecStore, resetSpecStore, saveSpec } from '@truecourse/core/lib/spec-store';
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
 import {
   setGuardStore,
   resetGuardStore,
@@ -132,6 +133,8 @@ beforeEach(async () => {
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
   setSpecStore(new PgSpecStore(db));
   setGuardStore(new PgGuardStore(db));
+  // The generate the pipeline drives records a run; here it is held in memory.
+  installMemorySessionRuns();
   setDefaultTransport(fakeTransport);
 });
 
@@ -139,6 +142,7 @@ afterEach(async () => {
   setDefaultTransport(undefined);
   resetSpecStore();
   resetGuardStore();
+  resetSessionRuns();
   await client.close();
 });
 

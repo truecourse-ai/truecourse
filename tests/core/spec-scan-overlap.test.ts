@@ -19,7 +19,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { resetKvCacheStore } from '@truecourse/llm'
+import {
+  installMemoryKvCache,
+  resetKvCacheStore,
+  type MemoryKvCacheStore,
+} from '../helpers/memory-kv-cache'
 import { runSpecScanSessions } from '../../packages/core/src/services/spec-scan/run'
 import {
   OVERLAP_SESSION_BUDGET,
@@ -169,11 +173,13 @@ function memoryPersistence(): { persistence: SessionPersistence } {
 // ---------------------------------------------------------------------------
 
 let repo: string
+let cache: MemoryKvCacheStore
 beforeEach(() => {
-  resetKvCacheStore()
+  cache = installMemoryKvCache()
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-scan-overlap-'))
 })
 afterEach(() => {
+  resetKvCacheStore()
   fs.rmSync(repo, { recursive: true, force: true })
 })
 
@@ -185,22 +191,23 @@ function writeDocs(files: Record<string, string>): void {
   }
 }
 
-/** The overlap kind's on-disk cache dir — derived from the cache NAME, so a
- *  rename cannot leave these cases quietly reading nothing. */
-function overlapCacheDir(): string {
-  return path.join(repo, '.truecourse', '.cache', ...OVERLAP_SESSION_CACHE_NAME.split('/'))
+/** Every cached overlap entry — narrowed by the cache NAME, so a rename cannot
+ *  leave these cases quietly reading nothing. */
+function overlapCacheEntries(): { scope: string; key: string; value: Record<string, unknown> }[] {
+  return cache
+    .list()
+    .filter((e) => e.cacheName === OVERLAP_SESSION_CACHE_NAME)
+    .map((e) => ({ scope: e.scope, key: e.key, value: e.value as Record<string, unknown> }))
 }
 
 /** Rewrite every cached overlap entry in the shape a run BEFORE `sectionsOpened`
  *  existed wrote it. Returns how many entries were rewritten. */
-function stripSectionsOpenedFromCache(): number {
+async function stripSectionsOpenedFromCache(): Promise<number> {
   let stripped = 0
-  for (const name of fs.readdirSync(overlapCacheDir())) {
-    const file = path.join(overlapCacheDir(), name)
-    const value = JSON.parse(fs.readFileSync(file, 'utf-8')) as Record<string, unknown>
-    if (!('sectionsOpened' in value)) continue
-    delete value.sectionsOpened
-    fs.writeFileSync(file, JSON.stringify(value, null, 2))
+  for (const entry of overlapCacheEntries()) {
+    if (!('sectionsOpened' in entry.value)) continue
+    const { sectionsOpened: _dropped, ...legacy } = entry.value
+    await cache.set(entry.scope, OVERLAP_SESSION_CACHE_NAME, entry.key, legacy)
     stripped++
   }
   return stripped
@@ -364,11 +371,9 @@ describe('sectionsOpened', () => {
 
     // …and the claim never reached the cache either: the stamp lands BEFORE the
     // write, so a later hit cannot resurrect the self-report.
-    const entries = fs
-      .readdirSync(overlapCacheDir())
-      .map((name) => JSON.parse(fs.readFileSync(path.join(overlapCacheDir(), name), 'utf-8')))
+    const entries = overlapCacheEntries()
     expect(entries).toHaveLength(1)
-    expect(entries[0].sectionsOpened).toBe(1)
+    expect(entries[0].value.sectionsOpened).toBe(1)
   })
 
   it('does not count an ERRORED read_section (a heading the doc does not have)', async () => {
@@ -961,7 +966,7 @@ describe('the per-area overlap cache', () => {
     expect(first.result.corpus.areas.find((a) => a.id === 'core/auth')!.sectionsOpened).toBe(1)
 
     // Age the entries back to the pre-stamp shape.
-    expect(stripSectionsOpenedFromCache()).toBe(2)
+    expect(await stripSectionsOpenedFromCache()).toBe(2)
 
     const { persistence } = memoryPersistence()
     const second = await runSpecScanSessions({

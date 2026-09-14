@@ -13,7 +13,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { resetKvCacheStore } from '@truecourse/llm';
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache';
 import { LlmStageFailureError } from '@truecourse/shared/llm';
 import { runSpecScanSessions } from '../../packages/core/src/services/spec-scan/run';
 import { corpusFilePath, readCorpus } from '../../packages/spec-consolidator/src/index.js';
@@ -66,7 +66,7 @@ const keepAll = (concern = 'orders') => (): unknown => ({
 
 let repo: string;
 beforeEach(() => {
-  resetKvCacheStore();
+  installMemoryKvCache();
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-llm-fail-'));
 });
 afterEach(() => {

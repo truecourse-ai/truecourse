@@ -17,32 +17,21 @@
  * A conflict tab renders the full-pane SpecOverlapDetail (the
  * same five-option resolver the BL-Drift Spec tab uses). Doc/conflict selection
  * mirrors `?guard`/`?gconf`; the within-doc section detail stays `?gsec`, and the
- * claim read inside it `?gclaim`. The
- * registered llms.txt sites some of these docs are fetched from are managed on
- * their own Sources page, the doc surface only ever READS them.
+ * claim read inside it `?gclaim`.
  */
 
 import { headingMatchKey } from '@/lib/heading-match';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  AlertTriangle,
-  ExternalLink,
-  Loader2,
-  PlayCircle,
-} from 'lucide-react';
+import { Loader2, PlayCircle } from 'lucide-react';
 import type { GuardClaimsView, GuardCoveragePlainStatus, GuardStaleness } from '@truecourse/shared';
 import { buildCorpusConflicts, isConflictId, resolveConflictId } from '@truecourse/shared';
 import { parseSpecKey, type SpecCorpusState } from '@/components/spec/SpecCorpusView';
 import { SpecOverlapDetail } from '@/components/spec/SpecOverlapDetail';
 import { DocMarkdown } from '@/components/spec/DocMarkdown';
-import { SpecScanButton } from '@/components/spec/SpecScanButton';
-import { WebSourceBadge } from '@/components/spec/WebSourceBadge';
 import { HoverPopover } from '@/preview/ui/hover-popover';
-import { useCapability } from '@/contexts/CapabilityContext';
 import * as api from '@/lib/api';
 import { tallyCapabilities, tallyNeedsSetup } from '@/lib/guard-report';
 import { findGuardClaimSelection, type GuardUntestableEntry } from '@/lib/guard-claims';
-import { corpusHasDoc, parseWebDocRef, webDocLabel } from '@/lib/spec-web-source';
 import { useGuardCoverage } from '@/hooks/useGuardCoverage';
 import { useGuardView } from '@/hooks/useGuardView';
 import type { GuardCoverageTabsState } from '@/hooks/useGuardCoverageTabs';
@@ -167,31 +156,6 @@ export function GuardCoveragePage({
     () => (activeConflict ? resolveConflictId(conflicts, activeConflict) : undefined),
     [conflicts, activeConflict],
   );
-
-  // The corpus's web-source pages, by ref: a page fetched from a registered
-  // llms.txt site reads as `<site> / <page>` wherever its raw snapshot ref would
-  // otherwise show, and links out to the page it was fetched from.
-  const webDocs = useMemo(
-    () => new Map((corpus.data?.corpus.docs ?? []).filter((d) => d.origin === 'web').map((d) => [d.ref, d])),
-    [corpus.data],
-  );
-  const docLabel = useCallback(
-    (ref: string): string => webDocLabel(ref, webDocs.get(ref)?.sourceTitle) ?? ref,
-    [webDocs],
-  );
-
-  // A fetched page the corpus does not know, a `?doc=<sourceRef>` deep link
-  // followed before the scan folded it in (or a page added after the last one).
-  // The snapshot is a real file, so it renders; nothing else on this tab has a
-  // row for it, so the doc says so instead of looking like a corpus doc.
-  const unscannedSource = useMemo(
-    () =>
-      doc && !corpus.hydrating && !corpusHasDoc(corpus.data, doc) ? parseWebDocRef(doc) : null,
-    [doc, corpus.hydrating, corpus.data],
-  );
-  // Scanning needs a working tree; hosted repos re-scan themselves, so the CTA
-  // (not the caution) is `local-filesystem`-gated exactly like the header's.
-  const canScan = useCapability('local-filesystem');
 
   // Fetch the raw markdown for the active doc (the coverage payload carries
   // section metadata, not the body). Same file the Spec tab reads.
@@ -377,55 +341,13 @@ export function GuardCoveragePage({
       );
     }
 
-    const webDoc = webDocs.get(doc);
-
     return (
       <div className="flex h-full flex-col">
-        {webDoc && (
-          // A fetched page is not this repo's writing, say where it came from and
-          // link to the live page, so a stale snapshot is one click from the truth.
-          <div className="flex items-center gap-2 border-b border-border bg-card/40 px-3 py-1.5 text-[11px] text-muted-foreground">
-            <WebSourceBadge />
-            <span className="truncate">{webDoc.sourceTitle ?? webDoc.sourceId}</span>
-            {webDoc.url && (
-              <a
-                href={webDoc.url}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex min-w-0 items-center gap-1 truncate text-primary hover:underline"
-              >
-                <ExternalLink className="h-3 w-3 shrink-0" />
-                <span className="truncate">{webDoc.url}</span>
-              </a>
-            )}
-          </div>
-        )}
-        {unscannedSource && (
-          <div className="flex items-center gap-2 border-b border-sky-500/30 bg-sky-500/10 px-3 py-1.5 text-[11px] text-sky-700 dark:text-sky-300">
-            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-            <span className="min-w-0 truncate">
-              Fetched from <span className="font-medium">{unscannedSource.sourceId}</span> but not
-              scanned yet, Scan folds it into the corpus.
-            </span>
-            {canScan && (
-              <span className="ml-auto shrink-0">
-                <SpecScanButton
-                  hasCorpus={corpus.data != null}
-                  scanning={corpus.scanning}
-                  decisionsPending={false}
-                  docsChanged={false}
-                  onClick={() => void corpus.scan()}
-                />
-              </span>
-            )}
-          </div>
-        )}
         {hasGenerated && !hasRun && (
           <div className="flex items-center gap-2 border-b border-border bg-sky-500/10 px-3 py-1.5 text-[11px] text-sky-700 dark:text-sky-300">
             <PlayCircle className="h-3.5 w-3.5 shrink-0" />
             <span>
-              No run yet, run <code className="rounded bg-sky-500/20 px-1 py-0.5">truecourse guard run</code> for
-              pass/fail.
+              No run yet — a Flow run decides pass/fail.
             </span>
           </div>
         )}

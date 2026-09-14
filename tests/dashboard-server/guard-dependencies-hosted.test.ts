@@ -38,7 +38,7 @@ import {
 } from '@truecourse/core/lib/guard-overlays';
 import { createTestApp } from '../helpers/test-app';
 import { emitSpecComplete } from '../../apps/dashboard/server/src/socket/handlers';
-import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
+import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
 
 const SECRET = 'master-secret-at-least-32-chars-long!!';
 

@@ -115,7 +115,6 @@ export function createContextScanTask(
         workspaceOrgId: org,
         repositories: await repositoriesOf(deps, org),
         tracker: checklistTracker(ctx),
-        source: 'dashboard',
         driver: llm.driver(),
         transportMode: llm.mode,
         onRunStarted: (info) => {

@@ -1,37 +1,44 @@
 /**
  * OpenRouter-backed model price table: parsing, per-tier ceiling roll-up, the
- * daily cache, and graceful degradation (stale cache → bundled) when the network
- * fails. `fetch` is stubbed so these never touch the network.
+ * day-long in-memory hold, and graceful degradation (the table already held →
+ * bundled) when the network fails. `fetch` is stubbed so these never touch the
+ * network.
+ *
+ * The table lives in the module, for the life of the process — there is no
+ * on-disk cache — so every case that cares about what is held resets the module
+ * registry and re-imports, which is the only way to start from "nothing held".
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import {
-  getModelPrices,
-  priceForModel,
-  type PriceTable,
-} from '../../packages/core/src/services/llm/model-prices.js';
+import { priceForModel, type PriceTable } from '../../packages/core/src/services/llm/model-prices.js';
 
-let home: string;
-const cacheFile = () => path.join(home, 'cache', 'openrouter-prices.json');
+const MODULE = '../../packages/core/src/services/llm/model-prices.js';
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** A module instance holding nothing yet. */
+async function freshPrices(): Promise<typeof import('../../packages/core/src/services/llm/model-prices.js')> {
+  vi.resetModules();
+  return import(MODULE);
+}
+
+/** Move the clock the module reads, so the held table ages past its TTL. */
+function advanceClock(ms: number): void {
+  const realNow = Date.now.bind(Date);
+  vi.spyOn(Date, 'now').mockImplementation(() => realNow() + ms);
+}
 
 function okResponse(body: unknown) {
   return { ok: true, status: 200, json: async () => body } as unknown as Response;
 }
 
 beforeEach(() => {
-  home = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-prices-'));
-  process.env.TRUECOURSE_HOME = home;
   // The global test setup forces offline mode; this suite exercises the real
-  // fetch/cache path against a stubbed `fetch`, so opt back in here.
+  // fetch path against a stubbed `fetch`, so opt back in here.
   delete process.env.TRUECOURSE_NO_PRICE_FETCH;
 });
 afterEach(() => {
-  delete process.env.TRUECOURSE_HOME;
   process.env.TRUECOURSE_NO_PRICE_FETCH = '1';
   vi.unstubAllGlobals();
-  fs.rmSync(home, { recursive: true, force: true });
+  vi.restoreAllMocks();
 });
 
 const OPENROUTER_BODY = {
@@ -47,9 +54,10 @@ const OPENROUTER_BODY = {
 };
 
 describe('getModelPrices', () => {
-  it('fetches, computes per-tier ceilings, and writes the cache', async () => {
+  it('fetches and computes per-tier ceilings', async () => {
     const fetchMock = vi.fn().mockResolvedValue(okResponse(OPENROUTER_BODY));
     vi.stubGlobal('fetch', fetchMock);
+    const { getModelPrices } = await freshPrices();
 
     const t = await getModelPrices();
     expect(t.source).toBe('live');
@@ -61,19 +69,24 @@ describe('getModelPrices', () => {
     expect(t.byId['anthropic/claude-opus-4']).toEqual({ input: 0.000015, output: 0.000075 });
     expect(t.byId['openai/gpt-4o']).toBeTruthy();
     expect(t.byId['broken/model']).toBeUndefined();
-    expect(fs.existsSync(cacheFile())).toBe(true);
   });
 
-  it('serves a fresh cache without refetching', async () => {
+  it('serves the table it already holds, without refetching, inside the day', async () => {
     const fetchMock = vi.fn().mockResolvedValue(okResponse(OPENROUTER_BODY));
     vi.stubGlobal('fetch', fetchMock);
-    await getModelPrices(); // populates cache
-    await getModelPrices(); // should hit cache
+    const { getModelPrices } = await freshPrices();
+
+    const first = await getModelPrices();
+    const second = await getModelPrices();
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(second).toBe(first);
+    expect(second.source).toBe('live');
   });
 
-  it('falls back to the bundled table when the network fails with no cache', async () => {
+  it('falls back to the bundled table when the network fails and it holds nothing', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    const { getModelPrices } = await freshPrices();
+
     const t = await getModelPrices();
     expect(t.source).toBe('bundled');
     expect(t.tiers.opus).toBeTruthy();
@@ -81,21 +94,20 @@ describe('getModelPrices', () => {
     expect(t.tiers.haiku).toBeTruthy();
   });
 
-  it('falls back to a stale cache (real numbers) when a refetch fails', async () => {
-    fs.mkdirSync(path.dirname(cacheFile()), { recursive: true });
-    fs.writeFileSync(
-      cacheFile(),
-      JSON.stringify({
-        tiers: { opus: { input: 1, output: 2 }, sonnet: { input: 1, output: 2 }, haiku: { input: 1, output: 2 } },
-        byId: {},
-        fetchedAt: 0, // ancient → triggers a refetch
-        source: 'live',
-      }),
-    );
+  it('falls back to the table it holds (real numbers) when the day-later refetch fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okResponse(OPENROUTER_BODY)));
+    const { getModelPrices } = await freshPrices();
+    const live = await getModelPrices();
+    expect(live.source).toBe('live');
+
+    // A day later the hold has expired, so the next call refetches — and loses.
+    advanceClock(DAY_MS + 60_000);
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+
     const t = await getModelPrices();
     expect(t.source).toBe('cache');
-    expect(t.tiers.opus).toEqual({ input: 1, output: 2 });
+    expect(t.tiers).toEqual(live.tiers);
+    expect(t.byId).toEqual(live.byId);
   });
 });
 

@@ -1,8 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import { EventEmitter } from 'node:events';
-import os from 'node:os';
-import path from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
@@ -10,23 +8,20 @@ import { eq, sql } from 'drizzle-orm';
 import { schema, activityRuns, activityEvents, MIGRATIONS_DIR, type Db, type Pool } from '@truecourse/db';
 import { PgSessionRunStore } from '../../packages/data-store/src/session-run-store';
 import { purgeRepoData } from '../../packages/data-store/src/repo-purge';
-import { createSessionRun, readStoredActivityPage, readStoredTranscript, sessionRunCursor, validateStoredActivityCursor, setSessionRunBackend, setSessionsRootResolver, resetSessionsRootResolver, type SessionRunStore } from '@truecourse/core/lib/sessions-store';
-import { subscribeActivity, readActivityEvents, readActivityProgress } from '@truecourse/core/lib/activity-journal';
-import { acquireRunsWatch, releaseRunsWatch } from '../../apps/dashboard/server/src/services/session-tailer.service';
+import { readStoredActivityPage, readStoredTranscript, sessionRunCursor, validateStoredActivityCursor, setSessionRunBackend, type SessionRunStore } from '@truecourse/core/lib/sessions-store';
+import { subscribeActivity, readActivityProgress } from '@truecourse/core/lib/activity-journal';
+import { acquireRunsWatch, releaseRunsWatch } from '../../apps/dashboard/server/src/services/run-watch.service';
 import { createActivityStream } from '../../apps/dashboard/server/src/services/activity-stream.service';
 
 const REPO = 'acme/widget';
 let client: PGlite;
 let db: Db;
 let store: PgSessionRunStore;
-let root: string;
 const queries: Array<{ query: string; params: unknown[] }> = [];
 const live: SessionRunStore[] = [];
 const event = (seq = 0) => ({ type: 'user-message' as const, seq, ts: new Date().toISOString(), content: `message ${seq}` });
 
 beforeEach(async () => {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-pg-activity-'));
-  setSessionsRootResolver(key => path.join(root, encodeURIComponent(key)));
   client = new PGlite();
   const d = drizzle(client, { schema, logger: { logQuery(query, params) { queries.push({ query, params }); } } });
   await migrate(d, { migrationsFolder: MIGRATIONS_DIR });
@@ -39,11 +34,9 @@ afterEach(async () => {
   }
   await client.close();
   setSessionRunBackend(undefined);
-  resetSessionsRootResolver();
-  fs.rmSync(root, { recursive: true, force: true });
 });
 async function create(command: 'spec-scan' | 'guard-setup' | 'guard-generate' | 'guard-interfaces' = 'spec-scan') {
-  const run = await store.create(REPO, { command, gitRef: 'abc', activityStream: true });
+  const run = await store.create(REPO, { command, gitRef: 'abc' });
   live.push(run); return run;
 }
 
@@ -113,24 +106,6 @@ describe('Postgres activity storage', () => {
   });
 
   const arbitraryText = 'before\u0000after \\u0000 lone \ud800 emoji 🎉';
-
-  it.each([false, true])('imports transcripts losslessly, with activity journal=%s', async activityStream => {
-    const old = createSessionRun(REPO, { command: 'guard-generate', gitRef: 'abc', activityStream });
-    const transcript = { ...event(), content: arbitraryText };
-    old.persistence.appendEvent('s', transcript);
-    old.finish('completed');
-    const originalFile = fs.readFileSync(path.join(old.dir, 's.jsonl'), 'utf8');
-    const journal = readActivityEvents(old.dir);
-    const imported = await store.open(REPO, 'guard-generate', old.runId);
-    expect(await readStoredTranscript(imported, 's')).toEqual([transcript]);
-    const replay = await imported.readActivity!(-1);
-    expect(replay.find(e => e.kind === 'session-event')).toMatchObject({ event: transcript });
-    if (activityStream) expect(replay.slice(0, journal.length)).toEqual(journal);
-    expect(await imported.readActivity!(replay[0].cursor)).toEqual(replay.slice(1));
-    expect(fs.readFileSync(path.join(old.dir, 's.jsonl'), 'utf8')).toBe(originalFile);
-    const reopened = await new PgSessionRunStore(db).open(REPO, 'guard-generate', old.runId);
-    expect(await reopened.readActivity!(-1)).toEqual(replay);
-  });
 
   it('round-trips arbitrary transcript text alongside existing inline events', async () => {
     const run = await create();
@@ -291,20 +266,6 @@ describe('Postgres activity storage', () => {
     await expect(run.flush!()).rejects.toThrow('lost its lease');
   });
 
-  it('imports old file history once with the original replay cursors and missing transcript events', async () => {
-    const old = createSessionRun(REPO, { command: 'guard-setup', gitRef: 'abc', activityStream: true });
-    old.persistence.appendEvent('s', event());
-    old.finish('completed');
-    const original = readActivityEvents(old.dir);
-    fs.appendFileSync(path.join(old.dir, 's.jsonl'), JSON.stringify(event(1)) + '\n');
-    const imported = await store.open(REPO, 'guard-setup', old.runId);
-    const events = await imported.readActivity!(-1);
-    expect(events.slice(0, original.length)).toEqual(original);
-    expect((await readStoredTranscript(imported, 's')).map(e => e.seq)).toEqual([0, 1]);
-    const again = await new PgSessionRunStore(db).open(REPO, 'guard-setup', old.runId);
-    expect(await again.readActivity!(-1)).toEqual(events);
-    expect(fs.existsSync(path.join(old.dir, 'run.json'))).toBe(true);
-  });
 });
 
 
@@ -368,7 +329,7 @@ it('updates the existing run-list watch without creating a file watcher or direc
 describe('workspace listing and journal pages', () => {
   const at = (seconds: number) => () => new Date(Date.UTC(2026, 0, 1, 0, 0, seconds));
   const createAt = async (repoKey: string, command: 'spec-scan' | 'guard-setup' | 'guard-generate', seconds: number) => {
-    const run = await store.create(repoKey, { command, gitRef: 'abc', activityStream: true, now: at(seconds) });
+    const run = await store.create(repoKey, { command, gitRef: 'abc', now: at(seconds) });
     live.push(run); return run;
   };
 

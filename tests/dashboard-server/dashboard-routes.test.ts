@@ -9,9 +9,10 @@ import {
   setupTestFixture,
   teardownTestFixture,
   type TestFixture,
-} from '../helpers/test-db';
+} from '../helpers/test-fixture';
 import { getProjectBySlug } from '../../packages/core/src/config/registry';
-import { getRepoTruecourseDir } from '../../packages/core/src/config/paths';
+import { guardLatestPath, workTreeDir } from '@truecourse/shared/work-tree';
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
 
 describe('repository routes', () => {
   let fixture: TestFixture;
@@ -19,10 +20,12 @@ describe('repository routes', () => {
 
   beforeEach(async () => {
     fixture = await setupTestFixture();
+    installWorkTreeGuardStore();
     app = createTestApp();
   });
 
   afterEach(async () => {
+    resetGuardStore();
     await teardownTestFixture(fixture.project.slug);
   });
 
@@ -46,7 +49,7 @@ describe('repository routes', () => {
       scenarios: [],
       sections: [],
     };
-    const guardFile = path.join(fixture.repoPath, '.truecourse', 'guard', 'LATEST.json');
+    const guardFile = guardLatestPath(fixture.repoPath);
     fs.mkdirSync(path.dirname(guardFile), { recursive: true });
     fs.writeFileSync(guardFile, JSON.stringify(guardLatest));
 
@@ -69,8 +72,8 @@ describe('repository routes', () => {
   });
 
   it('DELETE /api/repos/:id 204 + disconnects without touching the tree', async () => {
-    const tcDir = getRepoTruecourseDir(fixture.repoPath);
-    expect(fs.existsSync(tcDir)).toBe(true);
+    const tcDir = workTreeDir(fixture.repoPath);
+    fs.mkdirSync(tcDir, { recursive: true });
 
     await request(app).delete(`/api/repos/${fixture.project.slug}`).expect(204);
 

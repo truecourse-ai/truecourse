@@ -357,8 +357,8 @@ export async function defaultGuardColdGenerate(
   return persistGeneratedGuardCorpus(guardStore, ref, dir, generated.report);
 }
 
-/** Fold the repo dismissals + the PR overlay (hosted store only — the file store
- *  has no overlay dimension) into one `dismissedClaimKey` identity set. */
+/** Fold the repo dismissals + the PR overlay into one `dismissedClaimKey`
+ *  identity set. */
 async function foldDismissals(
   guardStore: GuardStore,
   repoKey: string,
@@ -369,9 +369,7 @@ async function foldDismissals(
     return out;
   };
   const dismissed = fold(new Set<string>(), await guardStore.readGuardDecisions(repoKey));
-  if (!guardStore.materializesInPlace) {
-    fold(dismissed, await guardStore.readGuardDecisions(repoKey, prGuardDecisionsRef(prNumber)));
-  }
+  fold(dismissed, await guardStore.readGuardDecisions(repoKey, prGuardDecisionsRef(prNumber)));
   return dismissed;
 }
 

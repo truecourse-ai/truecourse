@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import yaml from 'js-yaml'
@@ -58,9 +58,14 @@ import {
   FAILING_STEPS,
   writeScenarioFile,
 } from './helpers.js'
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache.js'
 
 const repos: string[] = []
+beforeEach(() => {
+  installMemoryKvCache()
+})
 afterEach(() => {
+  resetKvCacheStore()
   while (repos.length) rmrf(repos.pop()!)
 })
 function repo(): string {
@@ -702,7 +707,7 @@ describe('generateGuards — birth validation', () => {
               expected: 'the bound server "web" (apps/web) to serve GET /v2/bookings',
               actual:
                 '404 — /v2/bookings is served by apps/api/v2, which this recipe declares no server for. ' +
-                'Declare it under api.servers in .truecourse/scenarios/recipe.json and re-run `guard generate`.',
+                'Declare it under api.servers in scenarios/recipe.json and re-run Flow generation.',
             },
           })),
         },
@@ -1479,7 +1484,7 @@ describe('generateGuards — universe + recipe discovery', () => {
     const r = repo()
     const res = await generateGuards({ repoRoot: r, ...flowStageSeams(r) })
     expect(res.status).toBe('no-docs')
-    expect(res.reason).toMatch(/spec scan/)
+    expect(res.reason).toMatch(/Document scan/)
   })
 
   it('the corpus is the only doc authority — committed scenarios do not create a universe', async () => {
@@ -1495,7 +1500,7 @@ describe('generateGuards — universe + recipe discovery', () => {
     })
     const res = await generateGuards({ repoRoot: r, ...flowStageSeams(r) })
     expect(res.status).toBe('no-docs')
-    expect(res.reason).toMatch(/spec scan/)
+    expect(res.reason).toMatch(/Document scan/)
   })
 
   // The hard no-derivation gate, on the WORKING-TREE path: derivation lives in
@@ -1516,7 +1521,7 @@ describe('generateGuards — universe + recipe discovery', () => {
     })
 
     expect(res.status).toBe('recipe-failed')
-    expect(res.reason).toMatch(/truecourse guard setup/)
+    expect(res.reason).toMatch(/Flow setup/)
   })
 
   // …and the hosted/EE path (an ephemeral checkout nobody has a terminal in) keeps

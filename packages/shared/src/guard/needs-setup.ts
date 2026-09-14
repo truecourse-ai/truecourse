@@ -55,8 +55,7 @@ export type GuardExternalSetupIndex = Readonly<Record<string, GuardExternalSetup
  * means the seed does not create those rows, so the gap renders as a to-do
  * ("extend the seed script"), never as "already set up". It is NEVER carried as
  * `unprovided`: without a seed there is no form to send anyone to, and the gap
- * stays plain `blocked-on` (the CLI/dashboard hint offers `guard seed --init`
- * instead).
+ * stays plain `blocked-on` (the hint points at authoring a seed instead).
  */
 export const MISSING_DATA_NOUN = 'missing-data'
 

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import { flowFingerprint, GUARD_REVIEW_POLICY_VERSION, type GuardFlow } from '@truecourse/shared'
 import { collectWorkDocs, planGuardWork, type FlowSynthesisArea } from '@truecourse/guard-generator'
@@ -13,9 +13,11 @@ import { CachedWorkerEntrySchema, flowWorkerCacheKey, flowWorkerPromptFingerprin
 import { authoringFixture } from '../fixtures/guard-authoring-benchmark/fixture.js'
 import { makeTempRepo, rmrf, writeCorpus, writeDoc, writeRecipe } from '../guard-generator/helpers.js'
 import { memoryPersistence, stubDriver } from './spec-scan-session-stub.js'
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache.js'
 
 const roots: string[] = []
-afterEach(() => { while (roots.length) rmrf(roots.pop()!) })
+beforeEach(() => { installMemoryKvCache() })
+afterEach(() => { resetKvCacheStore(); while (roots.length) rmrf(roots.pop()!) })
 const DOC = 'docs/tasks.md', ANCHOR = 'tasks/creating-tasks', CLAIM = '`relkit add <title>` creates a task'
 function seededRepo() {
   const root = makeTempRepo(); roots.push(root)

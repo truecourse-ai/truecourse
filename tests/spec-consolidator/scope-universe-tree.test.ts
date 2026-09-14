@@ -28,7 +28,7 @@ function doc(p: string): DocCandidate {
 }
 
 function tree(paths: string[]): string {
-  return renderUniverseTree(buildScanScopeUniverse(buildScanUniverse(paths.map(doc)), []));
+  return renderUniverseTree(buildScanScopeUniverse(buildScanUniverse(paths.map(doc))));
 }
 
 describe('renderUniverseTree', () => {

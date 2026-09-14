@@ -2,5 +2,4 @@ packages:
   - "apps/dashboard/*"
   - "apps/landing"
   - "packages/*"
-  - "tools/*"
   - "ee/packages/*"

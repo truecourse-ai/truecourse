@@ -1,8 +1,6 @@
 /**
- * Agent-sessions routes — the dashboard read surface over the sessions store
- * (Postgres for dashboard repositories, local files for file-mode callers).
- * Read-only. Dashboard activity runs expose a replayable AI SDK SSE stream;
- * legacy runs use the socket tail (`joinRun` → `session:*` events).
+ * Agent-sessions routes — the dashboard read surface over the sessions store.
+ * Read-only. A run's activity is a replayable AI SDK SSE stream.
  *
  *   GET /:id/sessions/runs                                    every run record, newest first
  *   GET /:id/sessions/runs/:command/:runId                    one run record (404 if absent)
@@ -10,7 +8,7 @@
  *   GET /:id/sessions/runs/:command/:runId/activity           one history page, ?after=&limit=
  *   GET /:id/sessions/runs/:command/:runId/transcript/:sessionId
  *       one session's transcript events; ?since=<seq> returns only events past
- *       that cursor (the client's catch-up read after a socket subscribe)
+ *       that cursor (the reader's catch-up after it subscribed)
  *
  * The workspace router (`createWorkspaceSessionsRouter`, mounted at
  * /api/sessions) is the same surface across every repository the caller's
@@ -53,7 +51,6 @@ import {
   toPublicRunRecord,
   validateStoredActivityCursor,
   readStoredTranscript,
-  recoverSessionActivity,
   type PublicRunRecord,
   type RepoRunRecord,
   type SessionRunQuery,
@@ -86,7 +83,6 @@ router.get('/:id/sessions/runs/:command/:runId/stream', async (req, res, next) =
     if (run.record().activityStream !== 'ai-sdk-v1') {
       res.status(409).json({ error: 'This run uses the legacy session transport' }); return;
     }
-    if (!run.readActivity) recoverSessionActivity(run);
     // Reject bad cursors before sending SSE headers.
     try { await validateStoredActivityCursor(run, after); }
     catch (error) {
@@ -186,7 +182,6 @@ router.get('/:id/sessions/runs/:command/:runId/activity', async (req: Request, r
     if (run.record().activityStream !== 'ai-sdk-v1') {
       res.status(409).json({ error: 'This run uses the legacy session transport' }); return;
     }
-    if (!run.readActivity) recoverSessionActivity(run);
     try {
       res.json(await readStoredActivityPage(run, after, limit, req.query.compact === '1'));
     } catch (error) {
@@ -429,7 +424,6 @@ export function createWorkspaceSessionsRouter(deps: WorkspaceSessionsDeps = {}):
       if (run.record().activityStream !== 'ai-sdk-v1') {
         res.status(409).json({ error: 'This run uses the legacy session transport' }); return;
       }
-      if (!run.readActivity) recoverSessionActivity(run);
       try {
         res.json(await readStoredActivityPage(run, after, limit));
       } catch (error) {
@@ -473,7 +467,6 @@ export function createWorkspaceSessionsRouter(deps: WorkspaceSessionsDeps = {}):
       if (run.record().activityStream !== 'ai-sdk-v1') {
         res.status(409).json({ error: 'This run uses the legacy session transport' }); return;
       }
-      if (!run.readActivity) recoverSessionActivity(run);
       try { await validateStoredActivityCursor(run, after); }
       catch (error) {
         if (error instanceof Error && error.message.startsWith('Activity cursor')) {

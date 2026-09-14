@@ -1,10 +1,9 @@
 /**
  * The SINGLE derivation of "is a within-area overlap resolved?" — ONE copy,
- * imported by core (the guard-generate gate), the CLI (`spec conflicts` /
- * `spec status`), the dashboard route, and the client (SpecCorpusView /
- * SpecOverlapDetail) alike, so no surface ever disagrees about which overlaps
- * are still open. No I/O: the caller supplies the parsed corpus + decisions;
- * these functions only classify.
+ * imported by core (the guard-generate gate), the dashboard route, and the
+ * client (SpecCorpusView / SpecOverlapDetail) alike, so no surface ever
+ * disagrees about which overlaps are still open. No I/O: the caller supplies
+ * the parsed corpus + decisions; these functions only classify.
  *
  * An overlap is RESOLVED only by a decision on the disagreement itself:
  *   - a matching SECTION-scoped conflict verdict — pick-a-side or dismissal

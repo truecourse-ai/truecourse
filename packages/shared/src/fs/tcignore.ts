@@ -28,9 +28,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import ignore, { type Ignore } from 'ignore';
+import { WORK_TREE_DIR } from './work-tree.js';
 
 /** Markers that identify a repo root, in priority order. */
-const ROOT_MARKERS = ['.truecourseignore', '.truecourse', '.git'];
+const ROOT_MARKERS = ['.truecourseignore', WORK_TREE_DIR, '.git'];
 
 export interface TcIgnore {
   /** The directory the `.truecourseignore` was anchored at. */

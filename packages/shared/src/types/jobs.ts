@@ -9,9 +9,14 @@
 
 // --- Jobs -----------------------------------------------------------
 
-/** `cancelled` is a deliberate stop (a disconnect, a superseding request), not a
- *  failure: no error is recorded and no notification is posted. */
-export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+/**
+ * `cancelled` is a deliberate stop (a disconnect, a superseding request), not a
+ * failure: no error is recorded and no notification is posted. `interrupted` is
+ * what a job and its run BOTH become when the process running them died — the
+ * boot sweep settles the pair with one word, so a restart never reads as the
+ * work having failed.
+ */
+export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted';
 
 /** Open job-type vocabulary — `knowledge.sync` first; analyze/verify/gate later. */
 export type JobType = string;

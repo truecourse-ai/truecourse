@@ -4,11 +4,19 @@ import path from 'node:path';
 import request from 'supertest';
 import { type Express } from 'express';
 import { createTestApp } from '../helpers/test-app';
-import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
+import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
+import { installWorkTreeGuardStore, resetGuardStore, WORK_TREE_COMMIT } from '../helpers/work-tree-guard-store';
+import { installMemoryGuardOverlays, resetGuardOverlayStore } from '../helpers/memory-guard-overlays';
+import { installWorkTreeDocReader, resetRepoDocReader } from '../helpers/work-tree-doc-reader';
+import { installMemorySpecStore, resetSpecStore } from '../helpers/memory-spec-store';
+import type { SpecStore } from '@truecourse/core/lib/spec-store';
+
+
 
 /**
- * Guard dashboard read routes (OSS). Temp-repo fixture + supertest over the real
- * app; the guard store is seeded by writing files under `.truecourse/`.
+ * Guard dashboard read routes. Temp-repo fixture + supertest over the real app;
+ * the guard store is the tree-backed double, so it is seeded by writing files
+ * under `.truecourse/`, and the curated corpus is seeded through the spec store.
  */
 
 const RUN_ID = '2026-07-07T00-00-00Z_abc12345';
@@ -88,6 +96,7 @@ describe('Guard routes', () => {
   let app: Express;
   let fixture: TestFixture;
   let root: string;
+  let specs: SpecStore;
 
   const write = (rel: string, content: string) => {
     const f = path.join(root, rel);
@@ -137,11 +146,13 @@ describe('Guard routes', () => {
     writeJson('.truecourse/guard/history.json', HISTORY);
     writeJson('.truecourse/guard/result.json', RESULT);
     write(`.truecourse/guard/evidence/${RUN_ID}/a1/transcript.txt`, 'hello evidence\n');
-    writeJson('.truecourse/specs/corpus.json', {});
   }
 
-  // Adds a recipe + a hand-written scenario on top of the base seed (kept out of
-  // `seed()` so the staleness tests' mtime bookkeeping stays exact).
+  /** The curated corpus, where it lives now: the spec store, at the read's commit. */
+  const seedCorpus = () =>
+    specs.saveSpec({ repoKey: root, commitSha: WORK_TREE_COMMIT }, 'corpus', {});
+
+  // Adds a recipe + a hand-written scenario on top of the base seed.
   function seedInventory() {
     seed();
     writeJson('.truecourse/scenarios/recipe.json', RECIPE);
@@ -149,12 +160,20 @@ describe('Guard routes', () => {
   }
 
   beforeEach(async () => {
+    installWorkTreeGuardStore();
+    installMemoryGuardOverlays();
+    installWorkTreeDocReader();
+    specs = installMemorySpecStore();
     fixture = await setupTestFixture();
     root = fixture.repoPath;
     app = createTestApp();
   });
   afterEach(async () => {
     await teardownTestFixture(fixture.project.slug);
+    resetGuardStore();
+    resetGuardOverlayStore();
+    resetRepoDocReader();
+    resetSpecStore();
   });
 
   // --- Happy paths ---------------------------------------------------------
@@ -240,12 +259,13 @@ describe('Guard routes', () => {
       file: path.join('.truecourse', 'scenarios', 'core', 'a1.yaml'),
     });
     expect(res.body.scenarios[1].headingText).toBe('Beta');
-    // Recipe card: build/entry/env pass through on the surface that runs them; a
-    // fresh fingerprint is computed; stale is true because it differs from the
-    // last run's recorded fingerprint.
+    // Recipe card: build/entry/env pass through on the surface that runs them.
+    // `stale` is always null — there is no working tree to fingerprint against the
+    // last run's recorded one, so the comparison is unknowable and is never
+    // reported as a false "the recipe changed".
     expect(res.body.recipe).toMatchObject({
       surfaces: { cli: { build: 'pnpm build', entry: ['node', 'dist/index.js'], env: { APP_MODE: 'test' } } },
-      stale: true,
+      stale: null,
     });
     expect(res.body.recipe.fingerprint).toMatch(/^sha256:/);
     // A cli-only recipe prepares no served surface at all — neither key exists.
@@ -670,32 +690,50 @@ describe('Guard routes', () => {
     for (const step of res.body.steps as { actual?: unknown }[]) expect(step.actual).toBeUndefined();
   });
 
-  it('staleness lights both dots when spec + scenarios lead the store', async () => {
-    seed();
-    const now = Date.now() / 1000;
-    const old = now - 100;
-    const touch = (rel: string, secs: number) => fs.utimesSync(path.join(root, rel), secs, secs);
-    touch('.truecourse/specs/corpus.json', now); // spec ahead of generate
-    touch('.truecourse/guard/result.json', old);
-    touch('.truecourse/scenarios/manifest.json', now); // scenarios ahead of run
-    touch('.truecourse/scenarios/core/a1.yaml', now);
-    touch('.truecourse/guard/LATEST.json', old);
+  /**
+   * Staleness is composed from the STORES at the resolved commit — presence, plus
+   * one generate-vs-run timestamp compare. There is no working tree to probe and
+   * no mtimes: a corpus nothing generated from lights the generate dot, and
+   * scenarios nothing ran (or a generate newer than the last run) light the run one.
+   */
+  it('staleness lights both dots when a corpus was never generated from and its scenarios never ran', async () => {
+    write(DOC, '# Alpha\nbody a\n');
+    writeJson('.truecourse/scenarios/manifest.json', MANIFEST);
+    write('.truecourse/scenarios/core/a1.yaml', SCENARIO_YAML);
+    await seedCorpus();
     const res = await request(app).get(url('staleness')).expect(200);
-    expect(res.body).toMatchObject({ generateStale: true, runStale: true, hasCorpus: true, hasScenarios: true, hasGenerated: true, hasRun: true });
+    expect(res.body).toEqual({
+      generateStale: true,
+      runStale: true,
+      hasCorpus: true,
+      hasScenarios: true,
+      hasGenerated: false,
+      hasRun: false,
+    });
   });
 
-  it('staleness stays dark when the store leads spec + scenarios', async () => {
+  it('staleness lights the run dot alone when the generate is newer than the last run', async () => {
     seed();
-    const now = Date.now() / 1000;
-    const old = now - 100;
-    const touch = (rel: string, secs: number) => fs.utimesSync(path.join(root, rel), secs, secs);
-    touch('.truecourse/specs/corpus.json', old);
-    touch('.truecourse/guard/result.json', now);
-    touch('.truecourse/scenarios/manifest.json', old);
-    touch('.truecourse/scenarios/core/a1.yaml', old);
-    touch('.truecourse/guard/LATEST.json', now);
+    await seedCorpus();
+    // A generate that landed AFTER the run: the committed scenarios have not been
+    // re-run since they were re-authored.
+    writeJson('.truecourse/guard/result.json', { ...RESULT, generatedAt: '2026-07-08T00:00:00.000Z' });
     const res = await request(app).get(url('staleness')).expect(200);
-    expect(res.body).toMatchObject({ generateStale: false, runStale: false });
+    expect(res.body).toMatchObject({ generateStale: false, runStale: true, hasCorpus: true, hasGenerated: true, hasRun: true });
+  });
+
+  it('staleness stays dark when the generate and the run are both behind nothing', async () => {
+    seed();
+    await seedCorpus();
+    const res = await request(app).get(url('staleness')).expect(200);
+    expect(res.body).toEqual({
+      generateStale: false,
+      runStale: false,
+      hasCorpus: true,
+      hasScenarios: true,
+      hasGenerated: true,
+      hasRun: true,
+    });
   });
 
   // --- Absent store --------------------------------------------------------
@@ -717,7 +755,8 @@ describe('Guard routes', () => {
 
   it('scenarios is 200 with empty list + null recipe on a fresh repo', async () => {
     const res = await request(app).get(url('scenarios')).expect(200);
-    expect(res.body).toEqual({ recipe: null, scenarios: [] });
+    // The commit the view resolved its read at rides along — the tree's own, here.
+    expect(res.body).toEqual({ recipe: null, scenarios: [], scenariosCommit: WORK_TREE_COMMIT });
   });
 
   it('latest / report / run 404 on a fresh repo', async () => {

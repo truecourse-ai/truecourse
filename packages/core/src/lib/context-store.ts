@@ -3,11 +3,9 @@
  * yielded, the syncs that reconciled them, and which repositories read which
  * source.
  *
- * One seam, ONE implementation: the hosted Postgres store
- * (`@truecourse/data-store`), installed at boot. File mode (the CLI) is a
- * one-repository world with a tree of its own and no workspace to speak of, so
- * the default store throws — nothing in the CLI may reach through here, and a
- * call that does is a bug that says so rather than inventing an empty workspace.
+ * One seam, ONE implementation: the Postgres store (`@truecourse/data-store`),
+ * installed at boot. Nothing is installed by default, and a read that arrives
+ * before boot says so rather than inventing an empty workspace.
  *
  * Bodies are content-addressed: the ledger row carries the sha256 HEX of the
  * body and the store keeps the body once per workspace under that hash. Reading
@@ -115,12 +113,12 @@ export interface ContextStore {
   changedAt(org: string): Promise<string | null>;
 }
 
-/** Every call a CLI checkout could make here is a bug — say so, don't invent. */
-const FILE_MODE = 'The workspace context store is not available in file mode.';
+/** Reaching the store before boot installed it is a bug — say so, don't invent. */
+const NOT_INSTALLED = 'No workspace context store installed (boot did not run installDbStores).';
 
-class UnavailableContextStore implements ContextStore {
+class UninstalledContextStore implements ContextStore {
   private fail(): never {
-    throw new Error(FILE_MODE);
+    throw new Error(NOT_INSTALLED);
   }
   listSources(): Promise<ContextSource[]> {
     this.fail();
@@ -169,7 +167,7 @@ class UnavailableContextStore implements ContextStore {
   }
 }
 
-const unavailable = new UnavailableContextStore();
+const unavailable = new UninstalledContextStore();
 let active: ContextStore = unavailable;
 
 export function setContextStore(store: ContextStore): void {
@@ -180,7 +178,7 @@ export function resetContextStore(): void {
   active = unavailable;
 }
 
-/** Whether a workspace context store is installed (hosted) or not (file mode). */
+/** Whether boot installed the workspace context store. */
 export function contextStoreInstalled(): boolean {
   return active !== unavailable;
 }

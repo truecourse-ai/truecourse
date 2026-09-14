@@ -80,7 +80,7 @@ export {
 
 export {
   createGuardGenerateSessionSeams,
-  // Single-step mode (`--only-<step>`): the loud refusal a cache-only replay of
+  // Single-step mode (`only`): the loud refusal a cache-only replay of
   // a prior step raises instead of spending that step's sessions.
   GenerateStepNotReadyError,
   type GuardGenerateSessionSeams,

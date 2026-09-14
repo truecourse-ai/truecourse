@@ -50,7 +50,7 @@ RUN apt-get update \
 
 ENV NODE_ENV=production \
     PORT=3001 \
-    TRUECOURSE_LOG_DIR=/data/logs
+    TRUECOURSE_RUNTIME_DIR=/data
 
 WORKDIR /app
 # Copy the whole built workspace. We DON'T prune devDependencies: the
@@ -58,8 +58,8 @@ WORKDIR /app
 # pruning would break interface mapping. (Image-size trimming is a later optimization.)
 COPY --from=builder /app /app
 
-# Writable data dir for logs. Durable state lives in Postgres; per-run clones
-# and session transcripts go under the node user's home (~/.truecourse).
+# Writable runtime dir: the log, the per-run clones and a run's session scratch.
+# Nothing durable — that all lives in Postgres.
 RUN mkdir -p /data/logs && chown -R node:node /data
 USER node
 WORKDIR /data

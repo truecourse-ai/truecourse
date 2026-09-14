@@ -23,7 +23,7 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
 });
 
 import { createTestApp, stubJobs, TEST_ORG } from '../helpers/test-app';
-import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
+import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
 import { memoryContextStore } from '../helpers/memory-context-store';
 import { memorySpecStore } from '../helpers/memory-spec-store';
 import {
@@ -33,7 +33,9 @@ import {
   type ContextStore,
 } from '@truecourse/core/lib/context-store';
 import { resetSpecStore, saveWorkspaceSpec, setSpecStore } from '@truecourse/core/lib/spec-store';
-import { readRegistry, unregisterProject } from '@truecourse/core/config/registry';
+import { clearTestRegistry } from '../helpers/test-fixture';
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
+import { installMemoryGuardOverlays, resetGuardOverlayStore } from '../helpers/memory-guard-overlays';
 import { manifestPath, writeGuardLatest } from '@truecourse/guard-runner';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -174,7 +176,9 @@ const rows = async (query = ''): Promise<ContextDocumentRow[]> => {
 beforeEach(async () => {
   // Earlier suites leave registrations behind; the workspace is exactly what
   // this test registers, because every one of them is a reader of a source.
-  for (const entry of await readRegistry()) await unregisterProject(entry.slug);
+  installWorkTreeGuardStore();
+  installMemoryGuardOverlays();
+  clearTestRegistry();
   repoA = await setupTestFixture();
   repoB = await setupTestFixture();
   context = memoryContextStore();
@@ -187,8 +191,9 @@ beforeEach(async () => {
 afterEach(async () => {
   resetContextStore();
   resetSpecStore();
-  await unregisterProject(repoA.project.slug);
-  await unregisterProject(repoB.project.slug);
+  clearTestRegistry();
+  resetGuardStore();
+  resetGuardOverlayStore();
   await teardownTestFixture();
 });
 

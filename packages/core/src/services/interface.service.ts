@@ -2,8 +2,8 @@ import { relativeExternalServicePaths } from '../lib/external-service-paths.js';
 /**
  * Interface mapping — the free, deterministic half of guard: analyze the working
  * tree, derive the interface catalog from it, and snapshot the result to
- * `.truecourse/guard/interfaces.json`. No LLM, no analyze store, no prior
- * `truecourse analyze` run: the analyzer is invoked directly on the tree.
+ * `.truecourse/guard/interfaces.json`. No LLM and no prior analysis: the
+ * per-file facts are derived directly from the tree.
  *
  * Degradation is defined, never inherited. A mapper or analyzer failure yields an
  * EMPTY catalog for that surface (whose flows then settle as honest `no-interface`

@@ -4,23 +4,19 @@
  * PR, base/head SHAs, fork flag, and the Check id the job completes). Fast path
  * only — the heavy work lives in the job's pipeline.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { FileGateStore, GUARD_GATE_CHECK_NAME } from '../../ee/packages/github-app/src/index';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { GUARD_GATE_CHECK_NAME } from '../../ee/packages/github-app/src/index';
 import {
   handlePullRequestGuardGate,
   type GuardGateHandlerDeps,
 } from '../../ee/packages/github-app/src/guard-gate-handler';
 import type { GuardGateRunRequest } from '../../ee/packages/github-app/src/guard-gate-runner';
+import { MemoryGateStore } from '../github-app/memory-store';
 
-let dir: string;
-let store: FileGateStore;
+let store: MemoryGateStore;
 
 beforeEach(async () => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-gate-handler-'));
-  store = new FileGateStore(dir);
+  store = new MemoryGateStore();
   await store.linkRepo({
     repoFullName: 'acme/api',
     installationId: 5,
@@ -33,9 +29,6 @@ beforeEach(async () => {
   });
 });
 
-afterEach(() => {
-  fs.rmSync(dir, { recursive: true, force: true });
-});
 
 function makeOctokit(
   opts: {

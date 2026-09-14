@@ -599,15 +599,12 @@ importers:
       js-yaml:
         specifier: ^4.1.0
         version: 4.1.1
-      p-limit:
-        specifier: ^7.3.0
-        version: 7.3.0
       minimatch:
         specifier: ^10.0.3
         version: 10.2.4
-      posthog-node:
-        specifier: ^4.0.0
-        version: 4.18.0
+      p-limit:
+        specifier: ^7.3.0
+        version: 7.3.0
       simple-git:
         specifier: ^3.27.0
         version: 3.33.0
@@ -1002,50 +999,6 @@ importers:
       '@types/node':
         specifier: ^22.19.15
         version: 22.19.15
-      typescript:
-        specifier: ^5.7.0
-        version: 5.9.3
-
-  tools/cli:
-    dependencies:
-      '@clack/prompts':
-        specifier: ^1.2.0
-        version: 1.2.0
-      '@truecourse/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@truecourse/guard-generator':
-        specifier: workspace:*
-        version: link:../../packages/guard-generator
-      '@truecourse/guard-runner':
-        specifier: workspace:*
-        version: link:../../packages/guard-runner
-      '@truecourse/shared':
-        specifier: workspace:^
-        version: link:../../packages/shared
-      '@truecourse/spec-consolidator':
-        specifier: workspace:*
-        version: link:../../packages/spec-consolidator
-      commander:
-        specifier: ^12.1.0
-        version: 12.1.0
-      js-yaml:
-        specifier: ^4.1.0
-        version: 4.1.1
-    optionalDependencies:
-      node-windows:
-        specifier: ^1.0.0-beta.8
-        version: 1.0.0-beta.8
-    devDependencies:
-      '@types/js-yaml':
-        specifier: ^4.0.9
-        version: 4.0.9
-      '@types/node':
-        specifier: ^22.19.15
-        version: 22.19.15
-      tsx:
-        specifier: ^4.19.0
-        version: 4.21.0
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -1462,12 +1415,6 @@ packages:
     peerDependenciesMeta:
       '@types/react':
         optional: true
-
-  '@clack/core@1.2.0':
-    resolution: {integrity: sha512-qfxof/3T3t9DPU/Rj3OmcFyZInceqj/NVtO9rwIuJqCUgh32gwPjpFQQp/ben07qKlhpwq7GzfWpST4qdJ5Drg==}
-
-  '@clack/prompts@1.2.0':
-    resolution: {integrity: sha512-4jmztR9fMqPMjz6H/UZXj0zEmE43ha1euENwkckKKel4XpSfokExPo5AiVStdHSAlHekz4d0CA/r45Ok1E4D3w==}
 
   '@csstools/color-helpers@5.1.0':
     resolution: {integrity: sha512-S11EXWJyy0Mz5SYvRmY8nJYTFFd1LCNV+7cXyAgQtOOuzb4EsgfqDufL+9esx72/eLhsRdGZwaldu/h+E4t4BA==}
@@ -3230,9 +3177,6 @@ packages:
   aws4fetch@1.0.20:
     resolution: {integrity: sha512-/djoAN709iY65ETD6LKCtyyEI04XIBP5xVvfmNxsEP0uJB5tyaGBztSryRr4HqMStr9R06PisQE7m9zDTXKu6g==}
 
-  axios@1.14.0:
-    resolution: {integrity: sha512-3Y8yrqLSwjuzpXuZ0oIYZ/XGgLwUIBU3uLvbcpb0pidD9ctpShJd43KSlEEkVQg6DS0G9NKyzOvBfUtDKEyHvQ==}
-
   babel-dead-code-elimination@1.0.12:
     resolution: {integrity: sha512-GERT7L2TiYcYDtYk1IpD+ASAYXjKbLTDPhBtYj7X1NuRMDTMtAx9kyBenub1Ev41lo91OHCKdmP+egTDmfQ7Ig==}
 
@@ -3399,10 +3343,6 @@ packages:
   commander@11.1.0:
     resolution: {integrity: sha512-yPVavfyCcRhmorC7rWlkHn15b4wDVgVmBA7kV4QVBsF7kv/9TKJAbAXVTxvTnwP8HHKjRCJDClKbciiYS7p0DQ==}
     engines: {node: '>=16'}
-
-  commander@12.1.0:
-    resolution: {integrity: sha512-Vw8qHK3bZM9y/P10u3Vib8o/DdkvA2OtPtZvD871QKjy74Wj1WSKFILMPRPSdUSx5RFK1arlJzEtA4PkFgnbuA==}
-    engines: {node: '>=18'}
 
   commander@14.0.3:
     resolution: {integrity: sha512-H+y0Jo/T1RZ9qPP4Eh1pkcQcLRglraJaSLoyOtHxu6AapkjWVCy2Sit1QQ4x3Dng8qDlSsZEet7g5Pq06MvTgw==}
@@ -3903,17 +3843,8 @@ packages:
   fast-sha256@1.3.0:
     resolution: {integrity: sha512-n11RGP/lrWEFI/bWdygLxhI+pVeo1ZYIVwvvPkW7azl/rOy+F3HYRZ2K5zeE9mmkhQppyv9sQFx0JM9UabnpPQ==}
 
-  fast-string-truncated-width@1.2.1:
-    resolution: {integrity: sha512-Q9acT/+Uu3GwGj+5w/zsGuQjh9O1TyywhIwAxHudtWrgF09nHOPrvTLhQevPbttcxjr/SNN7mJmfOw/B1bXgow==}
-
-  fast-string-width@1.1.0:
-    resolution: {integrity: sha512-O3fwIVIH5gKB38QNbdg+3760ZmGz0SZMgvwJbA1b2TGXceKE6A2cOlfogh1iw8lr049zPyd7YADHy+B7U4W9bQ==}
-
   fast-uri@3.1.0:
     resolution: {integrity: sha512-iPeeDKJSWf4IEOasVVrknXpaBV0IApz/gp7S2bb7Z4Lljbl2MGJRqInZiUrQwV16cpzw/D3S5j5Julj/gT52AA==}
-
-  fast-wrap-ansi@0.1.6:
-    resolution: {integrity: sha512-HlUwET7a5gqjURj70D5jl7aC3Zmy4weA1SHUfM0JFI0Ptq987NH2TwbBFLoERhfwk+E+eaq4EK3jXoT+R3yp3w==}
 
   fast-xml-builder@1.2.0:
     resolution: {integrity: sha512-00aAWieqff+ZJhsXA4g1g7M8k+7AYoMUUHF+/zFb5U6Uv/P0Vl4QZo84/IcufzYalLuEj9928bXN9PbbFzMF0Q==}
@@ -3960,15 +3891,6 @@ packages:
   finalhandler@2.1.1:
     resolution: {integrity: sha512-S8KoZgRZN+a5rNwqTxlZZePjT/4cnm0ROV70LedRHZ0p8u9fRID0hJUZQpkKLzro8LfmC8sx23bY6tVNxv8pQA==}
     engines: {node: '>= 18.0.0'}
-
-  follow-redirects@1.15.11:
-    resolution: {integrity: sha512-deG2P0JfjrTxl50XGCDyfI97ZGVCxIpfKYmfyrQ54n5FO/0gfIES8C/Psl6kWVDolizcaaxZJnTS0QSMxvnsBQ==}
-    engines: {node: '>=4.0'}
-    peerDependencies:
-      debug: '*'
-    peerDependenciesMeta:
-      debug:
-        optional: true
 
   form-data@4.0.5:
     resolution: {integrity: sha512-8RipRLol37bNs2bhoV67fiTEvdTrbMUYcFTiy3+wuuOnUog2QBHCZWXDRijWQfAkhBj2Uf5UnVaiWwA5vdd82w==}
@@ -4818,9 +4740,6 @@ packages:
   node-releases@2.0.36:
     resolution: {integrity: sha512-TdC8FSgHz8Mwtw9g5L4gR/Sh9XhSP/0DEkQxfEFXOpiul5IiHgHan2VhYYb6agDSfp4KuvltmGApc8HMgUrIkA==}
 
-  node-windows@1.0.0-beta.8:
-    resolution: {integrity: sha512-uLekXnSeem3nW5escID224Fd0U/1VtvE796JpSpOY+c73Cslz/Qn2WUHRJyPQJEMrNGAy/FMRFjjhh4z1alZTA==}
-
   npm-run-path@4.0.1:
     resolution: {integrity: sha512-S48WzZW777zhNIrn7gxOlISNAqi9ZC/uQFnRdbeIHhZhCA6UqpkOT8T1G7BvfdgP4Er8gF4sUbaS0i7QvIfCWw==}
     engines: {node: '>=8'}
@@ -5035,10 +4954,6 @@ packages:
   posthog-js@1.372.10:
     resolution: {integrity: sha512-ZQslIenDM8UpwKhmeeEnJ+t2nXr8mOIjCG+Ej3DCJnTBk9NX9Sr5RMuwHeGG8UJitwvtGOADyiY7DignOXaZwg==}
 
-  posthog-node@4.18.0:
-    resolution: {integrity: sha512-XROs1h+DNatgKh/AlIlCtDxWzwrKdYDb2mOs58n4yN8BkGN9ewqeQwG5ApS4/IzwCb7HPttUkOVulkYatd2PIw==}
-    engines: {node: '>=15.0.0'}
-
   powershell-utils@0.1.0:
     resolution: {integrity: sha512-dM0jVuXJPsDN6DvRpea484tCUaMiXWjuCn++HGTqUWzGDjv5tZkEZldAJ/UMlqRYGFrD/etByo4/xOuC/snX2A==}
     engines: {node: '>=20'}
@@ -5073,10 +4988,6 @@ packages:
   proxy-addr@2.0.7:
     resolution: {integrity: sha512-llQsMLSUDUPT44jdrU/O37qlnifitDP+ZwrmmZcoSKyLKvtZxpyV0n2/bD/N4tBAAZ/gJEdZU7KMraoK1+XYAg==}
     engines: {node: '>= 0.10'}
-
-  proxy-from-env@2.1.0:
-    resolution: {integrity: sha512-cJ+oHTW1VAEa8cJslgmUZrc+sjRKgAKl3Zyse6+PV38hZe/V6Z14TbCuXcan9F9ghlz4QrFr2c92TNF82UkYHA==}
-    engines: {node: '>=10'}
 
   punycode@2.3.1:
     resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
@@ -5985,9 +5896,6 @@ packages:
     resolution: {integrity: sha512-k8KO9hrMyNk6tUWqUfkTEZbezRRpONVOzUTnc97VnCvyj6Tf9lyUR9EDAIeiVLv56jsMcoXEwjW8Kv5yPY52lw==}
     engines: {node: '>=16.0.0'}
 
-  xml@1.0.1:
-    resolution: {integrity: sha512-huCv9IH9Tcf95zuYCsQraZtWnJvBtLVE0QHMOs8bWyZAFZNDcYjsPq1nEx8jKA9y+Beo9v+7OBPRisQTjinQMw==}
-
   xmlchars@2.2.0:
     resolution: {integrity: sha512-JZnDKK8B0RCDw84FNdDAIpZK+JuJw+s7Lz8nksI7SIuU3UXJJslUthsi+uWBUYOwPFwW7W7PRLRfUKpxjtjFCw==}
 
@@ -6724,18 +6632,6 @@ snapshots:
       use-sync-external-store: 1.6.0(react@19.2.4)
     optionalDependencies:
       '@types/react': 19.2.14
-
-  '@clack/core@1.2.0':
-    dependencies:
-      fast-wrap-ansi: 0.1.6
-      sisteransi: 1.0.5
-
-  '@clack/prompts@1.2.0':
-    dependencies:
-      '@clack/core': 1.2.0
-      fast-string-width: 1.1.0
-      fast-wrap-ansi: 0.1.6
-      sisteransi: 1.0.5
 
   '@csstools/color-helpers@5.1.0': {}
 
@@ -8278,14 +8174,6 @@ snapshots:
 
   aws4fetch@1.0.20: {}
 
-  axios@1.14.0:
-    dependencies:
-      follow-redirects: 1.15.11
-      form-data: 4.0.5
-      proxy-from-env: 2.1.0
-    transitivePeerDependencies:
-      - debug
-
   babel-dead-code-elimination@1.0.12:
     dependencies:
       '@babel/core': 7.29.0
@@ -8455,8 +8343,6 @@ snapshots:
   comma-separated-tokens@2.0.3: {}
 
   commander@11.1.0: {}
-
-  commander@12.1.0: {}
 
   commander@14.0.3: {}
 
@@ -8983,17 +8869,7 @@ snapshots:
 
   fast-sha256@1.3.0: {}
 
-  fast-string-truncated-width@1.2.1: {}
-
-  fast-string-width@1.1.0:
-    dependencies:
-      fast-string-truncated-width: 1.2.1
-
   fast-uri@3.1.0: {}
-
-  fast-wrap-ansi@0.1.6:
-    dependencies:
-      fast-string-width: 1.1.0
 
   fast-xml-builder@1.2.0:
     dependencies:
@@ -9061,8 +8937,6 @@ snapshots:
       statuses: 2.0.2
     transitivePeerDependencies:
       - supports-color
-
-  follow-redirects@1.15.11: {}
 
   form-data@4.0.5:
     dependencies:
@@ -10111,12 +9985,6 @@ snapshots:
 
   node-releases@2.0.36: {}
 
-  node-windows@1.0.0-beta.8:
-    dependencies:
-      xml: 1.0.1
-      yargs: 17.7.2
-    optional: true
-
   npm-run-path@4.0.1:
     dependencies:
       path-key: 3.1.1
@@ -10334,12 +10202,6 @@ snapshots:
       query-selector-shadow-dom: 1.0.1
       web-vitals: 5.2.0
 
-  posthog-node@4.18.0:
-    dependencies:
-      axios: 1.14.0
-    transitivePeerDependencies:
-      - debug
-
   powershell-utils@0.1.0: {}
 
   preact@10.29.1: {}
@@ -10382,8 +10244,6 @@ snapshots:
     dependencies:
       forwarded: 0.2.0
       ipaddr.js: 1.9.1
-
-  proxy-from-env@2.1.0: {}
 
   punycode@2.3.1: {}
 
@@ -11383,9 +11243,6 @@ snapshots:
   xml-name-validator@5.0.0: {}
 
   xml-naming@0.1.0: {}
-
-  xml@1.0.1:
-    optional: true
 
   xmlchars@2.2.0: {}
 

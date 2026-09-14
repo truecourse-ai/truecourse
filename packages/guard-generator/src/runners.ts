@@ -26,8 +26,14 @@
  * records a fail-soft failure.
  */
 
-import { cliTransport, extractJsonValue, jsonSchemaHint, type LlmTransport } from '@truecourse/shared/llm'
+import { getDefaultTransport, noProviderTransport, extractJsonValue, jsonSchemaHint, type LlmTransport } from '@truecourse/shared/llm'
 import { ClaimDiffSchema, RealizationMatchSchema, RecipeProposalSchema, WorldClassifySchema } from './schemas.js'
+
+/** The transport a one-shot stage calls through: the caller's, else the process
+ *  default, else the sentinel that fails with the no-provider message. */
+function requireTransport(opts: { transport?: LlmTransport }): LlmTransport {
+  return opts.transport ?? getDefaultTransport() ?? noProviderTransport
+}
 import {
   RECIPE_SYSTEM_PROMPT,
   buildRecipeUserPrompt,
@@ -64,7 +70,7 @@ interface SpawnOptions {
 
 /** Realization matching — one call per (flow, surface with a non-empty catalog). */
 export function spawnMatchRunner(opts: SpawnOptions = {}): MatchRunner {
-  const transport = opts.transport ?? cliTransport()
+  const transport = requireTransport(opts)
   const timeoutMs = opts.timeoutMs ?? 300_000
   return async (ctx) => {
     const suffix = `${ctx.issues ? ':issues' : ''}${ctx.correction ? ':correction' : ''}`
@@ -86,7 +92,7 @@ export function spawnMatchRunner(opts: SpawnOptions = {}): MatchRunner {
 /** World classification — ONE batched call per generate over the changed flows,
  *  deciding which workers the pool schedules into the mutator tail. */
 export function spawnWorldClassifyRunner(opts: SpawnOptions = {}): WorldClassifyRunner {
-  const transport = opts.transport ?? cliTransport()
+  const transport = requireTransport(opts)
   const timeoutMs = opts.timeoutMs ?? 300_000
   return async (flows) => {
     const raw = await transport({
@@ -107,7 +113,7 @@ export function spawnWorldClassifyRunner(opts: SpawnOptions = {}): WorldClassify
 /** Claim-diff gate — one call per EDITED section whose doc has a prior
  *  extraction, deciding whether the edit changed any obligation. */
 export function spawnClaimDiffRunner(opts: SpawnOptions = {}): ClaimDiffRunner {
-  const transport = opts.transport ?? cliTransport()
+  const transport = requireTransport(opts)
   const timeoutMs = opts.timeoutMs ?? 120_000
   return async (section) => {
     const raw = await transport({
@@ -131,7 +137,7 @@ export function spawnClaimDiffRunner(opts: SpawnOptions = {}): ClaimDiffRunner {
 // and `buildSeedUserPrompt` grounding directly.
 
 export function spawnRecipeRunner(opts: SpawnOptions = {}): RecipeRunner {
-  const transport = opts.transport ?? cliTransport()
+  const transport = requireTransport(opts)
   const timeoutMs = opts.timeoutMs ?? 120_000
   return async (input) => {
     const raw = await transport({

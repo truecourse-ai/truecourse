@@ -19,7 +19,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { resetKvCacheStore } from '@truecourse/llm'
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache'
 import {
   ScanStepNotReadyError,
   runSpecScanSessions,
@@ -46,7 +46,7 @@ import type { DriverResult } from '../../packages/agent-loop/src/index'
 
 let repo: string
 beforeEach(() => {
-  resetKvCacheStore()
+  installMemoryKvCache()
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-scan-steps-'))
   writeDocs({
     'docs/a.md': '# A\n\nBooking rules.\n',
@@ -54,6 +54,7 @@ beforeEach(() => {
   })
 })
 afterEach(() => {
+  resetKvCacheStore()
   fs.rmSync(repo, { recursive: true, force: true })
 })
 
@@ -120,10 +121,10 @@ async function runOnly(
 }
 
 // ---------------------------------------------------------------------------
-// --only-orchestrate
+// only: orchestrate
 // ---------------------------------------------------------------------------
 
-describe('--only-orchestrate', () => {
+describe('only: orchestrate', () => {
   it('runs the scope session, persists its verdicts, and stops before curation', async () => {
     seedDecisions()
     const { result, kinds } = await runOnly('orchestrate', async (call) => {
@@ -166,15 +167,15 @@ describe('--only-orchestrate', () => {
 })
 
 // ---------------------------------------------------------------------------
-// --only-curate
+// only: curate
 // ---------------------------------------------------------------------------
 
-describe('--only-curate', () => {
+describe('only: curate', () => {
   it('never starts a scope session even on an UNCOVERED universe, curates, and stops', async () => {
     seedDecisions()
     const { result, kinds } = await runOnly('curate', async (call) => {
       if (call.kind === SPEC_SCAN_ORCHESTRATE_SESSION_KIND) {
-        throw new Error('the scope session belongs to --only-orchestrate')
+        throw new Error('the scope session belongs to only: orchestrate')
       }
       return curateByPath(call)
     })
@@ -201,7 +202,7 @@ describe('--only-curate', () => {
 // ---------------------------------------------------------------------------
 
 describe('a prior step not yet run', () => {
-  it('--only-settle on a cold curation cache throws, naming the step and the misses', async () => {
+  it('only: settle on a cold curation cache throws, naming the step and the misses', async () => {
     seedDecisions()
     const error = await runSpecScanSessions({
       repoRoot: repo,
@@ -213,10 +214,10 @@ describe('a prior step not yet run', () => {
     expect(error).toBeInstanceOf(ScanStepNotReadyError)
     expect((error as ScanStepNotReadyError).step).toBe('curate')
     expect((error as ScanStepNotReadyError).missing).toHaveLength(2)
-    expect((error as ScanStepNotReadyError).message).toContain('--only-curate')
+    expect((error as ScanStepNotReadyError).message).toContain('curate step')
   })
 
-  it('--only-overlap after curation but before settling throws for the settle step', async () => {
+  it('only: overlap after curation but before settling throws for the settle step', async () => {
     seedDecisions()
     await runOnly('curate', anyKind)
     const error = await runSpecScanSessions({
@@ -258,7 +259,7 @@ describe('the stepwise chain', () => {
     // The final step completes the scan: earlier steps from cache, corpus written.
     const overlapLeg = await runOnly('overlap', async (call) => {
       if (call.kind === CURATE_DOC_SESSION_KIND || call.kind === SETTLE_AREAS_SESSION_KIND) {
-        throw new Error(`${call.kind} must replay from cache in --only-overlap`)
+        throw new Error(`${call.kind} must replay from cache in only: 'overlap'`)
       }
       return anyKind(call)
     })

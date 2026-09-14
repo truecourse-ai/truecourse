@@ -1,23 +1,22 @@
 /**
  * Shared in-process entry points for the BL Drift / Spec Consolidation
- * commands. Both the CLI and the dashboard server import these so
- * progress wiring, decision-file writes, and IL-extraction chaining
- * live in exactly one place.
+ * commands. The dashboard server imports these so progress wiring,
+ * decision-file writes, and IL-extraction chaining live in exactly
+ * one place.
  *
- * Same shape as `analyze-in-process.ts` — the caller passes a
- * `StepTracker` and we drive it through the high-level phases:
+ * The caller passes a `StepTracker` and we drive it through the high-level
+ * phases:
  *
  *   curate         discover → tag areas → group → flag overlaps → corpus.json
  *
- * Step keys + labels are stable across CLI/dashboard so the progress
- * UI is identical on both surfaces. Implementations of the actual
- * pipelines come from `@truecourse/spec-consolidator`; this module
- * just orchestrates them and reports progress.
+ * Step keys + labels are a stable taxonomy the progress UI keys on.
+ * Implementations of the actual pipelines come from
+ * `@truecourse/spec-consolidator`; this module just orchestrates them
+ * and reports progress.
  */
 
 import {
   classifyDoc,
-  readDecisions,
   writeDecisions,
   type CuratedCorpus,
   type CurateResult,
@@ -26,7 +25,7 @@ import {
   type DocCandidate,
   type RepoIdentity,
 } from '@truecourse/spec-consolidator';
-import { effectiveLlmMode, type LlmTransportMode } from '../config/global-config.js';
+import type { LlmTransportMode } from '../services/llm/provider-config.js';
 import { resolveModel, type StageId } from '../config/llm-models.js';
 import { openConflicts } from '@truecourse/shared';
 
@@ -59,7 +58,7 @@ import { OVERLAP_SESSION_KIND } from '../services/spec-scan/overlap.js';
 import { createStoredSessionRun, type SessionRunStartedInfo } from '../lib/sessions-store.js';
 import { resolveCommitSha, type WorkspaceRef } from '../lib/repo-ref.js';
 import {
-  createConfiguredSessionDriver,
+  createClaudeCodeSessionDriver,
   type ConfiguredSessionDriver,
 } from '../services/llm/session-driver.js';
 import type { LlmEstimate } from '../services/llm/token-estimator.js';
@@ -110,17 +109,10 @@ import {
   loadLatestSpec,
   saveWorkspaceSpec,
   loadWorkspaceSpec,
-  specsMaterializeInPlace,
 } from '../lib/spec-store.js';
 import { readRepoDoc } from '../lib/repo-doc-reader.js';
 import { getSpecInheritanceHook } from '../lib/spec-inheritance-hook.js';
 import { withEstimatePhase, type EstimatePhase, type StepTracker } from '../progress.js';
-import {
-  trackEvent,
-  bucketFileCount,
-  bucketDuration,
-  type TelemetrySource,
-} from '../services/telemetry.service.js';
 
 // ---------------------------------------------------------------------------
 // Step taxonomies — exported so callers can pre-build the tracker.
@@ -159,7 +151,7 @@ function humanTokens(n: number): string {
 
 /**
  * Whether progress may fall back to the per-stage *resolved* model when no real
- * usage was recorded. OSS honors per-stage model tiers (CLI `--model`), so the
+ * usage was recorded. OSS honors per-stage model tiers, so the
  * fallback is accurate there. EE runs ONE model for every stage (the AI-SDK
  * transport ignores the per-stage hint) and records no per-stage usage, so the
  * fallback would show a misleading OSS tier — EE turns this off at boot
@@ -174,9 +166,8 @@ export function setShowResolvedStageModel(show: boolean): void {
 
 /**
  * Whether a step's progress detail carries its model, tokens and cost at all.
- * The CLI's checklist wants them beside each step; the dashboard server turns
- * them off at boot — the product shows a step's count only, and spend has its
- * own place.
+ * On by default; the dashboard server turns them off at boot — the product
+ * shows a step's count only, and spend has its own place.
  */
 let showStageUsage = true;
 
@@ -212,7 +203,7 @@ export function stageUsageTag(
   }
   let model = [...models].join(', ');
   if (!model && showResolvedStageModel) {
-    model = [...new Set(stages.map((s) => resolveModel(s, undefined, repoRoot, mode)))].join(', ');
+    model = [...new Set(stages.map((s) => resolveModel(s)))].join(', ');
   }
   const parts: string[] = [];
   if (model) parts.push(model);
@@ -225,12 +216,12 @@ export function stageUsageTag(
 
 
 // ---------------------------------------------------------------------------
-// Corpus path driver — shared by the CLI (`spec scan`) and the dashboard
-// routes. `curateInProcess` builds corpus.json via the SESSION-based scan run
+// Corpus path driver — the entry point the dashboard routes call.
+// `curateInProcess` builds corpus.json via the SESSION-based scan run
 // (`services/spec-scan/run.ts`): one `spec-scan.curate-doc`
 // session per doc, at most one `spec-scan.settle-areas` session, one
 // `spec-scan.overlap` session per area. The four CURATE_STEPS keys are kept so
-// both surfaces' progress UIs render unchanged.
+// the progress UI renders unchanged.
 // ---------------------------------------------------------------------------
 
 export interface SpecCurateInProcessResult {
@@ -239,7 +230,7 @@ export interface SpecCurateInProcessResult {
   noChanges: boolean;
   /**
    * Questions the interactive scope orchestrator left unanswered. A
-   * non-interactive run never blocks on them; the CLI/dashboard summary must
+   * non-interactive run never blocks on them; the dashboard summary must
    * surface them LOUDLY.
    */
   pendingQuestions: UserInputQuestion[];
@@ -260,38 +251,26 @@ export interface CurateInProcessOptions {
   /** The dashboard finishes only after its server-side corpus persistence succeeds. */
   deferRunCompletion?: boolean;
   tracker?: StepTracker;
-  source?: TelemetrySource;
-  /**
-   * LLM transport mode for the scan SESSIONS (`cli` = the claude-code driver,
-   * `api` = the per-turn API driver). The `agent` mailbox transport has no
-   * session driver and is refused — sessions are multi-turn, tool-calling
-   * conversations the one-shot mailbox cannot carry.
-   */
-  llm?: 'cli' | 'agent' | 'api';
-  /** Retired with the `agent` transport; accepted for caller compatibility. */
-  io?: string;
   skipGit?: boolean;
   /** Compute the corpus without overwriting corpus.json — for read-only callers. */
   skipCorpusWrite?: boolean;
   /**
    * User resolutions (manual areas / includes / conflict verdicts) to fold into
-   * the scan. EE MUST pass the stored decisions here: its re-scan runs on a
-   * fresh clone with no `.truecourse/specs/decisions.json` (resolutions live in
-   * Postgres), so without this the re-scan re-detects already-resolved
-   * conflicts. Omit in OSS — the run reads them from the repo tree.
+   * the scan. The caller MUST pass the stored decisions: a scan runs on a fresh
+   * working tree that holds no resolutions of its own, so without this it
+   * re-detects already-resolved conflicts.
    */
   decisions?: DecisionsFile;
   /**
-   * Inject the doc set instead of walking the filesystem. Editions with no live
-   * working tree (EE) source docs through the repo-doc seam (`readRepoDoc`); OSS
-   * omits it and the run discovers from disk.
+   * Inject the doc set instead of walking the working tree — the workspace scan
+   * sources its documents through the repo-doc seam (`readRepoDoc`).
    */
   docSource?: () => DocCandidate[] | Promise<DocCandidate[]>;
   /**
-   * Who this repository is, for the curation session's IDENTITY block.
-   * Omit and the run resolves it from the repo tree (OSS). EE passes it
-   * explicitly — including explicit `null` — because its scan runs on an
-   * ephemeral shallow clone whose directory is named `tc-gate-scan-XXXX`.
+   * Who this repository is, for the curation session's IDENTITY block. Passed
+   * explicitly — including explicit `null` — because a scan runs on an
+   * ephemeral clone whose directory name says nothing. Omit and the run
+   * resolves it from the tree.
    */
   repoIdentity?: RepoIdentity | null;
   /**
@@ -302,8 +281,8 @@ export interface CurateInProcessOptions {
   onLlmEstimate?: (estimate: LlmEstimate) => Promise<boolean>;
   /**
    * Progress surface for the estimate itself (it runs before the first pipeline
-   * step, so the tracker can't carry it). The CLI resolves a spinner line above
-   * the estimate panel; the dashboard passes `estimateStepPhase(tracker)`.
+   * step, so the tracker can't carry it). The dashboard passes
+   * `estimateStepPhase(tracker)`.
    */
   onEstimatePhase?: EstimatePhase;
   /** Ceiling on concurrent sessions (the pool's governor may run fewer). */
@@ -317,7 +296,7 @@ export interface CurateInProcessOptions {
    */
   signal?: AbortSignal;
   /**
-   * Single-step mode (the CLI's `--only-<step>` flags): run only this step's
+   * Single-step mode (`only`): run only this step's
    * sessions — prior steps replay from their durable artifacts (a missing one
    * throws {@link ScanStepNotReadyError}), later steps never start, and
    * corpus.json is written only by the final step (`overlap`). The estimate
@@ -350,15 +329,13 @@ export interface CurateInProcessOptions {
   discoverDetail?: (docs: number, toCurate: number) => string;
   /**
    * A `question-asked` event from a scan session (the interactive scope
-   * orchestrator), as it happens. The CLI prints the dashboard deep
-   * link; nothing ever blocks on it — an unanswered question lands in the
-   * result's `pendingQuestions`.
+   * orchestrator), as it happens. Nothing ever blocks on it — an unanswered
+   * question lands in the result's `pendingQuestions`.
    */
   onQuestion?: (workItem: string, question: UserInputQuestion) => void;
   /**
    * The sessions-store run record was just created (post-estimate-confirm,
-   * before any session runs). The CLI prints the dashboard "watch live" deep
-   * link from it.
+   * before any session runs). The caller learns the run's id from it.
    */
   onRunStarted?: (info: SessionRunStartedInfo) => void;
   /**
@@ -387,8 +364,8 @@ export interface CurateInProcessOptions {
  * CURATE_STEPS. Writes `.truecourse/specs/corpus.json` (the run does).
  * Idempotent: unchanged docs hit the per-doc session cache and cost nothing.
  *
- * The four step keys survive from the one-shot pipeline so both surfaces'
- * progress UIs render unchanged; what each covers moved: `discover` =
+ * The four step keys survive from the one-shot pipeline so the progress UI
+ * renders unchanged; what each covers moved: `discover` =
  * discovery + prefilter, `tag` = the curate-doc pool + the settle session,
  * `overlap` = the per-area overlap sessions, `verify` = the deterministic
  * fold (pointer re-anchoring, cross-area dedup, confidence auto-apply).
@@ -398,15 +375,7 @@ export async function curateInProcess(
   options: CurateInProcessOptions = {},
 ): Promise<SpecCurateInProcessResult> {
   const { tracker } = options;
-  if (options.llm === 'agent') {
-    throw new Error(
-      'spec scan now runs agent sessions; the `agent` mailbox transport cannot carry them — use `--llm api` or `--llm cli`.',
-    );
-  }
-  // The transport this run actually uses decides what the estimate names —
-  // never the saved selection a `--llm-transport` flag just overrode.
-  const mode = effectiveLlmMode(options.llm);
-  const startedAt = Date.now();
+  const mode: LlmTransportMode = options.transportMode ?? 'claude-code';
 
   // Pre-flight cost estimate + confirm, before any LLM work. Skip the prompt
   // when there's nothing to spend (a warmed cache yields an empty estimate).
@@ -421,7 +390,11 @@ export async function curateInProcess(
   if (options.onLlmEstimate) {
     const prices = await getModelPrices();
     const estimate = await withEstimatePhase(options.onEstimatePhase, () =>
-      estimateScanTokens(repoRoot, prices, { identity: options.repoIdentity, mode, only: options.only }),
+      estimateScanTokens(repoRoot, prices, {
+        identity: options.repoIdentity,
+        ...(options.driver?.attribution.model ? { sessionModel: options.driver.attribution.model } : {}),
+        only: options.only,
+      }),
     );
     if ((estimate.stages?.length ?? 0) > 0) {
       const proceed = await raceAbort(options.onLlmEstimate(estimate), options.signal);
@@ -432,14 +405,11 @@ export async function curateInProcess(
   // The sessions run + transcript store: `sessions/spec-scan/<runId>/`.
   // Created after the estimate gate, so a declined scan leaves no run record.
   const gitRef = await resolveCommitSha(repoRoot);
-  const run = await createStoredSessionRun(options.sessionsKey ?? repoRoot, {
-    command: 'spec-scan', gitRef, activityStream: options.source === 'dashboard',
-  });
+  const run = await createStoredSessionRun(options.sessionsKey ?? repoRoot, { command: 'spec-scan', gitRef });
   options.onRunStarted?.({ command: 'spec-scan', runId: run.runId, dir: run.dir });
   // Mirror the step checklist into the run record as the run's own display:
-  // the CLI renders the tracker locally, but the dashboard can only see what
-  // run.json carries, and the early phases (discover/tag) have no sessions to
-  // show progress through.
+  // the dashboard can only see what run.json carries, and the early phases
+  // (discover/tag) have no sessions to show progress through.
   const untap = tracker?.tap((p) => {
     if (!p.steps) return;
     run.setChecklist(
@@ -472,8 +442,7 @@ export async function curateInProcess(
       return options.driver;
     }
     if (!configured) {
-      configured = createConfiguredSessionDriver({
-        ...(options.llm && options.llm !== 'agent' ? { transport: options.llm } : {}),
+      configured = createClaudeCodeSessionDriver({
         cwd: repoRoot,
         providerStateDir: path.join(run.dir, 'provider'),
       });
@@ -589,9 +558,9 @@ export async function curateInProcess(
     }
 
     if (result.stoppedAfter) {
-      // Single-step run: close only the steps that actually opened. The CLI
-      // hands the tracker a reduced checklist, so the later keys don't exist
-      // (and StepTracker no-ops on unknown keys anyway).
+      // Single-step run: close only the steps that actually opened. A caller
+      // may hand the tracker a reduced checklist, so the later keys don't
+      // exist (and StepTracker no-ops on unknown keys anyway).
       const note = `stopped after ${result.stoppedAfter}`;
       if (tagStarted) tracker?.done('tag', note);
       else tracker?.done('discover', note);
@@ -614,18 +583,6 @@ export async function curateInProcess(
       );
     }
     if (!options.deferRunCompletion) run.finish('completed');
-
-    // A partial (single-step) run never reports telemetry — its counts would
-    // read as a whole scan's.
-    if (options.source && !result.stoppedAfter) {
-      await trackEvent('spec_scan', {
-        source: options.source,
-        docsScannedRange: bucketFileCount(result.stats.docsScanned),
-        claimsRange: bucketFileCount(result.stats.docsKept),
-        openConflicts: result.stats.overlapFlags,
-        durationRange: bucketDuration(Date.now() - startedAt),
-      });
-    }
 
     // "Nothing changed" = the scan ran zero fresh sessions (every kind was a
     // cache hit) and lost none. Computed by the run itself — sessions never
@@ -690,8 +647,6 @@ export async function syncWorkspaceCorpusInProcess(options: {
    */
   decisions?: DecisionsFile;
   tracker?: StepTracker;
-  llm?: 'cli' | 'agent' | 'api';
-  io?: string;
   // --- test seams (mirror curateInProcess(); production passes none) --------
   driver?: CurateInProcessOptions['driver'];
   disableOverlapDetection?: boolean;
@@ -705,15 +660,13 @@ export async function syncWorkspaceCorpusInProcess(options: {
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.writeFileSync(dest, doc.markdown, 'utf-8');
     }
-    // Materialize the decisions BEFORE curate so it reads them from the tree, the
-    // same channel a repo uses (curate reads `.truecourse/specs/decisions.json`).
+    // Materialize the decisions BEFORE curate so it reads them from the tree,
+    // the same channel every scan uses.
     if (options.decisions) writeDecisions(tmp, options.decisions);
 
     const { curate: curateResult } = await curateInProcess(tmp, {
       tracker: options.tracker,
       skipGit: true,
-      llm: options.llm,
-      io: options.io,
       driver: options.driver,
       disableOverlapDetection: options.disableOverlapDetection,
       // The scratch tree is transient — a scope session here would re-spend on
@@ -815,24 +768,15 @@ export const EMPTY_DECISIONS: DecisionsFile = {
   scopeVerdicts: [],
   instructions: [],
 };
-/** Sentinel commit for the per-repo "current" decisions document in EE. */
+/** Sentinel commit for the per-repo "current" decisions document. */
 const DECISIONS_REF = '_repo';
-/** Sentinel commit for a PR-scoped decisions overlay in EE (`_pr/<number>`). */
+/** Sentinel commit for a PR-scoped decisions overlay (`_pr/<number>`). */
 const prDecisionsRef = (pr: number): string => `_pr/${pr}`;
 /** The sentinel commit addressing the repo row or a PR overlay. */
 const decisionsRef = (pr?: number): string =>
   pr === undefined ? DECISIONS_REF : prDecisionsRef(pr);
 
-/** PR-scoped decisions live only in EE — a live-tree (OSS) store can't hold them. */
-function assertNoPrInPlace(pr?: number): void {
-  if (pr !== undefined && specsMaterializeInPlace()) {
-    throw new Error('[spec] PR-scoped decisions require the enterprise store');
-  }
-}
-
 async function loadDecisions(repoKey: string, opts?: { pr?: number }): Promise<DecisionsFile> {
-  assertNoPrInPlace(opts?.pr);
-  if (specsMaterializeInPlace()) return readDecisions(repoKey);
   return (
     (await loadSpec<DecisionsFile>(
       { repoKey, commitSha: decisionsRef(opts?.pr) },
@@ -846,18 +790,13 @@ async function storeDecisions(
   next: DecisionsFile,
   opts?: { pr?: number },
 ): Promise<void> {
-  assertNoPrInPlace(opts?.pr);
-  if (specsMaterializeInPlace()) {
-    writeDecisions(repoKey, next);
-    return;
-  }
   await saveSpec({ repoKey, commitSha: decisionsRef(opts?.pr) }, 'decisions', next);
 }
 
 /**
- * The repo's current decisions (dashboard read) — file in OSS, Postgres in EE.
- * With `pr`, returns the effective decisions for that PR: the repo row merged
- * with the PR's overlay (the overlay wins — see {@link mergeDecisions}).
+ * The repo's current decisions (the dashboard read). With `pr`, the effective
+ * decisions for that PR: the repo row merged with the PR's overlay (the overlay
+ * wins — see {@link mergeDecisions}).
  */
 export async function getDecisions(
   repoKey: string,
@@ -1035,9 +974,8 @@ export async function recuratePrCorpus(
 // ---------------------------------------------------------------------------
 // Decisions-file mutations
 //
-// Pure read-modify-write helpers around decisions. The dashboard server routes
-// and the CLI both call these so the two surfaces agree on update semantics.
-// None of these re-curate the corpus.
+// Pure read-modify-write helpers around decisions, called by the dashboard
+// server routes. None of these re-curate the corpus.
 // ---------------------------------------------------------------------------
 
 // Pure DecisionsFile transforms — the read-modify-write core, shared verbatim by

@@ -1,42 +1,25 @@
 /**
- * Installs the LLM transport the user selected in `~/.truecourse/config.json`.
+ * How a run's LLM transport is built.
  *
- * One injection point for the whole product: in `api` mode a direct-API
- * transport (`@truecourse/llm-api`) becomes the process-wide default, so all ~20
- * leaf runners reach the provider over its API. In `claude-code` mode the Agent
- * SDK one-shot transport (`@truecourse/llm-claude-agent`) is the default — the
- * same protocol the session driver runs, on the user's own `claude` login — so
- * no leaf runner spawns `claude -p` unless a run asks for that explicitly.
- *
- * Safe to call per pipeline entry: the config file's mtime is cached, so repeat
- * calls are one `stat`. A transport installed by someone else (the enterprise
- * edition installs its own from encrypted Postgres at boot) is never cleared —
- * only the one this module installed is.
+ * A run reaches the model with the credentials of the workspace that asked for
+ * it: the server loads that workspace's stored provider block and builds a
+ * direct-API transport (`@truecourse/llm-api`) here, threading it into the
+ * pipeline call. There is no process-wide provider — except in OPERATOR MODE,
+ * where every workspace runs on this process's own `claude` login through the
+ * Agent SDK one-shot transport (`@truecourse/llm-claude-agent`).
  */
 
 import { createApiTransport, type ProviderConfig } from '@truecourse/llm-api';
 import { createClaudeAgentTransport } from '@truecourse/llm-claude-agent';
 import { resolveClaudeBinary } from '@truecourse/shared';
-import {
-  getDefaultTransport,
-  setDefaultTransport,
-  type LlmTransport,
-} from '@truecourse/shared/llm';
+import type { LlmTransport } from '@truecourse/shared/llm';
 import { LLM_PROVIDER_KINDS, type LlmProviderKind } from '@truecourse/shared';
-import {
-  getConfiguredLlmMode,
-  globalConfigMtimeMs,
-  readApiLlmConfig,
-  type GlobalApiLlmConfig,
-} from '../../config/global-config.js';
-import { getGlobalConfigPath } from '../../config/paths.js';
+import type { LlmApiConfig } from './provider-config.js';
 import { getModelPrices, priceForModel, type PriceTable } from './model-prices.js';
 
-export { getConfiguredLlmMode, effectiveLlmMode } from '../../config/global-config.js';
+const SETUP_HINT = 'Set a provider in Settings → Models.';
 
-const SETUP_HINT = 'Run `truecourse config llm setup` to configure it.';
-
-/** The API transport is selected but its configuration can't be used. */
+/** The stored provider block cannot be used. */
 export class LlmApiConfigError extends Error {
   constructor(problem: string) {
     super(`${problem} ${SETUP_HINT}`);
@@ -65,7 +48,7 @@ export function providerKeyEnvVar(provider: LlmProviderKind): string | null {
  * named, else the provider's standard env var. Bedrock has none — it uses the
  * ambient AWS credential chain.
  */
-export function resolveApiKey(api: GlobalApiLlmConfig): string | undefined {
+export function resolveApiKey(api: LlmApiConfig): string | undefined {
   const stored = api.apiKey?.trim();
   if (stored) return stored;
   const named = api.apiKeyEnv?.trim();
@@ -78,16 +61,16 @@ export function resolveApiKey(api: GlobalApiLlmConfig): string | undefined {
   return standard ? process.env[standard]?.trim() || undefined : undefined;
 }
 
-function describeKeySources(api: GlobalApiLlmConfig): string {
+function describeKeySources(api: LlmApiConfig): string {
   const named = api.apiKeyEnv?.trim();
   if (named) return `\`${named}\` is unset`;
   const standard = PROVIDER_KEY_ENV[api.provider];
   return standard ? `no key is stored and \`${standard}\` is unset` : 'no key is stored';
 }
 
-/** Validate the saved API block and turn it into a provider config. */
-export function buildProviderConfig(api: GlobalApiLlmConfig | undefined): ProviderConfig {
-  if (!api) throw new LlmApiConfigError('The API transport is selected but not configured.');
+/** Validate a stored provider block and turn it into a provider config. */
+export function buildProviderConfig(api: LlmApiConfig | undefined): ProviderConfig {
+  if (!api) throw new LlmApiConfigError('No LLM provider is configured.');
   if (!LLM_PROVIDER_KINDS.includes(api.provider)) {
     throw new LlmApiConfigError(
       `Unknown LLM provider \`${String(api.provider)}\` (expected one of ${LLM_PROVIDER_KINDS.join(', ')}).`,
@@ -169,39 +152,27 @@ export function priceCall(
 }
 
 // ---------------------------------------------------------------------------
-// Install
+// Transports
 // ---------------------------------------------------------------------------
 
 /**
- * Build the API transport from an EXPLICIT provider block — the entry for a
- * caller that holds the credentials itself (the dashboard server threads its
- * workspace's stored config per run) rather than reading the user's file.
- * Throws `LlmApiConfigError` when the block is unusable.
+ * Build the API transport from a workspace's stored provider block. Throws
+ * `LlmApiConfigError` when the block is unusable.
  */
 export function createApiTransportFor(
-  api: GlobalApiLlmConfig | undefined,
+  api: LlmApiConfig | undefined,
   opts: { honorRequestModel?: boolean } = {},
 ): LlmTransport {
   const cfg = buildProviderConfig(api);
   primePriceTable();
-  // Per-stage model overrides (`TRUECOURSE_MODEL_<STAGE>` / `llm.stages`) arrive
-  // as `req.model`; honoring them is what keeps those overrides alive in API mode.
-  // A caller whose config IS the whole selection (the dashboard's per-workspace
-  // block) turns that off: the stage tiers it would otherwise inherit are Claude
-  // CLI aliases, meaningless to a raw provider API.
+  // Per-stage model overrides (`TRUECOURSE_MODEL_<STAGE>`) arrive as `req.model`.
+  // A caller whose block IS the whole selection (a workspace's) turns that off:
+  // the stage tiers it would otherwise inherit are Claude CLI aliases,
+  // meaningless to a raw provider API.
   return createApiTransport(cfg, {
     pricing: priceCall,
     honorRequestModel: opts.honorRequestModel ?? true,
   });
-}
-
-/**
- * Build the API transport from the saved global config. Throws
- * `LlmApiConfigError` when the API block is missing or unusable — the CLI turns
- * that into a one-liner pointing at the setup command.
- */
-export function createConfiguredApiTransport(): LlmTransport {
-  return createApiTransportFor(readApiLlmConfig());
 }
 
 /** The one claude-code transport of this process — identity is how a caller
@@ -210,9 +181,8 @@ let claudeCode: LlmTransport | undefined;
 
 /**
  * The claude-code one-shot transport: the Agent SDK on the `claude` login of
- * whoever runs this process, resolving the binary per call. The CLI reaches it
- * through {@link installConfiguredLlmTransport}; the dashboard server reaches it
- * directly when the operator runs the instance on their own Claude Code.
+ * whoever runs this process, resolving the binary per call. Operator mode hands
+ * it to every run.
  */
 export function createClaudeCodeTransport(): LlmTransport {
   claudeCode ??= createClaudeAgentTransport({ pathToClaudeCodeExecutable: resolveClaudeBinary() });
@@ -222,43 +192,4 @@ export function createClaudeCodeTransport(): LlmTransport {
 /** Whether `transport` is the claude-code one — the run will spawn `claude`. */
 export function isClaudeCodeTransport(transport: LlmTransport | undefined): boolean {
   return transport !== undefined && transport === claudeCode;
-}
-
-/** The transport this module installed, so it never clears anyone else's. */
-let installed: LlmTransport | undefined;
-/** Config identity (path + mtime + env override) the current install came from. */
-let installedFrom: string | null = null;
-
-function configKey(): string {
-  return `${getGlobalConfigPath()}|${globalConfigMtimeMs() ?? 0}|${process.env.TRUECOURSE_LLM_TRANSPORT ?? ''}`;
-}
-
-/**
- * Install the configured transport if the config changed since the last call.
- * `api` → the direct-API transport becomes the process default; `claude-code` →
- * the Agent SDK one-shot transport does. A transport someone else installed
- * (the enterprise edition, at boot) is never replaced.
- */
-export function installConfiguredLlmTransport(): void {
-  const key = configKey();
-  if (key === installedFrom) return;
-  const current = getDefaultTransport();
-  if (current !== undefined && current !== installed) return;
-
-  // Only a successful build marks the config as handled, so a caller that
-  // retries after fixing an invalid config sees the error again, not a no-op.
-  const transport =
-    getConfiguredLlmMode() === 'api' ? createConfiguredApiTransport() : createClaudeCodeTransport();
-  installed = transport;
-  setDefaultTransport(transport);
-  installedFrom = key;
-}
-
-/** Forget the cached config identity + installed transport (tests). */
-export function resetConfiguredLlmTransport(): void {
-  if (installed && getDefaultTransport() === installed) setDefaultTransport(undefined);
-  installed = undefined;
-  installedFrom = null;
-  priceTable = null;
-  claudeCode = undefined;
 }

@@ -59,8 +59,7 @@ export function siteConfig(config: ContextSourceConfig): SiteSourceConfig {
   const raw = (config ?? {}) as Partial<SiteSourceConfig>;
   const url = typeof raw.llmsTxtUrl === 'string' ? raw.llmsTxtUrl.trim() : '';
   if (!url) throw new ContextConfigError("A documentation site needs its llms.txt URL.");
-  // Throws InvalidSourceUrlError for anything that is not an llms.txt URL —
-  // the same gate `spec source add` applies.
+  // Throws InvalidSourceUrlError for anything that is not an llms.txt URL.
   return { llmsTxtUrl: assertLlmsTxtUrl(url) };
 }
 

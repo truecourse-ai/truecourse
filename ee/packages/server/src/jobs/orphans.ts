@@ -3,7 +3,7 @@
  * crash kills the job body before its catch can complete the PR's in-progress
  * Check (jobs run maxAttempts:1, so graphile never re-runs it either) — without
  * this, that Check would spin forever. `registerJobs` calls this right after
- * `jobStore.failOrphaned()`, reading each orphan's persisted enqueue payload
+ * `jobStore.interruptOrphaned()`, reading each orphan's persisted enqueue payload
  * and completing its Check as the same error-styled failure the crash path
  * posts (a broken gate blocks, never passes silently).
  */

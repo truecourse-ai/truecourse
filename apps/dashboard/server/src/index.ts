@@ -9,6 +9,7 @@ import { createServerJobs } from './jobs/index.js';
 import { closeDb, getDb, getDbHandle, initDb } from './db.js';
 import {
   installDbStores,
+  reconcileStoredRuns,
   setRepoWorkspaceLookup,
   subscribeSessionRunWrites,
   workspaceOfRepo,
@@ -20,8 +21,8 @@ import { operatorClaudeCode } from './services/workspace-llm.service.js';
 import { sweepRunClones } from './services/run-clone.service.js';
 import { setRepoJobsCanceller } from './services/repo-removal.service.js';
 import { stopAllWatchers } from './services/watcher.service.js';
-import { stopAllRunTails } from './services/session-tailer.service.js';
-import { wipeLegacyPostgresData, getLogDir } from '@truecourse/core/config/paths';
+import { stopAllRunsWatches } from './services/run-watch.service.js';
+import { getLogDir } from '@truecourse/core/config/runtime-dir';
 import { getProjectByPath, slugify } from '@truecourse/core/config/registry';
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { closeLogger, FileLogTransport, setLogTransport, log } from '@truecourse/core/lib/logger';
@@ -32,24 +33,16 @@ import { ServerLogTransport } from './observability/log-transport.js';
 const port = parseInt(process.env.PORT || '3001', 10);
 
 async function main() {
-  // 0. Route all internal diagnostics to the dashboard log file. When running
-  //    via `pnpm dev` the `TRUECOURSE_DEV=1` env var tees lines to stderr
-  //    too so the dev terminal still shows them. Packaged dashboard (console
-  //    or service) gets file-only output. Service installers pass an explicit
-  //    `TRUECOURSE_LOG_DIR` so the log lands somewhere the user can reach
-  //    even when the service runs as a system account whose `os.homedir()`
-  //    differs from the invoking user's.
-  const logDir = process.env.TRUECOURSE_LOG_DIR ?? getLogDir();
+  // 1. Route all internal diagnostics to the server log file, through the
+  //    transport that also reports errors to Sentry. Under `pnpm dev`
+  //    `TRUECOURSE_DEV=1` tees lines to stderr so the dev terminal shows them;
+  //    a deployment that collects logs from a fixed path sets
+  //    `TRUECOURSE_LOG_DIR`.
   initSentry();
   setLogTransport(new ServerLogTransport(new FileLogTransport({
-    filePath: path.join(logDir, 'dashboard.log'),
+    filePath: path.join(process.env.TRUECOURSE_LOG_DIR ?? getLogDir(), 'dashboard.log'),
     tee: process.env.TRUECOURSE_DEV === '1',
   })));
-
-  // 1. One-time cleanup of the pre-0.4 embedded-postgres data dir
-  if (wipeLegacyPostgresData()) {
-    log.info('[Storage] Legacy Postgres data wiped.');
-  }
 
   // 2. Postgres. All server state lives there — there is no file fallback, so
   //    DATABASE_URL is required and createDb applies the migrations at boot.
@@ -73,9 +66,13 @@ async function main() {
 
   await initDb(databaseUrl);
   log.info('[Server] db ready (Postgres, migrations applied)');
-  // Swap the file storage seams for Postgres before anything reads or writes
-  // repo state, and clear run-clone debris a crashed process left behind.
+  // Fill every storage seam before anything reads or writes repo state, and
+  // clear run-clone debris a crashed process left behind.
   installDbStores(getDbHandle(), { masterSecret });
+  // What a dead process left behind: its runs settle `interrupted` (the jobs
+  // queue settles its abandoned rows the same way when it starts), and its
+  // half-written clones go.
+  await reconcileStoredRuns();
   sweepRunClones();
   if (operatorClaudeCode()) {
     log.info("[LLM] operator mode — every workspace runs on this process's Claude Code login");
@@ -223,7 +220,7 @@ async function main() {
   async function shutdown() {
     log.info('[Server] Shutting down...');
     stopAllWatchers();
-    stopAllRunTails();
+    stopAllRunsWatches();
     stopRunRelay();
     contextSchedule.stop();
     httpServer.closeAllConnections();

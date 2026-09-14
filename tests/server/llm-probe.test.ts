@@ -18,7 +18,7 @@ const anthropic = { provider: 'anthropic' as const, model: 'claude-sonnet-4-5', 
 
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-llm-probe-'));
-  process.env.TRUECOURSE_HOME = home;
+  process.env.TRUECOURSE_RUNTIME_DIR = home;
   delete process.env.ANTHROPIC_API_KEY;
 });
 

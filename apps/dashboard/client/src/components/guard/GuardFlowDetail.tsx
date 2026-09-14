@@ -760,11 +760,8 @@ export function GuardFlowDetail({
                         ? {
                             notes: (
                               <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
-                                The last run has no result for this test, run{" "}
-                                <code className="rounded bg-muted px-1 py-0.5 text-xs">
-                                  truecourse guard run
-                                </code>{" "}
-                                to test it.
+                                The last run has no result for this test. Start
+                                a Flow run to test it.
                               </p>
                             ),
                           }

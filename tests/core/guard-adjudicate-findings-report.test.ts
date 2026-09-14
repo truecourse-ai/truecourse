@@ -39,7 +39,7 @@ import {
 } from '../../packages/core/src/services/guard-adjudicate/findings-report'
 import { appendFindingsLedger } from '../../packages/core/src/services/agent/findings-ledger'
 import { writeGuardAdjudicationReport } from '../../packages/core/src/commands/guard-adjudicate'
-import { ensureRepoTruecourseDir } from '../../packages/core/src/config/paths'
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store'
 
 let repo: string
 
@@ -70,10 +70,12 @@ function writeDoc(content: string): void {
 }
 
 beforeEach(() => {
+  installWorkTreeGuardStore()
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-findings-report-'))
   writeDoc(DOC_CONTENT)
 })
 afterEach(() => {
+  resetGuardStore()
   fs.rmSync(repo, { recursive: true, force: true })
 })
 
@@ -278,34 +280,6 @@ describe('writeGuardFindingsReport — when a file is written at all', () => {
     expect(report).not.toContain('scn-a title')
     // The two files are siblings, never the same file.
     expect(fs.readFileSync(ledgerPath, 'utf-8')).toBe(ledger)
-  })
-
-  it('lands both markdown files where git TRACKS them', () => {
-    ensureRepoTruecourseDir(repo)
-    execFileSync('git', ['init', '-q'], { cwd: repo })
-    writeGuardFindingsReport(repo, board([row('scn-a', verdict('bug'))]))
-    appendFindingsLedger({
-      repoRoot: repo,
-      ledgerPath: guardAdjudicateFindingsPath(repo),
-      runId: 'run-1',
-      findings: [{ workItem: 'scn-a', lines: ['a finding'] }],
-    })
-
-    // `git check-ignore --quiet` exits 0 for an ignored path and 1 (a throw here)
-    // for one git would track.
-    const isIgnored = (rel: string): boolean => {
-      try {
-        execFileSync('git', ['check-ignore', '--quiet', '--', rel], { cwd: repo, stdio: 'pipe' })
-        return true
-      } catch {
-        return false
-      }
-    }
-    expect(isIgnored('.truecourse/guard/findings.md')).toBe(false)
-    expect(isIgnored('.truecourse/guard/adjudicate.findings.md')).toBe(false)
-    // The control: the run store next to them IS ignored, so the template is live.
-    expect(isIgnored('.truecourse/guard/runs/r1.json')).toBe(true)
-    expect(isIgnored('.truecourse/guard/result.json')).toBe(true)
   })
 })
 

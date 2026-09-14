@@ -1,7 +1,4 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import os from 'node:os';
-import path from 'node:path';
-import fs from 'node:fs';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
@@ -14,27 +11,18 @@ import {
 } from '@truecourse/llm';
 import { PgKvCacheStore } from '../../ee/packages/data-store/src/index';
 
-describe('FileKvCacheStore (the OSS default, via the seam delegators)', () => {
-  let scope: string;
-  beforeEach(() => {
-    scope = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-cache-'));
-    resetKvCacheStore();
-  });
-  afterEach(() => {
-    resetKvCacheStore();
-    fs.rmSync(scope, { recursive: true, force: true });
-  });
+describe('the KV cache with nothing installed (the seam default)', () => {
+  beforeEach(() => resetKvCacheStore());
+  afterEach(() => resetKvCacheStore());
 
-  it('writes/reads at <scope>/.truecourse/.cache/<name>/<key>.json (unchanged OSS layout)', async () => {
-    expect(await getCacheEntry(scope, 'extractor/slices', 'abc')).toBeNull();
-    await setCacheEntry(scope, 'extractor/slices', 'abc', { hello: 'world' });
-    const file = path.join(scope, '.truecourse', '.cache', 'extractor', 'slices', 'abc.json');
-    expect(fs.existsSync(file)).toBe(true);
-    expect(await getCacheEntry(scope, 'extractor/slices', 'abc')).toEqual({ hello: 'world' });
-    // a different scope is isolated for the file impl
-    const other = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-cache2-'));
-    expect(await getCacheEntry(other, 'extractor/slices', 'abc')).toBeNull();
-    fs.rmSync(other, { recursive: true, force: true });
+  // A cache is an optimization: a process that never installed one must still
+  // run — every read misses and every write is dropped, never throws.
+  it('misses every read and drops every write', async () => {
+    expect(await getCacheEntry('/clone/a', 'extractor/slices', 'abc')).toBeNull();
+    await expect(
+      setCacheEntry('/clone/a', 'extractor/slices', 'abc', { hello: 'world' }),
+    ).resolves.toBeUndefined();
+    expect(await getCacheEntry('/clone/a', 'extractor/slices', 'abc')).toBeNull();
   });
 });
 

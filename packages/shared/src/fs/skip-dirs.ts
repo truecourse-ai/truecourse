@@ -4,6 +4,9 @@
  * (`discoverDocs` in @truecourse/spec-consolidator) and the EE github-app's PR
  * spec-detect, so the two agree on what counts as a discoverable spec document.
  */
+
+import { WORK_TREE_DIR } from './work-tree.js';
+
 export const DOC_DISCOVERY_SKIP_DIRS: ReadonlySet<string> = new Set([
   'node_modules',
   '.git',
@@ -11,7 +14,7 @@ export const DOC_DISCOVERY_SKIP_DIRS: ReadonlySet<string> = new Set([
   'build',
   '.next',
   '.turbo',
-  '.truecourse', // TrueCourse's own outputs — never re-discover
+  WORK_TREE_DIR, // a run's own working tree — never re-discover
   '.cache',
   'coverage',
   'vendor', // vendored third-party code — the docs promise it is never read

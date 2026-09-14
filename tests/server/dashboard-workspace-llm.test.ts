@@ -45,11 +45,11 @@ vi.mock('@truecourse/core/commands/spec-in-process', async (importOriginal) => (
 // be different module instances with their own stores.
 import { guardGenerateInProcess } from '@truecourse/core/commands/guard-in-process';
 import { curateInProcess } from '@truecourse/core/commands/spec-in-process';
-import { listSessionRuns } from '@truecourse/core/lib/sessions-store';
+import { listStoredSessionRuns } from '@truecourse/core/lib/sessions-store';
 import { workspaceSessionsKey } from '@truecourse/core/commands/context-scan';
 import type { SessionDriver } from '@truecourse/agent-loop';
 import type { LlmTransport } from '@truecourse/shared/llm';
-import type { GlobalApiLlmConfig } from '@truecourse/core/config/global-config';
+import type { LlmApiConfig } from '@truecourse/core/services/llm/provider-config';
 import { createTestApp, stubJobs, TEST_ORG, type StubJobs } from '../helpers/test-app';
 import {
   resetWorkspaceLlmBackend,
@@ -58,9 +58,13 @@ import {
   setWorkspaceLlmConfigStore,
   type WorkspaceLlmConfigStore,
 } from '../../apps/dashboard/server/src/services/workspace-llm.service';
-import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
+import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
+import { installMemorySpecStore, resetSpecStore } from '../helpers/memory-spec-store';
 
-const WORKSPACE_CONFIG: GlobalApiLlmConfig = {
+
+
+const WORKSPACE_CONFIG: LlmApiConfig = {
   provider: 'anthropic',
   model: 'claude-workspace',
   apiKey: 'sk-workspace',
@@ -71,7 +75,7 @@ const driver = { attribution: { provider: 'anthropic', model: 'claude-workspace'
 const transport = (async () => '{}') as LlmTransport;
 
 /** An in-memory stand-in for the Postgres config store (that has its own suite). */
-function configStore(configs: Record<string, GlobalApiLlmConfig>): WorkspaceLlmConfigStore {
+function configStore(configs: Record<string, LlmApiConfig>): WorkspaceLlmConfigStore {
   return {
     getConfig: async (orgId) => configs[orgId] ?? null,
     getView: async () => null,
@@ -85,6 +89,8 @@ let probe: ReturnType<typeof vi.fn>;
 let jobs: StubJobs;
 
 beforeEach(async () => {
+  installMemorySessionRuns();
+  installMemorySpecStore();
   probe = vi.fn(async () => {});
 
   vi.mocked(guardGenerateInProcess).mockReset().mockResolvedValue({
@@ -109,6 +115,8 @@ afterEach(async () => {
   await teardownTestFixture(fixture.project.slug);
   resetWorkspaceLlmBackend();
   resetWorkspaceLlmConfigStore();
+  resetSessionRuns();
+  resetSpecStore();
 });
 
 const url = (suffix: string) => `/api/repos/${fixture.project.slug}/${suffix}`;
@@ -127,7 +135,7 @@ const start = (suffix: string) => {
 const ENTRIES = ['spec scan', 'guard generate'];
 
 /** The workspace's own scan runs, newest first — the Document scan's records. */
-const workspaceScanRuns = () => listSessionRuns(workspaceSessionsKey(TEST_ORG), 'spec-scan');
+const workspaceScanRuns = () => listStoredSessionRuns(workspaceSessionsKey(TEST_ORG), 'spec-scan');
 
 describe('a workspace with no provider configured', () => {
   beforeEach(() => {
@@ -146,7 +154,7 @@ describe('a workspace with no provider configured', () => {
     expect(probe).not.toHaveBeenCalled();
     expect(jobs.contextScans).toEqual([]);
     expect(jobs.guardGenerates).toEqual([]);
-    expect(workspaceScanRuns()).toHaveLength(0);
+    expect(await workspaceScanRuns()).toHaveLength(0);
   });
 });
 
@@ -164,10 +172,10 @@ describe('a provider that will not answer', () => {
 
   // The scan is the WORKSPACE's now, so the run it leaves is the workspace's.
   it('leaves the scan a failed run that says why, so Activity can show it', async () => {
-    const before = workspaceScanRuns().length;
+    const before = (await workspaceScanRuns()).length;
     await start('spec scan').expect(502);
 
-    const runs = workspaceScanRuns();
+    const runs = await workspaceScanRuns();
     expect(runs).toHaveLength(before + 1);
     expect(runs[0]).toMatchObject({
       status: 'failed',

@@ -1,5 +1,5 @@
 /**
- * Guard tables for the hosted edition — the Postgres home for `truecourse guard`,
+ * Guard tables for the hosted edition — the Postgres home for the guard pipeline,
  * mirroring the verify + contract conventions:
  *
  *   guard_runs          — one row per (repo_key, commit_sha): every `guard run`

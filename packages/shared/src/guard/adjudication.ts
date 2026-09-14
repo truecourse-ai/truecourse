@@ -1,5 +1,5 @@
 /**
- * RUN ADJUDICATION — the verdict `truecourse guard adjudicate` attaches to one
+ * RUN ADJUDICATION — the verdict Failure adjudication attaches to one
  * failing scenario of a guard run (plan 05, steps 21–23). The corpus runs'
  * largest recurring hand cost was reading every failure's transcript before
  * classifying it; the adjudication session does that read and ends with THIS

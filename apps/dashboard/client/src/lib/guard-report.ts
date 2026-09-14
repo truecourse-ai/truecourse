@@ -1,9 +1,9 @@
 /**
  * Client-side shaping of the last-generate report (`guard/result.json`) for the
- * report view. Pure functions that recompute exactly what the CLI summary
- * (`printGuardGenerateSummary`) and `composeGuardStatus` derive, so the dashboard
- * and `truecourse guard status` never tell different stories, the client can't
- * import core, so this mirrors that composition and is unit-tested.
+ * report view. Pure functions that recompute exactly what `composeGuardStatus`
+ * derives, so the report view and the status summary never tell different
+ * stories, the client can't import core, so this mirrors that composition and
+ * is unit-tested.
  */
 
 import {
@@ -20,7 +20,7 @@ import type {
   GuardNeedsSetup,
 } from '@truecourse/shared';
 
-/** Changed sections split the way the CLI reports them. */
+/** Changed sections split the way the generate report counts them. */
 export interface GuardSettledCounts {
   /** Sections whose spec content changed since the last generate. */
   changed: number;
@@ -33,7 +33,7 @@ export interface GuardSettledCounts {
 }
 
 /**
- * Settled / unsettled split, identical to `printGuardGenerateSummary`.
+ * Settled / unsettled split, identical to `composeGuardStatus`.
  *
  * A COMMITTED failing test settles its section: guard commits every test it
  * authors, so the section has its measurement and the measurement is red, there

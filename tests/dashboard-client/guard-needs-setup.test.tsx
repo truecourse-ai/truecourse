@@ -143,7 +143,7 @@ describe('needs-setup vocabulary and paint', () => {
 
   it('the follow-up line adds what the headline leaves out, and never restates it', () => {
     expect(GUARD_NEEDS_SETUP_NEXT).toBe(
-      'A real or sandbox account both work, provide one, then re-run `truecourse guard generate` to author these tests.',
+      'A real or sandbox account both work, provide one, then re-run Flow generation to author these tests.',
     );
   });
 
@@ -211,7 +211,7 @@ describe('GuardSectionDetail — the needs-setup CTA', () => {
         onClose={() => {}}
       />,
     );
-    expect(screen.getByText('truecourse guard generate')).toBeInTheDocument();
+    expect(screen.getByText(/Flow generation authors them/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Provide/ })).not.toBeInTheDocument();
   });
 
@@ -342,7 +342,7 @@ describe('GuardFlowDetail — the needs-setup why-no-test row', () => {
 
   it('the provided sub-state offers the command, and no explainer that contradicts it', () => {
     renderDetail({ services: [], provided: ['open-meteo'] });
-    expect(screen.getByText('truecourse guard generate')).toBeInTheDocument();
+    expect(screen.getByText(/Flow generation authors them/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Provide/ })).not.toBeInTheDocument();
     expect(screen.queryByText(GUARD_NEEDS_SETUP_NEXT)).not.toBeInTheDocument();
   });

@@ -246,7 +246,7 @@ export type CorpusDoc = z.infer<typeof CorpusDocSchema>;
 
 /**
  * A flagged within-area overlap — two docs in the same area that MAY disagree.
- * Carries refs only; the CLI/UI derive the prose passages at display time. The
+ * Carries refs only; the UI derives the prose passages at display time. The
  * user resolves it with a section-scoped conflict verdict (pick-a-side or
  * dismissal) or a force-exclude.
  */

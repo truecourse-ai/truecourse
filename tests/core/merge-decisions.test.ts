@@ -1,18 +1,16 @@
 /**
- * `mergeDecisions` folds a PR's decisions overlay over the repo row (the overlay
- * wins on every dimension), and the PR-scoped decision APIs are enterprise-only —
- * the OSS file store has no commit dimension, so a PR-scoped ref must fail loud.
+ * `mergeDecisions` folds a PR's decisions overlay over the repo row — the
+ * overlay wins on every dimension — and the decisions helpers read and write
+ * that row through the spec store.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import {
   mergeDecisions,
   addManualInclude,
   getDecisions,
 } from '../../packages/core/src/commands/spec-in-process';
-import { resetSpecStore } from '../../packages/core/src/lib/spec-store';
+import { setSpecStore, resetSpecStore } from '../../packages/core/src/lib/spec-store';
+import { memorySpecStore } from '../helpers/memory-spec-store';
 import type { DecisionsFile } from '@truecourse/spec-consolidator';
 
 const empty: DecisionsFile = {
@@ -135,27 +133,12 @@ describe('mergeDecisions — scope verdicts and instructions (v2)', () => {
   });
 });
 
-describe('PR-scoped decisions are enterprise-only on the file store', () => {
-  let repo: string;
-  beforeEach(() => {
-    resetSpecStore(); // file-backed default (OSS)
-    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-pr-decisions-'));
-    fs.mkdirSync(path.join(repo, '.truecourse', 'specs'), { recursive: true });
-  });
-  afterEach(() => {
-    resetSpecStore();
-    fs.rmSync(repo, { recursive: true, force: true });
-  });
+describe('decisions through the store', () => {
+  const repo = 'acme/widgets';
+  beforeEach(() => setSpecStore(memorySpecStore()));
+  afterEach(() => resetSpecStore());
 
-  it('a mutation helper with a PR opt rejects (no overlay dimension in OSS)', async () => {
-    await expect(addManualInclude(repo, 'a.md', { pr: 1 })).rejects.toThrow(/enterprise store/);
-  });
-
-  it('getDecisions with a PR opt rejects on the file store', async () => {
-    await expect(getDecisions(repo, { pr: 1 })).rejects.toThrow(/enterprise store/);
-  });
-
-  it('getDecisions without a PR opt is the repo row (unchanged OSS behavior)', async () => {
+  it('getDecisions without a PR opt is the repo row', async () => {
     await addManualInclude(repo, 'a.md');
     const d = await getDecisions(repo);
     expect(d.manualIncludes).toEqual(['a.md']);

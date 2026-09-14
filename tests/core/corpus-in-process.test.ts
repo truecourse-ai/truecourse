@@ -7,17 +7,20 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { resetKvCacheStore } from '@truecourse/llm';
 import { curateInProcess, CURATE_STEPS } from '../../packages/core/src/commands/spec-in-process.js';
 import { StepTracker, estimateStepPhase, type AnalysisStep } from '../../packages/core/src/progress.js';
 import { readCorpus } from '../../packages/spec-consolidator/src/index.js';
 import type { DecisionsFile } from '../../packages/spec-consolidator/src/index.js';
 import { docPathOf, outcome, stubDriver, toolResult } from './spec-scan-session-stub';
 import { readActivityEvents } from '../../packages/core/src/lib/activity-journal';
+import { listStoredSessionRuns } from '../../packages/core/src/lib/sessions-store';
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache';
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
 
 let repo: string;
 beforeEach(() => {
-  resetKvCacheStore();
+  installMemoryKvCache();
+  installMemorySessionRuns();
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-corpus-inproc-'));
   const docs = path.join(repo, 'docs');
   fs.mkdirSync(docs, { recursive: true });
@@ -25,6 +28,8 @@ beforeEach(() => {
   fs.writeFileSync(path.join(docs, 'auth.md'), '# Auth\nStatus: shipped\nSessions authenticate users.');
 });
 afterEach(() => {
+  resetKvCacheStore();
+  resetSessionRuns();
   fs.rmSync(repo, { recursive: true, force: true });
 });
 
@@ -86,12 +91,14 @@ const scanOptions = (driver = scanDriver()) => ({
   skipGit: true,
 });
 describe('curateInProcess', () => {
-  it('opts dashboard scans into direct replay and lets the hosted caller finish after saving', async () => {
-    const result = await curateInProcess(repo, { ...scanOptions(), source: 'dashboard', deferRunCompletion: true });
+  it('lets the caller finish the run itself after it has saved', async () => {
+    const result = await curateInProcess(repo, { ...scanOptions(), deferRunCompletion: true });
     const journal = readActivityEvents(result.sessionsRunDir);
-    expect(journal[0]).toMatchObject({ kind: 'run', run: { activityStream: 'ai-sdk-v1' } });
+    expect(journal[0]).toMatchObject({ kind: 'run' });
     expect(journal.some(e => e.kind === 'session-event' && e.event.type === 'outcome')).toBe(true);
-    const run = JSON.parse(fs.readFileSync(path.join(result.sessionsRunDir, 'run.json'), 'utf8'));
+    // The scan returned, but the run is still open — the hosted caller closes it
+    // only once its own persistence succeeded.
+    const [run] = await listStoredSessionRuns(repo, 'spec-scan');
     expect(run.status).toBe('running');
     expect(run.finishedAt).toBeUndefined();
   });
@@ -206,7 +213,7 @@ describe('curateInProcess', () => {
     await expect(scan).rejects.toThrow('the spec scan was cancelled');
     // The gate sits before the run record, so the aborted scan left none —
     // and no corpus.
-    expect(fs.existsSync(path.join(repo, '.truecourse', 'sessions'))).toBe(false);
+    expect(await listStoredSessionRuns(repo, 'spec-scan')).toEqual([]);
     expect(readCorpus(repo)).toBeNull();
   });
 

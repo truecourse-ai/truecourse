@@ -21,13 +21,16 @@ import {
 } from '@truecourse/guard-runner'
 import type { GuardLatest, GuardScenarioAdjudication, GuardScenarioResult, GuardSummary } from '@truecourse/shared'
 import { readGuardAdjudicationView } from '../../packages/core/src/commands/guard-adjudicate'
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store'
 
 let repo: string
 
 beforeEach(() => {
+  installWorkTreeGuardStore()
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-adjudicate-converge-'))
 })
 afterEach(() => {
+  resetGuardStore()
   fs.rmSync(repo, { recursive: true, force: true })
 })
 

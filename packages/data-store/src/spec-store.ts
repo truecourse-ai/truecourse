@@ -1,7 +1,7 @@
 /**
  * Postgres implementation of core's `SpecStore`. Routes each artifact to its
  * proper home:
- *   - immutable per-commit artifacts (corpus / inferredDecisions / the docs
+ *   - immutable per-commit artifacts (corpus / the docs
  *     snapshot manifest) → content-addressed in `content`, with a `spec_sets`
  *     manifest row pointing in by sha (deduped: an unchanged artifact across
  *     commits is stored once); the document bodies the snapshot points at live
@@ -50,7 +50,6 @@ function decisionsScope(ref: RepoRef): string {
 }
 
 export class PgSpecStore implements SpecStore {
-  readonly materializesInPlace = false;
   private readonly content: ContentStore;
 
   constructor(private readonly db: Db) {

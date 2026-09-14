@@ -11,7 +11,7 @@
  * never a deterministic retry, because the detectors are pure.
  */
 
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -28,9 +28,14 @@ import {
   type RecipeRunner,
 } from '@truecourse/guard-generator'
 import { makeTempRepo, rmrf, FIXTURE_BIN, FIXTURE_API_SERVER, FIXTURE_API_SERVER_V2 } from './helpers.js'
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache.js'
 
 const repos: string[] = []
+beforeEach(() => {
+  installMemoryKvCache()
+})
 afterEach(() => {
+  resetKvCacheStore()
   while (repos.length) rmrf(repos.pop()!)
 })
 function repo(): string {

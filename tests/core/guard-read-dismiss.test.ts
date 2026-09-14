@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,9 +7,14 @@ import {
   readGuardEvidenceAt,
 } from '../../packages/core/src/commands/guard-read';
 import type { GuardGenerateReport } from '../../packages/shared/src/index';
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
 
 const repos: string[] = [];
+beforeEach(() => {
+  installWorkTreeGuardStore();
+});
 afterEach(() => {
+  resetGuardStore();
   while (repos.length) fs.rmSync(repos.pop()!, { recursive: true, force: true });
 });
 function repo(): string {

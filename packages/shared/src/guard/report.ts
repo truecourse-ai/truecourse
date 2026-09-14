@@ -4,8 +4,8 @@ import { GuardBlockerSchema, GuardObligationRefSchema } from './verification.js'
  * at the end of every `guard generate` (the `contracts/result.json` convention).
  *
  * It is the generator's `GuardGenerateResult` plus a `generatedAt` timestamp and
- * the run's optional LLM `usage` totals, so `guard status` (CLI) and the dashboard
- * coverage view render the same summary from the same store file. Gitignored
+ * the run's optional LLM `usage` totals, so the dashboard coverage view renders
+ * its summary from the store file. Gitignored
  * (transient run output); the committed `scenarios/` tree it describes is durable.
  */
 
@@ -91,8 +91,8 @@ export type GuardCoverageGapKind = z.infer<typeof GuardCoverageGapKindSchema>
 /**
  * Migrate an OLD-shape gap row (`kind:'api'|'web'|'tui'`) to the un-conflated
  * shape (`kind:'awaiting-driver', driver:'api'`). Applied at the schema layer so
- * EVERY reader of a persisted report — the store `readGuardResult`, the routes,
- * the CLI — tolerates the historical `guard/result.json` files (which cost real
+ * EVERY reader of a persisted report — the store `readGuardResult`, the routes
+ * — tolerates the historical `guard/result.json` files (which cost real
  * money to produce) without a per-reader shim. New-shape rows pass through.
  */
 export const GuardCoverageGapSchema = z
@@ -129,7 +129,7 @@ export type GuardCoverageGap = z.infer<typeof GuardCoverageGapSchema>
  * The flat rendering key a gap paints under: a per-driver id for an
  * `awaiting-driver` gap (so "Needs API driver" and "Needs web driver" stay
  * separate chips/counts), else the gap kind itself. This is the domain the
- * coverage strip, the CLI `guard status` gap line, and the summary tallies key by
+ * coverage strip and the summary tallies key by
  * — the OLD flat kind set, re-derived from the driver registry so it tracks new
  * drivers automatically.
  */
@@ -149,8 +149,8 @@ export function gapDisplayKind(
   return gap.kind
 }
 
-/** The display keys with a zeroed count, in the canonical order the CLI renders
- *  them (awaiting drivers first, then the residual kinds). */
+/** The display keys with a zeroed count, in the canonical order they render
+ *  (awaiting drivers first, then the residual kinds). */
 export function emptyGapDisplayTotals(): Record<GuardGapDisplayKind, number> {
   const out = {} as Record<GuardGapDisplayKind, number>
   for (const id of awaitingDriverIds) out[id] = 0
@@ -958,7 +958,7 @@ export const GuardGenerateReportSchema = z
      * with no verdict about it. Never an abort (see
      * {@link GuardUnadjudicatedStageSchema}) — but never silent either: this is what
      * makes "these tests were never reviewed" readable off the stored report, not
-     * only off the terminal that ran it. Optional so older reports parse; absent
+     * only off the live run that produced it. Optional so older reports parse; absent
      * reads as "everything was adjudicated".
      */
     unadjudicated: z.array(GuardUnadjudicatedStageSchema).optional(),

@@ -104,7 +104,7 @@ export function seedDraftGate(input: {
   replaceExisting?: boolean
 }): { ok: true } | { ok: false; reason: string } {
   if (!input.recipe) {
-    return { ok: false, reason: 'no recipe.json — run `truecourse guard setup` first' }
+    return { ok: false, reason: 'no recipe.json — Flow setup has not discovered one yet' }
   }
   if (!input.recipe.api) {
     return {
@@ -116,7 +116,7 @@ export function seedDraftGate(input: {
     return {
       ok: false,
       reason:
-        'the recipe already declares `api.seed` — an existing seed is a committed, human-reviewed file and is never silently overwritten (`truecourse guard setup --refresh` replaces it, with a confirmation)',
+        'the recipe already declares `api.seed` — an existing seed is a human-reviewed file and is never silently overwritten (a refreshing Flow setup replaces it, with a confirmation)',
     }
   }
   if (input.database === undefined) return { ok: true }

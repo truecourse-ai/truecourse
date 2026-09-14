@@ -118,7 +118,7 @@ export interface EeClientModule {
   navItems: EeNavItem[]
   /**
    * Optional replacement for the OSS home page at "/" when running as
-   * enterprise (e.g. the workspace dashboard instead of the local-CLI
+   * enterprise (e.g. the workspace dashboard instead of the OSS
    * onboarding screen). Lazily imported; default export is a React
    * component (typed `unknown`, cast at render).
    */

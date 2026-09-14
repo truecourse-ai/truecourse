@@ -25,13 +25,16 @@ import {
 } from '@truecourse/shared'
 import { persistAdjudication } from '../../packages/core/src/services/guard-adjudicate/fold'
 import type { AdjudicationItem } from '../../packages/core/src/services/guard-adjudicate/pre-pass'
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store'
 
 let repo: string
 
 beforeEach(() => {
+  installWorkTreeGuardStore()
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-adjudicate-persist-'))
 })
 afterEach(() => {
+  resetGuardStore()
   fs.rmSync(repo, { recursive: true, force: true })
 })
 

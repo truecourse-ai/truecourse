@@ -5,15 +5,11 @@
  */
 import express, { type Express, type Request } from 'express';
 import request from 'supertest';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { AuthUser, GithubConnectStatusResponse } from '@truecourse/shared';
 import {
   createConnectRouter,
   createConnectGateRouter,
-  FileGateStore,
 } from '../../ee/packages/github-app/src/index';
 import type { OctokitClient } from '../../packages/github-app/src/octokit';
 // Shared via the bare specifier so this overrides the singleton the routers use.
@@ -22,9 +18,9 @@ import {
   resetRegistryStore,
   type RegistryStore,
 } from '@truecourse/core/config/registry';
+import { MemoryGateStore } from '../github-app/memory-store';
 
-let dir: string;
-let store: FileGateStore;
+let store: MemoryGateStore;
 let app: Express;
 let currentOrg: string | null;
 const stubOctokit = { paginate: async () => [] } as unknown as OctokitClient;
@@ -43,8 +39,7 @@ const stubRegistry: RegistryStore = {
 };
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-gate-connect-'));
-  store = new FileGateStore(dir);
+  store = new MemoryGateStore();
   currentOrg = 'org_A';
   app = express();
   app.use(express.json());
@@ -72,7 +67,6 @@ beforeEach(() => {
 
 afterEach(() => {
   resetRegistryStore();
-  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 async function connectRepo(repoFullName = 'acme/api') {

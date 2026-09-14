@@ -11,7 +11,8 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import type { GuardGatePipeline } from '@truecourse/ee-github-app';
-import { JobStore, NotificationStore } from '../../ee/packages/data-store/src/index';
+import { JobStore, NotificationStore, PgGuardStore } from '../../ee/packages/data-store/src/index';
+import { setGuardStore, resetGuardStore } from '@truecourse/core/lib/guard-store';
 import {
   GUARD_GATE_TASK,
   guardGateJobKey,
@@ -40,6 +41,9 @@ beforeEach(async () => {
   client = new PGlite();
   db = drizzle(client, { schema }) as unknown as Db;
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
+  // The pipeline reads and writes guard state through the seam; here it is the
+  // same database the job's own rows live in.
+  setGuardStore(new PgGuardStore(db));
   savedEnv = {};
   for (const [k, v] of Object.entries(GITHUB_ENV)) {
     savedEnv[k] = process.env[k];
@@ -52,6 +56,7 @@ afterEach(async () => {
     if (savedEnv[k] === undefined) delete process.env[k];
     else process.env[k] = savedEnv[k];
   }
+  resetGuardStore();
   await client.close();
 });
 
@@ -286,7 +291,7 @@ describe('guard.gate — restart survival (boot recovery)', () => {
     return req;
   };
 
-  it('the durable row survives as queued/running; failOrphaned reaps it and frees the key', async () => {
+  it('the durable row survives as queued/running; interruptOrphaned reaps it and frees the key', async () => {
     const jobStore = new JobStore(db);
     const key = guardGateJobKey(REPO, HEAD_SHA);
     const job = await jobStore.create({ org: ORG, type: GUARD_GATE_TASK, key });
@@ -294,9 +299,12 @@ describe('guard.gate — restart survival (boot recovery)', () => {
 
     // Simulated restart: the in-process worker died mid-run; registerJobs boots
     // and reaps every non-terminal row so the single-flight key frees.
-    const reaped = await jobStore.failOrphaned();
+    const reaped = await jobStore.interruptOrphaned();
     expect(reaped).toHaveLength(1);
-    expect((await jobStore.get(job.id))?.status).toBe('failed');
+    expect(await jobStore.get(job.id)).toMatchObject({
+      status: 'interrupted',
+      error: 'interrupted by a server restart',
+    });
 
     const rerun = await jobStore.create({ org: ORG, type: GUARD_GATE_TASK, key });
     expect(rerun.status).toBe('queued');
@@ -322,7 +330,7 @@ describe('guard.gate — restart survival (boot recovery)', () => {
     });
     await jobStore.markRunning(sync.id);
 
-    const orphans = await jobStore.failOrphaned();
+    const orphans = await jobStore.interruptOrphaned();
     expect(orphans).toHaveLength(2);
 
     const { octokit, calls } = makeOctokit();
@@ -357,7 +365,7 @@ describe('guard.gate — restart survival (boot recovery)', () => {
     });
     await jobStore.markRunning(gate.id);
 
-    const orphans = await jobStore.failOrphaned();
+    const orphans = await jobStore.interruptOrphaned();
     const failing: any = {
       checks: {
         create: async () => {

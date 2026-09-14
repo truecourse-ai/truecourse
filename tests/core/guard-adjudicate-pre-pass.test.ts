@@ -9,7 +9,7 @@
  * drives the real command and asserts the sessions store was never created.
  */
 
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { CAPABILITY_SETUP_EXPECTED, writeGuardLatest, writeManifest } from '@truecourse/guard-runner'
@@ -19,9 +19,14 @@ import {
 } from '../../packages/core/src/services/guard-adjudicate/pre-pass'
 import { runGuardAdjudication } from '../../packages/core/src/commands/guard-adjudicate'
 import { board, failRow, item, makeRepo, manifestWith, rmrf, RUN_ID } from './guard-adjudicate-helpers'
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store'
 
 const repos: string[] = []
+beforeEach(() => {
+  installWorkTreeGuardStore()
+})
 afterEach(() => {
+  resetGuardStore()
   while (repos.length) rmrf(repos.pop()!)
 })
 function repo(): string {

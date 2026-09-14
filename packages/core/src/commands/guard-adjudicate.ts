@@ -36,7 +36,7 @@ import {
   type GuardScenarioDiagnosis,
 } from '@truecourse/shared';
 import path from 'node:path';
-import { createSessionRun, type SessionRunStartedInfo } from '../lib/sessions-store.js';
+import { createStoredSessionRun, type SessionRunStartedInfo } from '../lib/sessions-store.js';
 import { resolveCommitSha } from '../lib/repo-ref.js';
 import { getGuardExecutor } from '../lib/guard-executor.js';
 import {
@@ -47,8 +47,7 @@ import {
   readManifest,
   readScenarioFile,
 } from '../lib/guard-store.js';
-import { createConfiguredSessionDriver } from '../services/llm/session-driver.js';
-import type { LlmTransportFlag } from '../config/global-config.js';
+import { createClaudeCodeSessionDriver } from '../services/llm/session-driver.js';
 import { defaultPoolConcurrency, runSessionPool } from '../services/agent/session-pool.js';
 import { appendFindingsLedger } from '../services/agent/findings-ledger.js';
 import { describeSessionFailure } from '../services/guard-setup/session-context.js';
@@ -191,7 +190,7 @@ async function prepareAdjudication(
 ): Promise<PreparedAdjudication> {
   const latest = await readGuardLatest(repoRoot);
   if (!latest) {
-    throw new Error('No guard board (`guard/LATEST.json`) — run `truecourse guard run` first.');
+    throw new Error('No guard board — this repository has no Flow run yet.');
   }
   let rows = failingRows(latest);
   if (opts.runId) {
@@ -371,8 +370,6 @@ export interface RunGuardAdjudicationOptions {
   scenarios?: readonly string[];
   /** Ceiling on concurrent sessions (the governor may run fewer). */
   concurrency?: number;
-  /** Per-run transport flag; the saved selection answers otherwise. */
-  transport?: LlmTransportFlag;
   /** Render `guard/findings.md` from the board's bug/drift verdicts after the run. */
   report?: boolean;
   signal?: AbortSignal;
@@ -381,7 +378,7 @@ export interface RunGuardAdjudicationOptions {
   /** What the run is doing before/around the sessions — the phase line. */
   onStatus?: (message: string) => void;
   /** The sessions-store run record just came into being (only when there are
-   *  session items) — the CLI prints the "watch live" deep link from it. */
+   *  session items) — the caller learns the run's id from it. */
   onRunStarted?: (info: SessionRunStartedInfo) => void;
 }
 
@@ -458,12 +455,11 @@ export async function runGuardAdjudication(
 
   if (prepared.sessionItems.length > 0 && !opts.signal?.aborted) {
     const gitRef = await resolveCommitSha(repoRoot);
-    const run = createSessionRun(repoRoot, { command: 'guard-adjudicate', gitRef });
+    const run = await createStoredSessionRun(repoRoot, { command: 'guard-adjudicate', gitRef });
     sessionRunId = run.runId;
     runDir = run.dir;
     opts.onRunStarted?.({ command: 'guard-adjudicate', runId: run.runId, dir: run.dir });
-    const { driver, mode, attribution } = createConfiguredSessionDriver({
-      ...(opts.transport ? { transport: opts.transport } : {}),
+    const { driver, mode, attribution } = createClaudeCodeSessionDriver({
       cwd: repoRoot,
       providerStateDir: path.join(run.dir, 'provider'),
     });
@@ -629,8 +625,8 @@ export async function runGuardAdjudication(
 
 /**
  * Render `guard/findings.md` from the current board WITHOUT adjudicating
- * anything — `truecourse guard adjudicate --report` with nothing left to
- * classify, and the dashboard's regenerate action.
+ * anything — the findings report with nothing left to classify, and the
+ * dashboard's regenerate action.
  */
 export async function writeGuardAdjudicationReport(
   repoRoot: string,
@@ -638,6 +634,3 @@ export async function writeGuardAdjudicationReport(
   return writeGuardFindingsReport(repoRoot, await readGuardLatest(repoRoot));
 }
 
-// Re-exported so the CLI states the ceiling it confirms against without a
-// second import path into the service internals.
-export { ADJUDICATE_BUDGET } from '../services/guard-adjudicate/session.js';

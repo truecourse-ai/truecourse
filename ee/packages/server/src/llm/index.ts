@@ -3,7 +3,7 @@
  * scan/infer/analyze run against Anthropic/OpenAI/Bedrock/Copilot rather
  * than a `claude` binary) and exposes the Models settings API. The active
  * provider comes ONLY from the encrypted Postgres config (set via the Models
- * page) — there is no CLI/.env provider fallback in EE. Until a provider is set,
+ * page) — there is no .env provider fallback in EE. Until a provider is set,
  * there is simply no transport and LLM work errors loudly.
  */
 
@@ -166,11 +166,11 @@ export interface RegisterLlmOptions {
  * Install the encrypted Postgres provider store + the Models API, and load the
  * stored provider as the active transport.
  *
- * EE has NO CLI/.env provider fallback: `DATABASE_URL` + `TRUECOURSE_SECRET_KEY`
+ * EE has NO .env provider fallback: `DATABASE_URL` + `TRUECOURSE_SECRET_KEY`
  * are required (the caller fails boot if the secret is missing/weak), and the
  * provider comes only from the in-app store. Until one is set via the Models
  * page there is simply no transport — LLM work errors loudly rather than
- * silently using an ambient CLI/.env key.
+ * silently using an ambient .env key.
  */
 export async function registerLlmProviders(
   registry: EeServerRegistry,

@@ -9,7 +9,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { seedDraftGate } from '@truecourse/guard-generator';
 import { mapInterfaces, interfaceTypeFingerprints } from '../../packages/core/src/services/interface.service';
-import { ensureRepoTruecourseDir } from '../../packages/core/src/config/paths';
 import { interfaceFingerprint } from '../../packages/shared/src/interfaces';
 import type { InterfacesFile } from '../../packages/shared/src/index';
 
@@ -567,18 +566,6 @@ describe('mapInterfaces — guard-fixture-api acceptance', () => {
       'updateTodo',
     ]);
     expect(result.fingerprints.api).toMatch(/^sha256:[0-9a-f]{64}$/);
-  });
-});
-
-describe('the interface snapshot is gitignored', () => {
-  it('lists guard/interfaces.json in the store .gitignore', () => {
-    writeRepo({ 'package.json': '{}' });
-    const dir = ensureRepoTruecourseDir(repo);
-    const ignored = fs.readFileSync(path.join(dir, '.gitignore'), 'utf-8').split('\n');
-    expect(ignored).toContain('guard/interfaces.json');
-    // …and its authored sibling is NOT: hand-authored surfaces travel with the
-    // repo, or a fresh clone maps itself back down to cli + api.
-    expect(ignored).not.toContain('guard/interfaces.authored.json');
   });
 });
 

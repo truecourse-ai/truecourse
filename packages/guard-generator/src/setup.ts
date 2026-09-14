@@ -1,6 +1,6 @@
 /**
- * `truecourse guard setup` — the CHEAP preparation stage that runs between
- * `spec scan` and `guard generate`.
+ * Flow setup — the CHEAP preparation stage that runs between the Document scan
+ * and Flow generation.
  *
  * Every environment fact guard needs used to be discovered as a byproduct of the most
  * expensive stage in the product, and FIXING any of them edits `recipe.json`, which
@@ -40,10 +40,10 @@
  * recipe and a seed reports and no-ops, and the report's `steps` spine records a
  * per-step input fingerprint so an unchanged step is SKIPPED on the next run
  * (`skipped`/`unchanged`). `refresh` forces every step; refreshing the SEED
- * additionally needs `confirmSeedReplace` to answer true, and the CLI's non-TTY path
- * answers false — a hand-edited seed script is never clobbered by a flag.
+ * additionally needs `confirmSeedReplace` to answer true, and a caller that cannot
+ * ask answers false — a hand-edited seed script is never clobbered by a flag.
  *
- * SINGLE-STEP MODE (`only` / the CLI's `--only-<step>` flags): run one LLM-bearing
+ * SINGLE-STEP MODE (`only`): run one LLM-bearing
  * step in isolation — prior steps replay from what they left on disk (never a
  * session, never the live probe; a step nobody ever ran fails loud with
  * {@link SetupStepNotReadyError}), later steps never start, and `guard/setup.json`
@@ -125,12 +125,12 @@ const MAX_SPEC_EXCERPTS = 6
 const SPEC_EXCERPT_CHARS = 1500
 
 // ---------------------------------------------------------------------------
-// Single-step mode (`--only-<step>`)
+// Single-step mode (`only`)
 // ---------------------------------------------------------------------------
 
 /**
- * The setup steps that may spend an LLM session, in spine order — the five the
- * `--only-<step>` flags select from. `detect` is NOT one of them: it is one
+ * The setup steps that may spend an LLM session, in spine order — the ones
+ * `only` selects from. `detect` is NOT one of them: it is one
  * deterministic `mapInterfaces` pass whose in-memory output every later step
  * reads, so it always runs and the detection snapshot is always this run's.
  */
@@ -141,8 +141,8 @@ export type GuardSetupOnlyStep = (typeof GUARD_SETUP_ONLY_STEPS)[number]
  * A single-step run found a PRIOR step's evidence missing: replaying it would
  * mean spending the sessions (or the boot, or the probe) that belong to that
  * step's OWN flag. Deliberately loud — silently running it is exactly the
- * blurring a stepwise run exists to prevent. The fix is always
- * `truecourse guard setup --only-<step>`.
+ * blurring a stepwise run exists to prevent. The fix is always a setup run
+ * with `only` set to that step.
  */
 export class SetupStepNotReadyError extends Error {
   constructor(
@@ -151,7 +151,7 @@ export class SetupStepNotReadyError extends Error {
     readonly missing: string,
   ) {
     super(
-      `the ${step} step has not run (${missing}) — run \`truecourse guard setup --only-${step}\` first`,
+      `the ${step} step has not run (${missing}) — run it without \`only\` first`,
     )
     this.name = 'SetupStepNotReadyError'
   }
@@ -178,7 +178,7 @@ export interface GuardSetupOptions {
    * AFTER it never start, `detect` always runs, and the persisted report merges
    * over the previous one so the untouched steps keep their record.
    *
-   * The exception to the merge is a recipe failure in `--only-recipe`:
+   * The exception to the merge is a recipe failure in `only: 'recipe'`:
    * a failed run reports the rows it reached and nothing else, exactly as a
    * whole run does — a recipe that no longer holds is no basis for calling the
    * steps that were computed against it settled.
@@ -247,7 +247,7 @@ export interface GuardSetupOptions {
   probe?: typeof probeApiServers
 }
 
-/** Stable step taxonomy, shared by the CLI tracker and the dashboard —
+/** Stable step taxonomy for the progress tracker —
  *  the §7.6 spine: recipe → detect → catalog → interfaces → seed → auth
  *  (the old externals step folded INTO catalog). */
 export const GUARD_SETUP_STEPS = [
@@ -457,7 +457,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   // and half-completing would leave a recipe that no spec ever justified.
   if (!hasGuardUniverse(repoRoot)) {
     return failed(
-      'No corpus found. `truecourse guard setup` runs after the spec scan — run `truecourse spec scan` first.',
+      'No corpus found. Flow setup runs after the Document scan, which has not curated anything yet.',
     )
   }
 
@@ -509,7 +509,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
   if (replayed('recipe')) {
     // Single-step mode, a later step: the recipe on disk IS the artifact every
     // step downstream reads. Neither discovery nor the repair session nor the
-    // live probe runs — they belong to `--only-recipe` — and no row is pushed,
+    // live probe runs — they belong to `only: 'recipe'` — and no row is pushed,
     // so the merge below keeps the one the run that really verified it wrote.
     if (!preexisting) {
       throw new SetupStepNotReadyError('recipe', `no readable recipe at ${recipePath(repoRoot)}`)
@@ -891,7 +891,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         inputFingerprint: interfacesFingerprint(repoRoot),
         ...(result.sessionRunId ? { sessionRunId: result.sessionRunId } : {}),
         // The step row is where run reporting lands (diagnostics are NEVER
-        // stored in the catalog, and 01-D left the CLI/dashboard silent on them).
+        // stored in the catalog, and 01-D left the dashboard silent on them).
         ...(result.diagnostics && result.diagnostics.length > 0 ? { diagnostics: result.diagnostics } : {}),
         ...(result.resolutions && result.resolutions.length > 0 ? { resolutions: result.resolutions } : {}),
         ...(result.changes && result.changes.length > 0 ? { changes: result.changes } : {}),
@@ -914,7 +914,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         key: 'interfaces',
         status: 'skipped',
         reason:
-          'interface authoring is not wired into this run — run `truecourse guard interfaces author`, or inject the `authorInterfaces` seam (production does)',
+          'interface authoring is not wired into this run — inject the `authorInterfaces` seam (production does)',
         inputFingerprint: interfacesFp,
       })
       fact('interfaces', 'interface authoring is not wired into this run; the derived catalog stands alone')
@@ -1110,7 +1110,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
 /**
  * The spine a SINGLE-STEP run persists: this run's rows, plus the previous
  * report's row for every step it did not touch, in taxonomy order. Without the
- * carry-forward a `--only-seed` run would leave a one-row spine, and the next
+ * carry-forward a `only: 'seed'` run would leave a one-row spine, and the next
  * bare setup would re-derive the recipe and re-classify the catalog for nothing.
  */
 function mergeStepSpine(
@@ -1838,7 +1838,7 @@ function stepPhases(opts: GuardSetupOptions): {
   }
 }
 
-/** Discovery's phases, in the words a reader of the terminal needs. */
+/** Discovery's phases, in the words a reader of the progress line needs. */
 function recipePhase(phase: RecipeDiscoveryPhase): StepPhase {
   if (phase.kind === 'proposing') {
     return phase.after

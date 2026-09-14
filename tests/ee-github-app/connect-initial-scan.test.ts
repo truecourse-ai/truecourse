@@ -1,16 +1,9 @@
 /**
- * What the gate hangs off the connection router's post-link seam: register the
- * project, then enqueue the repo's INITIAL scan at the default branch's head.
+ * What the gate hangs off the connection router's post-link seam: enqueue the
+ * repo's INITIAL scan at the default branch's head. Nothing is registered — a
+ * repository exists by being connected, and the registry is that view.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-
-const { registerProject } = vi.hoisted(() => ({ registerProject: vi.fn() }));
-// The registry writes to the file-based OSS registry; stub it so the hook is
-// exercised without touching disk.
-vi.mock('@truecourse/core/config/registry', () => ({
-  registerProject,
-  getProjectByPath: vi.fn().mockResolvedValue(null),
-}));
 
 import { createRepoLinkedHook } from '../../ee/packages/github-app/src/connect-gate';
 import type { OctokitClient, RepoLinkRecord } from '../../packages/github-app/src/index';
@@ -30,18 +23,16 @@ let getBranch: ReturnType<typeof vi.fn>;
 let octokit: OctokitClient;
 
 beforeEach(() => {
-  registerProject.mockReset().mockResolvedValue(undefined);
   getBranch = vi.fn().mockResolvedValue({ data: { commit: { sha: 'abc1234567' } } });
   octokit = { repos: { getBranch } } as unknown as OctokitClient;
 });
 
 describe('the gate’s post-link hook', () => {
-  it('registers the project and enqueues a baseline scan at the branch head', async () => {
+  it('enqueues a baseline scan at the branch head', async () => {
     const enqueueBaseline = vi.fn().mockResolvedValue('job_1');
 
     await createRepoLinkedHook(enqueueBaseline)(LINK, octokit);
 
-    expect(registerProject).toHaveBeenCalledWith(LINK.repoFullName, LINK.repoFullName);
     expect(getBranch).toHaveBeenCalledWith({
       owner: 'mushgev',
       repo: 'truecourse-gate-test',
@@ -56,10 +47,9 @@ describe('the gate’s post-link hook', () => {
     });
   });
 
-  it('registers the project but resolves no branch head when no queue is wired', async () => {
+  it('resolves no branch head when no queue is wired', async () => {
     await createRepoLinkedHook()(LINK, octokit);
 
-    expect(registerProject).toHaveBeenCalledOnce();
     expect(getBranch).not.toHaveBeenCalled();
   });
 

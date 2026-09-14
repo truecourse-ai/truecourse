@@ -31,7 +31,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { EntityList, type EntityListGroup } from '@/preview/ui/entity-list';
 import { HoverPopover } from '@/preview/ui/hover-popover';
 import {
-  GUARD_SEED_INIT_COMMAND,
+  GUARD_SEED_INIT_ACTION,
   guardNeedsSetupNeed,
   guardPlainStatus,
 } from '@/lib/guard-flow-status';
@@ -269,8 +269,7 @@ export function GuardSectionDetail({
           appear when there is a seed to draft. */}
       {!section.needsSetup && section.blockedOnCapabilities?.some(isMissingDataCapability) && (
         <p className="border-b border-border px-3 py-2 text-[11px] text-muted-foreground">
-          No seed script yet, draft one with{' '}
-          <code className="rounded bg-muted px-1 py-0.5">{GUARD_SEED_INIT_COMMAND}</code>.
+          No seed script yet, {GUARD_SEED_INIT_ACTION} drafts one.
         </p>
       )}
 

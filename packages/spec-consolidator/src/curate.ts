@@ -9,7 +9,7 @@
  * five one-shot LLM stages this module used to chain. What stays here is the
  * part that was never a call and that the new run folds through unchanged:
  *
- * - {@link CurateStats} / {@link CurateResult} — the CLI and dashboard read
+ * - {@link CurateStats} / {@link CurateResult} — the dashboard reads
  *   exactly these fields off a scan, whichever engine produced it;
  * - {@link readCorpusDecisions} — the decisions read the run curates with;
  * - {@link pruneOrphanedConflictResolutions} — drop stored verdicts whose docs
@@ -33,6 +33,7 @@ import {
   type DecisionsFile,
 } from './types.js';
 import { type CuratedCorpus, type Overlap } from './corpus-types.js';
+import { specDecisionsPath } from '@truecourse/shared/work-tree';
 
 export interface CurateStats {
   docsScanned: number;
@@ -43,7 +44,7 @@ export interface CurateStats {
    * Flagged overlaps a verify pass pruned as detector false positives. Always 0
    * on a session scan — the overlap session flags and adjudicates in ONE pass,
    * so there is no recall-biased detector to prune behind. Kept in the shape so
-   * older engines' results still parse and the CLI line renders either way.
+   * older engines' results still parse and the stats render either way.
    */
   overlapRefuted: number;
   /**
@@ -73,15 +74,6 @@ export interface CurateStats {
    * failed 100% of calls and the corpus looked merely permissive.
    */
   classifyFailed: number;
-  /** Active include-scope globs (`spec.include`); empty when discovery looks at everything. */
-  scopeGlobs: string[];
-  /**
-   * Configured manualIncludes that fall outside the active include-scope. A
-   * manual include is a relevance-level override, not a universe one, so an
-   * out-of-scope include never gets discovered — surfaced here so a scope typo
-   * isn't a silent no-op.
-   */
-  outOfScopeManualIncludes: string[];
   /**
    * Session kinds that lost SESSIONS this run (attempts + failures + the first
    * error), in the same tally shape the one-shot stages used — `attempts` counts
@@ -101,7 +93,7 @@ export interface CurateResult {
   skippedDocs: Array<{ path: string; reason: string; category?: string }>;
   /** The decisions file that informed the run. */
   decisions: DecisionsFile;
-  /** Summary counts for CLI output / dashboard status. */
+  /** Summary counts for dashboard status. */
   stats: CurateStats;
 }
 
@@ -205,8 +197,8 @@ export function autoApplyHighConfidenceRecommendations(
  * The judge's review for a conflict, resolved from its REPRESENTATIVE
  * overlap — the record whose docs order is exactly `[c.a, c.b]` and whose section
  * pointers match — so a `pick-a`/`pick-b` recommendation orients exactly as
- * `c.a`/`c.b`. Mirrors the CLI's lookup (`spec-conflicts.ts`); the merged
- * conflict record deliberately does not carry the review itself.
+ * `c.a`/`c.b`. The merged conflict record deliberately does not carry the
+ * review itself.
  */
 function reviewForConflict(corpus: CuratedCorpus, c: CorpusConflict): Overlap['review'] {
   const sectionKeys = (
@@ -232,7 +224,7 @@ function reviewForConflict(corpus: CuratedCorpus, c: CorpusConflict): Overlap['r
 // ---------------------------------------------------------------------------
 // Decisions I/O — the scan run reads decisions.json for the user's manualAreas
 // and include/exclude overrides; kept here so the deterministic tail is
-// self-contained. Recording new decisions stays the caller's job (CLI /
+// self-contained. Recording new decisions stays the caller's job (the
 // dashboard); the only writes this module makes are the prune + auto-apply
 // above.
 // ---------------------------------------------------------------------------
@@ -248,7 +240,7 @@ const EMPTY_DECISIONS: DecisionsFile = {
 };
 
 export function readCorpusDecisions(repoRoot: string): DecisionsFile {
-  const file = path.join(repoRoot, '.truecourse', 'specs', 'decisions.json');
+  const file = specDecisionsPath(repoRoot);
   if (!fs.existsSync(file)) return EMPTY_DECISIONS;
   try {
     const raw = JSON.parse(fs.readFileSync(file, 'utf-8'));

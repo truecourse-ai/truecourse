@@ -86,12 +86,11 @@ import {
   type RegistryEntry,
   type RegistryStore,
 } from '@truecourse/core/config/registry';
-import {
-  createSessionRun,
-  sessionsDir,
-  setSessionsRootResolver,
-  resetSessionsRootResolver,
-} from '@truecourse/core/lib/sessions-store';
+import { createStoredSessionRun, sessionsDir } from '@truecourse/core/lib/sessions-store';
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
+import { installMemoryGuardOverlays, resetGuardOverlayStore } from '../helpers/memory-guard-overlays';
+import { installMemorySpecStore, resetSpecStore } from '../helpers/memory-spec-store';
 import { resetContextStore, setContextStore } from '@truecourse/core/lib/context-store';
 import type { OctokitClient } from '../../packages/github-app/src/octokit';
 import { MemoryGateStore } from '../github-app/memory-store';
@@ -162,18 +161,8 @@ function derivedRegistry(gate: MemoryGateStore): RegistryStore {
     (await gate.listRepos()).map((r) => toEntry(r.repoFullName, r.defaultBranch));
   return {
     readRegistry: all,
-    pruneStaleProjects: all,
     getProjectBySlug: async (slug) => (await all()).find((e) => e.slug === slug) ?? null,
     getProjectByPath: async (p) => (await all()).find((e) => e.path === p) ?? null,
-    registerProject: async (repoPath) =>
-      (await all()).find((e) => e.path === repoPath) ?? {
-        slug: slugify(repoPath, []),
-        name: repoPath,
-        path: repoPath,
-      },
-    unregisterProject: async () => true,
-    touchProject: async () => {},
-    setLastAnalyzed: async () => {},
   };
 }
 
@@ -217,18 +206,16 @@ function signed(body: unknown): { payload: string; signature: string } {
 }
 
 beforeAll(() => {
-  process.env.TRUECOURSE_HOME = makeTmpDir('tc-github-home-');
   Object.assign(process.env, APP_ENV);
-  // The production sessions layout: transcripts keyed by repo identity under
-  // the global dir, so they exist independent of any work tree.
-  setSessionsRootResolver((key) =>
-    path.isAbsolute(key)
-      ? path.join(key, '.truecourse', 'sessions')
-      : path.join(process.env.TRUECOURSE_HOME!, 'sessions', key.replace('/', '__')),
-  );
 });
 
 beforeEach(async () => {
+  installMemorySessionRuns();
+  // The per-repo guard surfaces this suite reaches are about VISIBILITY, not
+  // guard data: the stores are here so the routes resolve, and hold nothing.
+  installWorkTreeGuardStore();
+  installMemoryGuardOverlays();
+  installMemorySpecStore();
   store = new MemoryGateStore();
   // A push looks for the source that scopes the repository, so the workspace
   // store has to exist for the push hook to do anything.
@@ -260,11 +247,14 @@ afterEach(() => {
   resetWorkspaceLlmConfigStore();
   resetWorkspaceLlmBackend();
   setWorkTreeProvider(null);
-  fs.rmSync(path.join(process.env.TRUECOURSE_HOME!, 'sessions'), { recursive: true, force: true });
+  resetSessionRuns();
+  resetGuardStore();
+  resetGuardOverlayStore();
+  resetSpecStore();
+  fs.rmSync(sessionsDir(REPO), { recursive: true, force: true });
 });
 
 afterAll(() => {
-  resetSessionsRootResolver();
   for (const key of Object.keys(APP_ENV)) delete process.env[key];
   for (const dir of tmpDirs) fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -612,7 +602,7 @@ describe('disconnecting a repository', () => {
     await linkRepo(app).expect(201);
 
     // Transcripts a scan left behind, keyed by identity.
-    createSessionRun(REPO, { command: 'spec-scan', gitRef: 'abc' }).finish('completed');
+    (await createStoredSessionRun(REPO, { command: 'spec-scan', gitRef: 'abc' })).finish('completed');
     expect(fs.existsSync(sessionsDir(REPO))).toBe(true);
 
     await request(app)

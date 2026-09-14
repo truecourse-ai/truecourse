@@ -11,7 +11,7 @@
  * Neither side imports the other (sibling adapters over core).
  *
  * Keyed by `repoKey` — the opaque per-repo identity every store keys by (the
- * working-tree path in OSS, `owner/repo` in hosted). Unset (CLI, tests, or a
+ * working-tree path in OSS, `owner/repo` in hosted). Unset (tests, or a
  * server without sockets) → `emitRepoLifecycle` is a silent no-op. Best-effort:
  * a refresh signal must never fail the job settle that fires it, so emitter
  * errors are swallowed.

@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 import path from 'node:path';
 
 // Two test projects sharing one `pnpm test` invocation:
-//   - node:   the existing suite (analyzer, core, dashboard-server, cli, ...).
+//   - node:   the engine and the server (core, guard, the stores, the routes).
 //             Boots tree-sitter WASM once via tests/setup.ts.
 //   - client: the dashboard React UI. jsdom + @testing-library/react.
 // New projects (e.g. an ee/ test project later) just add another entry.

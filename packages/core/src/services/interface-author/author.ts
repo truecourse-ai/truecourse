@@ -104,7 +104,7 @@ export interface AuthorRunOptions {
   context?: ReadonlyMap<string, WebPlaceContext>
   signal?: AbortSignal
   onProgress?: (event: AuthorProgress) => void
-  /** Every transcript event, as it is persisted — the CLI's live line. */
+  /** Every transcript event, as it is persisted — the caller's live view. */
   onSessionEvent?: (placeId: string, event: SessionEvent) => void
   mintSessionId?: () => string
   now?: () => string
@@ -244,7 +244,7 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
     const unknown = [...named].filter((id) => !all.some((item) => item.place.id === id))
     if (unknown.length > 0) {
       throw new Error(
-        `no such place: ${unknown.join(', ')}. \`truecourse guard interfaces\` lists the places this repository has.`,
+        `no such place: ${unknown.join(', ')}. The interface catalog lists the places this repository has.`,
       )
     }
     const staleNamed = [...named].filter((id) => stale.has(id))
@@ -438,8 +438,8 @@ export async function authorWebInterfaces(opts: AuthorRunOptions): Promise<Autho
 }
 
 /**
- * How many clusters run at once by default — the pool's own default, kept under
- * the name the CLI has always imported. See {@link defaultPoolConcurrency} for
+ * How many clusters run at once by default — the pool's own default, re-exported
+ * under this module's name. See {@link defaultPoolConcurrency} for
  * why it is small and which knob (`TRUECOURSE_MAX_CONCURRENCY`) moves it.
  */
 export { defaultPoolConcurrency as defaultAuthorConcurrency }

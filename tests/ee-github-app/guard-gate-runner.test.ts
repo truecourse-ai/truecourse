@@ -27,7 +27,8 @@ import type {
   GuardExecutor,
   Recipe,
 } from '@truecourse/guard-runner';
-import { PgGuardStore } from '../../ee/packages/data-store/src/index';
+import { PgGuardStore, PgSpecStore } from '../../ee/packages/data-store/src/index';
+import { setSpecStore, resetSpecStore } from '@truecourse/core/lib/spec-store';
 import { createSemaphore } from '../../ee/packages/server/src/jobs/guard-gate-limiter';
 import { selectGateStore } from '../../ee/packages/github-app/src/store/index';
 import type { GateStore } from '../../packages/github-app/src/store/types';
@@ -185,6 +186,9 @@ beforeEach(async () => {
   db = drizzle(client, { schema }) as unknown as Db;
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
   guardStore = new PgGuardStore(db);
+  // The cold-generate path materializes the stored corpus through the spec seam,
+  // so it has to be installed even when the test stores no corpus at all.
+  setSpecStore(new PgSpecStore(db));
   gateStore = selectGateStore(db);
   await gateStore.linkRepo({
     repoFullName: REPO,
@@ -203,6 +207,7 @@ beforeEach(async () => {
 afterEach(async () => {
   if (savedKillSwitch === undefined) delete process.env[KILL_SWITCH];
   else process.env[KILL_SWITCH] = savedKillSwitch;
+  resetSpecStore();
   await client.close();
 });
 

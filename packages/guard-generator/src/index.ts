@@ -11,7 +11,7 @@ export {
   generateGuards,
   looksWorldMutating,
   workerCacheKey,
-  // Single-step mode (the CLI's `--only-<step>` flags): the pipeline's session
+  // Single-step mode (`only`): the pipeline's session
   // steps in order. `@truecourse/core` enforces the cache-only replay of the
   // prior ones against these.
   GENERATE_SESSION_STEPS,
@@ -239,7 +239,7 @@ export {
   type SeedDraftDatabase,
 } from './seed-draft.js'
 
-// `truecourse guard setup` — the cheap preparation stage between the spec scan and
+// Flow setup — the cheap preparation stage between the spec scan and
 // the (expensive) generate.
 export {
   runGuardSetup,

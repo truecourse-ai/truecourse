@@ -611,11 +611,8 @@ export function buildCSharpSymbolIndex(files: FileAnalysis[], rootPath: string):
 export function contributeCSharpEdges(files: FileAnalysis[], rootPath: string): ModuleDependency[] {
   const index = buildCSharpSymbolIndex(files, rootPath)
   // Do NOT write to stdout/stderr here. This runs mid-analysis during
-  // dependency-graph building, and any stray line corrupts the CLI's in-place
-  // progress checklist: the extra row throws off the renderer's cursor
-  // accounting, leaving a ghost/duplicate step (see the analyze.ts step
-  // renderer). `index.stats.ambiguousRefs` remains available for a caller that
-  // wants to surface it through the file logger — the way core logs the Pyright
-  // fallback in analyzer.service.ts — rather than printing from this library.
+  // dependency-graph building, and a library that prints has no idea what its
+  // caller is drawing. `index.stats.ambiguousRefs` remains available for a
+  // caller that wants to surface it through the logger instead.
   return index.edges
 }

@@ -58,8 +58,8 @@ export type EnqueueBaseline = (req: {
 export interface RegisterGithubAppOptions {
   /** Dashboard client origin for browser-facing redirects (e.g. /setup). */
   appUrl?: string;
-  /** Shared db (Postgres) when hosted; null → the file gate store. */
-  db?: Db | null;
+  /** The shared Postgres db every gate record lives in. */
+  db: Db;
   /** Background-queue enqueue for repo scans (connect + push). Inline fallback if omitted. */
   enqueueBaseline?: EnqueueBaseline;
   /** Background-queue enqueue for guard-gate runs (PR events). Inline fallback if omitted. */
@@ -75,7 +75,7 @@ export interface RegisterGithubAppOptions {
  */
 export async function registerGithubApp(
   registry: EeServerRegistry,
-  opts: RegisterGithubAppOptions = {},
+  opts: RegisterGithubAppOptions,
 ): Promise<boolean> {
   const cfg = loadGithubAppConfig();
   if (!cfg) {
@@ -87,7 +87,7 @@ export async function registerGithubApp(
 
   const appUrl =
     opts.appUrl ?? process.env.WORKOS_APP_URL ?? 'http://localhost:3000';
-  const store = selectGateStore(opts.db ?? null);
+  const store = selectGateStore(opts.db);
   const auth = createGithubAuth(cfg);
   const notifier = notifierFromConfig(cfg);
 

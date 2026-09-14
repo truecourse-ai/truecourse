@@ -60,6 +60,7 @@ import { appendFindingsLedger } from '../agent/findings-ledger.js';
 import { runSessionPool } from '../agent/session-pool.js';
 import { readFileTool, searchTool } from '../agent/repo-tools.js';
 import { describeSessionFailure, type GuardSetupSessionContext } from './session-context.js';
+import { corpusFilePath } from '@truecourse/shared/work-tree';
 
 export const DEPENDENCY_CATALOG_SESSION_KIND = 'guard-setup.dependency-catalog';
 export const DEPENDENCY_CATALOG_CACHE_NAME = 'guard/dependency-catalog';
@@ -466,7 +467,7 @@ export function dependencyCatalogBriefing(
 /** The corpus's area tags with their doc counts — the domain map the catalog
  *  grounds on. A missing/unreadable corpus yields nothing, never a failure. */
 function corpusAreaSummary(repoRoot: string): { area: string; docs: number }[] {
-  const file = path.join(repoRoot, '.truecourse', 'specs', 'corpus.json');
+  const file = corpusFilePath(repoRoot);
   try {
     const parsed = JSON.parse(fs.readFileSync(file, 'utf-8')) as {
       docs?: { areaTags?: string[] }[];

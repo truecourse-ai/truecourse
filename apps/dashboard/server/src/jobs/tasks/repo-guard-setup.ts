@@ -1,6 +1,6 @@
 import { dashboardActivity } from '../../services/dashboard-activity.service.js';
 /**
- * `repo.guard-setup` — `truecourse guard setup` over an ephemeral clone.
+ * `repo.guard-setup` — Flow setup over an ephemeral clone.
  *
  * Setup writes files INSIDE the repo (the recipe, the dependency catalog, the
  * seed script, its own step spine), and a hosted clone is thrown away when the

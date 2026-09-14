@@ -27,6 +27,7 @@ import {
   writeGuardDecisions,
 } from '../../packages/core/src/commands/guard-read';
 import { setGuardStore, resetGuardStore } from '../../packages/core/src/lib/guard-store';
+import { installWorkTreeGuardStore } from '../helpers/work-tree-guard-store';
 import type {
   GuardDecisions,
   GuardDismissedClaim,
@@ -82,7 +83,7 @@ describe('mergeGuardDecisions — union dismissedClaims by identity', () => {
 describe('PR-scoped guard decisions are enterprise-only on the file store', () => {
   let repo: string;
   beforeEach(() => {
-    resetGuardStore(); // file-backed default (OSS)
+    installWorkTreeGuardStore(); // the non-enterprise store
     repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-overlay-'));
   });
   afterEach(() => {
@@ -121,7 +122,7 @@ describe('PR-scoped guard decisions are enterprise-only on the file store', () =
 describe('dismissGuardFlow / undismissGuardFlow (repo scope, file store)', () => {
   let repo: string;
   beforeEach(() => {
-    resetGuardStore();
+    installWorkTreeGuardStore();
     repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-flow-dismiss-'));
   });
   afterEach(() => {

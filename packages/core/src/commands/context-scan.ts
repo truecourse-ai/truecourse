@@ -97,7 +97,6 @@ export interface WorkspaceContextScanOptions {
   repositories?: readonly string[];
   /** Seams the caller threads in: progress, cancellation, the run's driver. */
   tracker?: CurateInProcessOptions['tracker'];
-  source?: CurateInProcessOptions['source'];
   driver?: CurateInProcessOptions['driver'];
   transportMode?: CurateInProcessOptions['transportMode'];
   signal?: AbortSignal;
@@ -151,7 +150,6 @@ export async function workspaceContextScanInProcess(
         docOrigins: materialized.origins,
         deferRunCompletion: true,
         ...(options.tracker ? { tracker: options.tracker } : {}),
-        ...(options.source ? { source: options.source } : {}),
         ...(options.driver ? { driver: options.driver } : {}),
         ...(options.transportMode ? { transportMode: options.transportMode } : {}),
         ...(options.signal ? { signal: options.signal } : {}),

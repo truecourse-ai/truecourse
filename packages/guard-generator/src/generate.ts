@@ -62,12 +62,20 @@ import pLimit from 'p-limit'
 import os from 'node:os'
 import {
   auditTransport,
-  cliTransport,
+  getDefaultTransport,
+  noProviderTransport,
   formatStageFailure,
   type LlmTransport,
   type StageTransportTally,
   type TransportAudit,
 } from '@truecourse/shared/llm'
+
+/** The transport a run's one-shot stages call through: the caller's, else the
+ *  process default. With neither, a stage that calls fails with the
+ *  no-provider message — a run whose stages are all injected never notices. */
+function requireTransport(options: { transport?: LlmTransport }): LlmTransport {
+  return options.transport ?? getDefaultTransport() ?? noProviderTransport
+}
 import {
   writeManifest,
   readManifest,
@@ -333,7 +341,7 @@ export function looksWorldMutating(flow: { title: string; milestones: readonly s
 
 /**
  * The generate pipeline's three SESSION steps, in pipeline order — what the
- * CLI's `--only-<step>` flags select (SPEC_GUARD_PLAN item 110, the `spec scan`
+ * `only` selects (SPEC_GUARD_PLAN item 110, the scan's
  * template). The fidelity judge is a depth-1 CHILD of a worker session, so it
  * has no step of its own; the deterministic stages between them (recipe load,
  * section planning, interface mapping, realization matching, the build) are not
@@ -625,7 +633,7 @@ export interface GenerateGuardsOptions {
   browserPreflight?: typeof preflightBrowser
   /**
    * The hard gate: refuse to run without a committed `recipe.json` instead of
-   * deriving one. TRUE on every working-tree path (`truecourse guard setup` owns
+   * deriving one. TRUE on every working-tree path (Flow setup owns
    * derivation now); FALSE on the hosted/EE ephemeral-checkout paths, which have no
    * user to run setup and must stay self-sufficient. Defaults to false so the engine
    * is unchanged for any caller that does not opt in.
@@ -633,13 +641,12 @@ export interface GenerateGuardsOptions {
   requireExistingRecipe?: boolean
   /**
    * INTERNAL test seam: stop after flow synthesis, before interface matching and
-   * authoring. Not a user-facing option and not exposed by any command — flow
-   * curation is `dismissedFlows` and cost control is the estimate gate.
+   * authoring. Not a user-facing option — flow curation is `dismissedFlows` and
+   * cost control is the estimate gate.
    */
   stopAfterFlows?: boolean
   /**
-   * SINGLE-STEP MODE (the CLI's `--only-<step>` flags): run only this session
-   * step. Steps BEFORE it replay from their outcome caches — the SEAMS enforce
+   * SINGLE-STEP MODE: run only this session step. Steps BEFORE it replay from their outcome caches — the SEAMS enforce
    * that (a miss throws `GenerateStepNotReadyError` in `@truecourse/core`
    * rather than silently spending the prior step's sessions); steps AFTER it
    * never start; and every durable write is gated on the FINAL step (`worker`)
@@ -717,7 +724,7 @@ export interface GenerateGuardsOptions {
   /**
    * Flow-worker pool progress: `done`/`total` worker sessions settled (cache
    * hits included) plus the running settled/blocked outcome tallies — what the
-   * CLI renders as `workers a/b · settled n · blocked m`.
+   * progress line renders as `workers a/b · settled n · blocked m`.
    */
   onWorkerProgress?: (progress: { done: number; total: number; settled: number; blocked: number }) => void
   /** Grounding probe progress — captured vs planned probes across the worker
@@ -998,14 +1005,14 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // injects a runner bypasses the transport entirely: that stage records no
   // attempts, which is correct — the tally answers "did this stage reach the
   // model", nothing else.
-  const audit = auditTransport(options.transport ?? cliTransport())
+  const audit = auditTransport(requireTransport(options))
   const transport = audit.transport
   /** File one line about a thing this run did, under the phase that did it. */
   const fact = (step: GuardGenerateFactStep, line: string): void => options.onFact?.(step, line)
 
   if (!hasGuardUniverse(repoRoot)) {
     return emptyResult('no-docs', {
-      reason: 'No corpus found. Run `truecourse spec scan` to curate the spec docs first.',
+      reason: 'No corpus found. A Document scan curates the spec docs first.',
     })
   }
 
@@ -1027,7 +1034,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     if (!existing) {
       return emptyResult('recipe-failed', {
         reason:
-          'No .truecourse/scenarios/recipe.json. Run `truecourse guard setup` first — it derives and verifies the recipe, declares the external APIs this repo talks to, and prepares the seed, so `guard generate` never pays to discover any of it.',
+          'No scenarios/recipe.json. Flow setup runs first — it derives and verifies the recipe, declares the external APIs this repo talks to, and prepares the seed, so Flow generation never pays to discover any of it.',
       })
     }
   }
@@ -1403,7 +1410,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     .filter((d) => extractedDocs.has(d.doc) && !extractedClaimKeys.has(dismissedClaimKey(d.doc, d.anchor, d.title)))
     .map((d) => ({ doc: d.doc, anchor: d.anchor, title: d.title }))
 
-  // Single-step early return (`--only-extract`): the extraction pool ran (or
+  // Single-step early return (`only: 'extract'`): the extraction pool ran (or
   // replayed), and nothing downstream starts — not even the free interface
   // mapping below. No corpus file is touched; the step's durable artifact is
   // its own outcome cache, which the next step replays from.
@@ -1528,7 +1535,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     sessionDocs: docs,
     sectionFingerprints: new Map(plan.sections.map((s) => [flowSectionKey(s.doc, s.anchor), s.fingerprint])),
     // `flows.json` is a durable output, so single-step mode writes it only when
-    // the FINAL step runs — `--only-flows` computes the corpus, caches the
+    // the FINAL step runs — `only: 'flows'` computes the corpus, caches the
     // sessions that produced it, and leaves the committed file alone.
     ...(options.only !== undefined && options.only !== 'worker' ? { write: false } : {}),
     onArea: () => options.onFlowProgress?.(++areasDone, areas.length),
@@ -1654,7 +1661,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const siblingIndex = buildSiblingIndex(repoRoot, priorFlows)
 
   // The flows stop — the internal `stopAfterFlows` test seam and single-step
-  // mode's `--only-flows` share it: everything spec-side ran, nothing was
+  // mode's `only: 'flows'` share it: everything spec-side ran, nothing was
   // written (single-step mode also suppressed the `flows.json` write above).
   if (options.stopAfterFlows || options.only === 'flows') {
     return {
@@ -4231,10 +4238,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   }
   writeWorkingManifest()
 
-  // Post-generate seed drafting used to run HERE. It is gone: `truecourse guard
-  // setup` writes the seed BEFORE the first extraction call, and the drafting gate
-  // refused to overwrite an existing `api.seed` — so the stage was dead by
-  // construction the moment setup became a prerequisite.
+  // Post-generate seed drafting used to run HERE. It is gone: Flow setup writes
+  // the seed BEFORE the first extraction call, and the drafting gate refused to
+  // overwrite an existing `api.seed` — so the stage was dead by construction the
+  // moment setup became a prerequisite.
 
   // Reconcile the durable ledger ONCE — counts and taints together:
   //  - counts: prior entries carry; this run's auto-resolutions bump theirs; a
@@ -4659,7 +4666,7 @@ function noOpAnomalyReason(anomaly: GuardNoOpAnomaly, recipe: Recipe): string {
       `so it ignores its arguments. Every scenario validated against it would be a silent no-op, so generation ` +
       `was aborted before writing anything — no scenario file, manifest, ledger or finding was touched. Fix the ` +
       `recipe entry (it likely names a stale build output or a placeholder such as \`true\`) and re-run ` +
-      `\`truecourse guard generate\`.`
+      `Flow generation.`
     )
   }
   const pct = Math.round(anomaly.fraction * 100)
@@ -4671,7 +4678,7 @@ function noOpAnomalyReason(anomaly: GuardNoOpAnomaly, recipe: Recipe): string {
     `request lines — the server answers every route identically with nothing, regardless of what it is asked. ` +
     `Every scenario validated against it would prove nothing about the spec, so generation was aborted before ` +
     `writing anything — no scenario file, manifest, ledger or finding was touched. Fix the recipe's api serve ` +
-    `command (it likely boots a placeholder or the wrong service) and re-run \`truecourse guard generate\`.`
+    `command (it likely boots a placeholder or the wrong service) and re-run Flow generation.`
   )
 }
 
@@ -4940,7 +4947,7 @@ function worldLostMessage(failure: GuardScenarioResult, boots: number, repairs: 
     `against it, the server could not boot any more (${observed}), and ${tried}. Every later execution was ` +
     'skipped instead of retiring its flow against a dead world, so the affected flows stay unsettled. Find what took ' +
     'the world down — a container that exited, a port another process took, a reset run under the pool — and ' +
-    're-run `truecourse guard generate`.'
+    're-run Flow generation.'
   )
 }
 

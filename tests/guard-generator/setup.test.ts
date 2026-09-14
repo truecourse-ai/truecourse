@@ -210,14 +210,14 @@ function baseOpts(r: string, over: Partial<GuardSetupOptions> = {}): GuardSetupO
 describe('runGuardSetup — the gates', () => {
   // Step 0.5. Setup is the SECOND link of a three-stage chain; half-completing would
   // leave a recipe no spec ever justified.
-  it('refuses without a corpus and names `spec scan`', async () => {
+  it('refuses without a corpus and names the Document scan', async () => {
     const r = fixtureRepo({ corpus: false })
     writeRecipe(r)
 
     const { report } = await runGuardSetup(baseOpts(r))
 
     expect(report.status).toBe('failed')
-    expect(report.reason).toMatch(/truecourse spec scan/)
+    expect(report.reason).toMatch(/Document scan/)
     expect(report.steps).toEqual([])
   })
 

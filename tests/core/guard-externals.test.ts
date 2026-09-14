@@ -19,7 +19,6 @@ import {
   writeGuardExternals,
   GuardExternalsWriteError,
 } from '../../packages/core/src/commands/guard-externals';
-import { GITIGNORE_CONTENTS, ensureRepoTruecourseDir } from '../../packages/core/src/config/paths';
 import { computeRecipeFingerprint } from '../../packages/guard-runner/src/index';
 import { deriveNeedsSetup } from '../../packages/shared/src/index';
 import type { GuardGenerateReport } from '../../packages/shared/src/index';
@@ -745,33 +744,3 @@ describe('external services without an api block (the dependency catalog)', () =
   });
 });
 
-describe('the .truecourse/.gitignore template', () => {
-  it('ignores the externals overlay — the secrets must never be committable', () => {
-    expect(GITIGNORE_CONTENTS.split('\n')).toContain('scenarios/externals.local.json');
-    // Same split for the dependency catalog: the INSTANCES are per-machine secrets.
-    expect(GITIGNORE_CONTENTS.split('\n')).toContain('scenarios/dependencies.local.json');
-    // The declarations themselves stay committable.
-    expect(GITIGNORE_CONTENTS).not.toContain('scenarios/recipe.json');
-    expect(GITIGNORE_CONTENTS.split('\n')).not.toContain('scenarios/dependencies.json');
-  });
-
-  // The template grows secret-bearing entries over time; a repo initialized before
-  // one existed must be upgraded in place, or `git add` can stage a registered key.
-  it('appends missing template lines to an EXISTING .gitignore, keeping user lines', () => {
-    const r = repo();
-    const gitignore = path.join(r, '.truecourse', '.gitignore');
-    fs.mkdirSync(path.dirname(gitignore), { recursive: true });
-    fs.writeFileSync(gitignore, 'analyses/\nmy-own-entry/\n');
-
-    ensureRepoTruecourseDir(r);
-    const lines = fs.readFileSync(gitignore, 'utf-8').split('\n');
-    expect(lines).toContain('my-own-entry/');
-    expect(lines).toContain('scenarios/dependencies.local.json');
-    expect(lines.filter((l) => l === 'analyses/')).toHaveLength(1);
-
-    // Idempotent: a second ensure rewrites nothing.
-    const upgraded = fs.readFileSync(gitignore, 'utf-8');
-    ensureRepoTruecourseDir(r);
-    expect(fs.readFileSync(gitignore, 'utf-8')).toBe(upgraded);
-  });
-});

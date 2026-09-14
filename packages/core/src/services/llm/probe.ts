@@ -2,10 +2,8 @@
  * Live validation of a candidate API-transport configuration: one tiny call
  * that proves the credentials, endpoint, and model id all resolve and answer.
  *
- * Same semantics the enterprise Models page uses before it persists a provider
- * (`ee/packages/server/src/llm/index.ts`), so a config accepted in one edition
- * is accepted in the other. It lives in core rather than the CLI so the CLI
- * (`config llm setup` / `config llm test`) and any future caller share it.
+ * The Models page runs it before it persists a provider, and every run runs it
+ * before it spends, so a block accepted in one place is accepted in the other.
  *
  * Nothing is recorded and nothing is priced — the probe is not a pipeline call.
  */
@@ -14,7 +12,7 @@ import { createApiTransport, type ProviderConfig } from '@truecourse/llm-api';
 import { loadSdk } from '@truecourse/llm-claude-agent';
 import { resolveClaudeBinary } from '@truecourse/shared';
 import type { LlmTransport } from '@truecourse/shared/llm';
-import type { GlobalApiLlmConfig } from '../../config/global-config.js';
+import type { LlmApiConfig } from './provider-config.js';
 import { checkClaudeAuth } from '../../lib/cli-binary.js';
 import { buildProviderConfig } from './install-transport.js';
 
@@ -32,7 +30,7 @@ export interface ProbeApiConfigOptions {
  * provider's own error when the call fails.
  */
 export async function probeApiConfig(
-  api: GlobalApiLlmConfig,
+  api: LlmApiConfig,
   opts: ProbeApiConfigOptions = {},
 ): Promise<void> {
   const cfg = buildProviderConfig(api);

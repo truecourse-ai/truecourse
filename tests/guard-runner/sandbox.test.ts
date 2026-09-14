@@ -58,18 +58,18 @@ describe('createSandbox — isolation & env', () => {
 describe('createSandbox — env allowlist (hermeticity)', () => {
   it('excludes host vars — secrets, TRUECOURSE_*, and proxy config never reach the child', () => {
     process.env.ANTHROPIC_API_KEY = 'sk-secret'
-    process.env.TRUECOURSE_HOME = '/host/.truecourse'
+    process.env.TRUECOURSE_RUNTIME_DIR = '/host/runtime'
     process.env.HTTPS_PROXY = 'http://proxy:8080'
     process.env.GUARD_RANDOM_HOST_VAR = 'x'
     try {
       const sb = make()
       expect(sb.env.ANTHROPIC_API_KEY).toBeUndefined()
-      expect(sb.env.TRUECOURSE_HOME).toBeUndefined()
+      expect(sb.env.TRUECOURSE_RUNTIME_DIR).toBeUndefined()
       expect(sb.env.HTTPS_PROXY).toBeUndefined()
       expect(sb.env.GUARD_RANDOM_HOST_VAR).toBeUndefined()
     } finally {
       delete process.env.ANTHROPIC_API_KEY
-      delete process.env.TRUECOURSE_HOME
+      delete process.env.TRUECOURSE_RUNTIME_DIR
       delete process.env.HTTPS_PROXY
       delete process.env.GUARD_RANDOM_HOST_VAR
     }

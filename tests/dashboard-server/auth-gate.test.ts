@@ -10,6 +10,7 @@ import request from 'supertest';
 import type { AuthResult, AuthVerifier } from '@truecourse/shared';
 import { createAuthGate } from '../../apps/dashboard/server/src/middleware/auth';
 import { createApp } from '../../apps/dashboard/server/src/app';
+import { clearTestRegistry, installTestRegistry } from '../helpers/test-fixture';
 
 function mkCtx(cookie?: string) {
   const req = { headers: { cookie } } as never as {
@@ -91,6 +92,9 @@ describe('createApp with a verifier', () => {
 
   let app: ReturnType<typeof createApp>;
   beforeEach(() => {
+    // `/api/repos` reads the registry seam; the workspace here has nothing in it.
+    installTestRegistry();
+    clearTestRegistry();
     app = createApp({ serveStatic: false, authVerifier: verify, github: null, jobs: null });
   });
 

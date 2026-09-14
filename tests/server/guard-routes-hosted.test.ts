@@ -16,17 +16,21 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import { PgGuardStore, PgSpecStore } from '../../ee/packages/data-store/src/index';
+import { PgGuardOverlayStore } from '../../packages/data-store/src/index';
 // Import the store setters from the PACKAGE (dist) specifiers — the SAME module
 // instances the dashboard route uses, so setGuardStore actually swaps the store
 // the route reads (source and dist are distinct singletons).
 import { setGuardStore, resetGuardStore } from '@truecourse/core/lib/guard-store';
 import { setSpecStore, resetSpecStore } from '@truecourse/core/lib/spec-store';
+import { setGuardOverlayStore, resetGuardOverlayStore } from '@truecourse/core/lib/guard-overlays';
 import { setRepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
 import { setGuardGatePendingLookup } from '@truecourse/core/lib/guard-gate-pending';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
 import { createTestApp } from '../helpers/test-app';
-import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
+import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
 import type { GuardLatest } from '../../packages/shared/src/index';
+
+
 
 const DOC = 'docs/spec.md';
 const DOC_CONTENT = '# Alpha\nbody a\n# Beta\nbody b\n';
@@ -103,12 +107,16 @@ beforeEach(async () => {
   setGuardStore(guardStore);
   specStore = new PgSpecStore(db);
   setSpecStore(specStore);
+  // Every guard read that composes a scratch tree materializes the repository's
+  // overlays into it, so the row store must be there even with nothing registered.
+  setGuardOverlayStore(new PgGuardOverlayStore(db, 'master-secret-at-least-32-chars-long!!'));
   setRepoDocReader(async (_repoKey, docPath) => (docPath === DOC ? DOC_CONTENT : null));
 });
 
 afterEach(async () => {
   resetGuardStore();
   resetSpecStore();
+  resetGuardOverlayStore();
   setRepoDocReader(async () => null);
   setGuardGatePendingLookup(null);
   await client.close();

@@ -22,7 +22,9 @@ import { guardAuthoredInterfacesPath, guardInterfacesPath } from '@truecourse/gu
 import type { InterfacesFile } from '../../packages/shared/src/index';
 import { GuardInterfacesViewSchema } from '../../packages/shared/src/index';
 import { readGuardInterfaces, readGuardInterfaceRaw } from '../../packages/core/src/commands/guard-read';
-import { resetGuardStore, setGuardStore, type GuardStore } from '../../packages/core/src/lib/guard-store';
+import { setGuardStore, type GuardStore } from '../../packages/core/src/lib/guard-store';
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
+import { installMemoryGuardOverlays, resetGuardOverlayStore } from '../helpers/memory-guard-overlays';
 import {
   GUARD_SETUP_AUTHORED_INTERFACES_FILE,
   GUARD_SETUP_INTERFACES_FILE,
@@ -31,9 +33,13 @@ import {
 let repo: string;
 
 beforeEach(() => {
+  installWorkTreeGuardStore();
+  installMemoryGuardOverlays();
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-iface-view-'));
 });
 afterEach(() => {
+  resetGuardStore();
+  resetGuardOverlayStore();
   fs.rmSync(repo, { recursive: true, force: true });
 });
 
@@ -234,7 +240,6 @@ describe('the raw interface source over a split catalog', () => {
 describe('the Interfaces view over a stored setup bundle (hosted)', () => {
   const install = (files: Record<string, string>): void =>
     setGuardStore({
-      materializesInPlace: false,
       loadGuardSetupBundle: async () => files,
       readGuardBaselineCommit: async () => null,
     } as unknown as GuardStore);

@@ -9,7 +9,7 @@
  * board) as if it were evidence of the failure under adjudication.
  */
 
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { ToolContext } from '../../packages/agent-loop/src/index'
@@ -22,9 +22,14 @@ import {
 } from '../../packages/core/src/services/guard-adjudicate/tools'
 import type { AdjudicationExecution } from '../../packages/core/src/services/guard-adjudicate/execute'
 import { board, failRow, item, makeRepo, rmrf, RUN_ID, scenarioDoc } from './guard-adjudicate-helpers'
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store'
 
 const repos: string[] = []
+beforeEach(() => {
+  installWorkTreeGuardStore()
+})
 afterEach(() => {
+  resetGuardStore()
   while (repos.length) rmrf(repos.pop()!)
 })
 function repo(): string {

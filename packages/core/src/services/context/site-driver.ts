@@ -8,11 +8,8 @@
  * public-only network guard), `mapUrlsToPaths` assigns stable snapshot paths
  * and `hashContent` is the diff key. None of that is re-implemented here.
  *
- * What is NOT here is the per-repository half: no `sources.json` registry, no
- * files written under `.truecourse/specs/sources/`, no repo root at all. A
- * workspace source's pages come back to the caller with their bodies and are
- * stored content-addressed under the workspace; `sources/store.ts` stays for
- * the CLI, which still owns a tree.
+ * Nothing is written to a tree here: a source's pages come back to the caller
+ * with their bodies and are stored content-addressed under the workspace.
  */
 
 import {

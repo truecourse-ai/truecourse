@@ -16,7 +16,7 @@
  * never called at all.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -51,12 +51,17 @@ import {
 } from '../../packages/core/src/services/guard-setup/seed-session';
 import type { GuardSetupSessionContext } from '../../packages/core/src/services/guard-setup/session-context';
 import { memoryPersistence, stubDriver, outcome, malformedFailure } from './spec-scan-session-stub';
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache';
 
 const FIXTURE = fileURLToPath(new URL('../fixtures/seed-draft', import.meta.url));
 const TARGET = '.truecourse/scenarios/guard-seed.mjs';
 
 const repos: string[] = [];
+beforeEach(() => {
+  installMemoryKvCache();
+});
 afterEach(() => {
+  resetKvCacheStore();
   while (repos.length) fs.rmSync(repos.pop()!, { recursive: true, force: true });
 });
 

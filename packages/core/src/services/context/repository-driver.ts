@@ -76,8 +76,7 @@ export function createRepositoryDriver(deps: RepositoryDriverDeps): ContextSourc
   /**
    * Walk a checkout and keep what the scope selects, in discovery order. The
    * source's own patterns are the whole scope: the repository's `spec.include`
-   * does not narrow it, and its registered llms.txt snapshots are not its
-   * files (a site is a source of its own).
+   * does not narrow it.
    */
   function scopedDocs(
     dir: string,
@@ -86,8 +85,8 @@ export function createRepositoryDriver(deps: RepositoryDriverDeps): ContextSourc
   ): DocCandidate[] {
     const { include, exclude } = repositoryConfig(config);
     const keep = scopeFilter(include, exclude);
-    return discoverDocs(dir, { skipGit: opts.skipGit, scope: EVERYTHING, registeredSources: false }).filter(
-      (doc) => keep(doc.path),
+    return discoverDocs(dir, { skipGit: opts.skipGit, scope: EVERYTHING }).filter((doc) =>
+      keep(doc.path),
     );
   }
 

@@ -4,7 +4,8 @@ import path from 'node:path';
 import request from 'supertest';
 import { type Express } from 'express';
 import { createTestApp } from '../helpers/test-app';
-import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
+import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
 
 /**
  * Guard dismiss + finding-evidence routes — persisting a user's dismissal and
@@ -26,12 +27,14 @@ describe('Guard dismiss + finding-evidence routes', () => {
   const decisionsFile = () => path.join(root, '.truecourse', 'scenarios', 'decisions.json');
 
   beforeEach(async () => {
+    installWorkTreeGuardStore();
     fixture = await setupTestFixture();
     root = fixture.repoPath;
     app = createTestApp();
   });
   afterEach(async () => {
     await teardownTestFixture(fixture.project.slug);
+    resetGuardStore();
   });
 
   const claim = { doc: DOC, anchor: 'version', title: 'the --version flag prints the semver' };

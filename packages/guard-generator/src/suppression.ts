@@ -20,6 +20,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
 import { suppressedClaims, normalizeQuote, type SuppressedClaim } from '@truecourse/shared'
+import { specsDir } from '@truecourse/shared/work-tree'
 
 // Tolerant corpus view: just the areas' overlaps (docs + note + section pointers +
 // spanned areas). Everything else in corpus.json is ignored; `.passthrough()`
@@ -73,7 +74,7 @@ function readJsonTolerant<T>(file: string, schema: z.ZodType<T>): T | undefined 
 
 /** The list of losing-side claims to suppress under the current resolutions. */
 export function readSuppressedClaims(repoRoot: string): SuppressedClaim[] {
-  const specDir = path.join(repoRoot, '.truecourse', 'specs')
+  const specDir = specsDir(repoRoot)
   const corpus = readJsonTolerant(path.join(specDir, 'corpus.json'), CorpusShape)
   if (!corpus) return []
   const decisions = readJsonTolerant(path.join(specDir, 'decisions.json'), DecisionsShape)

@@ -8,6 +8,7 @@ Thanks for your interest in contributing! This guide will help you get started.
 
 - Node.js 22+
 - pnpm 9+
+- Docker (for the Postgres the server stores everything in)
 
 ### Getting Started
 
@@ -15,20 +16,23 @@ Thanks for your interest in contributing! This guide will help you get started.
 git clone https://github.com/truecourse-ai/truecourse.git
 cd truecourse
 pnpm install
-pnpm dev          # Start all services (Vite frontend + Express backend)
+POSTGRES_PASSWORD=truecourse docker compose up -d db   # the database
+pnpm dev                                               # Vite frontend + Express backend
 ```
 
-The dev server starts at `http://localhost:3000`. State is stored as JSON files under `.truecourse/` in your repo — no database, no Docker.
+The dev server starts at `http://localhost:3000`. See `docker-compose.yml` for the environment the server needs (`DATABASE_URL`, `TRUECOURSE_SECRET_KEY`, the WorkOS and GitHub App variables).
 
 ### Project Structure
 
 ```
-apps/dashboard/client/    — Vite + React frontend (React Flow graph, Tailwind CSS)
+apps/dashboard/client/    — Vite + React frontend (Tailwind CSS)
 apps/dashboard/server/    — Express + Socket.io HTTP layer (thin adapter over core)
-packages/core/            — Framework-agnostic analysis engine, persistence, LLM providers
-packages/analyzer/        — Tree-sitter + TypeScript Compiler analysis engine
-packages/shared/          — Shared Zod schemas and TypeScript types
-tools/cli/                — CLI commands (thin adapter over core)
+packages/core/            — The engine the server runs: the agent sessions, the store seams, the LLM transports
+packages/shared/          — Shared Zod schemas and types, the transport seam, the work-tree layout
+packages/guard-runner/    — The deterministic test runner and its drivers
+packages/guard-generator/ — The deterministic half of test generation
+packages/spec-consolidator/ — The deterministic half of the document scan
+packages/data-store/      — The Postgres implementation of every store seam
 tests/                    — All tests (centralized, not colocated)
 tests/fixtures/           — Fixture projects for integration tests
 ```
@@ -36,15 +40,15 @@ tests/fixtures/           — Fixture projects for integration tests
 ### Useful Commands
 
 ```bash
-pnpm dev          # Start all services
+pnpm dev          # Start the client and the server
 pnpm build        # Build all packages
 pnpm test         # Run all tests (vitest)
-pnpm build:dist   # Build distributable npm package (static frontend + bundled server → dist/)
+pnpm typecheck    # Typecheck every package
 ```
 
 ### Storage
 
-TrueCourse stores everything as plain JSON files under `<repo>/.truecourse/` — no database, no Docker, no migrations. The file format is documented in `packages/core/src/types/snapshot.ts`.
+Everything durable lives in Postgres, reached through the store seams in `packages/core` and filled at boot with their `packages/data-store` implementations. A run works on a copy: it clones the repository, materializes what it needs into a private `.truecourse/` working tree, and discards the tree when it settles.
 
 ## How to Contribute
 
@@ -53,7 +57,6 @@ TrueCourse stores everything as plain JSON files under `<repo>/.truecourse/` —
 Open an issue on GitHub with:
 - Steps to reproduce
 - Expected vs actual behavior
-- TrueCourse version (`npx truecourse --version`)
 - Node.js version
 - OS
 
@@ -78,20 +81,13 @@ Open an issue on GitHub with:
 - TypeScript for all source code
 - Tests live in `tests/` directory (not colocated with source)
 - Shared types go in `packages/shared`
-- The analyzer only supports TypeScript and JavaScript currently
-- Detection patterns are TypeScript constants in `packages/analyzer/src/patterns/`
+- Every path inside a run's working tree comes from `packages/shared/src/fs/work-tree.ts`
 - No workarounds — fix root causes
-
-### Adding a New Language
-
-See [packages/analyzer/ADDING_A_LANGUAGE.md](packages/analyzer/ADDING_A_LANGUAGE.md) for the complete guide on adding support for a new programming language.
 
 ## Areas Where We Need Help
 
-- **New language support** — Python and Go are the next targets
-- **New deterministic rules** — see `packages/analyzer/src/rules/` for examples
 - **Documentation** — improving docs, adding examples, writing tutorials
-- **Testing** — expanding test coverage, especially for edge cases in dependency resolution
+- **Testing** — expanding test coverage, especially around the guard drivers
 
 ## Questions?
 

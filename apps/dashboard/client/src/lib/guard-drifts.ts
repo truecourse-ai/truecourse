@@ -1,8 +1,8 @@
 /**
  * Client-side guard drift shaping, the read-only labels/formatters the drifts
  * view uses. The ordering composition itself (`orderGuardDrifts`, `GUARD_DRIFT_ORDER`)
- * lives ONCE in `@truecourse/shared` and is re-exported here so the dashboard and
- * `truecourse guard drifts` can never diverge, no mirrored copy.
+ * lives ONCE in `@truecourse/shared` and is re-exported here so the drifts view
+ * can never diverge from it, no mirrored copy.
  */
 
 import type { GuardOutcome, GuardRunEnvelope } from '@truecourse/shared';

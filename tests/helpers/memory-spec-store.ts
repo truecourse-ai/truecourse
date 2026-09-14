@@ -5,12 +5,18 @@
  * corpus, the decisions, and the documents as the scan read them).
  */
 
-import type {
-  RepoRef,
-  SpecArtifact,
-  SpecStore,
-  WorkspaceRef,
+import {
+  setSpecStore as setSpecStoreByPackage,
+  resetSpecStore as resetSpecStoreByPackage,
+  type RepoRef,
+  type SpecArtifact,
+  type SpecStore,
+  type WorkspaceRef,
 } from '@truecourse/core/lib/spec-store';
+import {
+  setSpecStore as setSpecStoreBySource,
+  resetSpecStore as resetSpecStoreBySource,
+} from '../../packages/core/src/lib/spec-store';
 
 export function memorySpecStore(): SpecStore {
   const byRef = new Map<string, unknown>();
@@ -22,7 +28,6 @@ export function memorySpecStore(): SpecStore {
   const lk = (repoKey: string, a: SpecArtifact): string => `${repoKey}\x00${a}`;
 
   return {
-    materializesInPlace: false,
     async saveSpec(ref, artifact, json) {
       byRef.set(rk(ref, artifact), json);
       latest.set(lk(ref.repoKey, artifact), json);
@@ -58,4 +63,24 @@ export function memorySpecStore(): SpecStore {
       return docs.get(`ws:${org}`)?.[docRef] ?? null;
     },
   } satisfies SpecStore;
+}
+
+/**
+ * Install the in-memory spec store for a suite. Pair with {@link resetSpecStore}.
+ *
+ * The seam is set through BOTH specifiers a test can reach core by — the package
+ * (`@truecourse/core/lib/spec-store`, which resolves to the built `dist`) and the
+ * source path — because under vitest those are separate module instances with
+ * separate seam state.
+ */
+export function installMemorySpecStore(): SpecStore {
+  const store = memorySpecStore();
+  setSpecStoreByPackage(store);
+  setSpecStoreBySource(store);
+  return store;
+}
+
+export function resetSpecStore(): void {
+  resetSpecStoreByPackage();
+  resetSpecStoreBySource();
 }

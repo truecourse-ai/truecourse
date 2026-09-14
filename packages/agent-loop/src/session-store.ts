@@ -145,7 +145,7 @@ export type RunRecord = z.infer<typeof RunRecordFieldsSchema>;
 export interface SessionPersistence {
   /** Await committed history before the session returns its outcome. */
   flush?(): Promise<void>;
-  /** Optional live channel. CLI stores and replay transcripts do not need it. */
+  /** Optional live channel. File stores and replay transcripts do not need it. */
   publishProgress?(sessionId: string, progress: import('./session-driver.js').SessionProgress): void;
   appendEvent(sessionId: string, event: SessionEvent): void;
   updateIndex(entry: SessionIndexEntry): void;

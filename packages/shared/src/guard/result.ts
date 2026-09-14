@@ -98,7 +98,7 @@ export const GuardRunEnvelopeSchema = z.preprocess(
      * Stamped by the gate when it persists a PR-head run so a stored run only
      * decides a later delivery when the corpus the gate would run still matches
      * (a force spec-regen run executes the PR's OWN regenerated corpus, whose
-     * ids don't align with the committed set). Optional so CLI runs and
+     * ids don't align with the committed set). Optional so non-gate runs and
      * pre-change snapshots keep parsing.
      */
       corpusFingerprint: z.string().optional(),
@@ -112,8 +112,8 @@ export const GuardRunEnvelopeSchema = z.preprocess(
       /** The pull request this run gated; absent on a default-branch run. */
       pullRequest: z.number().int().positive().optional(),
       /**
-       * Where the run executed: the hosted runner, or a developer's machine
-       * through the CLI. Absent reads as `hosted`.
+       * Where the run executed: the hosted runner, or a developer's machine.
+       * Absent reads as `hosted`.
        */
       origin: GuardRunOriginSchema.optional(),
     })
@@ -313,8 +313,8 @@ export const GuardScenarioResultSchema = z
      */
     blockedOn: GuardBlockedDependencySchema.optional(),
     /**
-     * The ADJUDICATION VERDICT this failure carries (`truecourse guard
-     * adjudicate`, plan 05 step 23) — written AFTER the run by the adjudication
+     * The ADJUDICATION VERDICT this failure carries (Failure adjudication, plan
+     * 05 step 23) — written AFTER the run by the adjudication
      * fold, never by the runner. The board merge carries it with an untouched
      * row and DROPS it from a re-run one (a new actual needs a new verdict —
      * see `mergeGuardBoard`). Present only on `fail` / `error` rows that were

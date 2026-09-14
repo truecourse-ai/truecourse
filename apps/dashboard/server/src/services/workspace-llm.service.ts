@@ -31,7 +31,7 @@ import type { SessionDriver } from '@truecourse/agent-loop';
 import { createAppError } from '@truecourse/core/lib/errors';
 import type { LlmConfigUpdate, LlmOperatorProvider, LlmProviderConfigView } from '@truecourse/shared';
 import type { LlmTransport } from '@truecourse/shared/llm';
-import type { GlobalApiLlmConfig, LlmTransportMode } from '@truecourse/core/config/global-config';
+import type { LlmApiConfig, LlmTransportMode } from '@truecourse/core/services/llm/provider-config';
 import {
   createApiTransportFor,
   createClaudeCodeTransport,
@@ -62,7 +62,7 @@ export interface WorkspaceLlmConfigStore {
   /** Masked, secret-free view for the settings page. Null when unconfigured. */
   getView(orgId: string): Promise<LlmProviderConfigView | null>;
   /** The decrypted block a run builds its transport from. Null when unconfigured. */
-  getConfig(orgId: string): Promise<GlobalApiLlmConfig | null>;
+  getConfig(orgId: string): Promise<LlmApiConfig | null>;
   save(orgId: string, input: LlmConfigUpdate): Promise<void>;
 }
 
@@ -116,9 +116,9 @@ export class LlmProbeFailedError extends Error {
 
 /** The provider calls themselves — replaced wholesale in tests. */
 export interface WorkspaceLlmBackend {
-  probe(config: GlobalApiLlmConfig): Promise<void>;
-  driver(config: GlobalApiLlmConfig): SessionDriver;
-  transport(config: GlobalApiLlmConfig): LlmTransport;
+  probe(config: LlmApiConfig): Promise<void>;
+  driver(config: LlmApiConfig): SessionDriver;
+  transport(config: LlmApiConfig): LlmTransport;
   /** Operator mode: the server's own `claude` login. */
   claudeCode: {
     probe(): Promise<void>;
@@ -169,7 +169,7 @@ export interface WorkspaceLlm {
  * CANDIDATE that is not stored yet, so a config it accepts is one the pipeline
  * will accept too. Throws the provider's own error.
  */
-export function probeWorkspaceLlmConfig(config: GlobalApiLlmConfig): Promise<void> {
+export function probeWorkspaceLlmConfig(config: LlmApiConfig): Promise<void> {
   return backend.probe(config);
 }
 

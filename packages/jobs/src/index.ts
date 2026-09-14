@@ -236,11 +236,11 @@ export function createJobs<M = Record<string, unknown>>(opts: CreateJobsOptions<
     },
     async start() {
       // Boot recovery: the in-process worker means a restart abandoned any
-      // in-flight job. Reap them so the single-flight keys free and stale
+      // in-flight job. Settle them so the single-flight keys free and stale
       // "in progress" UI clears.
-      const reaped = await jobStore.failOrphaned();
+      const reaped = await jobStore.interruptOrphaned();
       if (reaped.length > 0) {
-        log.info(`[jobs] reaped ${reaped.length} orphaned job(s) from a prior run`);
+        log.info(`[jobs] interrupted ${reaped.length} job(s) a prior run abandoned`);
         await opts.onReaped?.(reaped);
       }
       // The same reap on graphile's side: a dead run still holds the QUEUE it

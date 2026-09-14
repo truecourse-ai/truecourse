@@ -308,9 +308,9 @@ export type RunGuardResult =
 
 /**
  * The canonical human-readable reason for a non-ok run result (`null` for 'ok').
- * Every adapter — the CLI command, the dashboard run route, birth validation —
- * renders THIS wording and adds only its own framing (exit codes, prefixes,
- * output tails), so the per-status phrasing can never drift between surfaces.
+ * Every adapter — the dashboard run route, birth validation — renders THIS
+ * wording and adds only its own framing (exit codes, prefixes, output tails),
+ * so the per-status phrasing can never drift between surfaces.
  */
 export function runFailureMessage(result: Exclude<RunGuardResult, { status: 'ok' }>): string
 export function runFailureMessage(result: RunGuardResult): string | null

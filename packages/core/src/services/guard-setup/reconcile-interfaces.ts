@@ -373,7 +373,7 @@ export interface ReconcileInterfacesRunOptions {
   /** See {@link ReconcileSessionInput.exec}. */
   exec?: CliProbeExec
   signal?: AbortSignal
-  /** Every transcript event, as it is persisted — the CLI's live line. */
+  /** Every transcript event, as it is persisted — the caller's live view. */
   onSessionEvent?: (event: SessionEvent) => void
   mintSessionId?: () => string
   now?: () => string

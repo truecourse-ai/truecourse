@@ -144,10 +144,6 @@ describe('PgGuardStore — run state (pglite)', () => {
     await client.close();
   });
 
-  it('reports materializesInPlace=false', () => {
-    expect(store.materializesInPlace).toBe(false);
-  });
-
   it('round-trips LATEST keyed by repo+commit; empty repo is null', async () => {
     expect(await store.readGuardLatest(REPO)).toBeNull();
     const latest = makeLatest({ runId: 'r1', ranAt: '2026-07-01T00:00:00.000Z', commit: 'c1' });

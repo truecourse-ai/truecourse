@@ -2192,7 +2192,7 @@ export interface SeedDraftInput {
   appImports: string[]
   /**
    * The flows that could not be authored, with the data they said they needed. Now
-   * that `truecourse guard setup` owns seed drafting this is OPTIONAL grounding, not
+   * that Flow setup owns seed drafting this is OPTIONAL grounding, not
    * the trigger: setup drafts a seed BEFORE authoring has ever run, so on a first
    * setup this list is legitimately empty.
    */

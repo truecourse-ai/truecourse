@@ -3,7 +3,7 @@
  *
  * The scan pipeline curates docs into a `CuratedCorpus` (areas +
  * overlaps); this index re-exports the type contracts and stage entry
- * points the CLI, dashboard server, and contract-extractor talk through.
+ * points the dashboard server talks through.
  */
 
 export type {
@@ -155,18 +155,6 @@ export {
   fetchPages,
   partitionByOrigin,
   previewSource,
-  addSource,
-  assertSourceAddable,
-  refreshSource,
-  removeSource,
-  listSources,
-  readSourcesFile,
-  writeSourcesFile,
-  sourcesFilePath,
-  sourcesDirPath,
-  sourceDirPath,
-  sourceDocAbsPath,
-  sourceDocRef,
   sourceIdFromUrl,
   slugifyId,
   urlToSnapshotPath,
@@ -174,16 +162,9 @@ export {
   hashContent,
   SourceSkipReasonSchema,
   SourceSkipSchema,
-  SourceDocSchema,
-  SpecSourceSchema,
-  SourcesFileSchema,
   InvalidSourceUrlError,
   LlmsTxtFetchError,
-  SourceExistsError,
-  SourceNotFoundError,
-  SourcesFileError,
   SourcePathError,
-  SOURCES_REF_PREFIX,
   USER_AGENT,
 } from './sources/index.js';
 export type {
@@ -195,14 +176,8 @@ export type {
   FetchPagesResult,
   FetchedPage,
   SourcePreview,
-  AddSourceOptions,
-  AddSourceResult,
-  RefreshSourceResult,
   SourceSkipReason,
   SourceSkip,
-  SourceDoc,
-  SpecSource,
-  SourcesFile,
 } from './sources/index.js';
 
 export {

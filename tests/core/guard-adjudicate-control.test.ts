@@ -15,7 +15,7 @@
  *    fixture leaves the board and the run store byte-identical.
  */
 
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import yaml from 'js-yaml'
@@ -48,9 +48,14 @@ import type { AdjudicationExecution } from '../../packages/core/src/services/gua
 import { board, failRow, item, makeRepo, rmrf, RUN_ID, scenarioDoc } from './guard-adjudicate-helpers'
 import { memoryPersistence, outcome, stubDriver, transportFailure, type StubCall } from './spec-scan-session-stub'
 import { writeRecipe, specBinds, FIXTURE_BIN } from '../guard-runner/helpers.js'
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store'
 
 const repos: string[] = []
+beforeEach(() => {
+  installWorkTreeGuardStore()
+})
 afterEach(() => {
+  resetGuardStore()
   while (repos.length) rmrf(repos.pop()!)
 })
 function repo(): string {

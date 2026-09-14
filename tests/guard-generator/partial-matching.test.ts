@@ -1,11 +1,13 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flowFingerprint, type GuardFlow, type GuardFlowMilestone, type Interface } from '@truecourse/shared'
 import { buildSurfaceCatalogs, matchFlow, planFlowMatching, readCachedMatch } from '../../packages/guard-generator/src/match.js'
 import { MATCH_SYSTEM_PROMPT, buildMatchUserPrompt } from '../../packages/guard-generator/src/prompts.js'
 import { makeTempRepo, rmrf } from './helpers.js'
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache.js'
 
 const repos: string[] = []
-afterEach(() => { while (repos.length) rmrf(repos.pop()!) })
+beforeEach(() => { installMemoryKvCache() })
+afterEach(() => { resetKvCacheStore(); while (repos.length) rmrf(repos.pop()!) })
 function repo() { const r = makeTempRepo(); repos.push(r); return r }
 const control: Interface = { id: 'web/cancel-add', title: 'Cancel adding', type: 'web', purpose: 'control',
   entry: { method: 'GET', path: '/' }, at: 'add-dialog', to: 'root',

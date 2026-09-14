@@ -12,7 +12,7 @@ export async function dashboardActivity<P extends OnboardingJobPayload, T>(
   execute: (run: SessionRunStore, tracker: StepTracker) => Promise<T>,
 ): Promise<T> {
   const run = await createStoredSessionRun(ctx.payload.repoFullName, {
-    command, gitRef: 'unknown', activityStream: true,
+    command, gitRef: 'unknown',
   });
   const tracker = mirrorTracker(ctx, [{ key: 'clone', label: 'Preparing repository' }, ...steps]);
   const untap = tracker.tap(progress => {

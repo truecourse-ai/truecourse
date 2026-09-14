@@ -31,7 +31,7 @@ import type { CoverageFilterMode } from '@/components/guard/GuardDocCoverage';
 import { HoverPopover } from '@/preview/ui/hover-popover';
 import { guardStatusMeta } from '@/lib/guard-status';
 import type { BlockedOnEntry, NeedsSetupEntry } from '@/lib/guard-report';
-import { GUARD_REGENERATE_COMMAND } from '@/lib/guard-flow-status';
+import { GUARD_REGENERATE_ACTION } from '@/lib/guard-flow-status';
 
 /** The wire status each chip borrows its swatch from, the same source the doc
  *  bands use, so a chip's dot and the sections it selects share one colour. */
@@ -185,9 +185,9 @@ export function GuardTotalsStrip({
               key={service}
               content={
                 provided
-                  ? `${guardSetupServiceLabel(service)} is already provided, run \`${GUARD_REGENERATE_COMMAND}\` to author these ${count} section${count === 1 ? '' : 's'}.`
+                  ? `${guardSetupServiceLabel(service)} is already provided, ${GUARD_REGENERATE_ACTION} authors these ${count} section${count === 1 ? '' : 's'}.`
                   : service === MISSING_DATA_NOUN
-                    ? `The seed script doesn’t create the data these ${count} section${count === 1 ? '' : 's'} need, extend it, then re-run \`${GUARD_REGENERATE_COMMAND}\`.`
+                    ? `The seed script doesn’t create the data these ${count} section${count === 1 ? '' : 's'} need, extend it, then re-run ${GUARD_REGENERATE_ACTION}.`
                     : `Provide ${guardSetupServiceLabel(service)} on the Dependencies page and these ${count} section${count === 1 ? '' : 's'} author automatically.`
               }
             >
@@ -213,9 +213,9 @@ export function GuardTotalsStrip({
           ))}
           <span className="text-[10px] text-muted-foreground">
             {needsSetupServices.every((s) => s.provided)
-              ? `Set up, run \`${GUARD_REGENERATE_COMMAND}\` to author these flows.`
+              ? `Set up, ${GUARD_REGENERATE_ACTION} authors these flows.`
               : needsSetupServices.every((s) => s.provided || s.service === MISSING_DATA_NOUN)
-                ? `Extend the seed script to create this data, then re-run \`${GUARD_REGENERATE_COMMAND}\`.`
+                ? `Extend the seed script to create this data, then re-run ${GUARD_REGENERATE_ACTION}.`
                 : 'Provide these on the Dependencies page and these flows author automatically.'}
           </span>
         </div>

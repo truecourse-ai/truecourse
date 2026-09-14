@@ -6,7 +6,12 @@ import { type Express } from 'express';
 import { mapInterfaces } from '../../packages/core/src/services/interface.service';
 import { createTestApp } from '../helpers/test-app';
 import { GuardInterfacesViewSchema } from '../../packages/shared/src/index';
-import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
+import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
+import { installMemoryGuardOverlays, resetGuardOverlayStore } from '../helpers/memory-guard-overlays';
+import { installMemorySpecStore, resetSpecStore } from '../helpers/memory-spec-store';
+
+
 
 /**
  * The Interfaces tab reads the CONTRACT, not just the command tree: `GET
@@ -167,6 +172,9 @@ describe('Guard interfaces — the contract passthrough', () => {
   const url = (suffix: string) => `/api/repos/${fixture.project.slug}/guard/${suffix}`;
 
   beforeEach(async () => {
+    installWorkTreeGuardStore();
+    installMemoryGuardOverlays();
+    installMemorySpecStore();
     fixture = await setupTestFixture();
     root = fixture.repoPath;
     app = createTestApp();
@@ -176,6 +184,9 @@ describe('Guard interfaces — the contract passthrough', () => {
   });
   afterEach(async () => {
     await teardownTestFixture(fixture.project.slug);
+    resetGuardStore();
+    resetGuardOverlayStore();
+    resetSpecStore();
   });
 
   it('serves helper-derived expense contracts from the persisted catalog', async () => {

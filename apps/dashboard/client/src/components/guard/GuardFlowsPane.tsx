@@ -134,10 +134,7 @@ export function GuardFlowsPane({
           icon={FlaskConical}
           title="No tests yet"
           body={
-            <>
-              Run <code className="rounded bg-muted px-1 py-0.5 text-xs">truecourse guard generate</code> to
-              synthesize flows and write their tests.
-            </>
+            <>Flow generation synthesizes this repository's flows and writes their tests.</>
           }
         />
       );

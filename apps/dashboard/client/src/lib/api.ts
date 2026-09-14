@@ -38,7 +38,6 @@ import type {
   WorkspaceMembersResponse,
   WorkspacesResponse,
 } from '@truecourse/shared';
-import type { GuardExternalPatch, GuardExternalsView } from '@/types/guard-externals';
 import type { RunRecord, SessionCommand, SessionEvent } from '@truecourse/agent-loop';
 import type { ActivityEvent } from '@truecourse/shared/activity-stream';
 import { getServerUrl } from './server-url';
@@ -509,23 +508,13 @@ export async function getGuardSetup(repoId: string): Promise<GuardSetupReport | 
   }
 }
 
-/**
- * Map the working tree's surfaces to interfaces — deterministic, LLM-free, free.
- * The response IS the fresh catalog view, so the tab swaps state from it (no
- * refetch, no socket).
- */
-export function mapGuardInterfaces(repoId: string): Promise<GuardInterfacesView> {
-  return fetchApi<GuardInterfacesView>(`/api/repos/${repoId}/guard/map`, { method: 'POST' });
-}
-
 /** Which artifact-backed entity a raw read addresses — the route's own segment. */
 export type GuardArtifactKind = 'interface' | 'flow' | 'claim' | 'dependency' | 'recipe';
 
 /**
  * The stored artifact behind one entity — its own pretty-printed slice of the
- * JSON store file, for the detail's raw mode. `null` on 404 (no store yet, or no
- * entry with that id). The interface catalog is working-tree-only, so a hosted
- * repo reads as `null` too.
+ * stored document, for the detail's raw mode. `null` on 404 (nothing stored yet,
+ * or no entry with that id).
  */
 export async function getGuardArtifactRaw(
   repoId: string,
@@ -542,32 +531,6 @@ export async function getGuardArtifactRaw(
     if (e instanceof ApiError && e.status === 404) return null;
     throw e;
   }
-}
-
-/**
- * The external API accounts view: what the analyzer detected, what
- * recipe.json declares, and how each resolves on this machine. Working-tree only
- * — a store that does not materialize in place answers 501.
- */
-export function getGuardExternals(repoId: string): Promise<GuardExternalsView> {
-  return fetchApi<GuardExternalsView>(`/api/repos/${repoId}/guard/externals`);
-}
-
-/**
- * Declare (or clear, with a `null` entry) external API accounts. The response IS
- * the fresh view, so the page swaps state from it. A refused write (no recipe, no
- * `api` block, a declaration that would not load) comes back as a 422 ApiError
- * whose message is safe to show verbatim.
- */
-export function saveGuardExternals(
-  repoId: string,
-  externals: Record<string, GuardExternalPatch | null>,
-): Promise<GuardExternalsView> {
-  return fetchApi<GuardExternalsView>(`/api/repos/${repoId}/guard/externals`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ externals }),
-  });
 }
 
 /** The last `guard generate` report; null on 404 (never generated). `ref` scopes to a PR head (EE). */

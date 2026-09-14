@@ -1,5 +1,5 @@
 /**
- * `repo.guard-run` — `truecourse guard run` over an ephemeral clone: the
+ * `repo.guard-run` — a Flow run over an ephemeral clone: the
  * repository's BASELINE run.
  *
  * The last link of onboarding: a generate that authored scenarios chains into

@@ -1,15 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { buildSpecScope, loadSpecScope } from '../../packages/shared/src/index.js';
+import { describe, it, expect } from 'vitest';
+import { buildSpecScope } from '../../packages/shared/src/index.js';
 
 /**
- * `spec.include` — the opt-in inverse of `.truecourseignore`, scoping spec-doc
+ * A spec scope — the opt-in inverse of `.truecourseignore`, scoping doc
  * discovery to markdown that matches a glob. Load-bearing properties: an
  * absent/empty scope is inactive (everything in scope, unchanged behavior),
- * gitignore-style globs, and a robust read that degrades a malformed config to
- * inactive rather than throwing.
+ * gitignore-style globs, and a build that degrades malformed input to inactive
+ * rather than throwing.
  */
 
 describe('buildSpecScope', () => {
@@ -49,47 +46,12 @@ describe('buildSpecScope', () => {
     expect(scope.includes('')).toBe(false);
     expect(scope.includes('../sibling.md')).toBe(false);
   });
-});
 
-describe('loadSpecScope', () => {
-  let root: string;
-  beforeEach(() => {
-    root = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-scope-'));
-  });
-  afterEach(() => {
-    fs.rmSync(root, { recursive: true, force: true });
-  });
-
-  function writeConfig(config: unknown): void {
-    fs.mkdirSync(path.join(root, '.truecourse'), { recursive: true });
-    fs.writeFileSync(path.join(root, '.truecourse', 'config.json'), JSON.stringify(config));
-  }
-
-  it('is inactive when there is no config.json', () => {
-    expect(loadSpecScope(root).active).toBe(false);
-  });
-
-  it('reads spec.include from config.json', () => {
-    writeConfig({ spec: { include: ['docs/**'] } });
-    const scope = loadSpecScope(root);
+  it('mixes a file-level pattern with a directory glob', () => {
+    const scope = buildSpecScope(['SPEC.md', 'docs/**']);
     expect(scope.active).toBe(true);
+    expect(scope.includes('SPEC.md')).toBe(true);
     expect(scope.includes('docs/a.md')).toBe(true);
-    expect(scope.includes('other/a.md')).toBe(false);
-  });
-
-  it('is inactive for an empty include array (same as absent)', () => {
-    writeConfig({ spec: { include: [] } });
-    expect(loadSpecScope(root).active).toBe(false);
-  });
-
-  it('is inactive when spec.include is absent even if other config exists', () => {
-    writeConfig({ enableLlmRules: false, spec: {} });
-    expect(loadSpecScope(root).active).toBe(false);
-  });
-
-  it('degrades a malformed config.json to inactive', () => {
-    fs.mkdirSync(path.join(root, '.truecourse'), { recursive: true });
-    fs.writeFileSync(path.join(root, '.truecourse', 'config.json'), '{ not json');
-    expect(loadSpecScope(root).active).toBe(false);
+    expect(scope.includes('other/b.md')).toBe(false);
   });
 });

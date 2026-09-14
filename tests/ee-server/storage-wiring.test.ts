@@ -65,10 +65,13 @@ describe('installEeStores — swaps every seam to its Postgres impl', () => {
     expect(fs.existsSync(path.join('acme/api', '.truecourse'))).toBe(false);
   });
 
-  it('resetAll restores the file-backed defaults', () => {
+  // There is no default to fall back to: a seam with nothing installed fails
+  // loud rather than inventing an empty store.
+  it('resetAll leaves every seam uninstalled', () => {
     resetAll();
-    expect(getKvCacheStore()).not.toBeInstanceOf(PgKvCacheStore);
-    expect(getSpecStore()).not.toBeInstanceOf(PgSpecStore);
+    expect(() => getSpecStore()).toThrow(/No spec store installed/);
+    expect(() => getGuardStore()).toThrow(/No guard store installed/);
+    expect(() => getRegistryStore()).toThrow(/No repository registry installed/);
   });
 });
 

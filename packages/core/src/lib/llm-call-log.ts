@@ -24,6 +24,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { workTreeLogsDir } from '@truecourse/shared/work-tree';
 import type { LlmCallRecord } from '@truecourse/shared/llm';
 
 /**
@@ -59,9 +60,9 @@ function sanitize(id: string): string {
 }
 
 /**
- * Create a logger. Metrics + summary default ON for every run (CLI and
- * dashboard alike — both enter through the in-process drivers); full I/O dumps
- * default ON only in dev (`pnpm dev` sets `TRUECOURSE_DEV=1`). Returns null only
+ * Create a logger. Metrics + summary default ON for every run (they all enter
+ * through the in-process drivers); full I/O dumps default ON only in dev
+ * (`pnpm dev` sets `TRUECOURSE_DEV=1`). Returns null only
  * when BOTH are explicitly disabled (`TRUECOURSE_LLM_LOG=0`), so the caller
  * installs no sink and pays nothing.
  *
@@ -78,7 +79,7 @@ export function createLlmCallLogger(repoRoot: string, label = 'scan'): LlmCallLo
   const announce =
     dev || truthyEnv(process.env.TRUECOURSE_LLM_LOG) || truthyEnv(process.env.TRUECOURSE_LLM_DUMP);
 
-  const logDir = path.join(repoRoot, '.truecourse', 'logs');
+  const logDir = workTreeLogsDir(repoRoot);
   // Diagnostics must never cost a run: a repo we cannot write to (read-only
   // checkout, permissions) yields NO logger rather than a thrown generate.
   try {
@@ -343,7 +344,7 @@ function padL(s: string, w: number): string {
   return s.length >= w ? s : ' '.repeat(w - s.length) + s;
 }
 
-/** Compact per-stage table on stderr (won't corrupt --json stdout). */
+/** Compact per-stage table on stderr. */
 function printSummary(s: LlmCallSummary, callsPath: string, ioDir: string | null): void {
   const w = (line: string): void => {
     process.stderr.write(`[llm-log] ${line}\n`);

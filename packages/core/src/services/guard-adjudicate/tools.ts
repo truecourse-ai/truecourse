@@ -27,15 +27,12 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { defineSessionTool, type SessionTool } from '@truecourse/agent-loop';
+import { getDefaultTransport } from '@truecourse/shared/llm';
 import { evidenceScenarioDir } from '@truecourse/guard-runner';
 import { readGuardEvidenceAt } from '../../lib/guard-store.js';
 import { readFileTool, searchTool } from '../agent/repo-tools.js';
 import { resolveModel, resolveFallbackModel } from '../../config/llm-models.js';
-import {
-  runVisualJudge,
-  spawnVisualJudgeRunner,
-  resolveVisualJudgeTransport,
-} from '../llm/guard-visual-judge.js';
+import { runVisualJudge, spawnVisualJudgeRunner } from '../llm/guard-visual-judge.js';
 import { describeSessionFailure } from '../guard-setup/session-context.js';
 import { readInvocation } from './evidence.js';
 import { executeOneScenario, type AdjudicationExecution } from './execute.js';
@@ -200,9 +197,9 @@ function visualJudgeTool(input: AdjudicationToolsInput): SessionTool {
       let runner;
       try {
         runner = spawnVisualJudgeRunner({
-          transport: resolveVisualJudgeTransport(),
-          model: resolveModel('guard.visualJudge', undefined, repoRoot),
-          fallbackModel: resolveFallbackModel(repoRoot) ?? undefined,
+          transport: getDefaultTransport(),
+          model: resolveModel('guard.visualJudge'),
+          fallbackModel: resolveFallbackModel() ?? undefined,
         });
       } catch (e) {
         return { content: `no usable vision transport: ${e instanceof Error ? e.message : String(e)}`, isError: true };

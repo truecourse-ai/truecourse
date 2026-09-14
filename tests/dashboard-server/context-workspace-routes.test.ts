@@ -23,7 +23,7 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
 });
 
 import { createTestApp, stubJobs, TEST_ORG, type StubJobs } from '../helpers/test-app';
-import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
+import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
 import { contextIsStale } from '../../apps/dashboard/server/src/services/context-scan.service';
 import { memoryContextStore } from '../helpers/memory-context-store';
 import { memorySpecStore } from '../helpers/memory-spec-store';
@@ -38,14 +38,7 @@ import {
   saveWorkspaceSpec,
   setSpecStore,
 } from '@truecourse/core/lib/spec-store';
-import {
-  resetSessionsRootResolver,
-  setSessionsRootResolver,
-} from '@truecourse/core/lib/sessions-store';
 import type { CuratedCorpus } from '@truecourse/spec-consolidator';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 
 const SRC_A = 'repo-acme-widgets';
 const SRC_B = 'stripe-docs';
@@ -55,7 +48,6 @@ let app: Express;
 let fixture: TestFixture;
 let jobs: StubJobs;
 let context: ContextStore;
-let home: string;
 
 const corpus = (): CuratedCorpus => ({
   version: 3,
@@ -81,8 +73,6 @@ beforeEach(async () => {
   context = memoryContextStore();
   setContextStore(context);
   setSpecStore(memorySpecStore());
-  home = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-ctx-routes-'));
-  setSessionsRootResolver(() => path.join(home, 'sessions'));
   jobs = stubJobs();
   app = createTestApp({ jobs: jobs.mount });
 });
@@ -90,8 +80,6 @@ beforeEach(async () => {
 afterEach(async () => {
   resetContextStore();
   resetSpecStore();
-  resetSessionsRootResolver();
-  fs.rmSync(home, { recursive: true, force: true });
   await teardownTestFixture(fixture.project.slug);
 });
 

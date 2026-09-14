@@ -1,5 +1,5 @@
 /**
- * The guard setup BUNDLE — the files `truecourse guard setup` leaves in a repo
+ * The guard setup BUNDLE — the files Flow setup leaves in a repo
  * that must outlive the working tree it ran in.
  *
  * On a hosted run the working tree is an ephemeral clone, so setup's per-step

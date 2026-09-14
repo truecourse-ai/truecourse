@@ -112,7 +112,6 @@ export async function recordFailedWorkspaceScanRun(
     const run = await createStoredSessionRun(workspaceSessionsKey(org), {
       command: 'spec-scan',
       gitRef: 'unknown',
-      activityStream: true,
     });
     run.finish('failed', { error });
     await run.flush?.();

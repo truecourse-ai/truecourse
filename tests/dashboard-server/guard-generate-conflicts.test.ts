@@ -4,7 +4,8 @@ import path from 'node:path';
 import request from 'supertest';
 import { type Express } from 'express';
 import { createTestApp } from '../helpers/test-app';
-import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
+import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
+import { installMemorySpecStore, resetSpecStore } from '../helpers/memory-spec-store';
 
 /**
  * The dashboard `guard generate` action hits the SAME open-conflict gate the CLI
@@ -23,17 +24,18 @@ describe('guard generate route — open-conflict gate', () => {
   const url = () => `/api/repos/${fixture.project.slug}/guard/generate`;
 
   beforeEach(async () => {
+    const specs = installMemorySpecStore();
     fixture = await setupTestFixture();
     root = fixture.repoPath;
     app = createTestApp();
 
-    fs.mkdirSync(path.join(root, '.truecourse', 'specs'), { recursive: true });
     fs.mkdirSync(path.join(root, 'docs'), { recursive: true });
     fs.writeFileSync(path.join(root, 'docs', 'v1.md'), '# Users v1\nThe user identity is auth0_id.');
     fs.writeFileSync(path.join(root, 'docs', 'v2.md'), '# Users v2\nThe user identity is auth0_sub.');
-    fs.writeFileSync(
-      path.join(root, '.truecourse', 'specs', 'corpus.json'),
-      JSON.stringify({
+    await specs.saveSpec(
+      { repoKey: root, commitSha: 'scan' },
+      'corpus',
+      {
         version: 3,
         generatedAt: '2026-01-01T00:00:00Z',
         docs: [
@@ -51,11 +53,12 @@ describe('guard generate route — open-conflict gate', () => {
         ],
         relations: [],
         skippedDocs: [],
-      }),
+      },
     );
   });
   afterEach(async () => {
     await teardownTestFixture(fixture.project.slug);
+    resetSpecStore();
   });
 
   it('returns the conflict report as an error and starts no job', async () => {
@@ -63,7 +66,7 @@ describe('guard generate route — open-conflict gate', () => {
     expect(res.body.error).toContain('docs/v1.md');
     expect(res.body.error).toContain('docs/v2.md');
     expect(res.body.error).toContain(NOTE);
-    expect(res.body.error).toContain('truecourse spec conflicts list');
+    expect(res.body.error).toContain('Conflicts group');
 
     // The job never started — the second POST is gated again (422), never 409.
     await request(app).post(url()).send({ confirmed: true }).expect(422);

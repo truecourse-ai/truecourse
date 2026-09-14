@@ -2,18 +2,16 @@
  * The supplied-dependency OVERLAYS — the instances a user registers for a
  * repository's `supplied` dependencies (API keys, base URLs, tokens, headers).
  *
- * In a working tree they are the two gitignored files the runner reads,
+ * They live in ONE encrypted row per repository and are MATERIALIZED into a
+ * run's working tree as the two files the engine reads,
  * `scenarios/dependencies.local.json` (the catalog's instances) and
- * `scenarios/externals.local.json` (the recipe-declared services' secrets). A
- * hosted repository has no working tree, so the same two documents live in one
- * encrypted row and are MATERIALIZED into every ephemeral clone before setup,
- * generate or a run reads them — and never collected back: a secret enters only
- * through the dashboard's registration write, which stores the overlays a
- * scratch tree was left with after the engine's own writer ran over it.
+ * `scenarios/externals.local.json` (the recipe-declared services' secrets).
+ * They are never collected back: a secret enters only through the dashboard's
+ * registration write, which stores the overlays a scratch tree was left with
+ * after the engine's own writer ran over it.
  *
- * One seam, two implementations: the file store IS the two files (the default —
- * a CLI checkout reads and writes them in place); the hosted store is the
- * encrypted row (`@truecourse/data-store`), installed at boot.
+ * The seam exists because `@truecourse/core` cannot depend on
+ * `@truecourse/data-store`; boot installs the encrypted-row store over it.
  */
 
 import fs from 'node:fs';
@@ -36,7 +34,7 @@ export interface GuardOverlays {
 
 export const EMPTY_GUARD_OVERLAYS: GuardOverlays = { dependencies: {}, externals: {} };
 
-/** Pluggable overlay store. The file store is the default; the hosted store is a row. */
+/** The stored overlays, one encrypted row per repository. */
 export interface GuardOverlayStore {
   /** The stored overlays; `null` when nothing has ever been registered. */
   read(repoKey: string): Promise<GuardOverlays | null>;
@@ -65,7 +63,7 @@ export function readGuardOverlaysFromTree(treeDir: string): GuardOverlays {
 }
 
 /**
- * Write the two overlay files into a working tree in the runner's own format
+ * Write the two overlay files into a working tree in the engine's own format
  * (2-space, keys sorted, trailing newline). An empty overlay removes its file,
  * so a cleared registration leaves no stale document behind.
  */
@@ -85,42 +83,34 @@ function writeOverlayFile(file: string, overlay: Record<string, unknown>): void 
   atomicWriteText(file, JSON.stringify(sorted, null, 2) + '\n');
 }
 
-/** The default: the repo key is a working tree and the overlays are its two files. */
-class FileGuardOverlayStore implements GuardOverlayStore {
-  async read(repoRoot: string): Promise<GuardOverlays | null> {
-    const overlays = readGuardOverlaysFromTree(repoRoot);
-    return guardOverlaysEmpty(overlays) ? null : overlays;
-  }
-
-  async write(repoRoot: string, overlays: GuardOverlays): Promise<void> {
-    writeGuardOverlaysToTree(repoRoot, overlays);
-  }
-}
-
-const fileStore = new FileGuardOverlayStore();
-let active: GuardOverlayStore = fileStore;
+let active: GuardOverlayStore | null = null;
 
 export function setGuardOverlayStore(store: GuardOverlayStore): void {
   active = store;
 }
 
 export function resetGuardOverlayStore(): void {
-  active = fileStore;
+  active = null;
+}
+
+function store(): GuardOverlayStore {
+  if (!active) throw new Error('No guard overlay store installed (boot did not run installDbStores).');
+  return active;
 }
 
 export const readGuardOverlays = (repoKey: string): Promise<GuardOverlays | null> =>
-  active.read(repoKey);
+  store().read(repoKey);
 
 export const writeGuardOverlays = (repoKey: string, overlays: GuardOverlays): Promise<void> =>
-  active.write(repoKey, overlays);
+  store().write(repoKey, overlays);
 
 /**
- * Put a hosted repo's stored overlays into an ephemeral clone, where the engine
+ * Put a repository's stored overlays into a run's working tree, where the engine
  * reads them as the two files. A repo with nothing registered writes nothing,
  * and the result says whether anything was written.
  */
 export async function materializeGuardOverlays(repoKey: string, treeDir: string): Promise<boolean> {
-  const overlays = await active.read(repoKey);
+  const overlays = await store().read(repoKey);
   if (!overlays) return false;
   writeGuardOverlaysToTree(treeDir, overlays);
   return true;

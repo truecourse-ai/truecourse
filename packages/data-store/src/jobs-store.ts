@@ -38,7 +38,7 @@ export class ActiveJobExistsError extends Error {
 type JobRow = typeof jobs.$inferSelect;
 
 /**
- * A reaped in-flight job, as returned by {@link JobStore.failOrphaned}: enough
+ * A reaped in-flight job, as returned by {@link JobStore.interruptOrphaned}: enough
  * for boot recovery to settle side effects the dead run left dangling (e.g.
  * complete a `guard.gate`'s stranded PR Check from the stored `payload`).
  */
@@ -228,15 +228,16 @@ export class JobStore {
 
   /**
    * Boot recovery: the in-process worker means a restart abandons any in-flight
-   * job. Mark every `queued|running` row `failed` so the unique key is freed and
-   * a stale "Syncing…" button clears. Returns the reaped jobs (id, type, stored
-   * payload) so the caller can settle what the dead runs left dangling.
+   * job. Mark every `queued|running` row `interrupted` — the same word its run
+   * record gets — so the unique key is freed and a stale "Syncing…" button
+   * clears. Returns the reaped jobs (id, type, stored payload) so the caller can
+   * settle what the dead runs left dangling.
    */
-  async failOrphaned(): Promise<OrphanedJob[]> {
+  async interruptOrphaned(): Promise<OrphanedJob[]> {
     const now = new Date().toISOString();
     return this.db
       .update(jobs)
-      .set({ status: 'failed', error: 'interrupted by server restart', finishedAt: now })
+      .set({ status: 'interrupted', error: 'interrupted by a server restart', finishedAt: now })
       .where(inArray(jobs.status, ['queued', 'running']))
       .returning({
         id: jobs.id,

@@ -6,13 +6,13 @@
  * a `spec:complete` lifecycle event (`kind: 'guard-generate' | 'guard-run'`)
  * flips staleness + refetches on the client.
  *
- *   GET  /:id/guard/estimate   the pre-flight token/cost estimate (same
- *                              estimateGuardTokens the CLI prompt renders).
+ *   GET  /:id/guard/estimate   the pre-flight token/cost estimate (the
+ *                              estimateGuardTokens the driver's gate uses).
  *   POST /:id/guard/generate   enqueue `guard generate` (author scenarios from
  *                              the spec sections) as a background job; 202
  *                              { jobId }, 409 when the repository is already
  *                              working, 422 while the corpus carries an open
- *                              conflict (the same gate the CLI hits, answered
+ *                              conflict (the same gate the driver hits, answered
  *                              before anything is queued).
  *   POST /:id/guard/run        run the committed scenarios (deterministic,
  *                              LLM-free — no estimate).
@@ -65,7 +65,6 @@ import {
   readGuardResultForView,
 } from '@truecourse/core/commands/guard-read';
 import { mapInterfaces } from '@truecourse/core/services/interface';
-import { guardsMaterializeInPlace } from '@truecourse/core/lib/guard-store';
 import { getGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { getGuardPrRegenEnqueue } from '@truecourse/core/lib/guard-pr-regen-enqueue';
 import { getGuardGateHeadsLookup } from '@truecourse/core/lib/guard-gate-pending';
@@ -207,8 +206,8 @@ async function refusedWithoutLlm(req: Request, res: Response): Promise<boolean> 
   }
 }
 
-// GET the pre-flight estimate — the SAME estimateGuardTokens call the CLI prompt
-// renders (deterministic token math + ceiling cost, cache-aware, "N of M sections
+// GET the pre-flight estimate — the SAME estimateGuardTokens call the driver's
+// gate uses (deterministic token math + ceiling cost, cache-aware, "N of M sections
 // changed"). No stages ⇒ nothing changed ⇒ the client skips the modal and triggers
 // directly. Read-only: never mutates, never spends.
 router.get('/:id/guard/estimate', async (req: Request, res: Response, next: NextFunction) => {
@@ -223,8 +222,8 @@ router.get('/:id/guard/estimate', async (req: Request, res: Response, next: Next
 
 // POST — author scenarios. Minutes of LLM work plus a sandbox build, so it is a
 // QUEUED JOB rather than work inside the request: the route answers the two
-// refusals a user can act on now — the open-conflict gate (the same one the CLI
-// hits, read through the store so a hosted repo is gated too) and the
+// refusals a user can act on now — the open-conflict gate (the same one the
+// driver hits, read through the store so a hosted repo is gated too) and the
 // provider check — then enqueues and answers 202 with the job id. There is no
 // estimate gate: an unchanged corpus is the engine's own deterministic no-op.
 router.post('/:id/guard/generate', async (req: Request, res: Response, next: NextFunction) => {
@@ -322,39 +321,6 @@ router.post('/:id/guard/run', async (req: Request, res: Response, next: NextFunc
   }
 });
 
-// POST — map the repo's surfaces to interfaces (the Interfaces tab's action). The
-// analyzer + interface-mapper are deterministic and LLM-free, so this action has NO
-// estimate gate and costs nothing; it rewrites `guard/interfaces.json` and answers
-// with the fresh catalog view (the same shape `GET /guard/interfaces` returns), so
-// the tab re-renders from the response without a follow-up fetch. It shares the
-// per-repo job guard with generate/run: they all write the guard store, so a
-// trigger while one is in flight is a 409. Mapping reads the WORKING TREE, so a
-// store that does not materialize in place (hosted) rejects it — those repos map
-// during their server-side generate.
-router.post('/:id/guard/map', async (req: Request, res: Response, next: NextFunction) => {
-  const repoId = req.params.id as string;
-  let held = false;
-  try {
-    const repo = await resolveProjectForRequest(repoId);
-    if (!guardsMaterializeInPlace()) {
-      res.status(501).json({ error: 'Interface mapping requires a local working tree.' });
-      return;
-    }
-    if (guardJobs.has(repoId)) {
-      res.status(409).json({ error: 'A guard job is already running for this repo.' });
-      return;
-    }
-    guardJobs.add(repoId);
-    held = true;
-
-    await mapInterfaces(repo.path);
-    res.json(await readGuardInterfaces(repo.path));
-  } catch (e) {
-    next(e);
-  } finally {
-    if (held) guardJobs.delete(repoId);
-  }
-});
 
 // POST — dismiss a finding's claim. `{ doc, anchor, title, note? }` where `title`
 // is the extracted claim's stable text (the finding's `claim`). Idempotent; returns
@@ -485,45 +451,6 @@ router.post('/:id/guard/flows/undismiss', async (req: Request, res: Response, ne
   }
 });
 
-// PUT — declare (or clear) external API accounts. Body: `{ externals: { "<service>":
-// { baseUrlEnv, baseUrl?, baseUrlTarget?, mode?, description?, env? } | null } }`,
-// where an env entry is `{ value }` (a SECRET — stored in the gitignored overlay),
-// `{ valueFromEnv }` (a variable NAME — committed), `{ value, inline: true }` (a
-// deliberate committed value), or `null` (drop it). Only the named services are
-// touched; the rest of recipe.json is preserved byte-for-byte and an unchanged
-// write touches no file.
-//
-// Not a job: it is an instant file write like dismiss/undismiss, so it takes no
-// guard lock — but it DOES change what the next generate authors (the declaration
-// enters the recipe fingerprint), so it emits the same completion lifecycle event
-// the write routes use to refetch the client's guard views. Working-tree only.
-router.put('/:id/guard/externals', async (req: Request, res: Response, next: NextFunction) => {
-  const repoId = req.params.id as string;
-  try {
-    const repo = await resolveProjectForRequest(repoId);
-    if (!guardsMaterializeInPlace()) {
-      res.status(501).json({ error: 'External accounts require a local working tree.' });
-      return;
-    }
-    const body = (req.body ?? {}) as Partial<GuardExternalsWrite>;
-    if (!body.externals || typeof body.externals !== 'object' || Array.isArray(body.externals)) {
-      res.status(400).json({ error: 'externals write requires { externals: { <service>: {…} | null } }.' });
-      return;
-    }
-    const view = writeGuardExternals(repo.path, { externals: body.externals });
-    emitSpecComplete(repoId, 'guard-externals');
-    res.json(view);
-  } catch (e) {
-    // A refused write is the user's problem to fix (no recipe, no api block, a
-    // declaration that would not load) — a plain 422 with the engine's wording,
-    // never a 500.
-    if (e instanceof GuardExternalsWriteError) {
-      res.status(422).json({ error: e.message });
-      return;
-    }
-    next(e);
-  }
-});
 
 // PUT — register ONE dependency's instance. Body: `{ name, env?, path?, baseUrlEnv?,
 // baseUrl?, mode?, token?, headers? }`. The caller names a dependency, never a file,
@@ -552,16 +479,14 @@ router.put('/:id/guard/dependencies', async (req: Request, res: Response, next: 
       return;
     }
     const { name, ...patch } = body;
-    const view = guardsMaterializeInPlace()
-      ? writeGuardDependency(repo.path, name, patch as GuardDependencyPatch)
-      : await withGuardReadTree(repo.path, undefined, async (tree) => {
-          const written = writeGuardDependency(tree, name, patch as GuardDependencyPatch, {
-            env: {},
-            hostless: true,
-          });
-          await writeGuardOverlays(repo.path, readGuardOverlaysFromTree(tree));
-          return hostedDependenciesView(tree, written);
-        });
+    const view = await withGuardReadTree(repo.path, undefined, async (tree) => {
+      const written = writeGuardDependency(tree, name, patch as GuardDependencyPatch, {
+        env: {},
+        hostless: true,
+      });
+      await writeGuardOverlays(repo.path, readGuardOverlaysFromTree(tree));
+      return hostedDependenciesView(tree, written);
+    });
     emitSpecComplete(repoId, 'guard-externals');
     res.json(view);
   } catch (e) {

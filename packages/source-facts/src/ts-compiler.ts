@@ -35,9 +35,9 @@ const moduleResolutionHost: ts.ModuleResolutionHost = {
  * Without this, `ts.createProgram(files, options)` falls back to
  * `ts.createCompilerHost(options)` which uses `ts.sys.getCurrentDirectory()`
  * (i.e. `process.cwd()`). That makes typeRoots / `@types` lookup pull from
- * the *parent process's* `node_modules` — so the same analyzer call returns
- * different counts depending on where the CLI / dashboard server was
- * launched. Anchoring at the analyzed repo makes results CWD-independent.
+ * the *parent process's* `node_modules` — so the same call returns different
+ * counts depending on where the server was launched. Anchoring at the analyzed
+ * repo makes results CWD-independent.
  */
 function createRepoScopedCompilerHost(
   repoPath: string,

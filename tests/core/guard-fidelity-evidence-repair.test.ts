@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import { GuardWebStepSchema, type GuardEvidenceProofContext } from '@truecourse/shared'
 import type { WorkerFidelityInput } from '@truecourse/guard-generator'
@@ -11,9 +11,11 @@ import { emptyFidelityTally, FidelityVerdictSchema, fidelitySessionCacheKey, fid
 import { buildGuardDocUniverse } from '../../packages/core/src/services/guard-generate/tools'
 import { memoryPersistence, outcome, stubDriver, type StubCall } from './spec-scan-session-stub'
 import { correctedEmptyLedgerEvidence, emptyLedgerEvidenceContext, invalidEmptyLedgerEvidence } from '../fixtures/guard-completion/empty-ledger-evidence'
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache'
 
 const repos: string[] = []
-afterEach(() => { while (repos.length) fs.rmSync(repos.pop()!, { recursive: true, force: true }) })
+beforeEach(() => { installMemoryKvCache() })
+afterEach(() => { resetKvCacheStore(); while (repos.length) fs.rmSync(repos.pop()!, { recursive: true, force: true }) })
 const universe = buildGuardDocUniverse([])
 const faithful = (evidence = correctedEmptyLedgerEvidence) => ({ verdict: 'faithful' as const, evidence })
 function input(proofContext = emptyLedgerEvidenceContext): WorkerFidelityInput {

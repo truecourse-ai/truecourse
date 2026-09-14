@@ -6,7 +6,7 @@
  */
 
 import { Router, type Request, type Response } from 'express';
-import { registerProject, getProjectByPath } from '@truecourse/core/config/registry';
+import { getProjectByPath } from '@truecourse/core/config/registry';
 import {
   NOTIFICATION_KEYS,
   resolveNotificationPrefs,
@@ -69,16 +69,13 @@ function prFieldsFor(pr: PrRecord | undefined): PrFeedFields {
 type EnqueueScan = (trigger: BaselineTrigger) => Promise<string | null>;
 
 /**
- * What the gate does with a freshly connected repo: surface it in the dashboard's
- * project list, then kick the INITIAL scan (background job) rather than waiting
- * for the next default-branch push, so the repo's spec + Code Quality baseline
- * populate as soon as it's connected. Without a queue wired there is no scan to
- * enqueue, so the branch head isn't resolved either.
+ * What the gate does with a freshly connected repo: kick the INITIAL scan
+ * (background job) rather than waiting for the next default-branch push, so the
+ * repo's baseline populates as soon as it is connected. Without a queue wired
+ * there is no scan to enqueue, so the branch head isn't resolved either.
  */
 export function createRepoLinkedHook(enqueueBaseline?: EnqueueScan): OnRepoLinked {
   return async (link: RepoLinkRecord, octokit: OctokitClient) => {
-    // Keyed by `owner/repo`, deterministic slug.
-    await registerProject(link.repoFullName, link.repoFullName);
     if (!enqueueBaseline) return;
     const branch = await octokit.repos.getBranch({
       ...splitRepo(link.repoFullName),

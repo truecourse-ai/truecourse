@@ -12,6 +12,7 @@ import path from 'node:path';
 import { resetKvCacheStore } from '@truecourse/llm';
 import { curateInProcess } from '../../packages/core/src/commands/spec-in-process';
 import type { DecisionsFile } from '../../packages/spec-consolidator/src/index.js';
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
 import { outcome, stubDriver, toolResult } from './spec-scan-session-stub';
 
 /** Keep every doc in one area; no provider, no network. */
@@ -56,6 +57,7 @@ function decisionsWith(manualExcludes: string[]): DecisionsFile {
 let repo: string;
 beforeEach(() => {
   resetKvCacheStore();
+  installMemorySessionRuns();
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-curate-inproc-'));
   fs.mkdirSync(path.join(repo, 'docs'), { recursive: true });
   fs.writeFileSync(path.join(repo, 'docs', 'alpha.md'), '# Orders alpha\nCancel up to 24h before.');
@@ -63,6 +65,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   resetKvCacheStore();
+  resetSessionRuns();
   fs.rmSync(repo, { recursive: true, force: true });
 });
 

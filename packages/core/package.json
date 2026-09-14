@@ -14,11 +14,6 @@
       "types": "./dist/commands/context-scan.d.ts",
       "import": "./dist/commands/context-scan.js"
     },
-    "./commands/spec-sources": {
-      "truecourse-source": "./src/commands/spec-sources.ts",
-      "types": "./dist/commands/spec-sources.d.ts",
-      "import": "./dist/commands/spec-sources.js"
-    },
     "./commands/guard-in-process": {
       "truecourse-source": "./src/commands/guard-in-process.ts",
       "types": "./dist/commands/guard-in-process.d.ts",
@@ -69,25 +64,15 @@
       "types": "./dist/progress.d.ts",
       "import": "./dist/progress.js"
     },
-    "./config": {
-      "truecourse-source": "./src/config/index.ts",
-      "types": "./dist/config/index.d.ts",
-      "import": "./dist/config/index.js"
-    },
-    "./config/paths": {
-      "truecourse-source": "./src/config/paths.ts",
-      "types": "./dist/config/paths.d.ts",
-      "import": "./dist/config/paths.js"
+    "./config/runtime-dir": {
+      "truecourse-source": "./src/config/runtime-dir.ts",
+      "types": "./dist/config/runtime-dir.d.ts",
+      "import": "./dist/config/runtime-dir.js"
     },
     "./config/registry": {
       "truecourse-source": "./src/config/registry.ts",
       "types": "./dist/config/registry.d.ts",
       "import": "./dist/config/registry.js"
-    },
-    "./config/project-config": {
-      "truecourse-source": "./src/config/project-config.ts",
-      "types": "./dist/config/project-config.d.ts",
-      "import": "./dist/config/project-config.js"
     },
     "./config/current-project": {
       "truecourse-source": "./src/config/current-project.ts",
@@ -103,11 +88,6 @@
       "truecourse-source": "./src/config/llm-models.ts",
       "types": "./dist/config/llm-models.d.ts",
       "import": "./dist/config/llm-models.js"
-    },
-    "./config/global-config": {
-      "truecourse-source": "./src/config/global-config.ts",
-      "types": "./dist/config/global-config.d.ts",
-      "import": "./dist/config/global-config.js"
     },
     "./lib/logger": {
       "truecourse-source": "./src/lib/logger.ts",
@@ -274,6 +254,11 @@
       "types": "./dist/services/llm/install-transport.d.ts",
       "import": "./dist/services/llm/install-transport.js"
     },
+    "./services/llm/provider-config": {
+      "truecourse-source": "./src/services/llm/provider-config.ts",
+      "types": "./dist/services/llm/provider-config.d.ts",
+      "import": "./dist/services/llm/provider-config.js"
+    },
     "./services/llm/probe": {
       "truecourse-source": "./src/services/llm/probe.ts",
       "types": "./dist/services/llm/probe.d.ts",
@@ -283,11 +268,6 @@
       "truecourse-source": "./src/services/llm/guard-visual-judge.ts",
       "types": "./dist/services/llm/guard-visual-judge.d.ts",
       "import": "./dist/services/llm/guard-visual-judge.js"
-    },
-    "./services/telemetry": {
-      "truecourse-source": "./src/services/telemetry.service.ts",
-      "types": "./dist/services/telemetry.service.d.ts",
-      "import": "./dist/services/telemetry.service.js"
     },
     "./lib/activity-journal": {
       "truecourse-source": "./src/lib/activity-journal.ts",
@@ -315,7 +295,6 @@
     "dotenv": "^16.4.0",
     "js-yaml": "^4.1.0",
     "p-limit": "^7.3.0",
-    "posthog-node": "^4.0.0",
     "simple-git": "^3.27.0",
     "zod": "^3.23.8",
     "zod-to-json-schema": "^3.25.1",

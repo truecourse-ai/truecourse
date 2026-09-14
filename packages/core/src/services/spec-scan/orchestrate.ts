@@ -13,7 +13,7 @@
  * itself; this session only produces the scope + instructions they run under.
  *
  * THE DETERMINISTIC PRE-PASS spends zero sessions on the common case: the
- * universe tree (dirs with doc counts, sources with page counts) is diffed
+ * universe tree (dirs with doc counts, sources with document counts) is diffed
  * against the covered `scopeVerdicts` already in decisions.json — when every
  * doc and source is covered, the verdicts are applied and the scan proceeds
  * with no orchestrator session at all. Growth (a new subtree, a new source)
@@ -39,13 +39,11 @@ import {
   type SessionTool,
 } from '@truecourse/agent-loop'
 import {
-  SOURCES_REF_PREFIX,
   docBody,
   headingOutline,
   type DecisionsFile,
   type DocCandidate,
   type ScopeVerdict,
-  type SpecSource,
 } from '@truecourse/spec-consolidator'
 import { CONTEXT_REF_PREFIX } from '../../lib/context-ref.js'
 import { docTitle, type ScanDocUniverse } from './tools.js'
@@ -96,7 +94,7 @@ export type ScanScopeOutcome = z.infer<typeof ScanScopeOutcomeSchema>
 // The universe view — what the pre-pass diffs and the briefing/tools render.
 // ---------------------------------------------------------------------------
 
-/** One registered llms.txt source, as the scope surface sees it. */
+/** One of the workspace's sources, as the scope surface sees it. */
 export interface ScopeSourceView {
   id: string
   title: string
@@ -107,9 +105,8 @@ export interface ScopeSourceView {
  * Which REF GRAMMAR the universe speaks, and therefore what a verdict path can
  * name:
  *
- * - `repo` — a repository's own tree. A doc ref is a repo-relative path, a
- *   registered llms.txt page lives under `.truecourse/specs/sources/<id>/`, and
- *   `.` names the repo-root files as a group.
+ * - `repo` — a tree of a repository's own docs. A doc ref is a repo-relative
+ *   path and `.` names the root files as a group; there are no sources.
  * - `context` — the WORKSPACE's documents. Every ref is
  *   `context/<sourceId>/<docPath>` (one grammar, `lib/context-ref`), so a
  *   verdict subject is a source id (or its `context/<sourceId>` path) and a
@@ -118,9 +115,9 @@ export interface ScopeSourceView {
 export type ScopeGrammar = 'repo' | 'context'
 
 export interface ScanScopeUniverse {
-  /** Repo docs (source snapshots excluded — those are attributed to their source). */
+  /** The docs the tree itself holds. */
   repoDocs: DocCandidate[]
-  /** Registered llms.txt sources, with page counts. */
+  /** The workspace's sources, with document counts. Empty under `repo`. */
   sources: ScopeSourceView[]
   /** The whole doc universe (repo + source docs), for `doc_outline`. */
   universe: ScanDocUniverse
@@ -128,25 +125,16 @@ export interface ScanScopeUniverse {
   grammar: ScopeGrammar
 }
 
-/** Is this ref a registered-source snapshot (lives under `.truecourse/`)? */
-function isSourceRef(ref: string): boolean {
-  return ref.startsWith(`${SOURCES_REF_PREFIX}/`)
+/** The ref prefix a source's documents share — sources are the workspace's. */
+function sourceRefPrefix(sourceId: string): string {
+  return `${CONTEXT_REF_PREFIX}/${sourceId}`
 }
 
-/** Where a source's documents live under a grammar: the ref prefix they share. */
-function sourceRefPrefix(sourceId: string, grammar: ScopeGrammar): string {
-  return grammar === 'context'
-    ? `${CONTEXT_REF_PREFIX}/${sourceId}`
-    : `${SOURCES_REF_PREFIX}/${sourceId}`
-}
-
-export function buildScanScopeUniverse(
-  universe: ScanDocUniverse,
-  sources: readonly SpecSource[],
-): ScanScopeUniverse {
+/** A repository tree's own docs: every ref is a path in it, and it has no sources. */
+export function buildScanScopeUniverse(universe: ScanDocUniverse): ScanScopeUniverse {
   return {
-    repoDocs: universe.ordered.filter((d) => !isSourceRef(d.path)),
-    sources: sources.map((s) => ({ id: s.id, title: s.title, pages: s.docs.length })),
+    repoDocs: [...universe.ordered],
+    sources: [],
     universe,
     grammar: 'repo',
   }
@@ -181,9 +169,8 @@ export function normalizeScopePath(path: string): string {
  * - `.`            — root-level repo docs only (refs with no `/`);
  * - a source id    — every document of that source;
  * - a dir prefix / exact ref — the subtree under it (or the one doc).
- * A source's documents are also covered by their full prefix
- * (`.truecourse/specs/sources/<id>` under the repo grammar, `context/<id>`
- * under the workspace's), so a hand-written prefix row works too.
+ * A source's documents are also covered by their full prefix (`context/<id>`),
+ * so a hand-written prefix row works too.
  */
 export function verdictCoversDoc(
   verdictPath: string,
@@ -196,19 +183,15 @@ export function verdictCoversDoc(
   // document is root-level (every ref opens `context/<sourceId>/`), so a `.`
   // row covers nothing rather than silently covering everything.
   if (path === '.') return grammar === 'repo' && !ref.includes('/')
-  if (sourceIds.has(path)) return ref.startsWith(`${sourceRefPrefix(path, grammar)}/`)
+  if (sourceIds.has(path)) return ref.startsWith(`${sourceRefPrefix(path)}/`)
   return ref === path || ref.startsWith(`${path}/`)
 }
 
 /** How specific a verdict path is — the longest match wins at application. */
-function scopePathSpecificity(
-  verdictPath: string,
-  sourceIds: ReadonlySet<string>,
-  grammar: ScopeGrammar = 'repo',
-): number {
+function scopePathSpecificity(verdictPath: string, sourceIds: ReadonlySet<string>): number {
   const path = normalizeScopePath(verdictPath)
   if (path === '.') return 0
-  if (sourceIds.has(path)) return sourceRefPrefix(path, grammar).length
+  if (sourceIds.has(path)) return sourceRefPrefix(path).length
   return path.length
 }
 
@@ -260,13 +243,13 @@ export function scopeCoverage(
   const uncoveredSources = scope.sources.filter((s) => {
     const named = verdicts.some((v) => {
       const path = normalizeScopePath(v.path)
-      return path === s.id || path === sourceRefPrefix(s.id, grammar)
+      return path === s.id || path === sourceRefPrefix(s.id)
     })
     if (named) return false
     // A source with pages is also covered when every page ref is (a broad
     // hand-written prefix); a pageless source needs its id named.
     const refs = scope.universe.ordered.filter((d) =>
-      d.path.startsWith(`${sourceRefPrefix(s.id, grammar)}/`),
+      d.path.startsWith(`${sourceRefPrefix(s.id)}/`),
     )
     return refs.length === 0 || refs.some((d) => !coveredDoc(d.path))
   })
@@ -308,7 +291,7 @@ export function applyScopeVerdicts(
     let winnerSpecificity = -1
     for (const v of verdicts) {
       if (!verdictCoversDoc(v.path, doc.path, sourceIds, grammar)) continue
-      const specificity = scopePathSpecificity(v.path, sourceIds, grammar)
+      const specificity = scopePathSpecificity(v.path, sourceIds)
       if (specificity > winnerSpecificity) {
         winner = v
         winnerSpecificity = specificity
@@ -445,21 +428,13 @@ export function renderUniverseTree(scope: ScanScopeUniverse): string {
     )
   }
 
-  const sourcesHeading =
-    scope.grammar === 'context'
-      ? 'Sources (verdict by source id to rule a whole source in or out):'
-      : 'Registered documentation sources (verdict by source id):'
   if (scope.sources.length > 0) {
-    lines.push('', sourcesHeading)
+    lines.push('', 'Sources (verdict by source id to rule a whole source in or out):')
     for (const s of scope.sources) {
-      const word = scope.grammar === 'context' ? 'document' : 'page'
-      lines.push(`  ${s.id}  ·  ${s.title}  (${s.pages} ${word}${s.pages === 1 ? '' : 's'})`)
+      lines.push(`  ${s.id}  ·  ${s.title}  (${s.pages} document${s.pages === 1 ? '' : 's'})`)
     }
   } else {
-    lines.push(
-      '',
-      scope.grammar === 'context' ? 'Sources: none.' : 'Registered documentation sources: none.',
-    )
+    lines.push('', 'Sources: none.')
   }
   return lines.join('\n')
 }
@@ -478,12 +453,12 @@ export function orchestrateSystemPrompt(grammar: ScopeGrammar = 'repo'): string 
   return grammar === 'context' ? WORKSPACE_SYSTEM_PROMPT : ORCHESTRATE_SYSTEM_PROMPT
 }
 
-export const ORCHESTRATE_SYSTEM_PROMPT = `You settle the SCAN SCOPE of ONE repository's documentation universe, before any per-doc curation spends. The universe is a tree of directories holding markdown docs, plus registered external documentation sources. You decide, per SUBTREE, whether it is spec-source territory — and you author the standing instructions every later scan session works under.
+export const ORCHESTRATE_SYSTEM_PROMPT = `You settle the SCAN SCOPE of ONE repository's documentation universe, before any per-doc curation spends. The universe is a tree of directories holding markdown docs. You decide, per SUBTREE, whether it is spec-source territory — and you author the standing instructions every later scan session works under.
 
 # Scope verdicts
 
 One verdict per subtree: { "path", "verdict": "keep" | "exclude", "reason" }.
-- "path" is a repo-relative DIRECTORY PREFIX exactly as the universe tree lists it (\`docs/archive\`), a single root-level doc (\`CHANGELOG.md\`), \`.\` for the repo-root files as a group, or a registered SOURCE ID.
+- "path" is a repo-relative DIRECTORY PREFIX exactly as the universe tree lists it (\`docs/archive\`), a single root-level doc (\`CHANGELOG.md\`), \`.\` for the repo-root files as a group.
 - COVER EVERY UNCOVERED ENTRY the briefing lists. A covered universe is what lets the next scan skip this session entirely.
 - "exclude" drops the subtree from the ENTIRE scan — its docs are never read again by any stage. Exclude only trees that are CATEGORICALLY not spec-source for this repository: vendored/third-party documentation mirrors, generated dumps duplicated by a canonical source elsewhere in the tree, archives of superseded material, machine-translated localization copies of a canonical-language tree, test fixture corpora.
 - WHEN UNSURE, KEEP. Per-doc curation judges individual docs far more carefully; a wrong keep costs a few curation sessions, a wrong exclude silently hides a subtree from everything, forever. Prefer verdicting a PARENT "keep" and its genuinely dead CHILD "exclude" over guessing at the parent.
@@ -495,11 +470,11 @@ Short imperative notes that ride EVERY scan session's briefing (e.g. "docs under
 
 # Findings
 
-Verbatim observations worth a human's eyes that fit no verdict — an apparently abandoned doc tree, a source whose snapshot looks truncated. Optional.
+Verbatim observations worth a human's eyes that fit no verdict — an apparently abandoned doc tree, a doc that looks truncated. Optional.
 
 # Tools
 
-- \`list_universe\` — the universe tree again (directories with doc counts and their direct filenames, sources with page counts).
+- \`list_universe\` — the universe tree again (directories with doc counts and their direct filenames).
 - \`doc_outline\` — one doc's heading outline, to sample what a directory actually holds. Sample a few representative docs before excluding anything; never exclude a subtree you did not look into.
 
 The outcome is one object: { "scopeVerdicts": [...], "instructions": [...], "findings": [...] }.`
@@ -534,7 +509,7 @@ function listUniverseTool(scope: ScanScopeUniverse): SessionTool {
   return defineSessionTool({
     name: 'list_universe',
     description:
-      'The doc universe as a tree: every directory with its doc count and direct doc filenames, and the registered documentation sources with page counts.',
+      'The doc universe as a tree: every directory with its doc count and direct doc filenames, and each source with its document count.',
     kind: 'list-scan-universe',
     readOnly: true,
     destructive: false,
@@ -703,10 +678,9 @@ export function orchestrateBriefing(
     '',
     'UNCOVERED — no verdict covers these yet; your verdicts must cover every entry:',
     ...coverage.uncoveredDirs.map((d) => `  ${d.path === '.' ? '. (repo-root files)' : `${d.path}/`}  (${docsWord(d.docs)})`),
-    ...coverage.uncoveredSources.map((s) => {
-      const word = scope.grammar === 'context' ? 'document' : 'page'
-      return `  source: ${s.id}  (${s.pages} ${word}${s.pages === 1 ? '' : 's'})`
-    }),
+    ...coverage.uncoveredSources.map(
+      (s) => `  source: ${s.id}  (${s.pages} document${s.pages === 1 ? '' : 's'})`,
+    ),
     '',
     'Sample outlines where a directory\'s nature is unclear, then produce the outcome.',
   ]

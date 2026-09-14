@@ -9,7 +9,7 @@
  * directions (work promised that never runs, spend that was never quoted).
  */
 
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -56,9 +56,14 @@ import {
   writeInterfaceSnapshot,
   PASSING_STEPS,
 } from './helpers.js'
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache.js'
 
 const repos: string[] = []
+beforeEach(() => {
+  installMemoryKvCache()
+})
 afterEach(() => {
+  resetKvCacheStore()
   while (repos.length) rmrf(repos.pop()!)
 })
 function repo(): string {

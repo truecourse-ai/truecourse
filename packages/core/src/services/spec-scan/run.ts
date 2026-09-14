@@ -46,7 +46,7 @@
  * completed outcomes are written back. Tools never write repo/store state —
  * every write happens in the fold here, after the outcomes.
  *
- * SINGLE-STEP MODE (`only` / the CLI's `--only-<step>` flags): run one step's
+ * SINGLE-STEP MODE (`only`): run one step's
  * sessions in isolation — prior steps replay from their durable artifacts
  * (stored scope verdicts, outcome caches; a miss fails loud), later steps
  * never start, and corpus.json is written only by the final step. See
@@ -79,7 +79,6 @@ import {
   pruneOrphanedConflictResolutions,
   readCorpusDecisions,
   readRepoIdentityInput,
-  readSourcesFile,
   resolveRepoIdentity,
   verifyOverlapSections,
   writeCorpus,
@@ -98,7 +97,6 @@ import {
   type Status,
   type VocabMap,
 } from '@truecourse/spec-consolidator'
-import { loadSpecScope } from '@truecourse/shared'
 import { LlmStageFailureError, type StageTransportTally } from '@truecourse/shared/llm'
 import { dedupeCrossAreaOverlaps } from '@truecourse/shared'
 import { cachedSessionOutcome } from '../agent/session-cache.js'
@@ -161,7 +159,7 @@ import {
 import { buildScanUniverse, instructionsFingerprint } from './tools.js'
 
 // ---------------------------------------------------------------------------
-// Single-step mode (`--only-<step>`)
+// Single-step mode (`only`)
 // ---------------------------------------------------------------------------
 
 /** The scan's four session steps, in pipeline order. */
@@ -178,13 +176,6 @@ export type ScanStep = (typeof SCAN_STEPS)[number]
 export type ScanFactStep = 'discover' | 'tag' | 'overlap' | 'verify'
 
 /**
- * A single-step run (`only`) found a PRIOR step's artifact missing: the prior
- * step's outcome cache has no entry for `missing`, so replaying it would spend
- * sessions that belong to that step's own flag. Deliberately loud — a silent
- * re-run here would mask exactly the cache-key drift a stepwise run exists to
- * expose. The fix is always `truecourse spec scan --only-<step>`.
- */
-/**
  * The caller cancelled the run through its `signal` (the dashboard does this
  * when a repository is disconnected under its own onboarding scan). Thrown
  * BEFORE anything is written: an aborted session fails, and a kind's fail-open
@@ -199,13 +190,20 @@ export class ScanAbortedError extends Error {
   }
 }
 
+/**
+ * A single-step run (`only`) found a PRIOR step's artifact missing: the prior
+ * step's outcome cache has no entry for `missing`, so replaying it would spend
+ * sessions that belong to that step's own run. Deliberately loud — a silent
+ * re-run here would mask exactly the cache-key drift a stepwise run exists to
+ * expose. The fix is always a scan with `only` set to that step.
+ */
 export class ScanStepNotReadyError extends Error {
   constructor(
     readonly step: ScanStep,
     readonly missing: string[],
   ) {
     super(
-      `the ${step} step has ${missing.length} uncached item${missing.length === 1 ? '' : 's'} — run \`truecourse spec scan --only-${step}\` first`,
+      `the ${step} step has ${missing.length} uncached item${missing.length === 1 ? '' : 's'} — run it without \`only\` first`,
     )
     this.name = 'ScanStepNotReadyError'
   }
@@ -292,7 +290,7 @@ export interface SpecScanSessionsOptions {
   onCurateProgress?: (done: number, total: number) => void
   onSettle?: (state: 'skipped' | 'cached' | 'ran' | 'failed') => void
   onOverlapProgress?: (done: number, total: number) => void
-  /** Every transcript event as it is persisted — the CLI's live line. */
+  /** Every transcript event as it is persisted — the caller's live view. */
   onSessionEvent?: (workItem: string, event: SessionEvent) => void
   mintSessionId?: () => string
   now?: () => string
@@ -311,12 +309,12 @@ export interface ScanSessionKindSummary {
 export interface SpecScanSessionsResult extends CurateResult {
   /** Zero fresh sessions and zero failures — every input was unchanged. */
   noChanges: boolean
-  /** Per-kind session rollups (for the CLI/dashboard detail lines). */
+  /** Per-kind session rollups (for the dashboard's detail lines). */
   sessions: ScanSessionKindSummary[]
   /**
    * Questions the interactive orchestrator left unanswered. A
    * non-interactive run never blocks on them — every consumer must surface
-   * them LOUDLY (the CLI summary does).
+   * them LOUDLY.
    */
   pendingQuestions: UserInputQuestion[]
   /** The orchestrator's `findings` — verbatim observations for human eyes. */
@@ -371,7 +369,7 @@ interface CachedPoolOptions<TItem, TOutcome> {
   /**
    * Single-step mode, replaying a PRIOR step: serve every item from cache and
    * throw {@link ScanStepNotReadyError} (naming this step) on any miss instead
-   * of running a session — the misses belong to this step's own `--only` flag.
+   * of running a session — the misses belong to this step's own `only` run.
    */
   cacheOnly?: ScanStep
 }
@@ -568,24 +566,12 @@ export async function runSpecScanSessions(
 
   // ---- Discover (det) ------------------------------------------------------
   let allDocs: DocCandidate[]
-  let scopeGlobs: string[] = []
-  let outOfScopeManualIncludes: string[] = []
   if (opts.docSource) {
     allDocs = await opts.docSource()
     fact('discover', 'docs supplied by the caller, no repository walk')
   } else {
-    const scope = loadSpecScope(repoRoot)
-    allDocs = discoverDocs(repoRoot, { skipGit: opts.skipGit, scope })
-    scopeGlobs = scope.globs
-    if (scope.active) {
-      fact('discover', `walked the repository under ${scope.globs.join(', ')}`)
-      outOfScopeManualIncludes = (decisions.manualIncludes ?? []).filter((p) => !scope.includes(p))
-      for (const pinned of outOfScopeManualIncludes) {
-        fact('discover', `${pinned}: pinned by a decision but outside the configured globs`)
-      }
-    } else {
-      fact('discover', 'walked the repository for documentation files')
-    }
+    allDocs = discoverDocs(repoRoot, { skipGit: opts.skipGit })
+    fact('discover', 'walked the repository for documentation files')
   }
 
   // ---- Scope orchestration (step 6, ≤1 session) ----------------------------
@@ -637,14 +623,14 @@ export async function runSpecScanSessions(
   } else {
     const scanScope = opts.scopeSources
       ? buildWorkspaceScopeUniverse(buildScanUniverse(allDocs), opts.scopeSources)
-      : buildScanScopeUniverse(buildScanUniverse(allDocs), readSourcesFile(repoRoot).sources)
+      : buildScanScopeUniverse(buildScanUniverse(allDocs))
     const coverage = scopeCoverage(scanScope, decisions.scopeVerdicts ?? [])
     if (coverage.covered) {
       fact('discover', 'every subtree already carries a scope verdict, no scope session')
       opts.onScope?.('covered')
     } else if (replayOnly('orchestrate')) {
       // Single-step mode, a later step: the scope session belongs to
-      // `--only-orchestrate`. Proceed on the stored verdicts — uncovered
+      // `only: 'orchestrate'`. Proceed on the stored verdicts — uncovered
       // subtrees stay kept, the same fail-open a lost session leaves.
       fact('discover', 'scope session belongs to another step, the stored verdicts still apply')
       opts.onScope?.('skipped')
@@ -738,8 +724,6 @@ export async function runSpecScanSessions(
         autoResolvedConflicts: [],
         openOverlaps: [],
         skippedDocs: over.skippedDocs ?? [],
-        scopeGlobs,
-        outOfScopeManualIncludes,
         llmFailures,
         ...over.stats,
       },
@@ -1301,8 +1285,6 @@ export async function runSpecScanSessions(
     autoResolvedConflicts,
     openOverlaps,
     skippedDocs,
-    scopeGlobs,
-    outOfScopeManualIncludes,
     llmFailures,
   }
 

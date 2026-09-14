@@ -128,6 +128,15 @@ Untracked, never committed.
 
 ## 4. Follow-ups, not in this migration
 
+- **The pull request flow, then its tables.** How pull requests work in the
+  one app is not designed yet (slice 1 gave the repository console a Pulls
+  tab over the gate's existing route). The gate's tables — `gh_runs`,
+  `gh_prs`, `gh_baselines` — and the per-commit, PR-scoped corpus in
+  `spec_sets` all wait on that design; slice 2 kept them for that reason,
+  against the plan's own drop list, and slice 4 must not drop them either.
+  `pending_baselines` and `guard_backfill_markers` DO go in slice 4: only
+  the EE server reads them, and slice 4 deletes it.
+
 - The MCP server over the HTTP API.
 - One definition of a section's status across the product (Code's
   Requirements bar reads the guard status summary; Home and the Documents

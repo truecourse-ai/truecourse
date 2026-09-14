@@ -77,7 +77,7 @@ import { withGuardReadTree } from '@truecourse/core/lib/guard-read-tree';
 import { hostedDependenciesView } from './guard-dependencies-hosted.js';
 import { readGuardSetup } from '@truecourse/core/commands/guard-setup';
 import { readBundleGuardSetup } from '@truecourse/core/services/guard-setup/bundle';
-import { guardsMaterializeInPlace, loadGuardSetupBundle } from '@truecourse/core/lib/guard-store';
+import { loadGuardSetupBundle } from '@truecourse/core/lib/guard-store';
 import { getGuardGatePendingLookup } from '@truecourse/core/lib/guard-gate-pending';
 import { prOf, refOf } from './route-params.js';
 
@@ -315,7 +315,7 @@ const rawArtifactRoute = (
 
 router.get(
   '/:id/guard/interface/raw',
-  rawArtifactRoute((repoPath, id) => readGuardInterfaceRaw(repoPath, id), 'interface'),
+  rawArtifactRoute(readGuardInterfaceRaw, 'interface'),
 );
 router.get('/:id/guard/flow/raw', rawArtifactRoute(readGuardFlowRaw, 'flow'));
 router.get('/:id/guard/claim/raw', rawArtifactRoute(readGuardClaimRaw, 'claim'));
@@ -324,7 +324,7 @@ router.get('/:id/guard/claim/raw', rawArtifactRoute(readGuardClaimRaw, 'claim'))
 // registered values, and a stored secret is never handed back.
 router.get('/:id/guard/dependency/raw', rawArtifactRoute(readGuardDependencyRaw, 'dependency'));
 // The repo's ONE recipe — no id, and every inline secret masked by the driver
-// (the same mask `truecourse guard recipe` prints).
+// (the same mask the recipe card shows).
 router.get(
   '/:id/guard/recipe/raw',
   rawArtifactRoute((repoPath, _id, ref) => readGuardRecipeRaw(repoPath, ref), 'recipe', true),
@@ -536,40 +536,18 @@ router.get('/:id/guard/staleness', async (req: Request, res: Response, next: Nex
   }
 });
 
-// GET — the external API accounts view: what the analyzer detected, what
-// recipe.json declares, how each resolves on THIS machine (provided / incomplete /
-// unprovided, with per-requirement reasons), and how many flows the last generate
-// left blocked on each service. Reads the WORKING TREE (recipe.json + the
-// gitignored overlay + the host env), so a store that does not materialize in place
-// has nothing to answer with — 501, the same gate the map action uses.
-router.get('/:id/guard/externals', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
-    if (!guardsMaterializeInPlace()) {
-      res.status(501).json({ error: 'External accounts require a local working tree.' });
-      return;
-    }
-    res.json(readGuardExternalsView(repo.path));
-  } catch (e) {
-    next(e);
-  }
-});
 
 // GET — what `guard setup` last decided for this repository: the recipe it
 // derived, the dependencies it catalogued, the seed it drafted, and the step
-// spine that says which of those are settled. Hosted repos keep it in the setup
-// BUNDLE (`?commit=` pins a commit; without one the newest bundle answers); a
-// working-tree store reads it off disk. 404 when setup has never run.
+// spine that says which of those are settled. It lives in the setup BUNDLE
+// (`?commit=` pins a commit; without one the newest bundle answers). 404 when
+// setup has never run.
 router.get('/:id/guard/setup', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
     const commit = req.query.commit ? String(req.query.commit) : undefined;
     const bundle = await loadGuardSetupBundle(repo.path, commit);
-    const report = bundle
-      ? readBundleGuardSetup(bundle)
-      : guardsMaterializeInPlace()
-        ? readGuardSetup(repo.path)
-        : null;
+    const report = bundle ? readBundleGuardSetup(bundle) : null;
     if (!report) {
       res.status(404).json({ error: 'Guard setup has not run for this repository yet.' });
       return;
@@ -590,10 +568,6 @@ router.get('/:id/guard/setup', async (req: Request, res: Response, next: NextFun
 router.get('/:id/guard/dependencies', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(req.params.id as string);
-    if (guardsMaterializeInPlace()) {
-      res.json(readGuardDependenciesView(repo.path));
-      return;
-    }
     res.json(
       await withGuardReadTree(repo.path, refOf(req), (tree) =>
         hostedDependenciesView(tree, readGuardDependenciesView(tree, { env: {}, hostless: true })),

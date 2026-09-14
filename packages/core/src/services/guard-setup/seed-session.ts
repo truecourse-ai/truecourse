@@ -87,6 +87,7 @@ import { appendFindingsLedger } from '../agent/findings-ledger.js';
 import { runSessionPool } from '../agent/session-pool.js';
 import { readFileTool, searchTool } from '../agent/repo-tools.js';
 import { describeSessionFailure, type GuardSetupSessionContext } from './session-context.js';
+import { WORK_TREE_DIR } from '@truecourse/shared/work-tree';
 
 export const SEED_SESSION_KIND = 'guard-setup.seed';
 
@@ -435,7 +436,7 @@ const SEED_MACHINERY_MAX_LINES = 60;
 const SEED_MACHINERY_MAX_CHARS = 3_000;
 /** Dirs the machinery walk never descends into. */
 const SEED_MACHINERY_SKIP = new Set([
-  'node_modules', '.git', 'dist', 'build', 'out', 'coverage', 'vendor', '.next', '.truecourse', '.cache',
+  'node_modules', '.git', 'dist', 'build', 'out', 'coverage', 'vendor', '.next', WORK_TREE_DIR, '.cache',
 ]);
 
 /**
@@ -1288,7 +1289,7 @@ export function buildSeedSession(
     const targetPath = seedScriptTargetPath(input);
     const scratchDir = path.join(
       input.repoRoot,
-      '.truecourse',
+      WORK_TREE_DIR,
       '.cache',
       'guard',
       'seed-drafts',

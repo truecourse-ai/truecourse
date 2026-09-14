@@ -1,25 +1,17 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
-  FileGateStore,
   upsertPrState,
   prStateFromPayload,
   type PullRequestPayload,
 } from '../../ee/packages/github-app/src/index';
+import { MemoryGateStore } from '../github-app/memory-store';
 
-let dir: string;
-let store: FileGateStore;
+let store: MemoryGateStore;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-gate-prstate-'));
-  store = new FileGateStore(dir);
+  store = new MemoryGateStore();
 });
 
-afterEach(() => {
-  fs.rmSync(dir, { recursive: true, force: true });
-});
 
 function payload(
   action: string,

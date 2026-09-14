@@ -2,8 +2,8 @@
  * Shared pre-flight TOKEN estimator for the staged LLM pipelines (the spec scan,
  * guard setup and guard generate) — the single place their estimate math lives.
  * Pure + deterministic: callers describe each stage's expected calls + per-call
- * token sizes, and this rolls them into the `LlmEstimate` shape the CLI prompt
- * and the dashboard modal render.
+ * token sizes, and this rolls them into the `LlmEstimate` shape the dashboard
+ * modal renders.
  */
 
 import { priceForModel, type PriceTable } from './model-prices.js';
@@ -15,8 +15,7 @@ export const PROMPT_OVERHEAD_TOKENS = 500;
 
 /**
  * A run's pre-flight estimate: what each stage will spend, and the ceiling for
- * the whole run. The CLI's confirm prompt and the dashboard's modal render this
- * one shape.
+ * the whole run. The dashboard's modal renders this one shape.
  */
 export interface LlmEstimate {
   totalEstimatedTokens: number;

@@ -17,7 +17,8 @@ import type { OnboardingJobRequest } from '../../apps/dashboard/server/src/jobs/
 import type { GuardSetupJobRequest } from '../../apps/dashboard/server/src/jobs/tasks/repo-guard-setup';
 import type { ContextScanJobRequest } from '../../apps/dashboard/server/src/jobs/tasks/context-scan';
 import type { ContextSyncJobRequest } from '../../apps/dashboard/server/src/jobs/tasks/context-sync';
-import { readRegistry, unregisterProject } from '@truecourse/core/config/registry';
+import { readRegistry } from '@truecourse/core/config/registry';
+import { unregisterTestRepo } from './test-fixture';
 import { createApp, type CreateAppOptions } from '../../apps/dashboard/server/src/app';
 import type { GithubMount } from '../../apps/dashboard/server/src/github/index';
 import { setWorkTreeProvider } from '../../apps/dashboard/server/src/services/work-tree.service';
@@ -62,7 +63,7 @@ export function testGithubMount(
       (await readRegistry()).map((e) => ({ repoFullName: e.name })),
     unlinkRepo: async (repoFullName: string) => {
       const entry = (await readRegistry()).find((e) => e.name === repoFullName);
-      if (entry) await unregisterProject(entry.slug);
+      if (entry) unregisterTestRepo(entry.slug);
     },
   };
   return {

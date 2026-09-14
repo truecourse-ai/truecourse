@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import type { EeServerRegistry } from '@truecourse/shared';
 import { registerGithubApp } from '../../ee/packages/github-app/src/index';
+import type { Db } from '@truecourse/db';
+
+/** Registration only constructs the store; nothing here issues a query. */
+const db = {} as Db;
 
 const KEYS = [
   'GITHUB_APP_ID',
@@ -56,7 +60,7 @@ function configure() {
 describe('registerGithubApp', () => {
   it('returns false and registers nothing when unconfigured', async () => {
     const { registry, routers } = fakeRegistry();
-    expect(await registerGithubApp(registry)).toBe(false);
+    expect(await registerGithubApp(registry, { db })).toBe(false);
     expect(routers).toEqual([]);
   });
 
@@ -64,7 +68,7 @@ describe('registerGithubApp', () => {
     configure();
     const { registry, routers } = fakeRegistry();
 
-    expect(await registerGithubApp(registry)).toBe(true);
+    expect(await registerGithubApp(registry, { db })).toBe(true);
 
     const publicRouters = routers.filter((r) => r.public);
     const protectedRouters = routers.filter((r) => !r.public);

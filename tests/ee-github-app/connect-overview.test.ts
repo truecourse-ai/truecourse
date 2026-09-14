@@ -5,9 +5,6 @@
  */
 import express, { type Express, type Request } from 'express';
 import request from 'supertest';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
@@ -16,12 +13,12 @@ import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import type { AuthUser, GithubConnectStatusResponse } from '@truecourse/shared';
 import {
   createConnectRouter,
-  FileGateStore,
 } from '../../ee/packages/github-app/src/index';
 import type { OctokitClient } from '../../packages/github-app/src/octokit';
 import { PgSpecStore } from '../../ee/packages/data-store/src/index';
 import { setSpecStore, resetSpecStore, saveSpec } from '@truecourse/core/lib/spec-store';
 import { setRegistryStore, resetRegistryStore, type RegistryStore } from '@truecourse/core/config/registry';
+import { MemoryGateStore } from '../github-app/memory-store';
 
 const REPO = 'acme/api';
 const stubOctokit = { paginate: async () => [] } as unknown as OctokitClient;
@@ -37,8 +34,7 @@ const stubRegistry: RegistryStore = {
 };
 
 let client: PGlite;
-let gateDir: string;
-let store: FileGateStore;
+let store: MemoryGateStore;
 let app: Express;
 
 beforeEach(async () => {
@@ -47,9 +43,7 @@ beforeEach(async () => {
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
   setSpecStore(new PgSpecStore(db as unknown as Db));
   setRegistryStore(stubRegistry);
-
-  gateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-overview-gate-'));
-  store = new FileGateStore(gateDir);
+  store = new MemoryGateStore();
 
   app = express();
   app.use(express.json());
@@ -68,7 +62,6 @@ afterEach(async () => {
   resetSpecStore();
   resetRegistryStore();
   await client.close();
-  fs.rmSync(gateDir, { recursive: true, force: true });
 });
 
 async function connectRepo() {

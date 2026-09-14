@@ -21,7 +21,6 @@ import type { ConflictResolutionLike, CorpusConflict } from '@truecourse/shared'
 import { Button } from '@/components/ui/button';
 import { HoverPopover } from '@/preview/ui/hover-popover';
 import type { SpecConflictResolution, SpecCorpusResponse, SpecOverlap, SpecOverlapReview } from '@/lib/api';
-import { webDocLabel } from '@/lib/spec-web-source';
 import { SpecDocViewer } from '@/components/spec/SpecDocViewer';
 import { WorkspaceBadge } from '@/components/spec/WorkspaceBadge';
 import { createRepoSpecSource, useSpecSource } from '@/components/spec/spec-source';
@@ -87,8 +86,7 @@ export function SpecOverlapDetail({
   // falling back to the ref, identity (docA/docB in the verdict payloads) is always
   // the ref.
   const docMeta = new Map(data.corpus.docs.map((d) => [d.ref, d] as const));
-  const titleOf = (ref: string): string =>
-    webDocLabel(ref, docMeta.get(ref)?.sourceTitle) ?? docMeta.get(ref)?.title ?? ref;
+  const titleOf = (ref: string): string => docMeta.get(ref)?.title ?? ref;
   // Hosted repo view: a doc inherited from the workspace Knowledge corpus carries
   // `layer: 'workspace'`, flags the workspace badge beside its title (repo-local
   // side stays unbadged). Inert on OSS / repo-local corpora.
@@ -156,7 +154,7 @@ export function SpecOverlapDetail({
   const source = ctxSource ?? repoSource;
 
   // Build the persisted verdict from the flagged sections (heading + verbatim quote
-  // per doc), the same identity the CLI and gate key on.
+  // per doc), the same identity the gate keys on.
   const buildResolution = (verdict: 'a' | 'b' | 'dismissed'): SpecConflictResolution => {
     const secOf = (d: string) => (overlap?.sections ?? []).find((s) => s.doc === d);
     return {
@@ -317,7 +315,6 @@ export function SpecOverlapDetail({
             repoId={repoId}
             docRef={docA}
             title={docMeta.get(docA)?.title}
-            sourceTitle={docMeta.get(docA)?.sourceTitle}
             url={docMeta.get(docA)?.url}
             commit={prRef}
             badge={docA === newerDoc ? 'Newer' : 'Older'}
@@ -331,7 +328,6 @@ export function SpecOverlapDetail({
             repoId={repoId}
             docRef={docB}
             title={docMeta.get(docB)?.title}
-            sourceTitle={docMeta.get(docB)?.sourceTitle}
             url={docMeta.get(docB)?.url}
             commit={prRef}
             badge={docB === newerDoc ? 'Newer' : 'Older'}

@@ -465,7 +465,7 @@ async function callModel(
   const sharedEnd = rt.sharedPrefix - 1;
   // The system prompt rides the SDK's `system` option, never `messages`: a
   // system role inside `messages` earns an "…can be a security risk…" warning
-  // on stderr for every call, which garbles the CLI's progress output. As a
+  // on stderr for every call, which floods the run's logs. As a
   // `SystemModelMessage` (not a bare string) it still carries its cache
   // breakpoint, and the SDK prepends it as the first message of the provider
   // prompt — so the request on the wire is unchanged. Resume changes nothing
@@ -491,8 +491,7 @@ async function callModel(
       maxRetries: 0,
       // A failed call is reported by this driver — as the `provider-retry`
       // event of the wait it causes, or as the session's failure. The SDK's
-      // default handler dumps the same error to stderr on top of that, across
-      // whatever the CLI is drawing.
+      // default handler dumps the same error to stderr on top of that.
       onError: () => {},
       // Carries the prompt-cache cluster key and, because the transcript
       // event models ONE tool call per turn, this provider's way of asking

@@ -4,14 +4,14 @@
  * `decisions.json` holds the user-authored curation intent the corpus
  * path reads: `manualAreas[]` (area-tag overrides), `manualIncludes[]` /
  * `manualExcludes[]` (relevance overrides), and `conflictResolutions[]`.
- * Both the CLI (`spec` subcommands) and the dashboard server write through
- * these helpers, and `curate()` reads them.
+ * The dashboard server writes through these helpers, and `curate()` reads them.
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { atomicWriteJson } from './atomic-write.js';
 import { DECISIONS_FILE_VERSION, DecisionsFileSchema, type DecisionsFile } from './types.js';
+import { specDecisionsPath, specsDir as workTreeSpecsDir } from '@truecourse/shared/work-tree';
 
 const EMPTY_DECISIONS: DecisionsFile = {
   version: DECISIONS_FILE_VERSION,
@@ -24,11 +24,11 @@ const EMPTY_DECISIONS: DecisionsFile = {
 };
 
 export function decisionsPath(repoRoot: string): string {
-  return path.join(repoRoot, '.truecourse', 'specs', 'decisions.json');
+  return specDecisionsPath(repoRoot);
 }
 
 export function specRootPath(repoRoot: string): string {
-  return path.join(repoRoot, '.truecourse', 'specs');
+  return workTreeSpecsDir(repoRoot);
 }
 
 /**
@@ -48,8 +48,8 @@ export function readDecisions(repoRoot: string): DecisionsFile {
 }
 
 /**
- * Write `decisions.json`. Used by the CLI's `spec` relation flow, the dashboard
- * write-back endpoints, and `curate()`'s orphan prune.
+ * Write `decisions.json`. Used by the dashboard write-back endpoints and
+ * `curate()`'s orphan prune.
  *
  * Atomic (write-to-tmp + rename), the store convention: a scan prunes this file
  * in the same cycle it writes `corpus.json`, and a reader must never observe a

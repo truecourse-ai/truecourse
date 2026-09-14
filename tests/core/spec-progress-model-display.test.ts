@@ -18,7 +18,6 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { resetKvCacheStore } from '@truecourse/llm';
 import {
   curateInProcess,
   setShowResolvedStageModel,
@@ -26,13 +25,14 @@ import {
   CURATE_STEPS,
 } from '../../packages/core/src/commands/spec-in-process';
 import { StepTracker } from '../../packages/core/src/progress';
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
 import type { DriverResult, SessionDriver } from '../../packages/agent-loop/src/index';
 
 const MODEL_TIER = /\b(haiku|sonnet|opus)\b/;
 
 let repo: string;
 beforeEach(() => {
-  resetKvCacheStore();
+  installMemorySessionRuns();
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-progress-model-'));
   fs.mkdirSync(path.join(repo, 'docs'), { recursive: true });
   fs.writeFileSync(path.join(repo, 'docs', 'alpha.md'), '# Orders alpha\nbody');
@@ -40,6 +40,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   setShowResolvedStageModel(true); // restore the OSS default
+  resetSessionRuns();
   fs.rmSync(repo, { recursive: true, force: true });
 });
 

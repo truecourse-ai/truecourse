@@ -1,10 +1,6 @@
 import dotenv from 'dotenv';
 import path from 'node:path';
-import os from 'node:os';
 import fs from 'node:fs';
-
-// Packaged (npm) mode: the installed OSS CLI reads the user's own config.
-dotenv.config({ path: path.join(os.homedir(), '.truecourse', '.env') });
 
 // Dev mode: the repo-root .env (next to .env.example). Walk up from cwd
 // to the workspace root so this resolves no matter which package the

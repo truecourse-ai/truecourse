@@ -20,8 +20,8 @@ import { sessionsDir } from '@truecourse/core/lib/sessions-store';
 
 /**
  * How disconnect stops the repository's background jobs (its scan, its guard
- * setup). Installed at boot with the job runner; absent in file mode (tests and
- * a server whose queue never came up), where there are no jobs to stop.
+ * setup). Installed at boot with the job runner; absent in a test, or in a
+ * server whose queue never came up, where there are no jobs to stop.
  */
 export type RepoJobsCanceller = (
   repoKey: string,
@@ -36,8 +36,7 @@ export function setRepoJobsCanceller(next: RepoJobsCanceller | null): void {
 
 /**
  * Deletes every per-repo database row. Installed at boot alongside the
- * Postgres stores; absent in file mode (tests), where the registry entry IS
- * the state and there is nothing keyed by repo identity to purge.
+ * stores; absent in a test that stores nothing keyed by repo identity.
  */
 export type RepoDataPurge = (repoKey: string) => Promise<void>;
 

@@ -1,6 +1,6 @@
 import { dashboardActivity } from '../../services/dashboard-activity.service.js';
 /**
- * `repo.guard-generate` — `truecourse guard generate` over an ephemeral clone.
+ * `repo.guard-generate` — Flow generation over an ephemeral clone.
  *
  * The third link of onboarding: a successful setup chains into it, and the
  * Generate button enqueues it. The generator reads and writes files, so the

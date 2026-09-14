@@ -8,12 +8,10 @@
 import { getGit } from './git.js';
 
 /**
- * Identity of one persisted set. `repoKey` is the opaque per-repo handle (a
- * filesystem path for the file impl; a stable repo id - e.g. the GitHub
- * `owner/repo` - for the hosted one). `commitSha` is the git SHA the set was
- * produced at: the gate = PR head; local = HEAD; a dirty tree falls back to
- * HEAD; `''` = a non-git workspace (the file impl ignores it, the Postgres impl
- * rejects it).
+ * Identity of one persisted set. `repoKey` is the opaque per-repository handle
+ * — a stable repo id, e.g. the GitHub `owner/repo`. `commitSha` is the git SHA
+ * the set was produced at: the gate = PR head, otherwise the run's HEAD; the
+ * store rejects an empty one.
  */
 export interface RepoRef {
   repoKey: string;

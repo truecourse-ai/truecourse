@@ -53,7 +53,13 @@ import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enq
 import { setGuardPrRegenEnqueue } from '@truecourse/core/lib/guard-pr-regen-enqueue';
 import { setGuardGateHeadsLookup } from '@truecourse/core/lib/guard-gate-pending';
 import type { GuardGenerateReport } from '@truecourse/shared';
-import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
+import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
+import { installWorkTreeGuardStore, WORK_TREE_COMMIT } from '../helpers/work-tree-guard-store';
+import { installMemoryGuardOverlays, resetGuardOverlayStore } from '../helpers/memory-guard-overlays';
+import { installMemorySpecStore, resetSpecStore } from '../helpers/memory-spec-store';
+import type { SpecStore } from '@truecourse/core/lib/spec-store';
+
+
 
 const DOC = 'docs/cli.md';
 const DOC_CONTENT = ['## version', '`app --version` prints the version and exits 0.', '', '## background', 'Design history — nothing observable.'].join('\n');
@@ -63,6 +69,7 @@ describe('Guard action routes', () => {
   let fixture: TestFixture;
   let root: string;
   let jobs: StubJobs;
+  let specs: SpecStore;
 
   const write = (rel: string, content: string) => {
     const f = path.join(root, rel);
@@ -74,8 +81,8 @@ describe('Guard action routes', () => {
 
   // A corpus with one doc + the doc on disk, and NO scenarios manifest → every
   // section is "changed", so the estimate carries stages (a non-trivial estimate).
-  function seedCorpus() {
-    writeJson('.truecourse/specs/corpus.json', {
+  async function seedCorpus() {
+    await specs.saveSpec({ repoKey: root, commitSha: WORK_TREE_COMMIT }, 'corpus', {
       version: 3,
       generatedAt: '2026-01-01T00:00:00Z',
       docs: [{ ref: DOC, kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['cli'] }],
@@ -86,6 +93,9 @@ describe('Guard action routes', () => {
   }
 
   beforeEach(async () => {
+    installWorkTreeGuardStore();
+    installMemoryGuardOverlays();
+    specs = installMemorySpecStore();
     fixture = await setupTestFixture();
     root = fixture.repoPath;
     vi.mocked(guardGenerateInProcess).mockReset();
@@ -96,12 +106,15 @@ describe('Guard action routes', () => {
   });
   afterEach(async () => {
     await teardownTestFixture(fixture.project.slug);
+    resetGuardStore();
+    resetGuardOverlayStore();
+    resetSpecStore();
   });
 
   // --- Estimate: the CLI-identical shape ------------------------------------
 
   it('GET /guard/estimate returns the same estimateGuard payload the CLI renders', async () => {
-    seedCorpus();
+    await seedCorpus();
     const res = await request(app).get(url('estimate')).expect(200);
     const direct = JSON.parse(JSON.stringify(await estimateGuard(root)));
     // Byte-identical to a direct estimateGuard call — no re-derivation.
@@ -376,6 +389,7 @@ describe('Guard dismiss → hosted auto-regenerate (repo scope)', () => {
     request(app).post(url('dismiss')).send({ doc: f.doc, anchor: f.anchor, title: f.claim });
 
   beforeEach(async () => {
+    installWorkTreeGuardStore();
     fixture = await setupTestFixture();
     root = fixture.repoPath;
     app = createTestApp();
@@ -385,6 +399,7 @@ describe('Guard dismiss → hosted auto-regenerate (repo scope)', () => {
   afterEach(async () => {
     setGuardGenerateEnqueue(null);
     await teardownTestFixture(fixture.project.slug);
+    resetGuardStore();
   });
 
   it('batches while findings remain active, then re-generates on the LAST dismissal', async () => {

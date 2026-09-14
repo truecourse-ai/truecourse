@@ -26,6 +26,11 @@ describe('resolveClaudeBinary', () => {
     expect(resolveClaudeBinary()).toBe('/opt/canonical/claude');
   });
 
+  it('passes a Windows path through unchanged', () => {
+    process.env.CLAUDE_CODE_BINARY = 'C:\\custom\\claude.exe';
+    expect(resolveClaudeBinary()).toBe('C:\\custom\\claude.exe');
+  });
+
   it('falls back to the legacy CLAUDE_CODE_BIN when canonical is unset/empty', () => {
     delete process.env.CLAUDE_CODE_BINARY;
     process.env.CLAUDE_CODE_BIN = '/opt/legacy/claude';

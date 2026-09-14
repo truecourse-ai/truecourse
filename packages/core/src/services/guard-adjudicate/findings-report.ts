@@ -1,7 +1,7 @@
 /**
  * THE FINDINGS REPORT (plan 05 step 24) — `guard/findings.md`, the pure render
- * of the board's `bug` / `drift` adjudications. Written on demand by
- * `truecourse guard adjudicate --report`, rendered by the dashboard, COMMITTED
+ * of the board's `bug` / `drift` adjudications. Written on demand by a
+ * findings-report regeneration, rendered by the dashboard, COMMITTED
  * (deliberately not in `GITIGNORE_CONTENTS`). GitHub stays untouched.
  *
  * Each finding is one `## F<n>` section: headline verdict, class, the verbatim
@@ -37,9 +37,9 @@ const NUMBERING_RE = /^<!-- numbering: (\{.*\}) -->$/m;
 
 const PREAMBLE = `# Guard findings
 
-The open \`bug\` / \`drift\` verdicts of \`truecourse guard adjudicate\`, rendered
-from the guard board. Regenerated whole by \`truecourse guard adjudicate
---report\`; finding numbers are stable (first-seen order) and never reused.
+The open \`bug\` / \`drift\` verdicts of failure adjudication, rendered from the
+guard board. Regenerated whole on every adjudication; finding numbers are stable
+(first-seen order) and never reused.
 `;
 
 /** Parse the persisted numbering registry out of a prior report, `{}` when none. */

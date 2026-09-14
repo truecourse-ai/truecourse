@@ -18,7 +18,13 @@ import {
   type GuardCoveragePlainStatus,
 } from '../../packages/shared/src/index';
 import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node';
-import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
+import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
+import { installWorkTreeGuardStore, resetGuardStore, WORK_TREE_COMMIT } from '../helpers/work-tree-guard-store';
+import { installMemoryGuardOverlays, resetGuardOverlayStore } from '../helpers/memory-guard-overlays';
+import { installWorkTreeDocReader, resetRepoDocReader } from '../helpers/work-tree-doc-reader';
+import { installMemorySpecStore, resetSpecStore } from '../helpers/memory-spec-store';
+
+
 
 /**
  * The FLOW read surfaces (OSS): the coverage inversion (a section lists the flows
@@ -340,12 +346,20 @@ describe('Guard flow read surfaces', () => {
   }
 
   beforeEach(async () => {
+    installWorkTreeGuardStore();
+    installMemoryGuardOverlays();
+    installWorkTreeDocReader();
+    installMemorySpecStore();
     fixture = await setupTestFixture();
     root = fixture.repoPath;
     app = createTestApp();
   });
   afterEach(async () => {
     await teardownTestFixture(fixture.project.slug);
+    resetGuardStore();
+    resetGuardOverlayStore();
+    resetRepoDocReader();
+    resetSpecStore();
   });
 
   it('keeps named setup and unsupported gaps visible in the same flow', async () => {
@@ -701,6 +715,8 @@ describe('Guard flow read surfaces', () => {
         generatedAt: null,
         runId: null,
         ranAt: null,
+        // The commit the view resolved its read at — the tree's own, here.
+        flowsCommit: WORK_TREE_COMMIT,
       });
     });
 

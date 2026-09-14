@@ -1,5 +1,5 @@
 /**
- * `guard/setup.json` — the persisted record of the last `truecourse guard setup`.
+ * `guard/setup.json` — the persisted record of the last Flow setup.
  * GITIGNORED and derived: every fact in it is re-derivable from the
  * working tree, and the durable artifacts setup produces (`recipe.json`, the seed
  * script, `scenarios/externals.local.json`) live where they always did.

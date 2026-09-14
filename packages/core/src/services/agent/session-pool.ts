@@ -17,7 +17,7 @@
  *   signal is already aborted, and the sessions in flight get the signal
  *   through `runAgentLoop` and end themselves;
  * - every persisted transcript event is tee'd to the caller's observer, AFTER
- *   the shell stamped it (`seq`/`ts`), so the CLI's live line sees exactly what
+ *   the shell stamped it (`seq`/`ts`), so the observer sees exactly what
  *   the transcript records.
  *
  * SERIAL GROUPS (item 8's cluster discipline, generalized). Items that share a

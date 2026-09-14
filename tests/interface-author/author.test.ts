@@ -26,7 +26,9 @@ import type {
 import { authorWebInterfaces, planWorkItems } from '../../packages/core/src/services/interface-author/author'
 import { readGuardInterfaces } from '../../packages/core/src/commands/guard-read'
 import { collectGuardSetupBundle, materializeGuardSetupBundle } from '../../packages/core/src/services/guard-setup/bundle'
-import { resetGuardStore, setGuardStore, type GuardStore } from '../../packages/core/src/lib/guard-store'
+import { setGuardStore, type GuardStore } from '../../packages/core/src/lib/guard-store'
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store'
+import { installMemoryGuardOverlays, resetGuardOverlayStore } from '../helpers/memory-guard-overlays'
 import { buildScreens, screenShowRows } from '../../apps/dashboard/client/src/lib/interface-pom'
 import type { AuthoredFragment } from '../../packages/core/src/services/interface-author/draft'
 import { InterfacesFileSchema, type InterfacesFile } from '../../packages/shared/src/index'
@@ -107,6 +109,8 @@ const REPORT_FRAGMENT: AuthoredFragment = {
 }
 
 beforeEach(() => {
+  installWorkTreeGuardStore()
+  installMemoryGuardOverlays()
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-iface-author-'))
   fs.mkdirSync(path.dirname(guardInterfacesPath(repo)), { recursive: true })
   fs.writeFileSync(guardInterfacesPath(repo), JSON.stringify(DERIVED))
@@ -126,6 +130,7 @@ beforeEach(() => {
 
 afterEach(() => {
   resetGuardStore()
+  resetGuardOverlayStore()
   fs.rmSync(repo, { recursive: true, force: true })
 })
 
@@ -1499,7 +1504,7 @@ describe('readable authoring through storage and the screen read view', () => {
     } finally {
       fs.rmSync(clone, { recursive: true, force: true })
     }
-    setGuardStore({ mode: 'db', loadGuardSetupBundle: async () => bundle,
+    setGuardStore({ loadGuardSetupBundle: async () => bundle,
       readGuardBaselineCommit: async () => null } as unknown as GuardStore)
     const hosted = await readGuardInterfaces('acme/app')
     expect(hosted.resources).toEqual(local.resources)

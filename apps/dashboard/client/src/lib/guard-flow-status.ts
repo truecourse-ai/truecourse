@@ -6,8 +6,8 @@
  * can never wear two words:
  *
  *  - the FIVE WORDS of coverage ({@link GUARD_FLOW_STATUS_WORD}, owned by
- *    `@truecourse/shared` so the CLI says the same five), Succeeded / Failed /
- *    Blocked / Not testable / Never run. Every section, flow, counter, filter and
+ *    `@truecourse/shared`), Succeeded / Failed / Blocked / Not testable /
+ *    Never run. Every section, flow, counter, filter and
  *    chip wears one of them and nothing else ({@link guardStatusWord});
  *  - ONE SENTENCE table (the per-gap-kind copy behind {@link guardGapNeed}), what
  *    a state concretely NEEDS, in the words a user would use ("needs credentials
@@ -55,8 +55,8 @@ import type {
 
 /**
  * A coverage state in plain words, the five, and the Flows-list filter domain.
- * The domain lives in `@truecourse/shared` so the CLI and the dashboard cannot
- * drift apart on it; this alias is the client's local name for it.
+ * The domain lives in `@truecourse/shared`; this alias is the client's local
+ * name for it.
  */
 export type GuardFlowPlainStatus = GuardCoveragePlainStatus;
 
@@ -117,7 +117,7 @@ const VOCAB = {
   guarded: { label: 'Passed earlier', sentence: 'passed when it was written, not in this run' },
   'never-run': {
     sentence: 'never executed',
-    hint: 'The test is committed but has never executed, not in a run, and not when it was written. Run `truecourse guard run` to find out what it proves.',
+    hint: 'The test is committed but has never executed, not in a run, and not when it was written. A Flow run finds out what it proves.',
   },
   ...(Object.fromEntries(
     awaitingDriverIds.map((id) => [
@@ -512,15 +512,15 @@ export function guardProvideServiceCta(service: string): string {
  * services are unlinkable. Per-service links use {@link guardProvideServiceCta}.
  */
 export function guardNeedsSetupCta(needsSetup: GuardNeedsSetup): string {
-  if (needsSetupIsDone(needsSetup)) return 'Re-run guard generate';
+  if (needsSetupIsDone(needsSetup)) return 'Re-run Flow generation';
   // "Provide seed data" would name the Dependencies page, which has no row for a
   // seed, the action is editing the seed script, so the CTA says so.
   if (needsSetup.services.every((s) => s === MISSING_DATA_NOUN)) return 'Extend the seed script';
   return `Provide ${guardNeedsSetupServiceList(needsSetup)}`;
 }
 
-/** The command the "setup done" sub-state points at, spelled once. */
-export const GUARD_REGENERATE_COMMAND = 'truecourse guard generate';
+/** The work the "setup done" sub-state points at, named once. */
+export const GUARD_REGENERATE_ACTION = 'Flow generation';
 
 /**
  * The one line UNDER the banner headline: what the headline deliberately leaves
@@ -529,11 +529,11 @@ export const GUARD_REGENERATE_COMMAND = 'truecourse guard generate';
  * explainer ({@link guardStatusHint}) still says the whole thing for a reader
  * who has no banner in front of them.
  */
-export const GUARD_NEEDS_SETUP_NEXT = `A real or sandbox account both work, provide one, then re-run \`${GUARD_REGENERATE_COMMAND}\` to author these tests.`;
+export const GUARD_NEEDS_SETUP_NEXT = `A real or sandbox account both work, provide one, then re-run ${GUARD_REGENERATE_ACTION} to author these tests.`;
 
-/** The command that DRAFTS a seed, the one action a missing-data gap
- *  with no `api.seed` has, spelled once for every surface that offers it. */
-export const GUARD_SEED_INIT_COMMAND = 'truecourse guard seed --init';
+/** The work that DRAFTS a seed, the one action a missing-data gap with no
+ *  `api.seed` has, named once for every surface that offers it. */
+export const GUARD_SEED_INIT_ACTION = 'Flow setup';
 
 /**
  * What this gap concretely NEEDS, in plain words, the sentence half of the pair.

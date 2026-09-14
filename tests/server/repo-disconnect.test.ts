@@ -46,7 +46,12 @@ import { JobStore } from '@truecourse/data-store';
 import { registerJob } from '@truecourse/jobs';
 import type { LlmTransport } from '@truecourse/shared/llm';
 import { createTestApp, TEST_ORG } from '../helpers/test-app';
-import { readRegistry, registerProject, unregisterProject } from '@truecourse/core/config/registry';
+import { readRegistry } from '@truecourse/core/config/registry';
+import { clearTestRegistry, installTestRegistry, setupTestFixture } from '../helpers/test-fixture';
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
+import { installMemorySpecStore, resetSpecStore } from '../helpers/memory-spec-store';
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
+import { installMemoryGuardOverlays, resetGuardOverlayStore } from '../helpers/memory-guard-overlays';
 import {
   createServerJobs,
   type JobsMount,
@@ -105,8 +110,6 @@ let setupImpl: (options: { signal?: AbortSignal }) => Promise<unknown>;
 let claimJobs: boolean;
 
 beforeAll(async () => {
-  // The registry hangs off TRUECOURSE_HOME; point it at a throwaway dir.
-  process.env.TRUECOURSE_HOME = makeTmpDir('tc-disconnect-home-');
   app = createTestApp();
   pg = new PGlite();
   db = drizzle(pg, { schema }) as unknown as Db;
@@ -114,6 +117,11 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  installTestRegistry();
+  installMemorySessionRuns();
+  installMemorySpecStore();
+  installWorkTreeGuardStore();
+  installMemoryGuardOverlays();
   running = [];
   claimJobs = true;
   setupImpl = async () => ({ report: { status: 'ok' } });
@@ -150,7 +158,11 @@ afterEach(async () => {
   setWorkTreeProvider(null);
   await Promise.all(running);
   await jobs.stop();
-  for (const entry of await readRegistry()) await unregisterProject(entry.slug);
+  clearTestRegistry();
+  resetSessionRuns();
+  resetSpecStore();
+  resetGuardStore();
+  resetGuardOverlayStore();
 });
 
 afterAll(async () => {
@@ -172,7 +184,7 @@ describe('POST /api/repos/connect', () => {
 describe('DELETE /api/repos/:id', () => {
   it('cancels the job THIS process is running and disconnects anyway', async () => {
     const local = makeGitRepo('tc-disconnect-working-');
-    const entry = await registerProject(local);
+    const { project: entry } = await setupTestFixture(local);
 
     // A setup that ends only when it is cancelled — the disconnect's job.
     let reached = false;
@@ -204,7 +216,7 @@ describe('DELETE /api/repos/:id', () => {
 
   it('cancels a job that is still queued, so its body never runs', async () => {
     const local = makeGitRepo('tc-disconnect-queued-');
-    const entry = await registerProject(local);
+    const { project: entry } = await setupTestFixture(local);
     // Nothing claims the row: what a job waiting for a free worker looks like.
     claimJobs = false;
     const queued = await jobs.enqueueGuardSetup({
@@ -222,7 +234,7 @@ describe('DELETE /api/repos/:id', () => {
 
   it('refuses while ANOTHER process is running the repo’s job — it is not ours to stop', async () => {
     const local = makeGitRepo('tc-disconnect-foreign-');
-    const entry = await registerProject(local);
+    const { project: entry } = await setupTestFixture(local);
     // A row claimed by another replica: `running`, but absent from this
     // process's cancel registry, so nothing here can abort it.
     const store = new JobStore(db);

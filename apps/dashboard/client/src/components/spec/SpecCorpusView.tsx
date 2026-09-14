@@ -7,9 +7,7 @@
  * DOCUMENTS, the relevance-dropped ones, and the two force-decision lists.
  * Selecting a row opens it in the RIGHT pane (single-click = preview,
  * double-click = pin), a doc opens the markdown viewer, an overlap the
- * resolution detail. Docs fetched from a registered llms.txt site read as
- * `<source> / <page>` with a web badge; the sites themselves are managed on the
- * Sources page, not here.
+ * resolution detail.
  *
  * Only the WORKSPACE "Not included" group is different, and only in where its
  * rows come from: a source can have thousands, so they page in from the server -
@@ -27,11 +25,9 @@ import { HoverPopover } from '@/preview/ui/hover-popover';
 import { useCapability } from '@/contexts/CapabilityContext';
 import { buildCorpusConflicts, isConflictId } from '@truecourse/shared';
 import type { SpecCorpusResponse, SpecCorpusDoc, SpecConflictResolution, SpecDecisionAck, SpecSkippedDoc } from '@/lib/api';
-import { webDocLabel } from '@/lib/spec-web-source';
 import { createRepoSpecSource, useSpecSource, type SkippedPage, type SpecSource } from '@/components/spec/spec-source';
 import { CHIP_CLASS } from '@/preview/ui/bits';
 import { formatRelativeTime } from '@truecourse/shared';
-import { WebSourceBadge } from '@/components/spec/WebSourceBadge';
 import { WorkspaceBadge } from '@/components/spec/WorkspaceBadge';
 
 /** Shown on decision actions while a PR is being viewed before its gate has run. */
@@ -390,24 +386,11 @@ export function SpecCorpusView({
   const showProduct = new Set(c.areas.map((a) => a.product)).size > 1;
   const fmtArea = (id: string): string => (showProduct ? id : id.split('/').pop() ?? id);
 
-  // Web-source docs (pages fetched from a registered llms.txt site) carry the
-  // source's title from the corpus enrichment; their raw snapshot ref is unreadable,
-  // so every row shows `<source> / <page>`. The map covers kept AND skipped docs so
-  // a dropped page reads the same, and a ref with no enrichment (a decision list, a
-  // source since removed) still maps through the id its ref carries.
-  const sourceTitles = new Map(
-    [...c.docs, ...(c.skippedDocs ?? [])]
-      .filter((d) => d.sourceTitle)
-      .map((d) => [d.ref, d.sourceTitle as string] as const),
-  );
-  const webLabelOf = (ref: string): string | null => webDocLabel(ref, sourceTitles.get(ref));
-
   // Workspace corpora carry the ledger's human title per doc ref (a synthetic stable
-  // docPath); repo corpora carry none. The display label prefers the web label, then
-  // the title, falling back to the ref, used for conflict-row labels below (which
-  // know refs only).
+  // docPath); repo corpora carry none. The display label prefers the title, falling
+  // back to the ref, used for conflict-row labels below (which know refs only).
   const docTitle = new Map(c.docs.map((d) => [d.ref, d.title] as const));
-  const labelOf = (ref: string): string => webLabelOf(ref) ?? docTitle.get(ref) ?? ref;
+  const labelOf = (ref: string): string => docTitle.get(ref) ?? ref;
 
   // Hosted repo view: docs inherited from the workspace Knowledge corpus carry
   // `layer: 'workspace'`. The set drives the workspace badge on kept-doc + conflict
@@ -477,7 +460,6 @@ export function SpecCorpusView({
       kind: 'doc' as const,
       id: doc.ref,
       doc,
-      label: webLabelOf(doc.ref),
       tags: doc.areaTags.map(fmtArea),
       workspace: doc.layer === 'workspace',
     })),
@@ -486,20 +468,17 @@ export function SpecCorpusView({
       : skippedDocs.map((doc) => ({
           kind: 'skipped' as const,
           id: doc.ref,
-          label: webLabelOf(doc.ref),
           ...(doc.title ? { title: doc.title } : {}),
           ...(doc.reason ? { reason: doc.reason } : {}),
         }))),
     ...manualIncludes.map((ref) => ({
       kind: 'included' as const,
       id: ref,
-      label: webLabelOf(ref),
       pending: !keptRefs.has(ref),
     })),
     ...manualExcludes.map((ref) => ({
       kind: 'excluded' as const,
       id: ref,
-      label: webLabelOf(ref),
       pending: keptRefs.has(ref),
     })),
   ];
@@ -650,7 +629,6 @@ export function SpecCorpusView({
           ) : row.kind === 'doc' ? (
             <DocRowContent
               doc={row.doc}
-              label={row.label}
               tags={row.tags}
               workspace={row.workspace}
               busy={busyRef !== null}
@@ -661,7 +639,6 @@ export function SpecCorpusView({
           ) : (
             <IncludeRowContent
               docRef={row.id}
-              label={row.label}
               {...(row.kind === 'skipped' && row.title ? { title: row.title } : {})}
               {...(row.kind === 'skipped' && row.reason ? { reason: row.reason } : {})}
               {...(row.kind === 'excluded' ? { reason: 'manually excluded' } : {})}
@@ -683,17 +660,17 @@ export function SpecCorpusView({
 /** The row union the sidebar lists: a conflict, a kept doc, or a decided ref. */
 type CorpusRow =
   | { kind: 'conflict'; id: string; label: string; area: string; resolved: boolean; workspace: boolean }
-  | { kind: 'doc'; id: string; doc: SpecCorpusDoc; label: string | null; tags: string[]; workspace: boolean }
-  | { kind: 'skipped'; id: string; label: string | null; title?: string; reason?: string }
-  | { kind: 'included'; id: string; label: string | null; pending: boolean }
-  | { kind: 'excluded'; id: string; label: string | null; pending: boolean };
+  | { kind: 'doc'; id: string; doc: SpecCorpusDoc; tags: string[]; workspace: boolean }
+  | { kind: 'skipped'; id: string; title?: string; reason?: string }
+  | { kind: 'included'; id: string; pending: boolean }
+  | { kind: 'excluded'; id: string; pending: boolean };
 
 /** What the search reads on a row, everything the row itself shows. */
 function rowText(row: CorpusRow): string {
   if (row.kind === 'conflict') return `${row.label} ${row.area}`;
-  if (row.kind === 'doc') return `${row.id} ${row.label ?? ''} ${row.doc.title ?? ''} ${row.tags.join(' ')}`;
-  if (row.kind === 'skipped') return `${row.id} ${row.label ?? ''} ${row.title ?? ''} ${row.reason ?? ''}`;
-  return `${row.id} ${row.label ?? ''}`;
+  if (row.kind === 'doc') return `${row.id} ${row.doc.title ?? ''} ${row.tags.join(' ')}`;
+  if (row.kind === 'skipped') return `${row.id} ${row.title ?? ''} ${row.reason ?? ''}`;
+  return row.id;
 }
 
 /**
@@ -721,7 +698,6 @@ function ChangeMark({ change }: { change: 'added' | 'edited' | 'removed' | 'open
 
 function DocRowContent({
   doc,
-  label,
   tags,
   workspace = false,
   busy,
@@ -730,8 +706,6 @@ function DocRowContent({
   change,
 }: {
   doc: SpecCorpusDoc;
-  /** Web-source docs: `<source> / <page>` in place of the raw snapshot ref. */
-  label?: string | null;
   tags: string[];
   /** Hosted repo view: this doc is inherited from the workspace Knowledge corpus. */
   workspace?: boolean;
@@ -745,9 +719,8 @@ function DocRowContent({
   return (
     <div className="group flex w-full min-w-0 flex-col gap-0.5 text-[13px]">
       <span className="flex w-full min-w-0 items-center gap-2">
-        <span className="min-w-0 flex-1 truncate text-foreground">{label ?? doc.title ?? doc.ref}</span>
+        <span className="min-w-0 flex-1 truncate text-foreground">{doc.title ?? doc.ref}</span>
         {workspace && <WorkspaceBadge />}
-        {label && <WebSourceBadge />}
         <HoverPopover content={disabledReason ?? 'Exclude this doc from the corpus'} side="top" align="end">
           <button
             type="button"
@@ -788,7 +761,6 @@ function DocRowContent({
  */
 function IncludeRowContent({
   docRef,
-  label,
   title,
   reason,
   actionLabel,
@@ -798,8 +770,6 @@ function IncludeRowContent({
   onAction,
 }: {
   docRef: string;
-  /** Web-source docs: `<source> / <page>` in place of the raw snapshot ref. */
-  label?: string | null;
   /** Workspace only: the ledger's human title for this ref. Falls back to the ref. */
   title?: string;
   reason?: string;
@@ -814,10 +784,7 @@ function IncludeRowContent({
   return (
     <div className="flex w-full items-start gap-1.5 text-[13px] text-muted-foreground">
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="flex min-w-0 items-center gap-1">
-          <span className="truncate">{label ?? title ?? docRef}</span>
-          {label && <WebSourceBadge />}
-        </span>
+        <span className="truncate">{title ?? docRef}</span>
         {reason && <span className="truncate text-[10px] text-muted-foreground/70">{reason}</span>}
         {pending && <span className="text-[10px] italic text-muted-foreground/60">pending rescan</span>}
       </span>

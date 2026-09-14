@@ -20,6 +20,8 @@ import {
   EstimateDeclined,
 } from '../../packages/core/src/commands/guard-in-process.js';
 import { resetSpecStore } from '../../packages/core/src/lib/spec-store.js';
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
 
 let repo: string;
 
@@ -57,6 +59,8 @@ function writeDecisions(decisions: Record<string, unknown>): void {
 
 beforeEach(() => {
   resetSpecStore();
+  installMemorySessionRuns();
+  installWorkTreeGuardStore();
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-gate-'));
   fs.mkdirSync(path.join(repo, '.truecourse', 'specs'), { recursive: true });
   fs.mkdirSync(path.join(repo, 'docs'), { recursive: true });
@@ -64,6 +68,8 @@ beforeEach(() => {
   fs.writeFileSync(path.join(repo, 'docs', 'v2.md'), '# Users v2\nThe user identity is auth0_sub.');
 });
 afterEach(() => {
+  resetSessionRuns();
+  resetGuardStore();
   fs.rmSync(repo, { recursive: true, force: true });
 });
 
@@ -91,8 +97,8 @@ describe('guard generate — open-conflict gate', () => {
     expect(msg).toContain('docs/v1.md');
     expect(msg).toContain('docs/v2.md');
     expect(msg).toContain(NOTE);
-    expect(msg).toContain('truecourse spec conflicts list');
-    expect(msg).toContain('truecourse guard generate');
+    expect(msg).toContain('Conflicts group');
+    expect(msg).toContain('Flow generation');
   });
 
   it('still FAILS under a covering relation — relations are lifecycle, never conflict resolution', async () => {

@@ -22,8 +22,15 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { resetKvCacheStore } from '@truecourse/llm'
 import { runSpecScanSessions } from '../../packages/core/src/services/spec-scan/run'
+import {
+  loadWorkspaceSpec,
+  resetSpecStore,
+  setSpecStore,
+} from '../../packages/core/src/lib/spec-store'
+import { memorySpecStore } from '../helpers/memory-spec-store'
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache'
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs'
 import {
   SPEC_SCAN_ORCHESTRATE_SESSION_KIND,
   applyScopeVerdicts,
@@ -45,7 +52,6 @@ import {
   decisionsPath,
   readDecisions,
   writeDecisions,
-  writeSourcesFile,
   type DecisionsFile,
   type DocCandidate,
   type ScopeVerdict,
@@ -167,10 +173,15 @@ const NO_ORCHESTRATE = async (): Promise<DriverResult> => {
 
 let repo: string
 beforeEach(() => {
-  resetKvCacheStore()
+  installMemoryKvCache()
+  installMemorySessionRuns()
+  setSpecStore(memorySpecStore())
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-scan-scope-'))
 })
 afterEach(() => {
+  resetKvCacheStore()
+  resetSessionRuns()
+  resetSpecStore()
   fs.rmSync(repo, { recursive: true, force: true })
 })
 
@@ -340,7 +351,7 @@ describe('the deterministic coverage pre-pass', () => {
     writeDocs({ 'docs/a.md': '# A\n' })
     seedDecisions({ scopeVerdicts: [verdict({ path: 'docs', verdict: 'keep' })] })
     const covered = scopeCoverage(
-      buildScanScopeUniverse(buildScanUniverse([docCandidate('docs/a.md')]), []),
+      buildScanScopeUniverse(buildScanUniverse([docCandidate('docs/a.md')])),
       readDecisions(repo).scopeVerdicts,
     )
     expect(covered.covered).toBe(true)
@@ -348,7 +359,6 @@ describe('the deterministic coverage pre-pass', () => {
     const grown = scopeCoverage(
       buildScanScopeUniverse(
         buildScanUniverse([docCandidate('docs/a.md'), docCandidate('handbook/onboarding.md')]),
-        [],
       ),
       readDecisions(repo).scopeVerdicts,
     )
@@ -456,49 +466,37 @@ describe('applyScopeVerdicts', () => {
     docCandidate('README.md'),
     docCandidate('docs/a.md'),
     docCandidate('docs/archive/old.md'),
-    docCandidate('.truecourse/specs/sources/acme/index.md'),
   ]
-  const sources = [{ id: 'acme', title: 'Acme', pages: 1 }]
 
   it('`.` covers ROOT files only', () => {
-    const kept = applyScopeVerdicts(docs, [verdict({ path: '.', verdict: 'exclude' })], sources)
-    expect(kept.map((d) => d.path)).toEqual([
-      'docs/a.md',
-      'docs/archive/old.md',
-      '.truecourse/specs/sources/acme/index.md',
-    ])
+    const kept = applyScopeVerdicts(docs, [verdict({ path: '.', verdict: 'exclude' })], [])
+    expect(kept.map((d) => d.path)).toEqual(['docs/a.md', 'docs/archive/old.md'])
   })
 
   it('the MOST SPECIFIC verdict wins (docs keep + docs/archive exclude)', () => {
     const kept = applyScopeVerdicts(
       docs,
       [verdict({ path: 'docs', verdict: 'keep' }), verdict({ path: 'docs/archive', verdict: 'exclude' })],
-      sources,
+      [],
     )
     expect(kept.map((d) => d.path)).not.toContain('docs/archive/old.md')
     expect(kept.map((d) => d.path)).toContain('docs/a.md')
   })
 
-  it('a SOURCE ID verdict covers that source\'s snapshots', () => {
-    const kept = applyScopeVerdicts(docs, [verdict({ path: 'acme', verdict: 'exclude' })], sources)
-    expect(kept.map((d) => d.path)).not.toContain('.truecourse/specs/sources/acme/index.md')
-    expect(kept).toHaveLength(3)
-  })
-
   it('keeps an uncovered doc — exclusion is explicit, never a default', () => {
-    expect(applyScopeVerdicts(docs, [verdict({ path: 'docs', verdict: 'keep' })], sources)).toHaveLength(4)
+    expect(applyScopeVerdicts(docs, [verdict({ path: 'docs', verdict: 'keep' })], [])).toHaveLength(3)
   })
 
   it('a trailing slash is the same path', () => {
-    const kept = applyScopeVerdicts(docs, [verdict({ path: 'docs/', verdict: 'exclude' })], sources)
-    expect(kept.map((d) => d.path)).toEqual(['README.md', '.truecourse/specs/sources/acme/index.md'])
+    const kept = applyScopeVerdicts(docs, [verdict({ path: 'docs/', verdict: 'exclude' })], [])
+    expect(kept.map((d) => d.path)).toEqual(['README.md'])
   })
 
   it('a manual-include pin outranks every verdict — a user decision is never silently reverted', () => {
     const kept = applyScopeVerdicts(
       docs,
       [verdict({ path: 'docs', verdict: 'exclude' })],
-      sources,
+      [],
       ['docs/archive/old.md'],
     )
     expect(kept.map((d) => d.path)).toContain('docs/archive/old.md')
@@ -573,51 +571,6 @@ describe('scope verdicts under the context grammar', () => {
   })
 })
 
-describe('a registered source', () => {
-  it('is uncovered until a verdict names it, and an exclude drops its snapshots from the scan', async () => {
-    writeDocs({
-      'docs/a.md': '# A\n',
-      '.truecourse/specs/sources/acme/index.md': '# Acme index\n',
-    })
-    writeSourcesFile(repo, {
-      version: 1,
-      sources: [
-        {
-          id: 'acme',
-          llmsTxtUrl: 'https://acme.example/llms.txt',
-          title: 'Acme',
-          fetchedAt: '2026-01-01T00:00:00Z',
-          docs: [{ url: 'https://acme.example/index', path: 'index.md', title: 'Index', contentHash: 'h' }],
-          skipped: [],
-        },
-      ],
-    })
-    // A verdict over `docs` alone leaves the SOURCE uncovered.
-    seedDecisions({ scopeVerdicts: [verdict({ path: 'docs', verdict: 'keep' })] })
-
-    const { driver, seen } = scriptedDriver(
-      downstream(async (input) => {
-        expect(openingOf(input)).toContain('source: acme')
-        return {
-          kind: 'outcome',
-          value: {
-            scopeVerdicts: [{ path: 'acme', verdict: 'exclude', reason: 'vendored docs mirror' }],
-            instructions: [],
-          },
-        }
-      }),
-    )
-    const result = await runSpecScanSessions({
-      repoRoot: repo,
-      driver: async () => driver,
-      persistence: memoryPersistence(),
-      skipGit: true,
-    })
-    expect(seen.filter((s) => s.kind === SPEC_SCAN_ORCHESTRATE_SESSION_KIND)).toHaveLength(1)
-    expect(result.corpus.docs.map((d) => d.ref)).toEqual(['docs/a.md'])
-  })
-})
-
 // ---------------------------------------------------------------------------
 // 5. instructions re-key everything downstream
 // ---------------------------------------------------------------------------
@@ -676,7 +629,7 @@ describe('standing instructions', () => {
 
 describe('the interactive session', () => {
   it('is declared interactive', () => {
-    const scope = buildScanScopeUniverse(buildScanUniverse([docCandidate('docs/a.md')]), [])
+    const scope = buildScanScopeUniverse(buildScanUniverse([docCandidate('docs/a.md')]))
     expect(orchestrateSessionDef(scope).interactive).toBe(true)
   })
 
@@ -775,22 +728,22 @@ describe('a failed orchestrate session', () => {
 describe('surfaces that skip the scope session', () => {
   /**
    * The workspace sync's scratch tree is transient, so a scope session there
-   * would re-spend every sync and settle nothing durable. It cannot be run to
-   * completion in OSS (persisting a workspace corpus needs the EE spec store —
-   * `tests/ee-server/knowledge-workspace-corpus.test.ts` owns that path), but
-   * the part that matters is reachable: the curation runs to the PERSIST step
-   * on a driver that throws the moment an orchestrate session starts.
+   * would re-spend every sync and settle nothing durable. The driver throws the
+   * moment an orchestrate session starts, so a sync that runs all the way to
+   * the persisted workspace corpus proves none was started.
    */
   it('an injected doc source (workspace sync) never starts one', async () => {
-    const error = await syncWorkspaceCorpusInProcess({
+    const result = await syncWorkspaceCorpusInProcess({
       workspaceOrgId: 'acme',
       docs: [{ docPath: 'knowledge/confluence/a.md', markdown: '# A\n\nSome spec prose.\n' }],
       driver: scriptedDriver(downstream(NO_ORCHESTRATE)).driver,
-    }).catch((e: unknown) => e as Error)
-    expect(error).toBeInstanceOf(Error)
-    // It got as far as persisting — i.e. the scan itself completed — and the
-    // failure is the OSS store's workspace refusal, never a scope session.
-    expect((error as Error).message).toContain('workspace-scoped specs require the enterprise store')
+    })
+    expect(result.areaCount).toBeGreaterThan(0)
+    const corpus = await loadWorkspaceSpec<{ docs: Array<{ ref: string }> }>(
+      { workspaceOrgId: 'acme' },
+      'corpus',
+    )
+    expect(corpus?.docs.map((d) => d.ref)).toEqual(['knowledge/confluence/a.md'])
   })
 
   it('`disableScopeOrchestration` honors the stored verdicts without a session', async () => {

@@ -28,7 +28,7 @@ import { manifestPath, writeGuardLatest } from '@truecourse/guard-runner';
 import type { HomeResponse } from '@truecourse/shared';
 import type { CuratedCorpus } from '@truecourse/spec-consolidator';
 import { createTestApp, stubJobs, TEST_ORG } from '../helpers/test-app';
-import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
+import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
 import { memoryContextStore } from '../helpers/memory-context-store';
 import { memorySpecStore } from '../helpers/memory-spec-store';
 import {
@@ -39,12 +39,15 @@ import {
 } from '@truecourse/core/lib/context-store';
 import { resetSpecStore, saveWorkspaceSpec, setSpecStore } from '@truecourse/core/lib/spec-store';
 import { writeGuardRunSections } from '@truecourse/core/lib/guard-store';
-import { createSessionRun } from '@truecourse/core/lib/sessions-store';
+import { createStoredSessionRun } from '@truecourse/core/lib/sessions-store';
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
+import { installMemoryGuardOverlays, resetGuardOverlayStore } from '../helpers/memory-guard-overlays';
 import {
   setWorkspaceLlmConfigStore,
   workspaceLlmConfigStore,
 } from '../../apps/dashboard/server/src/services/workspace-llm.service';
-import { readRegistry, unregisterProject } from '@truecourse/core/config/registry';
+import { clearTestRegistry } from '../helpers/test-fixture';
 
 const SITE = 'site-docs-acme';
 const ref = (name: string): string => `context/${SITE}/${name}`;
@@ -198,7 +201,10 @@ function withProvider(): void {
 }
 
 beforeEach(async () => {
-  for (const entry of await readRegistry()) await unregisterProject(entry.slug);
+  installMemorySessionRuns();
+  installWorkTreeGuardStore();
+  installMemoryGuardOverlays();
+  clearTestRegistry();
   repoA = await setupTestFixture();
   repoB = await setupTestFixture();
   context = memoryContextStore();
@@ -211,8 +217,10 @@ beforeEach(async () => {
 afterEach(async () => {
   resetContextStore();
   resetSpecStore();
-  await unregisterProject(repoA.project.slug);
-  await unregisterProject(repoB.project.slug);
+  resetSessionRuns();
+  resetGuardStore();
+  resetGuardOverlayStore();
+  clearTestRegistry();
   await teardownTestFixture();
   vi.restoreAllMocks();
 });
@@ -343,12 +351,12 @@ describe('GET /api/home', () => {
       // Runs of one repository never share a start time: the lane serializes
       // them. The clock here says so, where back-to-back creation would not.
       const at = (minute: number) => () => new Date(`2026-09-11T10:${String(minute).padStart(2, '0')}:00.000Z`);
-      createSessionRun(repoA.repoPath, { command: 'spec-scan', gitRef: 'abc', now: at(1) }).finish('failed', {
+      (await createStoredSessionRun(repoA.repoPath, { command: 'spec-scan', gitRef: 'abc', now: at(1) })).finish('failed', {
         error: { message: 'the provider refused' },
       });
       // A later success on the same kind clears an older failure.
-      createSessionRun(repoA.repoPath, { command: 'guard-setup', gitRef: 'abc', now: at(2) }).finish('failed');
-      createSessionRun(repoA.repoPath, { command: 'guard-setup', gitRef: 'abc', now: at(3) }).finish('completed');
+      (await createStoredSessionRun(repoA.repoPath, { command: 'guard-setup', gitRef: 'abc', now: at(2) })).finish('failed');
+      (await createStoredSessionRun(repoA.repoPath, { command: 'guard-setup', gitRef: 'abc', now: at(3) })).finish('completed');
 
       const rows = (await home()).attention.filter((row) => row.kind === 'conversation');
 

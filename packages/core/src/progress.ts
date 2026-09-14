@@ -26,8 +26,8 @@ export interface AnalysisProgressPayload {
 
 // ---------------------------------------------------------------------------
 // StepTracker — manages a checklist of analysis phases and emits progress.
-// The emitter is caller-provided so the CLI can render to stdout while the
-// dashboard server wires it through Socket.io.
+// The emitter is caller-provided so each surface picks its own presentation —
+// the dashboard server wires it through Socket.io.
 // ---------------------------------------------------------------------------
 
 export type ProgressEmit = (payload: AnalysisProgressPayload) => void;
@@ -44,7 +44,7 @@ export class StepTracker {
 
   /**
    * Add a secondary emit listener — e.g. the sessions run record mirroring
-   * the checklist so the dashboard sees CLI-run progress. Returns the remover.
+   * the checklist so the dashboard sees the run's progress. Returns the remover.
    */
   tap(fn: ProgressEmit): () => void {
     this.taps.push(fn);
@@ -79,7 +79,7 @@ export class StepTracker {
    * is no dedupe: two docs that read the same are two facts, and a repeated
    * line is a repeated event. A fact for a key this tracker doesn't carry is
    * dropped, exactly as `detail` is, so a caller running a reduced checklist
-   * (`--only-<step>`) still names its work without knowing which keys exist.
+   * (`only`) still names its work without knowing which keys exist.
    */
   fact(key: string, line: string): void {
     const step = this.steps.find((s) => s.key === key);
@@ -152,15 +152,14 @@ const ESTIMATE_STEP_KEY = 'estimate';
 /**
  * The pre-flight cost estimate's own progress surface. The estimate reads every
  * doc the run would price — seconds of work on a large corpus — and it finishes
- * before the pipeline's first step, so without a surface of its own the CLI and
- * the dashboard sit silent until the confirm gate opens.
+ * before the pipeline's first step, so without a surface of its own a caller
+ * sits silent until the confirm gate opens.
  *
- * It is deliberately NOT part of the run checklist: the terminal renderer draws
- * the checklist in place, so an estimate step made the whole checklist paint
- * once during estimation (every real step pending) and again after the confirm.
- * Each caller picks its own presentation — the CLI resolves a spinner into a
- * standalone line above the estimate panel; the dashboard adapts it back onto
- * the tracker via {@link estimateStepPhase}, whose popup replaces in place.
+ * It is deliberately NOT part of the run checklist: a surface that draws the
+ * checklist in place would paint the whole thing once during estimation (every
+ * real step pending) and again after the confirm. Each caller picks its own
+ * presentation — the dashboard adapts it back onto the tracker via
+ * {@link estimateStepPhase}, whose popup replaces in place.
  */
 export interface EstimatePhase {
   start(): void;

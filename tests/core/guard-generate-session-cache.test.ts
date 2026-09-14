@@ -3,7 +3,7 @@
  * driven against a SCRIPTED session driver.
  *
  * `createGuardGenerateSessionSeams` takes an optional `driver` seam, but the
- * PRODUCTION path is the internal `createConfiguredSessionDriver` one — and it
+ * PRODUCTION path is the internal `createClaudeCodeSessionDriver` one — and it
  * is the lazy path a cache test has to prove (a fully-cached run must build no
  * driver and open no run record). So that module is mocked with a COUNTER and
  * each case scripts it; the injected seam gets one case of its own, for the
@@ -29,7 +29,7 @@ let sessionScript: StubScript = () => {
 vi.mock('../../packages/core/src/services/llm/session-driver.js', () => ({
   SESSION_MODEL_CLAUDE_CODE: 'opus',
   assertSessionBackendReady: async () => {},
-  createConfiguredSessionDriver: () => {
+  createClaudeCodeSessionDriver: () => {
     constructions++
     const { driver } = stubDriver((call) => sessionScript(call))
     return { driver, mode: 'claude-code', attribution: driver.attribution }
@@ -50,8 +50,11 @@ import {
   extractSessionCacheKey,
   flowsSessionCacheKey,
 } from '../../packages/core/src/services/guard-generate/index'
+import { listStoredSessionRuns } from '../../packages/core/src/lib/sessions-store.js'
 import { memoryPersistence, outcome, stubDriver, type StubCall, type StubScript } from './spec-scan-session-stub'
 import { makeTempRepo, rmrf, writeCorpus, writeDoc, writeRecipe } from '../guard-generator/helpers.js'
+import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache'
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs'
 
 const DOC = 'docs/tasks.md'
 const CONTENT = ['# Tasks', '', '## Creating tasks', '', '`relkit add <title>` creates a task.'].join('\n')
@@ -59,19 +62,18 @@ const ANCHOR = 'tasks/creating-tasks'
 const CLAIM = '`relkit add <title>` creates a task'
 
 const repos: string[] = []
-let home = ''
 
 beforeEach(() => {
   constructions = 0
   sessionScript = () => {
     throw new Error('no session script installed for this case')
   }
-  home = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-gg-cache-home-'))
-  process.env.TRUECOURSE_HOME = home
+  installMemoryKvCache()
+  installMemorySessionRuns()
 })
 afterEach(() => {
-  delete process.env.TRUECOURSE_HOME
-  fs.rmSync(home, { recursive: true, force: true })
+  resetKvCacheStore()
+  resetSessionRuns()
   while (repos.length) rmrf(repos.pop()!)
 })
 
@@ -160,14 +162,14 @@ describe('the extract seam’s cache', () => {
     await seams.extractSession({ docs: [doc], prerequisiteTargets: [] })
     const runId = seams.runId()
     expect(runId).toBeTruthy()
-    expect(fs.existsSync(path.join(r, '.truecourse', 'sessions', 'guard-generate', runId!, 'run.json'))).toBe(true)
+    expect((await listStoredSessionRuns(r, 'guard-generate')).map((run) => run.runId)).toEqual([runId])
     seams.finish(false)
   })
 
   // The INJECTED driver seam (`opts.driver`) and its documented convention:
   // whoever owns the driver owns the run record, so an injected one creates
   // none at all — `runId()` stays undefined, `finish()` no-ops, and nothing is
-  // written under `sessions/`. The internal `createConfiguredSessionDriver`
+  // written under `sessions/`. The internal `createClaudeCodeSessionDriver`
   // path is never reached (the mock's counter proves it).
   it('an injected driver runs the sessions and opens NO run record', async () => {
     const r = docRepo()
@@ -191,7 +193,7 @@ describe('the extract seam’s cache', () => {
     expect(constructions).toBe(0)
     expect(seams.runId()).toBeUndefined()
     expect(() => seams.finish(false)).not.toThrow()
-    expect(fs.existsSync(path.join(r, '.truecourse', 'sessions'))).toBe(false)
+    expect(await listStoredSessionRuns(r, 'guard-generate')).toEqual([])
   })
 
   it('never caches a FAILED session — the next run re-attempts it', async () => {

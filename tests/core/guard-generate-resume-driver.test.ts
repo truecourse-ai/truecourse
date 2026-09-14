@@ -6,16 +6,24 @@ import { StepTracker } from '../../packages/core/src/progress.js';
 import { resetSpecStore } from '../../packages/core/src/lib/spec-store.js';
 import { flowStageSeams, makeTempRepo, rmrf, writeCorpus, writeDoc, writeRecipe } from '../guard-generator/helpers.js';
 import { stubDriver } from './spec-scan-session-stub.js';
+import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs.js';
+import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store.js';
 
 let repo: string;
 beforeEach(() => {
   resetSpecStore();
+  installMemorySessionRuns();
+  installWorkTreeGuardStore();
   repo = makeTempRepo();
   writeRecipe(repo);
   writeCorpus(repo, [{ ref: 'docs/cli.md' }]);
   writeDoc(repo, 'docs/cli.md', '## version\n`relkit --version` prints the version and exits 0.\n');
 });
-afterEach(() => rmrf(repo));
+afterEach(() => {
+  resetSessionRuns();
+  resetGuardStore();
+  rmrf(repo);
+});
 
 describe('resume through the generate driver', () => {
   it('refuses a completed matcher cache miss before spending or starting workers', async () => {

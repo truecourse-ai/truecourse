@@ -3,10 +3,9 @@
  *
  *     context/<sourceId>/<docPath>
  *
- * `docPath` is the repo-relative path for a repository source and the snapshot
- * path for a site. That ref is the document's address in the corpus, in claims,
- * in scenarios and in the Documents view, and it replaces the two old grammars
- * (`.truecourse/specs/sources/...` and `knowledge/...`).
+ * `docPath` is the repo-relative path for a repository source and the page path
+ * for a site. That ref is the document's address in the corpus, in claims, in
+ * scenarios and in the Documents view.
  *
  * Nothing else composes or splits the string: build one with {@link contextDocRef}
  * and read one with {@link parseContextDocRef}, so the grammar can never drift

@@ -4,25 +4,21 @@
  * job for the resolved head. Fakes only the octokit client + the enqueue seam; the
  * FileGateStore is real.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import fs from 'node:fs';
-import os from 'node:os';
+import { describe, it, expect, beforeEach } from 'vitest';
 import path from 'node:path';
 import {
-  FileGateStore,
   handlePullRequestGuardSpecOffer,
   handleCommentEditedGuardSpec,
   renderGuardSpecComment,
   type GuardSpecOfferDeps,
   type GuardSpecRegenRequest,
 } from '../../ee/packages/github-app/src/index';
+import { MemoryGateStore } from '../github-app/memory-store';
 
-let dir: string;
-let store: FileGateStore;
+let store: MemoryGateStore;
 
 beforeEach(async () => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-spec-'));
-  store = new FileGateStore(dir);
+  store = new MemoryGateStore();
   await store.linkRepo({
     repoFullName: 'acme/api',
     installationId: 5,
@@ -35,9 +31,6 @@ beforeEach(async () => {
   });
 });
 
-afterEach(() => {
-  fs.rmSync(dir, { recursive: true, force: true });
-});
 
 function makeOctokit(opts: {
   files?: string[];

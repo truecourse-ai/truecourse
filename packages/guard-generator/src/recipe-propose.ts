@@ -45,6 +45,7 @@ import {
 import { parseOpenApiSpec, parseSecuritySchemes, type SecurityScheme } from '@truecourse/shared/openapi'
 import type { DatastoreUrlRef, Interface } from '@truecourse/shared'
 import { deriveGuardCompose, GUARD_COMPOSE_FILE, type ComposePlan } from './datastore-compose.js'
+import { WORK_TREE_DIR, corpusFilePath } from '@truecourse/shared/work-tree'
 
 /** One operation of the derived api surface — all the health ranking needs. */
 export interface ApiRouteRef {
@@ -85,7 +86,7 @@ export type ProposeRecipeOutcome =
       ok: true
       recipe: Recipe
       ecosystem: RecipeEcosystem
-      /** Human fill-ins the CLI prints — credential env vars, unmappable schemes. */
+      /** Human fill-ins the setup report carries — credential env vars, unmappable schemes. */
       todos: string[]
       /**
        * The datastore compose file this proposal REQUIRES to exist, when
@@ -685,7 +686,7 @@ function detectDotnet(repoRoot: string): RecipeSignals | { ok: false; reason: st
 
 /** Every `.csproj` under the repo root, depth-limited and skipping build output. */
 function findCsprojFiles(repoRoot: string, maxDepth = 3): string[] {
-  const skip = new Set(['bin', 'obj', 'node_modules', '.git', '.truecourse', 'dist', 'build', 'target'])
+  const skip = new Set(['bin', 'obj', 'node_modules', '.git', WORK_TREE_DIR, 'dist', 'build', 'target'])
   const found: string[] = []
   const walk = (dir: string, depth: number) => {
     let entries: fs.Dirent[]
@@ -901,7 +902,7 @@ export function credentialEnvName(schemeKey: string): string {
 /** The security schemes declared by the corpus's OpenAPI docs, merged. Missing or
  *  unreadable corpus → no schemes, never a failure. */
 function readCorpusSecuritySchemes(repoRoot: string): Record<string, SecurityScheme> {
-  const corpus = readJson(path.join(repoRoot, '.truecourse', 'specs', 'corpus.json'))
+  const corpus = readJson(corpusFilePath(repoRoot))
   const docs = Array.isArray(corpus?.docs) ? corpus.docs : []
   const schemes: Record<string, SecurityScheme> = {}
   for (const entry of docs) {
