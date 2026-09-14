@@ -211,7 +211,7 @@ describe('mapInterfaces', () => {
 
   it('maps caller-supplied analyses without re-analyzing the tree', async () => {
     writeRepo({ 'package.json': JSON.stringify({ name: 'shipit' }) });
-    const { analyzeFileContent } = await import('../../packages/analyzer/src/file-analyzer');
+    const { analyzeFileContent } = await import('../../packages/source-facts/src/file-analyzer');
 
     const result = await mapInterfaces(repo, {
       fileAnalyses: [analyzeFileContent('src/cli.ts', COMMANDER_CLI, 'typescript')],

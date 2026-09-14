@@ -7,10 +7,8 @@ import {
   writeTelemetryConfig,
   bucketFileCount,
   bucketDuration,
-  detectLanguages,
   getSystemInfo,
 } from '../../packages/core/src/services/telemetry.service';
-import type { AnalysisResult } from '../../packages/core/src/services/analyzer.service';
 
 let tmpDir: string;
 const originalHome = process.env.HOME;
@@ -135,80 +133,6 @@ describe('bucketDuration', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Language detection
-// ---------------------------------------------------------------------------
-
-describe('detectLanguages', () => {
-  function makeResult(files: string[][]): AnalysisResult {
-    return {
-      services: files.map((f, i) => ({
-        name: `service-${i}`,
-        rootPath: `/tmp/service-${i}`,
-        type: 'api-server' as const,
-        fileCount: f.length,
-        layers: [],
-        files: f,
-      })),
-      architecture: 'monolith',
-      dependencies: [],
-      layerDetails: [],
-      databaseResult: { connections: [], schemas: [] },
-      modules: [],
-      methods: [],
-      moduleLevelDependencies: [],
-      methodLevelDependencies: [],
-      fileAnalyses: [],
-      moduleDependencies: [],
-      entryPointFiles: new Set<string>(),
-      metadata: {},
-    } as AnalysisResult;
-  }
-
-  it('detects TypeScript from .ts and .tsx files', () => {
-    const result = makeResult([['src/index.ts', 'src/App.tsx']]);
-    expect(detectLanguages(result)).toEqual(['typescript']);
-  });
-
-  it('detects JavaScript from .js and .jsx files', () => {
-    const result = makeResult([['src/index.js', 'src/App.jsx']]);
-    expect(detectLanguages(result)).toEqual(['javascript']);
-  });
-
-  it('detects multiple languages across services', () => {
-    const result = makeResult([
-      ['src/index.ts'],
-      ['app/main.py'],
-    ]);
-    const langs = detectLanguages(result);
-    expect(langs).toContain('typescript');
-    expect(langs).toContain('python');
-  });
-
-  it('deduplicates languages', () => {
-    const result = makeResult([
-      ['src/a.ts', 'src/b.ts', 'src/c.tsx'],
-    ]);
-    expect(detectLanguages(result)).toEqual(['typescript']);
-  });
-
-  it('returns sorted array', () => {
-    const result = makeResult([
-      ['main.py', 'index.ts', 'app.go'],
-    ]);
-    expect(detectLanguages(result)).toEqual(['go', 'python', 'typescript']);
-  });
-
-  it('ignores unknown extensions', () => {
-    const result = makeResult([['README.md', 'data.csv', 'Makefile']]);
-    expect(detectLanguages(result)).toEqual([]);
-  });
-
-  it('returns empty array for no services', () => {
-    const result = makeResult([]);
-    expect(detectLanguages(result)).toEqual([]);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // System info

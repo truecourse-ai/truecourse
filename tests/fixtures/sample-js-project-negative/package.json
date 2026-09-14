@@ -1,5 +1,0 @@
-{
-  "name": "sample-project",
-  "private": true,
-  "workspaces": ["services/*", "shared/*"]
-}

@@ -11,27 +11,6 @@ import { describe, it, expect, vi } from 'vitest';
 import request from 'supertest';
 import { COMMUNITY_CAPABILITIES } from '@truecourse/shared';
 
-vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../apps/dashboard/server/src/socket/handlers')>();
-  class NoopTracker {
-    start() {}
-    done() {}
-    error() {}
-    detail() {}
-  }
-  return {
-    ...actual,
-    emitAnalysisProgress: vi.fn(),
-    emitAnalysisComplete: vi.fn(),
-    emitViolationsReady: vi.fn(),
-    emitFilesChanged: vi.fn(),
-    emitAnalysisCanceled: vi.fn(),
-    createSocketTracker: () => new NoopTracker(),
-    createSocketLlmEstimateHandler: () => () => Promise.resolve(true),
-    createSocketStashConfirmHandler: () => () => Promise.resolve('stash'),
-  };
-});
-
 import { createTestApp } from '../helpers/test-app';
 
 describe('GET /api/capabilities', () => {

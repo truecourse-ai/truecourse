@@ -53,9 +53,9 @@ ENV NODE_ENV=production \
     TRUECOURSE_LOG_DIR=/data/logs
 
 WORKDIR /app
-# Copy the whole built workspace. We DON'T prune devDependencies: the analyzer's
+# Copy the whole built workspace. We DON'T prune devDependencies: the
 # tree-sitter WASM grammars are declared as devDeps but are needed at runtime, so
-# pruning would break `analyze`. (Image-size trimming is a later optimization.)
+# pruning would break interface mapping. (Image-size trimming is a later optimization.)
 COPY --from=builder /app /app
 
 # Writable data dir for logs. Durable state lives in Postgres; per-run clones

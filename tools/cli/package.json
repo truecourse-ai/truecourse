@@ -17,8 +17,6 @@
   },
   "dependencies": {
     "@clack/prompts": "^1.2.0",
-    "@truecourse/contract-extractor": "workspace:*",
-    "@truecourse/contract-verifier": "workspace:*",
     "@truecourse/core": "workspace:*",
     "@truecourse/guard-generator": "workspace:*",
     "@truecourse/guard-runner": "workspace:*",

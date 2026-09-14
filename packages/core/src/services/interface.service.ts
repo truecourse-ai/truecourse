@@ -41,7 +41,7 @@ import {
   discoverFiles,
   initParsers,
   DATABASE_IMPORT_MAP,
-} from '@truecourse/analyzer';
+} from '@truecourse/source-facts';
 import {
   atomicWriteJson,
   computeRecipeFingerprint,

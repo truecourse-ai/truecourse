@@ -11,43 +11,6 @@ export interface JobStepDef {
   label: string;
 }
 
-export const KNOWLEDGE_SYNC_TASK = 'knowledge.sync';
-
-export interface SyncJobPayload {
-  jobId: string;
-  org: string;
-  /**
-   * The connector whose Process button (or decision write) dispatched this run —
-   * for the toast/attribution only. Processing is workspace-scoped: the job
-   * consolidates the UNION of every connected source regardless of `kind`.
-   */
-  kind: string;
-}
-
-/**
- * Single-flight key for a `knowledge.sync` (processing) job — ONE per workspace at
- * a time, not per connector: every source's Process button dispatches the same
- * union job, so a second click (any source) while one runs is a no-op.
- */
-export function workspaceSyncJobKey(org: string): string {
-  return `${KNOWLEDGE_SYNC_TASK}:${org}`;
-}
-
-/** The sweep stage: sweep the source and price the work to process (no LLM), then
- *  persist a pending record so the Process button + its cost are workspace-visible. */
-export const KNOWLEDGE_ESTIMATE_TASK = 'knowledge.estimate';
-
-/** Same resolved target as a sync (org + connector kind); the result carries the estimate. */
-export type EstimateJobPayload = SyncJobPayload;
-
-/** Display title + stepped checklist for the sweep job popup. The estimate is an
- *  internal by-product of the sweep — the user-visible step is the change diff. */
-export const KNOWLEDGE_ESTIMATE_TITLE = 'Syncing knowledge';
-export const KNOWLEDGE_ESTIMATE_STEPS: readonly JobStepDef[] = [
-  { key: 'fetch', label: 'Fetching documents' },
-  { key: 'estimate', label: 'Checking for changes' },
-];
-
 export const REPO_BASELINE_TASK = 'repo.baseline';
 
 /** Display title + stepped checklist for the repo-scan job popup. */

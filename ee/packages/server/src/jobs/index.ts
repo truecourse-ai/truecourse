@@ -41,7 +41,6 @@ import {
   chainGuardBaselineRefresh,
   generateWasBlocked,
 } from './guard-chain.js';
-import { chainInheritanceRipple, type RippleRepo } from './knowledge-chain.js';
 import { settleOrphanedGuardGates } from './orphans.js';
 import {
   enqueueOrPendBaseline,
@@ -56,8 +55,6 @@ import {
 } from './pending-guard-baseline.js';
 import { runGuardBackfill } from './guard-backfill.js';
 import {
-  KNOWLEDGE_SYNC_TASK,
-  KNOWLEDGE_ESTIMATE_TASK,
   REPO_BASELINE_TASK,
   REPO_GUARD_TASK,
   GUARD_GATE_TASK,
@@ -67,8 +64,6 @@ import {
   guardGateJobKey,
   guardSpecRegenJobKey,
   guardBaselineJobKey,
-  type SyncJobPayload,
-  type EstimateJobPayload,
   type BaselineEnqueueRequest,
   type BaselineJobPayload,
   type GuardGenerateEnqueueRequest,
@@ -81,10 +76,6 @@ import {
 /** The job surface other modules enqueue onto: the shared store + the enqueue. */
 export interface JobsApi {
   jobStore: JobStore;
-  /** Enqueue a connector sync (maxAttempts:1 — a failure is terminal, see worker.ts). */
-  enqueueSync(payload: SyncJobPayload, jobKey: string): Promise<void>;
-  /** Enqueue Stage 1 of a sync — the cache-aware cost estimate (maxAttempts:1). */
-  enqueueEstimate(payload: EstimateJobPayload, jobKey: string): Promise<void>;
   /**
    * Enqueue an initial/refresh repo scan (connect + default-branch push). Single-
    * flight per repo: returns the new job id, or null when a scan is already
@@ -178,7 +169,6 @@ export async function registerJobs(
         onBaselineSettled,
         onGuardGenerateSettled,
         onGuardBaselineSettled,
-        onKnowledgeSyncSettled,
       }),
   });
   const jobStore = jobs.jobStore;
@@ -341,52 +331,6 @@ export async function registerJobs(
     if (settled.outcome === 'succeeded') await emitRepoLifecycle(payload.repoFullName, 'guard-run');
   };
 
-  // The workspace's open spec conflicts (the shared `openConflicts` derivation the
-  // repo gate uses) — 0 when there is no corpus yet. The ripple skips a workspace
-  // that still has any conflict open (repos stay on the last clean spec).
-  const workspaceOpenConflicts = async (org: string): Promise<number> => {
-    const corpus = await loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId: org }, 'corpus');
-    if (!corpus) return 0;
-    const decisions = await getWorkspaceDecisions(org);
-    return openConflicts(corpus, decisions).length;
-  };
-
-  // The org's connected repos that have a baseline to re-scan — the ripple targets.
-  // A repo with no baseline yet (never scanned) is skipped: there is nothing to
-  // re-inherit into and no commit to key by.
-  const listReposToRipple = async (org: string): Promise<RippleRepo[]> => {
-    const links = await gateStore.listReposForWorkspace(org);
-    const repos: RippleRepo[] = [];
-    for (const link of links) {
-      const baseline = await gateStore.getBaseline(link.repoFullName);
-      if (!baseline) continue;
-      repos.push({
-        repoFullName: link.repoFullName,
-        installationId: link.installationId,
-        defaultBranch: link.defaultBranch,
-        commitSha: baseline.commitSha,
-      });
-    }
-    return repos;
-  };
-
-  // After a knowledge.sync (processing) job succeeds WITH a corpus change and no open
-  // spec conflict, ripple a baseline re-scan to the org's connected repos — they fold
-  // the workspace layer into their own spec, so a changed corpus makes their inherited
-  // spec stale. Best-effort; single-flight losses coalesce onto pending-baseline.
-  const onKnowledgeSyncSettled = async (
-    payload: SyncJobPayload,
-    outcome: JobOutcomeStatus,
-    result?: unknown,
-  ): Promise<void> => {
-    await chainInheritanceRipple(
-      { openConflicts: workspaceOpenConflicts, listRepos: listReposToRipple, enqueueBaseline },
-      payload,
-      outcome,
-      result,
-    );
-  };
-
   // Start the background services (need a live Postgres). A failure here must NOT
   // prevent the dashboard from booting — the HTTP server (auth, reads, capabilities)
   // still comes up; jobs simply don't process until a restart succeeds. Every
@@ -437,9 +381,6 @@ export async function registerJobs(
 
   return {
     jobStore,
-    enqueueSync: (payload, jobKey) => jobs.addJob(KNOWLEDGE_SYNC_TASK, { ...payload }, jobKey),
-    enqueueEstimate: (payload, jobKey) =>
-      jobs.addJob(KNOWLEDGE_ESTIMATE_TASK, { ...payload }, jobKey),
     enqueueBaseline,
     enqueueGuardGenerate,
     enqueueGuardGate,

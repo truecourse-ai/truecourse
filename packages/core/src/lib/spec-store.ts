@@ -11,9 +11,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import type { RepoRef, WorkspaceRef } from './contract-store.js';
+import type { RepoRef, WorkspaceRef } from './repo-ref.js';
 
-export type { RepoRef, WorkspaceRef } from './contract-store.js';
+export type { RepoRef, WorkspaceRef } from './repo-ref.js';
 
 /**
  * Per-(repo, commit) JSON artifacts. `corpus`/`decisions` are the curated spec

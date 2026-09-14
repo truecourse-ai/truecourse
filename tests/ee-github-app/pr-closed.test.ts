@@ -1,22 +1,16 @@
 /**
  * pull_request.closed handling: a merged PR promotes its decisions overlay onto
  * the repo row (and drops the overlay); an unmerged close discards the overlay
- * without touching the repo row. Both clean up the PR-scoped Code Quality diff.
+ * without touching the repo row.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
-import { PgSpecStore, PgAnalysisStore, PgGuardStore } from '../../ee/packages/data-store/src/index';
+import { PgSpecStore, PgGuardStore } from '../../ee/packages/data-store/src/index';
 import { setSpecStore, resetSpecStore } from '@truecourse/core/lib/spec-store';
 import { setGuardStore, resetGuardStore } from '@truecourse/core/lib/guard-store';
-import {
-  setAnalysisStore,
-  resetAnalysisStore,
-  readDiff,
-  writeDiff,
-} from '@truecourse/core/lib/analysis-store';
 // Bare specifiers so the store singletons match the ones the github-app source
 // reads through (it imports core via `@truecourse/core/...`, not the src path).
 import {
@@ -55,13 +49,11 @@ beforeEach(async () => {
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
   setSpecStore(new PgSpecStore(db as unknown as Db));
   setGuardStore(new PgGuardStore(db as unknown as Db));
-  setAnalysisStore(new PgAnalysisStore(db as unknown as Db));
 });
 
 afterEach(async () => {
   resetSpecStore();
   resetGuardStore();
-  resetAnalysisStore();
   await client.close();
 });
 
@@ -110,15 +102,5 @@ describe('handlePullRequestClosed', () => {
   it('merged with no overlay is a no-op (never throws)', async () => {
     await expect(handlePullRequestClosed(closedPayload(99, true))).resolves.toBeUndefined();
     expect((await getDecisions(REPO)).manualIncludes).toEqual([]);
-  });
-
-  it('cleans up the PR-scoped Code Quality diff on close', async () => {
-    const prKey = `${REPO}::pr/7`;
-    await writeDiff(prKey, { summary: { newCount: 1 } } as never);
-    expect(await readDiff(prKey)).not.toBeNull();
-
-    await handlePullRequestClosed(closedPayload(7, false));
-
-    expect(await readDiff(prKey)).toBeNull();
   });
 });

@@ -1,3 +1,0 @@
-operation DELETE "/catalog/{id}" {
-  origin "reference/specs/modules/catalog/endpoints.md" "DELETE /catalog/{id}" 1..5
-}

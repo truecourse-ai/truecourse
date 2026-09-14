@@ -3,7 +3,7 @@
 /**
  * Build script for TrueCourse npm package.
  *
- * 1. Build shared + analyzer + core (tsc)
+ * 1. Build the workspace packages (tsc)
  * 2. Build dashboard client (vite → static export to apps/dashboard/client/dist/)
  * 3. Bundle dashboard server + CLI with esbuild
  * 4. Copy WASM assets (web-tree-sitter runtime + grammars) next to the bundle
@@ -20,13 +20,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
 
-// require() resolver anchored at the analyzer package — NOT the repo root.
+// require() resolver anchored at the source-facts package — NOT the repo root.
 // The tree-sitter-* grammar packages are devDependencies of
-// `packages/analyzer`; under pnpm's isolated layout they are NOT guaranteed
+// `packages/source-facts`; under pnpm's isolated layout they are NOT guaranteed
 // to be reachable from the workspace root. Anchoring here matches where
 // parser.ts runs at install time and ensures `.wasm` asset resolution works.
-const requireFromAnalyzer = createRequire(
-  path.join(ROOT, 'packages', 'analyzer', 'package.json'),
+const requireFromSourceFacts = createRequire(
+  path.join(ROOT, 'packages', 'source-facts', 'package.json'),
 );
 
 function run(cmd: string, cwd = ROOT) {
@@ -53,29 +53,19 @@ console.log('Cleaning dist/...');
 fs.rmSync(DIST, { recursive: true, force: true });
 fs.mkdirSync(DIST, { recursive: true });
 
-// 1. Build packages in dependency order:
-//      shared → analyzer
-//      spec-consolidator → contract-verifier → contract-extractor → core
-//      guard-runner → guard-generator → core
-//
-// core's tsc imports the contract/spec/guard packages, so their .d.ts
-// files MUST exist before core compiles. The intra-package graph:
+// 1. Build packages in dependency order. core's tsc imports the spec/guard
+// packages, so their .d.ts files MUST exist before core compiles. The
+// intra-package graph:
 //
 //   shared             ←  no truecourse deps
 //   llm                ←  no truecourse deps
 //   llm-api            ←  shared
-//   analyzer           ←  shared
+//   source-facts       ←  shared
 //   spec-consolidator  ←  shared + llm
-//   contract-verifier  ←  shared + analyzer
-//   contract-extractor ←  shared + contract-verifier + spec-consolidator + llm
 //   guard-runner       ←  shared
+//   interface-mapper   ←  shared + guard-runner
 //   guard-generator    ←  guard-runner (+ shared)
 //   core               ←  all of the above
-//
-// Sequential order below honors that graph. Prior to this, fresh-checkout
-// `pnpm build:dist` failed at core's tsc because the contract/spec/guard
-// packages weren't built yet — and later at spec-consolidator's tsc because
-// its @truecourse/llm dependency wasn't built yet.
 console.log('\n=== Building packages ===');
 run('pnpm --filter @truecourse/shared build');
 run('pnpm --filter @truecourse/db build');
@@ -83,10 +73,8 @@ run('pnpm --filter @truecourse/llm build');
 run('pnpm --filter @truecourse/agent-loop build');
 run('pnpm --filter @truecourse/llm-api build');
 run('pnpm --filter @truecourse/llm-claude-agent build');
-run('pnpm --filter @truecourse/analyzer build');
+run('pnpm --filter @truecourse/source-facts build');
 run('pnpm --filter @truecourse/spec-consolidator build');
-run('pnpm --filter @truecourse/contract-verifier build');
-run('pnpm --filter @truecourse/contract-extractor build');
 run('pnpm --filter @truecourse/guard-runner build');
 run('pnpm --filter @truecourse/interface-mapper build');
 run('pnpm --filter @truecourse/guard-generator build');
@@ -99,7 +87,7 @@ run('pnpm --filter @truecourse/github-app build');
 console.log('\n=== Building dashboard client (static export) ===');
 run('pnpm --filter @truecourse/dashboard-client build');
 
-// 3. Bundle dashboard server with esbuild. `web-tree-sitter` and `pyright`/`typescript`
+// 3. Bundle dashboard server with esbuild. `web-tree-sitter` and `typescript`
 // stay external so their package metadata (and asset files like the WASM
 // runtime) can be resolved at runtime from installed node_modules.
 console.log('\n=== Bundling dashboard server ===');
@@ -116,7 +104,6 @@ run(
     '--format=esm',
     '--outfile=dist/server.mjs',
     '--external:web-tree-sitter',
-    '--external:pyright',
     '--external:typescript',
     // Keep the commercial enterprise plugin OUT of the community
     // artifact. The server reaches it only via a guarded dynamic
@@ -151,7 +138,6 @@ run(
     '--outfile=dist/cli.mjs',
     '--external:node-windows',
     '--external:web-tree-sitter',
-    '--external:pyright',
     '--external:typescript',
     // Community artifact excludes the commercial enterprise plugin.
     '--external:@truecourse/ee-server',
@@ -162,53 +148,6 @@ run(
 
 // Ensure CLI is executable
 fs.chmodSync(path.join(DIST, 'cli.mjs'), 0o755);
-
-// 5a. Bundle the deterministic-scan worker as a sibling of cli.mjs/server.mjs.
-// The tree-sitter code rules run in this worker so a single pathological file
-// (catastrophic regex backtracking) can be terminated instead of freezing the
-// whole run. It must be a separate file esbuild does NOT inline into the entry
-// bundles; the controller resolves it at runtime via `det-scan-worker.mjs` next
-// to the entry (see deterministic-scan/controller.ts resolveWorkerPath). Same
-// externals as the entries so web-tree-sitter WASM + typescript resolve from
-// node_modules, and BUNDLED_WASM_DIR (dist/wasm) is shared with the entries.
-console.log('\n=== Bundling deterministic-scan worker ===');
-run(
-  [
-    'npx esbuild packages/analyzer/src/deterministic-scan/worker.ts',
-    '--bundle',
-    '--platform=node',
-    '--target=node22',
-    '--format=esm',
-    '--outfile=dist/det-scan-worker.mjs',
-    '--external:web-tree-sitter',
-    '--external:pyright',
-    '--external:typescript',
-    '--banner:js="import { createRequire as __cRw } from \'node:module\'; const require = __cRw(import.meta.url);"',
-  ].join(' '),
-);
-
-// 5b. Build the C# Roslyn semantic host (framework-dependent, portable). Ships
-// as `dist/roslyn-host/csharp-roslyn-host.dll` and is launched via the user's
-// `dotnet` at runtime — one build runs on every OS (no per-platform matrix).
-// Not self-contained on purpose: C# devs already have .NET, and the project-
-// aware tier needs their SDK regardless. `UseAppHost=false` drops the per-OS
-// native launcher so the published output is fully portable IL.
-//
-// Tolerant by design: a build box that only ships JS/TS/Python analysis (or has
-// no .NET SDK) must NOT fail the whole build. If `dotnet` is missing or the
-// publish fails, warn and continue — the host is simply absent from dist, and
-// C# analysis fails-hard at runtime with a clear "build the host" message. For
-// C# analysis (incl. `.slnx` solutions) install the .NET SDK — 10.x recommended.
-console.log('\n=== Building C# Roslyn host ===');
-try {
-  execSync('dotnet --version', { cwd: ROOT, stdio: 'ignore' });
-  run('dotnet publish tools/csharp-roslyn-host -c Release -p:UseAppHost=false -o dist/roslyn-host');
-} catch {
-  console.warn(
-    '  ⚠ Skipped C# Roslyn host build — the .NET SDK is unavailable or `dotnet publish` failed.\n' +
-    '    C# semantic analysis will be unavailable in this dist. Install the .NET SDK (10.x for .slnx) to enable it.',
-  );
-}
 
 // 6. Copy tree-sitter WASM assets into dist/wasm/ so parser.ts finds them via
 // BUNDLED_WASM_DIR at runtime. These are shipped alongside the bundle — no
@@ -227,7 +166,7 @@ const WASM_SUBPATHS = [
   'tree-sitter-c-sharp/tree-sitter-c_sharp.wasm',
 ];
 for (const subpath of WASM_SUBPATHS) {
-  const srcPath = requireFromAnalyzer.resolve(subpath);
+  const srcPath = requireFromSourceFacts.resolve(subpath);
   const destPath = path.join(wasmDest, path.basename(subpath));
   fs.copyFileSync(srcPath, destPath);
   console.log(`  ${subpath} → dist/wasm/${path.basename(subpath)}`);
@@ -254,7 +193,9 @@ copyDir(path.join(ROOT, 'assets'), path.join(DIST, 'assets'));
 
 // 9. Generate package.json for npm publish
 console.log('\nGenerating package.json...');
-const analyzerPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'packages/analyzer/package.json'), 'utf-8'));
+const sourceFactsPkg = JSON.parse(
+  fs.readFileSync(path.join(ROOT, 'packages/source-facts/package.json'), 'utf-8'),
+);
 const corePkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'packages/core/package.json'), 'utf-8'));
 const cliPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools/cli/package.json'), 'utf-8'));
 const publishPkg = {
@@ -269,12 +210,11 @@ const publishPkg = {
     node: '>=22',
   },
   dependencies: {
-    'pyright': analyzerPkg.dependencies['pyright'],
     'dotenv': corePkg.dependencies['dotenv'],
     'commander': cliPkg.dependencies['commander'],
     '@clack/prompts': cliPkg.dependencies['@clack/prompts'],
-    'typescript': analyzerPkg.dependencies['typescript'],
-    'web-tree-sitter': analyzerPkg.dependencies['web-tree-sitter'],
+    'typescript': sourceFactsPkg.dependencies['typescript'],
+    'web-tree-sitter': sourceFactsPkg.dependencies['web-tree-sitter'],
   },
   optionalDependencies: {
     'node-windows': '^1.0.0-beta.8',

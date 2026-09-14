@@ -34,7 +34,7 @@ import { loadWorkspaceSpec, loadWorkspaceSpecDoc } from '@truecourse/core/lib/sp
 import { contextBindings, readContextDocByRef } from '@truecourse/core/lib/context-store';
 import { sliceCorpus } from '@truecourse/core/services/context';
 import { assertSafeRel, safeJoin } from '@truecourse/core/lib/safe-path';
-import type { RepoRef } from '@truecourse/core/lib/contract-store';
+import type { RepoRef } from '@truecourse/core/lib/repo-ref';
 
 function writeJson(file: string, value: unknown): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });

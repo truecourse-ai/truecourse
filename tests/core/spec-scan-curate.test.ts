@@ -197,7 +197,7 @@ describe('the curate-doc prompt and briefing', () => {
   })
 
   it('the briefing states the doc PATH and the repo identity', () => {
-    const fixturePath = 'tests/fixtures/sample-js-project-il/reference/specs/modules/orders/data.md'
+    const fixturePath = 'docs/specs/modules/orders/data.md'
     const doc = docCandidate(fixturePath, '# Orders\nThe order entity has an id.\n')
     const briefing = curateDocBriefing(doc, IDENTITY)
     expect(briefing).toMatch(/PATH \(repo-relative\)/)

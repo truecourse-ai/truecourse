@@ -237,9 +237,6 @@ importers:
       '@truecourse/agent-loop':
         specifier: workspace:*
         version: link:../../../packages/agent-loop
-      '@truecourse/contract-extractor':
-        specifier: workspace:*
-        version: link:../../../packages/contract-extractor
       '@truecourse/core':
         specifier: workspace:*
         version: link:../../../packages/core
@@ -561,116 +558,11 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
-  packages/analyzer:
-    dependencies:
-      '@truecourse/shared':
-        specifier: workspace:*
-        version: link:../shared
-      ignore:
-        specifier: ^7.0.5
-        version: 7.0.5
-      minimatch:
-        specifier: ^10.0.3
-        version: 10.2.4
-      pyright:
-        specifier: ^1.1.408
-        version: 1.1.408
-      smol-toml:
-        specifier: ^1.6.1
-        version: 1.6.1
-      typescript:
-        specifier: ^5.7.0
-        version: 5.9.3
-      web-tree-sitter:
-        specifier: ^0.26.0
-        version: 0.26.8
-    devDependencies:
-      '@types/node':
-        specifier: ^22.0.0
-        version: 22.19.15
-      tree-sitter-c-sharp:
-        specifier: ^0.23.5
-        version: 0.23.5
-      tree-sitter-javascript:
-        specifier: ^0.25.0
-        version: 0.25.0
-      tree-sitter-python:
-        specifier: ^0.25.0
-        version: 0.25.0
-      tree-sitter-typescript:
-        specifier: ^0.23.2
-        version: 0.23.2
-
-  packages/contract-extractor:
-    dependencies:
-      '@truecourse/contract-verifier':
-        specifier: workspace:*
-        version: link:../contract-verifier
-      '@truecourse/llm':
-        specifier: workspace:*
-        version: link:../llm
-      '@truecourse/shared':
-        specifier: workspace:*
-        version: link:../shared
-      '@truecourse/spec-consolidator':
-        specifier: workspace:*
-        version: link:../spec-consolidator
-      js-yaml:
-        specifier: ^4.1.0
-        version: 4.1.1
-      p-limit:
-        specifier: ^7.3.0
-        version: 7.3.0
-      zod:
-        specifier: ^3.23.8
-        version: 3.25.76
-    devDependencies:
-      '@types/js-yaml':
-        specifier: ^4.0.9
-        version: 4.0.9
-      '@types/node':
-        specifier: ^22.19.15
-        version: 22.19.15
-      typescript:
-        specifier: ^5.7.0
-        version: 5.9.3
-
-  packages/contract-verifier:
-    dependencies:
-      '@truecourse/analyzer':
-        specifier: workspace:*
-        version: link:../analyzer
-      '@truecourse/shared':
-        specifier: workspace:*
-        version: link:../shared
-      ohm-js:
-        specifier: ^17.5.0
-        version: 17.5.0
-      web-tree-sitter:
-        specifier: ^0.26.0
-        version: 0.26.8
-      zod:
-        specifier: ^3.23.8
-        version: 3.25.76
-    devDependencies:
-      typescript:
-        specifier: ^5.7.0
-        version: 5.9.3
-
   packages/core:
     dependencies:
       '@truecourse/agent-loop':
         specifier: workspace:*
         version: link:../agent-loop
-      '@truecourse/analyzer':
-        specifier: workspace:*
-        version: link:../analyzer
-      '@truecourse/contract-extractor':
-        specifier: workspace:*
-        version: link:../contract-extractor
-      '@truecourse/contract-verifier':
-        specifier: workspace:*
-        version: link:../contract-verifier
       '@truecourse/guard-generator':
         specifier: workspace:*
         version: link:../guard-generator
@@ -692,15 +584,15 @@ importers:
       '@truecourse/shared':
         specifier: workspace:*
         version: link:../shared
+      '@truecourse/source-facts':
+        specifier: workspace:*
+        version: link:../source-facts
       '@truecourse/spec-consolidator':
         specifier: workspace:*
         version: link:../spec-consolidator
       cross-spawn:
         specifier: ^7.0.6
         version: 7.0.6
-      dagre:
-        specifier: ^0.8.5
-        version: 0.8.5
       dotenv:
         specifier: ^16.4.0
         version: 16.6.1
@@ -732,9 +624,6 @@ importers:
       '@types/cross-spawn':
         specifier: ^6.0.6
         version: 6.0.6
-      '@types/dagre':
-        specifier: ^0.7.52
-        version: 0.7.54
       '@types/js-yaml':
         specifier: ^4.0.9
         version: 4.0.9
@@ -1055,6 +944,37 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  packages/source-facts:
+    dependencies:
+      '@truecourse/shared':
+        specifier: workspace:*
+        version: link:../shared
+      ignore:
+        specifier: ^7.0.5
+        version: 7.0.5
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      web-tree-sitter:
+        specifier: ^0.26.0
+        version: 0.26.8
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.15
+      tree-sitter-c-sharp:
+        specifier: ^0.23.5
+        version: 0.23.5
+      tree-sitter-javascript:
+        specifier: ^0.25.0
+        version: 0.25.0
+      tree-sitter-python:
+        specifier: ^0.25.0
+        version: 0.25.0
+      tree-sitter-typescript:
+        specifier: ^0.23.2
+        version: 0.23.2
+
   packages/spec-consolidator:
     dependencies:
       '@truecourse/llm':
@@ -1091,12 +1011,6 @@ importers:
       '@clack/prompts':
         specifier: ^1.2.0
         version: 1.2.0
-      '@truecourse/contract-extractor':
-        specifier: workspace:*
-        version: link:../../packages/contract-extractor
-      '@truecourse/contract-verifier':
-        specifier: workspace:*
-        version: link:../../packages/contract-verifier
       '@truecourse/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -3044,9 +2958,6 @@ packages:
   '@types/cross-spawn@6.0.6':
     resolution: {integrity: sha512-fXRhhUkG4H3TQk5dBhQ7m/JDdSNHKwR2BBia62lhwEIq9xGiQKLxd6LymNhn47SjXhsUEPmxi+PKw2OkW4LLjA==}
 
-  '@types/dagre@0.7.54':
-    resolution: {integrity: sha512-QjcRY+adGbYvBFS7cwv5txhVIwX1XXIUswWl+kSQTbI6NjgZydrZkEKX/etzVd7i+bCsCb40Z/xlBY5eoFuvWQ==}
-
   '@types/debug@4.1.12':
     resolution: {integrity: sha512-vIChWdVG3LG1SMxEvI/AK+FWJthlrqlTu7fbrlywTkkaONwk/UAGaULXRlf8vkzFBLVm0zkMdCquhL5aOjhXPQ==}
 
@@ -3583,9 +3494,6 @@ packages:
 
   csstype@3.2.3:
     resolution: {integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==}
-
-  dagre@0.8.5:
-    resolution: {integrity: sha512-/aTqmnRta7x7MCCpExk7HQL2O4owCT2h8NT//9I1OQ9vt29Pa0BzSAkR5lwFUcQ7491yVi/3CXU9jQ5o0Mn2Sw==}
 
   data-uri-to-buffer@4.0.1:
     resolution: {integrity: sha512-0R9ikRb668HB7QDxT1vkpuUBtqc53YyAwMwGeUFKRojY/NWKvdZ+9UYtRfGmhqNbRkTSVpMbmyhXipFFv2cb/A==}
@@ -4158,9 +4066,6 @@ packages:
     resolution: {integrity: sha512-e7gGYDmGqzju2l83MpzX8vNG/lOtVJiSzI3eZpAFubSxh/cxs7sRrRGBGjzBP1kNG0H+c95etPpNRNlH65PYhw==}
     engines: {node: '>=14.0.0'}
     hasBin: true
-
-  graphlib@2.1.8:
-    resolution: {integrity: sha512-jcLLfkpoVGmH7/InMC/1hIvOPSUh38oJtGhvrOFGzioE1DZ+0YW16RgmOJhHiuWTvGiJQ9Z1Ik43JvkRPRvE+A==}
 
   graphql@16.13.1:
     resolution: {integrity: sha512-gGgrVCoDKlIZ8fIqXBBb0pPKqDgki0Z/FSKNiQzSGj2uEYHr1tq5wmBegGwJx6QB5S5cM0khSBpi/JFHMCvsmQ==}
@@ -4939,10 +4844,6 @@ packages:
     resolution: {integrity: sha512-EFVjAYfzWqWsBMRHPMAXLCDIJnpMhdWAqR7xG6M6a2cs6PMFpl/+Z20w9zDW4vkxOFfddegBKq9Rehd0bxWE7A==}
     engines: {node: '>= 10'}
 
-  ohm-js@17.5.0:
-    resolution: {integrity: sha512-l4Sa7026+6jsvYbt0PXKmL+f+ML32fD++IznLgxDhx2t9Cx6NC7zwRqblCujPHGGmkQerHoeBzRutdxaw/S72g==}
-    engines: {node: '>=0.12.1'}
-
   on-finished@2.4.1:
     resolution: {integrity: sha512-oVlzkg3ENAhCk2zdv7IJwd/QUD4z2RxRwpkcGY8psCVcCYZNq4wYnVWALHM+brtuJjePWiYF/ClmuDr8Ch5+kg==}
     engines: {node: '>= 0.8'}
@@ -5187,11 +5088,6 @@ packages:
   pvutils@1.1.5:
     resolution: {integrity: sha512-KTqnxsgGiQ6ZAzZCVlJH5eOjSnvlyEgx1m8bkRJfOhmGRqfo5KLvmAlACQkrjEtOQ4B7wF9TdSLIs9O90MX9xA==}
     engines: {node: '>=16.0.0'}
-
-  pyright@1.1.408:
-    resolution: {integrity: sha512-N61pxaLLCsPcUuPPHMNIrGoZgGBgrbjBX5UqkaT5UV8NVZdL7ExsO6N3ectv1DzAUsLOzdlyqoYtX76u8eF4YA==}
-    engines: {node: '>=14.0.0'}
-    hasBin: true
 
   qs@6.14.1:
     resolution: {integrity: sha512-4EK3+xJl8Ts67nLYNwqw/dsFVnCf+qR7RgXSK9jEEm9unao3njwMDdmsdvoKBKHzxd7tCYz5e5M+SnMjdtXGQQ==}
@@ -8058,8 +7954,6 @@ snapshots:
     dependencies:
       '@types/node': 22.19.15
 
-  '@types/dagre@0.7.54': {}
-
   '@types/debug@4.1.12':
     dependencies:
       '@types/ms': 2.1.0
@@ -8633,11 +8527,6 @@ snapshots:
       rrweb-cssom: 0.8.0
 
   csstype@3.2.3: {}
-
-  dagre@0.8.5:
-    dependencies:
-      graphlib: 2.1.8
-      lodash: 4.17.23
 
   data-uri-to-buffer@4.0.1: {}
 
@@ -9288,10 +9177,6 @@ snapshots:
       - pg-native
       - supports-color
       - typescript
-
-  graphlib@2.1.8:
-    dependencies:
-      lodash: 4.17.23
 
   graphql@16.13.1: {}
 
@@ -10249,8 +10134,6 @@ snapshots:
 
   object-treeify@1.1.33: {}
 
-  ohm-js@17.5.0: {}
-
   on-finished@2.4.1:
     dependencies:
       ee-first: 1.1.1
@@ -10509,10 +10392,6 @@ snapshots:
       tslib: 2.8.1
 
   pvutils@1.1.5: {}
-
-  pyright@1.1.408:
-    optionalDependencies:
-      fsevents: 2.3.3
 
   qs@6.14.1:
     dependencies:

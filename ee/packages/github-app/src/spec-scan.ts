@@ -19,7 +19,7 @@ import { saveSpec } from '@truecourse/core/lib/spec-store';
 import { writeDecisions, resolveRepoIdentity } from '@truecourse/spec-consolidator';
 import { isLlmConfigured, NO_LLM_PROVIDER_MESSAGE } from '@truecourse/shared/llm';
 import type { StepTracker } from '@truecourse/core/progress';
-import type { RepoRef } from '@truecourse/core/lib/contract-store';
+import type { RepoRef } from '@truecourse/core/lib/repo-ref';
 import {
   getInstallationToken,
   cloneUrl,

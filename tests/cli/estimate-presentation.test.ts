@@ -38,13 +38,12 @@ import { runSpecScan } from '../../tools/cli/src/commands/spec.js';
 import { runGuardGenerate } from '../../tools/cli/src/commands/guard.js';
 import { curateInProcess, EstimateDeclined } from '@truecourse/core/commands/spec-in-process';
 import { guardGenerateInProcess } from '@truecourse/core/commands/guard-in-process';
-import type { LlmEstimate } from '@truecourse/core/commands/analyze-in-process';
+import type { LlmEstimate } from '@truecourse/core/services/llm/token-estimator';
 
 /** A staged estimate shaped like the real scan/guard ones (subject + one stage). */
 function estimate(subject: string): LlmEstimate {
   return {
     totalEstimatedTokens: 1_200_000,
-    tiers: [],
     subjectLabel: subject,
     estimatedCostUsd: 3.1,
     costSource: 'bundled',

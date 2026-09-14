@@ -49,7 +49,6 @@ import {
   guardRunInProcess,
 } from '@truecourse/core/commands/guard-in-process';
 import { setGuardStore, resetGuardStore, writeGuardResult } from '@truecourse/core/lib/guard-store';
-import { writeLatest } from '@truecourse/core/lib/analysis-store';
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { setGuardPrRegenEnqueue } from '@truecourse/core/lib/guard-pr-regen-enqueue';
 import { setGuardGateHeadsLookup } from '@truecourse/core/lib/guard-gate-pending';
@@ -441,32 +440,6 @@ describe('Guard dismiss → hosted auto-regenerate (repo scope)', () => {
       const db = drizzle(client, { schema }) as unknown as Db;
       await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
       setGuardStore(new PgGuardStore(db));
-      // Anchor the repo baseline (the analyze LATEST commit) at `basesha1111`.
-      await writeLatest(root, {
-        head: 'run.json',
-        analysis: {
-          id: 'r1',
-          createdAt: '2026-07-01T00:00:00.000Z',
-          branch: 'main',
-          commitHash: 'basesha1111',
-          architecture: 'monolith',
-          metadata: { isDiffAnalysis: false },
-          status: 'completed',
-        },
-        graph: {
-          services: [],
-          serviceDependencies: [],
-          layers: [],
-          modules: [],
-          methods: [],
-          moduleDeps: [],
-          methodDeps: [],
-          databases: [],
-          databaseConnections: [],
-          flows: [],
-        },
-        violations: [],
-      });
     });
     afterEach(async () => {
       resetGuardStore();
@@ -474,7 +447,10 @@ describe('Guard dismiss → hosted auto-regenerate (repo scope)', () => {
     });
 
     it("a newer PR-head report never masks the repo's findings — the last dismissal still regenerates", async () => {
-      await writeGuardResult({ repoKey: root, commitSha: 'basesha1111' }, report([findingA]));
+      // The baseline-flagged generate is the repo's anchor.
+      await writeGuardResult({ repoKey: root, commitSha: 'basesha1111' }, report([findingA]), {
+        baseline: true,
+      });
       // A PR regen persisted a findings-free report at its head — strictly newer
       // createdAt, so a commit-less "newest" read would see zero findings and skip.
       await new Promise((r) => setTimeout(r, 5));

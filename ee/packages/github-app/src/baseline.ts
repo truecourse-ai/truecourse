@@ -1,12 +1,11 @@
 /**
- * Baseline capture: clone a repo's default branch, curate its spec (conflict
- * detection), and run the Code Quality analyze pass — establishing the per-repo
- * baseline the PR gate compares against. Refreshed whenever the default branch
- * advances (merge).
+ * Baseline capture: clone a repo's default branch and curate its spec (conflict
+ * detection), establishing the per-repo baseline commit the PR gate reads
+ * against. Refreshed whenever the default branch advances (merge).
  *
- * A repo with no spec docs simply produces no corpus. A scan/analyze FAILURE
- * propagates (the caller logs it) so the prior baseline is left intact and the
- * gate self-heals.
+ * A repo with no spec docs simply produces no corpus. A scan FAILURE propagates
+ * (the caller logs it) so the prior baseline is left intact and the gate
+ * self-heals.
  */
 
 import fs from 'node:fs';
@@ -14,10 +13,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { simpleGit } from 'simple-git';
 import { promoteDecisionsOverlay } from '@truecourse/core/commands/spec-in-process';
-import { analyzeInProcess } from '@truecourse/core/commands/analyze-in-process';
-import { readLatest } from '@truecourse/core/lib/analysis-store';
 import type { StepTracker } from '@truecourse/core/progress';
-import type { RepoRef } from '@truecourse/core/lib/contract-store';
+import type { RepoRef } from '@truecourse/core/lib/repo-ref';
 import { log } from '@truecourse/core/lib/logger';
 import {
   type GateStore,
@@ -44,7 +41,7 @@ export interface BaselineDeps {
   /** Spec-scan pipeline for the cold path (injected in tests). */
   scanPipeline?: SpecScanPipeline;
   /** Phase callback for the stepped progress popup (EE jobs). */
-  onPhase?: (phase: 'clone' | 'spec' | 'analyze') => void | Promise<void>;
+  onPhase?: (phase: 'clone' | 'spec') => void | Promise<void>;
   /** Spec-scan tracker — driven through CURATE_STEPS for the popup's "Extracting spec" detail. */
   specTracker?: StepTracker;
 }
@@ -155,43 +152,8 @@ export async function runBaseline(
     // the scan folds them. Degrades to a no-op on any failure.
     await promoteMergedPrDecisions(deps, req);
 
-    // Note: the old spec→contract→infer baseline flow was retired here in favor of
-    // spec→guard (scenario generate + run). The contract subsystem is dormant, kept
-    // for a future spec→code linking layer; nothing runs it at baseline time.
     await deps.onPhase?.('spec');
     const { openConflicts } = await scanPipeline.scan(tmp, ref, deps.specTracker);
-
-    // Code Quality: run the OSS analyze pass on the same clone, persisted under the
-    // repo identity by the EE PgAnalysisStore (codeDir = clone; project.path = the
-    // repoKey storage key). Independent of the spec — a spec-less repo still has an
-    // architecture + violations. Best-effort: an analyze failure (e.g. no LLM
-    // provider configured yet) must not block the baseline.
-    try {
-      // Code analyze depends on the CODE, not the spec — so skip it when this commit
-      // already has a persisted analysis. A re-baseline (post-conflict-resolve) fires
-      // at the SAME commit purely to refresh the spec corpus; re-analyzing unchanged
-      // code would reproduce the same result and waste an LLM pass. A real code change
-      // is a different commit (so it still analyzes), and a never-analyzed commit reads
-      // null (also analyzes).
-      const analyzedCommit = (await readLatest(req.repoFullName))?.analysis.commitHash;
-      if (analyzedCommit === req.commitSha) {
-        log.info(
-          `[github-app] Code Quality analyze skipped for ${req.repoFullName}@${req.commitSha.slice(0, 7)} — code already analyzed`,
-        );
-      } else {
-        await deps.onPhase?.('analyze');
-        // LLM (semantic) rules run only when the workspace opted in; deterministic
-        // rules always run. They use the AI SDK transport's structured-output path.
-        await analyzeInProcess(
-          { slug: req.repoFullName, name: req.repoFullName, path: req.repoFullName },
-          { codeDir: tmp, skipStash: true, enableLlmRulesOverride: req.enableLlmAnalysis ?? false },
-        );
-      }
-    } catch (err) {
-      log.warn(
-        `[github-app] baseline analyze failed for ${req.repoFullName}@${req.commitSha.slice(0, 7)}: ${(err as Error).message}`,
-      );
-    }
 
     await deps.store.saveBaseline({
       repoFullName: req.repoFullName,

@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { adfToMarkdown } from '../../ee/packages/server/src/knowledge/connectors/adf-to-markdown';
-import { jiraConnector, type JiraConfig } from '../../ee/packages/server/src/knowledge/connectors/jira';
-import { UpstreamHttpError } from '../../ee/packages/server/src/knowledge/connectors/types';
+import { adfToMarkdown } from '../../ee/packages/server/src/integrations/connectors/adf-to-markdown';
+import { jiraConnector, type JiraConfig } from '../../ee/packages/server/src/integrations/connectors/jira';
+import { UpstreamHttpError } from '../../ee/packages/server/src/integrations/connectors/types';
 
 /** Wrap block nodes in a realistic ADF `doc` envelope (version/type as Jira emits). */
 function doc(...content: unknown[]) {

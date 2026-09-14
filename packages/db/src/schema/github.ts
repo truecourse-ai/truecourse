@@ -58,22 +58,6 @@ export const ghBaselines = pgTable('gh_baselines', {
   capturedAt: ts('captured_at').notNull(),
 });
 
-// Persistent per-repo overlay of user actions on inferred decisions. Applied by
-// the baseline AFTER inference, so a dismiss/promote survives a re-baseline (which
-// re-infers from scratch). One row per decision, keyed by (repo, kind, identity).
-export const ghInferredActions = pgTable(
-  'gh_inferred_actions',
-  {
-    repoFullName: text('repo_full_name').notNull(),
-    kind: text('kind').notNull(),
-    identity: text('identity').notNull(),
-    // 'dismissed' | 'promoted' — loosely typed (@truecourse/db is a leaf).
-    status: text('status').notNull(),
-    createdAt: ts('created_at').notNull(),
-  },
-  (t) => [primaryKey({ columns: [t.repoFullName, t.kind, t.identity] })],
-);
-
 export const ghRuns = pgTable(
   'gh_runs',
   {

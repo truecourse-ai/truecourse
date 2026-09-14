@@ -141,6 +141,13 @@
       "when": 1789174251555,
       "tag": "0019_drop_spec_sources",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1789338943549,
+      "tag": "0020_drop_analyze_era",
+      "breakpoints": true
     }
   ]
 }

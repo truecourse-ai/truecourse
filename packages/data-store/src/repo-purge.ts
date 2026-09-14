@@ -7,8 +7,8 @@
  * a deleted link.
  *
  * Deliberately NOT purged: `extraction_cache` (content-keyed, repo-agnostic by
- * design) and the workspace-/org-scoped stores (knowledge, traces, settings) —
- * those belong to the workspace, not the repo.
+ * design) and the workspace-/org-scoped stores — those belong to the workspace,
+ * not the repo.
  *
  * CONTEXT is workspace state too, so this purge only drops the repository's own
  * LINKS (`context_bindings`), never a source another repository still reads. The
@@ -23,11 +23,6 @@
 import { eq, inArray, or, sql } from 'drizzle-orm';
 import {
   activityRuns,
-  analyses,
-  analysisCurrent,
-  analysisHistory,
-  repoConfig,
-  repoUiState,
   specSets,
   contextBindings,
   guardRuns,
@@ -37,7 +32,6 @@ import {
   guardDependencyOverlays,
   decisions,
   content,
-  ghInferredActions,
   ghBaselines,
   ghRuns,
   ghPrs,
@@ -56,11 +50,6 @@ export async function purgeRepoData(db: Db, repoKey: string): Promise<void> {
   let touched: string[] = [];
   await db.transaction(async (tx) => {
     await tx.delete(activityRuns).where(eq(activityRuns.repoKey, repoKey));
-    await tx.delete(analyses).where(eq(analyses.repoKey, repoKey));
-    await tx.delete(analysisCurrent).where(eq(analysisCurrent.repoKey, repoKey));
-    await tx.delete(analysisHistory).where(eq(analysisHistory.repoKey, repoKey));
-    await tx.delete(repoConfig).where(eq(repoConfig.repoKey, repoKey));
-    await tx.delete(repoUiState).where(eq(repoUiState.repoKey, repoKey));
     await tx.delete(specSets).where(eq(specSets.repoKey, repoKey));
     // Only the LINKS: the sources themselves belong to the workspace, and one
     // another repository still reads must survive this disconnect.
@@ -92,7 +81,6 @@ export async function purgeRepoData(db: Db, repoKey: string): Promise<void> {
       ]),
     );
     // Gate-side per-repo state (unlinkRepo itself only drops the gh_repos row).
-    await tx.delete(ghInferredActions).where(eq(ghInferredActions.repoFullName, repoKey));
     await tx.delete(ghBaselines).where(eq(ghBaselines.repoFullName, repoKey));
     await tx.delete(ghRuns).where(eq(ghRuns.repoFullName, repoKey));
     await tx.delete(ghPrs).where(eq(ghPrs.repoFullName, repoKey));

@@ -8,7 +8,7 @@ import {
   isSentryEnabled,
   upstreamStatusOf,
 } from '../../ee/packages/server/src/observability/sentry';
-import { UpstreamHttpError } from '../../ee/packages/server/src/knowledge/connectors/types';
+import { UpstreamHttpError } from '../../ee/packages/server/src/integrations/connectors/types';
 
 // A worst-case event: request body with a raw token, breadcrumbs, PII user,
 // stack-frame locals holding a decrypted secret + source context lines, and a

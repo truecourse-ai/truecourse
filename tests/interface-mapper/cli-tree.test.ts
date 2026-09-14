@@ -4,7 +4,7 @@
  * → mapper seam rather than hand-written artifact literals.
  */
 import { describe, it, expect } from 'vitest'
-import { analyzeFileContent } from '../../packages/analyzer/src/file-analyzer'
+import { analyzeFileContent } from '../../packages/source-facts/src/file-analyzer'
 import { deriveCliInterfacesFromTree } from '../../packages/interface-mapper/src/cli-tree'
 import type { FileAnalysis } from '../../packages/shared/src/index'
 

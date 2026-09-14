@@ -1,5 +1,5 @@
 import * as p from "@clack/prompts";
-import type { LlmEstimate } from "@truecourse/core/commands/analyze-in-process";
+import type { LlmEstimate } from "@truecourse/core/services/llm/token-estimator";
 import type { EstimatePhase } from "@truecourse/core/progress";
 import { isInteractive } from "./helpers.js";
 
@@ -68,9 +68,8 @@ export async function promptLlmEstimate(
       ? `~${(tokens / 1_000_000).toFixed(1)}M tokens`
       : `~${Math.round(tokens / 1000)}k tokens`;
 
-  const staged = estimate.stages && estimate.stages.length > 0;
-  if (staged) {
-    const stages = estimate.stages!;
+  const stages = estimate.stages ?? [];
+  if (stages.length > 0) {
     const totalCalls = stages.reduce((s, st) => s + st.calls, 0);
     const subject = estimate.subjectLabel ?? `${stages.length} stages`;
     const verb = nouns?.verb ?? "This";
@@ -119,12 +118,6 @@ export async function promptLlmEstimate(
           : `Ranges = fewest–most calls; cost is a ceiling — prompt caching may lower it.${approx}`;
       p.log.message(`  ${ceilingCopy}`);
     }
-  } else {
-    const totalRules =
-      estimate.uniqueRuleCount ?? estimate.tiers.reduce((s, t) => s + t.ruleCount, 0);
-    const totalFiles =
-      estimate.uniqueFileCount ?? estimate.tiers.reduce((s, t) => s + t.fileCount, 0);
-    p.log.step(`LLM will analyze ${totalFiles} files with ${totalRules} rules (${tokenStr})`);
   }
 
   if (autoApprove) return true;

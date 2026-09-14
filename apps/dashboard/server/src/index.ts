@@ -48,7 +48,7 @@ async function main() {
 
   // 1. One-time cleanup of the pre-0.4 embedded-postgres data dir
   if (wipeLegacyPostgresData()) {
-    log.info('[Storage] Legacy Postgres data wiped. Re-analyze to repopulate.');
+    log.info('[Storage] Legacy Postgres data wiped.');
   }
 
   // 2. Postgres. All server state lives there — there is no file fallback, so

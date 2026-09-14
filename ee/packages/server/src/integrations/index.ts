@@ -13,13 +13,13 @@ import type { Db } from '@truecourse/db';
 import { log } from '@truecourse/core/lib/logger';
 import { captureEeException, upstreamStatusOf } from '../observability/sentry.js';
 import { IntegrationStore } from './store.js';
-import { CONNECTORS } from '../knowledge/connectors/registry.js';
+import { CONNECTORS } from './connectors/registry.js';
 import {
   connectorConfig,
   secretFieldKey,
   type ConnectorKind,
   type KnowledgeConnector,
-} from '../knowledge/connectors/types.js';
+} from './connectors/types.js';
 
 function orgIdOf(req: Request): string | null {
   return (req as Request & { user?: AuthUser }).user?.organizationId ?? null;

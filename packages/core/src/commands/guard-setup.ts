@@ -84,7 +84,7 @@ import {
 } from '../services/guard-setup/index.js';
 import { INTERFACE_AUTHOR_SESSION_KIND } from '../services/interface-author/index.js';
 import { runGuardInterfaceAuthoring } from './guard-interfaces.js';
-import type { LlmEstimate } from './analyze-core.js';
+import type { LlmEstimate } from '../services/llm/token-estimator.js';
 import { EstimateDeclined } from './spec-in-process.js';
 import type { StepTracker } from '../progress.js';
 

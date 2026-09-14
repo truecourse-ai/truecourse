@@ -5,9 +5,6 @@ import { migrate } from 'drizzle-orm/pglite/migrator';
 import {
   schema,
   MIGRATIONS_DIR,
-  analyses,
-  analysisCurrent,
-  repoConfig,
   specSets,
   guardRuns,
   guardSetupSets,
@@ -38,15 +35,6 @@ const NOW = '2026-01-01T00:00:00.000Z';
 
 /** Seed one row per representative table for `repoKey`. */
 async function seed(repoKey: string): Promise<void> {
-  await db.insert(analyses).values({
-    repoKey,
-    filename: 'a.json',
-    analysisId: 'a1',
-    snapshot: {},
-    createdAt: NOW,
-  });
-  await db.insert(analysisCurrent).values({ repoKey, kind: 'latest', body: {}, updatedAt: NOW });
-  await db.insert(repoConfig).values({ repoKey, config: {} });
   await db.insert(specSets).values({
     repoKey,
     commitSha: 'c1',
@@ -93,9 +81,6 @@ describe('purgeRepoData', () => {
     await purgeRepoData(db, 'acme/api');
 
     // Target: gone everywhere.
-    expect(await db.select().from(analyses)).toHaveLength(1);
-    expect(await db.select().from(analysisCurrent)).toHaveLength(1);
-    expect(await db.select().from(repoConfig)).toHaveLength(1);
     expect(await db.select().from(specSets)).toHaveLength(1);
     expect(await db.select().from(guardRuns)).toHaveLength(1);
     expect(await db.select().from(guardSetupSets)).toHaveLength(1);
@@ -104,7 +89,7 @@ describe('purgeRepoData', () => {
     const contentRows = await db.select({ scope: content.scope }).from(content);
     expect(contentRows).toEqual([{ scope: 'spec:acme/web' }]);
     // The survivors all belong to the other repo.
-    expect((await db.select().from(repoConfig))[0]?.repoKey).toBe('acme/web');
+    expect((await db.select().from(specSets))[0]?.repoKey).toBe('acme/web');
   });
 
   it('takes the repository’s context LINKS and leaves the workspace’s sources', async () => {

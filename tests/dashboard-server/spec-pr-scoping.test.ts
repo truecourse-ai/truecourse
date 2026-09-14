@@ -6,7 +6,6 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import { PgSpecStore } from '../../ee/packages/data-store/src/index';
-import type { LatestSnapshot } from '@truecourse/core/types/snapshot';
 
 vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../apps/dashboard/server/src/socket/handlers')>();
@@ -36,7 +35,6 @@ import {
 } from '@truecourse/core/lib/context-store';
 import { recuratePrCorpus, getDecisions } from '@truecourse/core/commands/spec-in-process';
 import { setSpecStore, resetSpecStore } from '@truecourse/core/lib/spec-store';
-import { resetAnalysisStore, writeLatest } from '@truecourse/core/lib/analysis-store';
 import { setRepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
 import { setBackgroundTaskRunner, type BackgroundTask } from '@truecourse/core/lib/background-tasks';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
@@ -49,22 +47,6 @@ async function makeDb(client: PGlite): Promise<Db> {
 
 // A minimal LATEST analysis stamped at `commit` — the baseline the corpus reader
 // anchors on. `baselineCommit` reads `analysis.commitHash` from the analyze store.
-const baselineLatest = (commit: string): LatestSnapshot =>
-  ({
-    head: `${commit}.json`,
-    analysis: {
-      id: `an-${commit}`,
-      createdAt: '2026-01-01T00:00:00.000Z',
-      branch: 'main',
-      commitHash: commit,
-      architecture: 'monolith',
-      metadata: null,
-      status: 'completed',
-    },
-    graph: { nodes: [], edges: [] },
-    violations: [],
-  }) as unknown as LatestSnapshot;
-
 const corpusWithArea = (areaId: string) => ({
   version: 3,
   generatedAt: '2026-01-01T00:00:00Z',
@@ -109,7 +91,6 @@ describe('GET /spec/corpus (hosted, the repository’s slice)', () => {
     spec = new PgSpecStore(db);
     setSpecStore(spec);
     setContextStore(memoryContextStore());
-    await writeLatest(fixture.repoPath, baselineLatest('base1'));
     // A corpus stored against the repository itself is not what it runs
     // against, so not what it shows: the slice of the workspace corpus is.
     await spec.saveSpec({ repoKey: fixture.repoPath, commitSha: 'base1' }, 'corpus', corpusWithArea('base/area'));
@@ -119,7 +100,6 @@ describe('GET /spec/corpus (hosted, the repository’s slice)', () => {
   afterEach(async () => {
     resetSpecStore();
     resetContextStore();
-    resetAnalysisStore();
     await client.close();
     await teardownTestFixture(fixture.project.slug);
   });
@@ -169,7 +149,6 @@ describe('GET /spec/corpus — 404 when the workspace has never scanned', () => 
   afterEach(async () => {
     resetSpecStore();
     resetContextStore();
-    resetAnalysisStore();
     await client.close();
     await teardownTestFixture(fixture.project.slug);
   });

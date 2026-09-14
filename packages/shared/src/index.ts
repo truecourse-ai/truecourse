@@ -1,5 +1,4 @@
 export * from './types/index.js'
-export * from './schemas/index.js'
 export * from './guard/index.js'
 export * from './interfaces.js'
 export * from './external-services.js'

@@ -6,13 +6,11 @@ import {
   unregisterProject,
   type RegistryEntry,
 } from '../../packages/core/src/config/registry';
-import { clearLatestCache } from '../../packages/core/src/lib/analysis-store';
 
 /**
  * File-store test harness. Each call creates a throwaway repo dir and
- * registers it in the per-run registry. Tests seed the store by writing
- * `LATEST.json` (via `writeLatest` from `analysis-store`) or by running
- * the analyze pipeline end-to-end.
+ * registers it in the per-run registry. Tests seed the store by writing the
+ * `.truecourse/` files the feature under test reads.
  *
  * No database — file-store only. Legacy name (`test-db.ts`) retained so
  * existing `import { setupTestDb } from '../helpers/test-db'` sites keep
@@ -39,9 +37,8 @@ export interface TestFixture {
 
 /**
  * Create (or adopt) a repo dir, register it, and return the project entry.
- * When `fixturePath` is omitted a throwaway temp dir is used. Tests call
- * `writeLatest(project.path, ...)` or run the analyze pipeline to seed
- * violations / graph data.
+ * When `fixturePath` is omitted a throwaway temp dir is used. Tests seed the
+ * repo's `.truecourse/` tree themselves.
  */
 export async function setupTestFixture(fixturePath?: string): Promise<TestFixture> {
   let repoPath = fixturePath;
@@ -60,12 +57,10 @@ export async function setupTestFixture(fixturePath?: string): Promise<TestFixtur
     truecourseDir: preexisting ? null : truecourseDir,
   });
 
-  clearLatestCache();
   return { project, repoPath };
 }
 
 export async function teardownTestFixture(slug?: string): Promise<void> {
-  clearLatestCache();
   if (slug) await unregisterProject(slug);
   while (cleanupPaths.length > 0) {
     const { tmpDir, truecourseDir } = cleanupPaths.pop()!;

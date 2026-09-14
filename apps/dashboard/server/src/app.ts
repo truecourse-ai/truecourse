@@ -6,14 +6,6 @@ import path from 'node:path';
 import { errorHandler } from './middleware/error.js';
 import { createProjectResolver } from './middleware/project.js';
 import { createReposRouter } from './routes/repos.js';
-import analysesRouter from './routes/analyses.js';
-import graphRouter from './routes/graph.js';
-import filesRouter from './routes/files.js';
-import violationsRouter from './routes/violations.js';
-import databasesRouter from './routes/databases.js';
-import rulesRouter from './routes/rules.js';
-import flowsRouter from './routes/flows.js';
-import analyticsRouter from './routes/analytics.js';
 import specRouter from './routes/spec.js';
 import { createContextRouter, createContextBindingsRouter } from './routes/context.js';
 import { createHomeRouter } from './routes/home.js';
@@ -192,23 +184,15 @@ export function createApp(opts: CreateAppOptions): express.Express {
   // the same link store, so it needs no project resolver.
   app.use('/api/sessions', createWorkspaceSessionsRouter({ githubLinks }));
   // Project-scoped routes. Each router's patterns declare their own `:id`
-  // (e.g. `/:id/violations`), so we mount at `/api/repos` — the router
+  // (e.g. `/:id/guard`), so we mount at `/api/repos` — the router
   // matches the `:id` segment itself. The resolver validates the slug, scopes
   // it to the caller's workspace, and touches `lastAccessed`.
   const projectResolver = createProjectResolver(githubLinks);
-  app.use('/api/repos', projectResolver, analysesRouter);
-  app.use('/api/repos', projectResolver, graphRouter);
-  app.use('/api/repos', projectResolver, filesRouter);
-  app.use('/api/repos', projectResolver, violationsRouter);
-  app.use('/api/repos', projectResolver, databasesRouter);
-  app.use('/api/repos', projectResolver, flowsRouter);
-  app.use('/api/repos', projectResolver, analyticsRouter);
   app.use('/api/repos', projectResolver, specRouter);
   app.use('/api/repos', projectResolver, createContextBindingsRouter());
   app.use('/api/repos', projectResolver, guardRouter);
   app.use('/api/repos', projectResolver, guardActionsRouter);
   app.use('/api/repos', projectResolver, sessionsRouter);
-  app.use('/api/rules', rulesRouter);
 
   app.use(errorHandler);
 

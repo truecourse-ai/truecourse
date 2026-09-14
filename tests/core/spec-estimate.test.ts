@@ -67,7 +67,6 @@ describe('estimateStageTokens', () => {
     );
     // per-call adds PROMPT_OVERHEAD_TOKENS (500): relevance 620×10, extract 2000×5
     expect(est.totalEstimatedTokens).toBe(620 * 10 + 2000 * 5);
-    expect(est.tiers).toEqual([]); // token-only: no rule tiers
     expect(est.subjectLabel).toBe('10 docs');
     const extract = est.stages!.find((s) => s.stage === 'extract')!;
     expect(extract.estimatedTokens).toBe(2000 * 5);

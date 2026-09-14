@@ -12,21 +12,16 @@
 import { WorkOS } from '@workos-inc/node';
 import type { EePlugin } from '@truecourse/shared';
 import { createDb, type Db } from '@truecourse/db';
-import { WorkspaceSettingsStore, PgKnowledgeStore } from '@truecourse/ee-data-store';
 import { log } from '@truecourse/core/lib/logger';
 import { registerGithubApp, selectGateStore, loadGithubAppConfig, readRepoDocFromGithub, createGuardGateHeadsLookup, installationOctokit } from '@truecourse/ee-github-app';
 import { setRepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
 import { setGuardGatePendingLookup, setGuardGateHeadsLookup } from '@truecourse/core/lib/guard-gate-pending';
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { setGuardPrRegenEnqueue } from '@truecourse/core/lib/guard-pr-regen-enqueue';
-import { setSpecInheritanceHook } from '@truecourse/core/lib/spec-inheritance-hook';
-import { setKnowledgeLedgerReader, setKnowledgeDocBodyReader } from '@truecourse/core/lib/knowledge-ledger-reader';
-import { createSpecInheritanceHook, createKnowledgeLedgerReader, createKnowledgeDocBodyReader } from './knowledge/inheritance.js';
 import { guardGateJobKey } from './jobs/constants.js';
 import { createWorkspaceRouter } from './workspace.js';
 import { registerLlmProviders } from './llm/index.js';
 import { registerIntegrations } from './integrations/index.js';
-import { registerKnowledge } from './knowledge/index.js';
 import { registerJobs } from './jobs/index.js';
 import {
   createGuardRouter,
@@ -88,21 +83,13 @@ const plugin: EePlugin = {
     const handle = await createDb(databaseUrl);
     const eeDb: Db = handle.db;
     log.info('[ee-server] db ready (Postgres, migrations applied)');
-    const { traceStore } = installEeStores(handle);
+    installEeStores(handle);
     sweepStaleTempDirs();
 
-    // Workspace data (SSO status + members + overview) — protected, behind the
-    // gate. The overview is scoped to the org's connected repos (gh_repos), so it
-    // never counts another workspace's repos. Registered after the db is ready.
+    // Workspace data (SSO status + members) — protected, behind the gate.
+    // Registered after the db is ready.
     const gateStore = selectGateStore(eeDb);
-    registry.registerRouter(
-      '/api/ee/workspace',
-      createWorkspaceRouter(
-        workos,
-        async (org) => (await gateStore.listReposForWorkspace(org)).map((r) => r.repoFullName),
-        new WorkspaceSettingsStore(eeDb),
-      ),
-    );
+    registry.registerRouter('/api/ee/workspace', createWorkspaceRouter(workos));
 
     // TRUECOURSE_SECRET_KEY derives the AES key for every encrypted-at-rest
     // secret (LLM provider keys + integration tokens), so — like DATABASE_URL —
@@ -125,10 +112,6 @@ const plugin: EePlugin = {
     // Settings → Integrations (encrypted connector tokens). Needs the Postgres
     // stores installed above + the master secret.
     registerIntegrations(registry, { db: eeDb, masterSecret });
-    // Workspace Knowledge (connector sweep/process + corpus reads) — rides the
-    // job queue for the sweep and processing stages.
-    registerKnowledge(registry, { db: eeDb, masterSecret, jobs });
-    plugin.capabilities.push('knowledge');
 
     // GitHub App PR gate — required (env validated at boot above, so this always
     // lights up `github-gate`). The repo scan (connect + push) runs on the
@@ -139,7 +122,6 @@ const plugin: EePlugin = {
       enqueueBaseline: jobs.enqueueBaseline,
       enqueueGuardGate: jobs.enqueueGuardGate,
       enqueueGuardSpecRegen: jobs.enqueueGuardSpecRegen,
-      codeAnalysisLlm: (org) => new WorkspaceSettingsStore(eeDb).codeAnalysisLlm(org),
     });
     plugin.capabilities.push('github-gate');
 
@@ -174,19 +156,6 @@ const plugin: EePlugin = {
         enqueueGuardSpecRegen: jobs.enqueueGuardSpecRegen,
       }),
     );
-
-    // Repo Knowledge inheritance: a connected repo folds its workspace's Knowledge
-    // corpus into its own spec. The spec pipeline materializes the workspace doc
-    // bodies + merges the workspace decisions (repo wins) into the checkout before
-    // curate/generate through this seam; the repo corpus GET enriches the inherited
-    // docs' title/url through the ledger reader seam, and the repo Spec-tab doc route
-    // serves an inherited (`knowledge/`) doc's body through the body reader seam
-    // (those bodies live in the workspace store, not the repo tree). All resolve the
-    // repo's workspace org from the gate store; a repo with no workspace inherits nothing.
-    const knowledgeStore = new PgKnowledgeStore(eeDb);
-    setSpecInheritanceHook(createSpecInheritanceHook({ store: gateStore, knowledge: knowledgeStore }));
-    setKnowledgeLedgerReader(createKnowledgeLedgerReader({ store: gateStore, knowledge: knowledgeStore }));
-    setKnowledgeDocBodyReader(createKnowledgeDocBodyReader({ store: gateStore, knowledge: knowledgeStore }));
 
     // The Spec tab reads source docs (README, ADRs) by repo path. OSS reads the
     // working tree; EE has no checkout, so fetch them from GitHub via the App
@@ -224,16 +193,14 @@ const plugin: EePlugin = {
 
     // LLM providers — the AI-SDK transport (so hosted LLM work doesn't depend on
     // a CLI binary) + the Models settings API. Reuses the validated masterSecret.
-    // The trace store is passed as the transport's recorder, so every LLM call
-    // the pipeline makes is captured for observability.
-    await registerLlmProviders(registry, { db: eeDb, masterSecret, recorder: traceStore });
+    await registerLlmProviders(registry, { db: eeDb, masterSecret });
     plugin.capabilities.push('llm-config');
 
-    // Cross-org Admin console (operator-only): LLM traces + jobs across every
+    // Cross-org Admin console (operator-only): background jobs across every
     // workspace. Gated PER-USER on `user.isOperator` (the nav/page hide for
     // members; the routes 403) — NOT a deployment capability, so the feature
     // isn't advertised in the public capabilities list.
-    registerAdmin(registry, { db: eeDb, traceStore });
+    registerAdmin(registry, { db: eeDb });
   },
 };
 

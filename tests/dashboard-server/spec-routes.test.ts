@@ -17,18 +17,10 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
   const actual = await importOriginal<typeof import('../../apps/dashboard/server/src/socket/handlers')>();
   return {
     ...actual,
-    emitAnalysisProgress: vi.fn(),
-    emitAnalysisComplete: vi.fn(),
-    emitViolationsReady: vi.fn(),
-    emitFilesChanged: vi.fn(),
-    emitAnalysisCanceled: vi.fn(),
     emitSpecProgress: vi.fn(),
     emitSpecComplete: vi.fn(),
-    createSocketTracker: () => ({ start() {}, done() {}, error() {}, detail() {} }),
     createSocketSpecTracker: () => ({ start() {}, done() {}, error() {}, detail() {} }),
-    createSocketLlmEstimateHandler: () => () => Promise.resolve(true),
     createSocketSpecEstimateHandler: () => () => Promise.resolve(true),
-    createSocketStashConfirmHandler: () => () => Promise.resolve('stash'),
   };
 });
 
@@ -65,7 +57,6 @@ import {
   type WorkspaceRef,
 } from '@truecourse/core/lib/spec-store';
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
-import { writeLatest } from '@truecourse/core/lib/analysis-store';
 import {
   sourceDirPath,
   sourcesDirPath,
@@ -436,45 +427,21 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
     verdict: 'b',
   };
 
+  // The repo's baseline commit — the anchor the repo-level guard-report read
+  // resolves through the guard store, never "newest".
+  const BASELINE_COMMIT = 'basesha1111';
+
   // A guard store whose generate report is `status`. `open-conflicts` = a generate
   // that stalled BLOCKED before authoring scenarios (the unblock trigger); anything
   // else = a healthy report that must NOT re-trigger. `null` = no report at all.
   const stubGuardReport = (status: GuardGenerateReport['status'] | null): void => {
     setGuardStore({
       materializesInPlace: false,
+      readGuardBaselineCommit: async () => BASELINE_COMMIT,
       readGuardResult: async () =>
         status === null ? null : ({ status } as unknown as GuardGenerateReport),
     } as unknown as GuardStore);
   };
-
-  // Anchor the hosted repo's baseline (the analyze LATEST commit) at `commit` —
-  // the anchor the repo-level guard-report read resolves, never "newest".
-  const seedAnalyzeBaseline = (commit: string): Promise<void> =>
-    writeLatest(fixture.repoPath, {
-      head: 'run.json',
-      analysis: {
-        id: 'r1',
-        createdAt: '2026-07-01T00:00:00.000Z',
-        branch: 'main',
-        commitHash: commit,
-        architecture: 'monolith',
-        metadata: { isDiffAnalysis: false },
-        status: 'completed',
-      },
-      graph: {
-        services: [],
-        serviceDependencies: [],
-        layers: [],
-        modules: [],
-        methods: [],
-        moduleDeps: [],
-        methodDeps: [],
-        databases: [],
-        databaseConnections: [],
-        flows: [],
-      },
-      violations: [],
-    });
 
   beforeEach(async () => {
     fixture = await setupTestFixture(); // deliberately NOT git-initialized
@@ -546,7 +513,6 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
       enqueued.push(repoKey);
     });
     seedCorpus({ conflict: true });
-    await seedAnalyzeBaseline('basesha1111');
     stubGuardReport('open-conflicts');
     await request(app)
       .post(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`)
@@ -561,7 +527,6 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
       enqueued.push(repoKey);
     });
     seedCorpus({ conflict: true });
-    await seedAnalyzeBaseline('basesha1111');
     stubGuardReport('open-conflicts');
     await request(app)
       .post(`/api/repos/${fixture.project.slug}/spec/excludes`)
@@ -576,15 +541,15 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
       enqueued.push(repoKey);
     });
     seedCorpus({ conflict: true });
-    await seedAnalyzeBaseline('basesha1111');
     // Commit-aware guard stub: the BASELINE row is the blocked open-conflicts
     // report; any commit-less ("newest by createdAt") read sees a PR regen's ok
     // report instead — which would wrongly skip the unblock generate forever.
     setGuardStore({
       materializesInPlace: false,
+      readGuardBaselineCommit: async () => BASELINE_COMMIT,
       readGuardResult: async (_repoKey: string, commitSha?: string) =>
         ({
-          status: commitSha === 'basesha1111' ? 'open-conflicts' : 'ok',
+          status: commitSha === BASELINE_COMMIT ? 'open-conflicts' : 'ok',
         }) as unknown as GuardGenerateReport,
     } as unknown as GuardStore);
     await request(app)
@@ -600,7 +565,6 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
       enqueued.push(repoKey);
     });
     seedCorpus({ conflict: true });
-    await seedAnalyzeBaseline('basesha1111');
     stubGuardReport('ok');
     await request(app)
       .post(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`)
@@ -617,6 +581,7 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
     let guardRead = false;
     setGuardStore({
       materializesInPlace: false,
+      readGuardBaselineCommit: async () => BASELINE_COMMIT,
       readGuardResult: async () => {
         guardRead = true;
         return { status: 'open-conflicts' } as unknown as GuardGenerateReport;
@@ -640,7 +605,6 @@ describe('corpus routes — EE (stored corpus, no live tree)', () => {
       tasks.push(t);
     });
     seedCorpus({ conflict: true });
-    await seedAnalyzeBaseline('basesha1111');
     stubGuardReport('open-conflicts');
     await request(app)
       .post(`/api/repos/${fixture.project.slug}/spec/conflict-resolution`)

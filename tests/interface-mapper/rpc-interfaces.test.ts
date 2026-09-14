@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest'
-import { analyzeFileContent } from '../../packages/analyzer/src/file-analyzer'
+import { analyzeFileContent } from '../../packages/source-facts/src/file-analyzer'
 import { deriveRpcOperations } from '../../packages/interface-mapper/src/rpc-interfaces'
 import { deriveApiInterfacesFromTree } from '../../packages/interface-mapper/src/api-tree'
 import type { FileAnalysis } from '../../packages/shared/src/index'

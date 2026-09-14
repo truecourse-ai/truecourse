@@ -18,13 +18,6 @@ runs:
         node-version-file: .node-version
         cache: pnpm
 
-    # The C# semantic rules run in an out-of-process .NET Roslyn host. Without
-    # the SDK + a built host, every C# host test skips and analyze-csharp fails
-    # (the pipeline is host-required for C#). Build it so C# is actually tested.
-    - uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: '8.0.x'
-
     # Turbo's local cache. Without it every run rebuilds all 20 packages from
     # scratch — CI logs showed `Cached: 0 cached, 20 total` on every single run.
     # The per-SHA key always misses; the prefix restore-key supplies the previous
@@ -36,23 +29,12 @@ runs:
         restore-keys: |
           turbo-${{ runner.os }}-node${{ hashFiles('.node-version') }}-
 
-    - uses: actions/cache@v4
-      with:
-        path: ~/.nuget/packages
-        key: nuget-${{ runner.os }}-${{ hashFiles('tools/csharp-roslyn-host/**/*.csproj') }}
-        restore-keys: |
-          nuget-${{ runner.os }}-
-
     - name: Install dependencies
       run: pnpm install --frozen-lockfile
       shell: bash
 
     - name: Build packages
       run: pnpm build
-      shell: bash
-
-    - name: Build C# Roslyn host
-      run: dotnet build -c Release tools/csharp-roslyn-host
       shell: bash
 
     # The guard web driver runs a real Chromium through `playwright-core`, and

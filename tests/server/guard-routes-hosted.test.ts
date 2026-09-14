@@ -25,7 +25,6 @@ import { setRepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
 import { setGuardGatePendingLookup } from '@truecourse/core/lib/guard-gate-pending';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
 import { createTestApp } from '../helpers/test-app';
-import { writeLatest } from '@truecourse/core/lib/analysis-store';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 import type { GuardLatest } from '../../packages/shared/src/index';
 
@@ -155,32 +154,26 @@ describe('Guard routes — hosted, PR-scoped', () => {
   });
 
   it('status without ref reads the baseline set — a newer PR regen never shadows the repo view', async () => {
-    // Anchor the repo baseline (the analyze LATEST commit) at `baselinesha`.
-    await writeLatest(repoKey, {
-      head: 'run.json',
-      analysis: {
-        id: 'r1',
-        createdAt: '2026-07-01T00:00:00.000Z',
-        branch: 'main',
-        commitHash: 'baselinesha',
-        architecture: 'monolith',
-        metadata: { isDiffAnalysis: false },
-        status: 'completed',
+    // Anchor the repo baseline at `baselinesha` — the baseline-flagged generate
+    // the hosted job writes on the default branch.
+    await guardStore.writeGuardResult(
+      { repoKey, commitSha: 'baselinesha' },
+      {
+        generatedAt: '2026-07-01T00:00:00.000Z',
+        status: 'ok',
+        sectionsTotal: 1,
+        sectionsChanged: 1,
+        skippedUnchanged: 0,
+        noChanges: false,
+        written: [],
+        coverageGaps: [],
+        birthFindings: [],
+        errors: [],
+        extractionFailures: [],
+        orphaned: [],
       },
-      graph: {
-        services: [],
-        serviceDependencies: [],
-        layers: [],
-        modules: [],
-        methods: [],
-        moduleDeps: [],
-        methodDeps: [],
-        databases: [],
-        databaseConnections: [],
-        flows: [],
-      },
-      violations: [],
-    });
+      { baseline: true },
+    );
     await saveSet('baselinesha', [['a1', 'alpha']]);
     await new Promise((r) => setTimeout(r, 5)); // strictly newer createdAt for the PR row
     // A PR regen persisted a NEWER, larger set + a report at its head.
@@ -206,8 +199,8 @@ describe('Guard routes — hosted, PR-scoped', () => {
     const res = await request(app).get(url('status')).expect(200);
     // The baseline manifest (1 section), not the PR head's newer 2-section set.
     expect(res.body.coverage).toMatchObject({ totalSections: 1 });
-    // No generate report exists at the baseline — the PR head's must not leak.
-    expect(res.body.lastGenerate).toBeNull();
+    // The baseline's own report, never the PR head's newer one.
+    expect(res.body.lastGenerate).toMatchObject({ generatedAt: '2026-07-01T00:00:00.000Z' });
   });
 
   it('status counts sections of every corpus doc from the stored corpus, not only the docs with scenarios', async () => {

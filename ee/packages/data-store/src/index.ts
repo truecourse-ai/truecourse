@@ -1,26 +1,17 @@
 /**
- * EE-only Postgres stores. The shared store implementations (analyses, specs,
- * guard, config, registry, caches, locks, and the content-addressed pool they
- * build on) live in `@truecourse/data-store` in the base product and are
- * re-exported here so EE consumers keep a single import surface. What remains
- * in this package is hosted-edition machinery: workspace knowledge, LLM traces,
- * and workspace settings.
+ * The Postgres stores, as EE consumes them. Every implementation lives in
+ * `@truecourse/data-store` in the base product; this package re-exports them so
+ * EE keeps a single import surface.
  */
 
 export {
   ContentStore,
   contentScope,
   sha256,
-  PgAnalysisStore,
-  PgRepoConfigStore,
-  PgUiStateStore,
-  PgRegistryStore,
   GhReposRegistryStore,
   PgSpecStore,
   PgGuardStore,
-  PgInferredActionStore,
   PgKvCacheStore,
-  PgAnalyzeLock,
   JobStore,
   NotificationStore,
   ActiveJobExistsError,
@@ -33,6 +24,3 @@ export {
   type PendingGuardBaselineInput,
   type PendingGuardBaselineView,
 } from '@truecourse/data-store';
-export { PgKnowledgeStore, type KnowledgeDocRow } from './knowledge-store.js';
-export { PgTraceStore } from './trace-store.js';
-export { WorkspaceSettingsStore, type WorkspaceSettings } from './workspace-settings-store.js';

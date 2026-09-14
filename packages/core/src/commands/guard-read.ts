@@ -183,7 +183,6 @@ import { readGuardExternalSetupIndex } from './guard-externals.js'
 import { getGuardGateHeadsLookup } from '../lib/guard-gate-pending.js'
 import { readRepoDoc } from '../lib/repo-doc-reader.js'
 import { loadSpec } from '../lib/spec-store.js'
-import { readLatest } from '../lib/analysis-store.js'
 
 // The dashboard reads the whole guard surface through core (never guard-runner /
 // the store directly), mirroring how spec routes read through spec-in-process.
@@ -199,21 +198,15 @@ export {
 } from '../lib/guard-store.js'
 
 // ---------------------------------------------------------------------------
-// Commit resolution (EE) — the guard analogue of the BL-Drift diff base.
+// Commit resolution (hosted)
 // ---------------------------------------------------------------------------
 
 /** The baseline commit — the default-branch anchor guard reads fall back to
- *  when no explicit ref is given (hosted): the analyze LATEST's commit (the same
- *  anchor spec-in-process uses for the baseline corpus), else the commit of the
- *  newest generate the store flagged as a baseline — what the hosted generate
- *  job writes, since it only ever runs on the default branch. `undefined` when
- *  neither exists yet. */
+ *  when no explicit ref is given (hosted): the commit of the newest generate the
+ *  store flagged as a baseline, which the hosted generate job writes since it
+ *  only ever runs on the default branch. `undefined` when there is none yet. */
 async function guardBaselineCommit(repoKey: string): Promise<string | undefined> {
-  return (
-    (await readLatest(repoKey))?.analysis.commitHash ??
-    (await getGuardStore().readGuardBaselineCommit(repoKey)) ??
-    undefined
-  )
+  return (await getGuardStore().readGuardBaselineCommit(repoKey)) ?? undefined
 }
 
 /**
@@ -1231,7 +1224,7 @@ interface GuardCorpusForView {
 
 /**
  * Load the committed scenario set + its manifest for a view. Corpus loads are
- * RepoRef-keyed (the contract-store convention): the file store ignores the commit
+ * RepoRef-keyed (the store convention): the file store ignores the commit
  * and reads the live tree; EE reads the requested ref (a PR head) or the baseline
  * set — never the newest, which a PR regen would pollute. A pinned PR head with NO
  * stored set falls back to the baseline set (the one the gate actually executed

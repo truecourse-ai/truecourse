@@ -1,6 +1,6 @@
 /**
  * Guard store — the pluggable persistence seam for the guard subsystem, the guard
- * analogue of `verify-store.ts` / `contract-store.ts` / `spec-store.ts`. File-backed
+ * analogue of `spec-store.ts`. File-backed
  * by default (OSS — the `<repo>/.truecourse/guard/` run store plus the committable
  * `<repo>/.truecourse/scenarios/` corpus, exactly where the guard-runner writers
  * put them); the enterprise edition injects a Postgres/Blob impl via `setGuardStore`.
@@ -53,12 +53,12 @@ import {
   type GuardLatest,
   type GuardManifest,
 } from '@truecourse/shared';
-import type { RepoRef } from './contract-store.js';
+import type { RepoRef } from './repo-ref.js';
 
-// `RepoRef` is declared in contract-store.ts (the canonical home for store scope
+// `RepoRef` is declared in repo-ref.ts (the canonical home for store scope
 // handles) and re-exported here so guard callers share one definition — the same
 // convention spec-store.ts follows.
-export type { RepoRef } from './contract-store.js';
+export type { RepoRef } from './repo-ref.js';
 
 /** How wide a history read is: the baseline trend (default) or every stored run. */
 export interface GuardHistoryReadOptions {

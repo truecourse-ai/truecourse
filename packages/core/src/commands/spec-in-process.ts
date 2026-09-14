@@ -26,7 +26,6 @@ import {
   type DocCandidate,
   type RepoIdentity,
 } from '@truecourse/spec-consolidator';
-import type { CoverageGap, ValidationIssue } from '@truecourse/contract-extractor';
 import { effectiveLlmMode, type LlmTransportMode } from '../config/global-config.js';
 import { resolveModel, type StageId } from '../config/llm-models.js';
 import { openConflicts } from '@truecourse/shared';
@@ -58,12 +57,12 @@ import {
 import { SETTLE_AREAS_SESSION_KIND } from '../services/spec-scan/settle-areas.js';
 import { OVERLAP_SESSION_KIND } from '../services/spec-scan/overlap.js';
 import { createStoredSessionRun, type SessionRunStartedInfo } from '../lib/sessions-store.js';
-import { resolveCommitSha } from '../lib/repo-ref.js';
+import { resolveCommitSha, type WorkspaceRef } from '../lib/repo-ref.js';
 import {
   createConfiguredSessionDriver,
   type ConfiguredSessionDriver,
 } from '../services/llm/session-driver.js';
-import type { LlmEstimate } from './analyze-core.js';
+import type { LlmEstimate } from '../services/llm/token-estimator.js';
 import { estimateScanTokens } from '../services/llm/spec-estimate.js';
 import { getModelPrices } from '../services/llm/model-prices.js';
 
@@ -100,22 +99,10 @@ async function raceAbort<T>(confirm: Promise<T>, signal?: AbortSignal): Promise<
   }
 }
 
-import {
-  infer,
-  writeInferred,
-  renderDecision,
-  type InferResult,
-} from '@truecourse/contract-verifier';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
-import {
-  saveContracts,
-  loadContracts,
-  type RepoRef,
-  type WorkspaceRef,
-} from '../lib/contract-store.js';
 import {
   saveSpec,
   loadSpec,
@@ -127,15 +114,6 @@ import {
 } from '../lib/spec-store.js';
 import { readRepoDoc } from '../lib/repo-doc-reader.js';
 import { getSpecInheritanceHook } from '../lib/spec-inheritance-hook.js';
-import {
-  reapplyPromoted,
-  applyInferredActions,
-  diffDecisions,
-  type InferredDecisionSummary,
-  type InferDiff,
-} from '../lib/inferred-decisions.js';
-import { listInferredActions } from '../lib/inferred-action-store.js';
-import { readLatest } from '../lib/analysis-store.js';
 import { withEstimatePhase, type EstimatePhase, type StepTracker } from '../progress.js';
 import {
   trackEvent,
@@ -168,12 +146,6 @@ const CURATE_STEP_SESSION_KINDS: Record<string, readonly string[]> = {
   overlap: [OVERLAP_SESSION_KIND],
   verify: [],
 };
-
-export const INFER_STEPS = [
-  { key: 'load', label: 'Loading authored contracts' },
-  { key: 'scan', label: 'Reverse-engineering decisions from code' },
-  { key: 'write', label: 'Writing inferred contracts' },
-] as const;
 
 // ---------------------------------------------------------------------------
 // Live per-step usage tag (` · <model> · <tok> tok · $<cost>`)
@@ -251,101 +223,6 @@ export function stageUsageTag(
   return parts.length ? ` · ${parts.join(' · ')}` : '';
 }
 
-// ---------------------------------------------------------------------------
-// Results
-// ---------------------------------------------------------------------------
-
-export interface InferInProcessResult {
-  /** Inference output — the undocumented decisions found in code. */
-  infer: InferResult;
-  /** Files written under `_inferred/` (empty on a dry run). */
-  written: string[];
-  /** Files that would be written, on a dry run. */
-  proposed: string[];
-  /**
-   * The `.tc` rel path (relative to the `_inferred/` root, e.g. `order/x.tc` —
-   * which is also the path in the `contracts_inferred` set) for each decision,
-   * PARALLEL to `infer.decisions`. Lets the gate promote a decision by reading its
-   * `.tc` from `contracts_inferred` and writing it into authored `contracts`.
-   */
-  decisionPaths: string[];
-  /** The structured summaries the dashboard reads (built even on a dry run). */
-  summaries: InferredDecisionSummary[];
-}
-
-// ---------------------------------------------------------------------------
-// Shared helpers
-// ---------------------------------------------------------------------------
-
-/**
- * The last `contracts generate` run's result + staleness marker. Lives in
- * `contracts/`, next to the `.tc` output it describes — NOT under `.cache/`
- * (that's for safe-to-delete re-run caches) and not top-level (that's the analyze
- * store). It's run-output metadata the dashboard reads back (written count, gaps,
- * validation issues); gitignored even though the rest of `contracts/` is tracked.
- * The dashboard's `/spec/staleness` endpoint reads its mtime against `corpus.json`
- * (was the scan run after the last generate?) and against the verifier state (has
- * verify run since?). Both CLI and dashboard drive the same in-process helper.
- */
-const GENERATED_MARKER_REL = path.join('.truecourse', 'contracts', 'result.json');
-
-export function generatedMarkerPath(repoRoot: string): string {
-  return path.join(repoRoot, GENERATED_MARKER_REL);
-}
-
-/**
- * The last `contracts generate` run's outcome — persisted alongside the staleness
- * marker so the dashboard can show what was written / what's still wrong AFTER a
- * page reload (the run result itself is otherwise transient). Derived/gitignored.
- */
-export interface GeneratedSummary {
-  generatedAt: string;
-  /** Number of `.tc` files written. */
-  written: number;
-  /** Enumerated targets that never got a contract. */
-  gaps: CoverageGap[];
-  /** Structural validation diagnostics (hard = dropped, soft = kept). */
-  validationIssues: ValidationIssue[];
-  /** Areas whose enumeration failed (e.g. LLM timeout) — contracts may be incomplete; re-run. */
-  enumerateFailures: string[];
-}
-
-export function stampGeneratedMarker(
-  repoRoot: string,
-  summary?: {
-    written: number;
-    gaps: CoverageGap[];
-    validationIssues: ValidationIssue[];
-    enumerateFailures?: string[];
-  },
-): void {
-  const file = generatedMarkerPath(repoRoot);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const body: GeneratedSummary = {
-    generatedAt: new Date().toISOString(),
-    written: summary?.written ?? 0,
-    gaps: summary?.gaps ?? [],
-    validationIssues: summary?.validationIssues ?? [],
-    enumerateFailures: summary?.enumerateFailures ?? [],
-  };
-  fs.writeFileSync(file, JSON.stringify(body, null, 2) + '\n');
-}
-
-/** Read the last generate run's summary (written count + gaps + issues), or null. */
-export function readGeneratedSummary(repoRoot: string): GeneratedSummary | null {
-  try {
-    const raw = JSON.parse(fs.readFileSync(generatedMarkerPath(repoRoot), 'utf-8'));
-    return {
-      generatedAt: typeof raw.generatedAt === 'string' ? raw.generatedAt : '',
-      written: typeof raw.written === 'number' ? raw.written : 0,
-      gaps: Array.isArray(raw.gaps) ? raw.gaps : [],
-      validationIssues: Array.isArray(raw.validationIssues) ? raw.validationIssues : [],
-      enumerateFailures: Array.isArray(raw.enumerateFailures) ? raw.enumerateFailures : [],
-    };
-  } catch {
-    return null;
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Corpus path driver — shared by the CLI (`spec scan`) and the dashboard
@@ -920,206 +797,6 @@ export function corpusContentSha(corpus: CuratedCorpus | null): string {
   return createHash('sha256').update(JSON.stringify(stable)).digest('hex');
 }
 
-export interface InferInProcessOptions {
-  tracker?: StepTracker;
-  /** Where authored contracts live (the coverage baseline). Defaults to
-   *  `<repoRoot>/.truecourse/contracts`. `_inferred/` is always excluded. */
-  contractsDir?: string;
-  /** Where the implementation code lives. Defaults to the auto-detected
-   *  code dir (the `code/` subdir when present, else the repo root). */
-  codeDir?: string;
-  /** When true, don't write — just report what would be written. */
-  dryRun?: boolean;
-  /** Adapter that triggered this run; auto-emitted in the `infer` telemetry payload. */
-  source?: TelemetrySource;
-  /** Explicit store identity (EE). When omitted, derived from `repoRoot`'s HEAD. */
-  ref?: RepoRef;
-  /**
-   * Fallback contracts source when `ref` has no authored contracts of its own. In
-   * the gate's warm path (a PR that changed no spec) the head commit stores no
-   * `contracts` — the head's code was verified against the BASELINE's contracts —
-   * so coverage must subtract those. Pass the baseline ref here; `ref` (the head)
-   * is still tried first (the cold path, where the PR generated its own contracts).
-   */
-  contractsRef?: RepoRef;
-  /** Override the commit SHA when `ref` is omitted. */
-  commitOverride?: string;
-  /**
-   * Re-apply promoted decisions into authored `contracts` (default true). Set false
-   * for a transient PR-head infer, where it would write a partial `contracts`
-   * manifest at the head and pollute the contracts tree/diff.
-   */
-  reapplyPromotions?: boolean;
-}
-
-/**
- * Reverse-engineer undocumented decisions from `codeDir` and write them as
- * `inferred` `.tc` artifacts under `<contractsDir>/_inferred/`. Instead of
- * checking code against the spec, it surfaces what the code decided that the
- * spec never recorded. Coverage is computed from authored contracts only, so a
- * decision drops out once it's documented.
- */
-export async function inferInProcess(
-  repoRoot: string,
-  options: InferInProcessOptions = {},
-): Promise<InferInProcessResult> {
-  const startedAt = Date.now();
-  const codeDir = options.codeDir ?? autodetectCodeDir(repoRoot);
-
-  // Resolve the authored-contract coverage dir (also where the inferred `.tc` output
-  // is written). EE runs on an ephemeral clone with no committed `.truecourse/contracts`
-  // — its contracts live in the store — so when a `ref` is set we materialize them from
-  // the store, the same source `verify` reads. Reading the clone's disk would see zero
-  // contracts and re-infer everything already documented. OSS (no `ref`) uses the
-  // working-tree dir; an explicit `contractsDir` overrides both.
-  let contractsDir = options.contractsDir ?? path.join(repoRoot, '.truecourse', 'contracts');
-  let releaseContracts: () => Promise<void> = async () => {};
-  if (!options.contractsDir && options.ref) {
-    // Prefer the head ref's own authored contracts (the cold path — the PR changed
-    // the spec and the gate generated contracts at the head). When the head has none
-    // (the warm path), fall back to `contractsRef` (the baseline) so coverage matches
-    // the contracts the gate verified against — otherwise infer sees nothing and
-    // re-offers everything already documented.
-    const mat =
-      (await loadContracts(options.ref, 'contracts')) ??
-      (options.contractsRef ? await loadContracts(options.contractsRef, 'contracts') : null);
-    if (mat) {
-      contractsDir = mat.dir;
-      releaseContracts = mat.cleanup;
-    }
-  }
-
-  try {
-    return await persistInferred(repoRoot, options, contractsDir, codeDir, startedAt);
-  } finally {
-    await releaseContracts();
-  }
-}
-
-/**
- * Run inference against the resolved `contractsDir` and persist the results. Split
- * from {@link inferInProcess} only so a store-materialized `contractsDir` can be
- * released in a `finally`.
- */
-async function persistInferred(
-  repoRoot: string,
-  options: InferInProcessOptions,
-  contractsDir: string,
-  codeDir: string,
-  startedAt: number,
-): Promise<InferInProcessResult> {
-  const { tracker } = options;
-
-  tracker?.start('load');
-  let result: InferResult;
-  try {
-    result = await infer({ contractsDir, codeDir });
-  } catch (e) {
-    tracker?.error('load', (e as Error).message);
-    throw e;
-  }
-  const covered = Object.values(result.coveredCounts).reduce((a, b) => a + b, 0);
-  tracker?.done('load', `${covered} authored artifact${covered === 1 ? '' : 's'}`);
-
-  tracker?.start('scan');
-  tracker?.done(
-    'scan',
-    `${result.decisions.length} undocumented decision${result.decisions.length === 1 ? '' : 's'}`,
-  );
-
-  tracker?.start('write');
-  const { written, proposed } = writeInferred(contractsDir, result.decisions, {
-    dryRun: options.dryRun,
-  });
-  tracker?.done(
-    'write',
-    options.dryRun
-      ? `${proposed.length} would be written`
-      : `${written.length} written`,
-  );
-
-  if (options.source) {
-    await trackEvent('infer', {
-      source: options.source,
-      decisionsRange: bucketFileCount(result.decisions.length),
-      dryRun: !!options.dryRun,
-      durationRange: bucketDuration(Date.now() - startedAt),
-    });
-  }
-
-  // Ingest the inferred `.tc` subtree into the active store as the split kind,
-  // when the caller passes an explicit `ref` (EE). OSS omits `ref` → no ingest.
-  if (!options.dryRun && options.ref) {
-    await saveContracts(options.ref, 'contracts_inferred', path.join(contractsDir, '_inferred'));
-  }
-
-  // Render each decision once — its `.tc` rel path keys the contracts_inferred set
-  // (so the gate/promote can locate it) and its source is the detail-view body.
-  const rendered = result.decisions.map((d) => renderDecision(d));
-  const decisionPaths = rendered.map((r) => r.relPath);
-
-  // The structured summaries the dashboard's Inferred tab reads — built regardless
-  // of dryRun so the OSS diff run (dryRun: true) can compute the working-tree set
-  // without overwriting the committed baseline.
-  const summaries: InferredDecisionSummary[] = result.decisions.map((d, i) => ({
-    kind: d.kind,
-    identity: d.identity,
-    path: d.codeLoc?.path,
-    line: d.codeLoc?.lines?.[0],
-    reason: d.reason,
-    confidence: d.confidence,
-    contractPath: decisionPaths[i],
-    tc: rendered[i].tcSource,
-  }));
-
-  // Persist them — OSS (file under `specs/`) and EE (Postgres) alike. The store ref
-  // is the PR head / baseline commit in EE; in OSS the repo tree (commit unused).
-  if (!options.dryRun) {
-    const specRef = options.ref ?? { repoKey: repoRoot, commitSha: options.commitOverride ?? '' };
-    await saveSpec(specRef, 'inferredDecisions', summaries);
-    // Re-apply user promotions: writing the `.tc` files regenerated the inferred
-    // tree, so each promoted decision's `.tc` is rewritten into authored contracts.
-    // Skipped for a transient PR-head infer (`reapplyPromotions: false`) — there it
-    // would write a PARTIAL `contracts` manifest at the head (just the promotions),
-    // polluting the contracts tree/diff into showing the whole base as removed.
-    if (options.reapplyPromotions ?? true) await reapplyPromoted(specRef, summaries);
-  }
-
-  return { infer: result, written, proposed, decisionPaths, summaries };
-}
-
-/**
- * OSS Git-Diff: the inferred decisions the WORKING TREE adds/changes vs the
- * committed baseline (`specs/inferredDecisions.json`, committed like the analyze
- * `LATEST.json`). Re-runs inference on the working tree with `dryRun` so the
- * baseline file is untouched, then diffs against it.
- * EE uses the per-commit `/inferred/diff?ref=` route instead.
- */
-export async function inferDiffInProcess(
-  repoRoot: string,
-  options: InferInProcessOptions = {},
-): Promise<InferDiff> {
-  const { summaries: current } = await inferInProcess(repoRoot, { ...options, dryRun: true });
-  const baseRaw = await loadLatestSpec<InferredDecisionSummary[]>(repoRoot, 'inferredDecisions');
-  const actions = await listInferredActions(repoRoot);
-  const head = applyInferredActions(current, actions);
-  const base = baseRaw ? applyInferredActions(baseRaw, actions) : null;
-  return diffDecisions(head, base);
-}
-
-/**
- * Try to find the project's code root. Most real projects keep code
- * at the repo root; the fixture nests it under `code/`. We prefer
- * the explicit subdir when present; otherwise fall back to repoRoot.
- */
-function autodetectCodeDir(repoRoot: string): string {
-  const codeSubdir = path.join(repoRoot, 'code');
-  if (fs.existsSync(codeSubdir) && fs.statSync(codeSubdir).isDirectory()) {
-    return codeSubdir;
-  }
-  return repoRoot;
-}
-
 // ---------------------------------------------------------------------------
 // Decisions, routed through the SpecStore seam.
 //
@@ -1330,75 +1007,19 @@ export function buildStoredDocSource(
 }
 
 /**
- * Re-curate the stored corpus after a decision change (force include/exclude),
- * for editions with no live working tree (EE). Runs the SAME `curate` the OSS path
- * runs — differing only in transport: docs come through {@link buildStoredDocSource}
- * (the repo-doc seam) instead of the filesystem, and the corpus is persisted to the
- * store instead of `corpus.json`. Unchanged docs hit the per-doc caches (the EE
- * Postgres KV store), so this is cheap and a RESTORE re-derives an excluded doc's
- * tags from cache. Contracts are NOT regenerated here — that stays a separate step,
- * exactly as in OSS. Returns the fresh corpus plus its open-conflict count (the
- * caller uses `openConflicts === 0` to decide whether to regenerate contracts), or
- * null when there is no corpus yet.
- */
-export async function recurateStoredCorpus(
-  repoKey: string,
-): Promise<{ corpus: CuratedCorpus; openConflicts: number } | null> {
-  const corpus = await getCorpus(repoKey);
-  if (!corpus) return null;
-  const decisions = await loadDecisions(repoKey);
-  const { curate: result } = await curateInProcess(repoKey, {
-    docSource: buildStoredDocSource(repoKey, corpus, decisions),
-    decisions,
-    skipGit: true,
-    skipCorpusWrite: true,
-  });
-  // Save at the baseline commit — the repo-scope corpus the base view reads —
-  // never `latestSpecCommit`, which a PR-head scan can leave pointing at a PR.
-  const commitSha = await baselineSpecCommit(repoKey);
-  if (commitSha) await saveSpec({ repoKey, commitSha }, 'corpus', result.corpus);
-  // Open = the SAME shared derivation the gate uses (verdicts/dismissals/excludes
-  // resolve; a flagged-but-verdicted dispute must not block regeneration).
-  return { corpus: result.corpus, openConflicts: openConflicts(result.corpus, decisions).length };
-}
-
-/**
- * The default-branch baseline commit for PR-scoped corpus reads. The EE gate's
- * baseline job analyzes the default-branch head and persists it as the repo's
- * LATEST analysis; PR-head analyses are stateless (diff-only) so they never move
- * it. That commit is the base repo view + repo-scope corpus anchor. `null` before
- * any baseline. The base is derived from the analyze store, not the working tree,
- * so this resolves for editions with no live checkout (EE).
- */
-async function baselineSpecCommit(repoKey: string): Promise<string | null> {
-  return (await readLatest(repoKey))?.analysis.commitHash ?? null;
-}
-
-/** The corpus stored at the baseline commit, or null when none is stored yet. */
-async function loadBaselineCorpus(repoKey: string): Promise<CuratedCorpus | null> {
-  const commitSha = await baselineSpecCommit(repoKey);
-  if (!commitSha) return null;
-  return loadSpec<CuratedCorpus>({ repoKey, commitSha }, 'corpus');
-}
-
-/**
- * Re-curate a PR's corpus after a PR-scoped decision edit (EE only). Mirrors
- * {@link recurateStoredCorpus}, but scoped to one PR: the doc universe is the
- * corpus scanned at the PR head (falling back to the baseline corpus for a
- * code-only PR that never scanned specs), doc bodies are read at the PR head, the
+ * Re-curate a PR's corpus after a PR-scoped decision edit, scoped to one PR:
+ * the doc universe is the corpus scanned at the PR head, doc bodies are read at the PR head, the
  * effective decisions fold the PR overlay ({@link getDecisions} with `pr`), and
  * the result is saved at the PR head — so it never touches the base repo view or
  * another PR. Returns the fresh corpus + open-conflict count, or null when the
- * repo has no corpus at all yet.
+ * PR head stored no corpus.
  */
 export async function recuratePrCorpus(
   repoKey: string,
   prHeadSha: string,
   prNumber: number,
 ): Promise<{ corpus: CuratedCorpus; openConflicts: number } | null> {
-  const corpus =
-    (await loadSpec<CuratedCorpus>({ repoKey, commitSha: prHeadSha }, 'corpus')) ??
-    (await loadBaselineCorpus(repoKey));
+  const corpus = await loadSpec<CuratedCorpus>({ repoKey, commitSha: prHeadSha }, 'corpus');
   if (!corpus) return null;
   const decisions = await getDecisions(repoKey, { pr: prNumber });
   const { curate: result } = await curateInProcess(repoKey, {

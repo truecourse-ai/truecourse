@@ -3,26 +3,20 @@ import os from 'node:os';
 import path from 'node:path';
 
 const TRUECOURSE_DIR = '.truecourse';
-// Committable (NOT ignored): `config.json`, `LATEST.json`, `specs/corpus.json`,
-// `specs/decisions.json` — and the `contracts/` `.tc` tree, which is git-tracked
-// ON PURPOSE so the generated spec→code map travels with the repo. `LATEST.json`
-// travels so fresh clones inherit a baseline; commit it (and the other
-// LATEST-convention files) only after merging to main, to avoid PR conflicts on
-// generated JSON.
+// Committable (NOT ignored): `config.json`, `specs/corpus.json` and
+// `specs/decisions.json`. They travel so fresh clones inherit a baseline; commit
+// them only after merging to main, to avoid PR conflicts on generated JSON.
 //
-// Ignored below: the analyze store snapshots, the `.cache/` re-run caches,
-// `contracts/result.json` — the last-generate run result (transient run output
-// the dashboard reads back; the rest of `contracts/` stays tracked) — and the
-// guard run store: `guard/runs/` snapshots, `guard/result.json` (last-generate
-// report), `guard/evidence/` transcripts, `guard/interfaces.json` (the surface
-// catalog, re-derived from the working tree on every mapping — what travels with
-// the repo are the fingerprints embedded in scenarios, plus the hand-authored
+// Ignored below: the `.cache/` re-run caches and the guard run store —
+// `guard/runs/` snapshots, `guard/result.json` (the last-generate report),
+// `guard/evidence/` transcripts, `guard/interfaces.json` (the surface catalog,
+// re-derived from the working tree on every mapping — what travels with the repo
+// are the fingerprints embedded in scenarios, plus the hand-authored
 // `guard/interfaces.authored.json` no derivation writes), `guard/.world-dirty`
 // (the transient marker of a world a mutating tail left dirty),
 // `guard/auto-resolutions.json` (the auto-resolve ledger + flow-taint set —
-// transient run memory), and `guard/history.json` (covered by the
-// unanchored `history.json` rule). `guard/LATEST.json` stays committable, same
-// LATEST convention as the analyze baseline.
+// transient run memory), and `guard/history.json`. `guard/LATEST.json` stays
+// committable, the same LATEST convention.
 //
 // `scenarios/externals.local.json` is the secrets overlay for the committed
 // `api.externals` declaration: base URLs and API keys for the external
@@ -44,14 +38,9 @@ const TRUECOURSE_DIR = '.truecourse';
 /** The template written to `<repo>/.truecourse/.gitignore` on first use — the
  *  materialized committable-vs-derived split (exported so a test can pin it). */
 export const GITIGNORE_CONTENTS = [
-  'analyses/',
   'history.json',
-  'diff.json',
-  'ui-state.json',
   'logs/',
-  '.analyze.lock',
   '.cache/',
-  'contracts/result.json',
   'guard/runs/',
   'guard/sections/',
   'guard/result.json',
@@ -93,16 +82,8 @@ export function getRepoTruecourseDir(repoDir: string): string {
   return path.join(repoDir, TRUECOURSE_DIR);
 }
 
-export function getRepoDbDir(repoDir: string): string {
-  return path.join(getRepoTruecourseDir(repoDir), 'db');
-}
-
 export function getRepoConfigPath(repoDir: string): string {
   return path.join(getRepoTruecourseDir(repoDir), 'config.json');
-}
-
-export function getRepoUiStatePath(repoDir: string): string {
-  return path.join(getRepoTruecourseDir(repoDir), 'ui-state.json');
 }
 
 // ---------------------------------------------------------------------------
@@ -116,7 +97,7 @@ export function getRepoUiStatePath(repoDir: string): string {
  *
  * Skips the global `~/.truecourse/` directory — that one is a per-user
  * registry, not a project marker. Walking into it would wrongly treat
- * `$HOME` as an analyzable project.
+ * `$HOME` as a project.
  */
 export function resolveRepoDir(startDir: string): string | null {
   const globalDir = path.resolve(getGlobalDir());

@@ -20,7 +20,7 @@
  * the stage did before the pack existed.
  */
 
-import { buildDependencyGraph } from '@truecourse/analyzer';
+import { buildDependencyGraph } from '@truecourse/source-facts';
 import {
   deriveWebPlaceContexts,
   deriveWebPlacesFromTree,

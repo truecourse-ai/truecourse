@@ -4,26 +4,6 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./commands/analyze-in-process": {
-      "truecourse-source": "./src/commands/analyze-in-process.ts",
-      "types": "./dist/commands/analyze-in-process.d.ts",
-      "import": "./dist/commands/analyze-in-process.js"
-    },
-    "./commands/analyze-core": {
-      "truecourse-source": "./src/commands/analyze-core.ts",
-      "types": "./dist/commands/analyze-core.d.ts",
-      "import": "./dist/commands/analyze-core.js"
-    },
-    "./commands/analyze-persist": {
-      "truecourse-source": "./src/commands/analyze-persist.ts",
-      "types": "./dist/commands/analyze-persist.d.ts",
-      "import": "./dist/commands/analyze-persist.js"
-    },
-    "./commands/diff-in-process": {
-      "truecourse-source": "./src/commands/diff-in-process.ts",
-      "types": "./dist/commands/diff-in-process.d.ts",
-      "import": "./dist/commands/diff-in-process.js"
-    },
     "./commands/spec-in-process": {
       "truecourse-source": "./src/commands/spec-in-process.ts",
       "types": "./dist/commands/spec-in-process.d.ts",
@@ -114,11 +94,6 @@
       "types": "./dist/config/current-project.d.ts",
       "import": "./dist/config/current-project.js"
     },
-    "./config/ui-state": {
-      "truecourse-source": "./src/config/ui-state.ts",
-      "types": "./dist/config/ui-state.d.ts",
-      "import": "./dist/config/ui-state.js"
-    },
     "./config/env": {
       "truecourse-source": "./src/config/env.ts",
       "types": "./dist/config/env.d.ts",
@@ -139,20 +114,10 @@
       "types": "./dist/lib/logger.d.ts",
       "import": "./dist/lib/logger.js"
     },
-    "./lib/analysis-store": {
-      "truecourse-source": "./src/lib/analysis-store.ts",
-      "types": "./dist/lib/analysis-store.d.ts",
-      "import": "./dist/lib/analysis-store.js"
-    },
     "./lib/sessions-store": {
       "truecourse-source": "./src/lib/sessions-store.ts",
       "types": "./dist/lib/sessions-store.d.ts",
       "import": "./dist/lib/sessions-store.js"
-    },
-    "./lib/contract-store": {
-      "truecourse-source": "./src/lib/contract-store.ts",
-      "types": "./dist/lib/contract-store.d.ts",
-      "import": "./dist/lib/contract-store.js"
     },
     "./lib/spec-store": {
       "truecourse-source": "./src/lib/spec-store.ts",
@@ -229,21 +194,6 @@
       "types": "./dist/lib/spec-inheritance-hook.d.ts",
       "import": "./dist/lib/spec-inheritance-hook.js"
     },
-    "./lib/knowledge-ledger-reader": {
-      "truecourse-source": "./src/lib/knowledge-ledger-reader.ts",
-      "types": "./dist/lib/knowledge-ledger-reader.d.ts",
-      "import": "./dist/lib/knowledge-ledger-reader.js"
-    },
-    "./lib/inferred-action-store": {
-      "truecourse-source": "./src/lib/inferred-action-store.ts",
-      "types": "./dist/lib/inferred-action-store.d.ts",
-      "import": "./dist/lib/inferred-action-store.js"
-    },
-    "./lib/inferred-decisions": {
-      "truecourse-source": "./src/lib/inferred-decisions.ts",
-      "types": "./dist/lib/inferred-decisions.d.ts",
-      "import": "./dist/lib/inferred-decisions.js"
-    },
     "./lib/artifact-diff": {
       "truecourse-source": "./src/lib/artifact-diff.ts",
       "types": "./dist/lib/artifact-diff.d.ts",
@@ -269,11 +219,6 @@
       "types": "./dist/lib/repo-ref.d.ts",
       "import": "./dist/lib/repo-ref.js"
     },
-    "./lib/analyze-lock": {
-      "truecourse-source": "./src/lib/analyze-lock.ts",
-      "types": "./dist/lib/analyze-lock.d.ts",
-      "import": "./dist/lib/analyze-lock.js"
-    },
     "./lib/git": {
       "truecourse-source": "./src/lib/git.ts",
       "types": "./dist/lib/git.d.ts",
@@ -294,21 +239,6 @@
       "types": "./dist/services/guard-setup/bundle.d.ts",
       "import": "./dist/services/guard-setup/bundle.js"
     },
-    "./services/analyzer": {
-      "truecourse-source": "./src/services/analyzer.service.ts",
-      "types": "./dist/services/analyzer.service.d.ts",
-      "import": "./dist/services/analyzer.service.js"
-    },
-    "./services/graph": {
-      "truecourse-source": "./src/services/graph.service.ts",
-      "types": "./dist/services/graph.service.d.ts",
-      "import": "./dist/services/graph.service.js"
-    },
-    "./services/flow": {
-      "truecourse-source": "./src/services/flow.service.ts",
-      "types": "./dist/services/flow.service.d.ts",
-      "import": "./dist/services/flow.service.js"
-    },
     "./services/interface": {
       "truecourse-source": "./src/services/interface.service.ts",
       "types": "./dist/services/interface.service.d.ts",
@@ -319,40 +249,15 @@
       "types": "./dist/services/interface-author/index.d.ts",
       "import": "./dist/services/interface-author/index.js"
     },
-    "./services/violation-query": {
-      "truecourse-source": "./src/services/violation-query.service.ts",
-      "types": "./dist/services/violation-query.service.d.ts",
-      "import": "./dist/services/violation-query.service.js"
-    },
-    "./services/violation": {
-      "truecourse-source": "./src/services/violation.service.ts",
-      "types": "./dist/services/violation.service.d.ts",
-      "import": "./dist/services/violation.service.js"
-    },
-    "./services/analysis-registry": {
-      "truecourse-source": "./src/services/analysis-registry.ts",
-      "types": "./dist/services/analysis-registry.d.ts",
-      "import": "./dist/services/analysis-registry.js"
-    },
-    "./services/rules": {
-      "truecourse-source": "./src/services/rules.service.ts",
-      "types": "./dist/services/rules.service.d.ts",
-      "import": "./dist/services/rules.service.js"
-    },
-    "./services/stable-keys": {
-      "truecourse-source": "./src/services/stable-keys.ts",
-      "types": "./dist/services/stable-keys.d.ts",
-      "import": "./dist/services/stable-keys.js"
-    },
-    "./services/llm/provider": {
-      "truecourse-source": "./src/services/llm/provider.ts",
-      "types": "./dist/services/llm/provider.d.ts",
-      "import": "./dist/services/llm/provider.js"
-    },
     "./services/llm/spec-estimate": {
       "truecourse-source": "./src/services/llm/spec-estimate.ts",
       "types": "./dist/services/llm/spec-estimate.d.ts",
       "import": "./dist/services/llm/spec-estimate.js"
+    },
+    "./services/llm/token-estimator": {
+      "truecourse-source": "./src/services/llm/token-estimator.ts",
+      "types": "./dist/services/llm/token-estimator.d.ts",
+      "import": "./dist/services/llm/token-estimator.js"
     },
     "./services/llm/model-prices": {
       "truecourse-source": "./src/services/llm/model-prices.ts",
@@ -384,11 +289,6 @@
       "types": "./dist/services/telemetry.service.d.ts",
       "import": "./dist/services/telemetry.service.js"
     },
-    "./types/snapshot": {
-      "truecourse-source": "./src/types/snapshot.ts",
-      "types": "./dist/types/snapshot.d.ts",
-      "import": "./dist/types/snapshot.js"
-    },
     "./lib/activity-journal": {
       "truecourse-source": "./src/lib/activity-journal.ts",
       "types": "./dist/lib/activity-journal.d.ts",
@@ -402,9 +302,6 @@
   },
   "dependencies": {
     "@truecourse/agent-loop": "workspace:*",
-    "@truecourse/analyzer": "workspace:*",
-    "@truecourse/contract-extractor": "workspace:*",
-    "@truecourse/contract-verifier": "workspace:*",
     "@truecourse/guard-generator": "workspace:*",
     "@truecourse/guard-runner": "workspace:*",
     "@truecourse/interface-mapper": "workspace:*",
@@ -412,9 +309,9 @@
     "@truecourse/llm-api": "workspace:*",
     "@truecourse/llm-claude-agent": "workspace:*",
     "@truecourse/shared": "workspace:*",
+    "@truecourse/source-facts": "workspace:*",
     "@truecourse/spec-consolidator": "workspace:*",
     "cross-spawn": "^7.0.6",
-    "dagre": "^0.8.5",
     "dotenv": "^16.4.0",
     "js-yaml": "^4.1.0",
     "p-limit": "^7.3.0",
@@ -427,7 +324,6 @@
   },
   "devDependencies": {
     "@types/cross-spawn": "^6.0.6",
-    "@types/dagre": "^0.7.52",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.0.0",
     "tsx": "^4.19.0"

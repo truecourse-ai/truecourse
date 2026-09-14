@@ -205,7 +205,7 @@ import {
   planWorkItems,
 } from '../interface-author/index.js';
 import type { RepoIdentity } from '@truecourse/spec-consolidator';
-import type { LlmEstimate } from '../../commands/analyze-core.js';
+import type { LlmEstimate } from './token-estimator.js';
 import type { LlmTransportMode } from '../../config/global-config.js';
 import { resolveModel } from '../../config/llm-models.js';
 import { estimateStageTokens, tokensFromChars, type StageCallEstimate } from './token-estimator.js';

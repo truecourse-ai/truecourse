@@ -33,7 +33,6 @@ import {
 import { renderGuardSpecComment } from './guard-spec-comment.js';
 import { defaultGuardHeadRegenPipeline } from './guard-head-regen.js';
 import { createGuardGatePipeline } from './guard-gate-runner.js';
-import { handlePullRequestGate } from './gate-handler.js';
 import { handlePullRequestClosed } from './pr-closed.js';
 import { upsertPrState } from './pr-state.js';
 import { reportGithubError } from './observability.js';
@@ -67,8 +66,6 @@ export interface RegisterGithubAppOptions {
   enqueueGuardGate?: EnqueueGuardGate;
   /** Background-queue enqueue for spec-change guard regens (checkbox tick). Inline fallback if omitted. */
   enqueueGuardSpecRegen?: EnqueueGuardSpecRegen;
-  /** Per-workspace LLM-code-analysis toggle reader; injected by the server, defaults off. */
-  codeAnalysisLlm?: (orgId: string) => Promise<boolean>;
 }
 
 /**
@@ -94,15 +91,12 @@ export async function registerGithubApp(
   const auth = createGithubAuth(cfg);
   const notifier = notifierFromConfig(cfg);
 
-  // Shared deps for the Code Quality gate. The gate in-flight set is keyed by
-  // `${repo}#${sha}` (concurrent deliveries of the same head).
+  // Shared deps for the PR handlers.
   const offerDeps = {
     store,
     auth,
     appUrl,
     octokitFor: (installationId: number) => installationOctokit(cfg, installationId),
-    gateInFlight: new Set<string>(),
-    codeAnalysisLlm: opts.codeAnalysisLlm,
   };
 
   // Guard-gate enqueue: prefer the durable background queue (ee-server); fall
@@ -267,22 +261,17 @@ export async function registerGithubApp(
           return;
         }
         // Guard gate: open the in-progress Check + enqueue the durable job (fast —
-        // no clone here). Independent of the Code Quality gate below.
+        // no clone here).
         void handlePullRequestGuardGate(
           { store, octokitFor: offerDeps.octokitFor, enqueueGuardGate },
           payload,
         ).catch((err) => reportGithubError(store, 'guard gate enqueue failed', ctx, err));
-        // Run the Code Quality gate, then offer the guard spec-change checkbox. A
-        // spec-changing PR gets a passive checkbox to regenerate its head's guard
-        // scenarios; the auto guard gate above keeps running the baseline corpus.
-        void (async () => {
-          await handlePullRequestGate(offerDeps, payload).catch((err) =>
-            reportGithubError(store, 'gate failed', ctx, err),
-          );
-          await handlePullRequestGuardSpecOffer(specOfferDeps, payload).catch((err) =>
-            reportGithubError(store, 'guard spec offer failed', ctx, err),
-          );
-        })();
+        // Offer the guard spec-change checkbox: a spec-changing PR gets a passive
+        // checkbox to regenerate its head's guard scenarios, while the guard gate
+        // above keeps running the baseline corpus.
+        void handlePullRequestGuardSpecOffer(specOfferDeps, payload).catch((err) =>
+          reportGithubError(store, 'guard spec offer failed', ctx, err),
+        );
       },
       // On comment edit: the matching handler (by marker) runs its checkbox flow.
       onCommentEdited: (payload) => {
@@ -372,32 +361,6 @@ export {
 } from '@truecourse/github-app';
 export { readRepoDocFromGithub } from './repo-doc.js';
 export { createGuardGateHeadsLookup } from './guard-gate-heads.js';
-
-// Code Quality gate
-export {
-  decideCodeQuality,
-  type GateConclusion,
-  type GateSeverity,
-  type CodeQualityDecision,
-  type CodeQualityOptions,
-} from './gate.js';
-export {
-  GATE_MARKER,
-  CODE_QUALITY_CHECK_NAME,
-  isGateComment,
-  renderGateComment,
-  cqCheckOutput,
-} from './gate-comment.js';
-export {
-  runGateAnalyze,
-  type GateAnalyzeDeps,
-  type GateAnalyzeRequest,
-  type GateAnalyzeOutput,
-} from './gate-runner.js';
-export {
-  handlePullRequestGate,
-  type GateHandlerDeps,
-} from './gate-handler.js';
 
 // Guard gate: pure diff/decision + Check output for the PR guard run
 export {

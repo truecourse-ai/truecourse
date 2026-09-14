@@ -35,20 +35,14 @@ import {
 } from '@truecourse/core/lib/spec-store';
 import { contextBindings, contextChangedAt } from '@truecourse/core/lib/context-store';
 import { sliceCorpus } from '@truecourse/core/services/context';
-import { listContractFiles } from '@truecourse/core/lib/contract-store';
 import { readRepoDoc } from '@truecourse/core/lib/repo-doc-reader';
 import { getBackgroundTaskRunner } from '@truecourse/core/lib/background-tasks';
 import { getGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
-import {
-  getKnowledgeLedgerReader,
-  getKnowledgeDocBodyReader,
-} from '@truecourse/core/lib/knowledge-ledger-reader';
 import { readGuardResultForView } from '@truecourse/core/commands/guard-read';
 import {
   addConflictResolution,
   addManualExclude,
   addManualInclude,
-  generatedMarkerPath,
   getCorpus,
   getDecisions,
   getWorkspaceDecisions,
@@ -57,7 +51,6 @@ import {
   removeManualExclude,
   removeManualInclude,
 } from '@truecourse/core/commands/spec-in-process';
-import { baselineCommit } from './diff-base.js';
 import { orgOf } from '../services/workspace-llm.service.js';
 import { contextIsStale } from '../services/context-scan.service.js';
 
@@ -79,12 +72,11 @@ interface SpecCorpusPayload {
 }
 
 /**
- * Resolve the corpus for a (possibly PR-scoped) view. OSS has no commit
- * dimension, so it always reads the live `corpus.json`. EE reads at the requested
- * `ref`, else the baseline commit (the same `isBaseline` anchor the BL-Drift PR
- * diffs use — never `loadLatest`, which a PR-head scan pollutes). A `ref` with no
- * stored corpus (a code-only PR that never scanned specs) falls back to the
- * baseline corpus, labelled by `corpusCommit` so the client can note it.
+ * Resolve the corpus for a (possibly PR-scoped) view. A live tree has no commit
+ * dimension, so it always reads `corpus.json`. Stored sets read at the requested
+ * `ref`; without one — or when that commit stored no corpus — the newest stored
+ * corpus IS the current one, which holds because nothing here scans anything but
+ * the default branch.
  */
 async function loadCorpusForRef(
   repoPath: string,
@@ -95,45 +87,9 @@ async function loadCorpusForRef(
     const corpus = await loadSpec<CuratedCorpus>({ repoKey: repoPath, commitSha: ref }, 'corpus');
     if (corpus) return { corpus, corpusCommit: ref };
   }
-  const baseSha = await baselineCommit(repoPath);
-  if (baseSha) {
-    const corpus = await loadSpec<CuratedCorpus>({ repoKey: repoPath, commitSha: baseSha }, 'corpus');
-    if (corpus) return { corpus, corpusCommit: baseSha };
-  }
-  // No analyze baseline to anchor to (this server runs no Code Quality
-  // baseline job), so the newest stored corpus IS the current one. Safe only
-  // because nothing here scans anything but the default branch — a PR-head
-  // scan would pollute latest, which is why the gate editions never take this
-  // branch.
   const latest = await loadLatestSpec<CuratedCorpus>(repoPath, 'corpus');
   if (latest) return { corpus: latest };
   return { corpus: null };
-}
-
-/**
- * Tag + enrich the corpus's workspace-inherited docs (hosted). A connected repo
- * folds its workspace Knowledge corpus into its own spec, so refs that start
- * `knowledge/` are inherited docs: mark them `layer: 'workspace'` and — through the
- * ledger-reader seam (EE installs it; unset ⇒ refs only) — attach the source's human
- * title + deep-link for display. Repo-local docs are untouched, and OSS (in-place
- * store) is inert: it has no inherited docs and no seam. Only optional display
- * fields are added; identity is unchanged.
- */
-export async function enrichWorkspaceLayer(
-  repoKey: string,
-  corpus: CuratedCorpus | null,
-): Promise<CuratedCorpus | null> {
-  if (!corpus || specsMaterializeInPlace()) return corpus;
-  const inheritedRefs = corpus.docs.filter((d) => d.ref.startsWith('knowledge/')).map((d) => d.ref);
-  if (inheritedRefs.length === 0) return corpus;
-  const reader = getKnowledgeLedgerReader();
-  const meta = reader ? await reader(repoKey, inheritedRefs) : new Map();
-  const docs = corpus.docs.map((d) => {
-    if (!d.ref.startsWith('knowledge/')) return d;
-    const m = meta.get(d.ref);
-    return { ...d, layer: 'workspace' as const, ...(m ? { title: m.title, url: m.url } : {}) };
-  });
-  return { ...corpus, docs };
 }
 
 /** One web-source page's display identity, keyed by its corpus ref. */
@@ -211,25 +167,6 @@ export async function enrichWebSources(
 }
 
 /**
- * Resolve an inherited workspace doc's body for the repo Spec-tab doc route (hosted).
- * A connected repo folds its workspace Knowledge into its own spec, so a ref under the
- * `knowledge/` prefix (the inherited layer `enrichWorkspaceLayer` tags) names a doc
- * whose body lives in the workspace document store, never the repo tree. Hosted + such
- * a ref is served through the body-reader seam (EE installs it; unset ⇒ missing).
- * Any other case — OSS in-place, or a repo-local ref — returns `{ inherited: false }`
- * so the route reads the repo tree as before. `content: null` (row/body absent) is the
- * route's 404 trigger.
- */
-export async function readInheritedDoc(
-  repoKey: string,
-  ref: string,
-): Promise<{ inherited: false } | { inherited: true; content: string | null }> {
-  if (specsMaterializeInPlace() || !ref.startsWith('knowledge/')) return { inherited: false };
-  const reader = getKnowledgeDocBodyReader();
-  return { inherited: true, content: reader ? await reader(repoKey, ref) : null };
-}
-
-/**
  * The repository's SLICE of the workspace corpus (hosted), or null when the
  * workspace has never been scanned — in which case the caller answers exactly
  * as it does for a repository that never scanned.
@@ -266,7 +203,7 @@ async function corpusPayload(repoPath: string, ref?: string, pr?: number): Promi
     pr !== undefined && !specsMaterializeInPlace() ? { pr } : undefined,
   );
   return {
-    corpus: await enrichWebSources(repoPath, await enrichWorkspaceLayer(repoPath, corpus)),
+    corpus: await enrichWebSources(repoPath, corpus),
     manualIncludes: decisions.manualIncludes ?? [],
     manualExcludes: decisions.manualExcludes ?? [],
     conflictResolutions: decisions.conflictResolutions ?? [],
@@ -284,7 +221,7 @@ async function prCorpusPayload(
 ): Promise<SpecCorpusPayload> {
   const decisions = await getDecisions(repoPath, { pr });
   return {
-    corpus: await enrichWorkspaceLayer(repoPath, corpus),
+    corpus,
     manualIncludes: decisions.manualIncludes ?? [],
     manualExcludes: decisions.manualExcludes ?? [],
     conflictResolutions: decisions.conflictResolutions ?? [],
@@ -338,18 +275,6 @@ router.get(
       // holds in EE too, where repo.path is a repoKey, not a filesystem path.
       if (path.isAbsolute(ref) || ref.split(/[\\/]/).includes('..')) {
         res.status(400).json({ error: 'ref escapes the repository.' });
-        return;
-      }
-      // A `knowledge/` ref (hosted) is an inherited workspace doc: its body lives in
-      // the workspace document store, not the repo tree — serve it through the seam.
-      // `commit` doesn't apply (the current workspace snapshot); a missing row/body 404s.
-      const inherited = await readInheritedDoc(repo.path, ref);
-      if (inherited.inherited) {
-        if (inherited.content == null) {
-          res.status(404).json({ error: `Doc not found: ${ref}` });
-          return;
-        }
-        res.json({ ref, content: inherited.content });
         return;
       }
       // Read through the seam: local working tree in OSS, GitHub (App) in EE.
@@ -703,10 +628,9 @@ router.get(
       // context, which is the same amber dot the Context page draws.
       if (!specsMaterializeInPlace()) {
         const org = orgOf(req);
-        const [corpus, decisions, contractFiles, changedAt] = await Promise.all([
+        const [corpus, decisions, changedAt] = await Promise.all([
           loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId: org }, 'corpus'),
           getWorkspaceDecisions(org),
-          listContractFiles(repo.path, 'contracts'),
           contextChangedAt(org),
         ]);
         res.json({
@@ -715,20 +639,15 @@ router.get(
           decisionsPending: corpus !== null && hasUnabsorbedDecisions(corpus, decisions),
           docsChanged: contextIsStale(corpus?.generatedAt ?? null, changedAt),
           hasCorpus: corpus !== null,
-          hasGenerated: contractFiles.length > 0,
         });
         return;
       }
 
-      // OSS: corpus/generated presence from the live tree's marker files.
-      const corpusMtime = mtimeIfExists(corpusFilePath(repo.path));
-      const generatedMtime = mtimeIfExists(generatedMarkerPath(repo.path));
-
+      // A live tree: corpus presence from its marker file.
       res.json({
         decisionsPending: hasPendingDecisions(repo.path),
         docsChanged: hasChangedDocs(repo.path),
-        hasCorpus: corpusMtime !== null,
-        hasGenerated: generatedMtime !== null,
+        hasCorpus: mtimeIfExists(corpusFilePath(repo.path)) !== null,
       });
     } catch (e) {
       next(e);

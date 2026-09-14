@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { storageXhtmlToMarkdown } from '../../ee/packages/server/src/knowledge/connectors/html-to-markdown';
+import { storageXhtmlToMarkdown } from '../../ee/packages/server/src/integrations/connectors/html-to-markdown';
 import {
   confluenceConnector,
   type ConfluenceConfig,
-} from '../../ee/packages/server/src/knowledge/connectors/confluence';
+} from '../../ee/packages/server/src/integrations/connectors/confluence';
 
 const CFG: ConfluenceConfig = {
   baseUrl: 'https://acme.atlassian.net',

@@ -1,4 +1,0 @@
-operation GET "/internal/catalog/{id}" {
-  status planned
-  origin "reference/specs/modules/catalog/endpoints.md" "GET /internal/catalog/{id}" 1..5
-}

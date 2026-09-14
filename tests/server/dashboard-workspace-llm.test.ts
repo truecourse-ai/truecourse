@@ -2,9 +2,9 @@
  * Per-workspace LLM credentials, threaded per run.
  *
  * The dashboard server holds no process-wide transport: every step that spends
- * — spec scan, guard generate, analyze's LLM rules, flow enrichment — loads the
- * asking workspace's provider, proves it answers, and hands the resulting
- * driver/transport to the pipeline call. What's asserted here is exactly that
+ * — the Document scan, guard generate — loads the asking workspace's provider,
+ * proves it answers, and hands the resulting driver/transport to the pipeline
+ * call. What's asserted here is exactly that
  * handoff, plus the two ways a start can refuse: no provider configured (409,
  * machine-readable) and a provider that won't answer (502, with the failure on
  * the run record so Activity can show it).
@@ -26,16 +26,8 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
   return {
     ...actual,
     createSocketSpecTracker: tracker,
-    createSocketTracker: tracker,
-    createSocketSpecEstimateHandler: () => async () => true,
-    createSocketLlmEstimateHandler: () => async () => true,
-    createSocketStashConfirmHandler: () => async () => 'stash',
     emitSpecProgress: vi.fn(),
     emitSpecComplete: vi.fn(),
-    emitAnalysisProgress: vi.fn(),
-    emitAnalysisComplete: vi.fn(),
-    emitViolationsReady: vi.fn(),
-    emitAnalysisCanceled: vi.fn(),
   };
 });
 
@@ -49,30 +41,10 @@ vi.mock('@truecourse/core/commands/spec-in-process', async (importOriginal) => (
   curateInProcess: vi.fn(),
 }));
 
-vi.mock('@truecourse/core/commands/analyze-in-process', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@truecourse/core/commands/analyze-in-process')>()),
-  analyzeInProcess: vi.fn(),
-}));
-
-vi.mock('@truecourse/core/services/llm/provider', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@truecourse/core/services/llm/provider')>()),
-  createLLMProvider: vi.fn(),
-}));
-
-vi.mock('@truecourse/core/services/flow', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@truecourse/core/services/flow')>()),
-  getFlowFromLatest: vi.fn(),
-  enrichFlowWithLLM: vi.fn(),
-}));
-
 // The dist entries the dashboard server itself imports — the source copies would
 // be different module instances with their own stores.
 import { guardGenerateInProcess } from '@truecourse/core/commands/guard-in-process';
 import { curateInProcess } from '@truecourse/core/commands/spec-in-process';
-import { analyzeInProcess } from '@truecourse/core/commands/analyze-in-process';
-import { isAnalysisActive } from '@truecourse/core/services/analysis-registry';
-import { createLLMProvider } from '@truecourse/core/services/llm/provider';
-import { getFlowFromLatest, enrichFlowWithLLM } from '@truecourse/core/services/flow';
 import { listSessionRuns } from '@truecourse/core/lib/sessions-store';
 import { workspaceSessionsKey } from '@truecourse/core/commands/context-scan';
 import type { SessionDriver } from '@truecourse/agent-loop';
@@ -119,14 +91,6 @@ beforeEach(async () => {
     guard: { status: 'ok', noChanges: false, written: [], birthFindings: [] },
   } as never);
   vi.mocked(curateInProcess).mockReset().mockResolvedValue({ noChanges: false } as never);
-  vi.mocked(analyzeInProcess).mockReset().mockResolvedValue({ analysisId: 'a1' } as never);
-  vi.mocked(createLLMProvider).mockReset().mockReturnValue({
-    setRepoId() {},
-    setRepoPath() {},
-    setAbortSignal() {},
-  } as never);
-  vi.mocked(getFlowFromLatest).mockReset().mockResolvedValue({ id: 'f1', name: 'Checkout' } as never);
-  vi.mocked(enrichFlowWithLLM).mockReset().mockResolvedValue(undefined as never);
 
   fixture = await setupTestFixture();
   execFileSync('git', ['init'], { cwd: fixture.repoPath, stdio: 'ignore' });
@@ -142,9 +106,6 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  // An analyze the route accepted with a 202 finishes after the test's last
-  // assertion; its log sink lives in the fixture, so the fixture outlives it.
-  await vi.waitFor(() => expect(isAnalysisActive(fixture.project.slug)).toBe(false), { timeout: 15_000 });
   await teardownTestFixture(fixture.project.slug);
   resetWorkspaceLlmBackend();
   resetWorkspaceLlmConfigStore();
@@ -158,16 +119,12 @@ const start = (suffix: string) => {
     // workspace address, not under a repository.
     case 'spec scan':
       return request(app).post('/api/context/scan');
-    case 'guard generate':
-      return request(app).post(url('guard/generate')).send({ confirmed: true });
-    case 'analyze':
-      return request(app).post(url('analyses')).send({ mode: 'full' });
     default:
-      return request(app).post(url('flows/f1/enrich'));
+      return request(app).post(url('guard/generate')).send({ confirmed: true });
   }
 };
 
-const ENTRIES = ['spec scan', 'guard generate', 'analyze', 'flow enrich'];
+const ENTRIES = ['spec scan', 'guard generate'];
 
 /** The workspace's own scan runs, newest first — the Document scan's records. */
 const workspaceScanRuns = () => listSessionRuns(workspaceSessionsKey(TEST_ORG), 'spec-scan');
@@ -203,8 +160,6 @@ describe('a provider that will not answer', () => {
     expect(res.body).toMatchObject({ error: 'llm-probe-failed', message: '401 invalid x-api-key' });
     expect(jobs.contextScans).toEqual([]);
     expect(jobs.guardGenerates).toEqual([]);
-    expect(vi.mocked(analyzeInProcess)).not.toHaveBeenCalled();
-    expect(vi.mocked(enrichFlowWithLLM)).not.toHaveBeenCalled();
   });
 
   // The scan is the WORKSPACE's now, so the run it leaves is the workspace's.
@@ -256,33 +211,6 @@ describe('a configured, answering provider', () => {
     ]);
     // The job body, not the route, runs the engine on the workspace transport.
     expect(vi.mocked(guardGenerateInProcess)).not.toHaveBeenCalled();
-  });
-
-  it('gives the analyze LLM rules that same transport', async () => {
-    // The run starts after the 202 — the route accepts, then works. How long
-    // that takes is not this test's subject, so the wait is generous: under a
-    // loaded suite the default second is not enough, and a timeout there would
-    // be a lie about the transport.
-    await start('analyze').expect(202);
-
-    await vi.waitFor(() => expect(vi.mocked(createLLMProvider)).toHaveBeenCalledWith(transport), {
-      timeout: 20_000,
-    });
-  }, 30_000);
-
-  it('enriches a flow on that transport', async () => {
-    await start('flow enrich').expect(200);
-
-    expect(vi.mocked(enrichFlowWithLLM)).toHaveBeenCalledWith(fixture.repoPath, 'f1', transport);
-  });
-
-  it('leaves analyze alone when LLM rules are off — no provider is needed', async () => {
-    const { writeProjectConfig } = await import('@truecourse/core/config/project-config');
-    await writeProjectConfig(fixture.repoPath, { enableLlmRules: false });
-    setWorkspaceLlmConfigStore(configStore({}));
-
-    await start('analyze').expect(202);
-    expect(probe).not.toHaveBeenCalled();
   });
 });
 

@@ -95,7 +95,7 @@ export { GENERATE_SESSION_STEPS, type GenerateStep } from '@truecourse/guard-gen
 export { assertGuardGenerateResumeCommit, guardGenerateResume, GuardGenerateResumeError, type GuardGenerateResume } from '../services/guard-generate/resume.js';
 import { readGuardRecipeCard } from './guard-read.js';
 import { readCorpus, readDecisions } from '@truecourse/spec-consolidator';
-import type { LlmEstimate } from './analyze-core.js';
+import type { LlmEstimate } from '../services/llm/token-estimator.js';
 import { EstimateDeclined, stageUsageTag } from './spec-in-process.js';
 import { withEstimatePhase, type EstimatePhase, type StepTracker } from '../progress.js';
 

@@ -4,7 +4,6 @@ import { Command, Option } from "commander";
 import * as p from "@clack/prompts";
 import { LLM_PROVIDER_KINDS } from "@truecourse/shared";
 import { runAdd } from "./commands/add.js";
-import { runAnalyze, runAnalyzeDiff } from "./commands/analyze.js";
 import {
   runDashboard,
   runDashboardStop,
@@ -12,15 +11,6 @@ import {
   runDashboardLogs,
   runDashboardUninstall,
 } from "./commands/dashboard.js";
-import { runList, runListDiff, parseSeverityFlag } from "./commands/list.js";
-import {
-  runRulesCategories,
-  runRulesDisable,
-  runRulesEnable,
-  runRulesList,
-  runRulesLlm,
-  runRulesReset,
-} from "./commands/rules.js";
 import {
   runSpecScan,
   runSpecStatus,
@@ -64,12 +54,6 @@ import { runGuardAdjudicate } from "./commands/guard-adjudicate.js";
 import { runConfigLlmShow, runConfigLlmTest, runConfigLlmUse } from "./commands/config.js";
 import { runConfigLlmSetup, runLlmFirstRun } from "./commands/config-llm-setup.js";
 import { readTelemetryConfig, writeTelemetryConfig } from "./telemetry.js";
-import {
-  runHooksInstall,
-  runHooksUninstall,
-  runHooksStatus,
-  runHooksRun,
-} from "./commands/hooks.js";
 
 const program = new Command();
 
@@ -176,62 +160,12 @@ function resolveInstallSkills(
 }
 
 program
-  .command("analyze")
-  .description("Analyze the current repository")
-  .option("--diff", "Run diff check against latest analysis")
-  // `--llm` and `--no-llm` are auto-paired by commander — they both control
-  // `options.llm`. Passing `--llm` → true, `--no-llm` → false, neither →
-  // undefined (falls through to config / interactive prompt).
-  .option("--llm", "Run LLM-powered rules (pre-approves the cost estimate)")
-  .option("--no-llm", "Skip LLM-powered rules for this run")
-  .addOption(llmTransportOption())
-  .option("--io <dir>", "Mailbox dir for --llm-transport agent (request/response files)")
-  .option("--stash", "Pre-approve stashing pending changes before analysis")
-  .option("--no-stash", "Analyze the working tree as-is without stashing")
-  .option("--install-skills", "Install Claude Code skills without prompting")
-  .option("--no-skills", "Skip the Claude Code skills prompt")
-  .action(async (options) => {
-    const llm: boolean | undefined = typeof options.llm === "boolean" ? options.llm : undefined;
-    const stash: boolean | undefined = typeof options.stash === "boolean" ? options.stash : undefined;
-    const installSkills = resolveInstallSkills(options);
-    const common = { llm, stash, installSkills, llmTransport: options.llmTransport, io: options.io };
-    if (options.diff) {
-      await runAnalyzeDiff(common);
-    } else {
-      await runAnalyze(common);
-    }
-  });
-
-program
   .command("add")
   .description("Register the current directory with TrueCourse")
   .option("--install-skills", "Install Claude Code skills without prompting")
   .option("--no-skills", "Skip the Claude Code skills prompt")
   .action(async (options) => {
     await runAdd({ installSkills: resolveInstallSkills(options) });
-  });
-
-program
-  .command("list")
-  .description("List violations from the latest analysis")
-  .option("--diff", "Show diff check results (new and resolved)")
-  .option("--limit <n>", "Number of violations to show (default: 20)", parseInt)
-  .option("--offset <n>", "Skip first N violations", parseInt)
-  .option("--all", "Show all violations")
-  .option(
-    "--severity <list>",
-    "Comma-separated severities to include (critical,high,medium,low,info)",
-  )
-  .action(async (options) => {
-    if (options.diff) {
-      await runListDiff();
-    } else {
-      await runList({
-        limit: options.all ? Infinity : (options.limit ?? 20),
-        offset: options.offset ?? 0,
-        severity: parseSeverityFlag(options.severity),
-      });
-    }
   });
 
 // Spec scan — docs → curated corpus (areas + doc relations + overlaps) in .truecourse/specs/.
@@ -659,64 +593,6 @@ guardCmd
     });
   });
 
-// Rules management — reads/writes per-repo config.json directly. No server needed.
-const rulesCmd = program
-  .command("rules")
-  .description("Manage analysis rules");
-
-rulesCmd
-  .command("categories")
-  .description("View or override rule categories for this repository")
-  .option("--enable <category>", "Enable a category")
-  .option("--disable <category>", "Disable a category")
-  .option("--reset", "Reset to global default")
-  .action(async (options) => {
-    await runRulesCategories(options);
-  });
-
-rulesCmd
-  .command("llm")
-  .description("Enable or disable LLM-powered rules for this repository")
-  .option("--enable", "Enable LLM rules")
-  .option("--disable", "Disable LLM rules")
-  .option("--reset", "Reset to global default")
-  .action(async (options) => {
-    await runRulesLlm(options);
-  });
-
-rulesCmd
-  .command("list")
-  .description("List rules with their enabled/disabled status for this repository")
-  .option("--domain <name>", "Only show rules in this domain (e.g. security, bugs)")
-  .option("--enabled", "Only show enabled rules")
-  .option("--disabled", "Only show disabled rules")
-  .option("--search <text>", "Filter by key, name, or description")
-  .option("--language <lang>", "Show per-language support status (javascript, python, csharp)")
-  .action(async (options) => {
-    await runRulesList(options);
-  });
-
-rulesCmd
-  .command("enable <ruleKey>")
-  .description("Enable a single rule for this repository")
-  .action(async (ruleKey: string) => {
-    await runRulesEnable({ ruleKey });
-  });
-
-rulesCmd
-  .command("disable <ruleKey>")
-  .description("Disable a single rule for this repository")
-  .action(async (ruleKey: string) => {
-    await runRulesDisable({ ruleKey });
-  });
-
-rulesCmd
-  .command("reset [ruleKey]")
-  .description("Clear per-rule overrides (one rule, or all if no key given)")
-  .action(async (ruleKey?: string) => {
-    await runRulesReset({ ruleKey });
-  });
-
 // Configuration — how TrueCourse reaches the LLM (per-user, in
 // `~/.truecourse/config.json`) plus the per-repo model resolution view. Per-stage
 // model overrides are still set via env vars or `.truecourse/config.json#llm`.
@@ -808,39 +684,6 @@ telemetryCmd
     } else {
       p.log.info("Telemetry is disabled.");
     }
-  });
-
-// Git hooks management
-const hooksCmd = program
-  .command("hooks")
-  .description("Manage git hooks");
-
-hooksCmd
-  .command("install")
-  .description("Install pre-commit hook")
-  .action(async () => {
-    await runHooksInstall();
-  });
-
-hooksCmd
-  .command("uninstall")
-  .description("Remove pre-commit hook")
-  .action(() => {
-    runHooksUninstall();
-  });
-
-hooksCmd
-  .command("status")
-  .description("Show hook installation status")
-  .action(() => {
-    runHooksStatus();
-  });
-
-hooksCmd
-  .command("run")
-  .description("Run pre-commit checks (called by the hook)")
-  .action(async () => {
-    await runHooksRun();
   });
 
 program.action(() => {

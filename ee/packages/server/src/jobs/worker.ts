@@ -17,7 +17,7 @@
 
 import type { Runner } from 'graphile-worker';
 import type { Db } from '@truecourse/db';
-import { JobStore, NotificationStore, PgKnowledgeStore, WorkspaceSettingsStore } from '@truecourse/ee-data-store';
+import { JobStore, NotificationStore } from '@truecourse/ee-data-store';
 import { log } from '@truecourse/core/lib/logger';
 import {
   runBaseline,
@@ -53,14 +53,6 @@ import { getGuardExecutor } from '@truecourse/core/lib/guard-executor';
 import type { IntegrationPendingView, NotificationLevel } from '@truecourse/shared';
 import { captureEeException, upstreamStatusOf, type EeErrorContext } from '../observability/sentry.js';
 import { IntegrationStore } from '../integrations/store.js';
-import { CONNECTORS } from '../knowledge/connectors/registry.js';
-import { connectorConfig, type ConnectorKind } from '../knowledge/connectors/types.js';
-import {
-  processWorkspaceKnowledge,
-  syncSource,
-  SYNC_MSG_CONSOLIDATE,
-  type WorkspaceSyncEstimate,
-} from '../knowledge/sync.js';
 import {
   getWorkspaceDecisions,
   corpusContentSha,
@@ -84,12 +76,6 @@ import {
   type JobTask,
 } from '@truecourse/jobs';
 import {
-  KNOWLEDGE_SYNC_TASK,
-  KNOWLEDGE_SYNC_TITLE,
-  KNOWLEDGE_SYNC_STEPS,
-  KNOWLEDGE_ESTIMATE_TASK,
-  KNOWLEDGE_ESTIMATE_TITLE,
-  KNOWLEDGE_ESTIMATE_STEPS,
   REPO_BASELINE_TASK,
   REPO_BASELINE_TITLE,
   REPO_BASELINE_STEPS,
@@ -105,8 +91,6 @@ import {
   GUARD_BASELINE_TASK,
   GUARD_BASELINE_TITLE,
   GUARD_BASELINE_STEPS,
-  type SyncJobPayload,
-  type EstimateJobPayload,
   type BaselineJobPayload,
   type GuardGenerateJobPayload,
   type GuardGateJobPayload,
@@ -154,19 +138,6 @@ export interface StartEeWorkerDeps {
    * onboarding (see guard-chain.ts). Wired only onto the baseline definition.
    */
   onBaselineSettled?: (payload: BaselineJobPayload, outcome: JobOutcomeStatus) => Promise<void>;
-  /**
-   * Called after a `knowledge.sync` (processing) job goes terminal. On SUCCESS with
-   * no open spec conflict AND a corpus that actually changed, processing just
-   * re-consolidated the workspace corpus, so ripple a baseline re-scan to the org's
-   * connected repos (they inherit the workspace layer — see knowledge-chain.ts). The
-   * run's `result` carries the `corpusChanged` flag. Wired only onto the processing
-   * definition.
-   */
-  onKnowledgeSyncSettled?: (
-    payload: SyncJobPayload,
-    outcome: JobOutcomeStatus,
-    result?: unknown,
-  ) => Promise<void>;
   /**
    * Called after a `repo.guard` (generate) job goes terminal. On SUCCESS, a fresh
    * generate just wrote scenarios — chain a guard-baseline refresh so the first PR
@@ -264,180 +235,10 @@ async function emailConflictsBlocked(
   void notifier.sendGuardConflictsBlocked(notifyEmails, { repoFullName, conflicts, dashboardUrl });
 }
 
-/**
- * Turn a sweep's estimate into the pending record + the completion toast. An
- * empty delta (nothing new/changed/removed) clears pending and reports the source
- * is up to date; a non-empty delta persists the delta + the full estimate (the
- * Process confirm dialog opens from it) and names ONLY the delta in the toast —
- * the cost is seen and confirmed at Process time, never at sync time.
- */
-export function pendingFromEstimate(
-  estimate: WorkspaceSyncEstimate,
-  connectorName: string,
-  sweptAt: string,
-): { pending: IntegrationPendingView | null; notification: JobNotification } {
-  const { delta, ...estimateOnly } = estimate;
-  if (delta.new + delta.changed + delta.removed === 0) {
-    return {
-      pending: null,
-      notification: {
-        level: 'success',
-        title: 'Sync complete',
-        body: `${connectorName} is up to date — nothing to process.`,
-      },
-    };
-  }
-  return {
-    pending: { delta, estimate: estimateOnly, sweptAt },
-    notification: {
-      level: 'success',
-      title: 'Sync complete',
-      body: `${estimateOnly.subjectLabel ?? ''} to process.`,
-    },
-  };
-}
-
-/** Shared deps the workspace knowledge job bodies close over (built in startWorker). */
-interface JobBodyDeps {
-  db: Db;
-  integrations: IntegrationStore;
-  knowledge: PgKnowledgeStore;
-}
-
 // --- Job definitions -------------------------------------------------
 
-/**
- * Processing stage (workspace-scoped): load the UNION of every synced source's
- * stored docs from the ledger (NO connector I/O) → consolidate the combined corpus
- * once (folding the workspace decisions) → clear ALL connectors' pending records
- * (their swept content was consumed). `kind` in the payload is attribution only.
- */
-function knowledgeSyncJob(
-  d: JobBodyDeps,
-  onSettled?: (payload: SyncJobPayload, outcome: JobOutcomeStatus, result?: unknown) => Promise<void>,
-): EeJobDefinition<SyncJobPayload> {
-  return {
-    type: KNOWLEDGE_SYNC_TASK,
-    title: KNOWLEDGE_SYNC_TITLE,
-    steps: KNOWLEDGE_SYNC_STEPS,
-    org: (p) => p.org,
-    // On a successful, conflict-free process that CHANGED the corpus, the settle
-    // hook ripples a baseline re-scan to the org's connected repos (knowledge-
-    // chain.ts) — best-effort, never throws. `corpusChanged` rides the result.
-    onSettled: onSettled ? (ctx, outcome, result) => onSettled(ctx.payload, outcome, result) : undefined,
-    errorMeta: (err, p) => ({
-      component: 'knowledge',
-      orgId: p.org,
-      connector: p.kind,
-      upstreamStatus: upstreamStatusOf(err),
-      route: 'worker knowledge.sync',
-    }),
-    async run(ctx) {
-      const { org } = ctx.payload;
-      // Fold the workspace decisions (force excludes/includes, verdicts) into curate.
-      const decisions = await getWorkspaceDecisions(org);
-
-      // Content signature of the corpus BEFORE re-consolidating — compared with the
-      // after signature so the settle hook skips the repo ripple when this process
-      // changed nothing meaningful (volatile timestamps are excluded from the sha).
-      const before = corpusContentSha(
-        await loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId: org }, 'corpus'),
-      );
-
-      const result = await processWorkspaceKnowledge(org, d.knowledge, {
-        decisions,
-        onProgress: async (current, total, message) => {
-          if (message === SYNC_MSG_CONSOLIDATE) await ctx.phase('consolidate');
-          else await ctx.phase('fetch', total > 0 ? `${current}/${total} docs` : undefined);
-        },
-        // Curate sub-phases surface on the "consolidate" step (N/M docs detail).
-        tracker: stepBridge(ctx.tracker, 'consolidate', CURATE_STEPS),
-      });
-
-      const after = corpusContentSha(
-        await loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId: org }, 'corpus'),
-      );
-
-      // Processing consumed the swept work for EVERY source — clear all pending
-      // records so no source's Process button lingers until the next sweep.
-      for (const connector of Object.values(CONNECTORS)) {
-        if (connector) await d.integrations.setPending(org, connector.kind, null);
-      }
-      return {
-        result: { synced: result.synced, corpusChanged: before !== after },
-        notification: {
-          level: 'success',
-          title: 'Processing complete',
-          body: `Processed ${result.synced} document${result.synced === 1 ? '' : 's'}.`,
-          data: { synced: result.synced },
-        },
-      };
-    },
-    onError: (err) => ({
-      level: 'error',
-      title: 'Processing failed',
-      body: 'Processing didn’t finish. Open Details for the technical reason.',
-      data: { detail: err.message },
-    }),
-  };
-}
-
-/** Sync-now stage: fetch the source, PERSIST every body + reconcile the ledger
- *  (Sources fills now), and price the classify+consolidate stage (no LLM). A
- *  non-empty delta persists a pending record + toasts the work to process; an empty
- *  delta clears any pending record + toasts "up to date". The estimate rides the
- *  job's result; the Process button dispatches the union consolidation (`/sync`). */
-function knowledgeEstimateJob(d: JobBodyDeps): EeJobDefinition<EstimateJobPayload> {
-  return {
-    type: KNOWLEDGE_ESTIMATE_TASK,
-    title: KNOWLEDGE_ESTIMATE_TITLE,
-    steps: KNOWLEDGE_ESTIMATE_STEPS,
-    org: (p) => p.org,
-    errorMeta: (err, p) => ({
-      component: 'knowledge',
-      orgId: p.org,
-      connector: p.kind,
-      upstreamStatus: upstreamStatusOf(err),
-      route: 'worker knowledge.estimate',
-    }),
-    async run(ctx) {
-      const { org, kind } = ctx.payload;
-      const connector = CONNECTORS[kind as ConnectorKind];
-      if (!connector) throw new Error(`Unknown connector: ${kind}`);
-      const conn = await d.integrations.getConnection(org, kind);
-      if (!conn?.token) throw new Error(`No ${kind} connection.`);
-      const cfg = connectorConfig(connector, conn.config, conn.token);
-
-      await ctx.phase('fetch');
-      // Sync now: fetch + persist bodies + reconcile the ledger, and return the
-      // classify+consolidate estimate (no LLM). Sources fills the moment this returns.
-      const estimate = await syncSource(org, d.knowledge, connector, cfg, {
-        onFetchProgress: (done, total) =>
-          ctx.phase('fetch', total > 0 ? `${done}/${total} docs` : undefined),
-      });
-      await ctx.phase('estimate');
-      // Persist the swept work (or clear it when up to date) so the Process button +
-      // its cost are visible to the whole workspace across refreshes; the estimate
-      // still rides the job's `result`. Completion always toasts (org-wide).
-      const { pending, notification } = pendingFromEstimate(
-        estimate,
-        connector.name,
-        new Date().toISOString(),
-      );
-      await d.integrations.setPending(org, kind, pending);
-      return { result: estimate, notification };
-    },
-    onError: (err) => ({
-      level: 'error',
-      title: 'Sync failed',
-      body: 'The sync didn’t finish. Open Details for the technical reason.',
-      data: { detail: err.message },
-    }),
-  };
-}
-
-/** Initial / refresh scan of a connected repo: spec (conflict detection) + the
- *  Code Quality analyze pass — all via runBaseline. */
+/** Initial / refresh scan of a connected repo: spec (conflict detection) via
+ *  runBaseline. */
 function repoBaselineJob(
   db: Db,
   onSettled?: (payload: BaselineJobPayload, outcome: JobOutcomeStatus) => Promise<void>,
@@ -462,9 +263,7 @@ function repoBaselineJob(
       if (!cfg) throw new Error('the GitHub App is not configured');
       const auth = createGithubAuth(cfg);
       const store = selectGateStore(db);
-      // Per-workspace toggle: LLM code-analysis rules run only when opted in.
-      const enableLlmAnalysis = await new WorkspaceSettingsStore(db).codeAnalysisLlm(workspaceOrgId);
-      const req = { repoFullName, installationId, defaultBranch, commitSha, force, enableLlmAnalysis };
+      const req = { repoFullName, installationId, defaultBranch, commitSha, force };
 
       const result = await runBaseline(
         {
@@ -1064,44 +863,6 @@ export async function runGuardSpecRegen(
   );
 }
 
-/** Deps the exported `runKnowledgeEstimate` / `runKnowledgeSync` test seams need —
- *  the job-body deps plus the harness stores. */
-export interface RunKnowledgeDeps {
-  db: Db;
-  jobStore: JobStore;
-  notifications: NotificationStore;
-  integrations: IntegrationStore;
-  knowledge: PgKnowledgeStore;
-}
-
-/** Run the `knowledge.estimate` (sweep) body directly (unit-testable without
- *  graphile-worker). A thin wrapper over the harness, mirroring `runGuardGate`. */
-export async function runKnowledgeEstimate(
-  deps: RunKnowledgeDeps,
-  payload: EstimateJobPayload,
-): Promise<void> {
-  await executeJob(
-    eeJobRuntime(deps.db, deps.jobStore, deps.notifications),
-    knowledgeEstimateJob(deps),
-    payload,
-  );
-}
-
-/** Run the `knowledge.sync` (processing) body directly. A thin wrapper over the
- *  harness, mirroring `runGuardGate`. `onSettled` stands in for the workspace guard
- *  chain (see knowledge-chain.ts), so a test can assert it fires on the outcome. */
-export async function runKnowledgeSync(
-  deps: RunKnowledgeDeps,
-  payload: SyncJobPayload,
-  onSettled?: (payload: SyncJobPayload, outcome: JobOutcomeStatus) => Promise<void>,
-): Promise<void> {
-  await executeJob(
-    eeJobRuntime(deps.db, deps.jobStore, deps.notifications),
-    knowledgeSyncJob(deps, onSettled),
-    payload,
-  );
-}
-
 /**
  * Start the worker with EE's task list. The runtime, connection and concurrency
  * come from the runner that owns them; everything else here is the per-edition
@@ -1109,15 +870,8 @@ export async function runKnowledgeSync(
  */
 export async function startEeWorker(deps: StartEeWorkerDeps): Promise<Runner> {
   const { db } = deps;
-  const bodyDeps: JobBodyDeps = {
-    db,
-    integrations: new IntegrationStore(db, deps.masterSecret),
-    knowledge: new PgKnowledgeStore(db),
-  };
 
   const tasks: JobTask<EeErrorContext>[] = [
-    knowledgeSyncJob(bodyDeps, deps.onKnowledgeSyncSettled),
-    knowledgeEstimateJob(bodyDeps),
     repoBaselineJob(db, deps.onBaselineSettled),
     guardGenerateJob({
       db,

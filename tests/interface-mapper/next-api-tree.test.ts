@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import path from 'node:path'
-import { analyzeFile } from '../../packages/analyzer/src/file-analyzer'
+import { analyzeFile } from '../../packages/source-facts/src/file-analyzer'
 import { collectApiRequestContracts } from '../../packages/interface-mapper/src/api-contracts'
 import { deriveApiInterfacesFromTree } from '../../packages/interface-mapper/src/api-tree'
 import type { FileAnalysis } from '../../packages/shared/src/index'

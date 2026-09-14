@@ -1,20 +1,71 @@
 /**
- * Shared pre-flight TOKEN estimator for the staged LLM pipelines (spec scan,
- * contracts generate) — the single place their estimate math lives, mirroring
- * how `analyze` estimates tokens for code rules. Pure + deterministic: callers
- * describe each stage's expected calls + per-call token sizes, and this rolls
- * them into the `LlmEstimate` shape the CLI prompt and dashboard modal already
- * render.
- *
- * Token-only by design (no dollar pricing): it reuses analyze's `CHARS_PER_TOKEN`
- * / `PROMPT_OVERHEAD_TOKENS` heuristics so all surfaces count tokens the same way.
+ * Shared pre-flight TOKEN estimator for the staged LLM pipelines (the spec scan,
+ * guard setup and guard generate) — the single place their estimate math lives.
+ * Pure + deterministic: callers describe each stage's expected calls + per-call
+ * token sizes, and this rolls them into the `LlmEstimate` shape the CLI prompt
+ * and the dashboard modal render.
  */
 
-import type { LlmEstimate } from '../../commands/analyze-core.js';
-import { CHARS_PER_TOKEN, PROMPT_OVERHEAD_TOKENS } from './context-router.js';
 import { priceForModel, type PriceTable } from './model-prices.js';
 
-export { CHARS_PER_TOKEN, PROMPT_OVERHEAD_TOKENS };
+/** Characters per token — the rough conversion every surface counts with. */
+export const CHARS_PER_TOKEN = 4;
+/** Prompt template + instructions charged on top of every call's body. */
+export const PROMPT_OVERHEAD_TOKENS = 500;
+
+/**
+ * A run's pre-flight estimate: what each stage will spend, and the ceiling for
+ * the whole run. The CLI's confirm prompt and the dashboard's modal render this
+ * one shape.
+ */
+export interface LlmEstimate {
+  totalEstimatedTokens: number;
+  /** Per-stage breakdown — staged LLM calls, in run order. */
+  stages?: {
+    /** Internal stage id (e.g. `gapJudge`). */
+    stage: string;
+    /** Human-readable label for display (e.g. "Reviewing gaps"). */
+    label?: string;
+    model: string;
+    calls: number;
+    estimatedTokens: number;
+    /** Set when call count is a range (e.g. scan's overlap pairs). */
+    callsRange?: { low: number; high: number };
+    /**
+     * Realistic (point) call count when the ceiling overstates the likely spend.
+     * Set only for stages that carry it.
+     */
+    expectedCalls?: number;
+    /**
+     * One line stating the honest BOUND behind a stage whose work count is an
+     * output of an earlier stage (guard flow synthesis: the flow count isn't
+     * knowable before the call, so the estimate quotes "flows ≤ runnable claims").
+     */
+    bound?: string;
+    /** Ceiling USD cost for this stage (set only when a price table was supplied). */
+    estimatedCostUsd?: number;
+    /** Expected USD cost for this stage (set only when {@link expectedCalls} is). */
+    expectedCostUsd?: number;
+  }[];
+  /** Short subject for the confirm copy, e.g. "12 docs" / "9 areas". */
+  subjectLabel?: string;
+  /**
+   * Ceiling USD cost for the whole run. Prices the high end of every stage's
+   * call range and ignores prompt-caching discounts, so the real bill lands at
+   * or below it. Absent when no price table was available.
+   */
+  estimatedCostUsd?: number;
+  /**
+   * Expected (likely) USD cost for the whole run — priced at each stage's realistic
+   * count instead of its ceiling. Set only when some stage carries `expectedCalls`;
+   * the ceiling {@link estimatedCostUsd} still bounds the spend.
+   */
+  expectedCostUsd?: number;
+  /** Provenance of the prices behind {@link estimatedCostUsd}. */
+  costSource?: 'live' | 'cache' | 'bundled';
+  /** True when some stage's model couldn't be priced (cost is a partial total). */
+  costPartial?: boolean;
+}
 
 /** Render a USD amount for the estimate UIs: `<$0.01`, `$0.42`, `$3.10`. */
 export function formatCostUsd(usd: number): string {
@@ -129,7 +180,6 @@ export function estimateStageTokens(
 
   const result: LlmEstimate = {
     totalEstimatedTokens,
-    tiers: [],
     stages: breakdown,
     subjectLabel,
   };

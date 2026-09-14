@@ -17,7 +17,6 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { PostHog } from 'posthog-node';
-import type { AnalysisResult } from './analyzer.service.js';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -123,35 +122,6 @@ export function bucketDuration(ms: number): string {
   if (seconds < 60) return '15-60s';
   if (seconds < 300) return '1-5m';
   return '5m+';
-}
-
-// ---------------------------------------------------------------------------
-// Language detection
-// ---------------------------------------------------------------------------
-
-const EXTENSION_TO_LANGUAGE: Record<string, string> = {
-  '.ts': 'typescript',
-  '.tsx': 'typescript',
-  '.js': 'javascript',
-  '.jsx': 'javascript',
-  '.py': 'python',
-  '.cs': 'csharp',
-  '.go': 'go',
-  '.java': 'java',
-  '.rb': 'ruby',
-  '.rs': 'rust',
-};
-
-export function detectLanguages(result: AnalysisResult): string[] {
-  const languages = new Set<string>();
-  for (const service of result.services) {
-    for (const filePath of service.files) {
-      const ext = path.extname(filePath).toLowerCase();
-      const lang = EXTENSION_TO_LANGUAGE[ext];
-      if (lang) languages.add(lang);
-    }
-  }
-  return Array.from(languages).sort();
 }
 
 // ---------------------------------------------------------------------------

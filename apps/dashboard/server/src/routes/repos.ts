@@ -1,10 +1,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { createAppError } from '@truecourse/core/lib/errors';
 import { getGit } from '@truecourse/core/lib/git';
-import { readProjectConfig, updateProjectConfig } from '@truecourse/core/config/project-config';
-import { readLatest } from '@truecourse/core/lib/analysis-store';
 import { resolveLatestEvent } from '@truecourse/core/commands/repo-events';
-import { getRules } from '@truecourse/core/services/rules';
 import {
   readRegistry,
   getProjectBySlug,
@@ -69,11 +66,9 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
     requireVisibleEntry(deps, req, req.params.id as string);
 
   // GET /api/repos - The caller's workspace's connected repos (home page).
-  // `lastAnalyzed` comes straight from the registry so unanalyzed projects don't
-  // surface a fake date. `latestEvent` is the repo's most recent lifecycle event
-  // (analyze / spec scan / contracts generate / verify / guard generate|run)
-  // composed from the per-repo stores' own timestamps — tolerant of missing or
-  // unreadable state (`resolveLatestEvent` never throws).
+  // `latestEvent` is the repo's most recent lifecycle event (spec scan / guard
+  // generate / guard run) composed from the per-repo stores' own timestamps —
+  // tolerant of missing or unreadable state (`resolveLatestEvent` never throws).
   router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const entries = await visibleTo(deps, req, await readRegistry());
@@ -83,8 +78,7 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
           name: e.name,
           path: e.path,
           remoteUrl: e.remoteUrl ?? null,
-          lastAnalyzed: e.lastAnalyzed ?? null,
-          latestEvent: await resolveLatestEvent(e.path, e.lastAnalyzed ?? null),
+          latestEvent: await resolveLatestEvent(e.path),
         })),
       );
       res.json(repos);
@@ -93,9 +87,7 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
     }
   });
 
-  // GET /api/repos/:id - Project details. Prefers the registry's cached
-  // `lastAnalyzed`, falling back to the persisted analysis timestamp when the
-  // registry doesn't track one (the gh_repos-derived registry).
+  // GET /api/repos/:id - Project details.
   router.get('/:id', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const entry = await requireEntry(req);
@@ -117,18 +109,11 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
           console.warn(`[repos] git unavailable for ${entry.path}:`, (err as Error).message);
         }
       }
-      // `lastAnalyzed` drives the dashboard's `hasAnalysis` gate (the Violations /
-      // Analytics views render an empty "No analysis yet" state when it's null).
-      // The derived registry doesn't cache it, so fall back to the timestamp of
-      // the actual persisted analysis — the source of truth.
-      const lastAnalyzed =
-        entry.lastAnalyzed ?? (await readLatest(entry.path))?.analysis.createdAt ?? null;
       res.json({
         id: entry.slug,
         name: entry.name,
         path: entry.path,
         remoteUrl: entry.remoteUrl ?? null,
-        lastAnalyzed,
         branches,
         defaultBranch,
         isGitRepo,
@@ -165,78 +150,6 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
       await removeRepoRunState(entry.path, orgOf(req));
       await deps.githubLinks?.unlinkRepo(entry.name);
       res.status(204).send();
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  // PUT /api/repos/:id/categories - Update per-repo enabled categories
-  router.put('/:id/categories', async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const entry = await requireEntry(req);
-      const { enabledCategories } = req.body as { enabledCategories: string[] | null };
-      const updated = await updateProjectConfig(entry.path, { enabledCategories });
-      res.json({ enabledCategories: updated.enabledCategories ?? null });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  // PUT /api/repos/:id/llm - Update per-repo LLM rules toggle
-  router.put('/:id/llm', async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const entry = await requireEntry(req);
-      const { enableLlmRules } = req.body as { enableLlmRules: boolean | null };
-      const updated = await updateProjectConfig(entry.path, { enableLlmRules });
-      res.json({ enableLlmRules: updated.enableLlmRules ?? null });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  // GET /api/repos/:id/config - Read per-repo config
-  router.get('/:id/config', async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const entry = await requireEntry(req);
-      res.json(await readProjectConfig(entry.path));
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  // GET /api/repos/:id/rules - Catalog with per-repo enabled overrides applied.
-  router.get('/:id/rules', async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const entry = await requireEntry(req);
-      res.json(await getRules(entry.path));
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  // PATCH /api/repos/:id/rules/:ruleKey - Toggle a single rule for this repo.
-  // Rule keys contain slashes so the client must URL-encode the key segment.
-  router.patch('/:id/rules/:ruleKey', async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const entry = await requireEntry(req);
-      const ruleKey = req.params.ruleKey as string;
-      const { enabled } = req.body as { enabled?: boolean };
-      if (typeof enabled !== 'boolean') {
-        throw createAppError('Body must include `enabled: boolean`', 400);
-      }
-
-      const all = await getRules();
-      if (!all.some((r) => r.key === ruleKey)) {
-        throw createAppError(`Unknown rule: ${ruleKey}`, 404);
-      }
-
-      const current = await readProjectConfig(entry.path);
-      const set = new Set<string>(current.disabledRules ?? []);
-      if (enabled) set.delete(ruleKey);
-      else set.add(ruleKey);
-      await updateProjectConfig(entry.path, { disabledRules: [...set].sort() });
-
-      res.json({ key: ruleKey, enabled });
     } catch (error) {
       next(error);
     }

@@ -8,36 +8,29 @@ import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type DbHandle } from '@truecourse/db';
 import { installEeStores, sweepStaleTempDirs } from '../../ee/packages/server/src/storage';
 import { getSpecStore, resetSpecStore } from '@truecourse/core/lib/spec-store';
-import { getRepoConfigStore, resetRepoConfigStore } from '@truecourse/core/config/project-config';
-import { getUiStateStore, resetUiStateStore } from '@truecourse/core/config/ui-state';
+import { getGuardStore, resetGuardStore } from '@truecourse/core/lib/guard-store';
 import { getRegistryStore, resetRegistryStore } from '@truecourse/core/config/registry';
-import { getAnalyzeLock, resetAnalyzeLock } from '@truecourse/core/lib/analyze-lock';
 import { getKvCacheStore, resetKvCacheStore } from '@truecourse/llm';
 import {
   PgSpecStore,
-  PgRepoConfigStore,
-  PgUiStateStore,
+  PgGuardStore,
   GhReposRegistryStore,
   PgKvCacheStore,
-  PgAnalyzeLock,
 } from '@truecourse/ee-data-store';
 
-// The analyze lock needs a session (a `pg.Pool`); PGlite isn't one. The wiring
-// test only asserts the seam was swapped (instanceof), so a no-op pool suffices.
+// `installEeStores` reads only `db`; the lock pool is part of the handle shape.
 const stubLockPool = {
   connect: async () => ({ query: async () => ({}), release: () => {} }),
 } as unknown as DbHandle['lockPool'];
 
 function resetAll() {
   resetSpecStore();
-  resetRepoConfigStore();
-  resetUiStateStore();
+  resetGuardStore();
   resetRegistryStore();
   resetKvCacheStore();
-  resetAnalyzeLock();
 }
 
-describe('installEeStores — swaps every seam to its Postgres/Blob impl', () => {
+describe('installEeStores — swaps every seam to its Postgres impl', () => {
   let client: PGlite;
   let prevBlob: string | undefined;
 
@@ -56,27 +49,26 @@ describe('installEeStores — swaps every seam to its Postgres/Blob impl', () =>
     await client.close();
   });
 
-  it('installs every hosted store + the advisory-lock seam', () => {
+  it('installs every hosted store', () => {
     expect(getSpecStore()).toBeInstanceOf(PgSpecStore);
-    expect(getRepoConfigStore()).toBeInstanceOf(PgRepoConfigStore);
-    expect(getUiStateStore()).toBeInstanceOf(PgUiStateStore);
+    expect(getGuardStore()).toBeInstanceOf(PgGuardStore);
     expect(getRegistryStore()).toBeInstanceOf(GhReposRegistryStore);
     expect(getKvCacheStore()).toBeInstanceOf(PgKvCacheStore);
-    expect(getAnalyzeLock()).toBeInstanceOf(PgAnalyzeLock);
   });
 
   it('the installed stores actually round-trip through Postgres', async () => {
-    // A write+read through the (now hosted) config seam lands in the DB, not a file.
-    await getRepoConfigStore().writeProjectConfig('acme/api', { enableLlmRules: false });
-    expect(await getRepoConfigStore().readProjectConfig('acme/api')).toEqual({ enableLlmRules: false });
+    // A write+read through the (now hosted) spec seam lands in the DB, not a file.
+    const ref = { repoKey: 'acme/api', commitSha: 'sha1' };
+    await getSpecStore().saveSpec(ref, 'corpus', { version: 3 });
+    expect(await getSpecStore().loadSpec(ref, 'corpus')).toEqual({ version: 3 });
     // No `.truecourse/` dir was created for the (non-filesystem) repo key.
     expect(fs.existsSync(path.join('acme/api', '.truecourse'))).toBe(false);
   });
 
-  it('resetAll restores the OSS file-backed defaults', () => {
+  it('resetAll restores the file-backed defaults', () => {
     resetAll();
     expect(getKvCacheStore()).not.toBeInstanceOf(PgKvCacheStore);
-    expect(getAnalyzeLock()).not.toBeInstanceOf(PgAnalyzeLock);
+    expect(getSpecStore()).not.toBeInstanceOf(PgSpecStore);
   });
 });
 

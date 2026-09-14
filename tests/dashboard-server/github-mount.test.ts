@@ -32,9 +32,8 @@ import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import { registerJob } from '@truecourse/jobs';
 import type { AuthResult, AuthVerifier } from '@truecourse/shared';
 
-// app.ts pulls the analyses router, which imports the socket-handlers module;
-// stub it so nothing tries to open a real socket (same shape as the other
-// route suites).
+// The routers import the socket-handlers module; stub it so nothing tries to
+// open a real socket (same shape as the other route suites).
 vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal) => {
   const actual =
     await importOriginal<typeof import('../../apps/dashboard/server/src/socket/handlers')>();
@@ -46,15 +45,7 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
   }
   return {
     ...actual,
-    emitAnalysisProgress: vi.fn(),
-    emitAnalysisComplete: vi.fn(),
-    emitViolationsReady: vi.fn(),
-    emitFilesChanged: vi.fn(),
-    emitAnalysisCanceled: vi.fn(),
-    createSocketTracker: () => new NoopTracker(),
     createSocketSpecTracker: () => new NoopTracker(),
-    createSocketLlmEstimateHandler: () => () => Promise.resolve(true),
-    createSocketStashConfirmHandler: () => () => Promise.resolve('stash'),
     emitSpecProgress: vi.fn(),
     emitSpecComplete: vi.fn(),
   };
@@ -688,16 +679,16 @@ describe('a slug that belongs to another workspace', () => {
       .expect(200);
   });
 
-  it('404s the per-repo config route', async () => {
+  it('404s the per-repo guard routes', async () => {
     const server = app();
     await linkRepo(server).expect(201);
 
     await request(server)
-      .get(`/api/repos/${REPO_SLUG}/config`)
+      .get(`/api/repos/${REPO_SLUG}/guard/staleness`)
       .set('Cookie', `tc_session=${OTHER_ORG}`)
       .expect(404);
     await request(server)
-      .get(`/api/repos/${REPO_SLUG}/config`)
+      .get(`/api/repos/${REPO_SLUG}/guard/staleness`)
       .set('Cookie', `tc_session=${ORG}`)
       .expect(200);
   });
