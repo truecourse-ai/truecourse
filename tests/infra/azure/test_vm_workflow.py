@@ -47,6 +47,11 @@ class WorkflowTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'did not report success'):
                 vm.require_guest_success({'value': [{'code': code, 'message': message}]}, DIGEST)
 
+    def test_failure_shows_the_vm_output(self):
+        message = 'Enable succeeded: \n[stdout]\nstaging\n\n[stderr]\nVM operation failed: CalledProcessError\n'
+        with self.assertRaisesRegex(RuntimeError, r'staging\nVM operation failed: CalledProcessError'):
+            vm.require_guest_success({'value': [{'code': 'ProvisioningState/succeeded', 'message': message}]}, DIGEST)
+
     def test_wrong_environment_and_tags_never_reach_azure(self):
         with patch.object(vm.subprocess, 'check_output') as cloud:
             for environment, digest in [('prod', DIGEST), ('dev', 'latest'), ('other', DIGEST)]:

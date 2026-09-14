@@ -32,6 +32,36 @@ ETC = Path('/etc/truecourse')
 ROOT = Path('/opt/truecourse')
 STATE = Path('/var/lib/truecourse/deployment')
 HEALTH_LOG = Path('/var/log/truecourse/health.log')
+UNIT_FILE = Path('/etc/systemd/system/truecourse.service')
+# Host configuration the release depends on ships with this helper, not with
+# cloud-init: bootstrap runs once per VM, deploy runs on every release.
+UNIT = '''[Unit]
+Description=TrueCourse dashboard and Docker job worker
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+ConditionPathExists=/opt/truecourse/current/app/apps/dashboard/server/dist/index.js
+
+[Service]
+Type=simple
+User=truecourse
+Group=truecourse
+SupplementaryGroups=docker
+WorkingDirectory=/var/lib/truecourse/home
+Environment=HOME=/var/lib/truecourse/home
+ExecStart=/usr/local/sbin/truecourse-vm launch
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=180
+# A release restarts the unit. The server stops its worker on SIGTERM; a job
+# still running is reaped as interrupted when the new process boots.
+TimeoutStopSec=30
+KillMode=mixed
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target
+'''
 APP_HEALTH_URL = 'http://127.0.0.1:3001/api/health'
 SECRET_NAMES = ('DATABASE_URL', 'TRUECOURSE_SECRET_KEY', 'WORKOS_API_KEY',
                 'WORKOS_CLIENT_ID', 'WORKOS_COOKIE_PASSWORD', 'GITHUB_APP_ID',
@@ -221,6 +251,13 @@ def wait_ready(image, timeout=120):
     raise RuntimeError('Application did not become ready; inspect journalctl -u truecourse')
 
 
+def install_unit():
+    if UNIT_FILE.exists() and UNIT_FILE.read_text() == UNIT:
+        return
+    UNIT_FILE.write_text(UNIT)
+    run(['systemctl', 'daemon-reload'])
+
+
 def start_release(release, env):
     atomic_json(ETC / 'app.json', env, mode=0o640, app_readable=True)
     activate_link(release)
@@ -231,14 +268,18 @@ def deploy(config, image):
     previous = current_release()
     target = stage(config, image)
     env = application_env(config, image)  # Fail before touching the running app.
-    start_release(target, env)
+    install_unit()
     try:
+        start_release(target, env)
         wait_ready(image)
     except Exception:
         # Put the previous release back so the site is not left down. Its env is
         # re-read from Key Vault, the same source the new one used.
         if previous and previous != target:
-            start_release(previous, application_env(config, read_json(previous / 'release.json')['image']))
+            try:
+                start_release(previous, application_env(config, read_json(previous / 'release.json')['image']))
+            except Exception:
+                raise RuntimeError('Release failed and the previous release could not be restarted') from None
             raise RuntimeError('Release failed; previous application release restarted') from None
         raise RuntimeError('Release failed; the new release is still active and unhealthy') from None
     print('TRUECOURSE_RELEASE_OK ' + image.split('sha256:')[-1])
@@ -271,6 +312,7 @@ def telemetry(config):
 def initialize(config):
     if not re.fullmatch(r'[a-z0-9.-]+', config['fqdn']):
         raise ValueError('Invalid hostname')
+    install_unit()
     # Caddy is a fixed reverse proxy; it answers 502 while the app restarts.
     Path('/etc/caddy/Caddyfile').write_text(config['fqdn'] + ' {\n reverse_proxy 127.0.0.1:3001\n}\n')
     run(['caddy', 'validate', '--config', '/etc/caddy/Caddyfile'])

@@ -35,20 +35,26 @@ test -f /var/lib/truecourse/deployment/bootstrap-complete
 
 
 def require_guest_success(result, digest):
-    streams = []
+    stdout, stderr = [], []
     for value in result.get('value', []):
         code, message = value.get('code', ''), value.get('message', '')
         if code == 'ComponentStatus/StdOut/succeeded':
-            streams.append(message)
+            stdout.append(message)
+        elif code == 'ComponentStatus/StdErr/succeeded':
+            stderr.append(message)
         elif code == 'ProvisioningState/succeeded':
             # Action Run Command on Linux wraps both streams in one status.
             _, separator, output = message.partition('[stdout]\n')
             if separator:
-                streams.append(output.partition('\n[stderr]')[0])
-    stdout = '\n'.join(streams)
+                out, _, err = output.partition('\n[stderr]')
+                stdout.append(out)
+                stderr.append(err.strip('\n'))
     marker = 'TRUECOURSE_RELEASE_OK ' + digest.split(':')[1]
-    if marker not in stdout.splitlines():
-        raise RuntimeError('VM release did not report success. Inspect VM logs before retrying. For first activation, verify the old Container App is stopped.')
+    if marker not in '\n'.join(stdout).splitlines():
+        # The helper prints its reason to stderr and never prints secrets.
+        lines = [line for line in (stdout + stderr) for line in line.splitlines() if line.strip()]
+        tail = '\n'.join(lines[-40:])
+        raise RuntimeError('VM release did not report success. Output from the VM:\n' + tail)
 
 
 def deploy(environment, outputs, digest, subscription):
