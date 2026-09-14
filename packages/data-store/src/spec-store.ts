@@ -33,7 +33,7 @@ interface SpecDocsManifest {
 
 function requireCommit(ref: RepoRef): string {
   if (!ref.commitSha) {
-    throw new Error('[ee-data-store] saveSpec requires a non-empty commit SHA');
+    throw new Error('[data-store] saveSpec requires a non-empty commit SHA');
   }
   return ref.commitSha;
 }
@@ -96,7 +96,7 @@ export class PgSpecStore implements SpecStore {
   // Idempotent: a DELETE with no match is a no-op.
   async deleteSpec(ref: RepoRef, artifact: SpecArtifact): Promise<void> {
     if (artifact !== 'decisions') {
-      throw new Error('[ee-data-store] deleteSpec supports only the decisions artifact');
+      throw new Error('[data-store] deleteSpec supports only the decisions artifact');
     }
     await this.deleteDecisions(decisionsScope(ref));
   }

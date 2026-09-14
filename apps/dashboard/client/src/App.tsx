@@ -8,7 +8,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { useDarkMode } from './hooks/useDarkMode';
 import { AppProvider } from './contexts/CapabilityContext';
-import { AuthProvider, AuthGate } from './ee/AuthContext';
+import { AuthProvider, AuthGate } from './auth/AuthContext';
 import PreviewApp from './preview/PreviewApp';
 
 export default function App() {

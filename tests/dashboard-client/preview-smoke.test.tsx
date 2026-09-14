@@ -54,7 +54,6 @@ const USER = {
   lastName: 'Rees',
   organizationId: 'org_1',
   organizationName: 'Northwind Labs',
-  isOperator: true,
 };
 
 function json(body: unknown, status = 200): Response {
@@ -123,7 +122,6 @@ const ROUTES: { path: string; heading: RegExp }[] = [
   { path: '/settings', heading: /^Settings$/ },
   { path: '/agent', heading: /^Agent$/ },
   { path: '/notifications', heading: /^Notifications$/ },
-  { path: '/admin', heading: /^Admin$/ },
 ];
 
 describe('the one-product shell', () => {

@@ -9,7 +9,7 @@
  * connect yet, so none render), then the two kinds that need no account — a
  * repository's own markdown, and a documentation site through its llms.txt —
  * the whole row being the button. Connecting a tool is Settings' job, so the
- * list ends with the one link that goes there.
+ * list ends with the one link that goes there, in an edition that HAS tools.
  *
  * THE REPOSITORY SCOPE reads the workspace's GitHub accounts and then the
  * repositories one of them can see, not the repositories Code has connected: a
@@ -46,6 +46,7 @@ import {
 } from '@/components/ui/dialog';
 import { addContextSource, previewContextSource } from '@/lib/api';
 import { fetchGithubStatus, fetchInstallationRepos } from '@/preview/data/real-repos';
+import { registeredSettingsTabs } from '@/preview/shell/registry';
 import { Stepper } from '@/preview/ui/stepper';
 import { sourceHref } from './context-hrefs';
 
@@ -73,7 +74,8 @@ const YIELD_NOUN: Record<AddableKind, { one: string; many: string }> = {
  * The kinds that need no connected account, in the order the dialog offers
  * them. The name of a kind is the shared one ({@link CONTEXT_SOURCE_KIND_LABEL}),
  * so the dialog and the Sources list call the same thing by the same word. The
- * tool kinds are named on Settings › Connections, where they are connected.
+ * tool kinds are named on Settings › Connections, where they are connected —
+ * a section this edition may not have, and then there is nothing to point at.
  */
 const KINDS: { kind: AddableKind; about: string }[] = [
   { kind: 'repository', about: "A repository's own markdown, by path patterns" },
@@ -104,6 +106,9 @@ export function AddContextDialog({
   onAdded?: () => void;
 }) {
   const navigate = useNavigate();
+  // Where a tool is connected. An edition without that section has no tools, so
+  // the list ends at the two kinds rather than pointing at a place that is not there.
+  const hasConnections = registeredSettingsTabs().some((tab) => tab.id === 'connections');
 
   const [kind, setKind] = useState<AddableKind | null>(null);
   const [installations, setInstallations] = useState<GithubInstallationSummary[] | null>(null);
@@ -277,15 +282,17 @@ export function AddContextDialog({
                 </button>
               </li>
             ))}
-            <li>
-              <Link
-                to={'/settings/connections'}
-                onClick={() => onOpenChange(false)}
-                className="block px-3 py-2.5 text-[13px] text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
-              >
-                Connect another tool in Settings
-              </Link>
-            </li>
+            {hasConnections && (
+              <li>
+                <Link
+                  to={'/settings/connections'}
+                  onClick={() => onOpenChange(false)}
+                  className="block px-3 py-2.5 text-[13px] text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+                >
+                  Connect another tool in Settings
+                </Link>
+              </li>
+            )}
           </ul>
         )}
 

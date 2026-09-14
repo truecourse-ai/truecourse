@@ -21,7 +21,6 @@ import {
   text,
   integer,
   bigint,
-  boolean,
   jsonb,
   timestamp,
   index,
@@ -70,24 +69,8 @@ export const jobs = pgTable(
   ],
 );
 
-// Coalesced follow-up baseline requests. `enqueueBaseline` single-flights one
-// scan per repo; a default-branch push whose enqueue loses that race is recorded
-// here (latest commit wins — one row per repo) instead of being dropped, then
-// replayed when the running scan settles (or at next boot after a crash). Holds
-// the full enqueue request so the replay reconstructs it verbatim.
-export const pendingBaselines = pgTable('pending_baselines', {
-  repoFullName: text('repo_full_name').primaryKey(),
-  installationId: bigint('installation_id', { mode: 'number' }).notNull(),
-  defaultBranch: text('default_branch').notNull(),
-  commitSha: text('commit_sha').notNull(),
-  workspaceOrgId: text('workspace_org_id').notNull(),
-  force: boolean('force').notNull().default(false),
-  quiet: boolean('quiet').notNull().default(false),
-  updatedAt: ts('updated_at').notNull(),
-});
-
-// Coalesced follow-up guard-baseline refreshes — the guard analogue of
-// `pending_baselines`. `enqueueGuardBaseline` single-flights one baseline run per
+// Coalesced follow-up guard-baseline refreshes. `enqueueGuardBaseline`
+// single-flights one baseline run per
 // repo; a refresh whose enqueue loses that race (a rapid second merge, or the
 // generate→baseline chain racing a merge) is recorded here (latest commit wins —
 // one row per repo) instead of being dropped, then replayed when the running
@@ -99,15 +82,6 @@ export const pendingGuardBaselines = pgTable('pending_guard_baselines', {
   commitSha: text('commit_sha').notNull(),
   workspaceOrgId: text('workspace_org_id').notNull(),
   updatedAt: ts('updated_at').notNull(),
-});
-
-// Deploy-time guard backfill marker. The one-time backfill (generate + baseline
-// for every already-connected repo) persists one row per repo it has processed,
-// so a subsequent deploy skips it entirely — a repo with no spec docs never
-// produces guard state, so a state-only check would re-enqueue every deploy.
-export const guardBackfillMarkers = pgTable('guard_backfill_markers', {
-  repoFullName: text('repo_full_name').primaryKey(),
-  markedAt: ts('marked_at').notNull(),
 });
 
 export const notifications = pgTable(

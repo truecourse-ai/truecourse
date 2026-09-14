@@ -1,7 +1,8 @@
 /**
  * Settings as a hub: the workspace's members, where its repositories are
- * connected from, the document connectors, and the LLM provider. The sub-tab
- * is in the URL, so a settings page is a place a link can point at.
+ * connected from, the LLM provider, and whatever this edition registered
+ * beside them. The sub-tab is in the URL, so a settings page is a place a link
+ * can point at.
  *
  * Everything here is the server's. There is no plan and no entitlement read yet,
  * so nothing is drawn as plan-gated: a feature that is not built says Coming
@@ -11,9 +12,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { CONTEXT_SOURCE_KIND_LABEL, GITHUB_INSTALL_ORIGINS, LLM_PROVIDER_KINDS } from '@truecourse/shared';
+import { GITHUB_INSTALL_ORIGINS, LLM_PROVIDER_KINDS } from '@truecourse/shared';
 import type {
-  ContextSourceKind,
   GithubInstallationSummary,
   GithubRepoSummary,
   LlmConfigResponse,
@@ -21,23 +21,14 @@ import type {
   LlmProviderKind,
   GithubInstallOrigin,
 } from '@truecourse/shared';
-import { ConnectorLogo, type ConnectorTool } from '@/preview/ui/connector-logos';
 import { StatusWord } from '@/preview/ui/status-word';
-import { Facts, ProviderIcon, PROVIDER_NAME, PageHeader, SideMenu } from '@/preview/ui/bits';
+import { Facts, ProviderIcon, PageHeader, SideMenu } from '@/preview/ui/bits';
 import { fetchLlmConfig, saveLlmConfig } from '@/preview/data/llm-config';
+import { repositoryProviders } from '@/preview/data/providers';
 import { fetchGithubStatus } from '@/preview/data/real-repos';
-import type { ProviderId } from '@/preview/data/types';
 import { MembersTab } from '@/preview/pages/MembersTab';
 import { usePreviewState } from '@/preview/shell/preview-state';
-
-const TABS = [
-  { id: 'members', label: 'Members' },
-  { id: 'repositories', label: 'Repositories' },
-  { id: 'connections', label: 'Connections' },
-  { id: 'models', label: 'Models' },
-] as const;
-
-type TabId = (typeof TABS)[number]['id'];
+import { registeredSettingsTabs, type SettingsTab } from '@/preview/shell/registry';
 
 /** What '/api/github/status' said; null while the read is in flight. */
 type GithubProviderState = {
@@ -50,9 +41,6 @@ type GithubProviderState = {
   reason?: string;
 };
 
-/** The providers a repository can be connected from, in the order they are offered. */
-const PROVIDERS: readonly ProviderId[] = ['github', 'gitlab', 'azure'];
-
 /**
  * Repositories: where they are connected FROM. One row per source-control
  * provider — its mark, its name, a status word, and the accounts under it,
@@ -61,9 +49,9 @@ const PROVIDERS: readonly ProviderId[] = ['github', 'gitlab', 'azure'];
  * GitHub is the real one: its accounts are the App's installations the server
  * reports, each line naming the account, its type and how many repositories
  * this workspace has linked through it, and connecting is a top-level
- * navigation to the App's install page. GitLab and Azure DevOps are listed and
- * say Coming soon: hiding them would make the page lie about where this is
- * going, and offering them would make it lie about what it does.
+ * navigation to the App's install page. Every other provider is listed and says
+ * Coming soon: hiding one would make the page lie about where this is going,
+ * and offering it would make it lie about what it does.
  */
 /** Where an install started here returns to: the place that sent the user here, else this tab. */
 function installOriginOf(raw: string | null): GithubInstallOrigin {
@@ -106,14 +94,14 @@ function RepositoriesTab() {
 
   return (
     <ul className="divide-y divide-border border-b border-border" aria-label="Providers">
-      {PROVIDERS.map((id) => {
+      {repositoryProviders().map(({ id, name }) => {
         const live = id === 'github';
         return (
           <li key={id} className="flex items-start gap-4 px-6 py-3">
             <ProviderIcon provider={id} className="mt-0.5 h-6 w-6 shrink-0" />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-3">
-                <span className="text-[13px] font-medium text-foreground">{PROVIDER_NAME[id]}</span>
+                <span className="text-[13px] font-medium text-foreground">{name}</span>
                 {!live && <span className="text-[11px] text-muted-foreground">Coming soon</span>}
                 {live && github === null && <StatusWord tone="neutral" word="Reading" />}
                 {live && github !== null && (
@@ -158,39 +146,6 @@ function RepositoriesTab() {
           </li>
         );
       })}
-    </ul>
-  );
-}
-
-/**
- * The tools a document can come from, one row each with its brand mark and the
- * shared name of its kind. None can be connected yet, so every row says Coming
- * soon and none of them is a control: hiding them would make the page lie about
- * where this is going, and offering them would make it lie about what it does.
- */
-const CONNECTORS: readonly { kind: ContextSourceKind; tool: ConnectorTool }[] = [
-  { kind: 'jira', tool: 'jira' },
-  { kind: 'confluence', tool: 'confluence' },
-  { kind: 'google-drive', tool: 'gdrive' },
-  { kind: 'onedrive', tool: 'onedrive' },
-  { kind: 'notion', tool: 'notion' },
-  { kind: 'slack', tool: 'slack' },
-];
-
-function ConnectionsTab() {
-  return (
-    <ul className="divide-y divide-border border-b border-border" aria-label="Connectors">
-      {CONNECTORS.map((connector) => (
-        <li key={connector.kind} className="flex items-start gap-4 px-6 py-3">
-          <ConnectorLogo tool={connector.tool} className="mt-0.5 h-6 w-6 shrink-0" />
-          <div className="flex min-w-0 flex-1 items-center gap-3">
-            <span className="truncate text-[13px] font-medium text-foreground">
-              {CONTEXT_SOURCE_KIND_LABEL[connector.kind]}
-            </span>
-            <span className="shrink-0 text-[11px] text-muted-foreground">Coming soon</span>
-          </div>
-        </li>
-      ))}
     </ul>
   );
 }
@@ -436,21 +391,41 @@ function ModelsTab() {
   );
 }
 
+/**
+ * The sections of Settings: the three the product has, then whatever this
+ * edition registered. A bare `/settings` lands on the first.
+ */
+function settingsTabs(
+  inviteOpen: boolean,
+  onInviteOpenChange: (open: boolean) => void,
+): SettingsTab[] {
+  const base: SettingsTab[] = [
+    {
+      id: 'members',
+      label: 'Members',
+      render: () => <MembersTab inviteOpen={inviteOpen} onInviteOpenChange={onInviteOpenChange} />,
+    },
+    { id: 'repositories', label: 'Repositories', render: () => <RepositoriesTab /> },
+    { id: 'models', label: 'Models', render: () => <ModelsTab /> },
+  ];
+  return [...base, ...registeredSettingsTabs()];
+}
+
 export default function SettingsPage() {
   const { tab } = useParams<{ tab?: string }>();
-  const active = useMemo<TabId>(
-    () => (TABS.find((t) => t.id === tab)?.id ?? 'members') as TabId,
-    [tab],
-  );
-
   const [inviteOpen, setInviteOpen] = useState(false);
+  const tabs = useMemo(
+    () => settingsTabs(inviteOpen, setInviteOpen),
+    [inviteOpen],
+  );
+  const active = tabs.find((t) => t.id === tab) ?? tabs[0]!;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader
         title="Settings"
         right={
-          active === 'members' && (
+          active.id === 'members' && (
             <button
               type="button"
               onClick={() => setInviteOpen(true)}
@@ -464,17 +439,10 @@ export default function SettingsPage() {
       <div className="flex min-h-0 flex-1">
         <SideMenu
           label="Settings sections"
-          activeId={active}
-          items={TABS.map((t) => ({ id: t.id, label: t.label, to: `/settings/${t.id}` }))}
+          activeId={active.id}
+          items={tabs.map((t) => ({ id: t.id, label: t.label, to: `/settings/${t.id}` }))}
         />
-        <div className="min-h-0 min-w-0 flex-1 overflow-auto">
-          {active === 'members' && (
-            <MembersTab inviteOpen={inviteOpen} onInviteOpenChange={setInviteOpen} />
-          )}
-          {active === 'repositories' && <RepositoriesTab />}
-          {active === 'connections' && <ConnectionsTab />}
-          {active === 'models' && <ModelsTab />}
-        </div>
+        <div className="min-h-0 min-w-0 flex-1 overflow-auto">{active.render()}</div>
       </div>
     </div>
   );

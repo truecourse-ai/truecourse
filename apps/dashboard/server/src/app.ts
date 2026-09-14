@@ -17,6 +17,7 @@ import llmRouter from './routes/llm.js';
 import { createAuthGate } from './middleware/auth.js';
 import type { GithubMount } from './github/index.js';
 import type { JobsMount } from './jobs/index.js';
+import type { ServerRouterMount } from './features.js';
 import { setCurrentJobs } from './jobs/current.js';
 import type { AuthVerifier } from '@truecourse/shared';
 
@@ -59,6 +60,11 @@ export interface CreateAppOptions {
    * pass it) makes the three job routes answer 503.
    */
   jobs: JobsMount | null;
+  /**
+   * Routers this edition adds, already built (see `features.ts`). The open
+   * edition has none; the enterprise bundle registers its own before boot.
+   */
+  featureRouters?: ServerRouterMount[];
 }
 
 export function createApp(opts: CreateAppOptions): express.Express {
@@ -88,6 +94,11 @@ export function createApp(opts: CreateAppOptions): express.Express {
   // Auth endpoints (login / callback / logout / me) must be reachable
   // without a session, so they mount before the gate.
   if (opts.authRouter) app.use('/api/auth', opts.authRouter);
+
+  const featureRouters = opts.featureRouters ?? [];
+  for (const mount of featureRouters) {
+    if (mount.public) app.use(mount.path, mount.router);
+  }
 
   // Capabilities + health stay public so the client can discover the
   // feature gates and liveness before authenticating.
@@ -150,6 +161,11 @@ export function createApp(opts: CreateAppOptions): express.Express {
   // invitations standing against it. Scoped to the session's organization, so
   // it needs the gate above it and nothing else.
   if (opts.workspaceRouter) app.use('/api/workspace', opts.workspaceRouter);
+
+  // This edition's own routers, with the session already resolved.
+  for (const mount of featureRouters) {
+    if (!mount.public) app.use(mount.path, mount.router);
+  }
 
   // The workspace's Models settings — workspace-scoped, not repo-scoped, so it
   // sits beside the registry routes rather than behind the project resolver.

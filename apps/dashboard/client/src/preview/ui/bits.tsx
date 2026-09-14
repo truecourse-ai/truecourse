@@ -13,24 +13,25 @@ import { useCallback, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronRight, Pin } from 'lucide-react';
 import type { ProviderId } from '@/preview/data/types';
-import azure from './logos/azure.svg';
-import github from './logos/github.svg';
-import gitlab from './logos/gitlab.svg';
+import { repositoryProvider } from '@/preview/data/providers';
 
-/** The providers' own marks (the SVG Logos and Devicon sets, CC0/MIT), as image files. */
-const PROVIDER_LOGO: Record<ProviderId, string> = { github, gitlab, azure };
+/** A provider's name, or its id when this edition does not know it. */
+export function providerName(provider: ProviderId): string {
+  return repositoryProvider(provider)?.name ?? provider;
+}
 
-export const PROVIDER_NAME: Record<ProviderId, string> = {
-  github: 'GitHub',
-  gitlab: 'GitLab',
-  azure: 'Azure DevOps',
-};
-
+/**
+ * A provider's own mark (the SVG Logos and Devicon sets, CC0/MIT). A provider
+ * this edition does not know has no mark, and draws none rather than a broken
+ * image.
+ */
 export function ProviderIcon({ provider, className = 'h-3.5 w-3.5' }: { provider: ProviderId; className?: string }) {
+  const known = repositoryProvider(provider);
+  if (!known) return null;
   return (
     <img
-      src={PROVIDER_LOGO[provider]}
-      alt={PROVIDER_NAME[provider]}
+      src={known.logo}
+      alt={known.name}
       className={`${className} shrink-0 object-contain`}
     />
   );

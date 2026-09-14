@@ -15,7 +15,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
-import { PgGuardStore, PgSpecStore } from '../../ee/packages/data-store/src/index';
+import { PgGuardStore, PgSpecStore } from '../../packages/data-store/src/index';
 import { PgGuardOverlayStore } from '../../packages/data-store/src/index';
 // Import the store setters from the PACKAGE (dist) specifiers — the SAME module
 // instances the dashboard route uses, so setGuardStore actually swaps the store

@@ -5,7 +5,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
-import { PgSpecStore } from '../../ee/packages/data-store/src/index';
+import { PgSpecStore } from '../../packages/data-store/src/index';
 
 vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../apps/dashboard/server/src/socket/handlers')>();
@@ -19,7 +19,7 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
 });
 
 // The PR-head re-curate runs the full curate pipeline (LLM); its own docSource
-// wiring is covered in tests/core + tests/ee-data-store. Stub it here so the route
+// wiring is covered in tests/core + tests/data-store. Stub it here so the route
 // test asserts the route INVOKES it and acts on the conflict count.
 vi.mock('@truecourse/core/commands/spec-in-process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@truecourse/core/commands/spec-in-process')>();

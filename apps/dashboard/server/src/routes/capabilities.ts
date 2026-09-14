@@ -4,10 +4,9 @@
  * Reports which feature gates are on. Public (mounted before the auth gate) so
  * the client can read them before authenticating.
  *
- * `edition` MUST stay the constant `'community'`. On `'enterprise'` the
- * client's `EeModuleContext` loads the legacy ee client chunk, which replaces
- * the `/` home and calls `/api/ee/workspace/*` routes that no longer exist. The
- * field itself stays on the wire because the client still reads it.
+ * `edition` is the constant `'community'`: there is one product, and which
+ * edition a deployment runs is decided when its bundle is built, not answered
+ * over the wire. The field stays because the client still reads it.
  */
 
 import { Router } from 'express';

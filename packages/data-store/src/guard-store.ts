@@ -99,7 +99,7 @@ const OBJECT_CONCURRENCY = 16;
 /** Reject an empty commit on the per-commit writes (mirrors `assertCommit`). */
 function requireCommit(ref: RepoRef, what: string): string {
   if (!ref.commitSha) {
-    throw new Error(`[ee-data-store] ${what} requires a non-empty commit SHA`);
+    throw new Error(`[data-store] ${what} requires a non-empty commit SHA`);
   }
   return ref.commitSha;
 }
@@ -343,7 +343,7 @@ export class PgGuardStore implements GuardStore {
     files: Record<string, string | Buffer>,
   ): Promise<string> {
     if (!SAFE_SEGMENT.test(runId)) {
-      throw new Error(`[ee-data-store] unsafe guard run id: ${runId}`);
+      throw new Error(`[data-store] unsafe guard run id: ${runId}`);
     }
     const entries = await this.putEvidenceFiles(repoKey, sanitizeSegment(scenarioId), files);
 
@@ -359,7 +359,7 @@ export class PgGuardStore implements GuardStore {
       .where(and(eq(guardRuns.repoKey, repoKey), eq(guardRuns.runId, runId)))
       .returning({ runId: guardRuns.runId });
     if (updated.length === 0) {
-      throw new Error(`[ee-data-store] no guard run ${runId} to attach evidence to`);
+      throw new Error(`[data-store] no guard run ${runId} to attach evidence to`);
     }
 
     return evidenceRelPath(runId, scenarioId);
@@ -380,7 +380,7 @@ export class PgGuardStore implements GuardStore {
     const entries: Record<string, string> = {};
     for (const [file, body] of Object.entries(files)) {
       if (!SAFE_SEGMENT.test(file)) {
-        throw new Error(`[ee-data-store] unsafe evidence file name: ${file}`);
+        throw new Error(`[data-store] unsafe evidence file name: ${file}`);
       }
       const sha = Buffer.isBuffer(body)
         ? await this.content.putBytes(scope, body)
@@ -409,7 +409,7 @@ export class PgGuardStore implements GuardStore {
       .returning({ repoKey: guardResults.repoKey });
     if (updated.length === 0) {
       throw new Error(
-        `[ee-data-store] no guard result for ${ref.repoKey}@${commitSha} to attach evidence to`,
+        `[data-store] no guard result for ${ref.repoKey}@${commitSha} to attach evidence to`,
       );
     }
   }
@@ -597,7 +597,7 @@ export class PgGuardStore implements GuardStore {
         const body = await this.content.get(scope, sha);
         if (body == null) {
           throw new Error(
-            `[ee-data-store] missing guard object ${sha} for ${rel} (${ref.repoKey}@${ref.commitSha})`,
+            `[data-store] missing guard object ${sha} for ${rel} (${ref.repoKey}@${ref.commitSha})`,
           );
         }
         await fsp.mkdir(path.dirname(dest), { recursive: true });

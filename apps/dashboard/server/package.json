@@ -3,6 +3,13 @@
   "version": "0.8.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": {
+      "truecourse-source": "./src/edition.ts",
+      "types": "./dist/edition.d.ts",
+      "import": "./dist/edition.js"
+    }
+  },
   "scripts": {
     "dev": "TRUECOURSE_DEV=1 tsx watch --conditions=truecourse-source src/index.ts",
     "build": "tsc",

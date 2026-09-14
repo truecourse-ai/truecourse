@@ -148,6 +148,13 @@
       "when": 1789338943549,
       "tag": "0020_drop_analyze_era",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1789356796572,
+      "tag": "0021_drop_ee_era",
+      "breakpoints": true
     }
   ]
 }

@@ -36,7 +36,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Capsule, ProviderIcon, PROVIDER_NAME } from '@/preview/ui/bits';
+import { Capsule, ProviderIcon, providerName } from '@/preview/ui/bits';
 import { StatusWord } from '@/preview/ui/status-word';
 import { Stepper } from '@/preview/ui/stepper';
 import type {
@@ -89,7 +89,7 @@ function InstanceLine({ name }: { name: string }) {
     <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
       <ProviderIcon provider="github" className="h-4 w-4" />
       <span className="text-foreground">{name}</span>
-      <span>· {PROVIDER_NAME.github}</span>
+      <span>· {providerName('github')}</span>
       <StatusWord tone="success" word="Connected" />
     </div>
   );
@@ -364,7 +364,7 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[13px] text-foreground">{nameOf(installation)}</span>
                       <span className="block truncate text-[11px] text-muted-foreground">
-                        {PROVIDER_NAME.github} · {facts}
+                        {providerName('github')} · {facts}
                       </span>
                     </span>
                     <StatusWord tone="success" word="Connected" />
@@ -488,7 +488,7 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
         {step === 4 && (
           <div className="rounded-md border border-border px-3 py-2.5">
             <p className="text-xs text-foreground">
-              Connect from {chosen ? `${PROVIDER_NAME.github} · ${nameOf(chosen)}` : PROVIDER_NAME.github}:
+              Connect from {chosen ? `${providerName('github')} · ${nameOf(chosen)}` : providerName('github')}:
             </p>
             <ul className="mt-1.5 space-y-1">
               {picked.map((name) => (

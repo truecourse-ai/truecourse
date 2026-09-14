@@ -1,13 +1,24 @@
 /**
- * Enforces the open-core import boundary: OSS code must never
- * statically import an `@truecourse/ee-*` package. The only sanctioned
- * way for OSS to reach enterprise code is a runtime dynamic `import()`
- * inside a loader (gated on edition), which this guard deliberately
- * allows.
+ * The open/enterprise line, pinned.
  *
- * This is a lightweight stand-in until a full ESLint config lands with
- * a `no-restricted-imports` rule; it runs in the normal node suite so
- * the boundary can't silently rot.
+ * The product is open except three things — the document Connections, the
+ * repository providers beyond GitHub and GitLab, and more than one workspace —
+ * which live in `ee/` and REGISTER into the open shell's registries. The
+ * dependency runs one way: `ee/` imports the open tree, never the reverse. So
+ * open code may not name an `ee/` path or an `@truecourse/ee-*` package at all,
+ * and there is no loader making it conditional.
+ *
+ * The one seam that crosses is `@edition`, the module `main.tsx` imports before
+ * rendering: the build points it at the enterprise bundle when the checkout has
+ * one, and at the open edition's no-op when it does not. That alias is allowed
+ * in exactly one file, which is asserted here.
+ *
+ * The other two rules are vendor SDK homes: model and provider APIs belong in
+ * `packages/llm-api`, and the Claude Agent SDK in `packages/llm-claude-agent`.
+ *
+ * A lightweight stand-in until a full ESLint config lands with a
+ * `no-restricted-imports` rule; it runs in the normal node suite so the
+ * boundary can't silently rot.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -22,13 +33,19 @@ const repoRoot = path.resolve(
   '..',
 );
 
-// OSS source roots that must not statically import ee.
+// OSS source roots that must not reach into ee.
 const OSS_ROOTS = [
   'apps/dashboard/client/src',
   'apps/dashboard/server/src',
   'apps/landing/src',
   'packages',
 ];
+
+/** The enterprise bundle: the three features, and nothing else. */
+const EE_PACKAGES = ['ee/packages/client', 'ee/packages/server'];
+
+/** The one open file allowed to import the edition module. */
+const EDITION_IMPORTER = 'apps/dashboard/client/src/main.tsx';
 
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.next', 'out', '.turbo']);
 const SOURCE_EXT = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
@@ -50,20 +67,62 @@ function walk(dir: string, out: string[]) {
   }
 }
 
-// Static import / require of an @truecourse/ee-* package. A dynamic
-// `import('@truecourse/ee-...')` does NOT match (no `from`, and the
-// `import(` form is excluded), which is intentional.
-const STATIC_EE_IMPORT =
-  /(?:^|\n)\s*import\b[^\n]*\bfrom\s*['"]@truecourse\/ee-|(?:^|\n)\s*import\s*['"]@truecourse\/ee-|require\(\s*['"]@truecourse\/ee-/;
+function ossFiles(): string[] {
+  const files: string[] = [];
+  for (const root of OSS_ROOTS) walk(path.join(repoRoot, root), files);
+  return files;
+}
+
+/** Every module specifier a file imports, requires, re-exports or type-imports. */
+function specifiersOf(file: string, src: string): string[] {
+  const source = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true);
+  const found: string[] = [];
+  const visit = (node: ts.Node) => {
+    if (
+      (ts.isImportDeclaration(node) || ts.isExportDeclaration(node))
+      && node.moduleSpecifier
+      && ts.isStringLiteral(node.moduleSpecifier)
+    ) {
+      found.push(node.moduleSpecifier.text);
+    } else if (ts.isExternalModuleReference(node) && ts.isStringLiteral(node.expression)) {
+      found.push(node.expression.text);
+    } else if (
+      ts.isCallExpression(node)
+      && (node.expression.kind === ts.SyntaxKind.ImportKeyword
+        || (ts.isIdentifier(node.expression) && node.expression.text === 'require'))
+      && node.arguments[0]
+      && ts.isStringLiteral(node.arguments[0])
+    ) {
+      found.push(node.arguments[0].text);
+    } else if (
+      ts.isImportTypeNode(node)
+      && ts.isLiteralTypeNode(node.argument)
+      && ts.isStringLiteral(node.argument.literal)
+    ) {
+      found.push(node.argument.literal.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return found;
+}
+
+/** Does this specifier name enterprise code? */
+function reachesEe(specifier: string): boolean {
+  return (
+    specifier.startsWith('@truecourse/ee-')
+    || specifier === 'ee'
+    || specifier.startsWith('ee/')
+    || /(^|\/)\.\.\/ee\//.test(specifier)
+    || specifier.includes('/ee/packages/')
+  );
+}
 
 // Vendor SDKs whose blast radius the boundary keeps contained.
 //
 // Model and provider APIs belong in `packages/llm-api`. Dashboard activity
 // streaming also uses the SDK's UI transport, with only the named imports
 // below allowed. Model access still goes through `@truecourse/shared/llm`.
-//
-// The cloud blob SDKs (`@aws-sdk/*` / `@azure/*`, used by `ee/packages/storage`)
-// stay enterprise-only: OSS uses the filesystem.
 const AI_SDK_HOME = 'packages/llm-api';
 
 const ACTIVITY_SDK_IMPORTS: Record<string, { values: string[]; types: string[] }> = {
@@ -132,31 +191,82 @@ const CLAUDE_AGENT_SDK_HOME = 'packages/llm-claude-agent';
 
 const CLAUDE_AGENT_SDK_REFERENCE = /@anthropic-ai\/claude-agent-sdk/;
 
-describe('open-core import boundary', () => {
-  it('no OSS source statically imports @truecourse/ee-*', () => {
-    const files: string[] = [];
-    for (const root of OSS_ROOTS) walk(path.join(repoRoot, root), files);
-
+describe('the open/enterprise line', () => {
+  it('no open source names an ee/ path or an @truecourse/ee-* package', () => {
     const offenders: string[] = [];
-    for (const file of files) {
+    for (const file of ossFiles()) {
+      const rel = path.relative(repoRoot, file).split(path.sep).join('/');
       const src = fs.readFileSync(file, 'utf8');
-      if (STATIC_EE_IMPORT.test(src)) {
-        offenders.push(path.relative(repoRoot, file));
+      for (const specifier of specifiersOf(rel, src)) {
+        if (reachesEe(specifier)) offenders.push(`${rel}: ${specifier}`);
       }
     }
 
     expect(
       offenders,
-      `OSS files statically importing ee/ (use a gated dynamic import() instead):\n${offenders.join('\n')}`,
+      `Open files reaching into ee/ (register into the shell's registries instead):\n${offenders.join('\n')}`,
     ).toEqual([]);
   });
 
-  it('keeps AI SDK model access in llm-api and permits only activity UI transport imports elsewhere', () => {
-    const files: string[] = [];
-    for (const root of OSS_ROOTS) walk(path.join(repoRoot, root), files);
+  it('the edition module is imported by exactly one open file', () => {
+    const importers: string[] = [];
+    for (const file of ossFiles()) {
+      const rel = path.relative(repoRoot, file).split(path.sep).join('/');
+      const src = fs.readFileSync(file, 'utf8');
+      if (specifiersOf(rel, src).includes('@edition')) importers.push(rel);
+    }
+    expect(importers).toEqual([EDITION_IMPORTER]);
+  });
 
+  it('the open edition has an edition module of its own, so it builds with ee/ absent', () => {
+    const stub = path.join(
+      repoRoot,
+      'apps/dashboard/client/src/preview/shell/open-edition.ts',
+    );
+    expect(fs.existsSync(stub)).toBe(true);
+    expect(fs.readFileSync(stub, 'utf8')).toContain('export function registerEditionFeatures');
+  });
+
+  it('the enterprise bundle is the three features, and it registers rather than being imported', () => {
+    const present = EE_PACKAGES.filter((pkg) => fs.existsSync(path.join(repoRoot, pkg)));
+    expect(present).toEqual(EE_PACKAGES);
+
+    const edition = fs.readFileSync(
+      path.join(repoRoot, 'ee/packages/client/src/edition.tsx'),
+      'utf8',
+    );
+    for (const register of [
+      'registerSettingsTab',
+      'registerRepositoryProvider',
+      'registerWorkspaceSwitcher',
+    ]) {
+      expect(edition).toContain(register);
+    }
+
+    const server = fs.readFileSync(
+      path.join(repoRoot, 'ee/packages/server/src/index.ts'),
+      'utf8',
+    );
+    expect(server).toContain('registerServerFeature');
+  });
+
+  it('the enterprise bundle may import the open tree (the dependency runs one way)', () => {
+    const files: string[] = [];
+    for (const pkg of EE_PACKAGES) walk(path.join(repoRoot, pkg), files);
+    const openImporters = files.filter((file) => {
+      const rel = path.relative(repoRoot, file).split(path.sep).join('/');
+      return specifiersOf(rel, fs.readFileSync(file, 'utf8')).some(
+        (specifier) => specifier.startsWith('@/') || specifier === '@truecourse/dashboard-server',
+      );
+    });
+    expect(openImporters.length).toBeGreaterThan(0);
+  });
+});
+
+describe('vendor SDK homes', () => {
+  it('keeps AI SDK model access in llm-api and permits only activity UI transport imports elsewhere', () => {
     const offenders: string[] = [];
-    for (const file of files) {
+    for (const file of ossFiles()) {
       const rel = path.relative(repoRoot, file);
       if (rel.startsWith(`${AI_SDK_HOME}${path.sep}`)) continue;
       const src = fs.readFileSync(file, 'utf8');
@@ -213,11 +323,8 @@ describe('open-core import boundary', () => {
   });
 
   it('only packages/llm-claude-agent references the Claude Agent SDK', () => {
-    const files: string[] = [];
-    for (const root of OSS_ROOTS) walk(path.join(repoRoot, root), files);
-
     const offenders: string[] = [];
-    for (const file of files) {
+    for (const file of ossFiles()) {
       const rel = path.relative(repoRoot, file);
       if (rel.startsWith(`${CLAUDE_AGENT_SDK_HOME}${path.sep}`)) continue;
       const src = fs.readFileSync(file, 'utf8');
@@ -243,9 +350,9 @@ describe('open-core import boundary', () => {
     ).toBe(true);
   });
 
-  it('no OSS source statically imports a cloud blob SDK (@aws-sdk/* / @azure/*)', () => {
-    const files: string[] = [];
-    for (const root of OSS_ROOTS) walk(path.join(repoRoot, root), files);
+  it('no source imports a cloud blob SDK (@aws-sdk/* / @azure/*)', () => {
+    const files = ossFiles();
+    for (const pkg of EE_PACKAGES) walk(path.join(repoRoot, pkg), files);
 
     const offenders: string[] = [];
     for (const file of files) {
@@ -257,13 +364,11 @@ describe('open-core import boundary', () => {
 
     expect(
       offenders,
-      `OSS files importing an enterprise-only cloud blob SDK (they live in ee/):\n${offenders.join('\n')}`,
+      `Files importing a cloud blob SDK (storage is Postgres and the run's own directory):\n${offenders.join('\n')}`,
     ).toEqual([]);
   });
 
   it('actually scans a non-trivial number of files (guard is wired)', () => {
-    const files: string[] = [];
-    for (const root of OSS_ROOTS) walk(path.join(repoRoot, root), files);
-    expect(files.length).toBeGreaterThan(50);
+    expect(ossFiles().length).toBeGreaterThan(50);
   });
 });

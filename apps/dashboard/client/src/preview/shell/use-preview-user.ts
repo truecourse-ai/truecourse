@@ -2,8 +2,7 @@
  * The signed-in user, in the shape the shell draws.
  *
  * The identity is the session's: it comes from the auth context's `AuthUser`,
- * so the avatar, the name and the email in the user menu are the session's,
- * and the Admin entry appears for the operators the server actually marks.
+ * so the name and the email in the user menu are the session's.
  *
  * With no session — a tree rendered without an auth provider, or a probe that
  * answered anon — there is no user, and the surfaces that draw one draw
@@ -12,7 +11,7 @@
 
 import { useMemo } from 'react';
 import type { AuthUser } from '@truecourse/shared';
-import { useAuth } from '@/ee/AuthContext';
+import { useAuth } from '@/auth/AuthContext';
 import type { PreviewUser } from '@/preview/data/types';
 
 /** First + last, else the email — the only two things a WorkOS user always has. */
@@ -27,7 +26,6 @@ export function toPreviewUser(user: AuthUser): PreviewUser {
     name,
     email: user.email,
     initial: name.trim().charAt(0).toUpperCase(),
-    isOperator: user.isOperator ?? false,
   };
 }
 

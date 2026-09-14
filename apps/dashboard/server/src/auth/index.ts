@@ -10,7 +10,12 @@ import { WorkOS } from '@workos-inc/node';
 import type { Router } from 'express';
 import type { AuthVerifier } from '@truecourse/shared';
 import { loadWorkosConfig, type WorkosConfig } from './config.js';
-import { createAuthRouter, createSessionVerifier } from './workos-auth.js';
+import {
+  createAuthRouter,
+  createSessionVerifier,
+  createWorkspaceSessionTools,
+  type WorkspaceSessionTools,
+} from './workos-auth.js';
 import { createWorkspaceMembersRouter } from './workspace-members.js';
 
 export { loadWorkosConfig, type WorkosConfig } from './config.js';
@@ -18,7 +23,11 @@ export { parseCookies, serializeCookie } from './cookies.js';
 export {
   createAuthRouter,
   createSessionVerifier,
+  createWorkspaceSessionTools,
   SESSION_COOKIE,
+  type MintedSession,
+  type SignedInSession,
+  type WorkspaceSessionTools,
 } from './workos-auth.js';
 export { createWorkspaceMembersRouter } from './workspace-members.js';
 
@@ -34,6 +43,11 @@ export interface Auth {
    * organization's.
    */
   members: Router;
+  /**
+   * What a route that moves the session between organizations is built from.
+   * Nothing in the open edition uses it: one workspace has nowhere to move to.
+   */
+  workspaceSession: WorkspaceSessionTools;
 }
 
 export function createAuth(): Auth {
@@ -45,5 +59,6 @@ export function createAuth(): Auth {
     verify,
     router: createAuthRouter(workos, config, verify),
     members: createWorkspaceMembersRouter(workos),
+    workspaceSession: createWorkspaceSessionTools(workos, config),
   };
 }

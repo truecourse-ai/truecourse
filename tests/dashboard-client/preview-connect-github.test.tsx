@@ -219,12 +219,12 @@ describe('a remote URL as a preview repository', () => {
       fullName: 'sub/thing',
       provider: 'gitlab',
     });
+    // A host no registered provider claims reads as github, the one that connects.
+    expect(parseRemote('https://git.sr.ht/~user/thing').provider).toBe('github');
     expect(parseRemote('https://dev.azure.com/acme/billing')).toEqual({
       fullName: 'acme/billing',
-      provider: 'azure',
+      provider: 'github',
     });
-    // No fourth icon in the preview: an unfamiliar host reads as github.
-    expect(parseRemote('https://git.sr.ht/~user/thing').provider).toBe('github');
   });
 
   it('maps a registry entry to a repository with no history behind it', () => {

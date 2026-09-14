@@ -1,13 +1,14 @@
 /**
  * The one-product shell: the sidebar the whole dashboard hangs off.
  *
- * Top to bottom: the workspace the session is in and the switcher into the
- * others, then
- * Home, Context, Code, Flows, Agent, Notifications (with the unread badge) and
- * Settings, then Admin
- * on its own, separated, when the signed-in user is an operator, then the
+ * Top to bottom: the workspace the session is in, then Home, Context, Code,
+ * Flows, Agent, Notifications (with the unread badge) and Settings, then the
  * user menu. Pull requests is NOT here: it lives inside a repository, and the
  * cross-repo feed it used to be is the home page's gate activity.
+ *
+ * There is ONE workspace, so the block at the top names it and offers no way
+ * out of it. An edition with more than one registers a switcher that replaces
+ * the block.
  *
  * The identity is the session's (`usePreviewUser`) and Sign out really ends it;
  * with no session there is no user block and no workspace block, because there
@@ -20,7 +21,6 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom';
 import {
   Bell,
-  ChevronsUpDown,
   Route,
   GitBranch,
   Home,
@@ -28,21 +28,19 @@ import {
   LogOut,
   MousePointer2,
   Moon,
-  Plus,
   Sun,
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
-  ShieldCheck,
   Check,
   type LucideIcon,
 } from 'lucide-react';
-import { useAuth } from '@/ee/AuthContext';
+import { useAuth } from '@/auth/AuthContext';
 import { useThemeToggle } from '@/hooks/useThemeToggle';
-import { CreateWorkspaceDialog } from './CreateWorkspaceDialog';
 import { usePreviewState } from './preview-state';
 import { usePreviewUser } from './use-preview-user';
 import { useOnboarding } from './use-onboarding';
+import { registeredWorkspaceSwitcher } from './registry';
 
 /** The brand wordmark face, the one place the UI uses the logo's font (`.brand-wordmark`). */
 const WORDMARK = { fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace", letterSpacing: '0.01em' } as const;
@@ -134,89 +132,31 @@ function useClickOutside(open: boolean, close: () => void) {
   return ref;
 }
 
-const initialOf = (name: string): string => name.trim().charAt(0).toUpperCase();
-
 /**
- * The workspace of the session, and the way into the others: its initial and
- * name, and a menu of every workspace the user belongs to plus Create
- * workspace. Choosing one switches the session and starts the app over in it.
- * Collapsed, the initial alone opens the same menu.
+ * The workspace the session is in: its initial and its name. There is one, so
+ * there is nothing to choose between — an edition with more than one registers
+ * a switcher that replaces this block.
  */
-function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
-  const { workspace, workspaces, switchWorkspace } = usePreviewState();
-  const [open, setOpen] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const close = useCallback(() => setOpen(false), []);
-  const ref = useClickOutside(open, close);
+function WorkspaceBlock({ collapsed }: { collapsed: boolean }) {
+  const Switcher = registeredWorkspaceSwitcher();
+  const { workspace } = usePreviewState();
+  if (Switcher) return <Switcher collapsed={collapsed} />;
 
   // Nobody is signed in: there is no workspace to name.
   if (!workspace) return null;
 
   return (
-    <div ref={ref} className={`relative ${collapsed ? 'flex justify-center px-0 py-1' : 'px-2 py-1'}`}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        aria-label="Switch workspace"
-        className={
-          collapsed
-            ? 'flex h-7 w-7 items-center justify-center rounded-md bg-muted text-xs font-semibold text-foreground transition-colors hover:bg-muted/60'
-            : 'flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left transition-colors hover:bg-muted/60'
-        }
-      >
-        {collapsed ? (
-          workspace.initial
-        ) : (
-          <>
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-semibold text-foreground">
-              {workspace.initial}
-            </span>
-            <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-              {workspace.name}
-            </span>
-            <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          </>
+    <div className={collapsed ? 'flex justify-center px-0 py-1' : 'px-2 py-1'}>
+      <div className={collapsed ? '' : 'flex w-full items-center gap-2 px-1.5 py-1.5'}>
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-semibold text-foreground">
+          {workspace.initial}
+        </span>
+        {!collapsed && (
+          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+            {workspace.name}
+          </span>
         )}
-      </button>
-      {open && (
-        <div
-          className={`absolute top-full z-30 mt-1 overflow-hidden rounded-md border border-border bg-popover shadow-md ${
-            collapsed ? 'left-1 w-48' : 'left-2 right-2'
-          }`}
-        >
-          {workspaces.map((w) => (
-            <button
-              key={w.id}
-              type="button"
-              onClick={() => {
-                setOpen(false);
-                void switchWorkspace(w.id);
-              }}
-              className={`flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs transition-colors hover:bg-muted/60 ${
-                w.current ? 'text-foreground' : 'text-muted-foreground'
-              }`}
-            >
-              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted text-[10px] font-semibold text-foreground">
-                {initialOf(w.name)}
-              </span>
-              <span className="min-w-0 flex-1 truncate">{w.name}</span>
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={() => {
-              setOpen(false);
-              setCreating(true);
-            }}
-            className="flex w-full items-center gap-2 border-t border-border px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-          >
-            <Plus className="h-3.5 w-3.5 shrink-0" />
-            Create workspace
-          </button>
-        </div>
-      )}
-      <CreateWorkspaceDialog open={creating} onOpenChange={setCreating} />
+      </div>
     </div>
   );
 }
@@ -356,7 +296,6 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
 
 export function PreviewShell({ children }: { children: ReactNode }) {
   const { unreadCount } = usePreviewState();
-  const user = usePreviewUser();
   const [collapsed, setCollapsed] = useState(false);
   const { pathname } = useLocation();
 
@@ -392,7 +331,7 @@ export function PreviewShell({ children }: { children: ReactNode }) {
           </button>
         </div>
 
-        <WorkspaceSwitcher collapsed={collapsed} />
+        <WorkspaceBlock collapsed={collapsed} />
 
         <nav className="mt-2 flex-1 space-y-0.5 overflow-y-auto px-2 py-1" aria-label="Workspace">
           {NAV.map((item) => (
@@ -408,23 +347,6 @@ export function PreviewShell({ children }: { children: ReactNode }) {
             />
           ))}
         </nav>
-
-        {user?.isOperator && (
-          <div className="space-y-0.5 border-t border-border px-2 py-2">
-            {!collapsed && (
-              <div className="px-2.5 pb-1 text-xs uppercase tracking-wider text-muted-foreground/70">
-                Operator
-              </div>
-            )}
-            <NavRow
-              to={'/admin'}
-              label="Admin"
-              icon={ShieldCheck}
-              active={isActive('/admin')}
-              collapsed={collapsed}
-            />
-          </div>
-        )}
 
         <GettingStarted collapsed={collapsed} />
         <div className="border-t border-border px-2 py-2">

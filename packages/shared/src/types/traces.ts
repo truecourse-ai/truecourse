@@ -1,16 +1,11 @@
 /**
- * AI observability — the LLM trace contract (enterprise edition).
+ * The LLM trace contract: what one completed call looks like to whatever
+ * records it.
  *
- * Every LLM call the hosted pipeline makes (spec consolidation, contract
- * extraction, the repair pass) is captured at the EE transport and recorded as
- * one trace: the prompt, the output, the model, token usage, latency, status and
- * context tags. Metadata lives in Postgres (`llm_traces`); the heavy prompt/
- * output/reasoning payloads live in the BlobStore, content-addressed.
- *
- * These are type-only definitions shared by the EE producer (`ee-llm` transport),
- * the store (`ee-data-store`), the routes (`ee-server`) and the dashboard
- * (`ee-client`) — the same cross-package convention as `jobs.ts`/`ee.ts`. OSS
- * never references them.
+ * The transport hands a recorder the prompt, the output, the model, the token
+ * usage, the latency, the status and the context tags of every call it makes.
+ * The run's own diagnostics log is the recorder the engine installs; nothing
+ * stores traces durably.
  */
 
 export type TraceStatus = 'ok' | 'error'
@@ -59,79 +54,7 @@ export interface LlmTraceInput {
   metadata: Record<string, unknown> | null
 }
 
-/** The sink the EE transport writes each call to. Implemented by `PgBlobTraceStore`. */
+/** The sink the transport writes each call to. */
 export interface LlmTraceRecorder {
   record(input: LlmTraceInput): Promise<void>
-}
-
-/** Row-level metadata for the traces list — no payloads (those stay in the blob). */
-export interface TraceSummary {
-  id: string
-  workspaceOrgId: string | null
-  traceId: string | null
-  stage: string | null
-  callId: string | null
-  sliceId: string | null
-  module: string | null
-  topic: string | null
-  model: string
-  status: TraceStatus
-  finishReason: string | null
-  usedFallback: boolean
-  /** sha256 of the prompt — groups identical prompts (the divergence view). */
-  promptHash: string
-  promptTokens: number | null
-  completionTokens: number | null
-  totalTokens: number | null
-  reasoningTokens: number | null
-  latencyMs: number
-  createdAt: string
-}
-
-/** A single trace with its hydrated payloads. */
-export interface TraceDetail extends TraceSummary {
-  parentId: string | null
-  errorMessage: string | null
-  metadata: Record<string, unknown> | null
-  system: string | null
-  user: string | null
-  output: string | null
-  reasoning: string | null
-}
-
-export interface TraceListFilters {
-  /** Tenant scope. Omit (operator only) for cross-org reads; set to scope to one org. */
-  org?: string
-  stage?: string
-  status?: TraceStatus
-  promptHash?: string
-  traceId?: string
-  /** Page size (default 100). */
-  limit?: number
-  /** `createdAt` cursor — return rows strictly older than this. */
-  before?: string
-}
-
-/** Filters for the cross-org Admin jobs list. */
-export interface JobListFilters {
-  /** Tenant scope. Omit for cross-org (operator); set to scope to one org. */
-  org?: string
-  type?: string
-  status?: 'queued' | 'running' | 'succeeded' | 'failed'
-  limit?: number
-}
-
-/** Per-stage aggregate for the overview. */
-export interface TraceStageStat {
-  stage: string | null
-  calls: number
-  errors: number
-  totalTokens: number
-  avgLatencyMs: number
-}
-
-export interface TraceStats {
-  stages: TraceStageStat[]
-  totalCalls: number
-  totalErrors: number
 }

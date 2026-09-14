@@ -1,26 +1,18 @@
 /**
  * Edition + capability contract for the dashboard.
  *
- * The server reports `edition` (community for OSS, enterprise for the
- * commercial build with a valid license key) and `capabilities` — the
- * feature gates that are currently turned on for this deployment.
- *
- * Capability identifiers are deliberately typed as plain strings so
- * the `ee/` packages (and any third-party plugins) can register their
- * own gates without forcing a shared-schema change for every feature.
- * Both the OSS dashboard and `ee/` agree on this vocabulary via this
- * single module.
+ * The server reports `edition` and `capabilities` — the feature gates that are
+ * currently turned on for this deployment. Capability identifiers are
+ * deliberately typed as plain strings so a gate can be added without a
+ * shared-schema change.
  */
 
 export type Edition = 'community' | 'enterprise'
 
 /**
- * Deliberately a plain string (see module doc). Identifiers currently in use:
- * OSS advertises `local-filesystem` (below); the enterprise plugin advertises
- * `sso`, `workspace`, `jobs`, `knowledge`, `github-gate`, `llm-config`, and
- * `guard` — the last one only when the guard subsystem is wired AND the
- * background job worker actually started (hosted guard generation runs on the
- * job queue, so a dead queue must not light up guard actions).
+ * Deliberately a plain string (see module doc). The one identifier in use is
+ * `local-filesystem`, the inverse gate described below, which no deployment
+ * advertises.
  */
 export type Capability = string
 

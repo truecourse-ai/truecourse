@@ -70,4 +70,8 @@ EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
   CMD node -e "require('http').get('http://127.0.0.1:'+(process.env.PORT||3001)+'/',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"
 
-CMD ["node", "/app/apps/dashboard/server/dist/index.js"]
+# Whichever edition this image was built from. The enterprise bundle's entry
+# registers its features and then boots the same server; with no `ee/` in the
+# build context there is only the open edition's entry. The client made the same
+# choice at build time, through its `@edition` alias.
+CMD ["sh", "-c", "if [ -f /app/ee/packages/server/dist/main.js ]; then exec node /app/ee/packages/server/dist/main.js; else exec node /app/apps/dashboard/server/dist/index.js; fi"]

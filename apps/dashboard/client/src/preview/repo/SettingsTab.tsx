@@ -19,7 +19,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useNavigate } from 'react-router-dom';
-import { Facts, PROVIDER_NAME } from '@/preview/ui/bits';
+import { Facts, providerName } from '@/preview/ui/bits';
 import type { Repo } from '@/preview/data/types';
 import { usePreviewState } from '@/preview/shell/preview-state';
 
@@ -38,7 +38,7 @@ export function SettingsTab({ repo }: { repo: Repo }) {
           <Facts
             rows={[
               { label: 'Name', value: repo.fullName },
-              { label: 'Provider', value: PROVIDER_NAME[repo.provider] },
+              { label: 'Provider', value: providerName(repo.provider) },
               {
                 label: 'Default branch',
                 value: <span className="font-mono">{repo.defaultBranch}</span>,

@@ -13,7 +13,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { WorkspaceInvitation, WorkspaceMember } from '@truecourse/shared';
-import { AuthProvider } from '@/ee/AuthContext';
+import { AuthProvider } from '@/auth/AuthContext';
 import PreviewApp from '@/preview/PreviewApp';
 
 vi.mock('@/lib/socket', () => {

@@ -12,7 +12,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import type { AuthUser } from '@truecourse/shared';
-import { AuthProvider } from '@/ee/AuthContext';
+import { AuthProvider } from '@/auth/AuthContext';
 import { toPreviewUser, usePreviewUser } from '@/preview/shell/use-preview-user';
 import { PreviewStateProvider, usePreviewState } from '@/preview/shell/preview-state';
 
@@ -54,7 +54,6 @@ describe('toPreviewUser', () => {
       name: 'Dana Rees',
       email: 'dana@acme.dev',
       initial: 'D',
-      isOperator: false,
     });
   });
 
@@ -72,10 +71,6 @@ describe('toPreviewUser', () => {
       initial: 'R',
     });
   });
-
-  it('passes the operator flag through', () => {
-    expect(toPreviewUser({ ...base, isOperator: true }).isOperator).toBe(true);
-  });
 });
 
 describe('usePreviewUser', () => {
@@ -85,7 +80,6 @@ describe('usePreviewUser', () => {
       email: 'dana@acme.dev',
       firstName: 'Dana',
       lastName: 'Rees',
-      isOperator: true,
     });
 
     const { result } = renderHook(() => usePreviewUser(), { wrapper: AuthProvider });
@@ -93,7 +87,6 @@ describe('usePreviewUser', () => {
     await waitFor(() => expect(result.current?.name).toBe('Dana Rees'));
     expect(result.current?.email).toBe('dana@acme.dev');
     expect(result.current?.initial).toBe('D');
-    expect(result.current?.isOperator).toBe(true);
   });
 
   it('is nobody with no provider above it, rather than a stand-in', () => {

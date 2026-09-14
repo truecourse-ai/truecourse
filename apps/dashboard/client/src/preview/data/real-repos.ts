@@ -28,6 +28,7 @@ import type {
   GithubInstallationReposResponse,
   GithubInstallOrigin,
 } from '@truecourse/shared';
+import { providerOfHost } from './providers';
 import type { ProviderId, Repo } from './types';
 
 /**
@@ -67,14 +68,6 @@ export async function linkGithubRepo(link: {
   });
 }
 
-/** The provider of a remote, by host. An unknown host reads as github: there is no fourth icon. */
-function providerOf(host: string): ProviderId {
-  const lower = host.toLowerCase();
-  if (lower.includes('gitlab')) return 'gitlab';
-  if (lower === 'dev.azure.com' || lower.endsWith('.visualstudio.com')) return 'azure';
-  return 'github';
-}
-
 /** `https://github.com/acme/orders-api.git` reads as `acme/orders-api` on github. */
 export function parseRemote(remoteUrl: string): { fullName: string; provider: ProviderId } {
   let parsed: URL;
@@ -89,7 +82,7 @@ export function parseRemote(remoteUrl: string): { fullName: string; provider: Pr
     .filter(Boolean)
     .map((s) => decodeURIComponent(s));
   const fullName = segments.length >= 2 ? segments.slice(-2).join('/') : (segments[0] ?? remoteUrl);
-  return { fullName, provider: providerOf(parsed.hostname) };
+  return { fullName, provider: providerOfHost(parsed.hostname) };
 }
 
 /** A registry entry as a shell `Repo`: connected, with nothing run on it yet. */

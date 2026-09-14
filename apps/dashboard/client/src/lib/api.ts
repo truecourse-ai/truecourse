@@ -21,7 +21,6 @@ import type {
 } from '@truecourse/shared';
 import type { GuardDependenciesView, GuardDependencyPatch } from '@/types/guard-dependencies';
 import type {
-  AuthUser,
   ContextBindingsResponse,
   ContextDocumentsViewResponse,
   ContextSource,
@@ -36,7 +35,6 @@ import type {
   NotificationsResponse,
   WorkspaceInvitation,
   WorkspaceMembersResponse,
-  WorkspacesResponse,
 } from '@truecourse/shared';
 import type { RunRecord, SessionCommand, SessionEvent } from '@truecourse/agent-loop';
 import type { ActivityEvent } from '@truecourse/shared/activity-stream';
@@ -1186,31 +1184,6 @@ export function revokeWorkspaceInvitation(id: string): Promise<void> {
 export function removeWorkspaceMember(id: string): Promise<void> {
   return fetchApi<void>(`/api/workspace/members/${encodeURIComponent(id)}`, {
     method: 'DELETE',
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Workspaces: the organizations the signed-in user belongs to, and the two
-// moves between them. These mint the session cookie, so they sit on the auth
-// router rather than behind the gate.
-// ---------------------------------------------------------------------------
-
-export function listWorkspaces(): Promise<WorkspacesResponse> {
-  return fetchApi<WorkspacesResponse>('/api/auth/workspaces');
-}
-
-/** Create one and go into it. The session comes back in the new organization. */
-export function createWorkspace(name: string): Promise<{ user: AuthUser }> {
-  return fetchApi<{ user: AuthUser }>('/api/auth/workspaces', {
-    method: 'POST',
-    body: JSON.stringify({ name }),
-  });
-}
-
-export function switchWorkspace(organizationId: string): Promise<{ user: AuthUser }> {
-  return fetchApi<{ user: AuthUser }>('/api/auth/workspaces/switch', {
-    method: 'POST',
-    body: JSON.stringify({ organizationId }),
   });
 }
 

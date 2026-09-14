@@ -21,7 +21,6 @@
  */
 
 import { Route, Routes, useParams } from 'react-router-dom';
-import AdminPage from './pages/AdminPage';
 import AgentPage from './pages/AgentPage';
 import CodePage from './pages/CodePage';
 import ConflictsPage from './pages/ConflictsPage';
@@ -91,8 +90,6 @@ export function PreviewRoutes() {
       <Route path="settings" element={<SettingsPage />} />
       <Route path="settings/:tab" element={<SettingsPage />} />
       <Route path="notifications" element={<NotificationsPage />} />
-      <Route path="admin" element={<AdminPage />} />
-      <Route path="admin/traces" element={<AdminPage tab="traces" />} />
       <Route path="*" element={<HomePage />} />
     </Routes>
   );

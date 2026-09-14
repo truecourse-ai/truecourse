@@ -1,12 +1,12 @@
 /**
- * Settings › Repositories and Settings › Connections: where a provider and a
- * tool are connected FROM.
+ * Settings › Repositories: where a repository is connected FROM.
  *
- * Repositories is real for GitHub — the accounts are the App's installations
+ * It is real for GitHub — the accounts are the App's installations
  * `/api/github/status` reports, and connecting one is a navigation to the App's
- * install page. GitLab and Azure DevOps, and every tool connector on
- * Connections, are LISTED and say "Coming soon": no lock, no button, nothing to
- * click, because there is nothing behind them yet.
+ * install page. GitLab is LISTED and says "Coming soon": no lock, no button,
+ * nothing to click, because there is nothing behind it yet. The providers
+ * beyond these two, and the Connections tab, are the enterprise bundle's and
+ * are tested beside it.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -99,13 +99,13 @@ afterEach(() => {
 });
 
 describe('Settings › Repositories', () => {
-  it('lists the three providers, GitHub with its installations and what each holds', async () => {
+  it('lists the two providers, GitHub with its installations and what each holds', async () => {
     serve();
     renderAt('/settings/repositories');
 
     const list = await screen.findByRole('list', { name: 'Providers' });
     // The provider rows themselves; an installation line is a row of its own list.
-    expect(within(list).getAllByRole('listitem').filter((li) => li.parentElement === list)).toHaveLength(3);
+    expect(within(list).getAllByRole('listitem').filter((li) => li.parentElement === list)).toHaveLength(2);
 
     const github = providerRow('GitHub');
     expect(await within(github).findByText('Connected')).toBeInTheDocument();
@@ -165,42 +165,28 @@ describe('Settings › Repositories', () => {
     expect(within(github).queryByRole('link')).toBeNull();
   });
 
-  it('lists GitLab and Azure DevOps as Coming soon, with nothing to click', async () => {
+  it('lists GitLab as Coming soon, with nothing to click', async () => {
     serve();
     renderAt('/settings/repositories');
     await screen.findByRole('list', { name: 'Providers' });
 
-    for (const name of ['GitLab', 'Azure DevOps']) {
-      const row = providerRow(name);
-      expect(within(row).getByText('Coming soon')).toBeInTheDocument();
-      expect(within(row).queryByRole('button')).toBeNull();
-      expect(within(row).queryByRole('link')).toBeNull();
-      // The word replaced the lock: no icon carries the meaning.
-      expect(within(row).queryByText('Team plan')).toBeNull();
-      // GitHub's accounts are GitHub's: a provider with nothing connected lists none.
-      expect(within(row).queryByRole('list', { name: 'GitHub installations' })).toBeNull();
-      expect(within(row).queryByText(/repositor(y|ies) linked/)).toBeNull();
-    }
+    const row = providerRow('GitLab');
+    expect(within(row).getByText('Coming soon')).toBeInTheDocument();
+    expect(within(row).queryByRole('button')).toBeNull();
+    expect(within(row).queryByRole('link')).toBeNull();
+    // The word replaced the lock: no icon carries the meaning.
+    expect(within(row).queryByText('Team plan')).toBeNull();
+    // GitHub's accounts are GitHub's: a provider with nothing connected lists none.
+    expect(within(row).queryByRole('list', { name: 'GitHub installations' })).toBeNull();
+    expect(within(row).queryByText(/repositor(y|ies) linked/)).toBeNull();
   });
-});
 
-describe('Settings › Connections', () => {
-  it('lists the six tool connectors, every one of them Coming soon and inert', async () => {
+  it('has no Connections tab and no provider beyond the two', async () => {
     serve();
-    renderAt('/settings/connections');
+    renderAt('/settings/repositories');
 
-    const list = await screen.findByRole('list', { name: 'Connectors' });
-    const rows = within(list).getAllByRole('listitem');
-    expect(rows.map((row) => within(row).getByText(/^(Jira|Confluence|Google Drive|OneDrive|Notion|Slack)$/).textContent)).toEqual([
-      'Jira',
-      'Confluence',
-      'Google Drive',
-      'OneDrive',
-      'Notion',
-      'Slack',
-    ]);
-    expect(within(list).getAllByText('Coming soon')).toHaveLength(6);
-    expect(within(list).queryByRole('button')).toBeNull();
-    expect(within(list).queryByRole('link')).toBeNull();
+    const sections = await screen.findByRole('navigation', { name: 'Settings sections' });
+    expect(within(sections).queryByText('Connections')).toBeNull();
+    expect(screen.queryByText('Azure DevOps')).toBeNull();
   });
 });

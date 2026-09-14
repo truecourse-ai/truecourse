@@ -15,24 +15,14 @@
   "scripts": {
     "build": "tsc",
     "clean": "rm -rf dist",
+    "start": "node dist/main.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@sentry/node": "^10.0.0",
     "@truecourse/core": "workspace:*",
-    "@truecourse/db": "workspace:*",
-    "@truecourse/ee-data-store": "workspace:*",
-    "@truecourse/ee-github-app": "workspace:*",
-    "@truecourse/ee-llm": "workspace:*",
-    "@truecourse/ee-storage": "workspace:*",
-    "@truecourse/jobs": "workspace:*",
-    "@truecourse/llm": "workspace:*",
+    "@truecourse/dashboard-server": "workspace:*",
     "@truecourse/shared": "workspace:*",
-    "@workos-inc/node": "^7.0.0",
-    "drizzle-orm": "^0.45.2",
-    "graphile-worker": "^0.16.6",
-    "pg": "^8.13.1",
-    "zod": "^3.23.8"
+    "@workos-inc/node": "^7.0.0"
   },
   "peerDependencies": {
     "express": "^4.21.0"
@@ -40,7 +30,6 @@
   "devDependencies": {
     "@types/express": "^5.0.0",
     "@types/node": "^22.0.0",
-    "@types/pg": "^8.11.10",
     "typescript": "^5.7.0"
   }
 }

@@ -12,7 +12,6 @@ export * from './decisions.js';
 export * from './contracts.js';
 export * from './workspace-spec.js';
 export * from './cache.js';
-export * from './integrations.js';
 export * from './jobs.js';
 export * from './guard.js';
 export * from './context.js';
@@ -24,14 +23,7 @@ import { decisions } from './decisions.js';
 import { specSets } from './contracts.js';
 import { extractionCache } from './cache.js';
 import { workspaceSpecSets } from './workspace-spec.js';
-import { integrationConnections } from './integrations.js';
-import {
-  jobs,
-  notifications,
-  pendingBaselines,
-  pendingGuardBaselines,
-  guardBackfillMarkers,
-} from './jobs.js';
+import { jobs, notifications, pendingGuardBaselines } from './jobs.js';
 import {
   guardRuns,
   guardResults,
@@ -61,12 +53,9 @@ export const schema = {
   specSets,
   extractionCache,
   workspaceSpecSets,
-  integrationConnections,
   jobs,
   notifications,
-  pendingBaselines,
   pendingGuardBaselines,
-  guardBackfillMarkers,
   guardRuns,
   guardResults,
   guardScenarioSets,

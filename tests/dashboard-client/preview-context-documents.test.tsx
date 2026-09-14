@@ -436,12 +436,13 @@ describe('Add context', () => {
     expect(rows).toHaveLength(2);
     expect(rows[0]).toHaveTextContent('Repository');
     expect(rows[1]).toHaveTextContent('Documentation site');
-    // The tool kinds are named on Settings › Connections, not here.
+    // The tool kinds are named on Settings › Connections, which this edition
+    // does not have — so there is nothing to point at either.
     expect(within(list).queryByText('Jira')).toBeNull();
     expect(within(list).queryByText('Coming soon')).toBeNull();
     expect(
-      within(list).getByRole('link', { name: 'Connect another tool in Settings' }),
-    ).toHaveAttribute('href', '/settings/connections');
+      within(list).queryByRole('link', { name: 'Connect another tool in Settings' }),
+    ).toBeNull();
   });
 
   it('checks a scope before anything is stored, then adds with no link', async () => {

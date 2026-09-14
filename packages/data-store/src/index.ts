@@ -26,12 +26,8 @@ export {
   JobStore,
   NotificationStore,
   ActiveJobExistsError,
-  PendingBaselineStore,
   PendingGuardBaselineStore,
-  GuardBackfillMarkerStore,
   type OrphanedJob,
-  type PendingBaselineInput,
-  type PendingBaselineView,
   type PendingGuardBaselineInput,
   type PendingGuardBaselineView,
 } from './jobs-store.js';

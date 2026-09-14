@@ -13,7 +13,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
-import { PgGuardStore } from '../../ee/packages/data-store/src/index';
+import { PgGuardStore } from '../../packages/data-store/src/index';
 import {
   mergeGuardDecisions,
   getGuardDecisions,
