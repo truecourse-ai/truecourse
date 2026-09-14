@@ -5,10 +5,11 @@ import yaml from 'js-yaml'
 import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
 import { GUARD_REVIEW_POLICY_VERSION, type GuardScenario } from '@truecourse/shared'
 import type { GuardExecutor } from '@truecourse/guard-runner'
+import { qualifyFixtureRecipe } from '../guard-runner/preparation-qualification-fixture.js'
 import {
   makeTempRepo, rmrf, writeApiRecipe, writeCorpus, writeDoc, extractSessionBy,
   interfacesOf, apiInterface, rawApi, PASSING_API_STEPS, runGenerate,
-  scenarioYaml, stampMilestones, sessionSummary,
+  scenarioYaml, stampMilestones, sessionSummary, FIXTURE_API_SERVER,
 } from './helpers.js'
 
 const repos: string[] = []
@@ -17,7 +18,8 @@ afterEach(() => { while (repos.length) rmrf(repos.pop()!) })
 function seed() {
   const r = makeTempRepo()
   repos.push(r)
-  writeApiRecipe(r, { entry: null })
+  fs.copyFileSync(FIXTURE_API_SERVER, path.join(r, 'server.mjs'))
+  writeApiRecipe(r, { entry: null, serve: ['node', 'server.mjs'] })
   const file = path.join(r, '.truecourse/scenarios/recipe.json')
   const recipe = JSON.parse(fs.readFileSync(file, 'utf8'))
   recipe.api.services = { up: 'true', down: 'true', reset: 'true' }
@@ -28,6 +30,7 @@ function seed() {
     seed: { script: 'seed.mjs', provides: { fixtures: {}, credentials: {} } },
     verify: { script: 'verify.mjs' }, cleanup: { script: 'cleanup.mjs' },
   } }
+  qualifyFixtureRecipe(r, recipe, 'server.mjs')
   fs.writeFileSync(file, JSON.stringify(recipe))
   writeCorpus(r, [{ ref: 'docs/api.md' }])
   writeDoc(r, 'docs/api.md', '## list\nGET /todos returns 200 with the todo list.')

@@ -4,8 +4,8 @@
  * Phase 3 advertises detected third parties as BLOCKERS worth naming. When the user
  * declares an account for one in `api.externals` and it fully resolves, the same
  * service must flip to a CAPABILITY: announced as live, never stubbed, asserted on
- * shapes. A declared-but-incomplete account must NOT flip it — the runner refuses
- * that repo, so authoring against it would be a lie.
+ * shapes. An incomplete account must not be advertised as live. Provider-control
+ * cases can still use setup.http with the recipe's declared base URL variable.
  */
 
 import { describe, it, expect, afterEach } from 'vitest'
@@ -93,7 +93,7 @@ describe('generate — a PROVIDED external is advertised as live', () => {
     expect(prompt).not.toContain('THIRD PARTIES THIS REPO DEPENDS ON')
   })
 
-  it('a declared but INCOMPLETE account changes nothing — the service stays a blocker', async () => {
+  it('an incomplete account uses declared stub wiring without advertising live access', async () => {
     const r = makeTempRepo()
     repos.push(r)
     writeApiRecipe(r, {
@@ -108,7 +108,9 @@ describe('generate — a PROVIDED external is advertised as live', () => {
     })
 
     const prompt = await apiBriefing(r, [{ service: 'open-meteo', baseUrlEnv: 'OM_BASE' }])
-    expect(prompt).toContain('open-meteo (base URL env: OM_BASE')
+    expect(prompt).toContain('open-meteo (base URL env: GEOCODING_BASE_URL')
+    expect(prompt).toContain('open-meteo: stub (setup.http); base URL variables: GEOCODING_BASE_URL; credential variable names: GEO_KEY')
+    expect(prompt).not.toContain('OM_BASE')
     expect(prompt).toContain('THIRD PARTIES THIS REPO DEPENDS ON')
     expect(prompt).not.toContain('EXTERNAL SERVICES AVAILABLE FOR REAL')
   })

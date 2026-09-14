@@ -252,8 +252,10 @@ describe('flowWorkerSessionDef', () => {
     // flow that is WORK consults the worker cache, so the roll costs one miss
     // per re-authoring flow, never a corpus-wide re-author.
     // Rolled for prerequisite eligibility, proof grounding, and setup-aware fidelity.
-    expect(FLOW_WORKER_CLI_PROMPT_FINGERPRINT).toBe('8f81d22b1f04d640')
-    expect(FLOW_WORKER_API_PROMPT_FINGERPRINT).toBe('425b3d9eb1693f78')
+    // Provider control changes the shared scenario schema and API authoring
+    // instructions, so cached drafts must be checked under the new contract.
+    expect(FLOW_WORKER_CLI_PROMPT_FINGERPRINT).toBe('15277774880ee40e')
+    expect(FLOW_WORKER_API_PROMPT_FINGERPRINT).toBe('1ef548ff71971375')
   })
 
   it('routes both tools to the task’s engine closures', async () => {
