@@ -11,7 +11,7 @@ import { log } from '@truecourse/core/lib/logger';
 import type { RepositoryRecord, RepositoryStore } from '@truecourse/shared';
 import { verifyWebhookSignature } from './signature.js';
 import { GITHUB_PROVIDER, installationOf } from './provider.js';
-import type { GateStore } from './store/types.js';
+import type { InstallationStore } from './store/types.js';
 
 export interface BaselineTrigger {
   repoFullName: string;
@@ -39,7 +39,7 @@ export interface SourcePushTrigger {
 
 export interface WebhookDeps {
   secret: string;
-  store: GateStore;
+  store: InstallationStore;
   /** The connected repositories, whichever provider brought them. */
   repos: RepositoryStore;
   /** Kick a baseline run for a connected repo (fire-and-forget). */
@@ -61,10 +61,6 @@ export interface WebhookDeps {
    * what actually failed.
    */
   onRepoRemoved?: (link: RepositoryRecord) => Promise<void>;
-  /** Handle a pull_request event (offer scan in Phase 2, gate in Phase 4). */
-  onPullRequest?: (payload: PullRequestPayload) => void;
-  /** Handle an issue_comment event (the scan checkbox); fire-and-forget. */
-  onCommentEdited?: (payload: IssueCommentPayload) => void;
 }
 
 interface InstallationPayload {
@@ -82,41 +78,6 @@ interface PushPayload {
   ref: string;
   after: string;
   repository: { full_name: string; default_branch: string };
-  installation?: { id: number };
-}
-
-export interface PullRequestPayload {
-  action: string;
-  number: number;
-  pull_request: {
-    /** PR title (present on every pull_request payload). */
-    title?: string;
-    head: {
-      sha: string;
-      ref: string;
-      /** Present on the webhook payload; absent → assume same-repo. */
-      repo?: { full_name: string; fork: boolean } | null;
-    };
-    base: { sha: string; ref: string };
-    /** Set on a `closed` event: whether the PR merged (vs. closed unmerged). */
-    merged?: boolean;
-  };
-  repository: { full_name: string; default_branch: string };
-  installation?: { id: number };
-}
-
-export interface IssueCommentPayload {
-  action: string;
-  comment: {
-    id: number;
-    body: string;
-    /** The comment author (our App bot for the scan comment). */
-    user?: { type: string; login: string };
-  };
-  /** The actor who performed the event (used to authorize the scan trigger). */
-  sender?: { login: string; type: string };
-  issue: { number: number; pull_request?: unknown };
-  repository: { full_name: string };
   installation?: { id: number };
 }
 
@@ -178,12 +139,6 @@ async function dispatch(
       break;
     case 'push':
       await handlePush(deps, payload as PushPayload);
-      break;
-    case 'pull_request':
-      deps.onPullRequest?.(payload as PullRequestPayload);
-      break;
-    case 'issue_comment':
-      deps.onCommentEdited?.(payload as IssueCommentPayload);
       break;
     default:
       // Unhandled event — ignore.

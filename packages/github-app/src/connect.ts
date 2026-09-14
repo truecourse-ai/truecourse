@@ -13,12 +13,8 @@
 import { Router, type Request, type Response } from 'express';
 import { log } from '@truecourse/core/lib/logger';
 import { getProjectByPath } from '@truecourse/core/config/registry';
-import { loadSpec, loadLatestSpec } from '@truecourse/core/lib/spec-store';
 import {
   GITHUB_INSTALL_ORIGINS,
-  openConflicts,
-  type CorpusLike,
-  type DecisionsLike,
   type GithubInstallOrigin,
 } from '@truecourse/shared';
 import type {
@@ -34,7 +30,7 @@ import type {
 import type { OctokitClient } from './octokit.js';
 import { resolveNotificationPrefs } from './notifications.js';
 import { GITHUB_PROVIDER, installationOf } from './provider.js';
-import type { GateStore, InstallationRecord } from './store/types.js';
+import type { InstallationStore, InstallationRecord } from './store/types.js';
 
 function orgIdOf(req: Request): string | null {
   const user = (req as Request & { user?: AuthUser }).user;
@@ -51,11 +47,7 @@ function toInstallationSummary(
   };
 }
 
-function toRepoSummary(
-  r: RepositoryRecord,
-  slug: string | null,
-  openConflicts: number,
-): GithubRepoSummary {
+function toRepoSummary(r: RepositoryRecord, slug: string | null): GithubRepoSummary {
   return {
     repoFullName: r.repoFullName,
     installationId: installationOf(r) ?? 0,
@@ -65,7 +57,6 @@ function toRepoSummary(
     notifyEmails: r.notifyEmails ?? [],
     notifications: resolveNotificationPrefs(r),
     slug,
-    openConflicts,
   };
 }
 
@@ -95,7 +86,7 @@ export type OnRepoLinked = (
 export type OnRepoUnlinked = (link: RepositoryRecord) => Promise<void>;
 
 export interface ConnectDeps {
-  store: GateStore;
+  store: InstallationStore;
   /** The connected repositories, whichever provider brought them. */
   repos: RepositoryStore;
   appSlug: string;
@@ -216,47 +207,24 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     // persisted, so the repair happens once and not on every dialog open.
     const installations = await Promise.all(listed.map(withAccount));
     // `?slim=1` — the store rows bare, for callers that only need which repos
-    // are connected (the connect dialog, on every open). The enrichment below
-    // reads a baseline, a corpus and a decisions file PER REPO, which is
-    // megabytes of JSON on a workspace with real repos.
+    // are connected (the connect dialog, on every open), skipping the registry
+    // read the slug below costs per repo.
     if (req.query.slim === '1') {
       const slim: GithubConnectStatusResponse = {
         configured: true,
         installUrl: buildInstallUrl(orgId, originOf(req.query.from)),
         installations: installations.map(toInstallationSummary),
-        repos: repos.map((r) => toRepoSummary(r, null, 0)),
+        repos: repos.map((r) => toRepoSummary(r, null)),
       };
       res.json(slim);
       return;
     }
     // Resolve each repo's dashboard slug (registered on link) so the UI can
-    // deep-link to `/repos/:slug`, plus its flagged-overlap count (within-area
-    // doc disagreements awaiting a relation) so the list can flag repos that need review.
+    // deep-link to `/repos/:slug`.
     const repoSummaries = await Promise.all(
-      repos.map(async (r) => {
-        // Read the corpus at the BASELINE commit — the repo's default-branch view —
-        // never the newest scan, which may be an in-flight PR head (that spec is
-        // PR-scoped and must not leak into the repo overview).
-        const [project, baseline] = await Promise.all([
-          getProjectByPath(r.repoFullName),
-          deps.store.getBaseline(r.repoFullName).catch(() => null),
-        ]);
-        const commit = baseline?.commitSha ?? null;
-        const corpus = commit
-          ? await loadSpec<CorpusLike>({ repoKey: r.repoFullName, commitSha: commit }, 'corpus').catch(
-              () => null,
-            )
-          : null;
-        // Open = the SAME shared derivation the generate gate and the Coverage
-        // sidebar use. A verdict/dismissal/exclude resolves a dispute WITHOUT
-        // removing the flagged overlap from the corpus, so a raw overlap count
-        // would keep a repo "Needs review" forever after its conflicts are resolved.
-        const decisions = corpus
-          ? ((await loadLatestSpec<DecisionsLike>(r.repoFullName, 'decisions').catch(() => null)) ?? {})
-          : {};
-        const openCount = corpus?.areas ? openConflicts(corpus, decisions).length : 0;
-        return toRepoSummary(r, project?.slug ?? null, openCount);
-      }),
+      repos.map(async (r) =>
+        toRepoSummary(r, (await getProjectByPath(r.repoFullName))?.slug ?? null),
+      ),
     );
     const body: GithubConnectStatusResponse = {
       configured: true,

@@ -32,6 +32,7 @@ export type StatusTone =
   | 'attention'
   | 'unproven'
   | 'neutral'
+  | 'outside'
   | 'running';
 
 const DOT: Record<StatusTone, string> = {
@@ -46,6 +47,10 @@ const DOT: Record<StatusTone, string> = {
   // amber Context's Blocked wears.
   unproven: 'bg-sky-500',
   neutral: 'bg-muted-foreground',
+  // Not a colour but a shape: a document the corpus does not hold is outside
+  // the set rather than another state within it, so its dot is a ring. Filled
+  // greys sit beside it (Not linked is IN the corpus) and must stay tellable.
+  outside: 'border border-muted-foreground',
   running: 'bg-sky-500',
 };
 
@@ -107,8 +112,8 @@ export const CONTEXT_DOC_TONE: Record<ContextDocumentStatus, StatusTone> = {
  */
 export const CONTEXT_INCLUSION_TONE: Record<ContextDocumentInclusion, StatusTone> = {
   'in-corpus': 'neutral',
-  'not-included': 'neutral',
-  excluded: 'neutral',
+  'not-included': 'outside',
+  excluded: 'outside',
 };
 
 /** A source's sync state as a status word, everywhere a source appears. */

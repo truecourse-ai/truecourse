@@ -390,16 +390,21 @@ describe('Context, the documents', () => {
 describe('the documents the corpus does not hold', () => {
   const world = { documents: [REFUNDS, ONBOARDING, CHANGELOG, LEGACY] };
 
-  it('draws them with their standing and the reason, never a coverage word', async () => {
+  it('draws them with their standing, the reason on the word, never a coverage word', async () => {
     serve(world);
     renderAt('/context/documents');
+    const user = userEvent.setup();
 
     await waitFor(() => expect(rows()).toHaveLength(4));
     const [, , changelog, legacy] = rows();
     expect(within(changelog!).getByText('Changelog')).toBeInTheDocument();
     expect(within(changelog!).getByText('Not included')).toBeInTheDocument();
-    expect(within(changelog!).getByText('a changelog, not a specification')).toBeInTheDocument();
     expect(within(legacy!).getByText('Excluded')).toBeInTheDocument();
+
+    // The reason is a sentence: the row stays one line and the word carries it.
+    expect(within(changelog!).queryByText('a changelog, not a specification')).toBeNull();
+    await user.hover(within(changelog!).getByText('Not included'));
+    expect(await screen.findByText('a changelog, not a specification')).toBeInTheDocument();
   });
 
   it('says what the next scan will do with a decision it has not applied', async () => {
@@ -411,11 +416,15 @@ describe('the documents the corpus does not hold', () => {
     });
     renderAt('/context/documents');
 
+    const user = userEvent.setup();
     await waitFor(() => expect(rows()).toHaveLength(2));
-    expect(screen.getByText('Excluded at the next scan')).toBeInTheDocument();
-    expect(screen.getByText('Included at the next scan')).toBeInTheDocument();
     // The one the corpus still holds keeps the coverage word it earned.
     expect(screen.getByText('Failed')).toBeInTheDocument();
+
+    await user.hover(screen.getByText('Not included'));
+    expect(await screen.findByText('Included at the next scan')).toBeInTheDocument();
+    await user.hover(screen.getByText('Failed'));
+    expect(await screen.findByText('Excluded at the next scan')).toBeInTheDocument();
   });
 
   it('narrows by inclusion, in the address, and a status filter leaves them out', async () => {

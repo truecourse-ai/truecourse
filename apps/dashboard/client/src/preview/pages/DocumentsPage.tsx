@@ -53,6 +53,7 @@ import {
 } from '@/preview/ui/status-word';
 import { formatRelativeTime } from '@truecourse/shared';
 import { useContextDocuments, useContextSignal, useContextSources } from '@/preview/shell/use-context';
+import { HoverPopover } from '@/preview/ui/hover-popover';
 import { ContextFrame } from './ContextFrame';
 import { CONTEXT_BASE, docHref, sourceHref } from './context-hrefs';
 import {
@@ -308,21 +309,16 @@ export default function DocumentsPage() {
           {
             key: 'status',
             label: 'Status',
-            width: '9rem',
-            wrap: true,
+            width: '7.5rem',
             cell: (row) => {
               const { word, tone } = contextRowWord(contextRowWordKey(row));
               const fact = contextRowFact(row);
-              return (
-                <span className="flex min-w-0 flex-col gap-0.5">
-                  <StatusWord tone={tone} word={word} />
-                  {fact && (
-                    <span className="break-words text-[11px] leading-snug text-muted-foreground">
-                      {fact}
-                    </span>
-                  )}
-                </span>
-              );
+              const status = <StatusWord tone={tone} word={word} />;
+              // The word is the row; why the scan left a document out, or what
+              // the next one will do with it, is a sentence and belongs on the
+              // document's own page. It rides the word on hover so the list
+              // stays one line per document.
+              return fact ? <HoverPopover portal content={fact}>{status}</HoverPopover> : status;
             },
           },
           {
