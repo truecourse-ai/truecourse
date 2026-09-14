@@ -1,8 +1,8 @@
 # TrueCourse server image (dashboard server + built client) — the one deployment
 # artifact, for self-hosting and the hosted product alike. Deliberately
 # cloud-neutral: configuration is env vars + a Postgres DATABASE_URL, no cloud
-# SDK at runtime. `docker compose up --build` boots it with a database (see
-# docker-compose.yml for the required env vars).
+# SDK at runtime. The database it needs is `docker-compose.yml`'s; running the
+# server from a checkout instead is the local setup (see CONTRIBUTING.md).
 
 ############################################
 # 1. Builder — install + build the whole pnpm/turbo workspace

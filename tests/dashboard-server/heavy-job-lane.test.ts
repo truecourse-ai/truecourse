@@ -132,7 +132,7 @@ function cloneDir(repoKey: string): string {
  * and stays running until the test lets go of it.
  */
 function installFrozenWorkTree(): void {
-  setWorkTreeProvider(async (repoKey) => {
+  setWorkTreeProvider('github', async (repoKey) => {
     const hold = deferred<void>();
     acquisitions.push({
       repoKey,
@@ -264,7 +264,7 @@ afterEach(async () => {
   for (const acquisition of acquisitions) acquisition.release();
   await Promise.all(running);
   await jobs?.stop();
-  setWorkTreeProvider(null);
+  setWorkTreeProvider('github', null);
   setContextEventPublisher(null);
   resetGuardStore();
   resetContextStore();

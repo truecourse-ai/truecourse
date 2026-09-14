@@ -18,6 +18,11 @@
  * the source is Code's side: the connect dialog's Context step, a repository's
  * Context tab, the source page.
  *
+ * ON A LOCAL SERVER there are no accounts and the repositories are the folders
+ * this machine has connected: a path is not a thing this dialog can be handed,
+ * it is a repository connected in Code, and the source reads it by copying the
+ * folder exactly as a run does.
+ *
  * Nothing is stored until Add and sync: Check runs the real driver against the
  * real scope and stores nothing, and the add closes on the new source's page,
  * which reads Syncing until its first sync lands.
@@ -46,6 +51,8 @@ import {
 } from '@/components/ui/dialog';
 import { addContextSource, previewContextSource } from '@/lib/api';
 import { fetchGithubStatus, fetchInstallationRepos } from '@/preview/data/real-repos';
+import { fetchLocalRepos } from '@/preview/providers/local-folder';
+import { useServerMode } from '@/contexts/CapabilityContext';
 import { registeredSettingsTabs } from '@/preview/shell/registry';
 import { Stepper } from '@/preview/ui/stepper';
 import { sourceHref } from './context-hrefs';
@@ -109,6 +116,9 @@ export function AddContextDialog({
   // Where a tool is connected. An edition without that section has no tools, so
   // the list ends at the two kinds rather than pointing at a place that is not there.
   const hasConnections = registeredSettingsTabs().some((tab) => tab.id === 'connections');
+  // A local server has no accounts: its repositories are the folders on this
+  // machine, which is what the repository scope offers there.
+  const local = useServerMode() === 'local';
 
   const [kind, setKind] = useState<AddableKind | null>(null);
   const [installations, setInstallations] = useState<GithubInstallationSummary[] | null>(null);
@@ -148,8 +158,34 @@ export function AddContextDialog({
   // The accounts a Repository source can read through, read on entering the
   // scope step: a source may read any repository they can reach, connected in
   // Code or not. With no account there is nothing to pick and the step says so.
+  // A local server has none — its repositories are the folders it connected —
+  // so those are read instead, and there is no account to choose.
   useEffect(() => {
     if (kind !== 'repository' || installations !== null) return;
+    if (local) {
+      let alive = true;
+      void fetchLocalRepos()
+        .then((folders) => {
+          if (!alive) return;
+          setInstallations([]);
+          setAccountRepos(
+            folders.map((folder) => ({
+              fullName: folder.repoFullName,
+              defaultBranch: '',
+              private: true,
+            })),
+          );
+        })
+        .catch((e: unknown) => {
+          if (!alive) return;
+          setInstallations([]);
+          setAccountRepos([]);
+          setReposError(e instanceof Error ? e.message : String(e));
+        });
+      return () => {
+        alive = false;
+      };
+    }
     let live = true;
     void fetchGithubStatus()
       .then((status) => {
@@ -167,7 +203,7 @@ export function AddContextDialog({
     return () => {
       live = false;
     };
-  }, [kind, installations]);
+  }, [kind, installations, local]);
 
   // What the chosen account can see.
   useEffect(() => {
@@ -200,6 +236,10 @@ export function AddContextDialog({
 
   const accounts = installations ?? [];
   const already = repoScope ? existingFor(repoScope) : undefined;
+  /** Nothing to read from: no GitHub account hosted, no folder connected locally. */
+  const nothingToReadFrom = local
+    ? accountRepos !== null && accountRepos.length === 0
+    : installations !== null && accounts.length === 0;
 
   const config = (): Record<string, unknown> =>
     kind === 'repository'
@@ -298,20 +338,22 @@ export function AddContextDialog({
 
         {step >= 2 && kind === 'repository' && (
           <div className="space-y-3">
-            {installations !== null && accounts.length === 0 ? (
+            {nothingToReadFrom ? (
               <div>
-                <p className="text-[11px] text-muted-foreground">No GitHub account connected yet.</p>
+                <p className="text-[11px] text-muted-foreground">
+                  {local ? 'No folder connected yet.' : 'No GitHub account connected yet.'}
+                </p>
                 <Link
-                  to={'/settings/repositories?from=context-add'}
+                  to={local ? '/code?connect=1' : '/settings/repositories?from=context-add'}
                   onClick={() => onOpenChange(false)}
                   className="mt-1 inline-block text-[11px] text-primary hover:underline"
                 >
-                  Connect an account in Settings
+                  {local ? 'Connect a folder in Code' : 'Connect an account in Settings'}
                 </Link>
               </div>
             ) : (
               <div className="space-y-3">
-                {accounts.length > 1 && (
+                {!local && accounts.length > 1 && (
                   <div>
                     <label
                       className="text-[11px] font-medium text-muted-foreground"
@@ -368,16 +410,16 @@ export function AddContextDialog({
                   </select>
                   {reposError && <p className="mt-1 text-[11px] text-destructive">{reposError}</p>}
                   <Link
-                    to={'/settings/repositories?from=context-add'}
+                    to={local ? '/code?connect=1' : '/settings/repositories?from=context-add'}
                     onClick={() => onOpenChange(false)}
                     className="mt-1 inline-block text-[11px] text-primary hover:underline"
                   >
-                    Connect another account in Settings
+                    {local ? 'Connect another folder in Code' : 'Connect another account in Settings'}
                   </Link>
                 </div>
               </div>
             )}
-            {installations !== null && accounts.length === 0 ? null : already ? (
+            {nothingToReadFrom ? null : already ? (
               <p className="text-[11px] text-muted-foreground">
                 {repoScope} already has a source, “{already.title}”. Edit its patterns
                 there rather than adding a second one.

@@ -58,7 +58,7 @@ import {
 
 export interface HomeRouterDeps {
   /** Present when the server has a GitHub App configured; null otherwise. */
-  githubLinks?: RepoOwnershipLookup | null;
+  repoLinks?: RepoOwnershipLookup | null;
 }
 
 /**
@@ -87,7 +87,7 @@ export function createHomeRouter(deps: HomeRouterDeps = {}): Router {
   async function visibleRepos(req: Request): Promise<Map<string, RegistryEntry>> {
     const visible = new Map<string, RegistryEntry>();
     for (const entry of await readRegistry()) {
-      if (!(await isVisibleTo(deps.githubLinks, req, entry))) continue;
+      if (!(await isVisibleTo(deps.repoLinks, req, entry))) continue;
       visible.set(entry.name, entry);
     }
     return visible;

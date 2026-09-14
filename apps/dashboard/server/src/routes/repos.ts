@@ -12,10 +12,9 @@ import { orgOf } from '../services/workspace-llm.service.js';
 import { isVisibleTo, type RepoOwnershipLookup } from '../middleware/project.js';
 
 /**
- * The GitHub link store, as this router uses it: which repos a workspace
+ * The connected repositories, as this router uses them: which ones a workspace
  * connected, who owns one, and the ability to disconnect one. Structural, so
- * the real `GateStore` satisfies it without this module depending on the
- * GitHub package.
+ * the real store satisfies it without this module depending on where it lives.
  */
 export interface RepoLinkStore extends RepoOwnershipLookup {
   listReposForWorkspace(workspaceOrgId: string): Promise<{ repoFullName: string }[]>;
@@ -23,8 +22,8 @@ export interface RepoLinkStore extends RepoOwnershipLookup {
 }
 
 export interface ReposRouterDeps {
-  /** Present when the server has a GitHub App configured; null otherwise. */
-  githubLinks?: RepoLinkStore | null;
+  /** The connected repositories of every provider; null in a test app with none. */
+  repoLinks?: RepoLinkStore | null;
 }
 
 /**
@@ -37,7 +36,7 @@ async function requireVisibleEntry(
   slug: string,
 ): Promise<RegistryEntry> {
   const entry = await getProjectBySlug(slug);
-  if (!entry || !(await isVisibleTo(deps.githubLinks, req, entry))) {
+  if (!entry || !(await isVisibleTo(deps.repoLinks, req, entry))) {
     throw createAppError('Project not found', 404);
   }
   return entry;
@@ -45,15 +44,15 @@ async function requireVisibleEntry(
 
 /**
  * The registry rows this caller may see: exactly the repos their workspace
- * connected, from one query. No link store (GitHub App unconfigured) means no
- * connected repos and an empty home — never everyone's rows.
+ * connected, from one query. No store means no connected repos and an empty
+ * home — never everyone's rows.
  */
 async function visibleTo(
   deps: ReposRouterDeps,
   req: Request,
   entries: RegistryEntry[],
 ): Promise<RegistryEntry[]> {
-  const links = deps.githubLinks;
+  const links = deps.repoLinks;
   const org = req.user?.organizationId;
   if (!links || !org) return [];
   const mine = new Set((await links.listReposForWorkspace(org)).map((r) => r.repoFullName));
@@ -77,6 +76,7 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
           id: e.slug,
           name: e.name,
           path: e.path,
+          provider: e.provider ?? null,
           remoteUrl: e.remoteUrl ?? null,
           latestEvent: await resolveLatestEvent(e.path),
         })),
@@ -92,13 +92,12 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
     try {
       const entry = await requireEntry(req);
       let branches: string[] = [];
-      // The registry tracks the default branch from gh_repos and has no local
-      // checkout, so only shell out to git when a registry didn't supply it.
-      // Otherwise simple-git fails on the non-path repo identity and logs
-      // "git unavailable" on every load.
+      // A connected repository has no checkout here — its identity is a name,
+      // not a path — so its branch is whatever the provider recorded and there
+      // is nothing to shell out to. Only an entry no provider brought is asked.
       let defaultBranch = entry.defaultBranch;
       let isGitRepo = true;
-      if (!defaultBranch) {
+      if (!defaultBranch && !entry.provider) {
         try {
           const git = await getGit(entry.path);
           const branchSummary = await git.branch();
@@ -113,6 +112,7 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
         id: entry.slug,
         name: entry.name,
         path: entry.path,
+        provider: entry.provider ?? null,
         remoteUrl: entry.remoteUrl ?? null,
         branches,
         defaultBranch,
@@ -148,7 +148,7 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
     try {
       const entry = await requireEntry(req);
       await removeRepoRunState(entry.path, orgOf(req));
-      await deps.githubLinks?.unlinkRepo(entry.name);
+      await deps.repoLinks?.unlinkRepo(entry.name);
       res.status(204).send();
     } catch (error) {
       next(error);

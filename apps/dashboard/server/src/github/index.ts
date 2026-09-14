@@ -3,7 +3,7 @@
  *
  * `@truecourse/github-app` owns the protocol — the webhook receiver, the connect
  * API, the link store. This module owns what connecting a repository MEANS here:
- * the `gh_repos` row IS the connection. Nothing is cloned at connect time — the
+ * the `repositories` row IS the connection. Nothing is cloned at connect time — the
  * work-tree provider installed here clones per run (a source's sync, a guard
  * run) and the clone is deleted when the run settles. Linking creates the
  * repository's Context source and ENQUEUES its sync, which is the first link of
@@ -28,13 +28,14 @@ import {
   getInstallationToken,
   installationOctokit,
   loadGithubAppConfig,
+  installationOf,
   PostgresGateStore,
   splitRepo,
   type GateStore,
   type GithubAuth,
   type OctokitClient,
-  type RepoLinkRecord,
 } from '@truecourse/github-app';
+import type { RepositoryRecord, RepositoryStore } from '@truecourse/shared';
 import { getDb } from '../db.js';
 import { createRunClone } from '../services/run-clone.service.js';
 import { setWorkTreeProvider, type WorkTreeProvider } from '../services/work-tree.service.js';
@@ -42,15 +43,11 @@ import type { ContextGithubAccess } from '../routes/context.js';
 import { removeRepoRunState } from '../services/repo-removal.service.js';
 import {
   removeRepositoryContext,
-  repositoryContextSource,
+  syncRepositorySource,
+  type ContextSyncStart,
 } from '../services/context-lifecycle.service.js';
 
-/** How a repository's Repository source is refreshed (on connect, and on a push). */
-export type ContextSyncStart = (
-  orgId: string,
-  sourceId: string,
-  source: 'add' | 'push',
-) => Promise<'queued' | 'busy' | 'failed'>;
+export type { ContextSyncStart };
 
 /** The routers app.ts mounts, plus the store the repo list scopes itself with. */
 export interface GithubMount {
@@ -58,14 +55,16 @@ export interface GithubMount {
   webhook: Router;
   /** Dashboard connect API — workspace-scoped, so it mounts BELOW the gate. */
   connect: Router;
-  /** The repo→workspace links, so `GET /api/repos` can hide other workspaces' repos. */
+  /** The App's own rows: its installations, and the pull request gate's. */
   store: GateStore;
   /** How Context resolves the installation a repository source reads through. */
   access: ContextGithubAccess;
 }
 
 export interface GithubConnectionOverrides {
-  /** Link store. Default: Postgres, on the server's one connection. */
+  /** The connected repositories, whichever provider brought them. */
+  repos: RepositoryStore;
+  /** The App's own store. Default: Postgres, on the server's one connection. */
   store?: GateStore;
   /** Installation-scoped GitHub client. Default: a real Octokit. */
   octokitFor?: (installationId: number) => OctokitClient;
@@ -88,7 +87,7 @@ export interface GithubConnectionOverrides {
 }
 
 /** How connect starts a repository's setup: the queue's answer, as a word. */
-export type SetupStart = (link: RepoLinkRecord) => Promise<'queued' | 'busy' | 'failed'>;
+export type SetupStart = (link: RepositoryRecord) => Promise<'queued' | 'busy' | 'failed'>;
 
 const noSetupRunner: SetupStart = async (link) => {
   log.warn(`[github] background jobs are not running — ${link.repoFullName} was not set up`);
@@ -101,12 +100,13 @@ const noContextSyncRunner: ContextSyncStart = async (_orgId, sourceId) => {
 };
 
 export function createGithubConnection(
-  overrides: GithubConnectionOverrides = {},
+  overrides: GithubConnectionOverrides,
 ): GithubMount | null {
   const cfg = loadGithubAppConfig();
   if (!cfg) return null;
 
   const store = overrides.store ?? new PostgresGateStore(getDb());
+  const repos = overrides.repos;
   const octokitFor =
     overrides.octokitFor ?? ((installationId: number) => installationOctokit(cfg, installationId));
   const contextSync = overrides.contextSync ?? noContextSyncRunner;
@@ -125,22 +125,23 @@ export function createGithubConnection(
       // A caller that already knows its installation is cloned through it, with
       // no link read at all: this is how a context source reads a repository
       // Code has not connected.
-      if (via) {
+      if (via?.installationId !== undefined) {
         return createRunClone(repoKey, await tokenFor(via.installationId), {
           workspaceOrgId: via.workspaceOrgId,
           defaultBranch: via.defaultBranch ?? null,
         });
       }
-      const link = await store.getRepo(repoKey);
-      if (!link) {
-        throw new Error(`${repoKey} is not a connected repository`);
+      const link = await repos.getRepo(repoKey);
+      const installationId = link ? installationOf(link) : null;
+      if (!link || installationId === null) {
+        throw new Error(`${repoKey} is not a repository connected through the GitHub App`);
       }
-      return createRunClone(repoKey, await tokenFor(link.installationId), {
+      return createRunClone(repoKey, await tokenFor(installationId), {
         workspaceOrgId: link.workspaceOrgId,
         defaultBranch: link.defaultBranch,
       });
     });
-  setWorkTreeProvider(workTree);
+  setWorkTreeProvider('github', workTree);
 
   /**
    * What Context needs of GitHub to store a source for a repository Code has
@@ -155,9 +156,10 @@ export function createGithubConnection(
         (installation) => installation.installationId,
       ),
     linkFor: async (repoFullName) => {
-      const link = await store.getRepo(repoFullName);
-      return link
-        ? { installationId: link.installationId, defaultBranch: link.defaultBranch }
+      const link = await repos.getRepo(repoFullName);
+      const installationId = link ? installationOf(link) : null;
+      return link && installationId !== null
+        ? { installationId, defaultBranch: link.defaultBranch ?? '' }
         : null;
     },
     reachRepository: async (installationId, repoFullName) => {
@@ -174,29 +176,15 @@ export function createGithubConnection(
   /**
    * A push to the default branch is what re-reads a repository's own
    * documentation: its Repository source syncs, and the workspace corpus goes
-   * stale from there. A repository with no source of its own has nothing to do
-   * here.
+   * stale from there.
    */
-  const syncSourceAfterPush = (workspaceOrgId: string, repoFullName: string): void => {
-    void (async () => {
-      try {
-        const source = await repositoryContextSource(workspaceOrgId, repoFullName);
-        if (!source) return;
-        const outcome = await contextSync(workspaceOrgId, source.id, 'push');
-        if (outcome !== 'queued') {
-          log.info(`[github] ${repoFullName} pushed, context sync ${outcome}`);
-        }
-      } catch (err) {
-        log.warn(
-          `[github] could not sync ${repoFullName}'s context after a push: ${(err as Error).message}`,
-        );
-      }
-    })();
-  };
+  const syncSourceAfterPush = (workspaceOrgId: string, repoFullName: string): void =>
+    syncRepositorySource(workspaceOrgId, repoFullName, contextSync);
 
   const webhook = createWebhookRouter({
     secret: cfg.webhookSecret,
     store,
+    repos,
     // A connected repository's push. (The gate's baseline refresh arrives
     // separately.)
     onBaseline: (trigger) => {
@@ -210,7 +198,7 @@ export function createGithubConnection(
     },
     // GitHub taking a repo away (app uninstall, repo removed from the
     // installation) disconnects it exactly like an explicit unlink does.
-    onRepoRemoved: async (link: RepoLinkRecord) => {
+    onRepoRemoved: async (link: RepositoryRecord) => {
       await removeRepoRunState(link.repoFullName, link.workspaceOrgId);
       await removeRepositoryContext(link.workspaceOrgId, link.repoFullName);
       log.info(`[github] ${link.repoFullName} disconnected by GitHub`);
@@ -219,6 +207,7 @@ export function createGithubConnection(
 
   const connect = createConnectRouter({
     store,
+    repos,
     appSlug: cfg.appSlug,
     appUrl: process.env.WORKOS_APP_URL || 'http://localhost:3000',
     // Back to the connect dialog, so the new installation is pickable at once.
@@ -232,7 +221,7 @@ export function createGithubConnection(
     lookupInstallationAccount:
       overrides.lookupInstallationAccount ??
       ((installationId: number) => fetchInstallationAccount(cfg, installationId)),
-    onRepoLinked: async (link: RepoLinkRecord) => {
+    onRepoLinked: async (link: RepositoryRecord) => {
       // Connecting starts the repository's Flow setup, which derives its recipe,
       // dependencies and interfaces from the CODE. What the repository reads is
       // Context's side: sources are made there, and the connect dialog's Context
@@ -249,7 +238,7 @@ export function createGithubConnection(
         log.error(`[github] could not start ${link.repoFullName}'s setup: ${(err as Error).message}`);
       }
     },
-    onRepoUnlinked: async (link: RepoLinkRecord) => {
+    onRepoUnlinked: async (link: RepositoryRecord) => {
       await removeRepoRunState(link.repoFullName, link.workspaceOrgId);
       await removeRepositoryContext(link.workspaceOrgId, link.repoFullName);
       log.info(`[github] ${link.repoFullName} disconnected`);

@@ -156,6 +156,51 @@ export async function createRunClone(
 }
 
 /**
+ * Copy a folder on this machine into a fresh per-run directory — the local
+ * provider's answer to a clone.
+ *
+ * The run works on the COPY and never on the folder itself: `guard setup`
+ * writes inside the tree it is given, and a developer's checkout is theirs. The
+ * copy is whole (`.git` included, so the run resolves the same commit the
+ * developer is on) and it is the only tree the run ever touches; disposing it
+ * leaves the original exactly as it was.
+ */
+export async function createRunCopy(
+  sourceDir: string,
+  opts: { workspaceOrgId: string },
+): Promise<RunClone> {
+  if (!fs.existsSync(sourceDir) || !fs.statSync(sourceDir).isDirectory()) {
+    throw createAppError(`${sourceDir} is not a folder on this machine any more.`, 404);
+  }
+
+  const tenantRoot = path.join(
+    getRunClonesDir(),
+    sanitizeSegment(opts.workspaceOrgId) || 'workspace',
+  );
+  fs.mkdirSync(tenantRoot, { recursive: true });
+  const dir = fs.mkdtempSync(path.join(tenantRoot, RUN_CLONE_PREFIX));
+
+  const dispose = (): void => {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // best-effort — the boot sweep picks up what a busy file handle blocks
+    }
+  };
+
+  try {
+    // `dereference: false` keeps a symlink a symlink, so a link pointing out of
+    // the folder is copied as the link it is rather than dragging the tree it
+    // names into the run.
+    fs.cpSync(sourceDir, dir, { recursive: true, dereference: false, force: true });
+    return { dir, dispose };
+  } catch (err) {
+    dispose();
+    throw createAppError(`Could not copy ${sourceDir}: ${(err as Error).message}`, 500);
+  }
+}
+
+/**
  * Remove every run clone under this machine's run-clones dir. Called once at
  * boot: a clone belongs to the process that made it and dies with it, and a
  * booting process has made none — so whatever is there is debris from a run

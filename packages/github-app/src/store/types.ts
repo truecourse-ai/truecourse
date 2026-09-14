@@ -1,11 +1,12 @@
 /**
- * Persistence contract for connected GitHub installations, repos and their gate
- * runs. Two adapters implement it: the Postgres one next door (used wherever a
- * shared db exists) and a file-based one for deployments without a database.
- * Callers depend only on this interface.
+ * Persistence contract for the GitHub App's own rows: the installations that
+ * granted it access, and the pull request gate's baselines, runs and PR state.
+ *
+ * The REPOSITORIES themselves are not here. A repository can come through any
+ * provider, so it is written through `RepositoryStore`
+ * (`@truecourse/shared`), which `@truecourse/data-store` implements — the
+ * routers below take one alongside this store.
  */
-
-import type { GithubNotificationPrefs } from '@truecourse/shared';
 
 /** A GitHub App installation — an account that installed the App. */
 export interface InstallationRecord {
@@ -16,30 +17,6 @@ export interface InstallationRecord {
   accountType: string;
   /** TrueCourse workspace (WorkOS org) this installation belongs to, once connected. */
   workspaceOrgId: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/** A repository connected to the gate. */
-export interface RepoLinkRecord {
-  /** 'owner/name'. */
-  repoFullName: string;
-  installationId: number;
-  /** Owning TrueCourse workspace (WorkOS org). */
-  workspaceOrgId: string;
-  defaultBranch: string;
-  /** When true (default) a PR with newly failing Spec Guard scenarios fails a required Check; false = advisory. */
-  blocking: boolean;
-  /** Code Quality gate: when true (default) new violations at/above
-   *  `codeQualityMinSeverity` fail a required Check; false = advisory. */
-  codeQualityBlocking?: boolean;
-  /** Min new-violation severity that fails the Code Quality Check (default `high`). */
-  codeQualityMinSeverity?: 'info' | 'low' | 'medium' | 'high' | 'critical';
-  enabled: boolean;
-  /** Addresses notified (via Resend) when the Spec Guard gate fails. */
-  notifyEmails?: string[];
-  /** Per-type email toggles. Absent = every type on (the default). */
-  notifications?: GithubNotificationPrefs;
   createdAt: string;
   updatedAt: string;
 }
@@ -68,7 +45,7 @@ export interface PrRecord {
   updatedAt: string;
 }
 
-/** A recorded gate run on a PR (Phase 4 fills in inline-comment details). */
+/** A recorded gate run on a PR. */
 export interface GateRunRecord {
   id: string;
   repoFullName: string;
@@ -94,14 +71,6 @@ export interface GateStore {
   listInstallationsForWorkspace(
     workspaceOrgId: string,
   ): Promise<InstallationRecord[]>;
-
-  // --- repo links ---
-  linkRepo(rec: RepoLinkRecord): Promise<void>;
-  unlinkRepo(repoFullName: string): Promise<void>;
-  getRepo(repoFullName: string): Promise<RepoLinkRecord | null>;
-  listReposForWorkspace(workspaceOrgId: string): Promise<RepoLinkRecord[]>;
-  /** Every repo linked through this installation (webhook uninstall cleanup). */
-  listReposForInstallation(installationId: number): Promise<RepoLinkRecord[]>;
 
   // --- baseline ---
   saveBaseline(rec: BaselineRecord): Promise<void>;

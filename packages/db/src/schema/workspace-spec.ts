@@ -2,7 +2,7 @@
  * The WORKSPACE's spec set: the corpus and the decisions the Document scan
  * produced. Documentation belongs to the workspace, not to one repository, so
  * these rows are keyed by the WorkOS organization id (`workspace_org_id`, the
- * same convention as `gh_repos`/`gh_installations`) rather than `repo_key`.
+ * same convention as `repositories`) rather than `repo_key`.
  *
  * Always-latest: one current row per `(workspace_org_id, artifact)` with NO
  * commit dimension, unlike the per-commit repo `spec_sets`.

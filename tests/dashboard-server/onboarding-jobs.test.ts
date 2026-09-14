@@ -181,7 +181,7 @@ afterEach(async () => {
   await Promise.all(running);
   resetContextStore();
   setRepoJobsCanceller(null);
-  setWorkTreeProvider(null);
+  setWorkTreeProvider('github', null);
   await jobs.stop();
   setSessionRunBackend(undefined);
   await client.close();
@@ -262,7 +262,7 @@ describe('the guard setup job', () => {
   /** A fresh clone of the fixture at a stable path, as a run really gets one. */
   function installWorkTree(): void {
     clone = path.join(makeTmpDir('tc-onboarding-clone-'), 'widgets');
-    setWorkTreeProvider(async () => {
+    setWorkTreeProvider('github', async () => {
       fs.rmSync(clone, { recursive: true, force: true });
       fs.cpSync(FIXTURE, clone, { recursive: true });
       git(clone, 'init', '--initial-branch=main');
@@ -667,7 +667,7 @@ describe('the guard generate job', () => {
 
   function installWorkTree(): void {
     clone = path.join(makeTmpDir('tc-onboarding-gen-clone-'), 'widgets');
-    setWorkTreeProvider(async () => {
+    setWorkTreeProvider('github', async () => {
       fs.rmSync(clone, { recursive: true, force: true });
       fs.cpSync(FIXTURE, clone, { recursive: true });
       git(clone, 'init', '--initial-branch=main');
@@ -770,7 +770,7 @@ describe('the guard generate job', () => {
     expect(source.status).toBe('failed');
     expect(fs.existsSync(clone)).toBe(false);
 
-    setWorkTreeProvider(async () => {
+    setWorkTreeProvider('github', async () => {
       fs.cpSync(savedTree, clone, { recursive: true });
       return { dir: clone, dispose: () => fs.rmSync(clone, { recursive: true, force: true }) };
     });
@@ -1083,7 +1083,7 @@ describe('the guard run job', () => {
 
   function installWorkTree(): void {
     clone = path.join(makeTmpDir('tc-onboarding-run-clone-'), 'widgets');
-    setWorkTreeProvider(async () => {
+    setWorkTreeProvider('github', async () => {
       fs.rmSync(clone, { recursive: true, force: true });
       fs.cpSync(FIXTURE, clone, { recursive: true });
       git(clone, 'init', '--initial-branch=main');
@@ -1337,7 +1337,7 @@ describe('disconnecting a repository mid-setup', () => {
     reached = false;
     disposedHere.length = 0;
     const dir = makeTmpDir('tc-onboarding-live-');
-    setWorkTreeProvider(async () => ({
+    setWorkTreeProvider('github', async () => ({
       dir,
       dispose: () => disposedHere.push(dir),
     }));

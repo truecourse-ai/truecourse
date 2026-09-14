@@ -8,7 +8,8 @@
 
 export { ContentStore, contentScope } from './content-store.js';
 export { sha256 } from './pack.js';
-export { GhReposRegistryStore } from './gh-repos-registry-store.js';
+export { RepositoriesRegistryStore } from './repositories-registry-store.js';
+export { PgRepositoryStore } from './repositories-store.js';
 export { PgSpecStore } from './spec-store.js';
 export {
   PgContextStore,

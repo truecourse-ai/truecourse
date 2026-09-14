@@ -146,15 +146,16 @@ const verify: AuthVerifier = async (cookieHeader) => {
 };
 
 /**
- * The registry as production runs it: a live view of the link store, exactly
- * what GhReposRegistryStore derives from gh_repos. Mutations are no-ops.
+ * The registry as production runs it: a live view of the repositories, exactly
+ * what RepositoriesRegistryStore derives from them. Mutations are no-ops.
  */
 function derivedRegistry(gate: MemoryGateStore): RegistryStore {
-  const toEntry = (repoFullName: string, defaultBranch: string): RegistryEntry => ({
+  const toEntry = (repoFullName: string, defaultBranch: string | null): RegistryEntry => ({
     slug: slugify(repoFullName, []),
     name: repoFullName,
     path: repoFullName,
-    defaultBranch,
+    provider: 'github',
+    ...(defaultBranch ? { defaultBranch } : {}),
     remoteUrl: `https://github.com/${repoFullName}`,
   });
   const all = async (): Promise<RegistryEntry[]> =>
@@ -182,11 +183,18 @@ let contextStore: ReturnType<typeof memoryContextStore>;
 function buildApp(opts: MountOptions = {}): Express {
   const github = createGithubConnection({
     store,
+    repos: store,
     octokitFor: () => octokit,
     ...opts,
   });
   if (!github) throw new Error('expected a configured GitHub connection');
-  return createApp({ serveStatic: false, authVerifier: verify, github, jobs: null });
+  return createApp({
+    serveStatic: false,
+    authVerifier: verify,
+    repoLinks: store,
+    github,
+    jobs: null,
+  });
 }
 
 /** Poll until a fire-and-forget handler has landed. */
@@ -246,7 +254,7 @@ afterEach(() => {
   resetContextStore();
   resetWorkspaceLlmConfigStore();
   resetWorkspaceLlmBackend();
-  setWorkTreeProvider(null);
+  setWorkTreeProvider('github', null);
   resetSessionRuns();
   resetGuardStore();
   resetGuardOverlayStore();
@@ -268,14 +276,20 @@ describe('a server with no GitHub App configured', () => {
     const saved = { ...process.env };
     for (const key of Object.keys(APP_ENV)) delete process.env[key];
     try {
-      expect(createGithubConnection()).toBeNull();
+      expect(createGithubConnection({ repos: store })).toBeNull();
     } finally {
       Object.assign(process.env, saved);
     }
   });
 
   it('answers every /api/github route with an actionable 503', async () => {
-    const app = createApp({ serveStatic: false, authVerifier: null, github: null, jobs: null });
+    const app = createApp({
+      serveStatic: false,
+      authVerifier: null,
+      repoLinks: null,
+      github: null,
+      jobs: null,
+    });
 
     const status = await request(app).get('/api/github/status').expect(503);
     expect(status.body.error).toMatch(/GITHUB_APP_ID/);

@@ -11,7 +11,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { GITHUB_INSTALL_ORIGINS, LLM_PROVIDER_KINDS } from '@truecourse/shared';
 import type {
   GithubInstallationSummary,
@@ -20,12 +20,15 @@ import type {
   LlmConfigUpdate,
   LlmProviderKind,
   GithubInstallOrigin,
+  LocalRepositorySummary,
 } from '@truecourse/shared';
 import { StatusWord } from '@/preview/ui/status-word';
 import { Facts, ProviderIcon, PageHeader, SideMenu } from '@/preview/ui/bits';
 import { fetchLlmConfig, saveLlmConfig } from '@/preview/data/llm-config';
-import { repositoryProviders } from '@/preview/data/providers';
+import { offeredRepositoryProviders } from '@/preview/data/providers';
 import { fetchGithubStatus } from '@/preview/data/real-repos';
+import { fetchLocalRepos } from '@/preview/providers/local-folder';
+import { useServerMode } from '@/contexts/CapabilityContext';
 import { MembersTab } from '@/preview/pages/MembersTab';
 import { usePreviewState } from '@/preview/shell/preview-state';
 import { registeredSettingsTabs, type SettingsTab } from '@/preview/shell/registry';
@@ -49,9 +52,12 @@ type GithubProviderState = {
  * GitHub is the real one: its accounts are the App's installations the server
  * reports, each line naming the account, its type and how many repositories
  * this workspace has linked through it, and connecting is a top-level
- * navigation to the App's install page. Every other provider is listed and says
- * Coming soon: hiding one would make the page lie about where this is going,
- * and offering it would make it lie about what it does.
+ * navigation to the App's install page. On a local server the folders of this
+ * machine are real too, each line naming the repository and the path behind it,
+ * and connecting one is the connect dialog, where the path is typed. Every
+ * other provider is listed and says Coming soon: hiding one would make the page
+ * lie about where this is going, and offering it would make it lie about what
+ * it does.
  */
 /** Where an install started here returns to: the place that sent the user here, else this tab. */
 function installOriginOf(raw: string | null): GithubInstallOrigin {
@@ -61,7 +67,9 @@ function installOriginOf(raw: string | null): GithubInstallOrigin {
 }
 
 function RepositoriesTab() {
+  const mode = useServerMode();
   const [github, setGithub] = useState<GithubProviderState | null>(null);
+  const [folders, setFolders] = useState<LocalRepositorySummary[] | null>(null);
   const [params] = useSearchParams();
   const from = installOriginOf(params.get('from'));
 
@@ -90,12 +98,34 @@ function RepositoriesTab() {
     };
   }, [from]);
 
+  // The folders this machine has connected. Only a local server has any, and
+  // only a local server has the route to ask.
+  useEffect(() => {
+    if (mode !== 'local') return;
+    let live = true;
+    void fetchLocalRepos()
+      .then((connected) => {
+        if (live) setFolders(connected);
+      })
+      .catch(() => {
+        if (live) setFolders([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [mode]);
+
   const installations = github?.installations ?? [];
 
   return (
     <ul className="divide-y divide-border border-b border-border" aria-label="Providers">
-      {repositoryProviders().map(({ id, name }) => {
-        const live = id === 'github';
+      {offeredRepositoryProviders(mode).map((provider) => {
+        const { id, name } = provider;
+        const isGithub = id === 'github';
+        const isLocal = id === 'local';
+        const live = isGithub || isLocal;
+        const connected = isGithub ? installations.length > 0 : (folders ?? []).length > 0;
+        const reading = isGithub ? github === null : folders === null;
         return (
           <li key={id} className="flex items-start gap-4 px-6 py-3">
             <ProviderIcon provider={id} className="mt-0.5 h-6 w-6 shrink-0" />
@@ -103,18 +133,18 @@ function RepositoriesTab() {
               <div className="flex items-center gap-3">
                 <span className="text-[13px] font-medium text-foreground">{name}</span>
                 {!live && <span className="text-[11px] text-muted-foreground">Coming soon</span>}
-                {live && github === null && <StatusWord tone="neutral" word="Reading" />}
-                {live && github !== null && (
+                {live && reading && <StatusWord tone="neutral" word="Reading" />}
+                {live && !reading && (
                   <StatusWord
-                    tone={installations.length > 0 ? 'success' : 'neutral'}
-                    word={installations.length > 0 ? 'Connected' : 'Not connected'}
+                    tone={connected ? 'success' : 'neutral'}
+                    word={connected ? 'Connected' : 'Not connected'}
                   />
                 )}
               </div>
-              {live && github?.reason && (
+              {isGithub && github?.reason && (
                 <p className="mt-1 text-[11px] text-destructive">{github.reason}</p>
               )}
-              {live && installations.length > 0 && (
+              {isGithub && installations.length > 0 && (
                 <ul className="mt-1 space-y-1" aria-label="GitHub installations">
                   {installations.map((i) => {
                     const linked = (github?.linked ?? []).filter(
@@ -130,8 +160,17 @@ function RepositoriesTab() {
                   })}
                 </ul>
               )}
+              {isLocal && (folders ?? []).length > 0 && (
+                <ul className="mt-1 space-y-1" aria-label="Connected folders">
+                  {(folders ?? []).map((folder) => (
+                    <li key={folder.repoFullName} className="truncate text-[11px] text-muted-foreground">
+                      <span className="text-foreground">{folder.repoFullName}</span> · {folder.path}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
-            {live && github?.installUrl && (
+            {isGithub && github?.installUrl && (
               <a
                 href={github.installUrl}
                 className={`shrink-0 rounded px-2.5 py-1.5 text-xs font-medium ${
@@ -142,6 +181,18 @@ function RepositoriesTab() {
               >
                 {installations.length === 0 ? 'Connect' : 'Add account'}
               </a>
+            )}
+            {isLocal && (
+              <Link
+                to={'/code?connect=1'}
+                className={`shrink-0 rounded px-2.5 py-1.5 text-xs font-medium ${
+                  connected
+                    ? 'border border-border text-foreground hover:bg-muted/60'
+                    : 'bg-primary text-primary-foreground hover:opacity-90'
+                }`}
+              >
+                {connected ? 'Add folder' : 'Connect'}
+              </Link>
             )}
           </li>
         );
@@ -413,6 +464,9 @@ function settingsTabs(
 
 export default function SettingsPage() {
   const { tab } = useParams<{ tab?: string }>();
+  // A local workspace is one person on one machine: there is no identity
+  // provider to send an invitation through, so none is offered.
+  const invitable = useServerMode() !== 'local';
   const [inviteOpen, setInviteOpen] = useState(false);
   const tabs = useMemo(
     () => settingsTabs(inviteOpen, setInviteOpen),
@@ -425,7 +479,7 @@ export default function SettingsPage() {
       <PageHeader
         title="Settings"
         right={
-          active.id === 'members' && (
+          active.id === 'members' && invitable && (
             <button
               type="button"
               onClick={() => setInviteOpen(true)}

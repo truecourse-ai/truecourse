@@ -23,7 +23,7 @@ export interface RepoRef {
  * every repository in it, and is **always-latest** - one current set per org per
  * artifact, with no commit dimension. `workspaceOrgId` is the WorkOS
  * organization id (= `req.user.organizationId`, the same value stored as
- * `gh_repos.workspace_org_id`).
+ * `repositories.workspace_org_id`).
  */
 export interface WorkspaceRef {
   workspaceOrgId: string;

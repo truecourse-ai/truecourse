@@ -1,19 +1,17 @@
-# Self-host TrueCourse: app + Postgres in one `docker compose up --build`.
-# Every credential comes from the environment — nothing is hardcoded here.
-# Bring a WorkOS environment (session auth) and a GitHub App (repo connect +
-# webhooks); put values in a gitignored .env (compose auto-loads it) or
-# export them inline:
+# Postgres for a local TrueCourse. `docker compose up -d` and then the server
+# is the whole setup: one storage and one job runner, the same ones a hosted
+# deployment runs (Postgres 16), and the server applies the migrations at boot.
 #
-#   POSTGRES_PASSWORD=$(openssl rand -hex 16) \
-#   TRUECOURSE_SECRET_KEY=$(node -e "console.log(require('crypto').randomBytes(32).toString('base64'))") \
-#   WORKOS_API_KEY=... WORKOS_CLIENT_ID=... WORKOS_COOKIE_PASSWORD=... \
-#   GITHUB_APP_ID=... GITHUB_APP_PRIVATE_KEY=... GITHUB_APP_WEBHOOK_SECRET=... GITHUB_APP_SLUG=... \
-#   docker compose up --build
+#   docker compose up -d
+#   TRUECOURSE_MODE=local pnpm dev
 #
-# WORKOS_* and DATABASE_URL are required — the server boots authenticated and
-# on Postgres or not at all. For just a local database (the usual dev case):
+# It needs nothing from the environment — the defaults below match the
+# DATABASE_URL in .env.example:
 #
-#   POSTGRES_PASSWORD=truecourse docker compose up -d db
+#   postgres://truecourse:truecourse@localhost:5432/truecourse
+#
+# Override any of POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB (compose reads
+# a .env file beside this one) and set DATABASE_URL to match.
 
 services:
   db:
@@ -21,48 +19,19 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-truecourse}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD (e.g. in a .env file)}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-truecourse}
       POSTGRES_DB: ${POSTGRES_DB:-truecourse}
     volumes:
       - tc-pgdata:/var/lib/postgresql/data
     ports:
-      # Published for local dev (`pnpm dev` reads DATABASE_URL=localhost:5432).
-      # Loopback-only so the database is never reachable from the network.
+      # Loopback-only: the database is reachable from this machine and nowhere
+      # else, which is the whole of its security here.
       - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-truecourse}"]
       interval: 5s
       timeout: 3s
       retries: 10
-
-  app:
-    build: .
-    image: truecourse:local
-    restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
-    ports:
-      - "3001:3001"
-    environment:
-      PORT: "3001"
-      DATABASE_URL: postgres://${POSTGRES_USER:-truecourse}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-truecourse}
-      # Generate a strong 32+ char value (see header).
-      TRUECOURSE_SECRET_KEY: ${TRUECOURSE_SECRET_KEY:?set a 32+ char secret}
-      # Session auth (WorkOS) — required; the server refuses to boot without it.
-      WORKOS_API_KEY: ${WORKOS_API_KEY:-}
-      WORKOS_CLIENT_ID: ${WORKOS_CLIENT_ID:-}
-      WORKOS_COOKIE_PASSWORD: ${WORKOS_COOKIE_PASSWORD:-}
-      WORKOS_REDIRECT_URI: ${WORKOS_REDIRECT_URI:-}
-      WORKOS_APP_URL: ${WORKOS_APP_URL:-}
-      # GitHub App connect. The server itself treats these as optional (it boots
-      # and answers /api/github with a 503 naming them), but the image exists to
-      # serve connected repos, so the compose contract requires all four up
-      # front rather than shipping a container that can't connect.
-      GITHUB_APP_ID: ${GITHUB_APP_ID:?set the GitHub App id}
-      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:?set the GitHub App private key}
-      GITHUB_APP_WEBHOOK_SECRET: ${GITHUB_APP_WEBHOOK_SECRET:?set the GitHub App webhook secret}
-      GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:?set the GitHub App slug}
 
 volumes:
   tc-pgdata:

@@ -36,6 +36,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
+import { useServerMode } from '@/contexts/CapabilityContext';
 import { useThemeToggle } from '@/hooks/useThemeToggle';
 import { usePreviewState } from './preview-state';
 import { usePreviewUser } from './use-preview-user';
@@ -231,6 +232,9 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
   const { workspace } = usePreviewState();
   const user = usePreviewUser();
   const { signOut } = useAuth();
+  // A local server has nobody signed in and so nothing to sign out of: the
+  // session is this machine's, and it ends when the server does.
+  const signedIn = useServerMode() !== 'local';
   const [open, setOpen] = useState(false);
   const close = useCallback(() => setOpen(false), []);
   const ref = useClickOutside(open, close);
@@ -256,7 +260,9 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
         {!collapsed && (
           <span className="min-w-0 flex-1">
             <span className="block truncate text-[13px] text-foreground">{user.name}</span>
-            <span className="block truncate text-[11px] text-muted-foreground">{user.email}</span>
+            {user.email && (
+              <span className="block truncate text-[11px] text-muted-foreground">{user.email}</span>
+            )}
           </span>
         )}
       </button>
@@ -264,7 +270,9 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
         <div className="absolute bottom-full left-0 z-30 mb-1 w-56 overflow-hidden rounded-md border border-border bg-popover shadow-md">
           <div className="border-b border-border px-3 py-2">
             <div className="text-[13px] text-foreground">{user.name}</div>
-            <div className="truncate text-[11px] text-muted-foreground">{user.email}</div>
+            {user.email && (
+              <div className="truncate text-[11px] text-muted-foreground">{user.email}</div>
+            )}
             {workspace && (
               <div className="mt-1.5 truncate text-[11px] text-muted-foreground">{workspace.name}</div>
             )}
@@ -277,17 +285,19 @@ function UserMenu({ collapsed }: { collapsed: boolean }) {
             {isDark ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
             {isDark ? 'Light mode' : 'Dark mode'}
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              setOpen(false);
-              void signOut();
-            }}
-            className="flex w-full items-center gap-2 border-t border-border px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-          >
-            <LogOut className="h-3.5 w-3.5" />
-            Sign out
-          </button>
+          {signedIn && (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                void signOut();
+              }}
+              className="flex w-full items-center gap-2 border-t border-border px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              Sign out
+            </button>
+          )}
         </div>
       )}
     </div>

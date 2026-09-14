@@ -91,7 +91,9 @@ export type RepoResponse = {
   id: string;
   name: string;
   path: string;
-  /** Set when the repo was connected through a provider; `path` is then a managed clone. */
+  /** The provider it was connected through (`github`, `local`). */
+  provider?: string | null;
+  /** Where the provider serves it: a remote URL, or a folder's path on this machine. */
   remoteUrl?: string | null;
   /** Most recent lifecycle event across features (home-page card), or null. */
   latestEvent?: { kind: LatestEventKind; at: string } | null;
@@ -100,9 +102,8 @@ export type RepoResponse = {
   isGitRepo?: boolean;
 };
 
-// Capabilities — fetched once at app boot by AppProvider so any
-// component can ask `useCapability('sso')`. OSS always responds with
-// `{ edition: 'community', capabilities: [] }`.
+// Capabilities — fetched once at app boot by AppProvider so any component can
+// ask `useCapability('sso')` or `useServerMode()`.
 export function getCapabilities(): Promise<CapabilitiesResponse> {
   return fetchApi<CapabilitiesResponse>('/api/capabilities');
 }

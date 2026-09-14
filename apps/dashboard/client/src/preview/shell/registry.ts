@@ -14,6 +14,7 @@
  */
 
 import type { ComponentType, ReactNode } from 'react';
+import type { ServerMode } from '@truecourse/shared';
 
 /**
  * One section of Settings: a row in its side menu and the page behind it, at
@@ -24,6 +25,21 @@ export interface SettingsTab {
   id: string;
   label: string;
   render(): ReactNode;
+}
+
+/**
+ * How a provider connects a repository from inside the app: the step that names
+ * what to connect, and the call that connects it. A provider with none is
+ * listed and inert, or connects elsewhere (GitHub starts at its own install
+ * page, which is a top-level navigation and not a step).
+ */
+export interface RepositoryConnect {
+  /** What the provider's row says beneath its name in the connect dialog. */
+  summary: string;
+  /** The picking step. `value` is what it has named so far. */
+  Picker: ComponentType<{ value: string; onChange: (next: string) => void }>;
+  /** Connect what the picker named; answers the repository's identity. */
+  link(picked: string): Promise<{ repoFullName: string }>;
 }
 
 /**
@@ -38,6 +54,13 @@ export interface RepositoryProvider {
   /** The provider's own mark, as an image URL. */
   logo: string;
   comingSoon?: boolean;
+  /**
+   * The one mode this provider is offered in. Absent means both — a folder on
+   * this machine only makes sense when the server shares that machine.
+   */
+  mode?: ServerMode;
+  /** How it connects a repository from inside the app, when it does. */
+  connect?: RepositoryConnect;
   /**
    * Whether a remote's host belongs to this provider, which is how a connected
    * repository gets its mark. GitHub needs none: an unrecognized host reads as

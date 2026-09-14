@@ -24,7 +24,12 @@ export interface ServerFeatureContext {
   db: Db;
   /** The key every encrypted-at-rest secret is derived from. */
   masterSecret: string;
-  workspaceSession: WorkspaceSessionTools;
+  /**
+   * What a route that moves the session between organizations is built from.
+   * Null in local mode: there is no identity provider and one workspace, so a
+   * feature that needs one mounts nothing.
+   */
+  workspaceSession: WorkspaceSessionTools | null;
 }
 
 export interface ServerRouterMount {

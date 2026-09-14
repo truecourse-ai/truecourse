@@ -1,10 +1,10 @@
 /**
- * Edition + capability contract for the dashboard.
+ * Edition, mode and capability contract for the dashboard.
  *
- * The server reports `edition` and `capabilities` — the feature gates that are
- * currently turned on for this deployment. Capability identifiers are
- * deliberately typed as plain strings so a gate can be added without a
- * shared-schema change.
+ * The server reports `edition`, the MODE it runs in and `capabilities` — the
+ * feature gates that are currently turned on for this deployment. Capability
+ * identifiers are deliberately typed as plain strings so a gate can be added
+ * without a shared-schema change.
  */
 
 export type Edition = 'community' | 'enterprise'
@@ -16,8 +16,23 @@ export type Edition = 'community' | 'enterprise'
  */
 export type Capability = string
 
+/**
+ * How the server runs.
+ *
+ * `hosted` is a deployment: WorkOS signs people in, and a workspace is their
+ * organization. `local` is one developer's machine: one implicit person, one
+ * implicit workspace, no sign-in, and repositories may be folders on that
+ * machine. A deployment never becomes local by accident — the server is told
+ * which it is, and answers `hosted` when it is told nothing.
+ */
+export type ServerMode = 'hosted' | 'local'
+
+export const DEFAULT_SERVER_MODE: ServerMode = 'hosted'
+
 export interface CapabilitiesResponse {
   edition: Edition
+  /** How this server runs; the client reads it before it has a session. */
+  mode: ServerMode
   capabilities: Capability[]
 }
 

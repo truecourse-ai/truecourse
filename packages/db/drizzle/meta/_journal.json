@@ -155,6 +155,13 @@
       "when": 1789356796572,
       "tag": "0021_drop_ee_era",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1789356896572,
+      "tag": "0022_provider_repositories",
+      "breakpoints": true
     }
   ]
 }

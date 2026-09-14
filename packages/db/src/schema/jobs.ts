@@ -8,7 +8,7 @@
  * page; it is the source of truth for history (SSE/NOTIFY is only the live push).
  *
  * Both are workspace-scoped by `workspace_org_id` (the WorkOS organization id,
- * the same convention as `gh_repos`/`knowledge_documents`).
+ * the same convention as `repositories`).
  *
  * Single-flight: at most ONE active (`queued`|`running`) job per (org, key) is
  * enforced by a PARTIAL UNIQUE INDEX, so a concurrent sync fails fast instead of

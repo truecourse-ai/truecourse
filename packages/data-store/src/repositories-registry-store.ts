@@ -1,8 +1,8 @@
 /**
- * The registry, backed by the gate's `gh_repos` table. There is no registry
- * table: every entry is DERIVED from `gh_repos` (the single source of truth
- * connect and unlink maintain), so it can neither drift nor accumulate
- * orphans.
+ * The registry, backed by the `repositories` table. There is no registry
+ * table: every entry is DERIVED from the connected repositories (the single
+ * source of truth connect and unlink maintain), so it can neither drift nor
+ * accumulate orphans.
  *
  * Slugs use the same `slugify` as core, minted over the whole set in a STABLE
  * ORDER (connection time, then full name): repo full names are globally unique,
@@ -13,16 +13,16 @@
  * `readRegistry` / `getProjectBySlug` / `getProjectByPath`.
  *
  * NOTE: `readRegistry()` is global (the core seam has no org param), which is fine
- * for slug → repo resolution. Workspace-scoped surfaces (the overview) must query
- * `gh_repos` by org directly, not through this seam.
+ * for slug → repo resolution. Workspace-scoped surfaces (the overview) read the
+ * repository store by org directly, not through this seam.
  */
 
-import { ghRepos, type Db } from '@truecourse/db';
+import { repositories, type Db } from '@truecourse/db';
 import { slugify, type RegistryEntry, type RegistryStore } from '@truecourse/core/config/registry';
 
-type GhRepoRow = typeof ghRepos.$inferSelect;
+type RepositoryRow = typeof repositories.$inferSelect;
 
-function toEntries(rows: GhRepoRow[]): RegistryEntry[] {
+function toEntries(rows: RepositoryRow[]): RegistryEntry[] {
   // Oldest connection first, full name as the tiebreak — the order is part of
   // slug identity (the earlier repo keeps the base slug on a collision), so it
   // must not depend on whatever order Postgres returned the rows in.
@@ -35,25 +35,30 @@ function toEntries(rows: GhRepoRow[]): RegistryEntry[] {
     const slug = slugify(r.repoFullName, taken);
     taken.push(slug);
     // `path` is the opaque repo identity every per-repo store keys by (repoKey).
-    // `defaultBranch` comes from gh_repos so the repo route never has to shell out
-    // to git on a non-path identity (there's no local checkout in hosted mode).
-    // `remoteUrl` marks the entry as a connected GitHub repo to the client
-    // (the preview shell keys "real" repos off its presence).
+    // `defaultBranch` comes from the row so the repo route never has to shell
+    // out to git on a non-path identity (a run works on a copy, and nothing is
+    // checked out between runs). `remoteUrl` is where the provider serves it,
+    // which the client reads as the mark of a connected repository — a local
+    // folder's is the path it was connected from.
     return {
       slug,
       name: r.repoFullName,
       path: r.repoFullName,
-      defaultBranch: r.defaultBranch,
-      remoteUrl: `https://github.com/${r.repoFullName}`,
+      provider: r.provider,
+      ...(r.defaultBranch ? { defaultBranch: r.defaultBranch } : {}),
+      remoteUrl:
+        r.provider === 'local'
+          ? (r.location ?? r.repoFullName)
+          : `https://github.com/${r.repoFullName}`,
     };
   });
 }
 
-export class GhReposRegistryStore implements RegistryStore {
+export class RepositoriesRegistryStore implements RegistryStore {
   constructor(private readonly db: Db) {}
 
   async readRegistry(): Promise<RegistryEntry[]> {
-    const rows = await this.db.select().from(ghRepos);
+    const rows = await this.db.select().from(repositories);
     return toEntries(rows);
   }
 

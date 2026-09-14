@@ -262,7 +262,7 @@ router.get(
 export default router;
 
 /**
- * Just enough of the GitHub link store to scope a workspace's runs: which
+ * Just enough of the repository store to scope a workspace's runs: which
  * repositories it connected. Structural, so the real `GateStore` satisfies it
  * without this module depending on the GitHub package.
  */
@@ -272,7 +272,7 @@ export interface WorkspaceRepoLinks {
 
 export interface WorkspaceSessionsDeps {
   /** Present when the server has a GitHub App configured; null otherwise. */
-  githubLinks?: WorkspaceRepoLinks | null;
+  repoLinks?: WorkspaceRepoLinks | null;
 }
 
 /**
@@ -284,14 +284,14 @@ export interface WorkspaceSessionsDeps {
 export type WorkspaceRun = PublicRunRecord & { repo: { id: string; fullName: string } | null };
 
 /**
- * The repositories this caller's runs may come from. With a link store the
- * workspace is exactly what it connected, so a session without one has nothing
- * to read (401). Without a link store the server has no workspaces at all
- * (file mode) and the registry IS the workspace.
+ * The repositories this caller's runs may come from: exactly what their
+ * workspace connected, so a session with no workspace has nothing to read
+ * (401). A test app that installs no store at all is the only case with
+ * nothing to scope by, and there the registry IS the workspace.
  */
 async function workspaceRepos(deps: WorkspaceSessionsDeps, req: Request): Promise<RegistryEntry[]> {
   const entries = await readRegistry();
-  const links = deps.githubLinks;
+  const links = deps.repoLinks;
   if (!links) return entries;
   const org = req.user?.organizationId;
   if (!org) throw createAppError('This session has no workspace.', 401);

@@ -6,8 +6,8 @@ import {
   createWebhookRouter,
   type BaselineTrigger,
   type SourcePushTrigger,
-  type RepoLinkRecord,
 } from '../../packages/github-app/src/index';
+import type { RepositoryRecord } from '@truecourse/shared';
 import { MemoryGateStore } from './memory-store';
 
 const SECRET = 'whsec';
@@ -21,7 +21,7 @@ let baselineCalls: BaselineTrigger[];
 let sourcePushCalls: SourcePushTrigger[];
 let prCalls: unknown[];
 let commentCalls: unknown[];
-let removedCalls: RepoLinkRecord[];
+let removedCalls: RepositoryRecord[];
 let app: Express;
 
 beforeEach(() => {
@@ -44,6 +44,7 @@ beforeEach(() => {
     createWebhookRouter({
       secret: SECRET,
       store,
+      repos: store,
       onBaseline: (t) => baselineCalls.push(t),
       onSourcePush: (t) => sourcePushCalls.push(t),
       onRepoRemoved: async (link) => {
@@ -55,10 +56,11 @@ beforeEach(() => {
   );
 });
 
-function repoLink(repoFullName: string, installationId: number): RepoLinkRecord {
+function repoLink(repoFullName: string, installationId: number): RepositoryRecord {
   return {
     repoFullName,
-    installationId,
+    provider: 'github',
+    accountId: String(installationId),
     workspaceOrgId: 'org_A',
     defaultBranch: 'main',
     blocking: true,
@@ -145,7 +147,8 @@ describe('webhook router', () => {
   it('triggers a baseline on push to the default branch of a connected repo', async () => {
     await store.linkRepo({
       repoFullName: 'acme/api',
-      installationId: 5,
+      provider: 'github',
+      accountId: '5',
       workspaceOrgId: 'org_A',
       defaultBranch: 'main',
       blocking: true,
@@ -173,7 +176,8 @@ describe('webhook router', () => {
   it('ignores a push to a non-default branch', async () => {
     await store.linkRepo({
       repoFullName: 'acme/api',
-      installationId: 5,
+      provider: 'github',
+      accountId: '5',
       workspaceOrgId: 'org_A',
       defaultBranch: 'main',
       blocking: true,

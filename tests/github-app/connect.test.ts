@@ -71,6 +71,7 @@ beforeEach(() => {
     '/api/ee/github',
     createConnectRouter({
       store,
+      repos: store,
       appSlug: 'tc-gate',
       appUrl: 'http://localhost:3000',
       setupRedirectPath: '/code?connect=1',
@@ -170,7 +171,8 @@ describe('connect router', () => {
     await seedInstallation('org_A'); // org_A owns installation 100
     await store.linkRepo({
       repoFullName: 'acme/api',
-      installationId: 200,
+      provider: 'github',
+      accountId: '200',
       workspaceOrgId: 'org_OTHER', // already owned by another workspace
       defaultBranch: 'main',
       blocking: true,
@@ -230,6 +232,7 @@ describe('connect router', () => {
       '/api/ee/github',
       createConnectRouter({
         store,
+        repos: store,
         appSlug: 'tc-gate',
         appUrl: 'https://app.truecourse.test',
         setupRedirectPath: '/repositories?connect=1',

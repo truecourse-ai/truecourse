@@ -10,6 +10,11 @@
  * nothing to offer here. Connecting one is Settings' job, so the list ends
  * with the single link that goes there, closing the dialog on the way.
  *
+ * A PROVIDER THAT CONNECTS FROM INSIDE THE APP is a row of its own beside them
+ * — on a local server, the folder on this machine. It brings its own picking
+ * step and its own link call through the provider registry, so this dialog
+ * knows only that there is one, not what it asks for.
+ *
  * THE CONTEXT STEP is real too: the workspace's sources come from
  * `GET /api/context/sources`, and the repository's OWN documentation leads the
  * list, checked — it is not a workspace source yet, it is the Repository source
@@ -37,6 +42,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Capsule, ProviderIcon, providerName } from '@/preview/ui/bits';
+import { offeredRepositoryProviders } from '@/preview/data/providers';
+import { useServerMode } from '@/contexts/CapabilityContext';
+import type { RepositoryProvider } from '@/preview/shell/registry';
 import { StatusWord } from '@/preview/ui/status-word';
 import { Stepper } from '@/preview/ui/stepper';
 import type {
@@ -98,8 +106,13 @@ function InstanceLine({ name }: { name: string }) {
 export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const { refreshRealRepos, llmProvider } = usePreviewState();
   const navigate = useNavigate();
+  const mode = useServerMode();
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [picked, setPicked] = useState<string[]>([]);
+  /** The provider connecting from inside the app, once its row is chosen. */
+  const [provider, setProvider] = useState<RepositoryProvider | null>(null);
+  /** What that provider's own step has named so far. */
+  const [named, setNamed] = useState('');
   /**
    * The Context step: which of the workspace's EXISTING sources the connected
    * repositories read. Sources are made in Context; connecting makes none. A
@@ -123,6 +136,8 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
     if (!open) {
       setStep(1);
       setPicked([]);
+      setProvider(null);
+      setNamed('');
       setInstallationId(null);
       setInstallationRepos(null);
       setReposError(null);
@@ -254,8 +269,50 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   /** Pick one connected instance: straight to the repositories it can see. */
   const chooseInstallation = (id: number) => {
     setPicked([]);
+    setProvider(null);
     setInstallationId(id);
     setStep(2);
+  };
+
+  /** Pick a provider that connects from here: straight to its own step. */
+  const chooseProvider = (next: RepositoryProvider) => {
+    setPicked([]);
+    setInstallationId(null);
+    setNamed('');
+    setProvider(next);
+    setStep(2);
+  };
+
+  /** The providers this server offers that connect from inside the app. */
+  const selfConnecting = offeredRepositoryProviders(mode).filter((p) => p.connect);
+
+  /**
+   * Connect what a provider's own step named. One repository, so a refusal is
+   * the whole answer and the dialog stays standing with the reason on it.
+   */
+  const connectThroughProvider = async () => {
+    const connect = provider?.connect;
+    if (!connect || linking !== null) return;
+    const asked = named.trim();
+    setLinkErrors({});
+    setLinking(0);
+    let landed: string | null = null;
+    try {
+      landed = (await connect.link(asked)).repoFullName;
+    } catch (error) {
+      setLinkErrors({ [asked]: reasonOf(error) });
+    }
+    setLinking(null);
+    if (!landed) return;
+    const connected = await refreshRealRepos();
+    await bindContext([landed], connected);
+    if (llmProvider === 'missing') {
+      toastNoLlmProvider(
+        navigate,
+        `${landed} is connected, but its scan cannot start until a provider is set.`,
+      );
+    }
+    onOpenChange(false);
   };
 
   /**
@@ -378,9 +435,26 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
             {github.kind === 'unavailable' && (
               <li className="px-3 py-2.5 text-[11px] text-destructive">{github.reason}</li>
             )}
-            {github.kind === 'ready' && installations.length === 0 && (
+            {github.kind === 'ready' && installations.length === 0 && selfConnecting.length === 0 && (
               <li className="px-3 py-2.5 text-[11px] text-muted-foreground">No provider connected yet.</li>
             )}
+            {selfConnecting.map((offered) => (
+              <li key={offered.id}>
+                <button
+                  type="button"
+                  onClick={() => chooseProvider(offered)}
+                  className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/40"
+                >
+                  <ProviderIcon provider={offered.id} className="h-5 w-5" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] text-foreground">{offered.name}</span>
+                    <span className="block truncate text-[11px] text-muted-foreground">
+                      {offered.connect!.summary}
+                    </span>
+                  </span>
+                </button>
+              </li>
+            ))}
             <li>
               <Link
                 to={'/settings/repositories?from=code-connect'}
@@ -393,7 +467,11 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
           </ul>
         )}
 
-        {step === 2 && (
+        {step === 2 && provider?.connect && (
+          <provider.connect.Picker value={named} onChange={setNamed} />
+        )}
+
+        {step === 2 && !provider && (
           <div>
             {chosen && <InstanceLine name={nameOf(chosen)} />}
             <ul className="mt-2 max-h-64 divide-y divide-border overflow-y-auto rounded-md border border-border">
@@ -488,10 +566,16 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
         {step === 4 && (
           <div className="rounded-md border border-border px-3 py-2.5">
             <p className="text-xs text-foreground">
-              Connect from {chosen ? `${providerName('github')} · ${nameOf(chosen)}` : providerName('github')}:
+              Connect from{' '}
+              {provider
+                ? provider.name
+                : chosen
+                  ? `${providerName('github')} · ${nameOf(chosen)}`
+                  : providerName('github')}
+              :
             </p>
             <ul className="mt-1.5 space-y-1">
-              {picked.map((name) => (
+              {(provider ? [named.trim()] : picked).map((name) => (
                 <li key={name} className="font-mono text-[11px] text-muted-foreground">
                   {name}
                   {linkErrors[name] && (
@@ -524,7 +608,7 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
           {step === 2 && (
             <button
               type="button"
-              disabled={picked.length === 0}
+              disabled={provider ? named.trim() === '' : picked.length === 0}
               onClick={() => setStep(3)}
               className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
             >
@@ -544,7 +628,7 @@ export function ConnectDialog({ open, onOpenChange }: { open: boolean; onOpenCha
             <button
               type="button"
               disabled={linking !== null}
-              onClick={() => void connectGithub()}
+              onClick={() => void (provider ? connectThroughProvider() : connectGithub())}
               className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
             >
               {linking === null ? 'Connect and start onboarding' : 'Connecting'}

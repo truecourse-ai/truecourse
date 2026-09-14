@@ -13,6 +13,7 @@
  */
 
 import type { GuardCoveragePlainStatus } from '../guard/dashboard.js';
+import type { RepositoryProviderId } from './repositories.js';
 
 /** Every kind a source can be. Only `repository` and `site` have a driver. */
 export const CONTEXT_SOURCE_KINDS = [
@@ -67,11 +68,16 @@ export const CONTEXT_SOURCE_STATUS_ORDER = [
 export interface RepositorySourceConfig {
   /** `owner/repo` — the identity every store, clone and link keys by. */
   repoFullName: string;
+  /** The provider the sync reads it through. Absent means the GitHub App. */
+  provider?: RepositoryProviderId;
   /**
    * The GitHub App installation the sync reads the repository through, which is
-   * what lets a source read a repository Code has not connected.
+   * what lets a source read a repository Code has not connected. Absent for a
+   * folder on this machine, which has no account behind it.
    */
-  installationId: number;
+  installationId?: number;
+  /** Where the provider finds it: a folder's absolute path on this machine. */
+  path?: string;
   /** Gitignore-style globs a file must match to enter the source. */
   include: string[];
   /** Gitignore-style globs that subtract after the include selects. */

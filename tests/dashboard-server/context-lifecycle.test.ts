@@ -82,9 +82,11 @@ afterEach(() => {
 async function link(repoFullName = REPO, org = ORG): Promise<void> {
   await gate.linkRepo({
     repoFullName,
-    installationId: INSTALLATION_ID,
+    provider: 'github',
+    accountId: String(INSTALLATION_ID),
     workspaceOrgId: org,
     defaultBranch: 'main',
+    blocking: true,
     enabled: true,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
@@ -114,6 +116,7 @@ describe('the connect hook', () => {
     const setups: string[] = [];
     const github = createGithubConnection({
       store: gate,
+      repos: gate,
       octokitFor: () => ({}) as never,
       workTree: async () => ({ dir: '/nowhere', dispose: () => {} }),
       contextSync: async (orgId, sourceId, source) => {
@@ -231,6 +234,7 @@ describe('disconnecting a repository', () => {
 function webhookApp(): Express {
   const github = createGithubConnection({
     store: gate,
+    repos: gate,
     octokitFor: () => ({}) as never,
     workTree: async () => ({ dir: '/nowhere', dispose: () => {} }),
     contextSync,

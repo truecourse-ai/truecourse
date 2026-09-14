@@ -60,10 +60,10 @@ export {
   type OnRepoLinked,
   type OnRepoUnlinked,
 } from './connect.js';
+export { GITHUB_PROVIDER, installationOf } from './provider.js';
 export type {
   GateStore,
   InstallationRecord,
-  RepoLinkRecord,
   BaselineRecord,
   PrState,
   PrRecord,

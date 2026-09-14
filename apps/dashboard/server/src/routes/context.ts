@@ -93,6 +93,7 @@ import {
   type ContextSourceConfig,
   type ContextSourceKind,
   type ContextSourceView,
+  type RepositoryProviderId,
   type RepositorySourceConfig,
   type SiteSourceConfig,
 } from '@truecourse/shared';
@@ -123,7 +124,7 @@ export interface ContextGithubAccess {
 
 export interface ContextRouterDeps {
   /** Present when the server has a GitHub App configured; null otherwise. */
-  githubLinks?: RepoOwnershipLookup | null;
+  repoLinks?: RepoOwnershipLookup | null;
   /** The same connection's installation access. Absent when GitHub is unconfigured. */
   github?: ContextGithubAccess | null;
 }
@@ -264,7 +265,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   async function linkableRepos(req: Request): Promise<Map<string, RegistryEntry>> {
     const byName = new Map<string, RegistryEntry>();
     for (const entry of await readRegistry()) {
-      if (!(await isVisibleTo(deps.githubLinks, req, entry))) continue;
+      if (!(await isVisibleTo(deps.repoLinks, req, entry))) continue;
       byName.set(entry.slug, entry);
       byName.set(entry.name, entry);
     }
@@ -686,8 +687,23 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
     req: Request,
     repoFullName: string,
     asked: unknown,
-  ): Promise<{ installationId?: number; defaultBranch?: string }> {
+  ): Promise<{
+    provider?: RepositoryProviderId;
+    path?: string;
+    installationId?: number;
+    defaultBranch?: string;
+  }> {
     const access = deps.github ?? null;
+    // A folder on this machine answers for itself: there is no account to name
+    // and nothing to reach over the network, only the path it was connected
+    // from. It must be one this workspace connected — the only way a path
+    // becomes a repository here.
+    if (await isLinkable(req, repoFullName)) {
+      const connected = await deps.repoLinks?.getRepo(repoFullName);
+      if (connected?.provider === 'local' && connected.location) {
+        return { provider: 'local', path: connected.location };
+      }
+    }
     if (asked === undefined || asked === null) {
       // The link is only read for a repository this workspace can see, so
       // naming another workspace's repository resolves nothing.
@@ -729,6 +745,8 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
     const branch = typeof raw.branch === 'string' ? raw.branch.trim() : '';
     return normalizeConfig('repository', {
       ...raw,
+      ...(resolved.provider === undefined ? {} : { provider: resolved.provider }),
+      ...(resolved.path === undefined ? {} : { path: resolved.path }),
       ...(resolved.installationId === undefined ? {} : { installationId: resolved.installationId }),
       branch: branch || resolved.defaultBranch || '',
     });
@@ -841,11 +859,13 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
         `A repository source always reads ${stored}; its repository cannot be changed.`,
       );
     }
-    // The repository and the installation that reads it are what the source was
-    // created with; an edit replaces the branch and the patterns around them.
+    // The repository and how it is read are what the source was created with;
+    // an edit replaces the branch and the patterns around them.
     return normalizeConfig('repository', {
       ...asked,
       repoFullName: stored,
+      ...(current.provider === undefined ? {} : { provider: current.provider }),
+      ...(current.path === undefined ? {} : { path: current.path }),
       installationId: current.installationId,
     });
   }

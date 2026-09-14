@@ -39,10 +39,16 @@ export function SettingsTab({ repo }: { repo: Repo }) {
             rows={[
               { label: 'Name', value: repo.fullName },
               { label: 'Provider', value: providerName(repo.provider) },
-              {
-                label: 'Default branch',
-                value: <span className="font-mono">{repo.defaultBranch}</span>,
-              },
+              // A folder on this machine tracks no branch: the run reads what
+              // is checked out, so the row is not drawn at all.
+              ...(repo.defaultBranch
+                ? [
+                    {
+                      label: 'Default branch',
+                      value: <span className="font-mono">{repo.defaultBranch}</span>,
+                    },
+                  ]
+                : []),
             ]}
           />
         </div>

@@ -6,7 +6,6 @@ import {
   PostgresGateStore,
   type GateDb,
   type InstallationRecord,
-  type RepoLinkRecord,
   type GateRunRecord,
 } from '../../packages/github-app/src/index';
 import { schema, MIGRATIONS_DIR } from '@truecourse/db';
@@ -37,21 +36,6 @@ function installation(id: number, org: string | null = null): InstallationRecord
   };
 }
 
-function repo(name: string, over: Partial<RepoLinkRecord> = {}): RepoLinkRecord {
-  return {
-    repoFullName: name,
-    installationId: 1,
-    workspaceOrgId: 'org_A',
-    defaultBranch: 'main',
-    blocking: true,
-    enabled: true,
-    notifyEmails: [],
-    createdAt: '2026-01-01T00:00:00.000Z',
-    updatedAt: '2026-01-01T00:00:00.000Z',
-    ...over,
-  };
-}
-
 describe('PostgresGateStore (Drizzle, validated against pglite)', () => {
   it('round-trips installations with the COALESCE upsert', async () => {
     await store.saveInstallation(installation(1, 'org_A'));
@@ -65,23 +49,6 @@ describe('PostgresGateStore (Drizzle, validated against pglite)', () => {
     expect((await store.getInstallation(1))?.workspaceOrgId).toBe('org_B');
     expect(await store.getInstallation(999)).toBeNull();
   });
-
-  it('round-trips repo links including notify_emails (text[]) and blocking', async () => {
-    await store.linkRepo(repo('acme/api', { notifyEmails: ['a@x.com', 'b@y.com'], blocking: false }));
-    const r = await store.getRepo('acme/api');
-    expect(r?.notifyEmails).toEqual(['a@x.com', 'b@y.com']);
-    expect(r?.blocking).toBe(false);
-
-    await store.linkRepo(repo('acme/api', { notifyEmails: [], blocking: true }));
-    const r2 = await store.getRepo('acme/api');
-    expect(r2?.notifyEmails).toEqual([]);
-    expect(r2?.blocking).toBe(true);
-
-    await store.linkRepo(repo('acme/web', { workspaceOrgId: 'org_A' }));
-    const forA = await store.listReposForWorkspace('org_A');
-    expect(forA.map((x) => x.repoFullName)).toEqual(['acme/api', 'acme/web']);
-  });
-
 
   it('baseline pointer round-trips; null for an unknown repo', async () => {
     await store.saveBaseline({ repoFullName: 'acme/api', commitSha: 'abc', capturedAt: '2026-01-02T00:00:00.000Z' });
@@ -138,24 +105,22 @@ describe('PostgresGateStore (Drizzle, validated against pglite)', () => {
     expect((await store.listPrs('other/web'))[0].state).toBe('closed');
   });
 
-  it('cascades removeInstallation to repos, baselines, runs, and PR state', async () => {
+  it('removes an installation, leaving the gate rows of its repositories alone', async () => {
+    // The repositories an installation brought are disconnected one at a time,
+    // by the webhook, which is also what purges their per-repository rows; the
+    // account row going is the whole of this.
     await store.saveInstallation(installation(1, 'org_A'));
-    await store.linkRepo(repo('acme/api', { installationId: 1 }));
     await store.saveBaseline({ repoFullName: 'acme/api', commitSha: 'abc', capturedAt: '2026-01-02T00:00:00.000Z' });
-    await store.recordRun({
-      id: 'r1', repoFullName: 'acme/api', prNumber: 1, headSha: 's', baseSha: 'b',
-      conclusion: 'success', addedCount: 0, resolvedCount: 0, createdAt: '2026-01-02T00:00:00.000Z',
-    });
-    await store.upsertPr({
-      repoFullName: 'acme/api', prNumber: 1, title: 'PR 1', state: 'open',
-      headSha: 's', updatedAt: '2026-01-02T00:00:00.000Z',
-    });
 
     await store.removeInstallation(1);
     expect(await store.getInstallation(1)).toBeNull();
-    expect(await store.getRepo('acme/api')).toBeNull();
-    expect(await store.getBaseline('acme/api')).toBeNull();
-    expect(await store.listRuns('acme/api')).toEqual([]);
-    expect(await store.listPrs('acme/api')).toEqual([]);
+    expect((await store.getBaseline('acme/api'))?.commitSha).toBe('abc');
+  });
+
+  it('keeps one workspace\'s installations apart from another\'s', async () => {
+    await store.saveInstallation(installation(1, 'org_A'));
+    await store.saveInstallation(installation(2, 'org_B'));
+    expect((await store.listInstallationsForWorkspace('org_A')).map((i) => i.installationId)).toEqual([1]);
+    expect((await store.listInstallationsForWorkspace('org_B')).map((i) => i.installationId)).toEqual([2]);
   });
 });

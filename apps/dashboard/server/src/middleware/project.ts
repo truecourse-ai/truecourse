@@ -2,21 +2,26 @@ import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import { getProjectBySlug, type RegistryEntry } from '@truecourse/core/config/registry';
 
 /**
- * Just enough of the GitHub link store to scope a repository: which workspace
- * owns a connected repository, if any. Structural, so the real `GateStore`
- * satisfies it without the server's routing layer depending on the GitHub
- * package.
+ * Just enough of the repository store to scope a repository: which workspace
+ * owns a connected repository, through which provider, and where that provider
+ * finds it. Structural, so the real store satisfies it without the server's
+ * routing layer depending on where it lives.
  */
 export interface RepoOwnershipLookup {
-  getRepo(repoFullName: string): Promise<{ workspaceOrgId: string } | null>;
+  getRepo(repoFullName: string): Promise<{
+    workspaceOrgId: string;
+    provider?: string;
+    /** Where the provider finds it, when the name is not enough (a folder's path). */
+    location?: string | null;
+  } | null>;
 }
 
 /**
  * May this caller act on this registry entry? A repository exists here only by
- * being connected through GitHub, so it belongs to exactly one workspace and
- * is invisible to every other one — on the list, on `/:id`, and on every
- * project-scoped router. CLOSED by construction: no link store (GitHub App
- * unconfigured) or no link row means nobody sees it, never everybody.
+ * being connected, so it belongs to exactly one workspace and is invisible to
+ * every other one — on the list, on `/:id`, and on every project-scoped
+ * router. CLOSED by construction: no store and no row both mean nobody sees
+ * it, never everybody.
  */
 export async function isVisibleTo(
   links: RepoOwnershipLookup | null | undefined,

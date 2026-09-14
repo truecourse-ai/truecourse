@@ -41,6 +41,7 @@ function makeApp(hooks: { onRepoLinked?: OnRepoLinked; onRepoUnlinked?: OnRepoUn
     '/api/ee/github',
     createConnectRouter({
       store,
+      repos: store,
       appSlug: 'tc-app',
       appUrl: 'http://localhost:3000',
       setupRedirectPath: '/code?connect=1',
@@ -85,7 +86,8 @@ describe('connect — the post-link seam', () => {
     const [record, client] = onRepoLinked.mock.calls[0]!;
     expect(record).toMatchObject({
       repoFullName: REPO,
-      installationId: 42,
+      provider: 'github',
+      accountId: '42',
       defaultBranch: 'main',
       workspaceOrgId: ORG,
       enabled: true,
@@ -136,7 +138,8 @@ describe('connect — the post-link seam', () => {
     const onRepoLinked = vi.fn().mockResolvedValue(undefined);
     await store.linkRepo({
       repoFullName: REPO,
-      installationId: 99,
+      provider: 'github',
+      accountId: '99',
       workspaceOrgId: 'org_OTHER',
       defaultBranch: 'main',
       blocking: true,
@@ -164,7 +167,8 @@ describe('connect — the post-unlink seam', () => {
     expect(onRepoUnlinked).toHaveBeenCalledTimes(1);
     expect(onRepoUnlinked.mock.calls[0]![0]).toMatchObject({
       repoFullName: REPO,
-      installationId: 42,
+      provider: 'github',
+      accountId: '42',
       workspaceOrgId: ORG,
     });
     // The cleanup runs while the repo is still owned, so nothing it leaves
@@ -198,7 +202,8 @@ describe('connect — the post-unlink seam', () => {
     const onRepoUnlinked = vi.fn().mockResolvedValue(undefined);
     await store.linkRepo({
       repoFullName: REPO,
-      installationId: 99,
+      provider: 'github',
+      accountId: '99',
       workspaceOrgId: 'org_OTHER',
       defaultBranch: 'main',
       blocking: true,

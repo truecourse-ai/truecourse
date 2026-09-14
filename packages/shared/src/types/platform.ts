@@ -87,11 +87,6 @@ export interface GithubRepoSummary {
   defaultBranch: string
   /** true = new drift fails a required Check; false = advisory only. */
   blocking: boolean
-  /** Code Quality gate: true (default) = new violations at/above
-   *  `codeQualityMinSeverity` fail a required Check; false = advisory only. */
-  codeQualityBlocking?: boolean
-  /** Min new-violation severity that fails the Code Quality Check (default `high`). */
-  codeQualityMinSeverity?: 'info' | 'low' | 'medium' | 'high' | 'critical'
   enabled: boolean
   /** Addresses emailed when the gate fails. */
   notifyEmails: string[]

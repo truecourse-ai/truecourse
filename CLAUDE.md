@@ -7,7 +7,7 @@
 ## Project Layout
 
 - `apps/dashboard/client/` — Vite + React Router frontend (Tailwind CSS, dark mode)
-- `apps/dashboard/server/` — Express + Socket.io HTTP layer that serves the dashboard. Thin adapter over `@truecourse/core`; contains the routes, the sockets, the middleware, the background job types, and the server-only services (the run clone, the run watch, the workspace's LLM).
+- `apps/dashboard/server/` — Express + Socket.io HTTP layer that serves the dashboard. Thin adapter over `@truecourse/core`; contains the routes, the sockets, the middleware, the background job types, the two auth modes (`auth/`, see MODES below), the LOCAL FOLDER provider (`local/`) and the server-only services (the run clone, the run watch, the workspace's LLM).
 - `apps/landing/` — Public marketing site (Vite + React + Tailwind v4). Standalone, deployed separately. `pnpm --filter @truecourse/landing dev` runs it on port 3100.
 - `packages/core/` — The framework-agnostic engine the server runs: the agent-session workstreams (setup, generate, the scan, adjudication), the guard reads every view is composed from, the store SEAMS (guard, spec, context, sessions, registry, overlays), the LLM transport and session-driver construction, the logger and the errors.
 - `packages/shared/` — Shared Zod schemas and TypeScript types, plus the engine contracts no package owns alone: the `LlmTransport` seam (`@truecourse/shared/llm`), the document-discovery rules (`.truecourseignore`, the skip list) and the WORK-TREE LAYOUT (`@truecourse/shared/work-tree`) every producer and consumer of a run's `.truecourse/` tree derives its paths from.
@@ -23,8 +23,8 @@
 - `packages/core/src/services/guard-generate/` — `guard generate`'s agent sessions (claim extraction per doc, flow synthesis per area plus one epic pass, the flow-worker pool that authors and proves each flow's scenarios, the fidelity children), injected into `@truecourse/guard-generator`'s `generateGuards` by `commands/guard-in-process.ts`, which owns the run record and hands the seams its driver. `services/guard-adjudicate/` is the post-run half: one session per failing scenario on the board, classifying it as a bug, a doc drift or a test defect, folded onto the stored run and rendered as the findings report. `services/llm/guard-visual-judge.ts` is the run's one LLM stage — a vision verdict on a failing web step's screenshot, opt-in and annotation-only.
 - `packages/core/src/services/spec-scan/` — The spec scan as agent sessions, the loop's first production consumer: `orchestrate` (≤1 scope session whose standing instructions ride every downstream briefing and cache key), `curate-doc` (pooled, one coherent keep/skip/tag judgment per doc — it may page a long doc and peek at a referenced one), `settle-areas` (a true barrier, concurrency 1) and `overlap` (pooled, one session per deterministic COLLISION CLUSTER). `run.ts` is the whole scan: discovery → prefilter → the four steps → the deterministic fold (pointer re-anchoring, cross-area dedup, high-confidence auto-apply) → `writeCorpus`. Two invariants: FAIL-OPEN per item (a dead session never drops a doc), and the ONE-ABORT rule — a kind whose every session died transport-class throws BEFORE anything is written. `@truecourse/spec-consolidator` keeps the deterministic half (discovery, prefilter, collision pairing, pointer verification, area grouping, the corpus/decisions stores); it holds no LLM runner and no `LlmTransport` reference at all.
 - `packages/db/` — `@truecourse/db`: the Postgres schema (drizzle) + `createDb` (one pool, migrations at boot, a dedicated advisory-lock pool). One schema and one migration history for the whole product.
-- `packages/data-store/` — `@truecourse/data-store`: Postgres implementations of core's storage seams (specs, context, guard, the guard overlays, the session runs, the gh_repos-derived registry, the LLM KV cache) over a content-addressed `content` table. Installed by the dashboard server at boot (`apps/dashboard/server/src/stores.ts`). The jobs and notifications stores live here too (`jobs-store.ts`), consumed by `@truecourse/jobs`.
-- `packages/github-app/` — The GitHub App protocol: webhook receiver, connect API, the `gh_repos`/installations link store (`PostgresGateStore`).
+- `packages/data-store/` — `@truecourse/data-store`: Postgres implementations of core's storage seams (specs, context, guard, the guard overlays, the session runs, the `repositories`-derived registry, the LLM KV cache) over a content-addressed `content` table. The CONNECTED REPOSITORIES themselves are here too (`PgRepositoryStore` over the `repositories` table, the contract in `@truecourse/shared`), because a repository can come through any provider. Installed by the dashboard server at boot (`apps/dashboard/server/src/stores.ts`). The jobs and notifications stores live here too (`jobs-store.ts`), consumed by `@truecourse/jobs`.
+- `packages/github-app/` — The GitHub App protocol: webhook receiver, connect API, and the App's own rows (`PostgresGateStore`: its installations as `provider_accounts` rows, and the pull request gate's baselines/runs/PRs). The repositories it connects are written through the provider-generic `RepositoryStore` its routers are handed.
 - `packages/jobs/` — `@truecourse/jobs`: the generic background job runner. A Postgres-backed queue (graphile-worker) with a tracked row per job, the shared lifecycle harness (`executeJob`: row bookkeeping, the stepped checklist, the standardized notification, the settled hook), a local cancel registry, the LISTEN/NOTIFY event hub, and the three routers the server mounts (`/api/events`, `/api/jobs`, `/api/notifications`). Enqueues are single-flight per `(workspace, key)`, and an enqueue may also name a QUEUE (graphile's `queueName`) — every job sharing a queue name runs one at a time, in enqueue order, waiting IN the queue as a `queued` row rather than in this process, which is how the dashboard's three heavy repository jobs (`repo.guard-setup` / `repo.guard-generate` / `repo.guard-run`) are rationed to one at a time per workspace while a `context.sync` or `context.scan` still runs beside them. Job TYPES live with their consumer — the dashboard server's are in `apps/dashboard/server/src/jobs/tasks/`.
 - `ee/packages/client/` — `@truecourse/ee-client`: the enterprise edition's CLIENT features, registered into the open shell's registries by `src/edition.tsx` — the Settings › Connections tab, Azure DevOps among the repository providers, and the workspace switcher with its Create workspace dialog. Reached only through the client's `@edition` alias (see EDITIONS below).
 - `ee/packages/server/` — `@truecourse/ee-server`: the enterprise edition's SERVER features and its process entry (`src/main.ts`). Today that is the three `/api/auth/workspaces` routes behind more than one workspace. It registers into `@truecourse/dashboard-server`'s feature registry and then starts that same server.
@@ -34,7 +34,8 @@
 ## Development Commands
 
 ```bash
-pnpm dev          # Start the client + server (turbo). Needs DATABASE_URL — `docker compose up -d db` brings one up.
+docker compose up -d   # Postgres 16 on 127.0.0.1:5432 — the whole of the storage
+TRUECOURSE_MODE=local pnpm dev   # Start the client + server (turbo), no sign-in
 pnpm build        # Build all packages
 pnpm test         # Run all tests (vitest)
 pnpm typecheck    # Typecheck every package
@@ -66,9 +67,35 @@ The dependency runs ONE WAY, from `ee/` inward, so no open file ever names an
   `ee/packages/server/src/main.ts`, which registers its features and then starts
   the same server. The Dockerfile picks whichever entry the image was built with.
 
+## Modes
+
+**A server is TOLD how it runs — `TRUECOURSE_MODE`, `hosted` (the default) or
+`local` — and never guesses.** Everything downstream takes the same three things
+either way (a session verifier, a public auth router, the workspace's people),
+so no route, job or store knows which mode it is in.
+
+- **Hosted** — WorkOS signs people in (`auth/workos-auth.ts`), a workspace is
+  the session's organization, and the gate refuses a request with no session.
+- **Local** — one developer's machine: one implicit person and one implicit
+  workspace behind a fixed organization id (`auth/local.ts`, `org_local`), the
+  gate answering that session for every request with no cookie to read and no
+  WorkOS client built at all. The client learns which it is from
+  `GET /api/capabilities` (`mode`), which is public, and hides sign-in,
+  sign-out and everything else that assumes an identity provider.
+
+**The LOCAL FOLDER provider** (`apps/dashboard/server/src/local/`) exists only
+in local mode: a path on this machine becomes a repository the way a connected
+one does — the same `repositories` row, with the folder's absolute path as its
+`location` — and every run works on a COPY of it under the run-clones dir
+(`createRunCopy`), never on the developer's tree. It has no webhook, so its
+documentation re-reads on a Sync now or on the watcher it installs over the
+folder. On the client it is a repository provider like any other
+(`preview/data/providers.ts` → the registry seam), offered only when the server
+says it is local.
+
 ## Storage
 
-**One storage: Postgres.** `DATABASE_URL` + WorkOS auth are required, and boot (`apps/dashboard/server/src/index.ts` → `stores.ts`) fills every one of core's store seams with its `@truecourse/data-store` implementation over a content-addressed `content` table. The seams exist only because `packages/core` cannot depend on `packages/data-store` — the dependency runs the other way — so nothing is installed by default and a process that never booted fails loud instead of inventing an empty store. A repository exists by being connected through the GitHub App, scoped to its workspace, and is identified by its `owner/repo` key; the "registry" is a live view of `gh_repos`, not a table of its own.
+**One storage: Postgres.** `DATABASE_URL` + WorkOS auth are required, and boot (`apps/dashboard/server/src/index.ts` → `stores.ts`) fills every one of core's store seams with its `@truecourse/data-store` implementation over a content-addressed `content` table. The seams exist only because `packages/core` cannot depend on `packages/data-store` — the dependency runs the other way — so nothing is installed by default and a process that never booted fails loud instead of inventing an empty store. A repository exists by being connected — through the GitHub App, or as a folder on this machine in local mode — scoped to its workspace and identified by its key (`owner/repo`, or `local/<folder>`); the rows live in `repositories` (with the provider accounts that brought them in `provider_accounts`), and the "registry" is a live view of that table, not one of its own. A run gets its files through the work-tree seam, which dispatches on the repository's provider: the App clones through an installation, the local provider copies the folder.
 
 Onboarding runs as BACKGROUND JOBS, not inside the request that asked for it: connecting a repo creates and links its Repository CONTEXT SOURCE and enqueues `context.sync`, whose first sync chains `repo.guard-setup`, which chains `repo.guard-generate` when its recipe gate held, which chains `repo.guard-run` — the BASELINE RUN — once a scenario set is stored (`apps/dashboard/server/src/jobs/`); Generate and Run enqueue their links by hand, and a decision that clears the last block on a generate (the final conflict resolved, the last finding dismissed) enqueues it through the `guard-generate-enqueue` seam. There is NO per-repository scan: documentation belongs to the workspace (see CONTEXT below), and the one Document scan is `POST /api/context/scan`. The routes enqueue and answer `202 { jobId }`; progress rides the repo's socket room (`spec:progress` / `spec:complete`) and the job's own SSE stream. Disconnecting a repo cancels whatever it has in flight.
 

@@ -103,7 +103,7 @@ export default function RepoConsole() {
         title={repo.fullName}
         subtitle={
           <span className="flex items-center gap-3">
-            <span className="font-mono">{repo.defaultBranch}</span>
+            {repo.defaultBranch && <span className="font-mono">{repo.defaultBranch}</span>}
             {repo.onboarding && <span className="text-sky-600 dark:text-sky-400">onboarding in flight</span>}
           </span>
         }

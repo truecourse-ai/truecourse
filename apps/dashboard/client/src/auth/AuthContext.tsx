@@ -1,7 +1,7 @@
 /**
  * The client's auth state: who is signed in, and how to sign in or out.
  *
- * Auth is part of the product — the provider always probes the WorkOS-backed
+ * Auth is part of the product — the provider always probes the server-held
  * session at `/api/auth/me` and the gate puts the whole dashboard behind it.
  * `disabled` survives only as the context's DEFAULT value, so a tree rendered
  * WITHOUT a provider (fixture-only tests) reads as "no auth here" instead of
@@ -20,6 +20,7 @@ import {
 } from 'react';
 import { Loader2 } from 'lucide-react';
 import type { AuthUser } from '@truecourse/shared';
+import { useServerMode } from '@/contexts/CapabilityContext';
 import { getServerUrl } from '@/lib/server-url';
 
 // The server's public auth router.
@@ -185,16 +186,22 @@ function CreateWorkspace() {
  * redirect to the hosted login when anonymous, and a retry screen when a
  * callback error came back (so we never redirect-loop). A tree with no
  * provider above it (`disabled`) renders straight through.
+ *
+ * A LOCAL SERVER has no sign-in: its session probe always answers, so the only
+ * way to be anonymous there is a server that is not answering at all — and
+ * sending the browser to a login that does not exist would hide that. It is
+ * said instead.
  */
 export function AuthGate({ children }: { children: ReactNode }) {
   const { status, user, signIn } = useAuth();
+  const local = useServerMode() === 'local';
   const authError = new URLSearchParams(window.location.search).get(
     'auth_error',
   );
 
   useEffect(() => {
-    if (status === 'anon' && !authError) signIn();
-  }, [status, authError, signIn]);
+    if (status === 'anon' && !authError && !local) signIn();
+  }, [status, authError, signIn, local]);
 
   if (status === 'disabled') return <>{children}</>;
 
@@ -203,6 +210,19 @@ export function AuthGate({ children }: { children: ReactNode }) {
     // self-serve onboarding before the rest of the dashboard.
     if (user && !user.organizationId) return <CreateWorkspace />;
     return <>{children}</>;
+  }
+
+  if (status === 'anon' && local) {
+    return (
+      <FullScreen>
+        <div className="max-w-sm text-center">
+          <p className="text-sm font-medium">The server is not answering</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            This dashboard runs on a server on this machine. Start it, then reload.
+          </p>
+        </div>
+      </FullScreen>
+    );
   }
 
   if (status === 'anon' && authError) {

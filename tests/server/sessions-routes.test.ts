@@ -360,14 +360,7 @@ describe('Workspace sessions routes', () => {
       listReposForWorkspace: async () => [{ repoFullName: repos[1].project.name }],
       unlinkRepo: async () => {},
     };
-    const scoped = createTestApp({
-      github: {
-        webhook: Router(),
-        connect: Router(),
-        store: store as unknown as GithubMount['store'],
-        access: noGithubAccess,
-      },
-    });
+    const scoped = createTestApp({ repoLinks: store });
     const res = await request(scoped).get('/api/sessions/runs');
     expect(res.body.runs.map((r: { runId: string }) => r.runId)).toEqual([generate.runId]);
     await request(scoped).get(`/api/sessions/runs/${scan.runId}`).expect(404);
@@ -444,14 +437,14 @@ describe('Workspace sessions routes', () => {
       .expect(404);
   });
 
-  it('refuses a session with no workspace, and reads the whole registry when the server has none', async () => {
+  it('refuses a session with no workspace, and reads the whole registry when nothing scopes it', async () => {
     const { setup, generate, scan } = await seedWorkspace();
     const noWorkspace = createTestApp({ authVerifier: async () => ({ user: { id: 'u', email: 'u@example.com' } }) });
     await request(noWorkspace).get('/api/sessions/runs').expect(401);
     await request(noWorkspace).get(`/api/sessions/runs/${scan.runId}`).expect(401);
 
-    const fileMode = createTestApp({ authVerifier: null, github: null });
-    const res = await request(fileMode).get('/api/sessions/runs');
+    const unscoped = createTestApp({ authVerifier: null, repoLinks: null, github: null });
+    const res = await request(unscoped).get('/api/sessions/runs');
     expect(res.body.runs.map((r: { runId: string }) => r.runId)).toEqual([scan.runId, generate.runId, setup.runId]);
   });
 });

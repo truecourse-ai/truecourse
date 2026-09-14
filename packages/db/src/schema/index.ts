@@ -6,6 +6,7 @@ import { activityRuns, activityEvents } from './activity.js';
  */
 
 export * from './github.js';
+export * from './repositories.js';
 export * from './llm.js';
 export * from './content.js';
 export * from './decisions.js';
@@ -16,7 +17,8 @@ export * from './jobs.js';
 export * from './guard.js';
 export * from './context.js';
 
-import { ghInstallations, ghRepos, ghBaselines, ghRuns, ghPrs } from './github.js';
+import { ghBaselines, ghRuns, ghPrs } from './github.js';
+import { providerAccounts, repositories } from './repositories.js';
 import { llmProviderConfig } from './llm.js';
 import { content } from './content.js';
 import { decisions } from './decisions.js';
@@ -42,8 +44,8 @@ import {
 export const schema = {
   activityRuns,
   activityEvents,
-  ghInstallations,
-  ghRepos,
+  providerAccounts,
+  repositories,
   ghBaselines,
   ghRuns,
   ghPrs,

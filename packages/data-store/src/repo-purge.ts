@@ -1,5 +1,5 @@
 /**
- * Purge every per-repo row when a repository is disconnected. The `gh_repos`
+ * Purge every per-repo row when a repository is disconnected. The `repositories`
  * link row is what scopes a repo to its workspace; every other per-repo table
  * keys on the bare repo key with no workspace column, so rows left behind
  * would be inherited wholesale by the next workspace to connect the same
@@ -80,7 +80,7 @@ export async function purgeRepoData(db: Db, repoKey: string): Promise<void> {
         contentScope.guardEvidence(repoKey),
       ]),
     );
-    // Gate-side per-repo state (unlinkRepo itself only drops the gh_repos row).
+    // Gate-side per-repo state (unlinkRepo itself only drops the repository row).
     await tx.delete(ghBaselines).where(eq(ghBaselines.repoFullName, repoKey));
     await tx.delete(ghRuns).where(eq(ghRuns.repoFullName, repoKey));
     await tx.delete(ghPrs).where(eq(ghPrs.repoFullName, repoKey));

@@ -1,6 +1,7 @@
 /**
  * The repository registry: the workspace's connected repositories, and the
- * GitHub App flow that connects one.
+ * GitHub App flow that connects one. The other provider, a folder on this
+ * machine, owns its own calls (`preview/providers/local-folder`).
  *
  * A repository exists by being connected on the server, so this list is the
  * whole of Code. A row just connected carries no coverage, no runs and no
@@ -87,12 +88,17 @@ export function parseRemote(remoteUrl: string): { fullName: string; provider: Pr
 
 /** A registry entry as a shell `Repo`: connected, with nothing run on it yet. */
 export function toPreviewRepo(entry: RepoResponse): Repo {
-  const { fullName, provider } = parseRemote(entry.remoteUrl ?? '');
+  const remote = parseRemote(entry.remoteUrl ?? '');
+  // A provider the server named wins: a folder on this machine has a path
+  // where a remote would be, and nothing about it can be read out of a URL.
   return {
     id: entry.id,
-    fullName,
-    provider,
-    defaultBranch: entry.defaultBranch ?? 'main',
+    fullName: entry.provider ? entry.name : remote.fullName,
+    provider: entry.provider ?? remote.provider,
+    // A provider that tracks a branch says which; a folder on this machine
+    // tracks none — a run reads whatever is checked out — so nothing is drawn
+    // rather than a branch it might not be on.
+    defaultBranch: entry.defaultBranch ?? (entry.provider ? '' : 'main'),
     lastCheck: {
       conclusion: 'neutral',
       word: 'Neutral',

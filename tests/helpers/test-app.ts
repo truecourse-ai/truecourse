@@ -1,12 +1,12 @@
 /**
  * Server-route test harness for the closed visibility model. A repository is
- * visible only when a link row ties it to the caller's workspace, so a bare
- * `createApp({ authVerifier: null, github: null, jobs: null })` sees nothing.
- * Route tests that are not ABOUT scoping use this instead: an auth verifier that
- * stamps one test org, a permissive link store that reads every registered repo
- * as linked to it — the file-registry analog of the gh_repos-derived registry the
- * production server runs on — and a job runner that records what a route enqueues
- * instead of running it.
+ * visible only when a row ties it to the caller's workspace, so a bare
+ * `createApp({ authVerifier: null, repoLinks: null, github: null, jobs: null })`
+ * sees nothing. Route tests that are not ABOUT scoping use this instead: an auth
+ * verifier that stamps one test org, a permissive repository store that reads
+ * every registered repo as connected to it — the fixture analog of the
+ * `repositories`-derived registry the production server runs on — and a job
+ * runner that records what a route enqueues instead of running it.
  */
 
 import { Router } from 'express';
@@ -21,6 +21,7 @@ import { readRegistry } from '@truecourse/core/config/registry';
 import { unregisterTestRepo } from './test-fixture';
 import { createApp, type CreateAppOptions } from '../../apps/dashboard/server/src/app';
 import type { GithubMount } from '../../apps/dashboard/server/src/github/index';
+import type { RepoLinkStore } from '../../apps/dashboard/server/src/routes/repos';
 import { setWorkTreeProvider } from '../../apps/dashboard/server/src/services/work-tree.service';
 import {
   resetWorkspaceLlmBackend,
@@ -48,16 +49,13 @@ export const noGithubAccess: GithubMount['access'] = {
 };
 
 /**
- * A GithubMount whose store links every registered repo to `orgId`. Unlinking
- * unregisters the entry, mirroring the derived registry (where deleting the
- * row IS the unregistration). Only the fields app.ts consumes are real; the
- * cast is confined to this helper.
+ * A repository store that reads every registered repo as connected to `orgId`.
+ * Unlinking unregisters the entry, mirroring the derived registry (where
+ * deleting the row IS the unregistration). Only the fields the routes consume
+ * are real; the cast is confined to this helper.
  */
-export function testGithubMount(
-  orgId: string = TEST_ORG,
-  access: GithubMount['access'] = noGithubAccess,
-): GithubMount {
-  const store = {
+export function testRepoLinks(orgId: string = TEST_ORG): RepoLinkStore {
+  return {
     getRepo: async () => ({ workspaceOrgId: orgId }),
     listReposForWorkspace: async () =>
       (await readRegistry()).map((e) => ({ repoFullName: e.name })),
@@ -66,10 +64,17 @@ export function testGithubMount(
       if (entry) unregisterTestRepo(entry.slug);
     },
   };
+}
+
+/** A GithubMount with no routes of its own: what a test that is not about connecting needs. */
+export function testGithubMount(
+  _orgId: string = TEST_ORG,
+  access: GithubMount['access'] = noGithubAccess,
+): GithubMount {
   return {
     webhook: Router(),
     connect: Router(),
-    store: store as unknown as GithubMount['store'],
+    store: {} as unknown as GithubMount['store'],
     access,
   };
 }
@@ -171,11 +176,12 @@ export function resetTestWorkspaceLlm(): void {
  *  Runs "clone" in place: the fixture repos ARE local paths, so the work-tree
  *  provider hands the registered path back with a no-op dispose. */
 export function createTestApp(overrides: Partial<CreateAppOptions> = {}) {
-  setWorkTreeProvider(async (repoKey) => ({ dir: repoKey, dispose: () => {} }));
+  setWorkTreeProvider('github', async (repoKey) => ({ dir: repoKey, dispose: () => {} }));
   installTestWorkspaceLlm();
   return createApp({
     serveStatic: false,
     authVerifier: testAuthVerifier(),
+    repoLinks: testRepoLinks(),
     github: testGithubMount(),
     // The routes that start work enqueue onto a runner; a test that is not ABOUT
     // the queue gets one that records the enqueue and runs nothing.

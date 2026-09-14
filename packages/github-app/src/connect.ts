@@ -28,10 +28,13 @@ import type {
   GithubInstallationReposResponse,
   GithubInstallationSummary,
   GithubRepoSummary,
+  RepositoryRecord,
+  RepositoryStore,
 } from '@truecourse/shared';
 import type { OctokitClient } from './octokit.js';
 import { resolveNotificationPrefs } from './notifications.js';
-import type { GateStore, InstallationRecord, RepoLinkRecord } from './store/types.js';
+import { GITHUB_PROVIDER, installationOf } from './provider.js';
+import type { GateStore, InstallationRecord } from './store/types.js';
 
 function orgIdOf(req: Request): string | null {
   const user = (req as Request & { user?: AuthUser }).user;
@@ -49,17 +52,15 @@ function toInstallationSummary(
 }
 
 function toRepoSummary(
-  r: RepoLinkRecord,
+  r: RepositoryRecord,
   slug: string | null,
   openConflicts: number,
 ): GithubRepoSummary {
   return {
     repoFullName: r.repoFullName,
-    installationId: r.installationId,
-    defaultBranch: r.defaultBranch,
+    installationId: installationOf(r) ?? 0,
+    defaultBranch: r.defaultBranch ?? '',
     blocking: r.blocking,
-    codeQualityBlocking: r.codeQualityBlocking ?? true,
-    codeQualityMinSeverity: r.codeQualityMinSeverity ?? 'high',
     enabled: r.enabled,
     notifyEmails: r.notifyEmails ?? [],
     notifications: resolveNotificationPrefs(r),
@@ -80,7 +81,7 @@ function toRepoSummary(
  * can act on.
  */
 export type OnRepoLinked = (
-  link: RepoLinkRecord,
+  link: RepositoryRecord,
   octokit: OctokitClient,
 ) => Promise<void>;
 
@@ -91,10 +92,12 @@ export type OnRepoLinked = (
  * works; a hook that throws leaves the link intact and fails the request, since
  * a clone that outlives its link row is scoped to nobody and visible to all.
  */
-export type OnRepoUnlinked = (link: RepoLinkRecord) => Promise<void>;
+export type OnRepoUnlinked = (link: RepositoryRecord) => Promise<void>;
 
 export interface ConnectDeps {
   store: GateStore;
+  /** The connected repositories, whichever provider brought them. */
+  repos: RepositoryStore;
   appSlug: string;
   /** Dashboard client origin, for browser-facing redirects (e.g. /setup). */
   appUrl: string;
@@ -202,10 +205,13 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       res.json(empty);
       return;
     }
-    const [listed, repos] = await Promise.all([
+    const [listed, connected] = await Promise.all([
       deps.store.listInstallationsForWorkspace(orgId),
-      deps.store.listReposForWorkspace(orgId),
+      deps.repos.listReposForWorkspace(orgId),
     ]);
+    // This surface is the App's: a repository connected through another
+    // provider is not one of its installations' and is not listed here.
+    const repos = connected.filter((r) => r.provider === GITHUB_PROVIDER);
     // Self-heal the rows no `installation` webhook ever named: one lookup each,
     // persisted, so the repair happens once and not on every dialog open.
     const installations = await Promise.all(listed.map(withAccount));
@@ -375,7 +381,7 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       return;
     }
     const now = new Date().toISOString();
-    const existing = await deps.store.getRepo(repoFullName);
+    const existing = await deps.repos.getRepo(repoFullName);
     // Repos are keyed globally by full name; never let one workspace overwrite
     // a repo another workspace already connected.
     if (existing && existing.workspaceOrgId !== orgId) {
@@ -391,22 +397,21 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       res.status(409).json({ error: 'repository is already connected' });
       return;
     }
-    // A first connection, so every setting starts at its default: Code Quality
-    // config and notify addresses are authored later, through the settings PATCH.
-    const link: RepoLinkRecord = {
+    // A first connection, so every setting starts at its default: the notify
+    // addresses are authored later, through the settings PATCH.
+    const link: RepositoryRecord = {
       repoFullName,
-      installationId,
+      provider: GITHUB_PROVIDER,
+      accountId: String(installationId),
       workspaceOrgId: orgId,
       defaultBranch,
       blocking: typeof blocking === 'boolean' ? blocking : true,
-      codeQualityBlocking: true,
-      codeQualityMinSeverity: 'high',
       enabled: true,
       notifyEmails: [],
       createdAt: now,
       updatedAt: now,
     };
-    await deps.store.linkRepo(link);
+    await deps.repos.linkRepo(link);
 
     // Hand the connected repo to the host (clone, project registration, initial
     // scan). The hook is part of the link: if it fails there is nothing behind
@@ -416,7 +421,7 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       try {
         await deps.onRepoLinked(link, deps.octokitFor(installationId));
       } catch (err) {
-        await deps.store.unlinkRepo(repoFullName).catch((cleanupErr: unknown) => {
+        await deps.repos.unlinkRepo(repoFullName).catch((cleanupErr: unknown) => {
           log.error(
             `[github-app] could not roll back the link for ${repoFullName}: ${(cleanupErr as Error).message}`,
           );
@@ -442,7 +447,7 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       res.status(400).json({ error: 'repoFullName required' });
       return;
     }
-    const existing = await deps.store.getRepo(repoFullName);
+    const existing = await deps.repos.getRepo(repoFullName);
     if (existing && existing.workspaceOrgId === orgId) {
       // Cleanup FIRST, link row second. The row is what scopes the repo to this
       // workspace, so removing it ahead of a cleanup that then fails would leave
@@ -458,7 +463,7 @@ export function createConnectRouter(deps: ConnectDeps): Router {
           return;
         }
       }
-      await deps.store.unlinkRepo(repoFullName);
+      await deps.repos.unlinkRepo(repoFullName);
     }
     res.json({ ok: true });
   });

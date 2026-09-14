@@ -286,7 +286,7 @@ beforeEach(async () => {
   setContextEventPublisher(() => {});
   // A clone the setup job can acquire — a real one-commit repository, because
   // what a job stores is keyed by the commit it ran on.
-  setWorkTreeProvider(async () => ({ dir: fakeClone(), dispose: () => {} }));
+  setWorkTreeProvider('github', async () => ({ dir: fakeClone(), dispose: () => {} }));
   pending = [];
   failures = [];
   enqueued = [];
@@ -319,7 +319,7 @@ afterEach(async () => {
   resetContextStore();
   resetSpecStore();
   setContextEventPublisher(null);
-  setWorkTreeProvider(null);
+  setWorkTreeProvider('github', null);
   resetGuardStore();
   resetSessionRuns();
   resetGuardOverlayStore();

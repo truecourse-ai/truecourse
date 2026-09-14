@@ -16,11 +16,15 @@ Thanks for your interest in contributing! This guide will help you get started.
 git clone https://github.com/truecourse-ai/truecourse.git
 cd truecourse
 pnpm install
-POSTGRES_PASSWORD=truecourse docker compose up -d db   # the database
-pnpm dev                                               # Vite frontend + Express backend
+docker compose up -d                    # Postgres, the whole of the storage
+TRUECOURSE_MODE=local pnpm dev          # Vite frontend + Express backend
 ```
 
-The dev server starts at `http://localhost:3000`. See `docker-compose.yml` for the environment the server needs (`DATABASE_URL`, `TRUECOURSE_SECRET_KEY`, the WorkOS and GitHub App variables).
+The dev server starts at `http://localhost:3000`. `TRUECOURSE_MODE=local` is one
+machine: no sign-in, one implicit person in one implicit workspace, and folders
+on this machine can be connected as repositories. It needs `DATABASE_URL` (the
+compose default is in `.env.example`) and `TRUECOURSE_SECRET_KEY`; the WorkOS
+variables are a hosted deployment's, and a local server never reads them.
 
 ### Project Structure
 

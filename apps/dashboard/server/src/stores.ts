@@ -29,7 +29,7 @@ import {
   PgContextStore,
   PgGuardStore,
   PgGuardOverlayStore,
-  GhReposRegistryStore,
+  RepositoriesRegistryStore,
   PgKvCacheStore,
   PgLlmConfigStore,
   purgeRepoData,
@@ -141,9 +141,10 @@ export function installDbStores(
   // The supplied-dependency overlays (registered API keys, base URLs, tokens):
   // one encrypted row per repo, decrypted only into a run's ephemeral clone.
   setGuardOverlayStore(new PgGuardOverlayStore(db, masterSecret));
-  // The "registry" is a derived view of gh_repos — no separate table, so it
-  // can't drift or orphan (slug routing resolves only connected repos).
-  setRegistryStore(new GhReposRegistryStore(db));
+  // The "registry" is a derived view of the connected repositories — no
+  // separate table, so it can't drift or orphan (slug routing resolves only
+  // connected repos).
+  setRegistryStore(new RepositoriesRegistryStore(db));
   // The content-addressed LLM-stage cache. This is what keeps re-runs cheap now
   // that every run's working tree is discarded when it settles.
   setKvCacheStore(new PgKvCacheStore(db));

@@ -5,7 +5,9 @@
  * and the webhook's repo-removal path — so all of them make the same decision.
  *
  * There is no working copy to delete: connected repos have no persistent
- * clone (runs use ephemeral work trees that dispose themselves). The durable
+ * clone (runs use ephemeral work trees that dispose themselves), and a folder
+ * on this machine is the developer's, never touched — only the watcher over it
+ * stops. The durable
  * artifacts live in Postgres keyed by the bare repo key with no workspace
  * column, so they MUST be purged here — left behind, they would be inherited
  * by the next workspace to connect the same `owner/repo`. What remains on
@@ -46,6 +48,19 @@ export function setRepoDataPurge(next: RepoDataPurge | null): void {
   purgeRepoData = next;
 }
 
+/**
+ * How a provider that WATCHES a repository's files stops watching one. Only a
+ * folder on this machine has anything to stop; installed by the local provider,
+ * absent everywhere else.
+ */
+export type RepoWatchStopper = (repoKey: string) => void;
+
+let stopWatchingRepo: RepoWatchStopper | null = null;
+
+export function setRepoWatchStopper(next: RepoWatchStopper | null): void {
+  stopWatchingRepo = next;
+}
+
 export async function removeRepoRunState(repoKey: string, orgId: string): Promise<void> {
   // An in-flight job holds an ephemeral clone and is appending transcripts
   // right now. One running in THIS process is aborted and awaited
@@ -59,6 +74,9 @@ export async function removeRepoRunState(repoKey: string, orgId: string): Promis
       409,
     );
   }
+
+  // Nothing watches a repository that is no longer connected.
+  stopWatchingRepo?.(repoKey);
 
   // The transcripts. Guarded to an absolute resolved path: with no resolver
   // installed (bare tests) an identity key resolves relative to cwd, and a

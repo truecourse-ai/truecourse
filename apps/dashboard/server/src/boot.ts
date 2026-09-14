@@ -12,6 +12,8 @@ import '@truecourse/core/config/env';
 import { setupSocket } from './socket/index.js';
 import { createApp } from './app.js';
 import { createAuth } from './auth/index.js';
+import { serverMode } from './mode.js';
+import { createLocalConnection, type LocalMount } from './local/index.js';
 import { registeredServerFeatures, type ServerRouterMount } from './features.js';
 import { createGithubConnection } from './github/index.js';
 import { createServerJobs } from './jobs/index.js';
@@ -23,6 +25,8 @@ import {
   subscribeSessionRunWrites,
   workspaceOfRepo,
 } from './stores.js';
+import { PgRepositoryStore } from '@truecourse/data-store';
+import { setRepoProviderLookup } from './services/work-tree.service.js';
 import { startRunChangeRelay } from './services/run-events.service.js';
 import { setContextEventPublisher } from './services/context.service.js';
 import { startContextSyncSchedule, type ContextSchedule } from './services/context-schedule.service.js';
@@ -35,6 +39,7 @@ import { getLogDir } from '@truecourse/core/config/runtime-dir';
 import { initSentry, flushSentry } from './observability/sentry.js';
 import { ServerLogTransport } from './observability/log-transport.js';
 import { getProjectByPath, slugify } from '@truecourse/core/config/registry';
+import { LOCAL_ORG_ID } from './auth/local.js';
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { closeLogger, FileLogTransport, setLogTransport, log } from '@truecourse/core/lib/logger';
 import { publishEvent } from '@truecourse/jobs';
@@ -42,6 +47,10 @@ import { publishEvent } from '@truecourse/jobs';
 const port = parseInt(process.env.PORT || '3001', 10);
 
 export async function startServer(): Promise<void> {
+  // How this server runs — hosted behind WorkOS, or local on one machine.
+  // Read first: everything below is assembled differently for each, and an
+  // unusable value must stop the boot before anything is opened.
+  const mode = serverMode();
   // 1. Route all internal diagnostics to the server log file, through the
   //    transport that also reports errors to Sentry. Under `pnpm dev`
   //    `TRUECOURSE_DEV=1` tees lines to stderr so the dev terminal shows them;
@@ -91,9 +100,20 @@ export async function startServer(): Promise<void> {
     log.info("[LLM] operator mode — every workspace runs on this process's Claude Code login");
   }
 
-  // 3. WorkOS session auth. Throws if the WORKOS_* env is incomplete — the
-  //    server boots authenticated or not at all.
-  const auth = createAuth();
+  // 3. Session auth. Hosted: WorkOS, throwing if the WORKOS_* env is
+  //    incomplete — the server boots authenticated or not at all. Local: the
+  //    one implicit session, with no identity provider at all.
+  const auth = createAuth(mode);
+  log.info(`[Server] ${mode} mode`);
+
+  // The connected repositories, whichever provider brought them. Built before
+  // the providers: each writes its rows through this one store, and a run
+  // resolves which provider has a repository's files from it.
+  const repoLinks = new PgRepositoryStore(getDb());
+  setRepoProviderLookup(async (repoKey) => (await repoLinks.getRepo(repoKey))?.provider ?? null);
+  // A `context/` document ref belongs to a workspace, not to a repository, so
+  // the doc reader needs to know whose workspace a repository reads.
+  setRepoWorkspaceLookup(async (repoKey) => (await repoLinks.getRepo(repoKey))?.workspaceOrgId ?? null);
 
   // 4. Background job queue. Long-running work runs here instead of inside the
   //    request that asked for it. Built BEFORE the GitHub connection, whose
@@ -117,6 +137,7 @@ export async function startServer(): Promise<void> {
   // 5. GitHub App connection. Optional: without GITHUB_APP_* the server still
   //    boots, and /api/github answers 503 with the vars to set.
   const github = createGithubConnection({
+    repos: repoLinks,
     // A push to a source's repository syncs the source.
     contextSync: async (orgId, sourceId, source) => {
       const outcome = await jobs.enqueueContextSync({ workspaceOrgId: orgId, sourceId, source });
@@ -136,27 +157,51 @@ export async function startServer(): Promise<void> {
   });
   if (github) {
     log.info('[Server] GitHub connect enabled');
-    // A `context/` document ref belongs to a workspace, not to a repository, so
-    // the doc reader needs to know whose workspace a repository reads. The link
-    // row is that answer.
-    setRepoWorkspaceLookup(async (repoKey) => (await github.store.getRepo(repoKey))?.workspaceOrgId ?? null);
-    // A decision that clears the last block on a generate (the final conflict
-    // resolved, the last active finding dismissed) re-generates on its own. The
-    // seam is keyed by repo identity alone, so the workspace and the slug are
-    // looked up from the link and the registry; a repo nobody connected is
-    // silently left alone — the seam is best-effort by contract.
-    setGuardGenerateEnqueue(async (repoKey) => {
-      const [link, entry] = await Promise.all([github.store.getRepo(repoKey), getProjectByPath(repoKey)]);
-      if (!link?.workspaceOrgId || !entry) return;
-      await jobs.enqueueGuardGenerate({
-        repoId: entry.slug,
-        repoFullName: repoKey,
-        workspaceOrgId: link.workspaceOrgId,
-        source: 'chain',
-      });
-    });
   } else {
     log.info('[Server] GitHub connect disabled — set GITHUB_APP_* to enable');
+  }
+
+  // A decision that clears the last block on a generate (the final conflict
+  // resolved, the last active finding dismissed) re-generates on its own. The
+  // seam is keyed by repo identity alone, so the workspace and the slug are
+  // looked up from the link and the registry; a repo nobody connected is
+  // silently left alone — the seam is best-effort by contract.
+  setGuardGenerateEnqueue(async (repoKey) => {
+    const [link, entry] = await Promise.all([repoLinks.getRepo(repoKey), getProjectByPath(repoKey)]);
+    if (!link?.workspaceOrgId || !entry) return;
+    await jobs.enqueueGuardGenerate({
+      repoId: entry.slug,
+      repoFullName: repoKey,
+      workspaceOrgId: link.workspaceOrgId,
+      source: 'chain',
+    });
+  });
+
+  // 5b. Folders on this machine, as repositories. Local mode only: the server
+  //     and the developer share a filesystem there and nowhere else.
+  let local: LocalMount | null = null;
+  if (mode === 'local') {
+    local = createLocalConnection({
+      repos: repoLinks,
+      contextSync: async (orgId, sourceId, source) => {
+        const outcome = await jobs.enqueueContextSync({ workspaceOrgId: orgId, sourceId, source });
+        return outcome.status;
+      },
+      startSetup: async (link) => {
+        const entry = await getProjectByPath(link.repoFullName);
+        const outcome = await jobs.enqueueGuardSetup({
+          repoId: entry?.slug ?? slugify(link.repoFullName, []),
+          repoFullName: link.repoFullName,
+          workspaceOrgId: link.workspaceOrgId,
+          source: 'chain',
+        });
+        return outcome.status;
+      },
+    });
+    // Whatever this machine already connected is watched again from here: a
+    // folder has no webhook, so a change on disk is the only notice there is.
+    await local.watchConnected(LOCAL_ORG_ID);
+    log.info('[Server] local folders can be connected as repositories');
   }
 
   // A site has no push to refresh it, so it is swept on a clock: every site
@@ -197,7 +242,9 @@ export async function startServer(): Promise<void> {
     authVerifier: auth.verify,
     authRouter: auth.router,
     workspaceRouter: auth.members,
+    repoLinks,
     github,
+    localRouter: local?.router ?? null,
     jobs,
     featureRouters,
   });
@@ -243,6 +290,7 @@ export async function startServer(): Promise<void> {
   // Graceful shutdown
   async function shutdown() {
     log.info('[Server] Shutting down...');
+    local?.stop();
     stopAllWatchers();
     stopAllRunsWatches();
     stopRunRelay();

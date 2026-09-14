@@ -127,7 +127,7 @@ beforeEach(async () => {
   setupImpl = async () => ({ report: { status: 'ok' } });
   // The job clones; there is no GitHub here, so the "clone" is the fixture repo
   // itself and disposing it is a no-op — the tree is not what this suite is about.
-  setWorkTreeProvider(async (repoKey) => ({ dir: repoKey, dispose: () => {} }));
+  setWorkTreeProvider('github', async (repoKey) => ({ dir: repoKey, dispose: () => {} }));
   jobs = createServerJobs({
     db,
     connectionString: 'postgres://unused',
@@ -155,7 +155,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   setRepoJobsCanceller(null);
-  setWorkTreeProvider(null);
+  setWorkTreeProvider('github', null);
   await Promise.all(running);
   await jobs.stop();
   clearTestRegistry();

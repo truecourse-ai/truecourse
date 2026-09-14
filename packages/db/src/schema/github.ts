@@ -1,56 +1,20 @@
 /**
- * GitHub App gate tables. `gh_baselines` is just the pointer to the repo's
- * baseline commit — the baseline run's results live per-commit in
- * `guard_runs[repo_key, commit_sha]`, not duplicated here.
+ * The pull request gate's tables. `gh_baselines` is just the pointer to the
+ * repo's baseline commit — the baseline run's results live per-commit in
+ * `guard_runs[repo_key, commit_sha]`, not duplicated here. The repositories
+ * these rows are about live in `repositories` (see ./repositories.ts).
  */
 
 import {
   pgTable,
-  bigint,
   text,
-  boolean,
   integer,
   timestamp,
-  jsonb,
   index,
   primaryKey,
 } from 'drizzle-orm/pg-core';
-import { sql } from 'drizzle-orm';
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'string' });
-
-export const ghInstallations = pgTable('gh_installations', {
-  installationId: bigint('installation_id', { mode: 'number' }).primaryKey(),
-  accountLogin: text('account_login').notNull(),
-  accountType: text('account_type').notNull(),
-  workspaceOrgId: text('workspace_org_id'),
-  createdAt: ts('created_at').notNull(),
-  updatedAt: ts('updated_at').notNull(),
-});
-
-export const ghRepos = pgTable('gh_repos', {
-  repoFullName: text('repo_full_name').primaryKey(),
-  installationId: bigint('installation_id', { mode: 'number' }).notNull(),
-  workspaceOrgId: text('workspace_org_id').notNull(),
-  defaultBranch: text('default_branch').notNull(),
-  blocking: boolean('blocking').notNull().default(true),
-  // Code Quality (analyze) gate: whether new violations at/above the min severity
-  // fail a required Check (default block on `high`+). Separate from `blocking`
-  // (drift). `min severity` is loosely typed text here (@truecourse/db is a leaf).
-  codeQualityBlocking: boolean('code_quality_blocking').notNull().default(true),
-  codeQualityMinSeverity: text('code_quality_min_severity').notNull().default('high'),
-  enabled: boolean('enabled').notNull().default(true),
-  notifyEmails: text('notify_emails')
-    .array()
-    .notNull()
-    .default(sql`'{}'::text[]`),
-  // Per-type email toggles ({ gateFailure, conflicts }). Loosely typed here
-  // (@truecourse/db is a dependency-free leaf); the gate store casts at the boundary.
-  // Null = unset → every type on.
-  notifications: jsonb('notifications').$type<Record<string, boolean>>(),
-  createdAt: ts('created_at').notNull(),
-  updatedAt: ts('updated_at').notNull(),
-});
 
 export const ghBaselines = pgTable('gh_baselines', {
   repoFullName: text('repo_full_name').primaryKey(),
