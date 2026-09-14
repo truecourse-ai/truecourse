@@ -792,7 +792,7 @@ describe('the tools are read-only and bounded to the repository', () => {
     const { persistence } = memoryPersistence()
     let hits = ''
     const { driver } = scriptedDriver(async (_place, input) => {
-      hits = await callTool(input, 'search_repo', { query: 'Add Repository', glob: '.tsx' })
+      hits = await callTool(input, 'search_repo', { query: 'Add Repository', glob: '**/*.tsx' })
       return { kind: 'outcome', value: { interfaces: [] } }
     })
     await authorWebInterfaces({ repoRoot: repo, driver, persistence, places: ['root'] })
