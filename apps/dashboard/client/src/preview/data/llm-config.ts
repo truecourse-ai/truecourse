@@ -1,6 +1,3 @@
-// PREVIEW: REAL — the workspace's LLM provider, read and written over the
-// dashboard server's own routes.
-
 /**
  * The Models settings seam.
  *

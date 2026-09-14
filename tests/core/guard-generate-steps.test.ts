@@ -227,7 +227,7 @@ async function warmExtractCache(r: string, doc: GuardDoc): Promise<void> {
     return outcome(EXTRACT_DRAFT)
   }
   const seams = createGuardGenerateSessionSeams({ repoRoot: r, only: 'extract' })
-  const { summary } = await seams.extractSession({ docs: [doc] })
+  const { summary } = await seams.extractSession({ docs: [doc], prerequisiteTargets: [] })
   expect(summary).toMatchObject({ ran: 1, failed: 0 })
 }
 
@@ -267,7 +267,7 @@ describe('a prior step not yet run', () => {
     const r = docRepo()
     const [doc] = docsOf(r)
     const seams = createGuardGenerateSessionSeams({ repoRoot: r, only: 'flows' })
-    const error = await seams.extractSession({ docs: [doc] }).catch((e: unknown) => e)
+    const error = await seams.extractSession({ docs: [doc], prerequisiteTargets: [] }).catch((e: unknown) => e)
 
     expect(error).toBeInstanceOf(GenerateStepNotReadyError)
     expect((error as GenerateStepNotReadyError).step).toBe('extract')
@@ -286,7 +286,7 @@ describe('a prior step not yet run', () => {
 
     const seams = createGuardGenerateSessionSeams({ repoRoot: r, only: 'worker' })
     // Extraction replays from the cache the step above wrote…
-    const replayed = await seams.extractSession({ docs: [doc] })
+    const replayed = await seams.extractSession({ docs: [doc], prerequisiteTargets: [] })
     expect(replayed.summary).toMatchObject({ ran: 0, fromCache: 1, failed: 0 })
 
     // …and the next step's own cache is cold, so the run stops there.

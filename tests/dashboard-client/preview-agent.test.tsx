@@ -44,15 +44,23 @@ vi.mock('@/lib/socket', () => {
 });
 
 vi.mock('@/components/sessions/RunConversationPage', () => ({
-  RunConversationPage: ({ run, repoId }: { run: { runId: string }; repoId: string }) => (
+  RunConversationPage: ({ run, repoId }: { run: { runId: string }; repoId: string | null }) => (
     <div data-testid="conversation">
-      {run.runId} in {repoId}
+      {run.runId} in {repoId ?? ''}
     </div>
+  ),
+  // The header's clock: the real one ticks off the page's own interval; here it
+  // reads the record's own span so the header carries the same words either way.
+  RunElapsed: ({ run }: { run: { startedAt: string; finishedAt?: string } }) => (
+    <span className="tabular-nums text-muted-foreground">
+      {run.finishedAt ? `${Math.round((Date.parse(run.finishedAt) - Date.parse(run.startedAt)) / 1000)}s` : ''}
+    </span>
   ),
 }));
 
 import PreviewApp from '@/preview/PreviewApp';
 import type { WorkspaceRun } from '@/lib/api';
+import type { JobView } from '@truecourse/shared';
 
 if (!Element.prototype.scrollTo) {
   Element.prototype.scrollTo = (() => {}) as Element['scrollTo'];
@@ -100,19 +108,52 @@ const SETUP = run({
 
 const SCAN = run();
 
+/** The workspace's OWN work: a Document scan belongs to no repository. */
+const WORKSPACE_SCAN = run({
+  runId: 'run-scan-workspace',
+  gitRef: 'workspace',
+  startedAt: '2026-09-03T09:00:00.000Z',
+  finishedAt: '2026-09-03T09:01:00.000Z',
+  repo: null,
+});
+
+/**
+ * A job of the workspace. `key` is the server's own (`<type>:<owner/repo>`),
+ * which is how a job names the repository it runs for.
+ */
+function job(over: Partial<JobView> = {}): JobView {
+  const type = over.type ?? 'repo.guard-generate';
+  return {
+    id: 'job-1',
+    workspaceOrgId: 'org_1',
+    type,
+    key: `${type}:${REPO_A.name}`,
+    status: 'queued',
+    progress: { current: 0, total: 0, message: null },
+    result: null,
+    error: null,
+    createdAt: '2026-09-04T09:10:00.000Z',
+    startedAt: null,
+    finishedAt: null,
+    ...over,
+  };
+}
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
 
-/** A world: two connected repositories and the runs the workspace route lists. */
-function serve(runs: WorkspaceRun[]) {
-  const state = { runs, calls: [] as string[] };
+/** A world: two connected repositories, the runs the workspace route lists, and
+ *  the jobs it has in flight. */
+function serve(runs: WorkspaceRun[], jobs: JobView[] = []) {
+  const state = { runs, jobs, calls: [] as string[] };
   window.fetch = vi.fn(async (input: RequestInfo | URL) => {
     const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const url = new URL(href, window.location.origin);
     state.calls.push(`${url.pathname}${url.search}`);
     if (url.pathname === '/api/repos') return json([REPO_A, REPO_B]);
     if (url.pathname === '/api/llm/config') return json({ config: { provider: 'anthropic' }, providers: ['anthropic'] });
+    if (url.pathname === '/api/jobs') return json({ jobs: state.jobs });
     if (url.pathname === '/api/sessions/runs') return json({ runs: state.runs });
     if (url.pathname.startsWith('/api/sessions/runs/')) {
       const id = decodeURIComponent(url.pathname.slice('/api/sessions/runs/'.length));
@@ -128,6 +169,40 @@ function serve(runs: WorkspaceRun[]) {
 function fireSocket(event: string, payload: unknown) {
   act(() => {
     for (const handler of listeners.get(event) ?? []) handler(payload);
+  });
+}
+
+/**
+ * The workspace's live stream (`/api/events`), which is where a run's record
+ * writes arrive — the only signal work of the workspace itself ever gets.
+ */
+class FakeEventSource {
+  static open: FakeEventSource[] = [];
+  readyState = 1;
+  private readonly handlers = new Set<(e: MessageEvent<string>) => void>();
+  constructor(readonly url: string) {
+    FakeEventSource.open.push(this);
+  }
+  addEventListener(type: string, handler: (e: MessageEvent<string>) => void) {
+    if (type === 'message') this.handlers.add(handler);
+  }
+  removeEventListener(_type: string, handler: (e: MessageEvent<string>) => void) {
+    this.handlers.delete(handler);
+  }
+  close() {
+    this.readyState = 2;
+    FakeEventSource.open = FakeEventSource.open.filter((s) => s !== this);
+  }
+  deliver(event: unknown) {
+    for (const handler of [...this.handlers]) {
+      handler({ data: JSON.stringify(event) } as MessageEvent<string>);
+    }
+  }
+}
+
+function fireServerEvent(event: unknown) {
+  act(() => {
+    for (const source of [...FakeEventSource.open]) source.deliver(event);
   });
 }
 
@@ -160,11 +235,13 @@ function rows() {
 
 beforeEach(() => {
   listeners.clear();
+  (window as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
   window.history.replaceState({}, '', '/preview');
 });
 
 afterEach(() => {
   window.fetch = realFetch;
+  delete (window as unknown as { EventSource?: unknown }).EventSource;
   vi.restoreAllMocks();
 });
 
@@ -181,7 +258,7 @@ describe('Agent, the index', () => {
     await waitFor(() => expect(rows()).toHaveLength(2));
 
     const [first, second] = rows();
-    expect(within(first!).getByText('Test setup')).toBeInTheDocument();
+    expect(within(first!).getByText('Flow setup')).toBeInTheDocument();
     expect(within(first!).getByText('spiderhands/filecli')).toBeInTheDocument();
     expect(within(first!).getByText('Failed')).toBeInTheDocument();
     expect(within(first!).getByText('2m 30s')).toBeInTheDocument();
@@ -224,7 +301,7 @@ describe('Agent, the index', () => {
 
     await user.click(screen.getByRole('button', { name: 'Add filter' }));
     await user.click(await screen.findByRole('option', { name: /Kind/ }));
-    await user.click(await screen.findByRole('option', { name: /Test setup/ }));
+    await user.click(await screen.findByRole('option', { name: /Flow setup/ }));
 
     await waitFor(() => expect(rows()).toHaveLength(1));
     expect(screen.getByTestId('address')).toHaveTextContent('/preview/agent?kind=guard-setup');
@@ -259,6 +336,32 @@ describe('Agent, the index', () => {
     expect(await screen.findByText('Nothing matches.')).toBeInTheDocument();
   });
 
+  it("shows the workspace's own work with no repository, and still by kind", async () => {
+    serve([WORKSPACE_SCAN, SETUP, SCAN]);
+    renderAt('/preview/agent');
+    const user = userEvent.setup();
+    await waitFor(() => expect(rows()).toHaveLength(3));
+
+    const first = rows()[0]!;
+    expect(within(first).getByText('Document scan')).toBeInTheDocument();
+    expect(within(first).getByText('—')).toBeInTheDocument();
+
+    // The Kind filter still lists it, and narrowing keeps it.
+    await user.click(screen.getByRole('button', { name: 'Add filter' }));
+    await user.click(await screen.findByRole('option', { name: /Kind/ }));
+    await user.click(await screen.findByRole('option', { name: /Document scan/ }));
+    await waitFor(() => expect(rows()).toHaveLength(2));
+
+    // A repository's filter is not about the workspace's own work.
+    await user.click(screen.getByRole('button', { name: 'Remove Kind Document scan' }));
+    await waitFor(() => expect(rows()).toHaveLength(3));
+    await user.click(screen.getByRole('button', { name: 'Add filter' }));
+    await user.click(await screen.findByRole('option', { name: /Repository/ }));
+    await user.click(await screen.findByRole('option', { name: /expense-tracker/ }));
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    expect(within(rows()[0]!).getByText('spiderhands/expense-tracker')).toBeInTheDocument();
+  });
+
   it('re-reads when a repository writes its store, without a reload', async () => {
     const state = serve([SCAN]);
     renderAt('/preview/agent');
@@ -268,6 +371,149 @@ describe('Agent, the index', () => {
     fireSocket('session:runs-changed', { repoId: REPO_B.id });
 
     await waitFor(() => expect(rows()).toHaveLength(2), { timeout: 3000 });
+  });
+
+  it('re-reads on a run change of the workspace itself, which has no room', async () => {
+    const state = serve([SCAN]);
+    renderAt('/preview/agent');
+    await waitFor(() => expect(rows()).toHaveLength(1));
+
+    state.runs = [WORKSPACE_SCAN, SCAN];
+    fireServerEvent({
+      type: 'run.changed',
+      runId: WORKSPACE_SCAN.runId,
+      repoKey: 'workspace:org_1',
+    });
+
+    await waitFor(() => expect(rows()).toHaveLength(2), { timeout: 3000 });
+    // The new row is the workspace's own work: it names no repository.
+    expect(within(rows()[0]!).getByText('—')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// work that has not started
+// ---------------------------------------------------------------------------
+
+/** Another repository's generation, holding the workspace's one heavy lane. */
+const GENERATING = run({
+  command: 'guard-generate',
+  runId: 'run-generate-b',
+  status: 'running',
+  startedAt: '2026-09-04T09:05:00.000Z',
+  finishedAt: undefined,
+  repo: { id: REPO_B.id, fullName: REPO_B.name },
+});
+
+const HOLDING_JOB = job({
+  id: 'job-holding',
+  key: `repo.guard-generate:${REPO_B.name}`,
+  status: 'running',
+  createdAt: '2026-09-04T09:04:00.000Z',
+  startedAt: '2026-09-04T09:04:30.000Z',
+});
+
+describe('work waiting its turn', () => {
+  it('lists a queued job as a row, saying what it waits for', async () => {
+    serve([GENERATING], [HOLDING_JOB, job()]);
+    renderAt('/preview/agent');
+
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    const [waiting, working] = rows();
+    expect(within(waiting!).getByText('Flow generation')).toBeInTheDocument();
+    expect(within(waiting!).getByText('spiderhands/expense-tracker')).toBeInTheDocument();
+    expect(within(waiting!).getByText('Queued')).toBeInTheDocument();
+    expect(
+      within(waiting!).getByText('waiting for Flow generation on spiderhands/filecli'),
+    ).toBeInTheDocument();
+    // The job holding the lane has its run record, so its work is one row.
+    expect(within(working!).getByText('Running')).toBeInTheDocument();
+    expect(within(working!).getByText('spiderhands/filecli')).toBeInTheDocument();
+  });
+
+  it('keeps one row when the job starts, until its own run record arrives', async () => {
+    const state = serve(
+      [],
+      [
+        job({
+          id: 'job-setup',
+          type: 'repo.guard-setup',
+          status: 'running',
+          createdAt: '2026-09-04T09:00:00.000Z',
+          startedAt: '2026-09-04T09:00:10.000Z',
+        }),
+      ],
+    );
+    renderAt('/preview/agent');
+    const user = userEvent.setup();
+
+    // The body has not written its record yet: the job is still the only row
+    // this work has, and it does not blink out while the record is on its way.
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    expect(within(rows()[0]!).getByText('Flow setup')).toBeInTheDocument();
+    expect(within(rows()[0]!).getByText('Running')).toBeInTheDocument();
+
+    state.runs = [
+      run({
+        command: 'guard-setup',
+        runId: 'run-setup-live',
+        status: 'running',
+        startedAt: '2026-09-04T09:00:12.000Z',
+        finishedAt: undefined,
+      }),
+    ];
+    fireSocket('session:runs-changed', { repoId: REPO_A.id });
+
+    await waitFor(
+      () =>
+        expect(
+          state.calls.filter((c) => c.startsWith('/api/sessions/runs?limit=200')).length,
+        ).toBe(2),
+      { timeout: 3000 },
+    );
+    expect(rows()).toHaveLength(1);
+    await user.click(rows()[0]!);
+    expect(screen.getByTestId('address')).toHaveTextContent('/preview/agent/run-setup-live');
+  });
+
+  it('opens a queued job where its work will appear', async () => {
+    serve([], [job({ type: 'repo.guard-setup' })]);
+    renderAt('/preview/agent');
+    const user = userEvent.setup();
+    await waitFor(() => expect(rows()).toHaveLength(1));
+
+    await user.click(rows()[0]!);
+    expect(screen.getByTestId('address')).toHaveTextContent(`/preview/repos/${REPO_A.id}/pipeline`);
+  });
+
+  it('sends a queued document scan to the Context it reads', async () => {
+    serve([], [job({ type: 'context.scan', key: 'context.scan' })]);
+    renderAt('/preview/agent');
+    const user = userEvent.setup();
+    await waitFor(() => expect(rows()).toHaveLength(1));
+
+    const row = rows()[0]!;
+    expect(within(row).getByText('Document scan')).toBeInTheDocument();
+    expect(within(row).getByText('—')).toBeInTheDocument();
+    expect(within(row).getByText('waiting in the queue')).toBeInTheDocument();
+
+    await user.click(row);
+    expect(screen.getByTestId('address')).toHaveTextContent('/preview/context');
+  });
+
+  it('counts Queued among the statuses, and narrows to it', async () => {
+    serve([GENERATING], [HOLDING_JOB, job()]);
+    renderAt('/preview/agent');
+    const user = userEvent.setup();
+    await waitFor(() => expect(rows()).toHaveLength(2));
+
+    await user.click(screen.getByRole('button', { name: 'Add filter' }));
+    await user.click(await screen.findByRole('option', { name: /Status/ }));
+    await user.click(await screen.findByRole('option', { name: /Queued/ }));
+
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    expect(within(rows()[0]!).getByText('Queued')).toBeInTheDocument();
+    expect(screen.getByTestId('address')).toHaveTextContent('/preview/agent?status=queued');
   });
 });
 
@@ -284,7 +530,7 @@ describe('one conversation', () => {
 
     await user.click(rows()[0]!);
 
-    expect(await screen.findByRole('heading', { name: 'Test setup' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Flow setup' })).toBeInTheDocument();
     const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' });
     expect(within(crumbs).getByRole('link', { name: 'Agent' })).toHaveAttribute('href', '/preview/agent');
     expect(screen.getByText('spiderhands/filecli')).toBeInTheDocument();
@@ -309,6 +555,47 @@ describe('one conversation', () => {
 
     expect(await screen.findByTestId('conversation')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Run again' })).toBeNull();
+  });
+
+  it("opens the workspace's own conversation, which names no repository", async () => {
+    serve([WORKSPACE_SCAN]);
+    renderAt(`/preview/agent/${WORKSPACE_SCAN.runId}`);
+
+    expect(await screen.findByRole('heading', { name: 'Document scan' })).toBeInTheDocument();
+    expect(screen.getByTestId('conversation')).toHaveTextContent('run-scan-workspace in');
+    expect(screen.queryByText('spiderhands/expense-tracker')).toBeNull();
+    // Nothing offers to run it again from here: it starts on Context.
+    expect(screen.queryByRole('button', { name: 'Run again' })).toBeNull();
+  });
+
+  it("follows its own run's record writes, and leaves another run's alone", async () => {
+    const running = run({
+      runId: WORKSPACE_SCAN.runId,
+      status: 'running',
+      startedAt: '2026-09-03T09:00:00.000Z',
+      finishedAt: undefined,
+      repo: null,
+    });
+    const state = serve([running]);
+    renderAt(`/preview/agent/${running.runId}`);
+    const reads = () =>
+      state.calls.filter((c) => c === `/api/sessions/runs/${running.runId}`).length;
+
+    expect(await screen.findByText('Running')).toBeInTheDocument();
+    const settled = reads();
+
+    // Another run's write is not this conversation's business.
+    fireServerEvent({ type: 'run.changed', runId: 'run-elsewhere', repoKey: 'workspace:org_1' });
+
+    state.runs = [WORKSPACE_SCAN];
+    fireServerEvent({
+      type: 'run.changed',
+      runId: WORKSPACE_SCAN.runId,
+      repoKey: 'workspace:org_1',
+    });
+
+    expect(await screen.findByText('Finished')).toBeInTheDocument();
+    expect(reads()).toBe(settled + 1);
   });
 
   it('says so at an address this workspace has nothing at', async () => {
@@ -337,10 +624,10 @@ describe('the way in', () => {
 
   it('is no longer a tab of the repository console', async () => {
     serve([SCAN]);
-    renderAt('/preview/repos/orders-api/coverage');
+    renderAt(`/preview/repos/${REPO_A.id}/runs`);
 
     const menu = await screen.findByRole('navigation', { name: 'Repository sections' });
     expect(within(menu).queryByRole('link', { name: 'Activity' })).toBeNull();
-    expect(within(menu).getByRole('link', { name: 'Coverage' })).toBeInTheDocument();
+    expect(within(menu).getByRole('link', { name: 'Runs' })).toBeInTheDocument();
   });
 });

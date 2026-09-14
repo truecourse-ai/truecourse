@@ -7,6 +7,11 @@
  * dimension, this one narrows several without stacking a chip row per
  * dimension. Selected keys are `dimension:value`.
  *
+ * An applied pill carries the value's OWN size in the full set, the menu the
+ * faceted count: a pill answers "how much does this filter keep", the menu
+ * "what would picking this leave". Collapsing both to the faceted number makes
+ * every applied pill repeat the tally.
+ *
  * Reading: AND across dimensions, OR within one. The surface that owns the list
  * applies that reading; this control only edits the selection.
  */
@@ -15,11 +20,21 @@ import { useEffect, useRef, useState } from 'react';
 import { Plus, Search, X } from 'lucide-react';
 import type { FilterOption } from './filter-bar';
 
+/**
+ * One value a dimension offers, with the TWO numbers a value has: `count` is
+ * the faceted one the menu shows (what picking it would leave, given what is
+ * already picked), `total` is what the value keeps of the full set on its own.
+ * An applied pill wears neither: the list's tally is where the numbers live.
+ */
+export interface FilterValue extends FilterOption {
+  total: number;
+}
+
 export interface FilterDimension {
   key: string;
   /** The dimension's word: "Area", "Status". */
   label: string;
-  options: FilterOption[];
+  options: FilterValue[];
 }
 
 export interface FilterBuilderProps {
@@ -97,7 +112,6 @@ export function FilterBuilder({ label, ariaLabel, dimensions, selected, onChange
           <span key={key} className={PILL}>
             <span className="opacity-70">{dim.label} ·</span>
             {option.label}
-            {option.count == null ? '' : ` ${option.count}`}
             <button
               type="button"
               aria-label={`Remove ${dim.label} ${option.label}`}

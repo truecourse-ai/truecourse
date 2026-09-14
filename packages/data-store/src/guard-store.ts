@@ -53,7 +53,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { promises as fsp } from 'node:fs';
-import { and, asc, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, isNotNull, sql } from 'drizzle-orm';
 import {
   guardRuns,
   guardResults,
@@ -65,6 +65,7 @@ import {
 import { guardEvidenceVisual } from '@truecourse/shared';
 import type {
   GuardHistoryReadOptions,
+  GuardRunSections,
   GuardStore,
   RepoRef,
   SaveScenariosResult,
@@ -80,6 +81,7 @@ import {
   type GuardHistoryEntry,
   type GuardLatest,
   type GuardManifest,
+  type GuardRunSectionSummary,
 } from '@truecourse/shared';
 import {
   loadScenarios as fileLoadScenarios,
@@ -202,6 +204,43 @@ export class PgGuardStore implements GuardStore {
 
   // History is derived from the baseline rows — nothing to append.
   async appendGuardHistory(): Promise<void> {}
+
+  /** Record a run's section summary on its own row, addressed by run id. */
+  async writeGuardRunSections(repoKey: string, run: GuardRunSections): Promise<void> {
+    if (!SAFE_SEGMENT.test(run.runId)) {
+      throw new Error(`[data-store] unsafe guard run id: ${run.runId}`);
+    }
+    await this.db
+      .update(guardRuns)
+      .set({ sections: run.sections })
+      .where(and(eq(guardRuns.repoKey, repoKey), eq(guardRuns.runId, run.runId)));
+  }
+
+  /** Every baseline run carrying a section summary, oldest first. */
+  async readGuardRunSections(repoKey: string): Promise<GuardRunSections[]> {
+    const rows = await this.db
+      .select({
+        runId: guardRuns.runId,
+        ranAt: guardRuns.ranAt,
+        commitSha: guardRuns.commitSha,
+        sections: guardRuns.sections,
+      })
+      .from(guardRuns)
+      .where(
+        and(
+          eq(guardRuns.repoKey, repoKey),
+          eq(guardRuns.isBaseline, true),
+          isNotNull(guardRuns.sections),
+        ),
+      )
+      .orderBy(asc(guardRuns.ranAt));
+    return rows.map((r) => ({
+      runId: r.runId,
+      ranAt: r.ranAt,
+      commit: r.commitSha,
+      sections: r.sections as GuardRunSectionSummary,
+    }));
+  }
 
   /** A specific commit's generate report, or the newest stored one when omitted. */
   async readGuardResult(repoKey: string, commitSha?: string): Promise<GuardGenerateReport | null> {

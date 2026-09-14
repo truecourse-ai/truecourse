@@ -189,15 +189,20 @@ export interface SsoStatusResponse {
   connections: SsoConnectionInfo[]
 }
 
-export interface WorkspaceMember {
+/**
+ * The users of a workspace, as the enterprise Workspace page lists them
+ * (`/api/ee/workspace/members`). Settings › Members reads the organization's
+ * memberships and invitations instead: `WorkspaceMember` in `workspace.ts`.
+ */
+export interface EeWorkspaceMember {
   id: string
   email: string
   firstName?: string | null
   lastName?: string | null
 }
 
-export interface WorkspaceMembersResponse {
-  members: WorkspaceMember[]
+export interface EeWorkspaceMembersResponse {
+  members: EeWorkspaceMember[]
 }
 
 /** Per-workspace feature settings (GET/PATCH /api/ee/workspace/settings). */
@@ -429,6 +434,14 @@ export interface GithubRunSummary {
 }
 
 /** Everything the Connect page needs in one call. */
+/**
+ * Where a GitHub App install was started from, carried through GitHub's
+ * `state` so the return lands there: Settings, Code's connect dialog, or Add
+ * context's repository step.
+ */
+export const GITHUB_INSTALL_ORIGINS = ['settings', 'code-connect', 'context-add'] as const;
+export type GithubInstallOrigin = (typeof GITHUB_INSTALL_ORIGINS)[number];
+
 export interface GithubConnectStatusResponse {
   /** Whether the GitHub App is configured server-side. */
   configured: boolean

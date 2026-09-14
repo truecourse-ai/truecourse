@@ -41,7 +41,7 @@ describe('author-only changes retain upstream cache compatibility', () => {
     const { driver } = stubDriver(calls)
     const acquire = vi.fn(async () => ({ driver, persistence: memoryPersistence().persistence }))
     const seams = createGuardGenerateSessionSeams({ repoRoot: root, driver: acquire })
-    expect((await seams.extractSession({ docs: [doc] })).summary).toMatchObject({ ran: 0, fromCache: 1 })
+    expect((await seams.extractSession({ docs: [doc], prerequisiteTargets: [] })).summary).toMatchObject({ ran: 0, fromCache: 1 })
     expect((await seams.flowsAreaSession({ areas: [area], docs: [doc] })).summary).toMatchObject({ ran: 0, fromCache: 1 })
     expect(calls).not.toHaveBeenCalled()
     expect(acquire).not.toHaveBeenCalled()

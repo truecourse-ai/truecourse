@@ -1,4 +1,8 @@
-/** Full-width catalog of screens, operations and commands. Rows open their own detail page. */
+/**
+ * Full-width catalog of screens, operations and commands. Rows open their own
+ * detail page. The toolbar is the platform's: the search box across the top,
+ * then ONE Add-filter row over both dimensions, never a chip bar per dimension.
+ */
 
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
@@ -8,7 +12,8 @@ import { GuardMethodLabel } from '@/components/guard/GuardMethodLabel';
 import { useGuardFlows } from '@/hooks/useGuardFlows';
 import { catalogOrigins, catalogUsage, interfaceCatalog } from './interface-catalog';
 import { CHIP_CLASS, PageHeader } from '@/preview/ui/bits';
-import { FilterBar } from '@/preview/ui/filter-bar';
+import { FilterBuilder, selectedValues, type FilterDimension } from '@/preview/ui/filter-builder';
+import { facetDimensions } from '@/preview/ui/filter-facets';
 import { useGuardInterfaces } from '@/hooks/useGuardInterfaces';
 import type { Repo } from '@/preview/data/types';
 import { useGuardTabJump } from './tab-jump';
@@ -46,22 +51,61 @@ export function InterfacesTab({ repo }: { repo: Repo }) {
   const flows = useGuardFlows(repo.id, true, reloadKey);
   const catalog = useMemo(() => interfaceCatalog(interfaces.view), [interfaces.view]);
   const [query, setQuery] = useState('');
-  const [surfaceFilter, setSurfaceFilter] = useState<string[]>([]);
-  const [originFilter, setOriginFilter] = useState<string[]>([]);
+  /** One selection over both dimensions, as `dimension:value` keys. */
+  const [filters, setFilters] = useState<string[]>([]);
+  const surfaceFilter = useMemo(() => selectedValues(filters, 'surface'), [filters]);
+  const originFilter = useMemo(() => selectedValues(filters, 'origin'), [filters]);
 
   const all: GuardInterfaceRow[] = useMemo(() => interfaces.view?.interfaces ?? [], [interfaces.view]);
 
-  const surfaceOptions = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const i of all) counts.set(i.type, (counts.get(i.type) ?? 0) + 1);
-    return [...counts.entries()].map(([key, count]) => ({ key, label: guardDriver(key)?.label ?? key, count }));
-  }, [all]);
-  const originOptions = useMemo(
+  const surfaces = useMemo(
     () =>
-      (['derived', 'authored'] as const)
-        .map((key) => ({ key, label: key, count: all.filter((i) => (i.origin ?? 'derived') === key).length }))
-        .filter((o) => o.count > 0),
+      [...new Set(all.map((i) => i.type))].map((key) => ({
+        key,
+        label: guardDriver(key)?.label ?? key,
+      })),
     [all],
+  );
+
+  /**
+   * The interfaces the search keeps: the members of every catalog row it
+   * matches. The counts are of interfaces, the search is over the rows they
+   * make up, so it reaches them through their membership.
+   */
+  const searched = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (q === '') return null;
+    return new Set(
+      catalog.rows.filter((row) => row.search.includes(q)).flatMap((row) => row.members.map((m) => m.id)),
+    );
+  }, [catalog, query]);
+
+  const dimensions: FilterDimension[] = useMemo(
+    () =>
+      facetDimensions<GuardInterfaceRow>({
+        rows: all,
+        selected: filters,
+        ...(searched ? { matches: (i: GuardInterfaceRow) => searched.has(i.id) } : {}),
+        dimensions: [
+          {
+            key: 'surface',
+            label: 'Surface',
+            valuesOf: (i) => [i.type],
+            values: surfaces.map((s) => ({ value: s.key, label: s.label })),
+          },
+          {
+            key: 'origin',
+            label: 'Origin',
+            valuesOf: (i) => [i.origin ?? 'derived'],
+            values: (['derived', 'authored'] as const).map((origin) => ({
+              value: origin,
+              label: origin,
+            })),
+            hideEmpty: true,
+          },
+        ],
+      }),
+    [all, filters, searched, surfaces],
   );
 
   const rows = useMemo(() => {
@@ -86,37 +130,27 @@ export function InterfacesTab({ repo }: { repo: Repo }) {
           return count ? [`${count} ${kind === 'entries' ? `entry point${count === 1 ? '' : 's'}` : `${kind}${count === 1 ? '' : 's'}`}`] : [];
         }).join(' · ') || '0 interfaces'}
       />
-      <div className="flex shrink-0 flex-wrap items-center gap-x-6 gap-y-1 border-b border-border px-6 py-2">
+      <div className="min-w-0 shrink-0 border-b border-border px-6 py-2">
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           aria-label="Search interfaces"
           placeholder="Search interfaces"
-          className="w-64 max-w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
         />
-        <div className="flex flex-wrap items-center gap-x-4 [&>div]:border-0 [&>div]:px-0 [&>div]:py-0">
-          <FilterBar
-            label="Surface"
-            ariaLabel="Filter interfaces by surface"
-            options={surfaceOptions}
-            selected={surfaceFilter}
-            onChange={setSurfaceFilter}
-            multi
-          />
-          <FilterBar
-            label="Origin"
-            ariaLabel="Filter interfaces by origin"
-            options={originOptions}
-            selected={originFilter}
-            onChange={setOriginFilter}
-          />
-        </div>
       </div>
+      <FilterBuilder
+        label="Filter"
+        ariaLabel="Filter interfaces"
+        dimensions={dimensions}
+        selected={filters}
+        onChange={setFilters}
+      />
 
       {flows.view?.recipe && (
         <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-6 py-2 text-xs">
           <span className="text-muted-foreground">Preparation</span>
-          {surfaceOptions.filter((s) => surfaceFilter.length === 0 || surfaceFilter.includes(s.key)).map((s) => (
+          {surfaces.filter((s) => surfaceFilter.length === 0 || surfaceFilter.includes(s.key)).map((s) => (
             <Link key={s.key} to={rowUrl(`recipe:${s.key}`)} className="rounded-sm text-foreground underline decoration-border underline-offset-4 hover:decoration-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">{s.label} recipe</Link>
           ))}
         </div>

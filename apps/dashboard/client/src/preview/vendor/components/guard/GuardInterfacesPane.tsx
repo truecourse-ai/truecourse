@@ -30,7 +30,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { HoverPopover } from '@/preview/ui/hover-popover';
 import { useGuardArtifactRaw } from '@/preview/vendor/hooks/useGuardArtifactRaw';
 import { formatGuardTime, shortFingerprint } from '@/preview/vendor/lib/guard-drifts';
-import { guardGapNeed, guardPlainStatus, type GuardFlowPlainStatus } from '@/preview/vendor/lib/guard-flow-status';
+import { guardGapNeed, type GuardFlowPlainStatus } from '@/preview/vendor/lib/guard-flow-status';
 import { GuardInterfaceContract } from '@/preview/vendor/components/guard/GuardInterfaceContract';
 import { GuardInterfaceDiagram } from '@/preview/vendor/components/guard/GuardInterfaceDiagram';
 import { GuardRecipeDetail } from '@/preview/vendor/components/guard/GuardRecipeDetail';
@@ -39,29 +39,20 @@ import { GuardTabStrip, type GuardTabStripItem } from '@/preview/vendor/componen
 import type { GuardTabsState } from '@/preview/vendor/hooks/useGuardTabs';
 
 /**
- * Every reference to this interface as ONE uniform chip: the flows that use it,
- * plus any grounding test whose flow the corpus can't name (an id-only reference
- * still reads as a FLOW, chipped by its flow id, never as a bare test id, and
- * never as loose text beside real chips).
+ * Every reference to this interface as ONE uniform chip. The status is the
+ * FLOW's own, computed once on the server from the same join the Flows list
+ * reads, so a flow reads the same word on both pages; an unrealized usage adds
+ * what it waits on beside it.
  */
 function interfaceFlowRefs(
   iface: GuardInterfaceRow,
 ): { flowId: string; label: string; status: GuardFlowPlainStatus; need?: string }[] {
-  const refs = iface.flows.map((flow) => ({
+  return iface.flows.map((flow) => ({
     flowId: flow.flowId,
     label: flow.title || flow.flowId,
-    status: flow.realized ? guardPlainStatus('guarded') : guardPlainStatus('blocked-on'),
+    status: flow.status,
     ...(flow.realized ? {} : { need: flow.gap ? guardGapNeed(flow.gap) : undefined }),
   }));
-  const known = new Set(refs.map((r) => r.flowId));
-  // A test id is `<flow-id>.<surface>.<n>`, recover the flow it belongs to.
-  for (const testId of iface.scenarioIds) {
-    const flowId = testId.split('.')[0] ?? testId;
-    if (known.has(flowId)) continue;
-    known.add(flowId);
-    refs.push({ flowId, label: flowId, status: guardPlainStatus('guarded') });
-  }
-  return refs;
 }
 
 function Centered({ children }: { children: React.ReactNode }) {

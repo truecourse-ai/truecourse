@@ -32,7 +32,7 @@ import {
   type GuardSessionSummary,
 } from '@truecourse/guard-generator'
 import { readManifest } from '@truecourse/guard-runner'
-import type { ExtractOutcome } from '@truecourse/shared'
+import type { ExtractOutcome, GuardPrerequisiteTarget } from '@truecourse/shared'
 import { runAgentLoop, type SessionRunInput } from '../../packages/agent-loop/src/index'
 import {
   EXTRACT_SESSION_BUDGET,
@@ -119,15 +119,70 @@ function claim(sectionAnchor: string, over: Partial<ExtractOutcome['claims'][num
   }
 }
 
+/** The declared dependencies of the fixture repo: one catalog entry, named the
+ *  way the catalog names it — not the way a document spells it. */
+const TARGETS: GuardPrerequisiteTarget[] = [
+  {
+    name: 'currencybeacon',
+    state: 'unprovided',
+    aliases: ['CurrencyBeacon API'],
+    registerIn: '.truecourse/scenarios/dependencies.local.json',
+    credentialEnv: ['CURRENCYBEACON_API_KEY'],
+  },
+]
+
+/** One claim whose single case names `dependency` however the session spelled it. */
+function prerequisiteClaim(dependency: string, mode: 'provided' | 'absent' = 'absent'): ExtractOutcome['claims'][number] {
+  const base = claim(CREATING)
+  return {
+    ...base,
+    verification: {
+      ...base.verification!,
+      cases: [{ ...base.verification!.cases![0], prerequisites: [{ dependency, mode }] }],
+    },
+  }
+}
+
+describe('the prerequisite vocabulary at the extraction boundary', () => {
+  it('briefs the declared dependencies by their catalog names', () => {
+    const briefing = extractSessionBriefing(docsOf(docRepo())[0], TARGETS)
+    expect(briefing).toContain('DECLARED DEPENDENCIES')
+    expect(briefing).toContain('currencybeacon (also known as CurrencyBeacon API, CURRENCYBEACON_API_KEY)')
+    expect(extractSessionBriefing(docsOf(docRepo())[0], [])).toContain('This repository declares none')
+  })
+
+  it('stores a variant spelling under the declared name, keeping what the session wrote', () => {
+    const doc = docsOf(docRepo())[0]
+    const def = extractSessionDef({ doc, universe: buildGuardDocUniverse([doc]), prerequisiteTargets: TARGETS })
+    const draft = { claims: [prerequisiteClaim('CurrencyBeacon')], untestable: [] }
+    expect(validateExtractDraft(draft, doc, TARGETS)).toEqual([])
+    const parsed = def.outcomeSchema.parse(draft) as ExtractOutcome
+    expect(parsed.claims[0].verification!.cases![0].prerequisites).toEqual([
+      { dependency: 'currencybeacon', mode: 'absent', originalNames: ['CurrencyBeacon'] },
+    ])
+  })
+
+  it('refuses a name no declared dependency matches, naming the ones that exist', () => {
+    const doc = docsOf(docRepo())[0]
+    const def = extractSessionDef({ doc, universe: buildGuardDocUniverse([doc]), prerequisiteTargets: TARGETS })
+    const draft = { claims: [prerequisiteClaim('Stripe', 'provided')], untestable: [] }
+    const problems = validateExtractDraft(draft, doc, TARGETS)
+    expect(problems).toHaveLength(1)
+    expect(problems[0]).toContain('`Stripe` matches no declared dependency')
+    expect(problems[0]).toContain('currencybeacon')
+    expect(def.outcomeSchema.safeParse(draft).success).toBe(false)
+  })
+})
+
 it('requires case-level account scope in both draft checks and the final extraction outcome', () => {
   const doc = docsOf(docRepo())[0]
   const draft = { claims: [claim(CREATING, { needs: [{ kind: 'credential' as const, name: 'provider-key' }] })], untestable: [] }
   delete draft.claims[0].verification!.cases![0].prerequisites
-  expect(validateExtractDraft(draft, doc)).toEqual(expect.arrayContaining([expect.stringContaining('Declare case-specific prerequisites')]))
-  const def = extractSessionDef({ doc, universe: buildGuardDocUniverse([doc]) })
+  expect(validateExtractDraft(draft, doc, TARGETS)).toEqual(expect.arrayContaining([expect.stringContaining('Declare case-specific prerequisites')]))
+  const def = extractSessionDef({ doc, universe: buildGuardDocUniverse([doc]), prerequisiteTargets: TARGETS })
   expect(def.outcomeSchema.safeParse(draft).success).toBe(false)
   draft.claims[0].verification!.cases![0].prerequisites = []
-  expect(validateExtractDraft(draft, doc)).toEqual([])
+  expect(validateExtractDraft(draft, doc, TARGETS)).toEqual([])
   expect(def.outcomeSchema.safeParse(draft).success).toBe(true)
 })
 
@@ -200,9 +255,9 @@ describe('guard-generate.extract — the session def through the loop', () => {
     })
     const { persistence } = memoryPersistence()
     const settled = await runAgentLoop<ExtractOutcome>({
-      def: extractSessionDef({ doc, universe: buildGuardDocUniverse([doc]) }),
+      def: extractSessionDef({ doc, universe: buildGuardDocUniverse([doc]), prerequisiteTargets: TARGETS }),
       workItem: `doc:${doc.doc}`,
-      initialMessages: [extractSessionBriefing(doc)],
+      initialMessages: [extractSessionBriefing(doc, TARGETS)],
       driver: stub.driver, persistence, sessionId: 'extract-repair',
     }).outcome
 
@@ -211,10 +266,41 @@ describe('guard-generate.extract — the session def through the loop', () => {
     expect(persistence.readEvents('extract-repair').filter(e => e.type === 'outcome')).toHaveLength(1)
   })
 
+  it('re-asks an unknown prerequisite with the declared names, then stores the canonical one', async () => {
+    const doc = docsOf(docRepo())[0]
+    const unknown = { claims: [prerequisiteClaim('Stripe', 'provided')], untestable: [] }
+    const fixed = { claims: [prerequisiteClaim('CurrencyBeacon')], untestable: [] }
+    const stub = stubDriver(async ({ input, emit }) => {
+      await emit({ type: 'assistant-turn', text: 'finish', usage: { inputTokens: 100, outputTokens: 10, cacheReadTokens: 0, cacheCreateTokens: 0, costUsd: 0, costSource: 'unpriced' } })
+      if (!input.resume) {
+        expect((await callTool(input, 'check_claims', unknown)).isError).toBe(true)
+        return { ...outcome(unknown), resumeCursor: 'prerequisite-cursor' }
+      }
+      expect(input.initialMessages[0]).toContain('Outcome schema needs correction')
+      expect(input.initialMessages[0]).toContain('`Stripe` matches no declared dependency')
+      expect(input.initialMessages[0]).toContain('currencybeacon')
+      expect((await callTool(input, 'check_claims', fixed)).isError).toBeUndefined()
+      return outcome(fixed)
+    })
+    const { persistence } = memoryPersistence()
+    const settled = await runAgentLoop<ExtractOutcome>({
+      def: extractSessionDef({ doc, universe: buildGuardDocUniverse([doc]), prerequisiteTargets: TARGETS }),
+      workItem: `doc:${doc.doc}`,
+      initialMessages: [extractSessionBriefing(doc, TARGETS)],
+      driver: stub.driver, persistence, sessionId: 'extract-prerequisite',
+    }).outcome
+
+    expect(settled.status).toBe('completed')
+    if (settled.status !== 'completed') return
+    expect(settled.output.claims[0].verification!.cases![0].prerequisites).toEqual([
+      { dependency: 'currencybeacon', mode: 'absent', originalNames: ['CurrencyBeacon'] },
+    ])
+  })
+
   it.each([false, true])('stops invalid outcomes at the repair limit or token ceiling: %s', async ceiling => {
     const doc = docsOf(docRepo())[0]
     const bad = conversionDraft('concurrency')
-    const def = extractSessionDef({ doc, universe: buildGuardDocUniverse([doc]) })
+    const def = extractSessionDef({ doc, universe: buildGuardDocUniverse([doc]), prerequisiteTargets: TARGETS })
     if (ceiling) def.budget = { ...def.budget, tokenCeiling: 100 }
     const stub = stubDriver(async ({ input, emit }) => {
       await callTool(input, 'check_claims', bad)
@@ -223,7 +309,7 @@ describe('guard-generate.extract — the session def through the loop', () => {
     })
     const { persistence } = memoryPersistence()
     const settled = await runAgentLoop<ExtractOutcome>({
-      def, workItem: `doc:${doc.doc}`, initialMessages: [extractSessionBriefing(doc)],
+      def, workItem: `doc:${doc.doc}`, initialMessages: [extractSessionBriefing(doc, TARGETS)],
       driver: stub.driver, persistence, sessionId: 'extract-repair-limit',
     }).outcome
 
@@ -247,9 +333,9 @@ describe('guard-generate.extract — the session def through the loop', () => {
     })
     const { persistence } = memoryPersistence()
     const handle = runAgentLoop<ExtractOutcome>({
-      def: extractSessionDef({ doc, universe: buildGuardDocUniverse([doc]) }),
+      def: extractSessionDef({ doc, universe: buildGuardDocUniverse([doc]), prerequisiteTargets: TARGETS }),
       workItem: `doc:${doc.doc}`,
-      initialMessages: [extractSessionBriefing(doc)],
+      initialMessages: [extractSessionBriefing(doc, TARGETS)],
       driver,
       persistence,
       sessionId: 'extract-1',
@@ -269,7 +355,7 @@ describe('guard-generate.extract — the session def through the loop', () => {
   it('refuses an outcome produced without `check_claims`, exactly once', async () => {
     const doc = docsOf(docRepo())[0]
     const draft = { claims: [claim(CREATING)], untestable: [] }
-    const def = extractSessionDef({ doc, universe: buildGuardDocUniverse([doc]) })
+    const def = extractSessionDef({ doc, universe: buildGuardDocUniverse([doc]), prerequisiteTargets: TARGETS })
     expect(def.outcomePrecondition?.tool).toBe('check_claims')
 
     // Never calls the tool: the shell must hand the refusal back and let the
@@ -279,7 +365,7 @@ describe('guard-generate.extract — the session def through the loop', () => {
     const settled = await runAgentLoop<ExtractOutcome>({
       def,
       workItem: `doc:${doc.doc}`,
-      initialMessages: [extractSessionBriefing(doc)],
+      initialMessages: [extractSessionBriefing(doc, TARGETS)],
       driver: stub.driver,
       persistence,
       sessionId: 'extract-2',
@@ -304,7 +390,7 @@ describe('guard-generate.extract — the session def through the loop', () => {
 describe('validateExtractDraft — the check the fold re-runs', () => {
   it('rechecks the final outcome for missing cases and mixed observation scopes', () => {
     const doc = docsOf(docRepo())[0]
-    const def = extractSessionDef({ doc, universe: buildGuardDocUniverse([doc]) })
+    const def = extractSessionDef({ doc, universe: buildGuardDocUniverse([doc]), prerequisiteTargets: TARGETS })
     const missing = { claims: [claim(CREATING, { verification: undefined })], untestable: [] }
     expect(def.outcomeSchema.safeParse(missing).success).toBe(false)
     const v = claim(CREATING).verification!
@@ -315,8 +401,8 @@ describe('validateExtractDraft — the check the fold re-runs', () => {
 
   it('passes a loose-but-snappable anchor and refuses an unsnappable one', () => {
     const doc = docsOf(docRepo())[0]
-    expect(validateExtractDraft({ claims: [claim('Creating Tasks')], untestable: [] }, doc)).toEqual([])
-    const problems = validateExtractDraft({ claims: [claim('nope/nowhere')], untestable: [] }, doc)
+    expect(validateExtractDraft({ claims: [claim('Creating Tasks')], untestable: [] }, doc, TARGETS)).toEqual([])
+    const problems = validateExtractDraft({ claims: [claim('nope/nowhere')], untestable: [] }, doc, TARGETS)
     expect(problems).toHaveLength(1)
     expect(problems[0]).toContain('nope/nowhere')
   })
@@ -332,6 +418,7 @@ describe('validateExtractDraft — the check the fold re-runs', () => {
         ],
       },
       doc,
+      TARGETS,
     )
     expect(problems.some((p) => p.includes('one per section'))).toBe(true)
   })
@@ -402,13 +489,13 @@ describe('doc paging', () => {
     expect(chunk.content).toContain('chunk 1/3')
     expect(renderDocChunk(doc, 4).isError).toBe(true)
     // The briefing is honest about what it did not show.
-    expect(extractSessionBriefing(doc)).toContain('2 more chunk(s)')
+    expect(extractSessionBriefing(doc, TARGETS)).toContain('2 more chunk(s)')
   })
 
   it('pages a short markdown doc as one chunk', () => {
     const doc = docsOf(docRepo())[0]
     expect(docChunkCount(doc)).toBe(1)
-    expect(extractSessionBriefing(doc)).not.toContain('more chunk(s)')
+    expect(extractSessionBriefing(doc, TARGETS)).not.toContain('more chunk(s)')
   })
 })
 
@@ -432,8 +519,8 @@ describe('suppression', () => {
 
   it('carries the RESOLVED — STALE block into the briefing, and nothing when clean', () => {
     const doc = docsOf(docRepo())[0]
-    expect(extractSessionBriefing(doc)).not.toContain('RESOLVED — STALE')
-    const briefing = extractSessionBriefing({ ...doc, suppressedQuotes: [QUOTE] })
+    expect(extractSessionBriefing(doc, TARGETS)).not.toContain('RESOLVED — STALE')
+    const briefing = extractSessionBriefing({ ...doc, suppressedQuotes: [QUOTE] }, TARGETS)
     expect(briefing).toContain('RESOLVED — STALE, DO NOT EXTRACT')
     expect(briefing).toContain(QUOTE)
   })
@@ -467,7 +554,7 @@ describe('the extract seam', () => {
     // `transport: 'api'` with an empty TRUECOURSE_HOME makes driver
     // construction throw — so surviving the call proves none was built.
     const seams = createGuardGenerateSessionSeams({ repoRoot: r, transport: 'api' })
-    const { byDoc, summary } = await seams.extractSession({ docs: [doc] })
+    const { byDoc, summary } = await seams.extractSession({ docs: [doc], prerequisiteTargets: TARGETS })
 
     expect(summary).toMatchObject({ kind: EXTRACT_SESSION_KIND, ran: 0, fromCache: 1, failed: 0 })
     expect(seams.runId()).toBeUndefined()
@@ -487,7 +574,7 @@ describe('the extract seam', () => {
       untestable: [{ sectionAnchor: 'Listing Tasks', reason: 'no observable behavior' }],
     })
     const seams = createGuardGenerateSessionSeams({ repoRoot: r, transport: 'api' })
-    const { byDoc } = await seams.extractSession({ docs: [doc] })
+    const { byDoc } = await seams.extractSession({ docs: [doc], prerequisiteTargets: TARGETS })
     const result = byDoc.get(doc.doc)!
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -503,7 +590,7 @@ describe('the extract seam', () => {
       untestable: [],
     })
     const seams = createGuardGenerateSessionSeams({ repoRoot: r, transport: 'api' })
-    const { byDoc } = await seams.extractSession({ docs: [doc] })
+    const { byDoc } = await seams.extractSession({ docs: [doc], prerequisiteTargets: TARGETS })
     const result = byDoc.get(doc.doc)!
     expect(result.ok).toBe(true)
     if (!result.ok) return
@@ -517,7 +604,7 @@ describe('the extract seam', () => {
     await primeExtractCache(r, doc, { claims: [claim(CREATING)], untestable: [] })
     const ticks: [number, number][] = []
     const seams = createGuardGenerateSessionSeams({ repoRoot: r, transport: 'api' })
-    await seams.extractSession({ docs: [doc], onDoc: (done, total) => ticks.push([done, total]) })
+    await seams.extractSession({ docs: [doc], prerequisiteTargets: TARGETS, onDoc: (done, total) => ticks.push([done, total]) })
     expect(ticks).toEqual([
       [0, 1],
       [1, 1],
@@ -532,7 +619,7 @@ describe('the extract seam', () => {
     const r = docRepo()
     const [doc] = docsOf(r)
     const seams = createGuardGenerateSessionSeams({ repoRoot: r, transport: 'api' })
-    const { byDoc, summary } = await seams.extractSession({ docs: [doc] })
+    const { byDoc, summary } = await seams.extractSession({ docs: [doc], prerequisiteTargets: TARGETS })
 
     expect(summary).toMatchObject({ kind: EXTRACT_SESSION_KIND, ran: 1, fromCache: 0, failed: 1, allTransport: true })
     // The tally names the ACTUAL config problem, not a generic driver error.
@@ -750,12 +837,12 @@ describe('source-grounded observation boundaries', () => {
         { id: 'post-contract', claim: 'POST creates the record', method: 'behavior', requires: ['http'], conditions: [] },
         { id: 'created-at', claim: 'An edit preserves createdAt', method: 'behavior', requires: ['http'], conditions: [] },
       ] } })
-    expect(validateExtractDraft({ claims: [post, edit, table, api], untestable: [] }, doc)).toEqual([])
+    expect(validateExtractDraft({ claims: [post, edit, table, api], untestable: [] }, doc, TARGETS)).toEqual([])
     for (const c of [post, edit, table]) {
       const mixed = { ...c, verification: { ...c.verification!, cases: [...c.verification!.cases!, api.verification!.cases![0]] } }
-      expect(validateExtractDraft({ claims: [mixed], untestable: [] }, doc).join(' ')).toContain('Move protocol')
+      expect(validateExtractDraft({ claims: [mixed], untestable: [] }, doc, TARGETS).join(' ')).toContain('Move protocol')
     }
-    expect(validateExtractDraft({ claims: [{ ...post, alternativeDrivers: ['api'] }], untestable: [] }, doc).join(' ')).toContain('web proof only')
+    expect(validateExtractDraft({ claims: [{ ...post, alternativeDrivers: ['api'] }], untestable: [] }, doc, TARGETS).join(' ')).toContain('web proof only')
   })
   it('separates pristine empty-state proof from filtered-empty presentation', () => {
     const r = docRepo(); const doc = docsOf(r)[0]
@@ -765,8 +852,8 @@ describe('source-grounded observation boundaries', () => {
     const filtered = claim(CREATING, { claim: 'A filter with no matching records shows no results', driver: 'web', verification: {
       scope: 'web', method: 'behavior', observable: 'Filtered empty list', cases: [{ id: 'filtered-empty', claim: 'No matching rows', method: 'behavior', requires: ['browser'], conditions: [] }],
     } })
-    expect(validateExtractDraft({ claims: [empty, filtered], untestable: [] }, doc)).toEqual([])
+    expect(validateExtractDraft({ claims: [empty, filtered], untestable: [] }, doc, TARGETS)).toEqual([])
     const merged = { ...empty, verification: { ...empty.verification!, cases: [...empty.verification!.cases!, ...filtered.verification!.cases!] } }
-    expect(validateExtractDraft({ claims: [merged], untestable: [] }, doc).join(' ')).toContain('different starting')
+    expect(validateExtractDraft({ claims: [merged], untestable: [] }, doc, TARGETS).join(' ')).toContain('different starting')
   })
 })

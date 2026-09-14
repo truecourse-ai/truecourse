@@ -7,23 +7,35 @@
  * brings no router of its own. That is what lets a test render it under a
  * MemoryRouter, and it is why the shell's links are written absolute.
  *
- * A repository address without a tab lands on Coverage, and a settings
+ * A repository address without a tab lands on Runs, and a settings
  * address without a sub-tab lands on Members: the two defaults are expressed as
  * routes rather than redirects, so a bare address is a place, not a bounce.
+ *
+ * The repositories are Code (`/code`) and the flows of every one of them are
+ * Flows (`/flows`, one flow at `/flows/:flowId?repo=`): neither is a tab of the
+ * other, and Home is the product owner's dashboard, which is not built yet.
+ *
+ * Context LANDS on its sources (`/context`), each source is a page of its own
+ * (`/context/sources/:id`), and their documents are a place of their own
+ * (`/context/documents`, narrowed by the query the filter row writes).
  */
 
 import { Route, Routes, useParams } from 'react-router-dom';
 import AdminPage from './pages/AdminPage';
 import AgentPage from './pages/AgentPage';
+import CodePage from './pages/CodePage';
+import ConflictsPage from './pages/ConflictsPage';
+import ContextConflictPage from './pages/ContextConflictPage';
+import ContextDocPage from './pages/ContextDocPage';
+import DocumentsPage from './pages/DocumentsPage';
+import FlowsPage from './pages/FlowsPage';
 import HomePage from './pages/HomePage';
-import KnowledgePage from './pages/KnowledgePage';
 import NotificationsPage from './pages/NotificationsPage';
 import SettingsPage from './pages/SettingsPage';
+import SourcePage from './pages/SourcePage';
+import SourcesPage from './pages/SourcesPage';
 import RepoConsole from './repo/RepoConsole';
 import { JobToasts } from './shell/JobToasts';
-import { installPreviewFetch } from './data/fake-api';
-
-installPreviewFetch();
 import { PreviewShell } from './shell/PreviewShell';
 import { PreviewStateProvider } from './shell/preview-state';
 
@@ -32,10 +44,28 @@ function AgentRunRoute() {
   return <AgentPage runId={runId ? decodeURIComponent(runId) : undefined} />;
 }
 
-function KnowledgeItemRoute({ kind }: { kind: 'doc' | 'conflict' }) {
-  const { docRef, conflictId } = useParams<{ docRef?: string; conflictId?: string }>();
-  const id = kind === 'doc' ? docRef : conflictId;
-  return <KnowledgePage kind={kind} itemId={id ? decodeURIComponent(id) : undefined} />;
+/** ONE flow, by the id in the address, read through the `?repo=` beside it. */
+function FlowRoute() {
+  const { flowId } = useParams<{ flowId: string }>();
+  return <FlowsPage flowId={flowId ? decodeURIComponent(flowId) : undefined} />;
+}
+
+/** One document of Context, by the corpus ref in the address. */
+function ContextDocRoute() {
+  const { docRef } = useParams<{ docRef: string }>();
+  return <ContextDocPage docRef={docRef ? decodeURIComponent(docRef) : ''} />;
+}
+
+/** One conflict of the workspace corpus, with its resolver. */
+function ContextConflictRoute() {
+  const { conflictId } = useParams<{ conflictId: string }>();
+  return <ContextConflictPage conflictId={conflictId ? decodeURIComponent(conflictId) : ''} />;
+}
+
+/** ONE source of the workspace's context: its scope, its readers, its syncs. */
+function ContextSourceRoute() {
+  const { sourceId } = useParams<{ sourceId: string }>();
+  return <SourcePage sourceId={sourceId ? decodeURIComponent(sourceId) : ''} />;
 }
 
 export function PreviewRoutes() {
@@ -44,19 +74,20 @@ export function PreviewRoutes() {
       <Route index element={<HomePage />} />
       <Route path="agent" element={<AgentPage />} />
       <Route path="agent/:runId" element={<AgentRunRoute />} />
-      <Route path="knowledge" element={<KnowledgePage />} />
-      <Route path="knowledge/sources" element={<KnowledgePage tab="sources" />} />
-      <Route path="knowledge/doc/:docRef" element={<KnowledgeItemRoute kind="doc" />} />
-      <Route path="knowledge/conflict/:conflictId" element={<KnowledgeItemRoute kind="conflict" />} />
+      <Route path="code" element={<CodePage />} />
+      <Route path="flows" element={<FlowsPage />} />
+      <Route path="flows/:flowId" element={<FlowRoute />} />
+      <Route path="context" element={<SourcesPage />} />
+      <Route path="context/sources/:sourceId" element={<ContextSourceRoute />} />
+      <Route path="context/documents" element={<DocumentsPage />} />
+      <Route path="context/conflicts" element={<ConflictsPage />} />
+      <Route path="context/conflicts/:conflictId" element={<ContextConflictRoute />} />
+      <Route path="context/doc/:docRef" element={<ContextDocRoute />} />
       <Route path="repos/:slug" element={<RepoConsole />} />
       <Route path="repos/:slug/:tab" element={<RepoConsole />} />
       <Route path="repos/:slug/runs/:runId" element={<RepoConsole />} />
-      <Route path="repos/:slug/tests/:flowId" element={<RepoConsole />} />
-      <Route path="repos/:slug/sources/:sourceId" element={<RepoConsole />} />
       <Route path="repos/:slug/interfaces/:interfaceId" element={<RepoConsole />} />
       <Route path="repos/:slug/dependencies/:dependencyName" element={<RepoConsole />} />
-      <Route path="repos/:slug/corpus/doc/:docRef" element={<RepoConsole />} />
-      <Route path="repos/:slug/corpus/conflict/:conflictId" element={<RepoConsole />} />
       <Route path="settings" element={<SettingsPage />} />
       <Route path="settings/:tab" element={<SettingsPage />} />
       <Route path="notifications" element={<NotificationsPage />} />

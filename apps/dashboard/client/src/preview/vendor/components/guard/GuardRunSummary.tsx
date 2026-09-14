@@ -15,7 +15,6 @@ import { ArrowUpRight } from 'lucide-react';
 import type { GuardHistoryEntry, GuardLatest, GuardOutcome } from '@/preview/vendor/shared';
 import { CHIP_CLASS } from '@/preview/ui/bits';
 import { EntityList } from '@/preview/ui/entity-list';
-import { coverageVersionById } from '@/preview/data/corpus';
 import { HoverPopover } from '@/preview/ui/hover-popover';
 import {
   GUARD_OUTCOMES,
@@ -56,11 +55,6 @@ function HistoryRow({ entry: h }: { entry: GuardHistoryEntry }) {
       </span>
     </>
   );
-}
-
-function coverageVersionLabel(repoId: string, id: string): string {
-  const v = coverageVersionById(repoId, id);
-  return v ? `${v.label} · ${v.sha}` : id;
 }
 
 export function GuardRunSummary({
@@ -107,7 +101,7 @@ export function GuardRunSummary({
                 to={`/preview/repos/${repoId}/corpus?version=${encodeURIComponent(env.coverageVersion)}`}
                 className="ml-auto inline-flex items-center gap-1 text-foreground hover:underline"
               >
-                coverage {coverageVersionLabel(repoId, env.coverageVersion)}
+                coverage {env.coverageVersion}
                 <ArrowUpRight className="h-3 w-3" />
               </Link>
             )}

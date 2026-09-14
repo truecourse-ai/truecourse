@@ -908,7 +908,6 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
         }
       }
       for (const change of result.changes ?? []) fact('interfaces', `catalog edit: ${change}`)
-      if (result.reason) fact('interfaces', firstReasonLine(result.reason))
       opts.onStepDone?.('interfaces', result.reason ?? result.status)
     } else {
       steps.push({

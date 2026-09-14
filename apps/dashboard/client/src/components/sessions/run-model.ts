@@ -9,6 +9,7 @@
  * `conversation-model`, which reads the checklist through here.
  */
 
+import { runKindWord } from '@truecourse/shared';
 import type { ChecklistItem, DisplayBlock } from '@truecourse/agent-loop';
 import type { PublicSessionRun } from '@/lib/api';
 
@@ -32,33 +33,33 @@ export function displayBlocks(display: unknown): readonly DisplayBlock[] {
 export type RunStatus = PublicSessionRun['status'];
 export type StepStatus = 'pending' | 'active' | 'done' | 'error';
 
-export const RUN_STATUS_META: Record<RunStatus, { word: string; dot: string }> = {
+/**
+ * What a piece of the agent's work wears: a run record's own status, or
+ * `queued` for work that has not started — a job waiting its turn in the
+ * workspace's queue, which has no run record behind it yet.
+ */
+export type WorkStatus = RunStatus | 'queued';
+
+export const RUN_STATUS_META: Record<WorkStatus, { word: string; dot: string }> = {
+  queued: { word: 'Queued', dot: 'bg-muted-foreground' },
   running: { word: 'Running', dot: 'bg-sky-500' },
   completed: { word: 'Finished', dot: 'bg-emerald-500' },
   failed: { word: 'Failed', dot: 'bg-red-500' },
   interrupted: { word: 'Interrupted', dot: 'bg-amber-500' },
 };
 
-/** The step-dot palette: a pending step is an empty ring, never a fill. */
+/** The step-dot palette: a pending step is an empty ring, never a fill; the
+ *  step being worked on pulses, as the work under it does. */
 export const STEP_DOT: Record<StepStatus, string> = {
   pending: 'border border-border bg-transparent',
-  active: 'bg-sky-500',
+  active: 'bg-sky-500 animate-pulse',
   done: 'bg-emerald-500',
   error: 'bg-red-500',
 };
 
-/** What each kind of run is called, in the product's words rather than the store's ids. */
-const COMMAND_LABEL: Record<string, string> = {
-  'spec-scan': 'Document scan',
-  'guard-setup': 'Test setup',
-  'guard-generate': 'Test generation',
-  'guard-run': 'Test run',
-  'guard-interfaces': 'Interface authoring',
-  'guard-adjudicate': 'Failure adjudication',
-};
-
-/** `spec-scan` → `Document scan`; a command with no name of its own reads as its id, spaced. */
-export const commandLabel = (command: string): string => COMMAND_LABEL[command] ?? command.replace(/-/g, ' ');
+/** `spec-scan` reads `Document scan`; a command with no name of its own reads as its id, spaced.
+ *  The words live in `@truecourse/shared`, where the server names a run too. */
+export const commandLabel = (command: string): string => runKindWord(command);
 
 export const startedLabel = (iso: string): string =>
   new Date(iso).toLocaleString(undefined, {
@@ -122,6 +123,4 @@ export interface RunStarter {
   start: (command: string, resumeRunId?: string) => void;
   /** A start is in flight. */
   pending: boolean;
-  /** What a repository with no runs at all is offered, when there is an offer. */
-  first: { command: string; label: string } | null;
 }

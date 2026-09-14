@@ -83,7 +83,7 @@ const FLOW_TITLE = 'A user creates a task, sees it listed, and completes it';
 const BLOCKED_FLOW_ID = 'manage-telemetry-settings';
 
 /** A realized usage — a committed scenario grounds on the interface. */
-const usedBy = (flowId: string, title: string) => ({ flowId, title, realized: true });
+const usedBy = (flowId: string, title: string) => ({ flowId, title, realized: true, status: 'succeeded' as const });
 
 /**
  * The cli registry: the `tasks` command group, with `tasks telemetry` hanging off
@@ -133,6 +133,7 @@ const MAPPED: GuardInterfacesView = {
           flowId: BLOCKED_FLOW_ID,
           title: 'A user turns telemetry off and it stays off',
           realized: false,
+          status: 'blocked',
           gap: {
             kind: 'blocked-on',
             reason: 'blocked on credentials: A user turns telemetry off',
@@ -177,14 +178,23 @@ const CLI_AND_WEB: GuardInterfacesView = {
  * The regression this pins: an interface grounded by a test whose flow the corpus
  * can't name rendered the raw TEST ID as loose text beside real chips.
  */
-const ORPHAN_TEST_ID = 'run-the-community-edition-without-the-ee-directory.cli.1';
+const ORPHAN_FLOW_ID = 'run-the-community-edition-without-the-ee-directory';
+const ORPHAN_TEST_ID = `${ORPHAN_FLOW_ID}.cli.1`;
+/**
+ * Two flows use the interface: one the corpus names, and a hand-written test's
+ * Manual pseudo-flow, which the server names by its flow id. The server's
+ * status rides each ref: the named flow's last run failed.
+ */
 const MIXED_REFS: GuardInterfacesView = {
   ...MAPPED,
   interfaces: [
     {
       ...MAPPED.interfaces[0],
       id: 'cli/tasks-add',
-      flows: [usedBy(FLOW_ID, FLOW_TITLE)],
+      flows: [
+        { ...usedBy(FLOW_ID, FLOW_TITLE), status: 'failed' as const },
+        usedBy(ORPHAN_FLOW_ID, ORPHAN_FLOW_ID),
+      ],
       scenarioIds: [SCENARIO_ID, ORPHAN_TEST_ID],
     },
   ],
@@ -683,7 +693,9 @@ const catalogOutline = () =>
   ).map((el) =>
     el.getAttribute('role') === 'listitem'
       ? rowLabel(el)
-      : `# ${el.querySelector('span')?.textContent ?? ''}`,
+      // A group header's label is the element that takes the row's slack; the
+      // count sits beside it and the whole face rides an opaque ground.
+      : `# ${el.querySelector('.flex-1')?.textContent ?? ''}`,
   );
 
 /** A place row of the panel, by the title it reads under. */
@@ -1312,7 +1324,7 @@ describe('Interfaces tab — the mapped catalog', () => {
     expect(screen.queryByText(/no code route serves it/)).not.toBeInTheDocument();
   });
 
-  it('renders EVERY reference as the same chip — an unnameable flow chips its id', async () => {
+  it('renders EVERY flow reference as the same chip, wearing the status the server sent', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string | URL) =>
@@ -1322,15 +1334,16 @@ describe('Interfaces tab — the mapped catalog', () => {
     renderTab('/repos/r?tab=interfaces&ginterface=cli%2Ftasks-add');
     expect(await screen.findByText('Used by flows')).toBeInTheDocument();
 
-    // Two uniform chips: the named flow, and the one recovered from a test id —
-    // chipped by its FLOW id, never by the test id, never as bare text.
+    // Two uniform chips: the named flow and the Manual pseudo-flow, chipped by
+    // its FLOW id, never by the test id, never as bare text.
     const named = screen.getByRole('button', { name: new RegExp(FLOW_TITLE) });
-    const recovered = screen.getByRole('button', {
-      name: /run-the-community-edition-without-the-ee-directory/,
-    });
-    expect(named.className).toBe(recovered.className);
-    expect(recovered).not.toHaveTextContent(ORPHAN_TEST_ID);
-    // The bare id line is gone for good.
+    const manual = screen.getByRole('button', { name: new RegExp(ORPHAN_FLOW_ID) });
+    expect(named.className).toBe(manual.className);
+    expect(manual).not.toHaveTextContent(ORPHAN_TEST_ID);
+    // The status is the server's, the same word the Flows list gives the flow:
+    // a realized flow whose last run failed is not painted Passing here.
+    expect(named).toHaveTextContent('Failed');
+    expect(manual).toHaveTextContent('Succeeded');
     expect(screen.queryByText(SCENARIO_ID)).not.toBeInTheDocument();
   });
 

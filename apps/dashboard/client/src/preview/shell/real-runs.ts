@@ -1,13 +1,9 @@
-// PREVIEW: the REAL seam, widened — the agent-session runs of the URL-connected
-// repositories, read from the server and followed live over the one socket the
-// shell holds.
-
 /**
- * Real runs, streaming into every page.
+ * The runs of the connected repositories, streaming into every page.
  *
  * §3.5: "Jobs and sessions stream live into every page through the one event
- * connection the shell already holds." This is that connection for the real
- * repositories. The shell joins each real repo's room once; every write to that
+ * connection the shell already holds." This is that connection. The shell joins
+ * each repo's room once; every write to that
  * repo's `run.json` — a phase ticking over, a session appearing, the run
  * finishing — arrives as `session:runs-changed` and re-reads that repo's run
  * list, with the room's `spec:progress` as a second prompt for the same read
@@ -17,28 +13,26 @@
  *
  * The run records are then read three ways, which is everything the shell shows:
  *   - as JOB CHAINS (the toast and the in-flight list), one per running run,
- *     whose steps are the run record's own phase checklist;
- *   - as NOTIFICATIONS, one when a run starts and one when it settles;
- *   both open the run's own conversation, never a list it would have to be
- *   found in;
+ *     whose steps are the run record's own phase checklist, opening the run's
+ *     own conversation rather than a list it would have to be found in;
+ *   - as FAILURES, one announcement per run that ended badly;
  *   - as REPO STATE: the `onboarding` marker while a repository's first scan
  *     runs, and an honest "last check" once something has settled.
  *
- * NOTIFICATIONS ARE DERIVED, NOT STORED. There is no server-side notification
- * store and this does not invent one: the feed is what this session watched
- * happen, so a reload starts it over, and read state is session-local — exactly
- * like the rest of the preview.
+ * The notification feed is not here: it is the SERVER's store, read by
+ * `use-notifications.ts`.
  *
- * Degrades to nothing. With no server to ask (a static preview, a jsdom test)
- * the reads fail quietly, no run is known, and the shell has its fixtures only.
+ * Degrades to nothing. With no server to ask (a static page, a jsdom test)
+ * the reads fail quietly and no run is known.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { listSessionRuns, type PublicSessionRun } from '@/lib/api';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { listSessionRuns, listWorkspaceRuns, type PublicSessionRun } from '@/lib/api';
 import { connectSocket, joinRepoRoom, leaveRepoRoom } from '@/lib/socket';
 import { commandLabel, runChecklist } from '@/components/sessions/run-model';
-import type { JobChain, JobStep, PreviewNotification, Repo } from '@/preview/data/types';
+import type { JobChain, JobStep, Repo } from '@/preview/data/types';
 import { PREVIEW_BASE } from './base';
+import { subscribeToServerEvents } from './event-stream';
 
 /** All the shell needs of a repository to describe its runs. */
 export interface RunRepoRef {
@@ -88,7 +82,7 @@ export const conversationHref = (runId: string): string =>
  * first spec scan and names the command for every later run: one job surface,
  * but a first scan IS the onboarding chain and a re-scan is not.
  */
-export function toJobChain(repo: RunRepoRef, run: PublicSessionRun, first: boolean): JobChain {
+export function toJobChain(repo: RunRepoRef | null, run: PublicSessionRun, first: boolean): JobChain {
   const steps: JobStep[] = runChecklist(run).map((p) => ({
     key: p.key,
     label: p.label,
@@ -96,59 +90,17 @@ export function toJobChain(repo: RunRepoRef, run: PublicSessionRun, first: boole
     ...(p.detail ? { counter: p.detail } : {}),
   }));
   return {
-    id: `real-${repo.id}-${run.runId}`,
-    title:
-      first && run.command === 'spec-scan'
+    id: `real-${repo?.id ?? 'workspace'}-${run.runId}`,
+    title: !repo
+      ? nounFor(run.command)
+      : first && run.command === 'spec-scan'
         ? `Onboarding ${repo.fullName}`
         : `${nounFor(run.command)} ${repo.fullName}`,
-    repoFullName: repo.fullName,
+    repoFullName: repo?.fullName ?? '',
     href: conversationHref(run.runId),
     // A run that has not published its checklist yet still has one honest step.
     steps: steps.length > 0 ? steps : [{ key: 'start', label: 'Starting', state: 'active' }],
   };
-}
-
-/** A notification plus the stamp it sorts on (the feed itself shows words). */
-type TimedNotification = PreviewNotification & { sortAt: string };
-
-/** The two notifications a run produces over its life: it started, it settled. */
-export function toNotifications(
-  repo: RunRepoRef,
-  run: PublicSessionRun,
-  now: number,
-): TimedNotification[] {
-  const noun = nounFor(run.command);
-  const href = conversationHref(run.runId);
-  const rows: TimedNotification[] = [
-    {
-      id: `real-${repo.id}-${run.runId}-started`,
-      level: 'neutral',
-      title: `${noun} started on ${repo.fullName}`,
-      body: 'Open the conversation to follow it.',
-      at: relativeTime(run.startedAt, now),
-      read: false,
-      href,
-      sortAt: run.startedAt,
-    },
-  ];
-  if (isSettled(run)) {
-    const failed = run.status !== 'completed';
-    rows.push({
-      id: `real-${repo.id}-${run.runId}-settled`,
-      level: failed ? 'failure' : 'success',
-      title: `${noun} ${run.status} on ${repo.fullName}`,
-      // The record's own reason when it has one: "it failed" is the title, and
-      // the body is the only room the feed has to say why.
-      body: failed
-        ? (run.error?.message ?? `It ended ${run.status}.`)
-        : `${run.sessions.length} piece${run.sessions.length === 1 ? '' : 's'} of work.`,
-      at: relativeTime(run.finishedAt ?? run.startedAt, now),
-      read: false,
-      href,
-      sortAt: run.finishedAt ?? run.startedAt,
-    });
-  }
-  return rows;
 }
 
 /**
@@ -164,11 +116,11 @@ export interface RunFailure {
   href: string;
 }
 
-export function toFailure(repo: RunRepoRef, run: PublicSessionRun): RunFailure | null {
+export function toFailure(repo: RunRepoRef | null, run: PublicSessionRun): RunFailure | null {
   if (run.status !== 'failed') return null;
   return {
-    id: `real-${repo.id}-${run.runId}`,
-    title: `${nounFor(run.command)} failed on ${repo.fullName}`,
+    id: `real-${repo?.id ?? 'workspace'}-${run.runId}`,
+    title: repo ? `${nounFor(run.command)} failed on ${repo.fullName}` : `${nounFor(run.command)} failed`,
     body: run.error?.message ?? 'It ended failed.',
     href: conversationHref(run.runId),
   };
@@ -215,8 +167,6 @@ export function repoRunState(runs: PublicSessionRun[], now: number): RealRepoRun
 export interface RealRunStream {
   /** The in-flight jobs of the real repositories, newest run first. */
   jobs: JobChain[];
-  /** Every start and settle this session watched, newest first. */
-  notifications: PreviewNotification[];
   /** The runs that ended badly, newest first — one entry per failed run. */
   failures: RunFailure[];
   /** Per repo id: the onboarding marker and the honest last check. */
@@ -228,12 +178,10 @@ export interface RealRunStream {
    * stay silent for those and announce only what starts later.
    */
   ready: boolean;
-  markRead: (id: string) => void;
-  markAllRead: () => void;
 }
 
 /**
- * Follow the runs of every real repository. Re-subscribes when the real repo
+ * Follow the runs of every connected repository. Re-subscribes when the repo
  * list changes (a connect adds a row) and never throws: the reads are guarded
  * and the socket calls are inert when there is nothing to connect to.
  *
@@ -248,7 +196,9 @@ export function useRealRunStream(repos: Repo[], reposLoaded = true): RealRunStre
   // Repo ids whose runs have been read at least once (success or failure) —
   // with `reposLoaded`, the two halves of `ready`.
   const [readRepoIds, setReadRepoIds] = useState<ReadonlySet<string>>(() => new Set());
-  const [readIds, setReadIds] = useState<ReadonlySet<string>>(() => new Set());
+  // The workspace's OWN runs (the Document scan), which belong to no repository
+  // and no room: read from the workspace listing, re-read on the job stream.
+  const [workspaceRuns, setWorkspaceRuns] = useState<PublicSessionRun[] | null>(null);
   // A clock, not an animation: re-read the wording every 30s so "just now"
   // becomes "4 minutes ago" without a socket event to prompt it.
   const [now, setNow] = useState(() => Date.now());
@@ -256,7 +206,6 @@ export function useRealRunStream(repos: Repo[], reposLoaded = true): RealRunStre
   // The repositories as a STRING, so every derivation below is stable while the
   // real list is unchanged — `repos` is a fresh array on every shell render.
   const repoKey = repos
-    .filter((r) => r.real)
     .map((r) => `${r.id} ${r.fullName}`)
     .join('|');
 
@@ -343,9 +292,31 @@ export function useRealRunStream(repos: Repo[], reposLoaded = true): RealRunStre
     return () => clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    let stopped = false;
+    const read = async (): Promise<void> => {
+      try {
+        const { runs } = await listWorkspaceRuns({ limit: 50 });
+        if (stopped || !alive.current) return;
+        setWorkspaceRuns(runs.filter((run) => run.repo === null));
+      } catch {
+        if (!stopped && alive.current) setWorkspaceRuns((prev) => prev ?? []);
+      }
+    };
+    void read();
+    // A scan's progress and its settlement ride the job stream; either is a
+    // reason to re-read what the workspace is running.
+    const unsubscribe = subscribeToServerEvents((event) => {
+      if (event.type === 'job.progress' || event.type === 'notification') void read();
+    });
+    return () => {
+      stopped = true;
+      unsubscribe();
+    };
+  }, []);
+
   const derived = useMemo(() => {
     const jobs: { run: PublicSessionRun; chain: JobChain }[] = [];
-    const notifications: TimedNotification[] = [];
     const failures: { at: string; failure: RunFailure }[] = [];
     const repoState = new Map<string, RealRepoRunState>();
 
@@ -358,45 +329,34 @@ export function useRealRunStream(repos: Repo[], reposLoaded = true): RealRunStre
         if (!isSettled(run)) {
           jobs.push({ run, chain: toJobChain(repo, run, run.runId === onboardingRunId) });
         }
-        notifications.push(...toNotifications(repo, run, now));
         const failure = toFailure(repo, run);
         if (failure) failures.push({ at: run.finishedAt ?? run.startedAt, failure });
       }
     }
+    for (const run of workspaceRuns ?? []) {
+      if (!isSettled(run)) jobs.push({ run, chain: toJobChain(null, run, false) });
+      const failure = toFailure(null, run);
+      if (failure) failures.push({ at: run.finishedAt ?? run.startedAt, failure });
+    }
 
     jobs.sort((a, b) => b.run.startedAt.localeCompare(a.run.startedAt));
-    notifications.sort((a, b) => b.sortAt.localeCompare(a.sortAt));
     failures.sort((a, b) => b.at.localeCompare(a.at));
     return {
       jobs: jobs.map((j) => j.chain),
-      notifications,
       failures: failures.map((f) => f.failure),
       repoState,
     };
-  }, [repoRefs, runsByRepo, now]);
+  }, [repoRefs, runsByRepo, workspaceRuns, now]);
 
-  const markRead = useCallback((id: string) => {
-    setReadIds((prev) => (prev.has(id) ? prev : new Set([...prev, id])));
-  }, []);
-
-  const markAllRead = useCallback(() => {
-    setReadIds((prev) => new Set([...prev, ...derived.notifications.map((n) => n.id)]));
-  }, [derived.notifications]);
-
-  const ready = reposLoaded && repoRefs.every((r) => readRepoIds.has(r.id));
+  const ready = reposLoaded && workspaceRuns !== null && repoRefs.every((r) => readRepoIds.has(r.id));
 
   return useMemo(
     () => ({
       jobs: derived.jobs,
-      notifications: derived.notifications.map(
-        ({ sortAt: _sortAt, ...n }): PreviewNotification => ({ ...n, read: readIds.has(n.id) }),
-      ),
       failures: derived.failures,
       repoState: derived.repoState,
       ready,
-      markRead,
-      markAllRead,
     }),
-    [derived, readIds, ready, markRead, markAllRead],
+    [derived, ready],
   );
 }

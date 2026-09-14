@@ -1,11 +1,15 @@
 /**
- * The repository's Settings tab: the gate policy, who gets notified, the facts,
- * and unlink. It is the last entry of the repository menu, so the Repositories
- * page stays a list whose rows OPEN the repository (selecting a repository
- * opens its page) rather than previewing its settings beside the list.
+ * The repository's Settings tab: what this repository is, and unlink.
+ *
+ * It is the last entry of the repository menu, so Code stays a list whose rows
+ * OPEN the repository rather than previewing its settings beside the list.
+ *
+ * Only what the server holds is here. The gate policy and the notify list are
+ * not stored anywhere yet, so they are not offered: a control whose Save went
+ * no further than this tab would be the one thing this page could get wrong.
  */
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -15,88 +19,35 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useNavigate } from 'react-router-dom';
-import type { GatePolicy, Repo } from '@/preview/data/types';
+import { Facts, PROVIDER_NAME } from '@/preview/ui/bits';
+import type { Repo } from '@/preview/data/types';
 import { usePreviewState } from '@/preview/shell/preview-state';
 import { PREVIEW_BASE } from '@/preview/shell/base';
 
 export function SettingsTab({ repo }: { repo: Repo }) {
-  const { updateRepo, unlinkRepo } = usePreviewState();
+  const { unlinkRepo } = usePreviewState();
   const navigate = useNavigate();
-  const [policy, setPolicy] = useState<GatePolicy>(repo.policy);
-  const [emails, setEmails] = useState(repo.notifyEmails.join(', '));
   const [confirmUnlink, setConfirmUnlink] = useState(false);
-
-  useEffect(() => {
-    setPolicy(repo.policy);
-    setEmails(repo.notifyEmails.join(', '));
-  }, [repo.id, repo.policy, repo.notifyEmails]);
-
-  const parsedEmails = emails
-    .split(',')
-    .map((e) => e.trim())
-    .filter(Boolean);
-  const dirty = policy !== repo.policy || parsedEmails.join(',') !== repo.notifyEmails.join(',');
-
-  const save = () => updateRepo(repo.id, { policy, notifyEmails: parsedEmails });
-  const discard = () => {
-    setPolicy(repo.policy);
-    setEmails(repo.notifyEmails.join(', '));
-  };
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-auto">
       <section className="border-b border-border px-4 py-3">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Gate policy</h3>
-        <div className="mt-2 flex items-center gap-1">
-          {(['blocking', 'advisory'] as const).map((p) => (
-            <button
-              key={p}
-              type="button"
-              aria-pressed={policy === p}
-              onClick={() => setPolicy(p)}
-              className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
-                policy === p ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground hover:bg-muted/70'
-              }`}
-            >
-              {p}
-            </button>
-          ))}
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Repository
+        </h3>
+        <div className="mt-2 overflow-hidden rounded-md border border-border">
+          <Facts
+            rows={[
+              { label: 'Name', value: repo.fullName },
+              { label: 'Provider', value: PROVIDER_NAME[repo.provider] },
+              {
+                label: 'Default branch',
+                value: <span className="font-mono">{repo.defaultBranch}</span>,
+              },
+            ]}
+          />
         </div>
       </section>
-
-      <section className="border-b border-border px-4 py-3">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Notify these addresses
-        </h3>
-        <input
-          value={emails}
-          onChange={(e) => setEmails(e.target.value)}
-          aria-label="Notify e-mail addresses"
-          placeholder="oncall@acme.dev, someone@acme.dev"
-          className="mt-2 w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-        />
-      </section>
-
-      <section className="flex items-center gap-2 border-b border-border px-4 py-3">
-        <button
-          type="button"
-          onClick={save}
-          disabled={!dirty}
-          className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Save settings
-        </button>
-        {dirty && (
-          <button
-            type="button"
-            onClick={discard}
-            className="rounded border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted/60"
-          >
-            Discard changes
-          </button>
-        )}
-      </section>
-
 
       <section className="px-4 py-3">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Unlink</h3>
@@ -130,8 +81,9 @@ export function SettingsTab({ repo }: { repo: Repo }) {
               onClick={() => {
                 setConfirmUnlink(false);
                 unlinkRepo(repo.id);
-                // The repo route below our feet just died — land on Home.
-                navigate(PREVIEW_BASE);
+                // The repo route below our feet just died — land on Code,
+                // where the repositories are.
+                navigate(`${PREVIEW_BASE}/code`);
               }}
               className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
             >

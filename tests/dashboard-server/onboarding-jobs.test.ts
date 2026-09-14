@@ -1,10 +1,10 @@
 /**
- * Onboarding as a chain of background jobs: `repo.scan` → `repo.guard-setup`
- * → `repo.guard-generate` → `repo.guard-run`.
+ * Onboarding as a chain of background jobs: `repo.guard-setup` →
+ * `repo.guard-generate` → `repo.guard-run`, which the workspace Document scan
+ * and its sync start (`tests/dashboard-server/context-*`).
  *
  * What is pinned here is the chain's semantics and the setup job's brackets.
- * The scan enqueues its successor ONLY when it succeeded — a failed or
- * cancelled scan leaves the repository alone. The setup job materializes the
+ * The setup job materializes the
  * stored spec and the newest setup BUNDLE into its ephemeral clone, runs the
  * real engine over it, and saves the bundle back under the clone's commit, so
  * a second run replays the settled steps instead of re-deriving them. The
@@ -51,7 +51,14 @@ import {
   writeGuardResult,
 } from '@truecourse/core/lib/guard-store';
 import { setGuardOverlayStore, writeGuardOverlays } from '@truecourse/core/lib/guard-overlays';
-import { setSpecStore, saveSpec } from '@truecourse/core/lib/spec-store';
+import { setSpecStore, saveWorkspaceSpec } from '@truecourse/core/lib/spec-store';
+import {
+  resetContextStore,
+  setContextBindings,
+  setContextStore,
+  writeContextDocuments,
+} from '@truecourse/core/lib/context-store';
+import { memoryContextStore } from '../helpers/memory-context-store';
 import {
   listSessionRuns,
   listStoredSessionRuns,
@@ -63,16 +70,18 @@ import {
 import { guardSetupInProcess } from '@truecourse/core/commands/guard-setup';
 import { OpenConflictsError } from '@truecourse/core/commands/guard-in-process';
 import {
+  buildDocSectionIndex,
   guardDecisionsPath,
+  indexRepoDocs,
   manifestPath,
   recipePath,
+  resolveBinding,
   scenariosDir,
   writeGuardResult as writeCloneGuardResult,
 } from '@truecourse/guard-runner';
 import { GUARD_FORMAT_VERSION, type GuardGenerateReport, type GuardLatest } from '@truecourse/shared';
 import type { LlmTransport } from '@truecourse/shared/llm';
 import { createServerJobs, type JobsMount } from '../../apps/dashboard/server/src/jobs/index';
-import type { RepoScanTaskDeps } from '../../apps/dashboard/server/src/jobs/tasks/repo-scan';
 import type { RepoGuardGenerateTaskDeps } from '../../apps/dashboard/server/src/jobs/tasks/repo-guard-generate';
 import type { RepoGuardRunTaskDeps } from '../../apps/dashboard/server/src/jobs/tasks/repo-guard-run';
 import { setWorkTreeProvider } from '../../apps/dashboard/server/src/services/work-tree.service';
@@ -170,6 +179,9 @@ beforeEach(async () => {
   setGuardStore(new PgGuardStore(db));
   setGuardOverlayStore(new PgGuardOverlayStore(db, 'master-secret-at-least-32-chars-long!!'));
   setSpecStore(new PgSpecStore(db));
+  // Documentation is the WORKSPACE's: the jobs materialize the repository's
+  // slice of the workspace corpus, so the workspace store has to exist.
+  setContextStore(memoryContextStore());
   running = [];
   enqueued = [];
   enqueuedPayloads = [];
@@ -178,6 +190,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await Promise.all(running);
+  resetContextStore();
   setRepoJobsCanceller(null);
   setWorkTreeProvider(null);
   await jobs.stop();
@@ -197,17 +210,50 @@ afterAll(() => {
 
 const request = { repoId: 'widgets', repoFullName: REPO, workspaceOrgId: ORG, source: 'connect' as const };
 
-type ScanEngine = NonNullable<RepoScanTaskDeps['runScan']>;
+/** The one Context source the workspace holds in this suite. */
+const SOURCE_ID = 'repo-acme-widgets';
+
+/** The ref a scenario binds to: a document is the WORKSPACE's, not the repo's. */
+const contextRef = (docPath: string): string => `context/${SOURCE_ID}/${docPath}`;
+
+/** The body every seeded document carries — one markdown section. */
+const contextDocBody = (docPath: string): string => `# ${docPath}\n`;
 
 /**
- * A scan result with nothing to resolve. Only the corpus + decisions the
- * conflict count derives from are real; the rest of the result shape belongs to
- * the scan's own suites.
+ * The scan's output, as the store holds it now: a workspace corpus over the
+ * repository's own Context source, with the documents it names in the context
+ * store and the repository linked to that source. This is what a job
+ * materializes into its clone.
  */
-const cleanScan = (): Awaited<ReturnType<ScanEngine>> =>
-  ({ curate: { corpus: { areas: [] }, decisions: {} } }) as unknown as Awaited<
-    ReturnType<ScanEngine>
-  >;
+async function seedWorkspaceSpec(docPaths: string[] = ['docs/orgs.md']): Promise<void> {
+  await writeContextDocuments(ORG, SOURCE_ID, {
+    documents: docPaths.map((docPath) => ({
+      docId: docPath,
+      docPath,
+      title: docPath,
+      url: null,
+      contentHash: `sha-${docPath}`,
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      body: contextDocBody(docPath),
+    })),
+    removed: [],
+  });
+  await setContextBindings(ORG, REPO, [SOURCE_ID]);
+  await saveWorkspaceSpec({ workspaceOrgId: ORG }, 'corpus', {
+    version: 3,
+    generatedAt: '2026-01-01T00:00:00Z',
+    docs: docPaths.map((docPath) => ({
+      ref: contextRef(docPath),
+      kind: 'prd',
+      lastTouched: '',
+      areaTags: [],
+      sourceId: SOURCE_ID,
+      sourceKind: 'repository',
+    })),
+    areas: [],
+    skippedDocs: [],
+  });
+}
 
 const jobsOfType = async (type: string): Promise<JobView[]> =>
   (await new JobStore(db).listForOrg(ORG)).filter((j) => j.type === type);
@@ -217,95 +263,6 @@ const checklistKeys = (run: { display?: { blocks: { kind: string }[] } }): strin
   const block = run.display?.blocks.find((b) => b.kind === 'checklist');
   return ((block as { items: { key: string }[] } | undefined)?.items ?? []).map((i) => i.key);
 };
-
-// ---------------------------------------------------------------------------
-// The chain
-// ---------------------------------------------------------------------------
-
-describe('a spec scan chains into guard setup', () => {
-  /** The scan body's engine, per test. */
-  let scanImpl: ScanEngine;
-
-  beforeEach(() => {
-    scanImpl = async () => cleanScan();
-    jobs = createServerJobs({
-      db,
-      connectionString: 'postgres://unused',
-      hub,
-      // Only the scan runs: a chained setup is observable as an enqueue without
-      // dragging the whole engine into a test about the chain.
-      startWorker: fakeWorker(['repo.scan']),
-      scan: {
-        startLlm: async () => testLlm,
-        runScan: (repoKey, options) => scanImpl(repoKey, options),
-      },
-    });
-    return jobs.start();
-  });
-
-  it('enqueues the setup job when the scan succeeded', async () => {
-    const outcome = await jobs.enqueueScan(request);
-    expect(outcome.status).toBe('queued');
-    await Promise.all(running);
-
-    expect(enqueued).toEqual(['repo.scan', 'repo.guard-setup']);
-    const [setup] = await jobsOfType('repo.guard-setup');
-    expect(setup).toMatchObject({ status: 'queued', key: `repo.guard-setup:${REPO}` });
-    // The scan itself succeeded, with the spec-ready notification.
-    const [scan] = await jobsOfType('repo.scan');
-    expect(scan?.status).toBe('succeeded');
-    // The chained enqueue addresses ITS row: a payload built from the scan's
-    // would carry the scan's id, and the worker would find that row settled
-    // and skip setup without a trace.
-    expect(enqueuedPayloads[1]).toMatchObject({
-      jobId: setup?.id,
-      repoFullName: REPO,
-      source: 'chain',
-    });
-    expect(enqueuedPayloads[1]?.jobId).not.toBe(scan?.id);
-    const notes = await new NotificationStore(db).listForOrg(ORG);
-    expect(notes.map((n) => n.title)).toEqual(['Repository scan complete']);
-  });
-
-  it('chains nothing when the scan failed, and says why', async () => {
-    scanImpl = async () => {
-      throw new Error('the clone went missing');
-    };
-
-    await jobs.enqueueScan(request);
-    await Promise.all(running);
-
-    expect(enqueued).toEqual(['repo.scan']);
-    expect(await jobsOfType('repo.guard-setup')).toEqual([]);
-    const [scan] = await jobsOfType('repo.scan');
-    expect(scan).toMatchObject({ status: 'failed', error: 'the clone went missing' });
-    const notes = await new NotificationStore(db).listForOrg(ORG);
-    expect(notes[0]).toMatchObject({ level: 'error', title: 'Repository scan failed' });
-  });
-
-  it('chains nothing when the scan was cancelled, and stays quiet', async () => {
-    let reached = false;
-    scanImpl = (_repoKey, options = {}) =>
-      new Promise((_resolve, reject) => {
-        reached = true;
-        const stop = (): void => reject(new Error('the spec scan was cancelled'));
-        if (options.signal?.aborted) stop();
-        else options.signal?.addEventListener('abort', stop, { once: true });
-      });
-
-    const outcome = await jobs.enqueueScan(request);
-    await until(() => reached);
-    if (outcome.status !== 'queued') throw new Error('the scan was not queued');
-    expect(await jobs.cancel(outcome.jobId)).toBe('cancelled');
-
-    expect(enqueued).toEqual(['repo.scan']);
-    expect(await jobsOfType('repo.guard-setup')).toEqual([]);
-    const [scan] = await jobsOfType('repo.scan');
-    expect(scan).toMatchObject({ status: 'cancelled', error: null });
-    // Cancellation is a normal outcome — nobody is told about work they stopped.
-    expect(await new NotificationStore(db).listForOrg(ORG)).toEqual([]);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // The setup job, over a real repository
@@ -361,16 +318,9 @@ describe('the guard setup job', () => {
     overlaysSeen.length = 0;
     preparationError = undefined;
     installWorkTree();
-    // The scan's output, as the store holds it: setup reads the curated doc
-    // universe, and the job materializes it into the clone.
-    await saveSpec({ repoKey: REPO, commitSha: 'scan-commit' }, 'corpus', {
-      version: 3,
-      generatedAt: '2026-01-01T00:00:00Z',
-      docs: [{ ref: 'docs/orgs.md', kind: 'prd', lastTouched: '', areaTags: [] }],
-      areas: [],
-      relations: [],
-      skippedDocs: [],
-    });
+    // Setup reads the curated doc universe, and the job materializes the
+    // repository's slice of the workspace corpus into the clone.
+    await seedWorkspaceSpec();
     jobs = createServerJobs({
       db,
       connectionString: 'postgres://unused',
@@ -518,6 +468,31 @@ describe('the guard setup job', () => {
     const [generate] = await jobsOfType('repo.guard-generate');
     expect(generate).toMatchObject({ status: 'queued', key: `repo.guard-generate:${REPO}` });
     expect(enqueuedPayloads[1]).toMatchObject({ jobId: generate?.id, repoFullName: REPO, source: 'chain' });
+  }, 60_000);
+
+  // A connected repository always onboards, documents or not: setup derives its
+  // recipe, dependencies and interfaces from the CODE. What it must not do is
+  // chain a generate that has no spec to generate from — that generate would
+  // fail, and a repository that simply reads nothing has failed at nothing.
+  it('is set up, and chains no generation, for a repository that reads no document', async () => {
+    await setContextBindings(ORG, REPO, []);
+
+    await jobs.enqueueGuardSetup(request);
+    await Promise.all(running);
+
+    expect(enqueued).toEqual(['repo.guard-setup']);
+    const [setup] = await jobsOfType('repo.guard-setup');
+    expect(setup).toMatchObject({ status: 'succeeded', result: { status: 'ok', documents: 0 } });
+    expect(setup?.error).toBeNull();
+    // One row per job: the started row moved onto how the setup settled.
+    const notes = await new NotificationStore(db).listForOrg(ORG, { limit: 10 });
+    expect(notes).toHaveLength(1);
+    const note = notes[0];
+    expect(note).toMatchObject({ level: 'success', title: 'Flow setup complete' });
+    expect(note?.body).toContain('No documents linked yet');
+    // The row's address: the setup's own conversation.
+    const [setupRun] = await listStoredSessionRuns(REPO, 'guard-setup');
+    expect(note?.data).toMatchObject({ repoFullName: REPO, runId: setupRun!.runId });
   }, 60_000);
 
   it.each(['file', 'postgres'])('persists a preparation failure, fails the job and Activity, and chains nothing with %s history', async storage => {
@@ -734,14 +709,7 @@ describe('the guard generate job', () => {
     generateLlm = testLlm;
     generateImpl = authoring;
     installWorkTree();
-    await saveSpec({ repoKey: REPO, commitSha: 'scan-commit' }, 'corpus', {
-      version: 3,
-      generatedAt: '2026-01-01T00:00:00Z',
-      docs: [{ ref: 'docs/orgs.md', kind: 'prd', lastTouched: '', areaTags: [] }],
-      areas: [],
-      relations: [],
-      skippedDocs: [],
-    });
+    await seedWorkspaceSpec();
     // Only the generate runs here: the run it chains into is observed as an
     // enqueue, never executed (its clone would race the assertions below).
     jobs = createServerJobs({
@@ -890,7 +858,12 @@ describe('the guard generate job', () => {
     );
     expect(evidence).toBe('step 1 failed');
     const notes = await new NotificationStore(db).listForOrg(ORG);
-    expect(notes.map((n) => [n.level, n.title])).toEqual([['warning', 'Scenarios generated — findings to review']]);
+    expect(notes.map((n) => [n.level, n.title])).toEqual([
+      ['warning', 'Flows generated, findings to review'],
+    ]);
+    // The row's address: the generate's own conversation.
+    const [generateRun] = await listStoredSessionRuns(REPO, 'guard-generate');
+    expect(notes[0]?.data).toMatchObject({ repoFullName: REPO, runId: generateRun!.runId });
     expect(fs.existsSync(clone)).toBe(false);
   }, 60_000);
 
@@ -937,7 +910,9 @@ describe('the guard generate job', () => {
     expect(opened?.record()).toMatchObject({ status: 'failed', error: { message: job.error } });
     const notes = await new NotificationStore(db).listForOrg(ORG);
     expect(notes).toHaveLength(1);
-    expect(notes[0]).toMatchObject({ level: 'error', title: 'Scenario generation failed', body: expect.stringContaining('docs/app.md') });
+    expect(notes[0]).toMatchObject({ level: 'error', title: 'Flow generation failed', body: expect.stringContaining('docs/app.md') });
+    // The moved row keeps what the started row addressed.
+    expect(notes[0]?.data).toMatchObject({ repoFullName: REPO, runId: run.runId });
     expect(enqueued).toEqual(['repo.guard-generate']);
     expect(disposed).toEqual([clone]);
   }, 60_000);
@@ -991,7 +966,7 @@ describe('the guard generate job', () => {
     });
     expect((await loadScenarios({ repoKey: REPO, commitSha: baseline! })).scenarios).toEqual([]);
     const notes = await new NotificationStore(db).listForOrg(ORG);
-    expect(notes[0]).toMatchObject({ level: 'warning', title: 'Scenario generation blocked' });
+    expect(notes[0]).toMatchObject({ level: 'warning', title: 'Flow generation blocked' });
   });
 
   it('a generate that authored nothing fails with its reason and stores nothing', async () => {
@@ -1050,7 +1025,8 @@ describe('the guard generate job', () => {
     const [job] = await jobsOfType('repo.guard-generate');
     expect(job).toMatchObject({ status: 'cancelled', error: null });
     expect(await readGuardBaselineCommit(REPO)).toBeNull();
-    expect(await new NotificationStore(db).listForOrg(ORG)).toEqual([]);
+    // The started row stands — the run did start; the stop itself settles quietly.
+    expect((await new NotificationStore(db).listForOrg(ORG)).map((n) => n.level)).toEqual(['started']);
     expect(disposed).toEqual([clone]);
   });
 });
@@ -1149,14 +1125,23 @@ describe('the guard run job', () => {
     });
   }
 
+  /** The bind a stored scenario carries — the default is inert; the binding
+   *  tests pass the document they seeded and the section it really holds. */
+  interface StoredBind {
+    doc: string;
+    section: string;
+    fingerprint: string;
+  }
+  const DEFAULT_BIND: StoredBind = { doc: 'docs/orgs.md', section: 'create', fingerprint: 'sha256:x' };
+
   /** What generate left: a stored scenario set and its baseline report. */
-  async function storeGeneratedSet(): Promise<void> {
+  async function storeGeneratedSet(bind: StoredBind = DEFAULT_BIND): Promise<void> {
     const dir = makeTmpDir('tc-onboarding-run-set-');
     const orgs = path.join(scenariosDir(dir), 'orgs');
     fs.mkdirSync(orgs, { recursive: true });
     fs.writeFileSync(
       path.join(orgs, 'a1.yaml'),
-      ['id: a1', 'title: create an org', 'binds:', '  - doc: docs/orgs.md', '    section: create', '    fingerprint: "sha256:x"', 'steps:', '  - run: ["--help"]', '    expect:', '      exit: 0', ''].join('\n'),
+      ['id: a1', 'title: create an org', 'binds:', `  - doc: ${bind.doc}`, `    section: ${bind.section}`, `    fingerprint: "${bind.fingerprint}"`, 'steps:', '  - run: ["--help"]', '    expect:', '      exit: 0', ''].join('\n'),
     );
     fs.writeFileSync(manifestPath(dir), JSON.stringify({ version: GUARD_FORMAT_VERSION, flows: [] }, null, 2) + '\n');
     const ref = { repoKey: REPO, commitSha: GEN_COMMIT };
@@ -1231,7 +1216,12 @@ describe('the guard run job', () => {
     expect(await store.readGuardEvidenceBytesAt(REPO, dir, 'step-1.png')).toEqual(PNG);
 
     const notes = await new NotificationStore(db).listForOrg(ORG);
-    expect(notes.map((n) => [n.level, n.title])).toEqual([['warning', 'Scenarios ran — failures to review']]);
+    expect(notes.map((n) => [n.level, n.title])).toEqual([
+      ['warning', 'Flows ran, failures to review'],
+    ]);
+    // The row's address: the repository's own page for THIS run.
+    expect(notes[0]?.data).toMatchObject({ repoFullName: REPO, guardRunId: RUN_ID });
+    expect(notes[0]?.data).not.toHaveProperty('runId');
     expect(fs.existsSync(clone)).toBe(false);
   }, 60_000);
 
@@ -1247,6 +1237,66 @@ describe('the guard run job', () => {
     const [job] = await jobsOfType('repo.guard-run');
     expect(job).toMatchObject({ status: 'failed', error: expect.stringMatching(/pnpm build/) });
     expect(await readGuardLatest(REPO)).toBeNull();
+  });
+
+  // The documents a scenario binds to are the WORKSPACE's, not the clone's: a
+  // run that does not materialize them resolves every bind against a file that
+  // is not there, and the whole board settles orphaned without a build.
+  const DOC_PATH = 'docs/orgs.md';
+
+  /** The section the seeded document really holds, as the runner derives it. */
+  function seededBind(): StoredBind {
+    const doc = contextRef(DOC_PATH);
+    const section = buildDocSectionIndex(doc, contextDocBody(DOC_PATH)).sections[0];
+    if (!section) throw new Error(`the seeded ${doc} holds no section to bind to`);
+    return { doc, section: section.anchor, fingerprint: section.fingerprint };
+  }
+
+  it('materializes the document the scenario binds to into the clone', async () => {
+    await seedWorkspaceSpec();
+    const bind = seededBind();
+    await storeGeneratedSet(bind);
+    await saveSetupBundle();
+
+    const read: { body?: string | null } = {};
+    runImpl = async (repoRoot, options) => {
+      const file = path.join(repoRoot, bind.doc);
+      read.body = fs.existsSync(file) ? fs.readFileSync(file, 'utf-8') : null;
+      return failingRun(repoRoot, options);
+    };
+
+    await jobs.enqueueGuardRun(request);
+    await Promise.all(running);
+
+    const [job] = await jobsOfType('repo.guard-run');
+    expect(job?.error).toBeNull();
+    expect(read.body).toBe(contextDocBody(DOC_PATH));
+  });
+
+  it('binds the stored scenario to that document — a match, not an orphan', async () => {
+    await seedWorkspaceSpec();
+    const bind = seededBind();
+    await storeGeneratedSet(bind);
+    await saveSetupBundle();
+
+    const resolved: { missing?: string[]; kind?: string } = {};
+    runImpl = async (repoRoot, options) => {
+      // The runner's own binding pass, over the clone the job prepared.
+      const docs = indexRepoDocs(repoRoot, [bind.doc]);
+      resolved.missing = [...docs.missing];
+      resolved.kind = resolveBinding(
+        docs.indexes.get(bind.doc) ?? null,
+        bind.section,
+        bind.fingerprint,
+      ).kind;
+      return failingRun(repoRoot, options);
+    };
+
+    await jobs.enqueueGuardRun(request);
+    await Promise.all(running);
+
+    expect(resolved.missing).toEqual([]);
+    expect(resolved.kind).toBe('match');
   });
 });
 
@@ -1267,14 +1317,7 @@ describe('disconnecting a repository mid-setup', () => {
       dispose: () => disposedHere.push(dir),
     }));
     setRepoJobsCanceller((repoKey, orgId) => jobs.cancelRepoJobs(repoKey, orgId));
-    await saveSpec({ repoKey: REPO, commitSha: 'scan-commit' }, 'corpus', {
-      version: 3,
-      generatedAt: '2026-01-01T00:00:00Z',
-      docs: [],
-      areas: [],
-      relations: [],
-      skippedDocs: [],
-    });
+    await seedWorkspaceSpec();
     jobs = createServerJobs({
       db,
       connectionString: 'postgres://unused',
@@ -1305,7 +1348,7 @@ describe('disconnecting a repository mid-setup', () => {
 
     const [setup] = await jobsOfType('repo.guard-setup');
     expect(setup).toMatchObject({ status: 'cancelled', error: null });
-    expect(await new NotificationStore(db).listForOrg(ORG)).toEqual([]);
+    expect((await new NotificationStore(db).listForOrg(ORG)).map((n) => n.level)).toEqual(['started']);
     expect(disposedHere).toHaveLength(1);
   });
 

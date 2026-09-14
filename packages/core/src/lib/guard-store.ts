@@ -46,6 +46,7 @@ import {
 import {
   GuardLatestSchema,
   type GuardDecisions,
+  type GuardRunSectionSummary,
   type GuardGenerateReport,
   type GuardHistory,
   type GuardHistoryEntry,
@@ -73,6 +74,18 @@ export interface WrittenGuardRun {
 /** Result of snapshotting the on-disk scenario corpus (the count is informational). */
 export interface SaveScenariosResult {
   fileCount: number;
+}
+
+/**
+ * ONE baseline run's section history: when it ran and what every section of the
+ * documents its scenario set covered was worth then. The trend on Home is these
+ * rows and nothing else. A run without one is absent from history.
+ */
+export interface GuardRunSections {
+  runId: string;
+  ranAt: string;
+  commit: string | null;
+  sections: GuardRunSectionSummary;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,6 +117,16 @@ export interface GuardStore {
    */
   readGuardHistory(repoPath: string, opts?: GuardHistoryReadOptions): Promise<GuardHistory>;
   appendGuardHistory(repoPath: string, entry: GuardHistoryEntry): Promise<void>;
+  /**
+   * Record a stored run's SECTION SUMMARY, written beside the run when it is
+   * persisted. Re-writing one replaces it.
+   */
+  writeGuardRunSections(repoPath: string, run: GuardRunSections): Promise<void>;
+  /**
+   * Every BASELINE run that carries a section summary, oldest first. A run
+   * whose summary could not be derived is simply not here.
+   */
+  readGuardRunSections(repoPath: string): Promise<GuardRunSections[]>;
   /**
    * The `guard generate` report. EE: `commitSha` reads that commit's report;
    * omit for the newest stored one. The file impl always reads the live store.
@@ -240,6 +263,13 @@ export interface GuardStore {
 /** Run ids, evidence filenames, scenario-dir names — no separators, no `..`. */
 const SAFE_SEGMENT = /^[A-Za-z0-9._-]+$/;
 
+/** Where the file store keeps a run's section summary: `guard/sections/<runId>.json`. */
+const SECTIONS_DIR = 'sections';
+
+function guardSectionsPath(repoPath: string, runId: string): string {
+  return path.join(guardDir(repoPath), SECTIONS_DIR, `${runId}.json`);
+}
+
 /**
  * Resolve a repo-relative evidence directory INSIDE the guard evidence root, or
  * `null` when it points anywhere else. The one confinement every dir-addressed
@@ -336,6 +366,36 @@ class FileGuardStore implements GuardStore {
 
   async appendGuardHistory(repoPath: string, entry: GuardHistoryEntry): Promise<void> {
     fileAppendGuardHistory(repoPath, entry);
+  }
+
+  // The section summaries live beside the run snapshots, one derived file per
+  // run: `guard/sections/<runId>.json`, gitignored like `guard/runs/`.
+  async writeGuardRunSections(repoPath: string, run: GuardRunSections): Promise<void> {
+    if (!SAFE_SEGMENT.test(run.runId)) return;
+    const file = guardSectionsPath(repoPath, run.runId);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(run, null, 2) + '\n');
+  }
+
+  async readGuardRunSections(repoPath: string): Promise<GuardRunSections[]> {
+    const dir = path.join(guardDir(repoPath), SECTIONS_DIR);
+    let names: string[];
+    try {
+      names = fs.readdirSync(dir);
+    } catch {
+      return [];
+    }
+    const runs: GuardRunSections[] = [];
+    for (const name of names) {
+      if (!name.endsWith('.json')) continue;
+      try {
+        const parsed = JSON.parse(fs.readFileSync(path.join(dir, name), 'utf-8')) as GuardRunSections;
+        if (parsed && typeof parsed.runId === 'string' && parsed.sections) runs.push(parsed);
+      } catch {
+        // A half-written or hand-edited file names no run.
+      }
+    }
+    return runs.sort((a, b) => a.ranAt.localeCompare(b.ranAt) || a.runId.localeCompare(b.runId));
   }
 
   // The file impl reads the live store — there is no per-commit history, so
@@ -528,6 +588,10 @@ export const readGuardHistory = (
 ): Promise<GuardHistory> => active.readGuardHistory(repoPath, opts);
 export const appendGuardHistory = (repoPath: string, entry: GuardHistoryEntry): Promise<void> =>
   active.appendGuardHistory(repoPath, entry);
+export const writeGuardRunSections = (repoPath: string, run: GuardRunSections): Promise<void> =>
+  active.writeGuardRunSections(repoPath, run);
+export const readGuardRunSections = (repoPath: string): Promise<GuardRunSections[]> =>
+  active.readGuardRunSections(repoPath);
 export const readGuardResult = (
   repoKey: string,
   commitSha?: string,

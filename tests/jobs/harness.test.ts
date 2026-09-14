@@ -116,6 +116,69 @@ describe('executeJob — shared lifecycle envelope', () => {
     expect(published.at(-1)?.event.type).toBe('notification');
   });
 
+  it('settles the row the body started: ONE feed row, moved rather than repeated', async () => {
+    const rt = runtime();
+    const job = await rt.jobStore.create({ org: ORG, type: 'test.job', key: 'test.job:one-row' });
+
+    const def: JobDefinition<Payload, ErrorMeta> = {
+      type: 'test.job',
+      title: 'Testing',
+      steps: [{ key: 'a', label: 'Step A' }],
+      org: (p) => p.org,
+      run: async (ctx) => {
+        await ctx.notify({ level: 'started', title: 'Testing started', data: { runId: 'run-1' } });
+        await ctx.phase('a');
+        return { result: {}, notification: { level: 'success', title: 'Done', body: 'All good' } };
+      },
+      onError: (err) => ({ level: 'error', title: 'Failed', body: err.message }),
+    };
+
+    await executeJob(rt, def, { jobId: job.id, org: ORG });
+
+    const notes = await rt.notifications.listForOrg(ORG);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatchObject({ level: 'success', title: 'Done', body: 'All good' });
+    // The started row's payload rides along: the run it named is still where the
+    // row leads.
+    expect(notes[0]?.data).toMatchObject({ jobId: job.id, runId: 'run-1' });
+
+    // Both frames went out as `notification`, carrying the SAME row id, so the
+    // feed replaces what it holds instead of growing a second entry.
+    const landed = published.flatMap((p) =>
+      p.event.type === 'notification' ? [p.event.notification] : [],
+    );
+    expect(landed.map((n) => n.level)).toEqual(['started', 'success']);
+    expect(new Set(landed.map((n) => n.id))).toEqual(new Set([notes[0]!.id]));
+  });
+
+  it('a failure moves the started row too', async () => {
+    const rt = runtime();
+    const job = await rt.jobStore.create({ org: ORG, type: 'test.job', key: 'test.job:one-row-err' });
+
+    await expect(
+      executeJob(
+        rt,
+        {
+          type: 'test.job',
+          title: 'Testing',
+          steps: [{ key: 'a', label: 'Step A' }],
+          org: (p: Payload) => p.org,
+          run: async (ctx) => {
+            await ctx.notify({ level: 'started', title: 'Testing started', data: { runId: 'run-2' } });
+            throw new Error('boom');
+          },
+          onError: (err: Error) => ({ level: 'error', title: 'Failed', body: err.message }),
+        },
+        { jobId: job.id, org: ORG },
+      ),
+    ).rejects.toThrow('boom');
+
+    const notes = await rt.notifications.listForOrg(ORG);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatchObject({ level: 'error', title: 'Failed', body: 'boom' });
+    expect(notes[0]?.data).toMatchObject({ jobId: job.id, runId: 'run-2' });
+  });
+
   it('a silent outcome (notification null) succeeds without posting a notification', async () => {
     const rt = runtime();
     const job = await rt.jobStore.create({ org: ORG, type: 'test.job', key: 'test.job:quiet' });

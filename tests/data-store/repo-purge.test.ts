@@ -14,6 +14,9 @@ import {
   decisions,
   content,
   ghBaselines,
+  contextSources,
+  contextBindings,
+  contextWorkspaces,
   type Db,
 } from '@truecourse/db';
 import { purgeRepoData } from '../../packages/data-store/src/index';
@@ -102,6 +105,36 @@ describe('purgeRepoData', () => {
     expect(contentRows).toEqual([{ scope: 'spec:acme/web' }]);
     // The survivors all belong to the other repo.
     expect((await db.select().from(repoConfig))[0]?.repoKey).toBe('acme/web');
+  });
+
+  it('takes the repository’s context LINKS and leaves the workspace’s sources', async () => {
+    // Context is workspace state: a disconnect drops what THIS repository read,
+    // never a source another repository still reads.
+    await db.insert(contextSources).values({
+      workspaceOrgId: 'org_A',
+      id: 'site-docs',
+      kind: 'site',
+      title: 'Docs',
+      config: { llmsTxtUrl: 'https://docs.acme.com/llms.txt' },
+      status: 'synced',
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    await db.insert(contextBindings).values([
+      { workspaceOrgId: 'org_A', repoFullName: 'acme/api', sourceId: 'site-docs', createdAt: NOW },
+      { workspaceOrgId: 'org_A', repoFullName: 'acme/web', sourceId: 'site-docs', createdAt: NOW },
+    ]);
+
+    await purgeRepoData(db, 'acme/api');
+
+    expect(await db.select().from(contextSources)).toHaveLength(1);
+    expect(
+      (await db.select().from(contextBindings)).map((row) => row.repoFullName),
+    ).toEqual(['acme/web']);
+    // Dropping a link makes the workspace's corpus stale, whoever dropped it.
+    expect((await db.select().from(contextWorkspaces)).map((row) => row.workspaceOrgId)).toEqual([
+      'org_A',
+    ]);
   });
 
   it('treats LIKE wildcards in the repo key literally', async () => {

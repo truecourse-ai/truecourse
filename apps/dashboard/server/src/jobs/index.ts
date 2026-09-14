@@ -1,17 +1,28 @@
 /**
  * The dashboard server's background job runner.
  *
- * Long-running work (a spec scan, a guard setup) runs here rather than inside
- * the request that asked for it: the route enqueues and answers, the queue runs
- * the job, and the client follows it over the SSE stream and the repo's socket
- * room. `createServerJobs` builds the runner and `JobsMount` is what
- * `createApp` needs to expose it.
+ * Long-running work (a document scan, a guard setup) runs here rather than
+ * inside the request that asked for it: the route enqueues and answers, the
+ * queue runs the job, and the client follows it over the SSE stream and the
+ * repo's socket room. `createServerJobs` builds the runner and `JobsMount` is
+ * what `createApp` needs to expose it.
  *
  * ENQUEUEING IS GUARDED TWICE. The queue's single-flight key stops a second
  * job for the same repo in the same workspace; a store-wide look at the repo's
  * session runs stops one in ANOTHER workspace, since two workspaces can connect
  * the same `owner/repo` and the durable stores it writes have no workspace
  * column. Either way the answer is `busy`, and nothing is enqueued.
+ *
+ * AND THE HEAVY JOBS RUN ONE AT A TIME PER WORKSPACE. Test setup, generation
+ * and the run each clone the repository, install and build it, map its
+ * interfaces and spend the model's sessions; several of them side by side
+ * starve the process that is also serving HTTP. So all three are enqueued into
+ * ONE graphile queue per workspace ({@link heavyJobQueue}): a workspace's
+ * second heavy job waits IN THE QUEUE as a `queued` row — visible as such on
+ * the Agent page and in `/api/jobs` — and starts when the running one settles,
+ * in enqueue order. Nothing waits in this process, so the gate survives a
+ * restart and holds across replicas; `context.sync` and `context.scan` name no
+ * queue and keep running beside a heavy job.
  */
 
 import {
@@ -24,11 +35,6 @@ import {
 import { listStoredSessionRuns } from '@truecourse/core/lib/sessions-store';
 import { log } from '@truecourse/core/lib/logger';
 import type { Db } from '@truecourse/db';
-import {
-  createRepoScanTask,
-  REPO_SCAN_TASK,
-  type RepoScanTaskDeps,
-} from './tasks/repo-scan.js';
 import {
   createRepoGuardSetupTask,
   REPO_GUARD_SETUP_TASK,
@@ -47,6 +53,31 @@ import {
   type GuardRunJobRequest,
   type RepoGuardRunTaskDeps,
 } from './tasks/repo-guard-run.js';
+import {
+  createContextSyncTask,
+  contextSyncJobKey,
+  CONTEXT_SYNC_TASK,
+  type ContextSyncJobRequest,
+  type ContextSyncJobResult,
+  type ContextSyncTaskDeps,
+} from './tasks/context-sync.js';
+import {
+  createContextScanTask,
+  contextScanJobKey,
+  CONTEXT_SCAN_TASK,
+  type ContextScanJobRequest,
+  type ContextScanTaskDeps,
+} from './tasks/context-scan.js';
+import {
+  repositoryOfSource,
+  workspaceRepositories,
+} from '../services/context-scan.service.js';
+import { loadGuardSetupBundle } from '@truecourse/core/lib/guard-store';
+import { loadWorkspaceSpec } from '@truecourse/core/lib/spec-store';
+import { getWorkspaceDecisions } from '@truecourse/core/commands/spec-in-process';
+import { openConflicts } from '@truecourse/shared';
+import type { CuratedCorpus } from '@truecourse/spec-consolidator';
+import { rippleLinksChanged, type RippleStart } from './context-ripple.js';
 import type { OnboardingJobRequest } from './tasks/onboarding.js';
 
 /** What an enqueue did: it queued a job, or the repo is already working. */
@@ -54,10 +85,27 @@ export type EnqueueResult = { status: 'queued'; jobId: string } | { status: 'bus
 
 /** The job surface the app mounts and the routes enqueue onto. */
 export interface JobsMount extends Jobs {
-  enqueueScan(request: OnboardingJobRequest): Promise<EnqueueResult>;
   enqueueGuardSetup(request: GuardSetupJobRequest): Promise<EnqueueResult>;
   enqueueGuardGenerate(request: GuardGenerateJobRequest): Promise<EnqueueResult>;
   enqueueGuardRun(request: GuardRunJobRequest): Promise<EnqueueResult>;
+  /**
+   * Refresh ONE workspace context source. Keyed by the source, not the repo:
+   * a source belongs to the workspace and several repositories may read it.
+   */
+  enqueueContextSync(request: ContextSyncJobRequest): Promise<EnqueueResult>;
+  /**
+   * The workspace Document scan. One per workspace: a second request while one
+   * runs is `busy`, and the scan itself queues the single follow-up run when
+   * the context moved under it (see `tasks/context-scan.ts`).
+   */
+  enqueueContextScan(request: ContextScanJobRequest): Promise<EnqueueResult>;
+  /**
+   * A repository's links changed, so its slice moved without the corpus
+   * moving: start what the ripple would start for it — nothing while its setup
+   * is in flight, Test generation once set up, Test setup before — under the
+   * ripple's gates. Null when nothing was started.
+   */
+  startForLinks(request: LinksChangedRequest): Promise<RippleStart | null>;
   /**
    * Stop everything this repository has in flight, for a disconnect. `not-here`
    * means one of its jobs is running on another replica, which is not ours to
@@ -66,14 +114,23 @@ export interface JobsMount extends Jobs {
   cancelRepoJobs(repoFullName: string, orgId: string): Promise<'stopped' | 'not-here'>;
 }
 
+export interface LinksChangedRequest {
+  workspaceOrgId: string;
+  repoId: string;
+  repoFullName: string;
+  /** The links the repository now has. */
+  sourceIds: string[];
+}
+
 export interface CreateServerJobsOptions {
   db: Db;
   connectionString: string;
   /** Task-body seams (tests substitute the engines each job drives). */
-  scan?: Omit<RepoScanTaskDeps, 'chainGuardSetup'>;
   guardSetup?: Omit<RepoGuardSetupTaskDeps, 'chainGuardGenerate'>;
   guardGenerate?: Omit<RepoGuardGenerateTaskDeps, 'chainGuardRun'>;
   guardRun?: RepoGuardRunTaskDeps;
+  contextSync?: ContextSyncTaskDeps;
+  contextScan?: Omit<ContextScanTaskDeps, 'ripple' | 'rescan'>;
   /** How the worker runner is started. Substituted in tests. */
   startWorker?: StartWorker<Record<string, unknown>>;
   /** The live backplane. Defaults to the queue's Postgres LISTEN/NOTIFY hub. */
@@ -81,11 +138,13 @@ export interface CreateServerJobsOptions {
 }
 
 export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
-  // The scan chains into setup, setup into generate and generate into the
-  // baseline run, and every enqueue lives on the mount the runner is part of —
-  // so the task list closes over a runner that exists a line later.
+  // Setup chains into generate and generate into the baseline run, and every
+  // enqueue lives on the mount the runner is part of — so the task list closes
+  // over a runner that exists a line later.
   let jobs!: Jobs;
 
+  // The three heavy jobs all enqueue through here, which is what puts every one
+  // of them in the workspace's single heavy queue.
   const enqueue = async (
     task: string,
     command: RepoCommand,
@@ -98,12 +157,10 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
       request.workspaceOrgId,
       jobKey(task, request.repoFullName),
       payload,
+      { queue: heavyJobQueue(request.workspaceOrgId) },
     );
     return jobId ? { status: 'queued', jobId } : { status: 'busy' };
   };
-
-  const enqueueScan = (request: OnboardingJobRequest): Promise<EnqueueResult> =>
-    enqueue(REPO_SCAN_TASK, 'spec-scan', request, { ...request });
 
   const enqueueGuardSetup = (request: GuardSetupJobRequest): Promise<EnqueueResult> =>
     enqueue(REPO_GUARD_SETUP_TASK, 'guard-setup', request, { ...request });
@@ -114,16 +171,81 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
   const enqueueGuardRun = (request: GuardRunJobRequest): Promise<EnqueueResult> =>
     enqueue(REPO_GUARD_RUN_TASK, 'guard-run', request, { ...request });
 
+  // A context source is not a repository: nothing about it is visible in the
+  // session-run store, so the queue's single-flight key is the whole guard.
+  const enqueueContextSync = async (request: ContextSyncJobRequest): Promise<EnqueueResult> => {
+    const jobId = await jobs.singleFlightEnqueue(
+      CONTEXT_SYNC_TASK,
+      request.workspaceOrgId,
+      contextSyncJobKey(request.sourceId),
+      { ...request },
+    );
+    return jobId ? { status: 'queued', jobId } : { status: 'busy' };
+  };
+
+  // One scan per workspace — the key is the task itself, since the row is
+  // already scoped to the org. A loser is `busy`, never a queued duplicate: the
+  // scan re-reads the workspace's staleness stamp when it settles and queues
+  // the single follow-up run itself.
+  const enqueueContextScan = async (request: ContextScanJobRequest): Promise<EnqueueResult> => {
+    const jobId = await jobs.singleFlightEnqueue(
+      CONTEXT_SCAN_TASK,
+      request.workspaceOrgId,
+      contextScanJobKey(),
+      { ...request },
+    );
+    return jobId ? { status: 'queued', jobId } : { status: 'busy' };
+  };
+
+  /**
+   * The ripple's collaborators: who reads what, whether a repository has been
+   * set up, and the two enqueues that start it. Built here because only the
+   * mount holds them.
+   */
+  const rippleDeps = (workspaceOrgId: string) => ({
+    workspaceOrgId,
+    listRepos: () => workspaceRepositories(workspaceOrgId),
+    hasSetup: async (repoFullName: string) =>
+      (await loadGuardSetupBundle(repoFullName)) !== null,
+    isSettingUp: async (repoFullName: string) =>
+      (await jobs.jobStore.getActiveByKey(
+        workspaceOrgId,
+        jobKey(REPO_GUARD_SETUP_TASK, repoFullName),
+      )) !== null,
+    startSetup: async (repo: { repoId: string; repoFullName: string }) =>
+      (
+        await enqueueGuardSetup({
+          repoId: repo.repoId,
+          repoFullName: repo.repoFullName,
+          workspaceOrgId,
+          source: 'chain',
+        })
+      ).status === 'queued',
+    startGenerate: async (repo: { repoId: string; repoFullName: string }) =>
+      (
+        await enqueueGuardGenerate({
+          repoId: repo.repoId,
+          repoFullName: repo.repoFullName,
+          workspaceOrgId,
+          source: 'chain',
+        })
+      ).status === 'queued',
+  });
+
+  const startForLinks = async (request: LinksChangedRequest): Promise<RippleStart | null> => {
+    const { workspaceOrgId, repoId, repoFullName, sourceIds } = request;
+    const corpus = await loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId }, 'corpus');
+    const conflicts = corpus
+      ? openConflicts(corpus, await getWorkspaceDecisions(workspaceOrgId)).length
+      : 0;
+    return rippleLinksChanged(rippleDeps(workspaceOrgId), {
+      corpus,
+      openConflicts: conflicts,
+      repo: { repoId, repoFullName, sourceIds },
+    });
+  };
+
   const tasks: readonly JobTask[] = [
-    createRepoScanTask({
-      ...opts.scan,
-      chainGuardSetup: async (request) => {
-        const outcome = await enqueueGuardSetup(request);
-        if (outcome.status === 'busy') {
-          log.info(`[jobs] guard setup for ${request.repoFullName} is already in flight`);
-        }
-      },
-    }),
     createRepoGuardSetupTask({
       ...opts.guardSetup,
       chainGuardGenerate: async (request) => {
@@ -143,6 +265,50 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
       },
     }),
     createRepoGuardRunTask(opts.guardRun),
+    createContextSyncTask({
+      ...opts.contextSync,
+      // A repository's FIRST sync is the rest of its onboarding: Test setup
+      // needs no documents, so it starts whatever the sync reconciled — a
+      // repository with no markdown at all still gets set up. Started here, the
+      // scan's ripple finds it working rather than racing it.
+      chainSetup: async (request) => {
+        if (request.source !== 'add') return;
+        const repo = await repositoryOfSource(request.workspaceOrgId, request.sourceId);
+        if (!repo) return;
+        // A repository that has been set up before is not onboarding: what it
+        // needs from a sync is the scan, which the chain below starts.
+        if ((await loadGuardSetupBundle(repo.repoFullName)) !== null) return;
+        const outcome = await enqueueGuardSetup({
+          ...repo,
+          workspaceOrgId: request.workspaceOrgId,
+          source: 'chain',
+        });
+        if (outcome.status === 'busy') {
+          log.info(`[jobs] test setup for ${repo.repoFullName} is already in flight`);
+        }
+      },
+      // A sync that reconciled nothing changed no document, so there is nothing
+      // for the scan to re-read; one that did is what makes the corpus stale.
+      chainScan: async (request, result) => {
+        if (result.added + result.changed + result.removed === 0) return;
+        const outcome = await enqueueContextScan({
+          workspaceOrgId: request.workspaceOrgId,
+          source: 'sync',
+        });
+        if (outcome.status === 'busy') {
+          log.info(
+            `[jobs] a document scan is already running for ${request.workspaceOrgId} — it will re-read the sync`,
+          );
+        }
+      },
+    }),
+    createContextScanTask({
+      ...opts.contextScan,
+      ripple: rippleDeps,
+      rescan: async (request) => {
+        await enqueueContextScan(request);
+      },
+    }),
   ];
 
   jobs = createJobs({
@@ -153,12 +319,16 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
     ...(opts.hub ? { hub: opts.hub } : {}),
   });
 
+  // Every heavy job of the repository goes, RUNNING OR QUEUED: the workspace's
+  // heavy lane means a disconnected repository can easily have one waiting its
+  // turn, and `getActiveByKey` covers both states (`jobs.cancel` settles a
+  // queued row outright — the worker that later claims its graphile job finds
+  // the row unclaimable and skips the body, freeing the lane immediately).
   const cancelRepoJobs = async (
     repoFullName: string,
     orgId: string,
   ): Promise<'stopped' | 'not-here'> => {
     for (const task of [
-      REPO_SCAN_TASK,
       REPO_GUARD_SETUP_TASK,
       REPO_GUARD_GENERATE_TASK,
       REPO_GUARD_RUN_TASK,
@@ -171,20 +341,30 @@ export function createServerJobs(opts: CreateServerJobsOptions): JobsMount {
   };
 
   return Object.assign(jobs, {
-    enqueueScan,
     enqueueGuardSetup,
     enqueueGuardGenerate,
     enqueueGuardRun,
+    enqueueContextSync,
+    enqueueContextScan,
+    startForLinks,
     cancelRepoJobs,
   });
 }
 
 /** The session-run commands the onboarding jobs run — what `repoIsWorking` reads.
  *  A run spends no sessions, so `guard-run` never has a record to find. */
-type RepoCommand = 'spec-scan' | 'guard-setup' | 'guard-generate' | 'guard-run';
+type RepoCommand = 'guard-setup' | 'guard-generate' | 'guard-run';
 
 /** One active job per (workspace, repo, task) — the queue's single-flight key. */
 const jobKey = (task: string, repoFullName: string): string => `${task}:${repoFullName}`;
+
+/**
+ * The workspace's heavy lane: setup, generation and the run of EVERY repository
+ * of a workspace share one graphile queue, so graphile runs them one at a time,
+ * in enqueue order. Per workspace rather than per repository — the cost being
+ * rationed is this process's, and a workspace is who pays for it.
+ */
+const heavyJobQueue = (org: string): string => `heavy:${org}`;
 
 /**
  * Is this repository already running this command — in ANY workspace? The

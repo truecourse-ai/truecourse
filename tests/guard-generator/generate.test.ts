@@ -1668,21 +1668,22 @@ describe('generateGuards — live progress', () => {
 
     let mapped: [number, number] | undefined
     const flows: Array<[number, number]> = []
-    const matches: Array<[number, number]> = []
+    const matches: Array<[number, number, number]> = []
     const res = await runGenerate({
       repoRoot: r,
       extractSession: extractSessionBy({}),
       flowWorkerSession: submitWorkerSessions((task) => raw(task.flowId, PASSING_STEPS)),
       onInterfaces: (interfaces, surfaces) => (mapped = [interfaces, surfaces]),
       onFlowProgress: (done, total) => flows.push([done, total]),
-      onMatchProgress: (done, total) => matches.push([done, total]),
+      onMatchProgress: ({ done, total, matched }) => matches.push([done, total, matched]),
     })
 
     expect(res.written).toHaveLength(2)
     expect(mapped).toEqual([2, 1]) // two cli interfaces, one surface
     expect(flows).toEqual([[0, 1], [1, 1]]) // one area, announced then settled
-    // Two flows × one matchable surface — the denominator is known up front.
-    expect(matches).toEqual([[0, 2], [1, 2], [2, 2]])
+    // Two flows × one matchable surface — the denominator is known up front, and
+    // every pair settles into a tally the moment it ticks.
+    expect(matches).toEqual([[0, 2, 0], [1, 2, 1], [2, 2, 2]])
   }, 90_000)
 
   it('fires onExtractProgress with the planned total upfront, then once per doc', async () => {
@@ -2076,5 +2077,44 @@ describe('generateGuards: the step facts', () => {
     expect(cached).toContain('match | version x cli: matched, 1 interface, from cache')
     expect(cached).toContain('validate | version: unchanged, 1 committed scenario stands')
     expect(cached.some((line) => line.startsWith('author |'))).toBe(false)
+  }, 60_000)
+
+  it('files a pair the engine refused before matching, and tallies it as blocked', async () => {
+    const r = seed()
+    const facts: string[] = []
+    const ticks: Array<{ done: number; total: number; matched: number; unmatched: number; blocked: number }> = []
+    let matchCalls = 0
+    const res = await runGenerate({
+      repoRoot: r,
+      extractSession: extractSessionBy({
+        background: { untestable: 'design history, nothing observable' },
+        version: [{
+          claim: '`relkit --version` prints the version',
+          verification: {
+            method: 'behavior',
+            scope: 'configuration',
+            observable: 'stdout carries the version',
+            cases: [{
+              id: 'prints-version', claim: 'prints the version', method: 'behavior', requires: ['process'],
+              conditions: [], prerequisites: [{ dependency: 'Stripe', mode: 'provided' }],
+            }],
+          },
+        }],
+      }),
+      flowWorkerSession: authorsEvery(raw('relkit --version', PASSING_STEPS)),
+      matchRunner: matchAll(() => matchCalls++),
+      onFact: (step, line) => facts.push(`${step} | ${line}`),
+      onMatchProgress: (progress) => ticks.push(progress),
+    })
+
+    // No case survived the gate, so no matcher verdict was ever bought — and the
+    // pair says why instead of vanishing between the counter and the facts.
+    expect(matchCalls).toBe(0)
+    expect(facts).toContain('match | version x cli: blocked, Prerequisite Stripe (provided) matches no declared dependency.')
+    expect(ticks).toEqual([
+      { done: 0, total: 1, matched: 0, unmatched: 0, blocked: 0 },
+      { done: 1, total: 1, matched: 0, unmatched: 0, blocked: 1 },
+    ])
+    expect(res.written).toEqual([])
   }, 60_000)
 })

@@ -19,6 +19,7 @@ export * from './jobs.js';
 export * from './traces.js';
 export * from './settings.js';
 export * from './guard.js';
+export * from './context.js';
 
 import { ghInstallations, ghRepos, ghBaselines, ghRuns, ghInferredActions, ghPrs } from './github.js';
 import { llmProviderConfig } from './llm.js';
@@ -46,6 +47,13 @@ import {
   guardSetupSets,
   guardDependencyOverlays,
 } from './guard.js';
+import {
+  contextSources,
+  contextSyncs,
+  contextDocuments,
+  contextBindings,
+  contextWorkspaces,
+} from './context.js';
 
 export const schema = {
   activityRuns,
@@ -82,4 +90,9 @@ export const schema = {
   guardScenarioSets,
   guardSetupSets,
   guardDependencyOverlays,
+  contextSources,
+  contextSyncs,
+  contextDocuments,
+  contextBindings,
+  contextWorkspaces,
 };

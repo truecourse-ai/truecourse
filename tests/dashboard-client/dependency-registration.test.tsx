@@ -8,7 +8,7 @@ import type { GuardDependenciesView, GuardDependencyRow } from '@/preview/vendor
 
 vi.mock('@/lib/socket', () => ({ connectSocket: () => ({ on: vi.fn(), off: vi.fn() }) }));
 
-const repo = { id: 'expense-tracker', fullName: 'owner/expense-tracker', real: true } as Repo;
+const repo = { id: 'expense-tracker', fullName: 'owner/expense-tracker' } as Repo;
 const urlVar = 'CURRENCYBEACON_BASE_URL';
 const keyVar = 'CURRENCYBEACON_API_KEY';
 const origin = 'https://provider.test';

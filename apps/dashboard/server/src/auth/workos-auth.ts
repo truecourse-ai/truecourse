@@ -7,10 +7,17 @@
  * the callback sets it after exchanging the auth code.
  */
 
-import { Router } from 'express';
+import { Router, type Request, type Response } from 'express';
 import { WorkOS } from '@workos-inc/node';
-import type { User } from '@workos-inc/node';
-import type { AuthResult, AuthUser, AuthVerifier } from '@truecourse/shared';
+import type { OrganizationMembership, User } from '@workos-inc/node';
+import type {
+  AuthResult,
+  AuthUser,
+  AuthVerifier,
+  WorkspaceSummary,
+  WorkspacesResponse,
+} from '@truecourse/shared';
+import { log } from '@truecourse/core/lib/logger';
 import type { WorkosConfig } from './config.js';
 import { parseCookies, serializeCookie } from './cookies.js';
 
@@ -204,6 +211,155 @@ export function createSessionVerifier(
 }
 
 /**
+ * The sealed session a Set-Cookie header carries. The verifier may have
+ * refreshed the session, and WorkOS rotates refresh tokens, so a second refresh
+ * has to chain onto the rotated cookie rather than the dead one the request
+ * arrived with.
+ */
+function sealedFromSetCookie(header: string | undefined): string | null {
+  if (!header) return null;
+  const first = header.split(';', 1)[0] ?? '';
+  const eq = first.indexOf('=');
+  if (eq < 0 || first.slice(0, eq).trim() !== SESSION_COOKIE) return null;
+  return decodeURIComponent(first.slice(eq + 1));
+}
+
+/**
+ * The organizations the user is really in. A workspace IS an active membership,
+ * so the list, the switch and the adoption of an org-less session all read this.
+ */
+async function activeMemberships(
+  workos: WorkOS,
+  userId: string,
+): Promise<OrganizationMembership[]> {
+  const page = await workos.userManagement.listOrganizationMemberships({ userId });
+  return (await page.autoPagination()).filter((m) => m.status === 'active');
+}
+
+/** A session re-minted into an organization, and the cookie that carries it. */
+interface MintedSession {
+  organizationId: string;
+  /** The re-minted session, as a Set-Cookie header value. */
+  setCookie: string;
+  user: User;
+}
+
+/**
+ * Mints the sealed session into an organization: the one way the cookie comes
+ * to carry `organizationId`, which everything org-scoped keys off. Throws when
+ * WorkOS refuses, since a caller that answered OK on a session that did not
+ * move would put the user in a workspace they are not in.
+ */
+async function mintSessionInto(
+  workos: WorkOS,
+  cfg: WorkosConfig,
+  sealed: string,
+  organizationId: string,
+): Promise<MintedSession> {
+  const session = workos.userManagement.loadSealedSession({
+    sessionData: sealed,
+    cookiePassword: cfg.cookiePassword,
+  });
+  const refreshed = await session.refresh({ organizationId });
+  if (!refreshed.authenticated || !refreshed.sealedSession) {
+    throw new Error('the session could not be moved into the workspace');
+  }
+  return {
+    organizationId: refreshed.organizationId ?? organizationId,
+    setCookie: serializeCookie(SESSION_COOKIE, refreshed.sealedSession, {
+      maxAgeSeconds: SESSION_MAX_AGE,
+      secure: isSecure(cfg.appUrl),
+    }),
+    user: refreshed.user,
+  };
+}
+
+/** An org-less session moved into the organization the user already belongs to. */
+interface AdoptedOrganization {
+  organizationId: string;
+  organizationName: string;
+  /** The re-minted session, as a Set-Cookie header value. */
+  setCookie: string;
+  user: User;
+}
+
+/**
+ * Puts an org-less session INTO the organization its user already belongs to.
+ *
+ * Accepting an invitation creates the membership in WorkOS, but a session that
+ * signed in carries no organization until it is re-minted, so this is where
+ * that happens: the session probe and the workspace-naming route both ask,
+ * which is what keeps an invited person out of a second workspace of their own.
+ *
+ * Answers null when the user has no active membership, which is the signup that
+ * still has to name a workspace. A refused WorkOS call throws.
+ */
+async function adoptExistingOrganization(
+  workos: WorkOS,
+  cfg: WorkosConfig,
+  sealed: string,
+  userId: string,
+): Promise<AdoptedOrganization | null> {
+  const membership = (await activeMemberships(workos, userId))[0];
+  if (!membership) return null;
+  const minted = await mintSessionInto(workos, cfg, sealed, membership.organizationId);
+  // The membership names its organization, so the shell's workspace name costs
+  // no second lookup here or on the next probe.
+  orgNameCache.set(membership.organizationId, membership.organizationName);
+  return {
+    organizationId: membership.organizationId,
+    organizationName: membership.organizationName,
+    setCookie: minted.setCookie,
+    user: minted.user,
+  };
+}
+
+/** The signed-in session a request carries. */
+interface SignedInSession {
+  /** The sealed cookie it arrived with, which a re-mint chains onto. */
+  sealed: string;
+  user: User;
+  organizationId: string | null;
+}
+
+/**
+ * The session behind a request that mints a cookie of its own, so it works off
+ * the sealed session rather than the gate's verifier. Answers null once it has
+ * sent the 401 itself; a refused WorkOS call throws to the route's handler.
+ */
+async function requireSession(
+  workos: WorkOS,
+  cfg: WorkosConfig,
+  req: Request,
+  res: Response,
+): Promise<SignedInSession | null> {
+  const sealed = parseCookies(req.headers.cookie)[SESSION_COOKIE];
+  if (!sealed) {
+    res.status(401).json({ error: 'Not authenticated' });
+    return null;
+  }
+  const session = workos.userManagement.loadSealedSession({
+    sessionData: sealed,
+    cookiePassword: cfg.cookiePassword,
+  });
+  const authed = await session.authenticate();
+  if (!authed.authenticated) {
+    res.status(401).json({ error: 'Not authenticated' });
+    return null;
+  }
+  return { sealed, user: authed.user, organizationId: authed.organizationId ?? null };
+}
+
+/** A workspace name as it may be stored, or null when it is not one. */
+function workspaceNameOf(body: unknown): string | null {
+  const raw = (body as { name?: unknown })?.name;
+  const name = typeof raw === 'string' ? raw.trim() : '';
+  return name && name.length <= 80 ? name : null;
+}
+
+const BAD_WORKSPACE_NAME = 'A workspace name of 1 to 80 characters is required.';
+
+/**
  * A post-login destination is only honored when it is a path on our own app:
  * it must start with a single `/`. `//evil.test` (protocol-relative) and any
  * absolute URL are rejected, so `?next=` can't be turned into an open redirect.
@@ -289,14 +445,40 @@ export function createAuthRouter(
       res.status(401).json({ error: 'Not authenticated' });
       return;
     }
-    if (result.setCookie) res.append('Set-Cookie', result.setCookie);
+    let user = result.user;
+    let setCookie = result.setCookie;
+    // A session with no organization may already belong to one: accepting an
+    // invitation creates the membership, and this is the probe that moves the
+    // session into it. A session that already carries an organization asks
+    // WorkOS nothing, since this runs on every page load.
+    if (!user.organizationId) {
+      const sealed =
+        sealedFromSetCookie(result.setCookie) ?? parseCookies(req.headers.cookie)[SESSION_COOKIE];
+      if (sealed) {
+        try {
+          const adopted = await adoptExistingOrganization(workos, cfg, sealed, user.id);
+          if (adopted) {
+            setCookie = adopted.setCookie;
+            user = toAuthUser(adopted.user, adopted.organizationId, adopted.organizationName);
+            user.isOperator = result.user.isOperator;
+          }
+        } catch (err) {
+          // The identity is still good, so the probe answers with it; the
+          // session simply stays org-less until the next one.
+          log.warn(
+            `[Auth] could not move ${user.id} into their workspace: ${(err as Error).message}`,
+          );
+        }
+      }
+    }
+    if (setCookie) res.append('Set-Cookie', setCookie);
     // The session carries the org id only; the shell needs its name.
-    const organizationId = result.user.organizationId;
-    const organizationName = organizationId
-      ? await resolveOrgName(workos, organizationId)
-      : undefined;
+    const organizationId = user.organizationId;
+    const organizationName =
+      user.organizationName ??
+      (organizationId ? await resolveOrgName(workos, organizationId) : undefined);
     res.json({
-      user: organizationName ? { ...result.user, organizationName } : result.user,
+      user: organizationName ? { ...user, organizationName } : user,
     });
   });
 
@@ -334,6 +516,18 @@ export function createAuthRouter(
         return;
       }
 
+      // Nor does an invited person get one of their own: a user who already has
+      // a membership is moved into it, and only a user with none names a new
+      // workspace.
+      const adopted = await adoptExistingOrganization(workos, cfg, sealed, authed.user.id);
+      if (adopted) {
+        res.setHeader('Set-Cookie', adopted.setCookie);
+        res.json({
+          user: toAuthUser(adopted.user, adopted.organizationId, adopted.organizationName),
+        });
+        return;
+      }
+
       const org = await workos.organizations.createOrganization({ name });
       await workos.userManagement.createOrganizationMembership({
         organizationId: org.id,
@@ -360,6 +554,93 @@ export function createAuthRouter(
       res.json({ user: toAuthUser(refreshed.user, refreshed.organizationId, org.name) });
     } catch (err) {
       res.status(500).json({ error: `Could not create workspace: ${(err as Error).message}` });
+    }
+  });
+
+  // The workspaces the signed-in user can be in: their active memberships, with
+  // the one the session is minted into marked. The side menu's switcher is this
+  // list.
+  router.get('/workspaces', async (req, res) => {
+    try {
+      const session = await requireSession(workos, cfg, req, res);
+      if (!session) return;
+      const memberships = await activeMemberships(workos, session.user.id);
+      const workspaces: WorkspaceSummary[] = await Promise.all(
+        memberships.map(async (m) => ({
+          id: m.organizationId,
+          // The cache `/me` fills: the current workspace is already in it, and
+          // every other is looked up once and kept for the life of the process.
+          // The membership's own name stands in when the lookup is refused.
+          name: (await resolveOrgName(workos, m.organizationId)) ?? m.organizationName,
+          current: m.organizationId === session.organizationId,
+        })),
+      );
+      const body: WorkspacesResponse = { workspaces };
+      res.json(body);
+    } catch (err) {
+      const message = (err as Error).message;
+      log.error(`[Auth] listing workspaces failed: ${message}`);
+      res.status(502).json({ error: message });
+    }
+  });
+
+  // Create a workspace and go into it. Unlike the onboarding `/workspace`, this
+  // ALWAYS creates: it is reached from the switcher by someone who already has
+  // one and wants another.
+  router.post('/workspaces', async (req, res) => {
+    const name = workspaceNameOf(req.body);
+    if (!name) {
+      res.status(400).json({ error: BAD_WORKSPACE_NAME });
+      return;
+    }
+    try {
+      const session = await requireSession(workos, cfg, req, res);
+      if (!session) return;
+      const org = await workos.organizations.createOrganization({ name });
+      await workos.userManagement.createOrganizationMembership({
+        organizationId: org.id,
+        userId: session.user.id,
+      });
+      const minted = await mintSessionInto(workos, cfg, session.sealed, org.id);
+      // The name is the one just typed, so nothing looks it up.
+      orgNameCache.set(org.id, org.name);
+      res.setHeader('Set-Cookie', minted.setCookie);
+      res.json({ user: toAuthUser(minted.user, minted.organizationId, org.name) });
+    } catch (err) {
+      res.status(500).json({ error: `Could not create workspace: ${(err as Error).message}` });
+    }
+  });
+
+  // Switch the session into another of the user's workspaces. Only one they are
+  // really in: an organization they have no active membership of is not theirs
+  // to enter, so it reads as absent.
+  router.post('/workspaces/switch', async (req, res) => {
+    const raw = (req.body as { organizationId?: unknown })?.organizationId;
+    const organizationId = typeof raw === 'string' ? raw.trim() : '';
+    if (!organizationId) {
+      res.status(400).json({ error: 'A workspace is required.' });
+      return;
+    }
+    try {
+      const session = await requireSession(workos, cfg, req, res);
+      if (!session) return;
+      const membership = (await activeMemberships(workos, session.user.id)).find(
+        (m) => m.organizationId === organizationId,
+      );
+      if (!membership) {
+        res.status(404).json({ error: 'No such workspace.' });
+        return;
+      }
+      const minted = await mintSessionInto(workos, cfg, session.sealed, organizationId);
+      orgNameCache.set(organizationId, membership.organizationName);
+      res.setHeader('Set-Cookie', minted.setCookie);
+      res.json({
+        user: toAuthUser(minted.user, minted.organizationId, membership.organizationName),
+      });
+    } catch (err) {
+      const message = (err as Error).message;
+      log.error(`[Auth] switching into ${organizationId} failed: ${message}`);
+      res.status(502).json({ error: message });
     }
   });
 

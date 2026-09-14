@@ -131,6 +131,13 @@ export interface DiscoveryOptions {
    * here so discovery and their own scope checks agree without re-reading.
    */
   scope?: SpecScope;
+  /**
+   * Whether the repository's registered llms.txt sources join the universe
+   * after the walk (the default, what the per-repository scan reads). A
+   * workspace Repository source is the walk alone: its sites are sources of
+   * their own, never files of the repository.
+   */
+  registeredSources?: boolean;
 }
 
 /**
@@ -206,7 +213,7 @@ export function discoverDocs(rootDir: string, opts: DiscoveryOptions = {}): DocC
     }
   };
   visit(rootDir);
-  out.push(...discoverSourceDocs(rootDir, previewLines, opts));
+  if (opts.registeredSources !== false) out.push(...discoverSourceDocs(rootDir, previewLines, opts));
   return out;
 }
 

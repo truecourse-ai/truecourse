@@ -229,7 +229,6 @@ export function GuardSectionDetail({
   return (
     <aside className="flex h-full w-96 shrink-0 flex-col border-l border-border bg-card">
       <div className="flex items-start gap-2 border-b border-border px-3 py-2">
-        <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${meta.dot}`} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <GuardStatusBadge status={section.status} />

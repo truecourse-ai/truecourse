@@ -1,0 +1,1 @@
+ALTER TABLE "guard_runs" ADD COLUMN "sections" jsonb;

@@ -14,7 +14,13 @@ import { Router, type Request, type Response } from 'express';
 import { log } from '@truecourse/core/lib/logger';
 import { getProjectByPath } from '@truecourse/core/config/registry';
 import { loadSpec, loadLatestSpec } from '@truecourse/core/lib/spec-store';
-import { openConflicts, type CorpusLike, type DecisionsLike } from '@truecourse/shared';
+import {
+  GITHUB_INSTALL_ORIGINS,
+  openConflicts,
+  type CorpusLike,
+  type DecisionsLike,
+  type GithubInstallOrigin,
+} from '@truecourse/shared';
 import type {
   AuthUser,
   GithubConnectStatusResponse,
@@ -98,6 +104,13 @@ export interface ConnectDeps {
    * route it differently.
    */
   setupRedirectPath: string;
+  /**
+   * Where the redirect lands instead when the install was started from a
+   * named place (the origin rides GitHub's `state`): a host that has such
+   * places names them here, one path each. An origin with no path here lands
+   * on {@link setupRedirectPath}.
+   */
+  setupRedirectPaths?: Partial<Record<GithubInstallOrigin, string>>;
   /** Installation-scoped GitHub client, for listing the repos a user can connect. */
   octokitFor: (installationId: number) => OctokitClient;
   /**
@@ -127,8 +140,17 @@ function statusOf(err: unknown): number {
 export function createConnectRouter(deps: ConnectDeps): Router {
   const router = Router();
 
-  const buildInstallUrl = (orgId: string): string =>
-    `https://github.com/apps/${deps.appSlug}/installations/new?state=${encodeURIComponent(orgId)}`;
+  // `state` is the workspace, and the place the install was started from when
+  // there is one, so the return can land there: GitHub echoes it untouched.
+  const buildInstallUrl = (orgId: string, origin: GithubInstallOrigin | null): string =>
+    `https://github.com/apps/${deps.appSlug}/installations/new?state=${encodeURIComponent(
+      origin ? `${orgId}:${origin}` : orgId,
+    )}`;
+
+  const originOf = (raw: unknown): GithubInstallOrigin | null =>
+    typeof raw === 'string' && (GITHUB_INSTALL_ORIGINS as readonly string[]).includes(raw)
+      ? (raw as GithubInstallOrigin)
+      : null;
 
   /** The installation's account, or null — a lookup failure is never fatal here. */
   const lookupAccount = async (
@@ -194,7 +216,7 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     if (req.query.slim === '1') {
       const slim: GithubConnectStatusResponse = {
         configured: true,
-        installUrl: buildInstallUrl(orgId),
+        installUrl: buildInstallUrl(orgId, originOf(req.query.from)),
         installations: installations.map(toInstallationSummary),
         repos: repos.map((r) => toRepoSummary(r, null, 0)),
       };
@@ -232,7 +254,7 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     );
     const body: GithubConnectStatusResponse = {
       configured: true,
-      installUrl: buildInstallUrl(orgId),
+      installUrl: buildInstallUrl(orgId, originOf(req.query.from)),
       installations: installations.map(toInstallationSummary),
       repos: repoSummaries,
     };
@@ -287,7 +309,11 @@ export function createConnectRouter(deps: ConnectDeps): Router {
   router.get('/setup', async (req: Request, res: Response) => {
     const orgId = orgIdOf(req);
     const installationId = Number(req.query.installation_id);
-    const state = typeof req.query.state === 'string' ? req.query.state : null;
+    const rawState = typeof req.query.state === 'string' ? req.query.state : null;
+    // `<orgId>` or `<orgId>:<origin>`; the workspace id never holds a colon.
+    const colon = rawState?.indexOf(':') ?? -1;
+    const state = rawState === null ? null : colon === -1 ? rawState : rawState.slice(0, colon);
+    const origin = rawState === null || colon === -1 ? null : originOf(rawState.slice(colon + 1));
 
     // Bind the install to the authenticated session's workspace. The orgId
     // comes from the session (trusted); `state` is a defense-in-depth check
@@ -318,9 +344,10 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       // Else: the installation already belongs to another workspace — never
       // re-link it (prevents cross-tenant installation takeover).
     }
-    // Land back on the connect dialog so the new installation is immediately
-    // pickable.
-    res.redirect(`${deps.appUrl}${deps.setupRedirectPath}`);
+    // Land back where the install was started, so the new installation is
+    // immediately pickable there.
+    const path = (origin && deps.setupRedirectPaths?.[origin]) ?? deps.setupRedirectPath;
+    res.redirect(`${deps.appUrl}${path}`);
   });
 
   router.post('/repos/link', async (req: Request, res: Response) => {

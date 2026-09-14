@@ -20,11 +20,32 @@ export interface BaselineTrigger {
   workspaceOrgId: string;
 }
 
+/**
+ * A push to the default branch of a repository this installation reaches but
+ * Code has NOT connected. Nothing is baselined for it, since there is no link
+ * and no repository page, but the workspace may still read its documentation
+ * as a context source, so the source's owner is told to re-read it.
+ */
+export interface SourcePushTrigger {
+  repoFullName: string;
+  installationId: number;
+  defaultBranch: string;
+  commitSha: string;
+  /** The workspace the installation belongs to. */
+  workspaceOrgId: string;
+}
+
 export interface WebhookDeps {
   secret: string;
   store: GateStore;
   /** Kick a baseline run for a connected repo (fire-and-forget). */
   onBaseline: (trigger: BaselineTrigger) => void;
+  /**
+   * A push to the default branch of an UNCONNECTED repository the installation
+   * reaches. Fire-and-forget, and only ever called when the installation
+   * belongs to a workspace.
+   */
+  onSourcePush?: (trigger: SourcePushTrigger) => void;
   /**
    * Per-repo cleanup when GitHub takes a linked repo away — the App is
    * uninstalled, or the repo is removed from the installation. The webhook is
@@ -234,7 +255,22 @@ async function handlePush(
 
   // Only re-baseline repos that are connected to the gate.
   const link = await deps.store.getRepo(payload.repository.full_name);
-  if (!link || !link.enabled) return;
+  if (!link || !link.enabled) {
+    // Not connected in Code, so nothing is baselined. The workspace this
+    // installation belongs to may still read the repository as a context
+    // source, and that source's documents just moved.
+    if (link || !deps.onSourcePush) return;
+    const installation = await deps.store.getInstallation(payload.installation.id);
+    if (!installation?.workspaceOrgId) return;
+    deps.onSourcePush({
+      repoFullName: payload.repository.full_name,
+      installationId: payload.installation.id,
+      defaultBranch: payload.repository.default_branch,
+      commitSha: payload.after,
+      workspaceOrgId: installation.workspaceOrgId,
+    });
+    return;
+  }
 
   deps.onBaseline({
     repoFullName: payload.repository.full_name,

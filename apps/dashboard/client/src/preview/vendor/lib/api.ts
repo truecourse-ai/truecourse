@@ -19,6 +19,7 @@ import type {
   GuardScenarioSource,
   GuardStaleness,
 } from '@/preview/vendor/shared';
+import type { GuardSetupReport } from '@truecourse/shared';
 import type { GuardDependenciesView, GuardDependencyPatch } from '@/preview/vendor/types/guard-dependencies';
 import type { RunRecord, SessionCommand, SessionEvent } from '@truecourse/agent-loop';
 import type { LlmEstimateData } from '@/preview/vendor/hooks/useSocket';
@@ -888,11 +889,6 @@ export interface SpecCorpusResponse {
   corpusCommit?: string;
 }
 
-/** A scan that the user dismissed at the cost-estimate confirm, a no-op. */
-export interface SpecScanCancelled {
-  cancelled: true;
-}
-
 /**
  * OSS include/exclude ack: the persisted decision lists only. The corpus is
  * unchanged by an OSS decision (no re-curate), so no corpus is returned, the
@@ -939,139 +935,11 @@ export async function getSpecCorpus(
   }
 }
 
-/**
- * Run a fresh corpus scan (curate), persist corpus.json, return it, or
- * `{ cancelled: true }` when the user dismisses the cost-estimate confirm.
- */
-export function getSpecCorpusScan(
-  repoId: string,
-): Promise<SpecCorpusResponse | SpecScanCancelled> {
-  return fetchApi<SpecCorpusResponse | SpecScanCancelled>(`/api/repos/${repoId}/spec/corpus/scan`);
-}
-
 /** A source doc's markdown (for the prose Spec tab). `commit` reads it at a PR head (EE). */
 export function getSpecDoc(repoId: string, ref: string, commit?: string): Promise<{ ref: string; content: string }> {
   const c = commit ? `&commit=${encodeURIComponent(commit)}` : '';
   return fetchApi<{ ref: string; content: string }>(
     `/api/repos/${repoId}/spec/doc?ref=${encodeURIComponent(ref)}${c}`,
-  );
-}
-
-/** A registered web page's current fetch, independent of the last corpus scan. */
-export function getSpecSourceDoc(repoId: string, ref: string): Promise<{ ref: string; content: string }> {
-  return fetchApi(`/api/repos/${repoId}/spec/source-doc?ref=${encodeURIComponent(ref)}`);
-}
-
-// ---------------------------------------------------------------------------
-// Web spec sources, llms.txt documentation sites snapshotted into the repo as
-// spec docs. Pure fetching (no LLM, no estimate); add/refresh stream progress
-// over `spec:progress` and end with `spec:complete { kind: 'sources' }`.
-// Working-tree only, so the UI is `local-filesystem`-gated like Dependencies.
-// ---------------------------------------------------------------------------
-
-/** A link the fetch wrote no page for, with the reason it was passed over. */
-export interface SpecSourceSkip {
-  url: string;
-  reason: 'external-origin' | 'not-markdown' | 'fetch-failed';
-  /** Status line or transport message, when the reason had one. */
-  detail?: string;
-}
-
-/** One registered source: the registry entry the sources list renders. */
-export interface SpecSourceView {
-  id: string;
-  title: string;
-  llmsTxtUrl: string;
-  fetchedAt: string;
-  docCount: number;
-  skipped: SpecSourceSkip[];
-}
-
-/** One snapshotted page of a source: its corpus ref, its page path inside the
- *  site, the llms.txt link title, and the URL it was fetched from. */
-export interface SpecSourceDoc {
-  ref: string;
-  path: string;
-  title: string;
-  url: string;
-}
-
-/** One source WITH its pages, the detail pane's payload (the listing omits them). */
-export interface SpecSourceDetailView extends SpecSourceView {
-  docs: SpecSourceDoc[];
-}
-
-/** What an add WOULD fetch, shown for confirmation before anything is written. */
-export interface SpecSourcePreview {
-  llmsTxtUrl: string;
-  title: string;
-  totalLinks: number;
-  /** The same-origin links, the ones an add fetches. */
-  fetchableLinks: number;
-  skipped: SpecSourceSkip[];
-}
-
-export interface SpecSourceAddResult {
-  source: SpecSourceView;
-  /** Snapshot files written. */
-  written: number;
-  skipped: SpecSourceSkip[];
-}
-
-/** One source's reconciliation with its site. `unchanged` is a count (the paths
- *  would be the whole site on a run where nothing moved). */
-export interface SpecSourceRefreshResult {
-  source: SpecSourceView;
-  added: string[];
-  changed: string[];
-  removed: string[];
-  unchanged: number;
-  skipped: SpecSourceSkip[];
-}
-
-export function listSpecSources(repoId: string): Promise<{ sources: SpecSourceView[] }> {
-  return fetchApi<{ sources: SpecSourceView[] }>(`/api/repos/${repoId}/spec/sources`);
-}
-
-/** One source with the pages it snapshotted, read when its detail is opened. */
-export function getSpecSource(repoId: string, sourceId: string): Promise<{ source: SpecSourceDetailView }> {
-  return fetchApi<{ source: SpecSourceDetailView }>(
-    `/api/repos/${repoId}/spec/sources/${encodeURIComponent(sourceId)}`,
-  );
-}
-
-/** Read the site's llms.txt and report what an add would fetch. Writes nothing. */
-export function previewSpecSource(repoId: string, url: string): Promise<SpecSourcePreview> {
-  return fetchApi<SpecSourcePreview>(`/api/repos/${repoId}/spec/sources/preview`, {
-    method: 'POST',
-    body: JSON.stringify({ url }),
-  });
-}
-
-/** Register the site and snapshot every markdown page its llms.txt lists. */
-export function addSpecSource(repoId: string, url: string, id?: string): Promise<SpecSourceAddResult> {
-  return fetchApi<SpecSourceAddResult>(`/api/repos/${repoId}/spec/sources`, {
-    method: 'POST',
-    body: JSON.stringify(id ? { url, id } : { url }),
-  });
-}
-
-/** Refetch one source, or every registered one when `sourceId` is omitted. */
-export function refreshSpecSources(
-  repoId: string,
-  sourceId?: string,
-): Promise<{ results: SpecSourceRefreshResult[] }> {
-  const path = sourceId
-    ? `/api/repos/${repoId}/spec/sources/${encodeURIComponent(sourceId)}/refresh`
-    : `/api/repos/${repoId}/spec/sources/refresh`;
-  return fetchApi<{ results: SpecSourceRefreshResult[] }>(path, { method: 'POST' });
-}
-
-/** Drop a source: its snapshot files and its registry entry. */
-export function removeSpecSource(repoId: string, sourceId: string): Promise<{ removed: SpecSourceView }> {
-  return fetchApi<{ removed: SpecSourceView }>(
-    `/api/repos/${repoId}/spec/sources/${encodeURIComponent(sourceId)}`,
-    { method: 'DELETE' },
   );
 }
 
@@ -1197,6 +1065,17 @@ export function saveGuardDependency(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, ...patch }),
   });
+}
+
+/** The last `guard setup` record; null on 404 (setup has never run here). */
+export async function getGuardSetup(repoId: string): Promise<GuardSetupReport | null> {
+  try {
+    const { report } = await fetchApi<{ report: GuardSetupReport }>(`/api/repos/${repoId}/guard/setup`);
+    return report;
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
 }
 
 /** The last `guard generate` report; null on 404 (never generated). `ref` scopes to a PR head (EE). */

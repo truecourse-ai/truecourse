@@ -2,13 +2,17 @@
  * Every run of a repository, for the Runs table: the baseline runs and the
  * pull-request head runs the gate stored, each naming its pull request and
  * where it ran. One read (`guard/history?all=1`); `reloadKey` re-reads it when
- * a run lands on the socket. A fixture repository's fake history answers the
- * same call.
+ * a run lands on the socket.
  */
 
 import { useEffect, useState } from 'react';
 import type { GuardHistoryEntry } from '@/preview/vendor/shared';
 import * as api from '@/preview/vendor/lib/api';
+
+/** A stored run's verdict: one failure or one error makes the run a failure. */
+export function guardRunVerdict(entry: GuardHistoryEntry): 'pass' | 'fail' {
+  return entry.summary.fail > 0 || entry.summary.error > 0 ? 'fail' : 'pass';
+}
 
 export interface GuardRunListState {
   runs: GuardHistoryEntry[];

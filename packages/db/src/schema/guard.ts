@@ -52,6 +52,13 @@ export const guardRuns = pgTable(
     summary: jsonb('summary').$type<unknown>().notNull(),
     /** Per-run evidence manifest `{ "<scenarioId>/<file>": 'sha256-…' }` into `content`. */
     evidence: jsonb('evidence').$type<unknown>().notNull().default({}),
+    /**
+     * The run's SECTION SUMMARY `{ "<docRef>#<anchor>": status }`, what every
+     * section the run's scenario set covered was worth at that moment, written
+     * beside the snapshot when the run is persisted. Null for a run whose
+     * summary could not be derived, which Home's trend leaves out.
+     */
+    sections: jsonb('sections').$type<unknown>(),
     /** True for default-branch runs — the baseline / trend selector (see file header). */
     isBaseline: boolean('is_baseline').notNull().default(false),
     ranAt: ts('ran_at').notNull(),

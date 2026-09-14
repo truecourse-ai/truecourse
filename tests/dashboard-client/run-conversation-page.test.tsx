@@ -20,7 +20,7 @@ import { MemoryRouter } from 'react-router-dom';
 import type { SessionEvent } from '@truecourse/agent-loop';
 import type { ActivityEvent } from '@truecourse/shared/activity-stream';
 
-import { RunConversationPage } from '@/components/sessions/RunConversationPage';
+import { RunConversationPage, RunElapsed } from '@/components/sessions/RunConversationPage';
 import type { PublicSessionRun } from '@/lib/api';
 
 const read = <T,>(name: string): T =>
@@ -83,6 +83,40 @@ function factCount(text: string): number {
   ).length;
   return sentences + pairs;
 }
+
+/**
+ * A run in flight, with the clocks the record carries: one step being worked
+ * on, one piece of work still going and one that ended.
+ */
+const LIVE_RUN = {
+  command: 'guard-generate',
+  runId: 'run-live-clock',
+  gitRef: 'abc1234',
+  startedAt: '2026-09-11T10:00:00.000Z',
+  status: 'running',
+  activityStream: 'ai-sdk-v1',
+  display: {
+    blocks: [
+      {
+        kind: 'checklist',
+        items: [
+          { key: 'extract', label: 'Extracting claims', status: 'done', startedAt: '2026-09-11T10:00:10.000Z', endedAt: '2026-09-11T10:00:20.000Z' },
+          { key: 'match', label: 'Matching flows', status: 'active', detail: '46/85 flow×surface', startedAt: '2026-09-11T10:00:30.000Z',
+            sessionKinds: ['guard-generate.flow-worker'] },
+        ],
+      },
+    ],
+  },
+  sessions: [
+    { sessionId: 'ses-run', kind: 'guard-generate.flow-worker', workItem: 'flow:create-an-expense:api', status: 'running',
+      startedAt: '2026-09-11T10:00:40.000Z', spent: { turns: 1, tokens: 10, costUsd: 0 } },
+    { sessionId: 'ses-done', kind: 'guard-generate.flow-worker', workItem: 'flow:list-expenses:api', status: 'completed',
+      startedAt: '2026-09-11T10:00:10.000Z', endedAt: '2026-09-11T10:01:42.000Z', spent: { turns: 4, tokens: 90, costUsd: 0 } },
+    // Stopped with the machine that ran it: it never recorded an end.
+    { sessionId: 'ses-lost', kind: 'guard-generate.flow-worker', workItem: 'flow:pay-an-invoice:api', status: 'parked',
+      startedAt: '2026-09-11T10:00:20.000Z', spent: { turns: 2, tokens: 20, costUsd: 0 } },
+  ],
+} as unknown as PublicSessionRun;
 
 function renderPage(run: PublicSessionRun) {
   return render(
@@ -469,6 +503,71 @@ describe('one conversation, as a page', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it('shows how long every piece of work has taken, and keeps counting the ones still going', async () => {
+    serve([]);
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-09-11T10:01:00.000Z'));
+      renderPage(LIVE_RUN);
+      const running = screen.getByRole('button', { name: /^create-an-expense/ });
+      const done = screen.getByRole('button', { name: /^list-expenses/ });
+      // Nothing is open: every row carries its own elapsed all the same.
+      expect(screen.queryByRole('complementary', { name: 'Work' })).toBeNull();
+      expect(within(running).getByText('20s')).toBeInTheDocument();
+      expect(within(done).getByText('1m 32s')).toBeInTheDocument();
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      expect(within(running).getByText('21s')).toBeInTheDocument();
+      expect(within(done).getByText('1m 32s')).toBeInTheDocument();
+
+      // Work that stopped without recording its end says nothing rather than
+      // counting on against a clock it left long ago.
+      const lost = screen.getByRole('button', { name: /^pay-an-invoice/ });
+      expect(lost.textContent).toBe('pay-an-invoiceapiflow-worker');
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('shows the step being worked on as working: a pulsing dot and its own elapsed', async () => {
+    serve([]);
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-09-11T10:01:00.000Z'));
+      renderPage(LIVE_RUN);
+      const heading = screen.getByRole('heading', { level: 2, name: /Matching flows/ });
+      expect(heading.querySelector('[aria-hidden]')?.className).toContain('animate-pulse');
+      expect(within(heading).getByText('30s')).toBeInTheDocument();
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      expect(within(heading).getByText('31s')).toBeInTheDocument();
+
+      // A step that has ended keeps the time it took, and stops pulsing.
+      const settled = screen.getByRole('heading', { level: 2, name: /Extracting claims/ });
+      expect(settled.querySelector('[aria-hidden]')?.className).not.toContain('animate-pulse');
+      expect(within(settled).getByText('10s')).toBeInTheDocument();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('folds a prompt that arrived as one very long line', async () => {
+    const blob = JSON.stringify({ instruction: 'Author the scenarios of this flow.', flow: 'x'.repeat(400) });
+    serve([
+      { cursor: 0, kind: 'session-event', sessionId: 'ses-run',
+        event: { type: 'session-start', seq: 0, ts: '2026-09-11T10:00:40.000Z', kind: 'guard-generate.flow-worker', workItem: 'flow:create-an-expense:api', systemPrompt: 'S', toolNames: [] } },
+      { cursor: 1, kind: 'session-event', sessionId: 'ses-run',
+        event: { type: 'user-message', seq: 1, ts: '2026-09-11T10:00:41.000Z', content: blob } },
+    ] as ActivityEvent[]);
+    renderPage(LIVE_RUN);
+    await userEvent.click(screen.getByRole('button', { name: /^create-an-expense/ }));
+    const work = within(pane());
+    // A text with no line breaks is measured in characters; folded to its
+    // first lines until it is opened, exactly as a many-line one.
+    await work.findByText(`${blob.length} characters`);
+    const asParagraph = (): boolean =>
+      [...pane().querySelectorAll('p')].some((p) => p.textContent === blob);
+    expect(asParagraph()).toBe(false);
+    expect(pane().querySelector('.line-clamp-3')?.textContent).toBe(blob);
+    await userEvent.click(work.getByRole('button', { name: rx(blob.slice(0, 30)) }));
+    expect(asParagraph()).toBe(true);
+  });
+
   it('shows a selected transcript error without downloading other agents', async () => {
     window.fetch = vi.fn(async () => json({ error: 'Transcript unavailable' }, 500)) as typeof window.fetch;
     renderPage(SETUP_RUN);
@@ -477,6 +576,164 @@ describe('one conversation, as a page', () => {
     expect(window.fetch).toHaveBeenCalledTimes(1);
   });
 
+});
+
+// ---------------------------------------------------------------------------
+// the run's own clock
+// ---------------------------------------------------------------------------
+
+describe('how long the run has been going', () => {
+  it('counts on while the run runs, and stops at the end the run recorded', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-09-11T10:01:00.000Z'));
+      const live = render(<RunElapsed run={LIVE_RUN} />);
+      expect(live.container.textContent).toBe('1m 00s');
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      expect(live.container.textContent).toBe('1m 01s');
+      live.unmount();
+
+      const ended = render(
+        <RunElapsed
+          run={{ ...LIVE_RUN, status: 'completed', finishedAt: '2026-09-11T10:00:30.000Z' } as PublicSessionRun}
+        />,
+      );
+      expect(ended.container.textContent).toBe('30s');
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+      expect(ended.container.textContent).toBe('30s');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// the line that is still being written
+// ---------------------------------------------------------------------------
+
+describe('what a piece of work is doing right now', () => {
+  /** The transcript page of every session, with the same live progress on it. */
+  const serveProgress = (progress: unknown) => {
+    window.fetch = vi.fn(async () =>
+      json({
+        events: [
+          { type: 'session-start', seq: 0, ts: '2026-09-11T10:00:40.000Z', kind: 'guard-generate.flow-worker',
+            workItem: 'flow:create-an-expense:api', systemPrompt: 'S', toolNames: [] },
+        ],
+        hasMore: false,
+        progress,
+      }),
+    ) as typeof window.fetch;
+  };
+  const liveLine = (): HTMLElement | undefined =>
+    [...pane().querySelectorAll('p')].find((p) => p.textContent?.endsWith('...'));
+
+  it('says the model is thinking while it composes, with an ellipsis that moves', async () => {
+    serveProgress({ kind: 'waiting', turnId: '0' });
+    renderPage(LIVE_RUN);
+    await userEvent.click(screen.getByRole('button', { name: /^create-an-expense/ }));
+
+    const line = await waitFor(() => {
+      const found = liveLine();
+      expect(found).toBeDefined();
+      return found!;
+    });
+    expect(line.textContent).toBe('Thinking...');
+    // Three dots, cycling one after the other — and still for a reader who
+    // asked for less motion.
+    const dots = [...line.querySelectorAll('span span')];
+    expect(dots.map((d) => d.textContent)).toEqual(['.', '.', '.']);
+    expect(dots.every((d) => d.className.includes('motion-safe:animate-pulse'))).toBe(true);
+    expect(dots.map((d) => d.className.includes('animation-delay'))).toEqual([false, true, true]);
+  });
+
+  it('never marks a piece of work that has ended', async () => {
+    serveProgress({ kind: 'text', turnId: '0', text: 'Writing the outcome' });
+    renderPage(LIVE_RUN);
+    await userEvent.click(screen.getByRole('button', { name: /^list-expenses/ }));
+    await within(pane()).findByText('S');
+    expect(liveLine()).toBeUndefined();
+    expect(within(pane()).queryByText('Writing the outcome')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// the tree, and what a row is called
+// ---------------------------------------------------------------------------
+
+describe('work under the work that started it', () => {
+  const FLOW = 'flow:create-an-expense-through-the-api:api';
+  const TREE_RUN = {
+    command: 'guard-generate',
+    runId: 'run-tree',
+    gitRef: 'abc1234',
+    startedAt: '2026-09-11T10:00:00.000Z',
+    status: 'running',
+    activityStream: 'ai-sdk-v1',
+    display: {
+      blocks: [
+        {
+          kind: 'checklist',
+          items: [
+            { key: 'author', label: 'Authoring scenarios', status: 'active',
+              sessionKinds: ['guard-generate.flow-worker', 'guard-generate.fidelity'] },
+          ],
+        },
+      ],
+    },
+    sessions: [
+      { sessionId: 'ses-flow', kind: 'guard-generate.flow-worker', workItem: FLOW, title: 'Scenario author',
+        status: 'running', startedAt: '2026-09-11T10:00:10.000Z', spent: { turns: 2, tokens: 20, costUsd: 0 } },
+      { sessionId: 'ses-web', kind: 'guard-generate.flow-worker', workItem: 'flow:list-expenses:web', title: 'Scenario author',
+        status: 'completed', startedAt: '2026-09-11T10:00:10.000Z', endedAt: '2026-09-11T10:00:40.000Z', spent: { turns: 3, tokens: 30, costUsd: 0 } },
+      { sessionId: 'ses-fidelity', kind: 'guard-generate.fidelity', workItem: FLOW, title: 'Fidelity check',
+        parentSessionId: 'ses-flow', status: 'completed', startedAt: '2026-09-11T10:00:20.000Z',
+        endedAt: '2026-09-11T10:00:30.000Z', spent: { turns: 1, tokens: 10, costUsd: 0 } },
+    ],
+  } as unknown as PublicSessionRun;
+
+  /** The lines a row draws to join it to its kin: the trunk on the dot's centre line, the tick into the child. */
+  const branches = (el: HTMLElement) =>
+    [...el.querySelectorAll('span')]
+      .filter((s) => s.className.includes('bg-border') && (s.className.includes('w-px') || s.className.includes('h-px')))
+      .map((s) => s.className);
+
+  it('names a flow by the flow, its surface beside it, and a child by what it is', async () => {
+    serve([]);
+    renderPage(TREE_RUN);
+    await screen.findByRole('heading', { level: 2, name: /Authoring scenarios/ });
+
+    // The work item is not shown as it is stored: the flow alone, with the
+    // surface as a capsule of its own.
+    const parent = screen.getByRole('button', { name: /^create-an-expense-through-the-api/ });
+    expect(within(parent).getByText('api')).toBeInTheDocument();
+    expect(screen.queryByText(FLOW)).toBeNull();
+    expect(within(screen.getByRole('button', { name: /^list-expenses/ })).getByText('web')).toBeInTheDocument();
+
+    // The child does its parent's work item: it says what it is instead, once.
+    const child = screen.getByRole('button', { name: /^Fidelity check/ });
+    expect(child.textContent).toBe('Fidelity check10s');
+    expect(within(child).queryByText('api')).toBeNull();
+  });
+
+  it('draws the child on a branch from the dot of the work that started it', async () => {
+    serve([]);
+    renderPage(TREE_RUN);
+    await screen.findByRole('heading', { level: 2, name: /Authoring scenarios/ });
+
+    // The parent carries the line down from its own dot; the child carries
+    // the rest of it and the tick into its row — and the last child's line
+    // stops at that tick rather than running past it.
+    const parent = screen.getByRole('button', { name: /^create-an-expense-through-the-api/ });
+    const child = screen.getByRole('button', { name: /^Fidelity check/ });
+    const sibling = screen.getByRole('button', { name: /^list-expenses/ });
+    expect(branches(parent)).toEqual([expect.stringContaining('top-[calc(50%+4px)]')]);
+    expect(branches(child)).toEqual([
+      expect.stringContaining('h-1/2'),
+      expect.stringContaining('h-px'),
+    ]);
+    expect(branches(sibling)).toEqual([]);
+  });
 });
 
 describe('the words the page is allowed to use', () => {

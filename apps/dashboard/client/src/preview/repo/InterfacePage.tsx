@@ -9,6 +9,7 @@ import { useGuardInterfaces } from '@/hooks/useGuardInterfaces';
 import type { GuardTabsState } from '@/hooks/useGuardTabs';
 import { placeSelectionForInterface } from '@/lib/interface-pom';
 import type { Repo } from '@/preview/data/types';
+import { flowHref } from '@/preview/pages/flow-hrefs';
 import { interfaceCatalog } from './interface-catalog';
 import { useGuardTabJump } from './tab-jump';
 import { useGuardRefresh } from './use-guard-refresh';
@@ -58,7 +59,7 @@ export function InterfacePage({ repo, interfaceId }: { repo: Repo; interfaceId: 
           }, { replace: true })}
           recipe={flows.view?.recipe ?? null}
           recipeSurface={recipeSurface}
-          onOpenFlow={(id) => navigate(`/preview/repos/${repo.id}/tests/${encodeURIComponent(id)}`)}
+          onOpenFlow={(id) => navigate(flowHref(id, repo.id))}
         />
       </div>
     </div>

@@ -208,7 +208,7 @@ const CATALOG: GuardInterfacesView = {
   interfaces: [
     entry('web/save', 'Save settings', 'web', { at: 'settings-dialog', origin: 'authored',
       steps: [{ kind: 'activate', target: 'Save changes' }], endState: 'saved',
-      scenarioIds: ['settings.web.1'], flows: [{ flowId: 'settings', title: 'Configure settings', realized: true }] }),
+      scenarioIds: ['settings.web.1'], flows: [{ flowId: 'settings', title: 'Configure settings', realized: true, status: 'succeeded' }] }),
     entry('web/edit', 'Edit profile', 'web', { at: 'profile', origin: 'derived',
       steps: [{ kind: 'input', target: 'Display name' }], scenarioIds: ['settings.web.2', 'profile.web.1'] }),
     entry('web/open', 'Open profile', 'web', { origin: 'authored', steps: [{ kind: 'navigate', route: '/profile' }] }),
@@ -254,9 +254,17 @@ describe('the full-page interface catalog', () => {
     await within(table).findByRole('link', { name: 'Profile /profile' });
     await user.type(screen.getByLabelText('Search interfaces'), 'Save changes');
     expect(within(table).getAllByRole('row')).toHaveLength(2);
-    await user.click(screen.getByRole('button', { name: 'derived 4' }));
+    // ONE Add-filter row over both dimensions: pick the dimension, then a
+    // value. The counts are of what the search kept — this screen's two
+    // interfaces, one of each origin — not of the whole catalog.
+    await user.click(screen.getByRole('button', { name: 'Add filter' }));
+    await user.click(screen.getByRole('option', { name: 'Origin 2' }));
+    await user.click(screen.getByRole('option', { name: 'derived 1' }));
     expect(within(table).getByRole('link', { name: 'Profile /profile' })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'authored 2' }));
+    await user.click(screen.getByRole('button', { name: 'Remove Origin derived' }));
+    await user.click(screen.getByRole('button', { name: 'Add filter' }));
+    await user.click(screen.getByRole('option', { name: 'Origin 2' }));
+    await user.click(screen.getByRole('option', { name: 'authored 1' }));
     expect(within(table).getByRole('link', { name: 'Profile /profile' })).toBeInTheDocument();
   });
 
@@ -303,7 +311,9 @@ describe('the full-page interface catalog', () => {
     serve({ interfaces: CATALOG });
     renderAt(`/preview/repos/${REAL.id}/interfaces`);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: 'Web 3' }));
+    await user.click(await screen.findByRole('button', { name: 'Add filter' }));
+    await user.click(screen.getByRole('option', { name: /^Surface / }));
+    await user.click(screen.getByRole('option', { name: 'Web 3' }));
     const table = screen.getByRole('table', { name: 'Interfaces' });
     expect(within(table).getAllByRole('row')).toHaveLength(3);
     expect(within(table).queryByText('Operation')).toBeNull();

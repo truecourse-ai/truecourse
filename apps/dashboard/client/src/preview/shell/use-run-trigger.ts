@@ -1,6 +1,3 @@
-// PREVIEW: REAL — the shell's one way to start an agentic run on a connected
-// repository.
-
 /**
  * Starting a run, and saying so when it cannot start.
  *
@@ -19,11 +16,8 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import type { RunStarter } from '@/components/sessions/run-model';
-import { FIRST_RUN_COMMAND, triggerFor } from '@/preview/data/run-triggers';
+import { triggerFor } from '@/preview/data/run-triggers';
 import { PREVIEW_BASE } from './base';
-
-/** A repository with nothing on it starts with the scan: everything else needs a corpus. */
-const FIRST_OFFER = { command: FIRST_RUN_COMMAND, label: 'Start scan' } as const;
 
 /**
  * The one no-provider error toast, shared by every surface that hits the wall:
@@ -84,7 +78,6 @@ export function useRunTrigger(repoId: string): RunStarter {
       supports: (command: string) => triggerFor(command) !== null,
       start,
       pending,
-      first: FIRST_OFFER,
     }),
     [start, pending],
   );

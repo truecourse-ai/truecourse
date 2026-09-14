@@ -63,6 +63,19 @@ export interface RepoIdentityInput {
 }
 
 export interface RepoIdentity {
+  /**
+   * What this identity names. `repository` (the default, and what every
+   * per-repository scan resolves) is one product; `workspace` is the hosted
+   * Context scan's subject — one curation over several connected repositories'
+   * documentation, where "are we this product?" becomes "are we ANY of these
+   * products?".
+   */
+  scope?: 'repository' | 'workspace';
+  /**
+   * Workspace scope only: the connected repositories, `owner/repo`, as the
+   * IDENTITY block lists them. Empty/absent for a repository identity.
+   */
+  repositories?: string[];
   /** The best single name for the repo's product. */
   name: string;
   /**
@@ -583,10 +596,18 @@ export function stripForNames(text: string): string {
  */
 function canonicalIdentity(id: RepoIdentity): string {
   const aliases = [...new Set(id.aliases.map((a) => a.toLowerCase()))].sort().slice(0, MAX_ALIASES);
-  return JSON.stringify({
+  const base = {
     name: id.name.toLowerCase(),
     description: id.description?.toLowerCase() ?? '',
     aliases,
+  };
+  // A repository identity fingerprints exactly as it always did — adding the
+  // workspace axis must not invalidate every stored per-doc cache entry.
+  if (id.scope !== 'workspace') return JSON.stringify(base);
+  return JSON.stringify({
+    ...base,
+    scope: 'workspace',
+    repositories: [...new Set(id.repositories ?? [])].sort(),
   });
 }
 
@@ -609,6 +630,7 @@ export function identityFingerprint(id: RepoIdentity | null): string {
  */
 export function identityBlock(id: RepoIdentity | null): string {
   if (id === null) return '';
+  if (id.scope === 'workspace') return workspaceIdentityBlock(id);
   const aliases = id.aliases.slice(0, MAX_ALIASES);
   const lines = [
     '--- IDENTITY: the repository being scanned ---',
@@ -624,6 +646,74 @@ export function identityBlock(id: RepoIdentity | null): string {
     '',
   );
   return lines.join('\n');
+}
+
+/**
+ * The workspace flavour of the block: the subject is not ONE product but every
+ * connected repository's, because one curation now spans them all. A document
+ * about ANY of them is ours — the third-party judgment is otherwise the same.
+ */
+function workspaceIdentityBlock(id: RepoIdentity): string {
+  const aliases = id.aliases.slice(0, MAX_ALIASES);
+  const lines = ['--- IDENTITY: the workspace being scanned ---'];
+  if (id.name) lines.push(`This workspace is: ${id.name}`);
+  if (id.description) lines.push(`What it is: ${id.description}`);
+  const repositories = id.repositories ?? [];
+  if (repositories.length > 0) {
+    lines.push('Its products are the repositories it has connected:');
+    for (const repo of repositories) lines.push(`  - ${repo}`);
+  }
+  if (aliases.length > 0) lines.push(`Also written as: ${aliases.join(', ')}`);
+  lines.push(
+    'Attribute every document against these. A doc describing ANY of these products',
+    '— its API, UI, data, or behavior — is OURS, however much it reads like public',
+    'vendor documentation. A doc describing any OTHER product is not ours.',
+    '--- end identity ---',
+    '',
+  );
+  return lines.join('\n');
+}
+
+/**
+ * The identity of a WORKSPACE: what its connected repositories are, and the
+ * names their documents may call them. Every name comes from a repository the
+ * workspace really connected (`owner/repo` resolved exactly as the
+ * per-repository scan resolves it) — nothing here is inferred about the
+ * workspace beyond the `name` a caller passes in.
+ *
+ * Returns null when the workspace has no name and no repositories: there is
+ * then nothing to attribute against, and the curator judges content alone.
+ */
+export function resolveWorkspaceIdentity(input: {
+  /** The workspace's own name, when the server knows one. */
+  name?: string;
+  /** Every connected repository, `owner/repo`. */
+  repositories: readonly string[];
+  /** The workspace's documents, for corpus name-frequency expansion. */
+  docs?: DocCandidate[];
+}): RepoIdentity | null {
+  const repositories = [...new Set(input.repositories.map((r) => r.trim()).filter(Boolean))].sort();
+  const name = input.name?.trim() ?? '';
+  if (!name && repositories.length === 0) return null;
+
+  const perRepo = repositories.map((repoFullName) =>
+    resolveRepoIdentity({ repoFullName, ...(input.docs ? { docs: input.docs } : {}) }),
+  );
+  const aliases = dedupeAliases(perRepo.flatMap((id) => id?.aliases ?? [])).filter(
+    (a) => a.length >= MIN_MATCHABLE_ALIAS,
+  );
+  // With no workspace name given, the one repository's own product name is the
+  // best HONEST name; several repositories have no single name, so the block
+  // simply lists them.
+  const resolvedName =
+    name || (repositories.length === 1 ? (perRepo[0]?.name ?? repositories[0]) : '');
+  return {
+    scope: 'workspace',
+    repositories,
+    name: resolvedName,
+    aliases: aliases.slice(0, MAX_ALIASES),
+    sources: ['workspace'],
+  };
 }
 
 // ---------------------------------------------------------------------------

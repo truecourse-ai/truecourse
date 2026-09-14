@@ -13,7 +13,7 @@ import type {
   AuthUser,
   SeverityCounts,
   SsoStatusResponse,
-  WorkspaceMembersResponse,
+  EeWorkspaceMembersResponse,
   WorkspaceOverviewResponse,
   WorkspaceSettingsResponse,
 } from '@truecourse/shared';
@@ -177,13 +177,13 @@ export function createWorkspaceRouter(
   router.get('/members', async (req, res) => {
     const organizationId = orgIdOf(req);
     if (!organizationId) {
-      const empty: WorkspaceMembersResponse = { members: [] };
+      const empty: EeWorkspaceMembersResponse = { members: [] };
       res.json(empty);
       return;
     }
     try {
       const list = await workos.userManagement.listUsers({ organizationId });
-      const body: WorkspaceMembersResponse = {
+      const body: EeWorkspaceMembersResponse = {
         members: list.data.map((u) => ({
           id: u.id,
           email: u.email,

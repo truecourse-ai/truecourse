@@ -9,7 +9,8 @@
  *
  * `NotificationStore` is the durable feed (the `notifications` row) shown in the
  * bell + notifications page — the source of truth for history (SSE is only live
- * push). Both are constructed directly by the jobs runner.
+ * push). A job holds ONE row there: the row it posts when it begins is the row
+ * `moveStarted` settles. Both are constructed directly by the jobs runner.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -486,6 +487,45 @@ export class NotificationStore {
       })
       .returning();
     return toNotificationView(row);
+  }
+
+  /**
+   * Move the row a job posted when it began onto how it settled — the same row,
+   * now carrying the settlement's level, wording, merged payload and time, so
+   * the feed shows one entry per job rather than a Started stranded beside a
+   * Done. Null when the job posted no started row: the caller inserts instead.
+   */
+  async moveStarted(input: {
+    org: string;
+    jobId: string;
+    kind: string;
+    level: NotificationLevel;
+    title: string;
+    body?: string | null;
+    data?: Record<string, unknown> | null;
+  }): Promise<NotificationView | null> {
+    const [row] = await this.db
+      .update(notifications)
+      .set({
+        kind: input.kind,
+        level: input.level,
+        title: input.title,
+        body: input.body ?? null,
+        data: sql`coalesce(${notifications.data}, '{}'::jsonb) || ${JSON.stringify(input.data ?? {})}::jsonb`,
+        // The feed is newest first and the settlement is news: the row is as
+        // new, and as unread, as what it now carries.
+        createdAt: new Date().toISOString(),
+        readAt: null,
+      })
+      .where(
+        and(
+          eq(notifications.workspaceOrgId, input.org),
+          eq(notifications.level, 'started'),
+          sql`${notifications.data}->>'jobId' = ${input.jobId}`,
+        ),
+      )
+      .returning();
+    return row ? toNotificationView(row) : null;
   }
 
   async listForOrg(org: string, opts: { limit?: number } = {}): Promise<NotificationView[]> {

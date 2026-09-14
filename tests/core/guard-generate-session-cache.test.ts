@@ -113,12 +113,12 @@ describe('the extract seam’s cache', () => {
       await callTool(call, 'check_claims', EXTRACT_DRAFT)
       return outcome(EXTRACT_DRAFT)
     }
-    await createGuardGenerateSessionSeams({ repoRoot: r }).extractSession({ docs: [doc] })
+    await createGuardGenerateSessionSeams({ repoRoot: r }).extractSession({ docs: [doc], prerequisiteTargets: [] })
     const before = constructions
     sessionScript = () => { throw new Error('completed extraction must not run again') }
     const resumed = createGuardGenerateSessionSeams({ repoRoot: r, replaySteps: ['extract', 'flows'] })
-    expect((await resumed.extractSession({ docs: [doc] })).summary).toMatchObject({ ran: 0, fromCache: 1 })
-    await expect(resumed.extractSession({ docs: [{ ...doc, content: `${doc.content}\nNew requirement` }] }))
+    expect((await resumed.extractSession({ docs: [doc], prerequisiteTargets: [] })).summary).toMatchObject({ ran: 0, fromCache: 1 })
+    await expect(resumed.extractSession({ docs: [{ ...doc, content: `${doc.content}\nNew requirement` }], prerequisiteTargets: [] }))
       .rejects.toMatchObject({ name: 'GenerateStepNotReadyError', step: 'extract' })
     expect(constructions).toBe(before)
   })
@@ -133,7 +133,7 @@ describe('the extract seam’s cache', () => {
       return outcome(EXTRACT_DRAFT)
     }
 
-    const first = await createGuardGenerateSessionSeams({ repoRoot: r }).extractSession({ docs: [doc] })
+    const first = await createGuardGenerateSessionSeams({ repoRoot: r }).extractSession({ docs: [doc], prerequisiteTargets: [] })
     expect(first.summary).toMatchObject({ ran: 1, fromCache: 0, failed: 0 })
     expect(ran).toBe(1)
     expect(constructions).toBe(1)
@@ -141,7 +141,7 @@ describe('the extract seam’s cache', () => {
     expect(await getCacheEntry(r, EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey(doc))).toEqual(EXTRACT_DRAFT)
 
     const seams = createGuardGenerateSessionSeams({ repoRoot: r })
-    const second = await seams.extractSession({ docs: [doc] })
+    const second = await seams.extractSession({ docs: [doc], prerequisiteTargets: [] })
     expect(second.summary).toMatchObject({ ran: 0, fromCache: 1, failed: 0 })
     expect(ran).toBe(1)
     // A fully-cached run builds NO driver and opens NO sessions-store run.
@@ -157,7 +157,7 @@ describe('the extract seam’s cache', () => {
       return outcome(EXTRACT_DRAFT)
     }
     const seams = createGuardGenerateSessionSeams({ repoRoot: r })
-    await seams.extractSession({ docs: [doc] })
+    await seams.extractSession({ docs: [doc], prerequisiteTargets: [] })
     const runId = seams.runId()
     expect(runId).toBeTruthy()
     expect(fs.existsSync(path.join(r, '.truecourse', 'sessions', 'guard-generate', runId!, 'run.json'))).toBe(true)
@@ -182,7 +182,7 @@ describe('the extract seam’s cache', () => {
       repoRoot: r,
       driver: async () => ({ driver, persistence }),
     })
-    const { byDoc, summary } = await seams.extractSession({ docs: [doc] })
+    const { byDoc, summary } = await seams.extractSession({ docs: [doc], prerequisiteTargets: [] })
 
     expect(summary).toMatchObject({ ran: 1, fromCache: 0, failed: 0 })
     expect(byDoc.get(doc.doc)?.ok).toBe(true)
@@ -203,7 +203,7 @@ describe('the extract seam’s cache', () => {
       return transportFailure
     }
 
-    const first = await createGuardGenerateSessionSeams({ repoRoot: r }).extractSession({ docs: [doc] })
+    const first = await createGuardGenerateSessionSeams({ repoRoot: r }).extractSession({ docs: [doc], prerequisiteTargets: [] })
     expect(first.summary).toMatchObject({ ran: 1, failed: 1, allTransport: true })
     expect(first.byDoc.get(doc.doc)).toEqual({
       ok: false,
@@ -211,7 +211,7 @@ describe('the extract seam’s cache', () => {
     })
     expect(await getCacheEntry(r, EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey(doc))).toBeNull()
 
-    await createGuardGenerateSessionSeams({ repoRoot: r }).extractSession({ docs: [doc] })
+    await createGuardGenerateSessionSeams({ repoRoot: r }).extractSession({ docs: [doc], prerequisiteTargets: [] })
     expect(ran).toBe(2)
   })
 })

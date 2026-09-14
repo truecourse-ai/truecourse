@@ -1,9 +1,10 @@
 /**
- * The Tests and Runs tabs of a CONNECTED repository read the server, not the
- * fixtures: Tests lists the flows generate stored and opens one as its own
- * page; Runs lists every stored run — the baseline runs and the pull-request
- * head runs the gate wrote — opens one as its own page, and re-reads itself
- * when a run of the repository lands on the socket.
+ * The Runs tab of a CONNECTED repository reads the server, not the fixtures: it
+ * lists every stored run — the baseline runs and the pull-request head runs the
+ * gate wrote — opens one as its own page, and re-reads itself when a run of the
+ * repository lands on the socket. Starting this repository's work is the
+ * Pipeline tab's (see preview-pipeline-tab.test.tsx); the Runs header keeps its
+ * search only.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -40,6 +41,7 @@ vi.mock('@/lib/socket', () => {
 });
 
 import PreviewApp from '@/preview/PreviewApp';
+import type { JobView } from '@truecourse/shared';
 
 function fireSocket(event: string, payload: unknown): void {
   for (const fn of listeners.get(event) ?? []) fn(payload);
@@ -121,8 +123,29 @@ const HEAD_RUN = {
   runFlows: [],
 };
 
+/**
+ * A job of the workspace, as `GET /api/jobs?active=1` hands it over. `key` is
+ * the server's own (`<type>:<owner/repo>`), which is how a job names the
+ * repository it runs for.
+ */
+function job(over: Partial<JobView> & Pick<JobView, 'type'>): JobView {
+  return {
+    id: over.type,
+    workspaceOrgId: 'org_1',
+    key: `${over.type}:${REAL.name}`,
+    status: 'running',
+    progress: { current: 0, total: 0, message: null },
+    result: null,
+    error: null,
+    createdAt: '2026-09-03T10:59:00Z',
+    startedAt: '2026-09-03T11:00:00Z',
+    finishedAt: null,
+    ...over,
+  };
+}
+
 /** One connected repository and what its server answers. */
-function serve(options: { flows?: unknown; history?: unknown } = {}) {
+function serve(options: { flows?: unknown; history?: unknown; jobs?: JobView[] } = {}) {
   const calls: string[] = [];
   window.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
@@ -131,6 +154,7 @@ function serve(options: { flows?: unknown; history?: unknown } = {}) {
     calls.push(method === 'GET' ? `${url.pathname}${url.search}` : `${method} ${url.pathname}`);
     const rest = url.pathname.replace(`/api/repos/${REAL.id}/`, '');
     if (url.pathname === '/api/repos') return json([REAL]);
+    if (url.pathname === '/api/jobs') return json({ jobs: options.jobs ?? [] });
     if (url.pathname === '/api/llm/config') return json({ config: { provider: 'anthropic' }, providers: ['anthropic'] });
     if (rest === 'sessions/runs') return json({ runs: [] });
     if (rest === 'guard/generate' && method === 'POST') return json({ jobId: 'generation-retry' }, 202);
@@ -168,45 +192,6 @@ afterEach(() => {
   window.fetch = realFetch;
 });
 
-describe('the Tests tab of a connected repository', () => {
-  it.each([FLOWS, { recipe: null, flows: [] }])('always offers manual generation regardless of the existing test inventory', async (flows) => {
-    const calls = serve({ flows });
-    renderAt(`/preview/repos/${REAL.id}/tests`);
-    const generate = await screen.findByRole('button', { name: 'Generate tests' });
-    await waitFor(() => expect(generate).toBeEnabled());
-    await userEvent.click(generate);
-    await waitFor(() => expect(calls).toContain(`POST /api/repos/${REAL.id}/guard/generate`));
-    expect(calls.some((call) => call.includes('/api/ee/'))).toBe(false);
-    expect(screen.getByRole('link', { name: 'Open Agent' })).toHaveAttribute('href', `/preview/agent?repo=${REAL.id}`);
-  });
-
-  it('lists the stored flows and opens one as its own page', async () => {
-    const calls = serve();
-    renderAt(`/preview/repos/${REAL.id}/tests`);
-    const user = userEvent.setup();
-
-    const table = await screen.findByRole('table', { name: 'Tests' });
-    const row = await within(table).findByText('Writes a file and reads it back');
-    expect(within(table).getByText('CLI')).toBeInTheDocument();
-    expect(calls).toContain(`/api/repos/${REAL.id}/guard/flows`);
-
-    await user.click(row);
-    // The page heads itself with the flow's title, under its own breadcrumb
-    // back to Tests (the console's breadcrumb, to the workspace, is the other).
-    await screen.findByRole('heading', { name: 'Writes a file and reads it back' });
-    const crumbs = screen.getAllByRole('navigation', { name: 'Breadcrumb' }).at(-1)!;
-    expect(within(crumbs).getByRole('link', { name: 'Tests' })).toBeInTheDocument();
-  });
-
-  it('says nothing is generated yet, rather than "no match", when the inventory is empty', async () => {
-    serve({ flows: { recipe: null, flows: [] } });
-    renderAt(`/preview/repos/${REAL.id}/tests`);
-
-    await screen.findByText(/No tests generated yet\./);
-    expect(screen.queryByText('No test matches.')).toBeNull();
-  });
-});
-
 describe('the Runs tab of a connected repository', () => {
   it('shows a short commit while preserving the full hash for hover and search', async () => {
     const commit = '3ec877a68bc423373220f9ee2fda3d93ba368680';
@@ -238,6 +223,38 @@ describe('the Runs tab of a connected repository', () => {
     expect(within(table).queryByRole('columnheader', { name: 'Coverage' })).toBeNull();
   });
 
+  it('tallies the runs it shows by verdict, and never beside the title', async () => {
+    serve();
+    renderAt(`/preview/repos/${REAL.id}/runs`);
+    const user = userEvent.setup();
+    const table = await screen.findByRole('table', { name: 'Runs' });
+    await within(table).findByText('f00d123');
+
+    const tally = () => screen.getByRole('group', { name: 'Runs tally' });
+    expect(tally().textContent).toBe('2 Failed2 total');
+    // The number lives at the bottom, once: the header carries the name alone.
+    expect(screen.getByRole('heading', { name: 'Runs' }).parentElement!.textContent).toBe('Runs');
+
+    // Narrowed, it also says what it was cut from, so the reader sees the rest.
+    await user.type(screen.getByRole('textbox', { name: 'Search runs' }), 'f00d123');
+    await waitFor(() => expect(tally().textContent).toBe('1 Failed1 of 2'));
+  });
+
+  it('is a full-width search over an opaque sticky head, and no filter row', async () => {
+    serve();
+    renderAt(`/preview/repos/${REAL.id}/runs`);
+
+    const table = await screen.findByRole('table', { name: 'Runs' });
+    // The search box is the whole toolbar: Origin is a column, and one
+    // dimension does not earn a filter row.
+    expect(screen.getByRole('textbox', { name: 'Search runs' }).className).toContain('w-full');
+    expect(screen.queryByRole('group', { name: /^Filter/ })).toBeNull();
+    // The head sticks, so the rows scrolling under it must be hidden.
+    const head = within(table).getAllByRole('columnheader')[0]!.closest('thead')!;
+    expect(head.className).toContain('sticky');
+    expect(head.className).toContain('bg-card');
+  });
+
   it('opens a run as its own page, reading exactly that run', async () => {
     const calls = serve();
     renderAt(`/preview/repos/${REAL.id}/runs/r-head7`);
@@ -248,6 +265,73 @@ describe('the Runs tab of a connected repository', () => {
     await screen.findByText('Writes a file and reads it back');
     expect(calls).toContain(`/api/repos/${REAL.id}/guard/runs/r-head7`);
     expect(screen.queryByText('No such run')).toBeNull();
+  });
+
+  it('leads with the run in flight, on the branch the header names, saying its step', async () => {
+    serve({
+      jobs: [
+        job({
+          type: 'repo.guard-run',
+          progress: {
+            current: 1,
+            total: 3,
+            message: null,
+            steps: [
+              { key: 'clone', label: 'Cloning the repository', status: 'done' },
+              { key: 'run', label: 'Running the scenarios', status: 'active' },
+            ],
+          },
+        }),
+      ],
+    });
+    renderAt(`/preview/repos/${REAL.id}/runs`);
+
+    const table = await screen.findByRole('table', { name: 'Runs' });
+    await within(table).findByText('Running');
+    const rows = within(table).getAllByRole('row').slice(1);
+    // First row, above every stored run.
+    expect(rows).toHaveLength(3);
+    const flight = rows[0]!;
+    expect(within(flight).getByText('main')).toBeInTheDocument();
+    expect(within(flight).getByText('hosted')).toBeInTheDocument();
+    expect(within(flight).getByText('Running the scenarios')).toBeInTheDocument();
+    // It has no run page yet, so it is not a door.
+    expect(flight.className).not.toContain('cursor-pointer');
+  });
+
+  it('says a run waiting its turn is queued, and what it waits for', async () => {
+    serve({
+      jobs: [
+        job({
+          id: 'holding',
+          type: 'repo.guard-generate',
+          key: 'repo.guard-generate:spiderhands/expense-tracker',
+        }),
+        job({ type: 'repo.guard-run', status: 'queued', startedAt: null }),
+      ],
+    });
+    renderAt(`/preview/repos/${REAL.id}/runs`);
+
+    const table = await screen.findByRole('table', { name: 'Runs' });
+    const flight = (await within(table).findByText('Queued')).closest('tr')!;
+    expect(
+      within(flight).getByText('waiting for Flow generation on spiderhands/expense-tracker'),
+    ).toBeInTheDocument();
+  });
+
+  it('steps aside for the stored run the moment it lands: never two rows for one run', async () => {
+    serve({
+      history: {
+        runs: [{ ...HISTORY.runs[0], ranAt: '2026-09-03T11:04:00.000Z' }],
+      },
+      jobs: [job({ type: 'repo.guard-run' })],
+    });
+    renderAt(`/preview/repos/${REAL.id}/runs`);
+
+    const table = await screen.findByRole('table', { name: 'Runs' });
+    await within(table).findByText('a1b2c3d');
+    expect(within(table).getAllByRole('row').slice(1)).toHaveLength(1);
+    expect(within(table).queryByText('Running')).toBeNull();
   });
 
   it('re-reads the list when a run of the repository lands on the socket', async () => {

@@ -174,4 +174,75 @@ describe('NotificationStore', () => {
     expect(reloaded?.level).toBe('success');
     expect(reloaded?.body).toBe('Synced 4 documents.');
   });
+
+  it('moves a job’s started row onto how it settled, keeping the payload it had', async () => {
+    const store = new NotificationStore(db);
+
+    const started = await store.add({
+      org: 'org_A',
+      kind: 'repo.guard-setup',
+      level: 'started',
+      title: 'Flow setup started',
+      data: { jobId: 'job-1', repoFullName: 'acme/widgets', runId: 'run-1' },
+    });
+    const older = await store.add({
+      org: 'org_A',
+      kind: 'context.sync',
+      level: 'success',
+      title: 'Source synced',
+      data: { jobId: 'job-0' },
+    });
+
+    // The row takes the time it settled, so the feed's order is real time, not
+    // insertion order: the two rows above must be measurably older than that.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    // Read while it was only started: the settlement is news, so it comes back unread.
+    await store.markRead('org_A', [started.id]);
+
+    const moved = await store.moveStarted({
+      org: 'org_A',
+      jobId: 'job-1',
+      kind: 'repo.guard-setup',
+      level: 'success',
+      title: 'Flow setup complete',
+      body: 'The recipe and its dependencies are ready.',
+      data: { jobId: 'job-1', repoFullName: 'acme/widgets' },
+    });
+
+    expect(moved).toMatchObject({
+      id: started.id,
+      level: 'success',
+      title: 'Flow setup complete',
+      body: 'The recipe and its dependencies are ready.',
+      readAt: null,
+    });
+    // The settlement's payload folds onto the started row's: the run it opened
+    // is still the row's address.
+    expect(moved?.data).toEqual({ jobId: 'job-1', repoFullName: 'acme/widgets', runId: 'run-1' });
+
+    // ONE row, and it is the newest: the feed shows the job where it now stands.
+    const list = await store.listForOrg('org_A');
+    expect(list.map((n) => n.id)).toEqual([started.id, older.id]);
+  });
+
+  it('moves nothing for a job that posted no started row, or another org’s', async () => {
+    const store = new NotificationStore(db);
+    await store.add({
+      org: 'org_A',
+      kind: 'context.scan',
+      level: 'started',
+      title: 'Document scan started',
+      data: { jobId: 'job-2' },
+    });
+
+    const settle = {
+      kind: 'context.scan',
+      level: 'success' as const,
+      title: 'Documents scanned',
+      data: { jobId: 'job-2' },
+    };
+    expect(await store.moveStarted({ org: 'org_B', jobId: 'job-2', ...settle })).toBeNull();
+    expect(await store.moveStarted({ org: 'org_A', jobId: 'job-3', ...settle })).toBeNull();
+    expect((await store.listForOrg('org_A')).map((n) => n.level)).toEqual(['started']);
+  });
 });

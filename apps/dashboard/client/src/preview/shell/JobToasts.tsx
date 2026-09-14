@@ -5,9 +5,7 @@
  * counter, no bar. Progress lives in one place, the conversation, and the
  * toast only says where to look. Renders nothing itself.
  *
- * Both kinds of job pass through here. A REAL run carries its conversation's
- * address; a fixture job has none and opens the Agent page narrowed to the
- * repository it names.
+ * Every job here is a run: the toast carries that run's conversation address.
  *
  * A real run that FAILS announces the same way, once, on the transition — with
  * the run's own reason and a link to the run itself. Both announcements are
@@ -21,17 +19,14 @@ import { ArrowUpRight, X } from 'lucide-react';
 import type { JobChain } from '@/preview/data/types';
 import type { RunFailure } from './real-runs';
 import { usePreviewState } from './preview-state';
-import { PREVIEW_BASE } from './PreviewShell';
-
-const slugOf = (fullName: string): string => fullName.split('/').slice(-1)[0] ?? fullName;
 
 export function JobToasts() {
   const { jobs, jobsReady, runFailures } = usePreviewState();
   const navigate = useNavigate();
   // Only jobs that START while the page is open announce (e.g. a repository
-  // just connected). Jobs already in flight on arrival — fixtures seeded into
-  // initial state, or a run resumed after a reload — stay silent: the user
-  // didn't just start them, and every sign-in reloads the page.
+  // just connected). Jobs already in flight on arrival — a run resumed after a
+  // reload — stay silent: the user didn't just start them, and every sign-in
+  // reloads the page.
   const announced = useRef<Set<string> | null>(null);
   // The same rule for failures: a run that was already failed when the page
   // loaded is history, not news.
@@ -52,8 +47,8 @@ export function JobToasts() {
 
   useEffect(() => {
     // The "already in flight on arrival" snapshot is only honest once the
-    // async real-run reads are in — seeded any earlier it would hold just the
-    // fixtures, and a scan resumed across a reload would announce itself.
+    // async run reads are in — taken any earlier it would be empty, and a scan
+    // resumed across a reload would announce itself.
     if (!jobsReady) return;
     if (announced.current === null) {
       announced.current = new Set(jobs.map((job) => job.id));
@@ -62,10 +57,7 @@ export function JobToasts() {
     for (const job of jobs) {
       if (announced.current.has(job.id)) continue;
       announced.current.add(job.id);
-      // A real run carries its conversation's address; a fixture derives a
-      // repository-narrowed one.
-      const to = job.href ?? `${PREVIEW_BASE}/agent?repo=${encodeURIComponent(slugOf(job.repoFullName))}`;
-      announceJob(job, () => navigate(to));
+      announceJob(job, () => navigate(job.href));
     }
   }, [jobs, jobsReady, navigate]);
 

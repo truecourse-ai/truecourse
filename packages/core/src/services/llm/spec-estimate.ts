@@ -678,7 +678,7 @@ async function planGuardSessionStages(repoRoot: string, plan: GuardWorkPlan): Pr
     );
     if (!cached) {
       extractItems++;
-      missBriefingChars.push(extractSessionBriefing(doc).length);
+      missBriefingChars.push(extractSessionBriefing(doc, prerequisites.targets).length);
       inventoryKnown = false;
       continue;
     }

@@ -1,5 +1,5 @@
 /**
- * A run that ended badly, told in the three places a user could be standing.
+ * A run that ended badly, told in the two places a user could be standing.
  *
  * The run record carries its own reason, and that reason beats every derived
  * sentence: the conversation opens with it rather than with how far the
@@ -45,7 +45,7 @@ vi.mock('@/lib/socket', () => {
 });
 
 import PreviewApp from '@/preview/PreviewApp';
-import { toFailure, toNotifications } from '@/preview/shell/real-runs';
+import { toFailure } from '@/preview/shell/real-runs';
 import type { PublicSessionRun } from '@/lib/api';
 
 if (!Element.prototype.scrollTo) {
@@ -218,7 +218,7 @@ describe('the Agent index', () => {
 describe('the failure toast', () => {
   it('fires once when a watched run dies, and carries the reason', async () => {
     const state = serve([scan()]);
-    renderAt('/preview');
+    renderAt('/preview/code');
 
     // The world is loaded and the scan is up; NOW it dies.
     await screen.findByText('linkwarden/linkwarden');
@@ -240,23 +240,11 @@ describe('the failure toast', () => {
 
   it('stays silent for a run that was already dead when the page loaded', async () => {
     serve([failed()]);
-    renderAt('/preview');
+    renderAt('/preview/code');
 
     await screen.findByText('linkwarden/linkwarden');
     // The row knows; the shell does not shout about it.
     await waitFor(() => expect(screen.queryByRole('button', { name: /Open conversation/ })).toBeNull());
     expect(screen.queryByText('Document scan failed on linkwarden/linkwarden')).toBeNull();
-  });
-
-  it('files the failure in the feed as well, still holding the reason', async () => {
-    serve([failed()]);
-    renderAt('/preview/notifications');
-
-    expect(await screen.findByText('Document scan failed on linkwarden/linkwarden')).toBeInTheDocument();
-    // The feed row shows the title only, so the reason is asserted on the
-    // notification itself: it is what a reader searches and what the bell body
-    // renders.
-    const settled = toNotifications({ id: REAL.id, fullName: REAL.name }, failed(), Date.now()).at(-1);
-    expect(settled?.body).toBe(REASON);
   });
 });

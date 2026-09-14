@@ -63,6 +63,9 @@ export interface AnalysisStep {
    * computation.
    */
   facts?: string[];
+  /** When the step became active, and when it reached done or error. */
+  startedAt?: string;
+  endedAt?: string;
 }
 
 export interface AnalysisProgressPayload {
@@ -163,6 +166,12 @@ export class StepTracker {
     const step = this.steps.find((s) => s.key === key);
     if (step) {
       step.status = status;
+      // The step's own clock. A step that goes straight to done (nothing to do,
+      // a cache answered) still has a start: the moment it settled.
+      const at = new Date().toISOString();
+      if (status !== 'pending') step.startedAt ??= at;
+      if (status === 'done' || status === 'error') step.endedAt = at;
+      else delete step.endedAt;
       if (detail !== undefined) step.detail = detail;
       this.emit();
     }

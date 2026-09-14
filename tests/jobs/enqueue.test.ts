@@ -3,6 +3,11 @@
  * whatever the caller's payload carried. A chain built from the settling job's
  * own payload forwards THAT job's id; the new row's id must still win, or the
  * task finds a settled row and skips the body it was queued for.
+ *
+ * And an enqueue can name a QUEUE — graphile runs everything in one queue name
+ * one at a time — which is how the heavy repository jobs are rationed per
+ * workspace. What is pinned here is that the name reaches graphile, and that a
+ * caller who names none still enqueues an unqueued job.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
@@ -11,7 +16,13 @@ import { migrate } from 'drizzle-orm/pglite/migrator';
 import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import type { Runner } from 'graphile-worker';
 import { JobStore, NotificationStore } from '@truecourse/data-store';
-import { createJobs, registerJob, type JobDefinition, type JobRuntime } from '@truecourse/jobs';
+import {
+  createJobs,
+  registerJob,
+  type JobDefinition,
+  type JobRuntime,
+  type Jobs,
+} from '@truecourse/jobs';
 
 const ORG = 'org_A';
 type Payload = { jobId: string; repo: string };
@@ -81,6 +92,91 @@ describe('singleFlightEnqueue', () => {
     expect(jobId).not.toBe(earlier.id);
     expect(seen).toEqual([jobId]);
     expect((await rt.jobStore.get(jobId as string))?.status).toBe('succeeded');
+    await jobs.stop();
+  });
+});
+
+describe('the queued row on the stream', () => {
+  it('is announced the moment it is enqueued, wearing the task\u2019s title', async () => {
+    const heard: { orgId: string; event: { type: string; job?: { id: string; status: string; title?: string } } }[] = [];
+    await client.listen('tc_events', (payload) => {
+      heard.push(JSON.parse(payload));
+    });
+    const def: JobDefinition<Payload> = {
+      type: 'test.job',
+      title: 'Test work',
+      steps: [],
+      org: () => ORG,
+      async run() {
+        return { result: null, notification: null };
+      },
+      onError: () => ({ level: 'error', title: 'failed', body: '' }),
+    };
+    const fakeRunner = { addJob: async () => {}, stop: async () => {} } as unknown as Runner;
+    const jobs = createJobs({
+      db,
+      connectionString: 'postgres://unused',
+      tasks: [def],
+      hub: { start: async () => {}, stop: async () => {}, subscribe: () => () => {} },
+      startWorker: async () => fakeRunner,
+    });
+    await jobs.start();
+
+    const jobId = await jobs.singleFlightEnqueue('test.job', ORG, 'test.job:r', { repo: 'acme/widgets' });
+
+    // A waiting job is visible from this frame, before anything runs it.
+    expect(heard).toHaveLength(1);
+    expect(heard[0]).toMatchObject({
+      orgId: ORG,
+      event: { type: 'job.progress', job: { id: jobId, status: 'queued', title: 'Test work' } },
+    });
+    await jobs.stop();
+  });
+});
+
+describe('the queue name', () => {
+  /** A runner that records the spec each enqueue reached graphile with. */
+  async function jobsRecording(): Promise<{
+    jobs: Jobs;
+    specs: { name: string; spec: Record<string, unknown> }[];
+  }> {
+    const specs: { name: string; spec: Record<string, unknown> }[] = [];
+    const fakeRunner = {
+      addJob: async (name: string, _payload: unknown, spec: Record<string, unknown>) => {
+        specs.push({ name, spec });
+      },
+      stop: async () => {},
+    } as unknown as Runner;
+    const jobs = createJobs({
+      db,
+      connectionString: 'postgres://unused',
+      tasks: [],
+      hub: { start: async () => {}, stop: async () => {}, subscribe: () => () => {} },
+      startWorker: async () => fakeRunner,
+    });
+    await jobs.start();
+    return { jobs, specs };
+  }
+
+  it('rides the enqueue into graphile, where it serializes the queue', async () => {
+    const { jobs, specs } = await jobsRecording();
+
+    await jobs.singleFlightEnqueue('test.job', ORG, 'test.job:a', { repo: 'a' }, { queue: `heavy:${ORG}` });
+    await jobs.addJob('test.job', { jobId: 'x' }, 'test.job:b', { queue: `heavy:${ORG}` });
+
+    expect(specs.map((s) => s.spec)).toEqual([
+      { jobKey: 'test.job:a', maxAttempts: 1, queueName: `heavy:${ORG}` },
+      { jobKey: 'test.job:b', maxAttempts: 1, queueName: `heavy:${ORG}` },
+    ]);
+    await jobs.stop();
+  });
+
+  it('is absent when the caller names none, so the job runs unqueued', async () => {
+    const { jobs, specs } = await jobsRecording();
+
+    await jobs.singleFlightEnqueue('test.job', ORG, 'test.job:a', { repo: 'a' });
+
+    expect(specs[0]?.spec).toEqual({ jobKey: 'test.job:a', maxAttempts: 1 });
     await jobs.stop();
   });
 });

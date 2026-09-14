@@ -219,7 +219,12 @@ export function FindingResolveProvider({
   active,
   children,
 }: {
-  repoId: string;
+  /**
+   * The repository whose corpus the finding is about, or NULL for a run of the
+   * workspace (a Document scan): its corpus and its decisions are the
+   * workspace's, settled once for every repository that reads the documents.
+   */
+  repoId: string | null;
   active: boolean;
   children: ReactNode;
 }) {
@@ -228,8 +233,7 @@ export function FindingResolveProvider({
   useEffect(() => {
     if (!active || resolutions !== null) return;
     let cancelled = false;
-    api
-      .getSpecCorpus(repoId)
+    (repoId ? api.getSpecCorpus(repoId) : api.getContextCorpus())
       .then((res) => {
         if (cancelled) return;
         setResolutions(res?.conflictResolutions ?? []);
@@ -260,16 +264,24 @@ export function FindingResolveProvider({
   const resolveCtx: FindingResolveCtx = {
     resolutions,
     resolve: async (d, verdict) =>
-      applyAck(await api.postSpecConflictResolution(repoId, { ...d, verdict })),
-    undo: async (d) =>
       applyAck(
-        await api.deleteSpecConflictResolution(repoId, {
-          docA: d.docA,
-          anchorA: d.anchorA,
-          docB: d.docB,
-          anchorB: d.anchorB,
-        }),
+        repoId
+          ? await api.postSpecConflictResolution(repoId, { ...d, verdict })
+          : await api.postContextConflictResolution({ ...d, verdict }),
       ),
+    undo: async (d) => {
+      const dispute = {
+        docA: d.docA,
+        anchorA: d.anchorA,
+        docB: d.docB,
+        anchorB: d.anchorB,
+      };
+      applyAck(
+        repoId
+          ? await api.deleteSpecConflictResolution(repoId, dispute)
+          : await api.deleteContextConflictResolution(dispute),
+      );
+    },
     // Link the dispute's EXACT Coverage record: match against the same derived
     // conflicts list that page renders (a hand-minted pair-form id would land
     // on the pair's FIRST dispute, which can be a sibling without the review).

@@ -198,8 +198,38 @@ async function runClaudeAgentSession(
     raws: SdkAssistantMessage[];
   }
   let pendingTurn: PendingTurn | undefined;
+  // The turn as it is being written, block by block: prose and thinking as
+  // they stream, a tool call from the moment the model starts composing it.
+  type ProseBlock = { kind: 'text' | 'thinking'; text: string };
+  type ProgressBlock = ProseBlock | { kind: 'tool'; toolCallId: string; toolName: string };
   let progressTurnId: string | undefined;
-  const progressBlocks = new Map<number, string>();
+  const progressBlocks = new Map<number, ProgressBlock>();
+  const reportProse = (turnId: string, kind: ProseBlock['kind']): void => {
+    const text = [...progressBlocks]
+      .filter((entry): entry is [number, ProseBlock] => entry[1].kind === kind)
+      .sort(([a], [b]) => a - b)
+      .map(([, block]) => block.text)
+      .join('\n');
+    input.onProgress?.({ kind, turnId, text });
+  };
+  // The model holds the context and has streamed nothing yet. The turn it is
+  // about to write has no provider id until it starts, so a wait names it by
+  // its ordinal in the session.
+  let turnsSeen = 0;
+  const reportWaiting = (): void => {
+    input.onProgress?.({ kind: 'waiting', turnId: String(turnsSeen) });
+  };
+  const reportCall = (index: number): void => {
+    const block = progressBlocks.get(index);
+    if (block?.kind !== 'tool') return;
+    input.onProgress?.({
+      kind: 'tool',
+      toolCallId: block.toolCallId,
+      toolName: block.toolName,
+      phase: 'calling',
+      elapsedSeconds: 0,
+    });
+  };
   const flushTurn = (): void => {
     if (!pendingTurn) return;
     const text = pendingTurn.texts.join('\n');
@@ -247,7 +277,7 @@ async function runClaudeAgentSession(
   const server = sdk.createSdkMcpServer({
     name: SESSION_MCP_SERVER_NAME,
     version: '1.0.0',
-    tools: def.tools.map((t) => buildMcpTool(sdk, t, onEvent, signal, flushTurn)),
+    tools: def.tools.map((t) => buildMcpTool(sdk, t, onEvent, signal, flushTurn, reportWaiting)),
   });
 
   const options: SdkQueryOptions = {
@@ -309,6 +339,7 @@ async function runClaudeAgentSession(
   } else {
     wiring.sendUser(input.resume ? RESUME_NUDGE : 'Begin.');
   }
+  reportWaiting();
 
   const endedWithoutOutcome = (): DriverResult =>
     failure(
@@ -337,20 +368,48 @@ async function runClaudeAgentSession(
             if (pendingTurn && pendingTurn.id !== event.message?.id) flushTurn();
             progressTurnId = event.message?.id;
             progressBlocks.clear();
-          } else if (progressTurnId && typeof event.index === 'number') {
-            if (event.type === 'content_block_start' && event.content_block?.type === 'text') {
-              progressBlocks.set(event.index, event.content_block.text ?? '');
-            } else if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
-              progressBlocks.set(event.index, (progressBlocks.get(event.index) ?? '') + (event.delta.text ?? ''));
-            } else break;
-            input.onProgress({ kind: 'text', turnId: progressTurnId, text: [...progressBlocks].sort(([a], [b]) => a - b).map(([, text]) => text).join('\n') });
+            turnsSeen += 1;
+            break;
+          }
+          const turnId = progressTurnId;
+          const index = event.index;
+          if (!turnId || typeof index !== 'number') break;
+          if (event.type === 'content_block_start') {
+            const block = event.content_block;
+            if (block?.type === 'text' || block?.type === 'thinking') {
+              const text = (block.type === 'text' ? block.text : block.thinking) ?? '';
+              progressBlocks.set(index, { kind: block.type, text });
+              reportProse(turnId, block.type);
+            } else if (block?.type === 'tool_use' && block.id && block.name) {
+              progressBlocks.set(index, {
+                kind: 'tool',
+                toolCallId: block.id,
+                toolName: bareToolName(block.name),
+              });
+              reportCall(index);
+            }
+            break;
+          }
+          if (event.type !== 'content_block_delta') break;
+          const delta = event.delta;
+          if (delta?.type === 'text_delta' || delta?.type === 'thinking_delta') {
+            const kind = delta.type === 'text_delta' ? 'text' : 'thinking';
+            const started = progressBlocks.get(index);
+            const before = started && started.kind !== 'tool' ? started.text : '';
+            const added = (delta.type === 'text_delta' ? delta.text : delta.thinking) ?? '';
+            progressBlocks.set(index, { kind, text: before + added });
+            reportProse(turnId, kind);
+          } else if (delta?.type === 'input_json_delta') {
+            // The arguments are still being written; the call's name is all
+            // the stream says, and it says it until the block closes.
+            reportCall(index);
           }
           break;
         }
         case 'tool_progress': {
           const progress = message as SdkToolProgressMessage;
           if (progress.parent_tool_use_id === null && Number.isFinite(progress.elapsed_time_seconds)) {
-            input.onProgress?.({ kind: 'tool', toolCallId: progress.tool_use_id, toolName: bareToolName(progress.tool_name), elapsedSeconds: Math.max(0, progress.elapsed_time_seconds) });
+            input.onProgress?.({ kind: 'tool', toolCallId: progress.tool_use_id, toolName: bareToolName(progress.tool_name), phase: 'running', elapsedSeconds: Math.max(0, progress.elapsed_time_seconds) });
           }
           break;
         }
@@ -570,6 +629,7 @@ function buildMcpTool(
   onEvent: SessionRunInput['onEvent'],
   signal: AbortSignal,
   flushTurn: () => void,
+  reportWaiting: () => void,
 ): unknown {
   const driverCtx: ToolContext = {
     workItem: '',
@@ -610,6 +670,11 @@ function buildMcpTool(
       const message = `tool \`${tool.name}\` crashed: ${err instanceof Error ? err.message : String(err)}`;
       onEvent({ type: 'tool-result', toolName: tool.name, content: message, isError: true });
       return toMcpResult(message, true);
+    } finally {
+      // Whatever the result is, it goes back to the model now — and the model
+      // composes on it in silence. Reported after the result was recorded, so
+      // the commit that clears a session's progress cannot clear this.
+      reportWaiting();
     }
   });
 }

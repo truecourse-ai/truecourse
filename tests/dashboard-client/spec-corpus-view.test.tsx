@@ -238,7 +238,7 @@ describe('SpecCorpusView — OSS batch skip (optimistic + pending, no scan round
     return <SpecCorpusView repoId="r1" corpus={corpus} activeKey={null} onOpen={() => {}} onDecision={onDecision} />;
   }
 
-  it('moves the skipped doc to Force-excluded with a pending hint, no /spec/corpus/scan call', async () => {
+  it('moves the skipped doc to Force-excluded with a pending hint, no scan call', async () => {
     const user = userEvent.setup();
     render(<Harness />);
     await screen.findByText('docs/v1.md'); // corpus loaded
@@ -250,7 +250,7 @@ describe('SpecCorpusView — OSS batch skip (optimistic + pending, no scan round
     expect(screen.getAllByText('docs/v1.md')).toHaveLength(1);
     expect(screen.getByText('pending rescan')).toBeInTheDocument();
     // No re-curate: the scan endpoint was never hit; only the decision POST.
-    expect(calls.some((c) => c.url.includes('/spec/corpus/scan'))).toBe(false);
+    expect(calls.some((c) => c.url.includes('/scan'))).toBe(false);
     expect(calls.some((c) => c.url.includes('/spec/excludes') && c.method === 'POST')).toBe(true);
   });
 
@@ -274,7 +274,7 @@ describe('SpecCorpusView — OSS batch skip (optimistic + pending, no scan round
     expect(screen.getAllByRole('button', { name: 'skip' })).toHaveLength(3);
     // The whole round-trip used only the mount read — no corpus refetch, no scan.
     expect(corpusReads()).toBe(1);
-    expect(calls.some((c) => c.url.includes('/spec/corpus/scan'))).toBe(false);
+    expect(calls.some((c) => c.url.includes('/scan'))).toBe(false);
   });
 
   it('include a skipped doc then undo returns it to Not included (mirror case)', async () => {
@@ -932,9 +932,11 @@ describe('useSpecCorpus (PR ref threading)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Scanning is a background JOB: the start route only enqueues, so the hook holds
-// its `scanning` flag past the request and takes the new corpus from the refetch
-// the page fires when the scan's completion event lands.
+// Scanning is a background JOB, and it is the WORKSPACE's Document scan —
+// documentation belongs to the workspace, so the repository corpus view starts
+// the one scan at the workspace address. The start route only enqueues, so the
+// hook holds its `scanning` flag past the request and takes the new corpus from
+// the refetch the page fires when the scan's completion event lands.
 // ---------------------------------------------------------------------------
 
 describe('useSpecCorpus (starting a scan)', () => {
@@ -951,7 +953,7 @@ describe('useSpecCorpus (starting a scan)', () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it('POSTs the scan route and stays scanning until the corpus is refetched', async () => {
+  it('POSTs the workspace scan route and stays scanning until the corpus is refetched', async () => {
     const { result } = renderHook(() => useSpecCorpus('r1', true));
     await waitFor(() => expect(result.current.data).not.toBeNull());
     calls.length = 0;
@@ -961,7 +963,7 @@ describe('useSpecCorpus (starting a scan)', () => {
     });
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ method: 'POST' });
-    expect(calls[0].url).toMatch(/\/api\/repos\/r1\/spec\/corpus\/scan$/);
+    expect(calls[0].url).toMatch(/\/api\/context\/scan$/);
     // The job is only queued — the button must not read as ready again yet.
     expect(result.current.scanning).toBe(true);
 

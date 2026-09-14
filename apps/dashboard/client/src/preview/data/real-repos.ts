@@ -1,16 +1,14 @@
-// PREVIEW: the repository list and the GitHub connect flow here are REAL (they
-// talk to the dashboard server); everything else in the preview is fake data.
-
 /**
- * The one seam where the preview touches the real server.
+ * The repository registry: the workspace's connected repositories, and the
+ * GitHub App flow that connects one.
  *
- * A repository connected on the server is a real row on the real registry. The
- * preview shows those rows beside its fixtures: they carry no coverage, no runs
- * and no corpus (the fixture lookups all fall back to empty), so they render as
- * a freshly connected repository would.
+ * A repository exists by being connected on the server, so this list is the
+ * whole of Code. A row just connected carries no coverage, no runs and no
+ * corpus until something has run on it, and every surface reads that state
+ * from the server rather than assuming it.
  *
  * Only repos with a `remoteUrl` are shown. A developer's own path-registered
- * repos are their local dashboard's business, not the product preview's.
+ * repos are their local dashboard's business, not this product's.
  *
  * The GitHub App is how one gets there: the status read says which installations
  * this workspace has and which repositories are already linked, an installation
@@ -18,8 +16,8 @@
  * not milliseconds, which is why its caller has to say so.
  *
  * The registry reads degrade to nothing: with no server behind them (a static
- * preview, a test) the list is simply empty rather than an error the mock has no
- * place for. The GitHub calls do the opposite and reject, because the reason is
+ * static page, a test) the list is simply empty, which is the honest answer:
+ * a workspace with nothing connected. The GitHub calls reject, because the reason is
  * the whole answer — an unconfigured server names the variables it wants.
  */
 
@@ -28,6 +26,7 @@ import type {
   GithubConnectStatusResponse,
   GithubInstallableRepo,
   GithubInstallationReposResponse,
+  GithubInstallOrigin,
 } from '@truecourse/shared';
 import type { ProviderId, Repo } from './types';
 
@@ -36,8 +35,13 @@ import type { ProviderId, Repo } from './types';
  * linked. `slim` because the dialog only needs the names: the full read walks
  * each repo's spec store, which the dialog would pay for on every open.
  */
-export function fetchGithubStatus(): Promise<GithubConnectStatusResponse> {
-  return fetchApi<GithubConnectStatusResponse>('/api/github/status?slim=1');
+/**
+ * The App's status for the connect surfaces. `from` names where an install
+ * started from this page would return to (it rides the install link's state).
+ */
+export function fetchGithubStatus(from?: GithubInstallOrigin): Promise<GithubConnectStatusResponse> {
+  const query = from ? `&from=${encodeURIComponent(from)}` : '';
+  return fetchApi<GithubConnectStatusResponse>(`/api/github/status?slim=1${query}`);
 }
 
 /** Everything one installation can see, linked or not. */
@@ -63,7 +67,7 @@ export async function linkGithubRepo(link: {
   });
 }
 
-/** The provider of a remote, by host. An unknown host reads as github: the preview has no fourth icon. */
+/** The provider of a remote, by host. An unknown host reads as github: there is no fourth icon. */
 function providerOf(host: string): ProviderId {
   const lower = host.toLowerCase();
   if (lower.includes('gitlab')) return 'gitlab';
@@ -88,19 +92,14 @@ export function parseRemote(remoteUrl: string): { fullName: string; provider: Pr
   return { fullName, provider: providerOf(parsed.hostname) };
 }
 
-/** A registry entry as the preview's Repo: connected, with nothing run on it yet. */
+/** A registry entry as a shell `Repo`: connected, with nothing run on it yet. */
 export function toPreviewRepo(entry: RepoResponse): Repo {
   const { fullName, provider } = parseRemote(entry.remoteUrl ?? '');
   return {
     id: entry.id,
     fullName,
     provider,
-    visibility: 'public',
     defaultBranch: entry.defaultBranch ?? 'main',
-    policy: 'advisory',
-    baselineSha: 'no baseline yet',
-    baselineAt: 'no baseline yet',
-    notifyEmails: [],
     lastCheck: {
       conclusion: 'neutral',
       word: 'Neutral',
@@ -108,11 +107,10 @@ export function toPreviewRepo(entry: RepoResponse): Repo {
       at: 'just now',
     },
     onboarding: false,
-    real: true,
   };
 }
 
-/** The connected repos of the real registry. Empty when there is no server to ask. */
+/** The connected repos of the registry. Empty when there is no server to ask. */
 export async function fetchRealRepos(): Promise<Repo[]> {
   try {
     const entries = await getRepos();

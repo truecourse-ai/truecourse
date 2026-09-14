@@ -3,6 +3,7 @@ import { resolveApiServers, resolveWebSurface, type Recipe } from '@truecourse/g
 import { invocationProofGap } from './proof-grounding.js'
 import {
   resolveGuardPrerequisite,
+  resolveGuardPrerequisiteNormalized,
   prerequisiteProblems,
   scenarioPrerequisiteProblems,
   scenarioMilestoneProof,
@@ -29,13 +30,13 @@ export function bindClaimPrerequisites(
   const requirements = needs
     .filter((n) => n.kind === 'credential' || n.kind === 'external')
     .map((need) => {
-      const exact = resolveGuardPrerequisite(need.name, targets)
+      const resolved = resolveGuardPrerequisiteNormalized(need.name, targets)
       // Environment evidence is an explicit identifier, never a guessed suffix alias.
       const evidenced = targets.filter((t) =>
         t.credentialEnv.some((key) => need.detail?.split(/[^A-Za-z0-9_]+/).includes(key)),
       )
       const name =
-        exact.kind === 'resolved' ? exact.target.name : evidenced.length === 1 ? evidenced[0].name : need.name
+        resolved.kind === 'resolved' ? resolved.target.name : evidenced.length === 1 ? evidenced[0].name : need.name
       return {
         dependency: name,
         mode: 'provided' as const,
@@ -48,13 +49,13 @@ export function bindClaimPrerequisites(
     cases: verification.cases.map((c) => ({
       ...c,
       prerequisites: (c.prerequisites ?? []).map((p) => {
-        const exact = resolveGuardPrerequisite(p.dependency, targets)
+        const resolved = resolveGuardPrerequisiteNormalized(p.dependency, targets)
         const evidenced = targets.filter((t) =>
           t.credentialEnv.some((key) => p.evidence?.split(/[^A-Za-z0-9_]+/).includes(key)),
         )
         const declared = requirements.find((r) => r.originalNames.includes(p.dependency))
         const name =
-          exact.kind === 'resolved' ? exact.target.name : evidenced.length === 1 ? evidenced[0].name : declared?.dependency ?? p.dependency
+          resolved.kind === 'resolved' ? resolved.target.name : evidenced.length === 1 ? evidenced[0].name : declared?.dependency ?? p.dependency
         return {
           ...p,
           dependency: name,
@@ -134,6 +135,28 @@ export function partitionFlowPrerequisites(
             capabilities: verificationRequirements(m.verification, [c.id]).filter((r) => !supported.includes(r)),
           },
         })
+      }
+      const unresolved = (c.prerequisites ?? [])
+        .map((p) => ({ prerequisite: p, resolution: resolveGuardPrerequisite(p.dependency, targets) }))
+        .filter((r) => r.resolution.kind !== 'resolved')
+      if (unresolved.length) {
+        gaps.push({
+          surface,
+          kind: 'blocked-on',
+          milestones: [m.order],
+          obligations: [{ milestone: m.order, caseId: c.id }],
+          reason: unresolved
+            .map(
+              ({ prerequisite, resolution }) =>
+                `Prerequisite ${prerequisite.dependency} (${prerequisite.mode}) matches ${resolution.kind === 'ambiguous' ? 'more than one declared dependency' : 'no declared dependency'}.`,
+            )
+            .join(' '),
+          blocker: {
+            kind: 'generation',
+            action: 'Resolve the extracted prerequisite to a declared service or dependency before generating this case.',
+          },
+        })
+        return false
       }
       const invocationGap = invocationGaps.find(gap => gap.obligations?.some(o => o.milestone === m.order && o.caseId === c.id))
       if (invocationGap) { gaps.push(invocationGap); return false }

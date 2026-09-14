@@ -50,6 +50,7 @@ export {
   createWebhookRouter,
   type WebhookDeps,
   type BaselineTrigger,
+  type SourcePushTrigger,
   type PullRequestPayload,
   type IssueCommentPayload,
 } from './webhook.js';

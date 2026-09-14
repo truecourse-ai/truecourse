@@ -53,6 +53,7 @@ export const GITIGNORE_CONTENTS = [
   '.cache/',
   'contracts/result.json',
   'guard/runs/',
+  'guard/sections/',
   'guard/result.json',
   'guard/setup.json',
   'guard/evidence/',

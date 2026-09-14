@@ -214,6 +214,9 @@ export const GUARD_COVERAGE_PLAIN_ORDER = [
   'not-testable',
 ] as const satisfies readonly GuardCoveragePlainStatus[]
 
+/** The five words as a wire value, for the payloads that carry one. */
+export const GuardCoveragePlainStatusSchema = z.enum([...GUARD_COVERAGE_PLAIN_ORDER])
+
 /** The ONE word per status. Nothing else may name a coverage state to a reader. */
 export const GUARD_COVERAGE_STATUS_WORD: Record<GuardCoveragePlainStatus, string> = {
   succeeded: 'Succeeded',
@@ -1107,6 +1110,12 @@ export const GuardInterfaceFlowRefSchema = z
     title: z.string(),
     /** True when a committed scenario of this flow grounds on the interface. */
     realized: z.boolean(),
+    /**
+     * The flow's own coverage status, the SAME derivation the Flows list shows
+     * for it ({@link guardFlowPlainStatus}) — so an interface can never report a
+     * flow as passing that the Flows page reports as blocked.
+     */
+    status: GuardCoveragePlainStatusSchema,
     /** Why an unrealized usage produced no scenario. Absent when realized. */
     gap: GuardFlowGapSchema.optional(),
   })
@@ -1395,3 +1404,26 @@ export const GuardClaimsViewSchema = z
   })
   .strict()
 export type GuardClaimsView = z.infer<typeof GuardClaimsViewSchema>
+
+/**
+ * A stored run's SECTION SUMMARY: the coverage word every document section the
+ * run's scenario set covers wore at that moment, keyed by {@link guardSectionRef}.
+ * Statuses only, so a run's history costs a handful of bytes per section.
+ *
+ * It is what makes history readable: a run snapshot says which SCENARIOS passed,
+ * and turning that back into sections needs the scenario set, the report and the
+ * documents as they were. Written when the run is persisted, never guessed
+ * afterwards. A run without one is simply absent from the trend.
+ */
+export type GuardRunSectionSummary = Record<string, GuardCoveragePlainStatus>
+
+/** The address of ONE section of ONE document: `<docRef>#<anchor>`. */
+export function guardSectionRef(doc: string, anchor: string): string {
+  return `${doc}#${anchor}`
+}
+
+/** The document half of a {@link guardSectionRef} (a ref with no `#` is the doc). */
+export function guardSectionRefDoc(sectionRef: string): string {
+  const cut = sectionRef.lastIndexOf('#')
+  return cut === -1 ? sectionRef : sectionRef.slice(0, cut)
+}

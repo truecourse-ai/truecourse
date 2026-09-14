@@ -1,15 +1,16 @@
 /**
  * Dependencies: supplied resources users can configure. Internal test resources
- * are excluded by useGuardDependencies. A row opens its own detail page.
+ * are excluded by useGuardDependencies. A row opens its own detail page. The
+ * search box is the whole toolbar: State is a column, and one dimension does
+ * not earn a filter row.
  */
 
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { PageHeader } from '@/preview/ui/bits';
-import { FilterBar } from '@/preview/ui/filter-bar';
 import { useGuardDependencies } from '@/preview/vendor/hooks/useGuardDependencies';
 import { GUARD_DEPENDENCY_STATE, guardDependencyMatches, guardDependencyType } from '@/preview/vendor/lib/guard-dependencies';
-import type { GuardDependencyRow, GuardDependencyState } from '@/preview/vendor/types/guard-dependencies';
+import type { GuardDependencyRow } from '@/preview/vendor/types/guard-dependencies';
 import type { Repo } from '@/preview/data/types';
 import { useGuardTabJump } from './tab-jump';
 import { useGuardRefresh } from './use-guard-refresh';
@@ -28,26 +29,13 @@ export function DependenciesTab({ repo }: { repo: Repo }) {
   const reloadKey = useGuardRefresh(repo, ['guard-setup', 'guard-externals', 'guard-generate', 'guard-run']);
   const { view, loading, error } = useGuardDependencies(repo.id, true, reloadKey);
   const [query, setQuery] = useState('');
-  const [stateFilter, setStateFilter] = useState<string[]>([]);
 
   const all: GuardDependencyRow[] = useMemo(() => view?.dependencies ?? [], [view]);
 
-  const stateOptions = useMemo(
-    () =>
-      (Object.keys(GUARD_DEPENDENCY_STATE) as GuardDependencyState[])
-        .map((key) => ({ key, label: GUARD_DEPENDENCY_STATE[key].label, count: all.filter((d) => d.state === key).length }))
-        .filter((o) => o.count > 0),
-    [all],
-  );
-
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return all.filter(
-      (d) =>
-        (!q || guardDependencyMatches(d, q)) &&
-        (stateFilter.length === 0 || (d.state != null && stateFilter.includes(d.state))),
-    );
-  }, [all, query, stateFilter]);
+    return all.filter((d) => !q || guardDependencyMatches(d, q));
+  }, [all, query]);
 
   const openDependency = (name: string) =>
     navigate(`/preview/repos/${repo.id}/dependencies/${encodeURIComponent(name)}`);
@@ -58,21 +46,13 @@ export function DependenciesTab({ repo }: { repo: Repo }) {
         title="Dependencies"
         subtitle={rows.length === all.length ? `${all.length}` : `${rows.length} of ${all.length}`}
       />
-      <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-border px-6 py-2 [&>div]:border-0 [&>div]:p-0">
+      <div className="min-w-0 shrink-0 border-b border-border px-6 py-2">
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           aria-label="Search dependencies"
           placeholder="Search dependencies"
-          className="w-64 max-w-full shrink-0 rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-        />
-        <FilterBar
-          label="State"
-          ariaLabel="Filter dependencies by state"
-          options={stateOptions}
-          selected={stateFilter}
-          onChange={setStateFilter}
-          multi
+          className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
         />
       </div>
 

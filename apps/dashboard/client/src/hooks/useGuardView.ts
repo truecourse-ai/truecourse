@@ -6,8 +6,7 @@
  * the `?gdrift` tab selection the Runs view was showing). `openGuardFlow` /
  * `openGuardInterface` are the same jump in the other direction — a section's
  * flow row into the Flows tab, a test's interface into the Interfaces tab — and
- * `openSpecDoc` / `openSpecSources` connect the Sources page to the doc viewer
- * and back.
+ * `openSpecDoc` opens one doc in the coverage viewer.
  *
  * Which *drift tab* is open is owned by `useGuardTabs('gdrift', …)` (the shared
  * preview/pin tab model), not here — this hook only owns the jump OUT of the view.
@@ -33,15 +32,9 @@ export interface GuardViewState {
   openSpecCoverage: () => void;
   /**
    * Jump to the Coverage tab with ONE doc open (`?guard=`) and no section
-   * highlighted — the route a Sources page's fetched page takes into the doc
-   * viewer. A doc has one home, and this is it.
+   * highlighted. A doc has one home, and this is it.
    */
   openSpecDoc: (ref: string) => void;
-  /**
-   * Jump to the Sources tab — the route the pre-scan corpus note takes ("add a
-   * documentation site first"). Lands the page; the user picks or adds a site.
-   */
-  openSpecSources: () => void;
   /**
    * Jump to the Flows tab with one flow's detail open (`?gflow=`) — the route a
    * Coverage section's flow row and an interface's "grounds" link both take.
@@ -144,16 +137,6 @@ export function useGuardView(): GuardViewState {
     [setParams],
   );
 
-  const openSpecSources = useCallback(() => {
-    setParams((prev) => {
-      const q = new URLSearchParams(prev);
-      q.set('section', 'guard');
-      q.set('tab', 'sources');
-      clearGuardSelections(q);
-      return q;
-    });
-  }, [setParams]);
-
   const openGuardFlow = useCallback(
     (flowId: string) => {
       setParams((prev) => {
@@ -217,7 +200,6 @@ export function useGuardView(): GuardViewState {
     openSpecConflict,
     openSpecCoverage,
     openSpecDoc,
-    openSpecSources,
     openGuardFlow,
     openGuardInterface,
     openGuardTest,

@@ -4,10 +4,14 @@ import path from 'node:path';
 import request from 'supertest';
 import { type Express } from 'express';
 import { Router } from 'express';
-import { createTestApp, TEST_ORG } from '../helpers/test-app';
+import { createTestApp, noGithubAccess, TEST_ORG } from '../helpers/test-app';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
 import { readRegistry, unregisterProject } from '../../packages/core/src/config/registry';
-import { createSessionRun, sessionRunDir } from '../../packages/core/src/lib/sessions-store';
+import {
+  createSessionRun,
+  sessionRunDir,
+  workspaceSessionsKey,
+} from '../../packages/core/src/lib/sessions-store';
 import type { SessionCommand } from '../../packages/agent-loop/src/index';
 import type { GithubMount } from '../../apps/dashboard/server/src/github/index';
 
@@ -381,11 +385,88 @@ describe('Workspace sessions routes', () => {
       unlinkRepo: async () => {},
     };
     const scoped = createTestApp({
-      github: { webhook: Router(), connect: Router(), store: store as unknown as GithubMount['store'] },
+      github: {
+        webhook: Router(),
+        connect: Router(),
+        store: store as unknown as GithubMount['store'],
+        access: noGithubAccess,
+      },
     });
     const res = await request(scoped).get('/api/sessions/runs');
     expect(res.body.runs.map((r: { runId: string }) => r.runId)).toEqual([generate.runId]);
     await request(scoped).get(`/api/sessions/runs/${scan.runId}`).expect(404);
+  });
+
+  // -------------------------------------------------------------------------
+  // The workspace's OWN runs: a Document scan belongs to no repository.
+  // -------------------------------------------------------------------------
+
+  /** One Document scan of the workspace, with one piece of work on it. */
+  const seedWorkspaceScan = (iso = '2026-01-01T00:00:04.000Z') => {
+    const run = createSessionRun(workspaceSessionsKey(TEST_ORG), {
+      command: 'spec-scan',
+      gitRef: 'workspace',
+      now: () => new Date(iso),
+      activityStream: true,
+    });
+    run.persistence.updateIndex({
+      sessionId: 'ses-ws',
+      kind: 'spec-scan.curate-doc',
+      workItem: 'doc:context/site-acme/one.md',
+      status: 'completed',
+      spent: { turns: 1, tokens: 10, costUsd: 0 },
+    });
+    run.persistence.appendEvent('ses-ws', EVENT(0) as never);
+    run.finish('completed');
+    return run;
+  };
+
+  it("lists the workspace's own runs, which name no repository", async () => {
+    const { scan } = seedWorkspace();
+    const workspaceScan = seedWorkspaceScan();
+
+    const res = await request(app).get('/api/sessions/runs');
+    expect(res.status).toBe(200);
+    const listed = res.body.runs as { runId: string; repo: unknown }[];
+    expect(listed[0]).toMatchObject({ runId: workspaceScan.runId, repo: null });
+    // The repositories' runs still name theirs.
+    expect(listed.find((r) => r.runId === scan.runId)!.repo).toEqual({
+      id: repos[0].project.slug,
+      fullName: repos[0].project.name,
+    });
+  });
+
+  it("leaves the workspace's own runs out when narrowed to one repository", async () => {
+    seedWorkspace();
+    const workspaceScan = seedWorkspaceScan();
+    const res = await request(app).get(`/api/sessions/runs?repo=${repos[0].project.slug}`);
+    expect(res.body.runs.map((r: { runId: string }) => r.runId)).not.toContain(workspaceScan.runId);
+  });
+
+  it('opens a workspace run: the record, its journal and one piece of work', async () => {
+    const workspaceScan = seedWorkspaceScan();
+
+    const one = await request(app).get(`/api/sessions/runs/${workspaceScan.runId}`).expect(200);
+    expect(one.body.run).toMatchObject({ runId: workspaceScan.runId, repo: null });
+
+    const activity = await request(app)
+      .get(`/api/sessions/runs/${workspaceScan.runId}/activity`)
+      .expect(200);
+    expect(activity.body.done).toBe(true);
+    expect(activity.body.events.length).toBeGreaterThan(0);
+
+    const transcript = await request(app)
+      .get(`/api/sessions/runs/${workspaceScan.runId}/transcript/ses-ws`)
+      .expect(200);
+    expect(transcript.body.events.map((e: { seq: number }) => e.seq)).toEqual([0]);
+  });
+
+  it('404s a conversation this workspace has nothing at', async () => {
+    seedWorkspaceScan();
+    await request(app).get('/api/sessions/runs/2026-01-01T00-00-00Z_00000000/activity').expect(404);
+    await request(app)
+      .get('/api/sessions/runs/2026-01-01T00-00-00Z_00000000/transcript/ses-ws')
+      .expect(404);
   });
 
   it('refuses a session with no workspace, and reads the whole registry when the server has none', async () => {

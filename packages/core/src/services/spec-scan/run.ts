@@ -111,6 +111,8 @@ import {
   curateDocCacheKey,
   curateDocSessionDef,
   curateDocWorkItem,
+  docOriginCachePart,
+  type DocOrigin,
   type DocVerdict,
 } from './curate-doc.js'
 import {
@@ -147,11 +149,13 @@ import {
   SPEC_SCAN_ORCHESTRATE_SESSION_KIND,
   applyScopeVerdicts,
   buildScanScopeUniverse,
+  buildWorkspaceScopeUniverse,
   mergeScopeOutcome,
   orchestrateBriefing,
   orchestrateSessionDef,
   scopeCoverage,
   type ScanScopeOutcome,
+  type ScopeGrammar,
   type ScopeSourceView,
 } from './orchestrate.js'
 import { buildScanUniverse, instructionsFingerprint } from './tools.js'
@@ -232,9 +236,26 @@ export interface SpecScanSessionsOptions {
    * The workspace corpus sync passes this: its doc tree is a transient scratch
    * materialization whose decisions are deleted with it, so a scope session
    * there would re-spend on every sync and settle nothing durable. Runs with an
-   * injected `docSource` skip the session implicitly for the same reason.
+   * injected `docSource` skip the session implicitly for the same reason —
+   * unless {@link SpecScanSessionsOptions.scopeSources} names the universe's
+   * sources, which is the workspace scan saying its scope IS durable.
    */
   disableScopeOrchestration?: boolean
+  /**
+   * UNIVERSE MODE. The sources whose documents make up the universe, with their
+   * document counts — what the scope session verdicts by id. Present ⇒ the scan
+   * runs the scope session over the CONTEXT grammar (`context/<sourceId>/…`
+   * refs; a source id or a `context/<sourceId>/<dir>` subtree is a verdict
+   * subject) instead of reading the tree's own `sources.json`. The workspace
+   * scan passes it; a per-repository scan never does.
+   */
+  scopeSources?: readonly ScopeSourceView[]
+  /**
+   * Universe mode: where each document came from, for the curation briefing
+   * (and its cache key, so a document that changes source is re-judged). Keyed
+   * by doc ref.
+   */
+  docOrigins?: ReadonlyMap<string, DocOrigin>
   /** Ceiling on concurrent sessions per pool (the governor may run fewer). */
   concurrency?: number
   /**
@@ -580,12 +601,20 @@ export async function runSpecScanSessions(
   // force-include them) — a doc that just vanishes cannot be undone. User
   // pins (`manualIncludes`) never land here: applyScopeVerdicts keeps them.
   const scopeExcluded: Array<{ path: string; reason: string; category?: string }> = []
-  const applyScope = (docs: DocCandidate[], sources: ScopeSourceView[]): DocCandidate[] => {
+  // Universe mode: the workspace's own sources, under the context ref grammar.
+  const scopeGrammar: ScopeGrammar = opts.scopeSources ? 'context' : 'repo'
+  const applyScope = (docs: DocCandidate[], sources: readonly ScopeSourceView[]): DocCandidate[] => {
     for (const verdict of decisions.scopeVerdicts ?? []) {
       const who = verdict.resolvedBy === 'auto' ? 'the scope session' : 'a decision'
       fact('discover', `${verdict.path}: ${verdict.verdict === 'exclude' ? 'excluded' : 'kept'} by ${who}, ${verdict.reason}`)
     }
-    const kept = applyScopeVerdicts(docs, decisions.scopeVerdicts ?? [], sources, decisions.manualIncludes ?? [])
+    const kept = applyScopeVerdicts(
+      docs,
+      decisions.scopeVerdicts ?? [],
+      sources,
+      decisions.manualIncludes ?? [],
+      scopeGrammar,
+    )
     if (kept.length !== docs.length) {
       const keptSet = new Set(kept.map((d) => d.path))
       // Force-excluded docs stay out of the skip list here too — a manual
@@ -601,12 +630,14 @@ export async function runSpecScanSessions(
   }
   let orchestrateSummary: (ScanSessionKindSummary & { firstError?: string; allTransport: boolean }) | null =
     null
-  if (opts.docSource || opts.disableScopeOrchestration) {
+  if ((opts.docSource && !opts.scopeSources) || opts.disableScopeOrchestration) {
     fact('discover', 'scope session skipped, the stored verdicts still apply')
-    allDocs = applyScope(allDocs, [])
+    allDocs = applyScope(allDocs, opts.scopeSources ?? [])
     opts.onScope?.('skipped')
   } else {
-    const scanScope = buildScanScopeUniverse(buildScanUniverse(allDocs), readSourcesFile(repoRoot).sources)
+    const scanScope = opts.scopeSources
+      ? buildWorkspaceScopeUniverse(buildScanUniverse(allDocs), opts.scopeSources)
+      : buildScanScopeUniverse(buildScanUniverse(allDocs), readSourcesFile(repoRoot).sources)
     const coverage = scopeCoverage(scanScope, decisions.scopeVerdicts ?? [])
     if (coverage.covered) {
       fact('discover', 'every subtree already carries a scope verdict, no scope session')
@@ -735,6 +766,13 @@ export async function runSpecScanSessions(
   // briefing and enter each cache key via the builders' `extraParts` tails.
   const instructions = decisions.instructions ?? []
   const instructionParts = [instructionsFingerprint(instructions)]
+  // Universe mode: each doc's source rides its briefing AND its cache key, so a
+  // document that changes source is judged again rather than read off a hit.
+  const originOf = (doc: DocCandidate): DocOrigin | undefined => opts.docOrigins?.get(doc.path)
+  const originParts = (doc: DocCandidate): string[] => {
+    const part = docOriginCachePart(originOf(doc))
+    return part ? [part] : []
+  }
 
   // Resolve identity AFTER discovery + scope application: corpus name-frequency
   // expansion reads the docs that are actually in scope. `!== undefined` so an
@@ -792,10 +830,10 @@ export async function runSpecScanSessions(
     cacheName: CURATE_DOC_CACHE_NAME,
     items: curateItems,
     workItem: (doc) => curateDocWorkItem(doc.path),
-    cacheKey: (doc) => curateDocCacheKey({ identity, doc }, instructionParts),
+    cacheKey: (doc) => curateDocCacheKey({ identity, doc }, [...instructionParts, ...originParts(doc)]),
     schema: DocVerdictSchema,
     session: (doc) => curateDocSessionDef({ doc, universe, liveVocab }),
-    briefing: (doc) => curateDocBriefing(doc, identity, instructions),
+    briefing: (doc) => curateDocBriefing(doc, identity, instructions, originOf(doc)),
     driver: opts.driver,
     persistence: opts.persistence,
     ...(replayOnly('curate') ? { cacheOnly: 'curate' as const } : {}),

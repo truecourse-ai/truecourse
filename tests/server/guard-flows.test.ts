@@ -13,7 +13,9 @@ import {
   GuardInterfacesViewSchema,
   GuardRunFlowSchema,
   GuardSectionFlowSchema,
+  GUARD_COVERAGE_STATUS_WORD,
   guardCoverageWord,
+  type GuardCoveragePlainStatus,
 } from '../../packages/shared/src/index';
 import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-db';
@@ -1136,7 +1138,9 @@ describe('Guard flow read surfaces', () => {
         title: 'tasks add',
         // This manifest carries no per-surface plan record — usage falls back to
         // the committed scenario's own grounding path, and reads as realized.
-        flows: [{ flowId: FLOW_ID, title: FLOWS_FILE.flows[0].title, realized: true }],
+        // Realized is about the USAGE; the word beside it is the flow's own
+        // status, and this flow's last run failed.
+        flows: [{ flowId: FLOW_ID, title: FLOWS_FILE.flows[0].title, realized: true, status: 'failed' }],
         scenarioIds: [SCENARIO_ID],
         source: 'tree',
       });
@@ -1179,6 +1183,7 @@ describe('Guard flow read surfaces', () => {
           flowId: 'task-export',
           title: FLOWS_FILE.flows[1].title,
           realized: false,
+          status: 'blocked',
           gap: {
             kind: 'blocked-on',
             reason: 'blocked on credentials: A user exports the task list',
@@ -1210,7 +1215,28 @@ describe('Guard flow read surfaces', () => {
 
       const res = await request(app).get(url('interfaces')).expect(200);
       const add = res.body.interfaces.find((i: any) => i.id === 'cli/tasks-add');
-      expect(add.flows).toEqual([{ flowId: FLOW_ID, title: FLOWS_FILE.flows[0].title, realized: true }]);
+      expect(add.flows).toEqual([
+        { flowId: FLOW_ID, title: FLOWS_FILE.flows[0].title, realized: true, status: 'failed' },
+      ]);
+    });
+
+    it('words each flow exactly as the Flows list words it', async () => {
+      seed();
+      const flows = await request(app).get(url('flows')).expect(200);
+      const wordByFlow = new Map<string, string>(
+        flows.body.flows.map((f: any) => [f.flowId, guardCoverageWord(f.status)]),
+      );
+
+      const res = await request(app).get(url('interfaces')).expect(200);
+      const refs = res.body.interfaces.flatMap((i: any) => i.flows);
+      expect(refs.length).toBeGreaterThan(0);
+      for (const ref of refs) {
+        expect(GUARD_COVERAGE_STATUS_WORD[ref.status as GuardCoveragePlainStatus]).toBe(
+          wordByFlow.get(ref.flowId),
+        );
+      }
+      // The failing flow's committed scenario grounds here, and the page says so.
+      expect(refs.find((r: any) => r.flowId === FLOW_ID)).toMatchObject({ realized: true, status: 'failed' });
     });
 
     it('banners every registry surface with its runnable flag', async () => {

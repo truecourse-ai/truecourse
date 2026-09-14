@@ -168,6 +168,23 @@ export const CURATE_DOC_PROMPT_FINGERPRINT = promptFingerprint(CURATE_DOC_SYSTEM
  * session reads inputs the key already names. `extraParts` is the appendable
  * tail (step 6's orchestrator `instructions` land there later).
  */
+/**
+ * Where a document came from, when the universe is a WORKSPACE's rather than
+ * one repository's: which source yielded it, and what kind of source that is.
+ * Stated in the briefing so the curator can weigh a public documentation site
+ * differently from a connected repository's own markdown.
+ */
+export interface DocOrigin {
+  sourceId: string
+  sourceTitle: string
+  sourceKind: string
+}
+
+/** The origin's contribution to a cache key — empty when there is none. */
+export function docOriginCachePart(origin: DocOrigin | undefined): string {
+  return origin ? `origin:${origin.sourceId}:${origin.sourceKind}` : ''
+}
+
 export function curateDocCacheKey(
   input: { identity: RepoIdentity | null; doc: Pick<DocCandidate, 'path' | 'contentHash'> },
   extraParts: readonly string[] = [],
@@ -238,13 +255,15 @@ export function curateDocBriefing(
   doc: DocCandidate,
   identity: RepoIdentity | null,
   instructions: readonly string[] = [],
+  origin?: DocOrigin,
 ): string {
   const chunks = planDocChunks(doc.path, docBody(doc), DOC_CHUNK_CHARS)
   const first = chunks[0]
   const lines = [
     ...instructionsBriefingBlock(instructions),
     identityBlock(identity),
-    `PATH (repo-relative): ${doc.path}`,
+    origin ? `REF: ${doc.path}` : `PATH (repo-relative): ${doc.path}`,
+    ...(origin ? [`SOURCE: ${origin.sourceTitle} (${origin.sourceKind})`] : []),
     `Detected kind: ${doc.kind}`,
     `Size: ${doc.size} bytes`,
     '',

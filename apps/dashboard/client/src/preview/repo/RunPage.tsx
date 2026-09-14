@@ -1,13 +1,11 @@
 /**
  * One run, as its own page (`/runs/:runId`): the breadcrumb back to Runs, the
  * run's facts on one line, then its results (the list, the tab strip, the
- * opened result's detail), the real run components over the run the address
- * names — the server's snapshot for a connected repository, a fixture's for a
- * mock one.
+ * opened result's detail), over the server's snapshot of the run the address
+ * names.
  */
 
 import { useMemo } from 'react';
-import { Link } from 'react-router-dom';
 import { FlaskConical, Loader2 } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { CHIP_CLASS, PageHeader } from '@/preview/ui/bits';
@@ -18,7 +16,6 @@ import { useGuardTabs } from '@/preview/vendor/hooks/useGuardTabs';
 import { useGuardView } from '@/preview/vendor/hooks/useGuardView';
 import { formatGuardDuration, formatGuardTime, guardRunRef, orderGuardDrifts } from '@/preview/vendor/lib/guard-drifts';
 import { guardStatusMeta } from '@/preview/vendor/lib/guard-status';
-import { coverageVersionById } from '@/preview/data/corpus';
 import type { Repo } from '@/preview/data/types';
 import { useGuardTabJump } from './tab-jump';
 import { useGuardRun } from './use-guard-run';
@@ -36,7 +33,6 @@ export function RunPage({ repo, runId }: { repo: Repo; runId: string }) {
 
   const env = shown?.run;
   const verdict = shown && (shown.summary.fail > 0 || shown.summary.error > 0) ? 'fail' : 'pass';
-  const version = env?.coverageVersion ? coverageVersionById(repo.id, env.coverageVersion) : undefined;
   const totalMs = (shown?.scenarios ?? []).reduce((n, s) => n + s.durationMs, 0);
 
   return (
@@ -50,14 +46,6 @@ export function RunPage({ repo, runId }: { repo: Repo; runId: string }) {
               <span className="font-mono text-[12px]">{guardRunRef(env)}</span>
               {env.pullRequest != null && <span className={CHIP_CLASS}>#{env.pullRequest}</span>}
               <span className={CHIP_CLASS}>{env.origin ?? 'hosted'}</span>
-              {version && (
-                <Link
-                  to={`/preview/repos/${repo.id}/corpus?version=${encodeURIComponent(version.id)}`}
-                  className="text-[11px] hover:text-foreground hover:underline"
-                >
-                  coverage {version.label} · {version.sha}
-                </Link>
-              )}
             </span>
           )
         }

@@ -49,8 +49,12 @@ import { ScanAbortedError } from '../services/spec-scan/run.js';
 import {
   SPEC_SCAN_ORCHESTRATE_SESSION_KIND,
   normalizeScopePath,
+  type ScopeSourceView,
 } from '../services/spec-scan/orchestrate.js';
-import { CURATE_DOC_SESSION_KIND } from '../services/spec-scan/curate-doc.js';
+import {
+  CURATE_DOC_SESSION_KIND,
+  type DocOrigin,
+} from '../services/spec-scan/curate-doc.js';
 import { SETTLE_AREAS_SESSION_KIND } from '../services/spec-scan/settle-areas.js';
 import { OVERLAP_SESSION_KIND } from '../services/spec-scan/overlap.js';
 import { createStoredSessionRun, type SessionRunStartedInfo } from '../lib/sessions-store.js';
@@ -453,6 +457,21 @@ export interface CurateInProcessOptions {
    */
   disableScopeOrchestration?: boolean;
   /**
+   * UNIVERSE MODE (the workspace Document scan): the sources whose documents
+   * make up the tree, with their document counts. Present ⇒ the scope session
+   * runs over the CONTEXT ref grammar (`context/<sourceId>/…`), verdicting a
+   * whole source by id or a subtree of one by path.
+   */
+  scopeSources?: readonly ScopeSourceView[];
+  /** Universe mode: each document's source, for the curation briefing + key. */
+  docOrigins?: ReadonlyMap<string, DocOrigin>;
+  /**
+   * What the "Discovering docs" step reports. The default counts docs; the
+   * workspace scan states which source yielded how many documents, because it
+   * walked no repository.
+   */
+  discoverDetail?: (docs: number, toCurate: number) => string;
+  /**
    * A `question-asked` event from a scan session (the interactive scope
    * orchestrator), as it happens. The CLI prints the dashboard deep
    * link; nothing ever blocks on it — an unanswered question lands in the
@@ -596,6 +615,9 @@ export async function curateInProcess(
   let tagStarted = false;
   let overlapStarted = false;
   let verifyStarted = false;
+  // The overlap step counts two different things: the collision CLUSTERS it
+  // reviews, and the AREAS of the whole corpus. Both lines name their own.
+  let overlapClusters = 0;
   const ensureTag = (): void => {
     if (tagStarted) return;
     tracker?.done('discover');
@@ -634,6 +656,8 @@ export async function curateInProcess(
         skipCorpusWrite: options.skipCorpusWrite,
         disableOverlapDetection: options.disableOverlapDetection,
         disableScopeOrchestration: options.disableScopeOrchestration,
+        ...(options.scopeSources ? { scopeSources: options.scopeSources } : {}),
+        ...(options.docOrigins ? { docOrigins: options.docOrigins } : {}),
         ...(options.only !== undefined ? { only: options.only } : {}),
         ...(options.concurrency !== undefined ? { concurrency: options.concurrency } : {}),
         ...(options.signal ? { signal: options.signal } : {}),
@@ -641,7 +665,12 @@ export async function curateInProcess(
         // phase keys ARE the checklist's step keys, so no mapping is needed.
         onFact: (step, line) => tracker?.fact(step, line),
         onDiscover: (docs, toCurate) =>
-          tracker?.detail('discover', `${docs} docs · ${toCurate} to curate`),
+          tracker?.detail(
+            'discover',
+            options.discoverDetail
+              ? options.discoverDetail(docs, toCurate)
+              : `${docs} docs · ${toCurate} to curate`,
+          ),
         onScope: (state) => {
           if (state === 'covered') tracker?.detail('discover', 'scope covered — no orchestrator session');
           else if (state === 'ran') tracker?.detail('discover', 'scan scope settled');
@@ -661,7 +690,13 @@ export async function curateInProcess(
         },
         onOverlapProgress: (done, total) => {
           ensureOverlap();
-          tracker?.detail('overlap', total > 0 ? `${done}/${total} areas` : 'no areas');
+          overlapClusters = total;
+          tracker?.detail(
+            'overlap',
+            total > 0
+              ? `${done}/${total} cluster${total === 1 ? '' : 's'} to review`
+              : 'no clusters to review',
+          );
         },
       });
     } catch (e) {
@@ -685,7 +720,15 @@ export async function curateInProcess(
       else tracker?.done('discover', note);
     } else {
       ensureVerify();
-      tracker?.done('overlap', `${result.stats.areaCount} areas · ${result.stats.overlapFlags} overlaps`);
+      // The tag step's line is its outcome, not the last thing it was doing.
+      tracker?.detail(
+        'tag',
+        `${result.stats.docsKept} kept · ${result.stats.docsScanned - result.stats.docsKept} skipped · ${result.stats.areaCount} areas`,
+      );
+      tracker?.done(
+        'overlap',
+        `${result.stats.areaCount} areas · ${overlapClusters} cluster${overlapClusters === 1 ? '' : 's'} reviewed · ${result.stats.overlapFlags} overlaps`,
+      );
       tracker?.done(
         'verify',
         result.stats.autoResolvedConflicts.length > 0
@@ -1132,17 +1175,6 @@ async function storeDecisions(
     return;
   }
   await saveSpec({ repoKey, commitSha: decisionsRef(opts?.pr) }, 'decisions', next);
-}
-
-/**
- * Replace the repo's current decisions document — file in OSS, Postgres in EE.
- * The write half of {@link getDecisions}: a scan that ran against an ephemeral
- * clone persists the decisions it produced (auto scope verdicts, standing
- * instructions, auto conflict resolutions) through this, so they outlive the
- * clone the way the corpus does.
- */
-export async function saveDecisions(repoKey: string, next: DecisionsFile): Promise<void> {
-  await storeDecisions(repoKey, next);
 }
 
 /**

@@ -61,6 +61,7 @@ import {
   type JobsMount,
 } from '../../apps/dashboard/server/src/jobs/index';
 import { setRepoJobsCanceller } from '../../apps/dashboard/server/src/services/repo-removal.service';
+import { setWorkTreeProvider } from '../../apps/dashboard/server/src/services/work-tree.service';
 import type { WorkspaceLlm } from '../../apps/dashboard/server/src/services/workspace-llm.service';
 import { forbiddenDriver } from '../core/spec-scan-session-stub';
 
@@ -76,7 +77,7 @@ function makeTmpDir(prefix: string): string {
 const git = (cwd: string, ...args: string[]): string =>
   execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim();
 
-/** A git repo standing in for the scan's work tree. */
+/** A git repo standing in for the job's work tree. */
 function makeGitRepo(prefix: string): string {
   const repo = makeTmpDir(prefix);
   git(repo, 'init', '--initial-branch=main');
@@ -107,8 +108,8 @@ let pg: PGlite;
 let db: Db;
 let jobs: JobsMount;
 let running: Promise<void>[];
-/** The scan body's engine — a test replaces it to hold a job open. */
-let scanImpl: (options: { signal?: AbortSignal }) => Promise<unknown>;
+/** The setup body's engine — a test replaces it to hold a job open. */
+let setupImpl: (options: { signal?: AbortSignal }) => Promise<unknown>;
 /** Whether the fake worker actually runs a body, or leaves the row queued. */
 let claimJobs: boolean;
 
@@ -124,7 +125,10 @@ beforeAll(async () => {
 beforeEach(async () => {
   running = [];
   claimJobs = true;
-  scanImpl = async () => ({ curate: { corpus: { areas: [] }, decisions: {} } });
+  setupImpl = async () => ({ report: { status: 'ok' } });
+  // The job clones; there is no GitHub here, so the "clone" is the fixture repo
+  // itself and disposing it is a no-op — the tree is not what this suite is about.
+  setWorkTreeProvider(async (repoKey) => ({ dir: repoKey, dispose: () => {} }));
   jobs = createServerJobs({
     db,
     connectionString: 'postgres://unused',
@@ -139,10 +143,11 @@ beforeEach(async () => {
         stop: async () => {},
       } as unknown as Runner;
     },
-    scan: {
+    guardSetup: {
       startLlm: async () => testLlm,
-      runScan: (_repoKey, options) =>
-        scanImpl(options ?? {}) as ReturnType<NonNullable<typeof scanImpl>>,
+      sliceDocuments: async () => 0,
+      runSetup: (_treeDir, options) =>
+        setupImpl(options ?? {}) as ReturnType<NonNullable<typeof setupImpl>>,
     },
   });
   await jobs.start();
@@ -151,6 +156,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   setRepoJobsCanceller(null);
+  setWorkTreeProvider(null);
   await Promise.all(running);
   await jobs.stop();
   for (const entry of await readRegistry()) await unregisterProject(entry.slug);
@@ -174,26 +180,26 @@ describe('POST /api/repos/connect', () => {
 
 describe('DELETE /api/repos/:id', () => {
   it('cancels the job THIS process is running and disconnects anyway', async () => {
-    const local = makeGitRepo('tc-disconnect-scanning-');
+    const local = makeGitRepo('tc-disconnect-working-');
     const entry = await registerProject(local);
 
-    // A scan that ends only when it is cancelled — the disconnect's job.
+    // A setup that ends only when it is cancelled — the disconnect's job.
     let reached = false;
-    scanImpl = (options) =>
+    setupImpl = (options) =>
       new Promise((_resolve, reject) => {
         reached = true;
-        const stop = (): void => reject(new Error('the spec scan was cancelled'));
+        const stop = (): void => reject(new Error('the setup was cancelled'));
         if (options.signal?.aborted) stop();
         else options.signal?.addEventListener('abort', stop, { once: true });
       });
 
-    const queued = await jobs.enqueueScan({
+    const queued = await jobs.enqueueGuardSetup({
       repoId: entry.slug,
       repoFullName: local,
       workspaceOrgId: TEST_ORG,
       source: 'manual',
     });
-    if (queued.status !== 'queued') throw new Error('the scan was not queued');
+    if (queued.status !== 'queued') throw new Error('the setup was not queued');
     await until(() => reached);
 
     // Disconnecting IS the answer to "is this work still wanted": it is not.
@@ -210,13 +216,13 @@ describe('DELETE /api/repos/:id', () => {
     const entry = await registerProject(local);
     // Nothing claims the row: what a job waiting for a free worker looks like.
     claimJobs = false;
-    const queued = await jobs.enqueueScan({
+    const queued = await jobs.enqueueGuardSetup({
       repoId: entry.slug,
       repoFullName: local,
       workspaceOrgId: TEST_ORG,
       source: 'connect',
     });
-    if (queued.status !== 'queued') throw new Error('the scan was not queued');
+    if (queued.status !== 'queued') throw new Error('the setup was not queued');
 
     await request(app).delete(`/api/repos/${entry.slug}`).expect(204);
 
@@ -231,8 +237,8 @@ describe('DELETE /api/repos/:id', () => {
     const store = new JobStore(db);
     const row = await store.create({
       org: TEST_ORG,
-      type: 'repo.scan',
-      key: `repo.scan:${local}`,
+      type: 'repo.guard-setup',
+      key: `repo.guard-setup:${local}`,
       payload: {},
     });
     await store.markRunning(row.id);
