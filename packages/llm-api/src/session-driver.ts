@@ -48,6 +48,7 @@ import type {
 } from '@truecourse/agent-loop';
 import { buildModel } from './model.js';
 import { normalizeForStrictOutput, stripInjectedNulls, type SchemaPath } from './strict-schema.js';
+import { compactNormalizedSchema } from './compact-schema.js';
 import { providerTuningFor, type ProviderTuning } from './provider-tuning.js';
 import type { ProviderConfig } from './types.js';
 import { callUsageOf, type CallUsage } from './transport.js';
@@ -690,7 +691,7 @@ function buildToolset(def: SessionDef): {
     let widened: readonly SchemaPath[] = [];
     try {
       const strict = normalizeForStrictOutput(rawSchema);
-      inputSchema = strict.schema;
+      inputSchema = compactNormalizedSchema(strict.schema);
       widened = strict.widened;
     } catch {
       /* inexpressible in the strict subset — send unnormalized */
