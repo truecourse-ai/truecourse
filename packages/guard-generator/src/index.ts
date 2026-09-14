@@ -54,6 +54,7 @@ export {
 
 export {
   matchFlow,
+  matchProviderControls,
   planFlowMatching,
   readCachedMatch,
   buildSurfaceCatalogs,

@@ -106,6 +106,7 @@ import {
   buildFlowAreas,
   buildSurfaceCatalogs,
   readCachedMatch,
+  matchProviderControls,
   realizationAssignmentFingerprint,
   partitionPlanPreparations,
   readFlowsFile,
@@ -129,6 +130,7 @@ import {
   EXTRACT_SESSION_KIND,
   EXTRACT_SESSION_SYSTEM_PROMPT,
   extractSessionBriefing,
+  extractContextSchema,
   extractSessionCacheKey,
   FLOWS_SESSION_BUDGET,
   FLOWS_SESSION_CACHE_NAME,
@@ -227,6 +229,7 @@ const STAGE_LABELS: Record<string, string> = {
   [INTERFACE_AUTHOR_SESSION_KIND]: 'Authoring web tasks',
   [SEED_SESSION_KIND]: 'Preparing data + principals',
   [AUTH_PROOF_SESSION_KIND]: 'Verifying supplied auth',
+  'guard-setup.preparation-observations': 'Reviewing baseline observation scope',
   [PREPARATION_SESSION_KIND]: 'Preparing private test data',
   // guard generate (session kinds — plan 04; recipe + match are still one-shots)
   guardRecipe: 'Discovering recipe',
@@ -255,6 +258,7 @@ const EXPECTED_TURNS: Record<string, number> = {
   [INTERFACE_AUTHOR_SESSION_KIND]: 15, // measured mean of the 2026-08-18 documenso run
   [SEED_SESSION_KIND]: 12,
   [AUTH_PROOF_SESSION_KIND]: 3,
+  'guard-setup.preparation-observations': 10,
   [PREPARATION_SESSION_KIND]: 12,
   // guard generate (plan 04 step 20) — PROVISIONAL, to re-ground on transcript
   // data once a few session-era generates have run.
@@ -281,6 +285,7 @@ const SESSION_OUTPUT_TOKENS: Record<string, number> = {
   [INTERFACE_AUTHOR_SESSION_KIND]: 800,
   [SEED_SESSION_KIND]: 3000, // the outcome carries the whole script (≈ GUARD_SEED_OUTPUT_TOKENS below)
   [AUTH_PROOF_SESSION_KIND]: 150,
+  'guard-setup.preparation-observations': 2_000,
   [PREPARATION_SESSION_KIND]: 5_000, // Multiple seed/verification scripts form the final outcome.
   // guard generate (plan 04 step 20) — provisional.
   [EXTRACT_SESSION_KIND]: 1500, // the outcome carries a doc's whole claim set
@@ -673,8 +678,8 @@ async function planGuardSessionStages(repoRoot: string, plan: GuardWorkPlan): Pr
     const cached = await probeSessionCache(
       repoRoot,
       EXTRACT_SESSION_CACHE_NAME,
-      extractSessionCacheKey(doc),
-      ExtractOutcomeSchema,
+      extractSessionCacheKey(doc, prerequisites.targets),
+      extractContextSchema(prerequisites.targets),
     );
     if (!cached) {
       extractItems++;
@@ -798,7 +803,7 @@ async function planGuardRealizationStages(
   let recipe: Recipe | undefined;
   try {
     recipe = loadRecipe(repoRoot, recipePath(repoRoot))?.recipe;
-    if (recipe) availablePreparations = preparationCatalog(recipe);
+    if (recipe) availablePreparations = preparationCatalog(recipe, repoRoot);
   } catch { /* Invalid recipes are repaired before runtime matching. */ }
 
   const prerequisites = resolvePrerequisites(repoRoot, recipe?.api?.externals);
@@ -844,7 +849,7 @@ async function planGuardRealizationStages(
         if (!flowDriversToMatch(flow).includes(catalog.surface)) continue;
         const eligibleFlow = recipe ? partitionFlowPrerequisites(flow, catalog.surface, prerequisites.targets, recipe).flow : flow;
         if (!eligibleFlow.milestones.length) continue;
-        const cached = await readCachedMatch(repoRoot, eligibleFlow, catalog);
+        const cached = await readCachedMatch(repoRoot, eligibleFlow, catalog, undefined, recipe ? matchProviderControls(eligibleFlow, catalog.surface, prerequisites.targets, recipe) : []);
         if (!cached) {
           matchCalls++;
           unknown = true;
@@ -870,7 +875,7 @@ async function planGuardRealizationStages(
       plannedPairs.sort((a, b) => Number(previousDrivers.includes(b.surface)) - Number(previousDrivers.includes(a.surface)) || a.surface.localeCompare(b.surface));
       plannedPairs.splice(1);
       interfaceFingerprints.push(...plannedPairs.flatMap(p => p.fingerprints));
-      interfaceFingerprints.push(flowPrerequisiteStateMaterial(flow, prerequisites.targets));
+      interfaceFingerprints.push(flowPrerequisiteStateMaterial(flow, prerequisites.targets, recipe));
       const sectionKeys = flow.bindings.map((b) => sectionKeyOf.get(`${b.doc} ${b.anchor}`) ?? b.fingerprint);
       const inputsHash = flowGenerationInputsHash({
         flowFingerprint: flow.fingerprint,
@@ -991,6 +996,7 @@ const SETUP_KIND_CHARS: Record<string, { system: number; briefing: number }> = {
   [INTERFACE_AUTHOR_SESSION_KIND]: { system: 8_000, briefing: 12_000 },
   [SEED_SESSION_KIND]: { system: 5_500, briefing: GUARD_SEED_BODY_CHARS + 9_000 },
   [AUTH_PROOF_SESSION_KIND]: { system: 1_800, briefing: 1_200 },
+  'guard-setup.preparation-observations': { system: 3000, briefing: 24000 },
   [PREPARATION_SESSION_KIND]: { system: PREPARATION_PROMPT.length, briefing: 12_000 },
 };
 
@@ -1106,7 +1112,7 @@ export async function estimateGuardSetup(
   // A profile is not evidence that this setup step already settled. The runtime
   // skips only its current recorded fingerprint; old setups must run this step.
   const preparationSettled = recipe !== undefined && settled('preparations') === computePreparationFingerprint(repoRoot) &&
-    preparationCatalog(recipe).length === Object.keys(recipe.preparations ?? {}).length;
+    preparationCatalog(recipe, repoRoot).length === Object.keys(recipe.preparations ?? {}).length;
   const preparationItems = preparationSettled ? 0 : 1;
   // Upstream recipe/seed work can move the fingerprint before this step starts.
   const preparationMax = !preparationSettled || repairMax > 0 || seedMax > 0 ? 1 : 0;
@@ -1184,6 +1190,10 @@ export async function estimateGuardSetup(
       bound: 'prove-by-execution; skipped when no database schema is detected (unknowable offline)',
     }),
     setupStage({
+      kind: 'guard-setup.preparation-observations', budget: { turns: 20, maxResumes: 0, tokenCeiling: 100000 },
+      items: preparationItems, maxItems: preparationMax, bound: 'source qualification before allocation; scoped or unknown observations stop preparation authoring',
+    }),
+    setupStage({
       kind: PREPARATION_SESSION_KIND,
       budget: PREPARATION_SESSION_BUDGET,
       items: preparationItems,
@@ -1205,7 +1215,7 @@ export async function estimateGuardSetup(
     catalog: [DEPENDENCY_CATALOG_SESSION_KIND],
     interfaces: [RECONCILE_INTERFACES_SESSION_KIND, INTERFACE_AUTHOR_SESSION_KIND],
     seed: [SEED_SESSION_KIND],
-    preparations: [PREPARATION_SESSION_KIND],
+    preparations: ['guard-setup.preparation-observations', PREPARATION_SESSION_KIND],
     auth: [AUTH_PROOF_SESSION_KIND],
   };
   const included = opts.only

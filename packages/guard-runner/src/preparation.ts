@@ -1,3 +1,5 @@
+import { assertObservationQualification } from './preparation-observation.js';
+import { stagePreparationRuntime, cleanupPreparationRuntime } from './preparation-runtime.js';
 /** Runner-owned private data lifetimes, independent of shared service ownership. */
 import fs from 'node:fs';
 import { resolvePreparationDependencies } from './preparation-dependencies.js';
@@ -11,8 +13,9 @@ import type {
 import { preparationOwnedEnvKeys, bindPreparationPostgres } from './preparation-postgres.js';
 import { PREPARATION_VERIFY_ENV } from './preparation-contract.js';
 import { buildCredentialRedactor } from './api/redact.js';
-import { runSeed, type SeedResult } from './api/seed.js';
+import { runSeed, SeedError, type SeedResult } from './api/seed.js';
 import { runBuild } from './build.js';
+import { SeedOutputCapture, seedDiagnosticSummary } from './api/seed-diagnostic.js';
 import { resolveApiServers, resolveWebSurface, resolveEntry, credentialServers, type Recipe, type RecipePreparation } from './recipe.js';
 import { startApiServer } from './api/server.js';
 import { lookupJsonPath } from './api/vars.js';
@@ -27,8 +30,12 @@ export interface PreparedScenarioWorld extends SeedResult {
 }
 
 /** Authoring sees capabilities, never concrete paths, fixture IDs or credentials. */
-export function preparationCatalog(recipe: Recipe) {
-  return Object.entries(recipe.preparations ?? {}).filter(([name, p]) => !baselineDefect(name, p)).map(([name, p]) => ({
+export function preparationCatalog(recipe: Recipe, repoRoot?: string) {
+  return Object.entries(recipe.preparations ?? {}).filter(([name, p]) => {
+    if (baselineDefect(name, p)) return false;
+    if (repoRoot) try { for (const check of p.baselineChecks ?? []) assertObservationQualification(repoRoot, recipe, check); } catch { return false; }
+    return true;
+  }).map(([name, p]) => ({
     name,
     baseline: p.baseline,
     scope: p.scope,
@@ -47,6 +54,7 @@ function baselineDefect(name: string, profile: RecipePreparation): string | unde
     return `Preparation "${name}" declares an empty baseline with nonzero business counts or totals.`;
   if (profile.baselineChecks.some(c => Object.keys(c.totals ?? {}).some(key => key in c.counts)))
     return `Preparation "${name}" baseline count and total paths must be distinct.`;
+  if (profile.baselineChecks.some(c => !c.qualification)) return `Preparation \"${name}\" lacks observation qualification; refresh Guard Setup preparations.`;
   return undefined;
 }
 
@@ -71,6 +79,10 @@ export function validateScenarioPreparation(
   const conflicts = Object.keys(scenario.setup?.env ?? {}).filter((key) =>
     owned.has(key),
   );
+  for (const service of Object.keys(scenario.setup?.externals ?? {})) {
+    const external = recipe.api?.externals?.[service];
+    if (external) conflicts.push(...[external.baseUrlEnv, ...Object.keys(external.endpoints ?? {})].filter(key => owned.has(key)));
+  }
   for (const step of [...scenario.steps, ...(scenario.teardown ?? [])]) {
     if (typeof step === 'object' && 'env' in step && step.env) {
       conflicts.push(...Object.keys(step.env).filter((key) => owned.has(key)));
@@ -130,6 +142,7 @@ export async function prepareScenario(opts: {
   const accountEnv = { ...account.env, ...opts.accountEnv };
   const externalSecrets = new Map([...(opts.externalSecrets ?? []), ...account.secrets]);
   const checks = profile.baselineChecks!;
+  for (const check of checks) assertObservationQualification(opts.repoRoot, opts.recipe, check);
   const ownedKeys = preparationOwnedEnvKeys(profile);
   const seedScript = scriptPath(opts.repoRoot, profile.seed.script);
   const verifyScript = scriptPath(opts.repoRoot, profile.verify.script);
@@ -148,13 +161,20 @@ export async function prepareScenario(opts: {
           allocation.provisioningEnv,
           timeoutMs,
         );
-        if (!result.ok)
-          throw new Error(
-            `Preparation "${opts.profile}" cleanup failed for its owned namespace`,
+        if (!result.ok) {
+          const capture = new SeedOutputCapture();
+          capture.push('stderr', Buffer.from(result.output));
+          const output = buildCredentialRedactor(secrets, externalSecrets)(capture.finish());
+          throw new SeedError(
+            `Preparation "${opts.profile}" cleanup failed for its owned namespace ${allocation.namespace}\n${seedDiagnosticSummary(output)}`,
+            {version: 1, output, totalBytes: capture.totalBytes, retainedBytes: Buffer.byteLength(output), omittedBytes: capture.omittedBytes,
+              exitCode: result.exitCode, timedOut: result.timedOut, signal: null},
           );
+        }
       }
     } finally {
-      fs.rmSync(allocation.directory, { recursive: true, force: true });
+      try { cleanupPreparationRuntime(allocation.directory, opts.repoRoot); }
+      finally { fs.rmSync(allocation.directory, { recursive: true, force: true }); }
     }
   };
   const close = async () => {
@@ -191,6 +211,7 @@ export async function prepareScenario(opts: {
         ]),
       ),
       GUARD_REPO_ROOT: opts.repoRoot,
+      GUARD_PREPARATION_RUNTIME: stagePreparationRuntime(directory),
       GUARD_PREPARATION_DIRECTORY: directory,
       GUARD_PREPARATION_NAMESPACE: namespace,
       GUARD_PREPARATION_BASELINE: profile.baseline,

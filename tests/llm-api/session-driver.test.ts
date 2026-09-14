@@ -229,6 +229,28 @@ beforeEach(() => buildModelMock.mockReset());
 // ---------------------------------------------------------------------------
 
 describe('api session driver', () => {
+  it('sends the compact outcome schema and persists artifacts without adding them to model context', async () => {
+    const scripted = scriptedModel([
+      { content: [call('check', { value: 'hi' })] },
+      { content: [outcomeCall({ draftId: 'draft-1' })] },
+    ]);
+    buildModelMock.mockReturnValue(scripted.model);
+    const artifact = { draft: 'large durable draft evidence' };
+    const check = defineSessionTool({ name: 'check', description: 'check', kind: 'check', readOnly: true,
+      destructive: false, inputSchema: z.object({ value: z.string() }),
+      execute: async () => ({ content: 'draft-1', artifact }),
+    });
+    const { handle, events } = runSession(createApiSessionDriver(cfg), {
+      def: makeDef({ tools: [check], outcomeInputSchema: z.object({ draftId: z.string() }).strict() }),
+    });
+    expect(await handle.done).toMatchObject({ kind: 'outcome', value: { draftId: 'draft-1' } });
+    expect(events.find(e => e.type === 'tool-result')).toMatchObject({ artifact });
+    expect(JSON.stringify(scripted.calls[1].prompt)).not.toContain(artifact.draft);
+    const wire = scripted.calls[0].tools?.find(t => (t as {name: string}).name === 'outcome');
+    expect(JSON.stringify(wire)).toContain('draftId');
+    expect(JSON.stringify(wire)).not.toContain('verdict');
+  });
+
   it('declares turn-boundary steering and a tool-based outcome', () => {
     buildModelMock.mockReturnValue(scriptedModel([]).model);
     const driver = createApiSessionDriver(cfg);

@@ -48,6 +48,7 @@ import type {
 } from '@truecourse/agent-loop';
 import { buildModel } from './model.js';
 import { normalizeForStrictOutput, stripInjectedNulls, type SchemaPath } from './strict-schema.js';
+import { compactNormalizedSchema } from './compact-schema.js';
 import { providerTuningFor, type ProviderTuning } from './provider-tuning.js';
 import type { ProviderConfig } from './types.js';
 import { callUsageOf, type CallUsage } from './transport.js';
@@ -394,6 +395,7 @@ async function runApiSession(input: SessionRunInput, rt: SessionRuntime): Promis
           toolName: call.toolName,
           content: toolResult.content,
           ...(toolResult.isError !== undefined ? { isError: toolResult.isError } : {}),
+          ...(toolResult.artifact !== undefined ? { artifact: toolResult.artifact } : {}),
         });
       } catch (err) {
         // Name-based check: the shell may be a different module instance of
@@ -690,7 +692,7 @@ function buildToolset(def: SessionDef): {
     let widened: readonly SchemaPath[] = [];
     try {
       const strict = normalizeForStrictOutput(rawSchema);
-      inputSchema = strict.schema;
+      inputSchema = compactNormalizedSchema(strict.schema);
       widened = strict.widened;
     } catch {
       /* inexpressible in the strict subset — send unnormalized */
@@ -707,7 +709,7 @@ function buildToolset(def: SessionDef): {
   add(
     OUTCOME_TOOL_NAME,
     'Report the final structured outcome of this session. Call exactly once, when the work is done.',
-    def.outcomeSchema as unknown as ZodTypeAny,
+    (def.outcomeInputSchema ?? def.outcomeSchema) as unknown as ZodTypeAny,
   );
   return { toolset, widenedByTool };
 }

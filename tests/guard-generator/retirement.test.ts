@@ -90,9 +90,10 @@ describe('flowGenerationInputsHash — the frozen retirement salt', () => {
    */
   // Intentionally rolled for case-granular matching, reviewed preparation profiles,
   // prerequisite eligibility, grounded proof, and the explicit review-policy version.
-  // Policy v5 deliberately revalidates committed coverage under typed web evidence;
-  // extraction, synthesis and matching cache-key algorithms are unchanged.
-  const GOLDEN = 'sha256:2eb1fc76cde7fdb99df25ea0d236fd9a29ba05b0de5a48e8b46f664cc7ef4125'
+  // Policy v5 deliberately revalidates committed coverage under typed web evidence.
+  // Provider control changes the authoring contract and includes the web prompt
+  // in this hash. The retired extract/flows/epic salts remain unchanged.
+  const GOLDEN = 'sha256:eb1546f70ef7a02e259ba2d7a26c109ed2ded15caf0bd2b9c854fd48690fd89a'
 
   it('retains the retirement salt with the current matching doctrine', () => {
     expect(

@@ -43,7 +43,8 @@ import {
   type SuppliedInstance,
 } from './dependencies.js'
 import { startHttpStubs, applyHttpStubOrigins, type HttpStubsHandle } from './capabilities/http.js'
-import { startExternalProxies } from './capabilities/external-proxy.js'
+import { startExternalProxies, type ExternalProxiesHandle } from './capabilities/external-proxy.js'
+import type { ExternalProxyTarget } from './externals.js'
 import type { StepObservation } from './step-stats.js'
 import { normalize, type NormalizerContext } from './normalizers.js'
 import { applyUnique, applyUniqueEnv, applyUniqueSetup } from './unique.js'
@@ -66,6 +67,7 @@ const ENV_PINS = DETERMINISM_PINS
 
 export interface RunScenarioContext {
   externalSecrets?: ReadonlyMap<string, string>
+  externalTargets?: readonly ExternalProxyTarget[]
 
   repoRoot: string
   runId: string
@@ -238,16 +240,19 @@ async function runScenarioInternal(
   // test reads its stubbed dependency's base URL from. A stub that cannot listen (or a
   // `${HTTP_STUB:…}` naming an undeclared stub) is infrastructure, not a finding.
   let stubs: HttpStubsHandle | null = null
+  let proxies: ExternalProxiesHandle | null = null
   let setup = declaredSetup
   try {
     stubs = await startHttpStubs(declaredSetup?.http)
     if (stubs) setup = applyHttpStubOrigins(declaredSetup, stubs.origins)
-    // External accounts configure the API SERVER's env, so the cli
-    // driver never proxies one. A cli scenario that scripts `setup.externals` is
-    // therefore addressing a world that does not exist here — the same loud
-    // CapabilityError an undeclared stub reference earns, never a silent no-op.
-    await startExternalProxies({ targets: [], scripts: declaredSetup?.externals })
+    // Served web scenarios use the same provider lifecycle as API scenarios.
+    // CLI still rejects external scripts without a served web world.
+    proxies = await startExternalProxies({
+      targets: ctx.web ? ctx.externalTargets ?? [] : [], scripts: declaredSetup?.externals,
+      overriddenEnv: Object.keys(setup?.env ?? {}),
+    })
   } catch (e) {
+    await proxies?.stop()
     await stubs?.stop()
     const message = e instanceof CapabilityError ? e.message : e instanceof Error ? e.message : String(e)
     return {
@@ -261,7 +266,7 @@ async function runScenarioInternal(
   let sandbox
   try {
     sandbox = createSandbox({
-      recipeEnv: ctx.recipeEnv,
+      recipeEnv: { ...ctx.web?.env, ...ctx.recipeEnv, ...proxies?.env },
       scenarioEnv: setup?.env,
       setupFiles: setup?.files,
       repoRoot: ctx.repoRoot,
@@ -270,6 +275,7 @@ async function runScenarioInternal(
     })
   } catch (e) {
     // Setup failure (e.g. a path escape) — infra error before any step ran.
+    await proxies?.stop()
     await stubs?.stop()
     const message = e instanceof SandboxError ? e.message : e instanceof Error ? e.message : String(e)
     return {
@@ -308,7 +314,9 @@ async function runScenarioInternal(
   const world: ScenarioDrivers = buildStepDrivers({
     resolvedEntry: ctx.resolvedEntry,
     ...(setup?.git?.identity ? { gitIdentity: setup.git.identity } : {}),
-    surface: ctx.web ?? null,
+    // Surface defaults have already been folded into sandbox.env, before account,
+    // proxy and scenario overrides. Do not apply them a second time at process boot.
+    surface: ctx.web ? { ...ctx.web, env: {} } : null,
   })
   const drivers = world.drivers
 
@@ -590,7 +598,8 @@ async function runScenarioInternal(
     // contract, so it settles as a `fail` on the step it happened during (the `calls`
     // check has no step — it is attributed to the last one). The cli driver resolves no
     // credentials, so there is nothing to redact out of the recorded excerpts.
-    const violation = stubs?.settle() ?? null
+    const externalViolation = proxies?.settle()
+    const violation = stubs?.settle() ?? (externalViolation ? { ...externalViolation, step: allSteps.length } : null)
     if (violation) {
       const violationStep = violation.step ?? allSteps.length
       const evidencePath = writeEvidence({
@@ -603,7 +612,7 @@ async function runScenarioInternal(
         steps: records,
         failingStep: violationStep,
         mismatch: {
-          subject: 'stub',
+          subject: 'stub' in violation ? 'stub' : 'external',
           expected: violation.expected,
           actual: violation.actual,
           detail: violation.detail,
@@ -741,6 +750,7 @@ async function runScenarioInternal(
     // keeps a scenario from leaving a server holding a deleted directory.
     await world.close()
     await stubs?.stop()
+    await proxies?.stop()
     sandbox.cleanup()
   }
 }
@@ -803,5 +813,4 @@ function abortedResult(
     failure: { step, expected: 'the step to run', actual: 'run aborted' },
   }
 }
-
 

@@ -36,6 +36,7 @@ export interface ExpectMismatch {
     | 'output'
     | 'files'
     | 'stub'
+    | 'external'
     | 'prompt'
     | 'capture'
     // The WEB driver's: an element the step addressed that the page never showed

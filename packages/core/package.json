@@ -421,14 +421,15 @@
     "posthog-node": "^4.0.0",
     "simple-git": "^3.27.0",
     "zod": "^3.23.8",
-    "zod-to-json-schema": "^3.25.1"
+    "zod-to-json-schema": "^3.25.1",
+    "minimatch": "^10.0.3",
+    "typescript": "^5.7.0"
   },
   "devDependencies": {
     "@types/cross-spawn": "^6.0.6",
     "@types/dagre": "^0.7.52",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.0.0",
-    "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "tsx": "^4.19.0"
   }
 }

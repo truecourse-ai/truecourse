@@ -1,6 +1,7 @@
+import { qualifyFixtureChecks, fixtureReview } from '../guard-runner/preparation-qualification-fixture';
 import {
   memoryPersistence,
-  stubDriver,
+  stubDriver as rawStubDriver,
   outcome,
 } from './spec-scan-session-stub';
 import type { GuardSetupSessionContext } from '../../packages/core/src/services/guard-setup/session-context';
@@ -28,6 +29,11 @@ import {
   type Recipe,
 } from '@truecourse/guard-runner';
 
+const stubDriver: typeof rawStubDriver = script => rawStubDriver(call => {
+  if (call.def.kind === 'guard-setup.preparation-observations') return outcome(fixtureReview);
+  return script(call);
+});
+
 const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0))
@@ -48,7 +54,7 @@ function fixture() {
       healthPath: '/health',
       seed: {
         command: 'original seed',
-        provides: { fixtures: { original: ['id'] } },
+        provides: { credentials: { owner: { header: 'x-world-token' } }, fixtures: { original: ['id'] } },
       },
     },
     env: { UNRELATED: 'preserved' },
@@ -79,6 +85,7 @@ function fixture() {
     ],
     findings: [],
   };
+  qualifyFixtureChecks(root, recipe, draft.profiles[0].baselineChecks);
   return {
     root,
     recipe,
@@ -178,6 +185,50 @@ describe('preparation authoring session completion gate', () => {
     return { context, acquire };
   }
 
+  it('repairs an invalid observation before verifying local worlds with an unprovided external', async () => {
+    const { root, input, draft } = fixture();
+    input.recipe.api!.externals = { currencybeacon: { baseUrlEnv: 'CURRENCYBEACON_BASE_URL', env: { CURRENCYBEACON_API_KEY: {} } } };
+    const phases: string[] = [];
+    let reviews = 0;
+    let verified = false;
+    const stub = rawStubDriver(async call => {
+      if (call.def.kind === 'guard-setup.preparation-observations') {
+        expect(phases).toEqual(['observation-review']);
+        const review = structuredClone(fixtureReview);
+        if (++reviews === 1) {
+          // The failed Expense Tracker run approved all three of these defects.
+          review.candidates[0].check = {
+            ...review.candidates[0].check, server: 'api',
+            credential: 'none — route is unauthenticated', counts: { '/count': 0 },
+          } as typeof review.candidates[0]['check'];
+          return outcome(review);
+        }
+        expect(call.input.initialMessages.join(' ')).toContain('dotted response field path');
+        return outcome(review);
+      }
+      expect(reviews).toBe(2);
+      const briefing = JSON.parse(call.briefing);
+      expect(briefing.dependencyAvailability.services).toContainEqual(expect.objectContaining({name:'currencybeacon',state:'unprovided'}));
+      expect(briefing.qualifiedObservations).toEqual([fixtureReview.candidates[0].check]);
+      const tool = call.def.tools.find(tool => tool.name === 'verify_preparations')!;
+      const result = await tool.execute(draft, {
+        workItem: 'preparations', signal: new AbortController().signal,
+        dispatchChild: async () => { throw new Error('no child'); },
+      });
+      expect(result.isError, result.content).not.toBe(true);
+      verified = true;
+      return outcome(draft);
+    });
+    const { context } = contextFor(stub);
+    const result = await buildPreparationSession(context)({...input,onPhase:(_label,phase)=>phases.push(phase)});
+    expect(result, result.reason).toMatchObject({status:'ok'});
+    expect(verified).toBe(true);
+    const profile=loadRecipe(root,recipePath(root))!.recipe.preparations!.ledger;
+    expect(profile.needs).toEqual([]);
+    expect(profile.baselineChecks![0].qualification).toBeDefined();
+    expect(profile.baselineChecks![0].server).toBeUndefined();
+  }, 30_000);
+
   it('briefs unavailable catalog-only AWS and provided accounts without their values', async () => {
     const { root, input, draft } = fixture();
     fs.writeFileSync(path.join(root, '.truecourse/scenarios/dependencies.json'), JSON.stringify({ dependencies: [
@@ -199,8 +250,9 @@ describe('preparation authoring session completion gate', () => {
     });
     const { context } = contextFor(stub);
     expect(await buildPreparationSession(context)(input)).toMatchObject({ status: 'skipped' });
-    expect(stub.calls).toHaveLength(1);
+    expect(stub.calls).toHaveLength(2);
     draft.profiles[0].needs = ['database'];
+    qualifyFixtureChecks(root, input.recipe, draft.profiles[0].baselineChecks);
     await expect(verifyPreparationDraft(input, draft, { persist: true })).resolves.toBeUndefined();
     expect(loadRecipe(root, recipePath(root))!.recipe.preparations!.ledger.needs).toEqual(['database']);
   });
@@ -223,7 +275,7 @@ describe('preparation authoring session completion gate', () => {
     const result = await buildPreparationSession(context)({ ...input, onPhase: (_running, done) => phases.push(done) });
     expect(result.status).toBe('skipped');
     expect(acquire).toHaveBeenCalledOnce();
-    expect(phases).toEqual(['install', 'build', 'preparations']);
+    expect(phases).toEqual(['observation-review', 'install', 'build', 'preparations']);
   });
 
   it.each(['install', 'build', 'services'] as const)('retains redacted %s diagnostics and never starts authoring after failure', async stage => {
@@ -241,7 +293,7 @@ describe('preparation authoring session completion gate', () => {
     expect(result.reason).toContain('exit 7');
     expect(result.reason).toContain('fixture dependency missing');
     expect(result.reason).not.toContain(secret);
-    expect(acquire).not.toHaveBeenCalled();
+    expect(acquire).toHaveBeenCalledOnce();
     expect(fs.existsSync(path.join(root, 'built'))).toBe(stage === 'services');
   });
 
@@ -377,6 +429,7 @@ describe('preparation authoring session completion gate', () => {
     expect(fs.readFileSync(recipePath(root), 'utf8')).toBe(original);
     draft.profiles[0].cleanup = cleanup;
     input.recipe.api!.env = { DATABASE_URL: 'postgres://local/shared', DIRECT_URL: 'postgres://direct/shared' };
+    qualifyFixtureChecks(root, input.recipe, draft.profiles[0].baselineChecks);
     await verifyPreparationDraft(input, draft, { persist: true });
     expect(loadRecipe(root, recipePath(root))!.recipe.preparations!.ledger.postgres).toEqual(draft.profiles[0].postgres);
     const bundle = collectGuardSetupBundle(root);

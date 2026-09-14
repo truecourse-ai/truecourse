@@ -4,7 +4,7 @@ import { navigationGroundingProblem } from './proof-grounding.js'
 import { resolvePrerequisites } from '@truecourse/guard-runner'
 import { bindClaimPrerequisites, bindScenarioPrerequisites, scenarioCasePrerequisiteProblems, partitionFlowPrerequisites, flowPrerequisiteStateMaterial, flowInvocationGaps } from './prerequisites.js'
 import { reconcileRemaining, type RepairIssue } from './worker-repair.js'
-import { verificationRequirements, scenarioFullFlowDefect, type GuardEvidenceProofContext, type GuardCaseEvidence, type GuardRemainingObligation } from '@truecourse/shared'
+import { GUARD_OBSERVATION_CAPABILITIES, verificationRequirements, scenarioFullFlowDefect, type GuardEvidenceProofContext, type GuardCaseEvidence, type GuardRemainingObligation } from '@truecourse/shared'
 import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
 /**
  * `guard generate` orchestration — the LLM pipeline that turns spec FLOWS into
@@ -235,6 +235,7 @@ import {
   buildSurfaceCatalogs,
   interfaceDigest,
   matchFlow,
+  matchProviderControls,
   realizationLines,
   realizationAssignmentFingerprint,
   partitionPlanPreparations,
@@ -1188,6 +1189,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // the document to extraction exactly as before.
   // Every document's text, remembered under its content hash: the next
   // generate's gate reads an edited document's OLD text from here.
+  const prerequisiteResolution = resolvePrerequisites(repoRoot, recipe.api?.externals)
   await rememberDocTexts(repoRoot, docs)
   const claimDiff = options.reuseExtraction
     ? await reuseCosmeticExtractions({
@@ -1195,6 +1197,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         docs,
         priorManifest: readManifest(repoRoot),
         seam: options.reuseExtraction,
+        prerequisiteTargets: prerequisiteResolution.targets,
         runner: claimDiffRunner,
       })
     : EMPTY_CLAIM_DIFF_GATE
@@ -1236,7 +1239,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // The declared dependencies: the closed vocabulary a case prerequisite may
   // name. The extraction sessions are briefed on it and their outcomes are held
   // to it; every fold below resolves against the same list.
-  const prerequisiteResolution = resolvePrerequisites(repoRoot, recipe.api?.externals)
 
   // One `guard-generate.extract` session per doc (plan 04 step 15), pooled +
   // cached by the seam; the seam's fold already re-snapped every anchor.
@@ -1465,16 +1467,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // The repo's own third-party dependencies, from the same pass. They name
   // the third party in an api authoring prompt and in every blocked-on gap reason.
   const externalServices = mapped.externalServices
-  // The AUTHORING hint per service: its canonical name plus, when one was detected, the
-  // env var that overrides its base URL — the precondition for a `setup.http` stub.
-  // The user-provided external accounts are joined onto the detected list. A
-  // PROVIDED service flips from blocker to capability (the runner points the app at
-  // it); a declared-but-unprovided one changes nothing. A declared external the
-  // detector never saw is still advertised when PROVIDED — the user knows about an
-  // integration import scanning cannot see, and an account they supplied is a real
-  // capability regardless of how the dependency is reached.
+  // Recipe declarations supply canonical wiring for every service, including
+  // unprovided services the source detector did not identify. Account availability
+  // comes from the same resolver used for eligibility and execution.
   const providedExternals = prerequisiteResolution.externals.filter(e => e.state === 'provided')
-  const externalServiceHints = buildExternalServiceHints(externalServices, providedExternals)
+  const externalServiceHints = buildExternalServiceHints(externalServices, providedExternals, recipe, prerequisiteResolution.targets)
   // The code-truth grounding. The inbound half needs no plumbing at all: what a
   // handler reads off the request lives ON its operation in the catalog (plan
   // item 102), so it is read per flow from the interfaces the plan walks. The
@@ -1617,7 +1614,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     const scenario = committedScenariosById.get(prior.id)
     if (scenario && scenarioReviewFingerprint(bindScenarioPrerequisites(work.flow, scenario, prerequisiteResolution.targets)) !== scenarioReviewFingerprint(scenario)) return false
     if (!scenario || scenarioFullFlowDefect(work.flow.milestones, scenario.steps) || prior.reviewed === false || work.prior?.flowFingerprint !== work.flow.fingerprint ||
-      scenario.flow?.fingerprint !== work.flow.fingerprint || scenarioPreparationDefect(work.flow, recipe, scenario) || scenarioCasePrerequisiteProblems(work.flow, scenario, prerequisiteResolution.targets, scenario.setup?.preparation ? recipe.preparations?.[scenario.setup.preparation]?.env : undefined).length) return false
+      scenario.flow?.fingerprint !== work.flow.fingerprint || scenarioPreparationDefect(work.flow, recipe, scenario) || scenarioCasePrerequisiteProblems(work.flow, scenario, prerequisiteResolution.targets, scenario.setup?.preparation ? recipe.preparations?.[scenario.setup.preparation]?.env : undefined, recipe).length) return false
     if (!work.flow.bindings.every(b => scenario.binds.some(s =>
       s.doc === b.doc && s.section === b.anchor && s.fingerprint === b.fingerprint))) return false
     return !work.flow.milestones.some(m => m.verification?.cases) ||
@@ -1831,7 +1828,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         continue
       }
       localMatchCalls++
-      const outcome = await limit(() => matchFlow(repoRoot, eligibleFlow, surfaceCatalog, matchRunner))
+      const outcome = await limit(() => matchFlow(repoRoot, eligibleFlow, surfaceCatalog, matchRunner, undefined, matchProviderControls(eligibleFlow, surface, prerequisiteResolution.targets, recipe)))
       if (outcome.kind === 'plan' || outcome.kind === 'gap') {
         for (const gap of outcome.gaps) gaps.push({ surface,
           kind: gap.kind === 'mapping' ? 'no-interface' : 'blocked-on',
@@ -1839,7 +1836,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           milestones: [gap.milestone],
           ...(gap.checks ? { obligations: gap.checks.map(caseId => ({ milestone: gap.milestone, caseId })) } : {}),
           ...(gap.kind === 'mapping' ? { blocker: { kind: 'generation' as const, action: `Run guard interfaces author to map ${gap.checks?.join(', ') ?? gap.milestone}: ${gap.reason}. Source ${flow.milestones.find(m => m.order === gap.milestone)?.doc}#${flow.milestones.find(m => m.order === gap.milestone)?.anchor}; retain existing valid interfaces.` } } : {}),
-          ...(gap.kind === 'capability' ? { blocker: { kind: 'unsupported-capability' as const, capabilities: verificationRequirements(flow.milestones.find(m => m.order === gap.milestone)?.verification, gap.checks) } } : {}),
+          ...(gap.kind === 'capability' ? { blocker: { kind: 'unsupported-capability' as const, capabilities: verificationRequirements(flow.milestones.find(m => m.order === gap.milestone)?.verification, gap.checks).filter(c => !(GUARD_OBSERVATION_CAPABILITIES[surface] ?? []).includes(c)) } } : {}),
         })
       }
       if (outcome.kind === 'plan') {
@@ -1876,7 +1873,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             continue
           }
         }
-        const prepared = partitionPlanPreparations(flow, outcome.plan, preparationCatalog(recipe))
+        const prepared = partitionPlanPreparations(flow, outcome.plan, preparationCatalog(recipe, repoRoot))
         for (const row of prepared.missing) gaps.push({ surface, kind: 'blocked-on', milestones: [row.milestone],
           obligations: [{ milestone: row.milestone, caseId: row.caseId }],
           blocker: { kind: 'configuration', action: `Refresh Guard Setup preparations to provide a verified ${row.requirement} private starting state.` },
@@ -1913,7 +1910,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       ...p.interfaces.map((j) => j.fingerprint),
       ...(p.surface === 'web' ? [catalogs.get('web')!.fingerprint] : []),
     ])
-    interfaceFingerprints.push(flowPrerequisiteStateMaterial(flow, prerequisiteResolution.targets))
+    interfaceFingerprints.push(flowPrerequisiteStateMaterial(flow, prerequisiteResolution.targets, recipe))
     const inputsHash = flowGenerationInputsHash({
       flowFingerprint: flow.fingerprint,
       sectionKeys,
@@ -1927,7 +1924,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     const invalidCaseReview = !!prior && (prior.scenarios.length > 1 || prior.scenarios.some(s =>
       s.reviewed === false || (s.reviewPolicyVersion !== GUARD_REVIEW_POLICY_VERSION || !committedScenariosById.has(s.id) || s.reviewedScenarioFingerprint !== scenarioReviewFingerprint(committedScenariosById.get(s.id)) ||
         scenarioPreparationDefect(flow, recipe, committedScenariosById.get(s.id)!) ||
-        scenarioCasePrerequisiteProblems(flow, committedScenariosById.get(s.id)!, prerequisiteResolution.targets).length ||
+        scenarioCasePrerequisiteProblems(flow, committedScenariosById.get(s.id)!, prerequisiteResolution.targets, undefined, recipe).length ||
         scenarioFullFlowDefect(flow.milestones, committedScenariosById.get(s.id)!.steps, s.caseEvidence ?? []))))
     let changed = !prior || prior.generationInputsHash !== inputsHash || violatesSettleInvariant(prior) || invalidCaseReview
     // THE PER-FLOW CLAIM-DIFF GATE: when the only inputs that moved are bound
@@ -2568,7 +2565,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           const problem = navigationGroundingProblem(step.navigate, task.plan.interfaces.flatMap(i => 'path' in i.entry ? [i.entry.path] : []), [...task.work.sections.values()].map(s => s.fullText || s.ownText).join('\n'))
           if (problem) return problem
         }
-        const prerequisiteDefect = scenarioCasePrerequisiteProblems(task.work.flow, raw, prerequisiteResolution.targets, raw.setup?.preparation ? recipe.preparations?.[raw.setup.preparation]?.env : undefined)[0]
+        const prerequisiteDefect = scenarioCasePrerequisiteProblems(task.work.flow, raw, prerequisiteResolution.targets, raw.setup?.preparation ? recipe.preparations?.[raw.setup.preparation]?.env : undefined, recipe)[0]
         if (prerequisiteDefect) return prerequisiteDefect.reason
         const preparationDefect = scenarioPreparationDefect(task.work.flow, recipe, raw)
         if (preparationDefect) return preparationDefect
@@ -2595,7 +2592,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       const privateMutatorRefs = new Set<string>()
       const localDependencies = new Set(prerequisiteResolution.dependencies.dependencies
         .filter(d => d.state === null && d.entry.class !== 'supplied').map(d => d.name))
-      const privateProfiles = privateAuthoringProfiles(recipe, localDependencies)
+      const privateProfiles = privateAuthoringProfiles(recipe, localDependencies, repoRoot)
 
       /**
        * The DETERMINISTIC mutator gate, enforced where execution happens — the
@@ -2986,7 +2983,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         judge: WorkerFidelityJudge,
       ): Promise<FlowWorkerToolReport> => {
         const task = state.task
-        const prerequisiteDefect = scenarioCasePrerequisiteProblems(task.work.flow, candidate.scenario, prerequisiteResolution.targets)[0]
+        const prerequisiteDefect = scenarioCasePrerequisiteProblems(task.work.flow, candidate.scenario, prerequisiteResolution.targets, undefined, recipe)[0]
         if (prerequisiteDefect) return { content: `not accepted: ${prerequisiteDefect.reason}`, isError: true }
         if (expectedReds.length && (result.preparationFailure || result.blockedPrecondition)) {
           rememberRejection(state, candidate, 'Required setup did not succeed; this execution cannot establish product drift.', 'preparation', 'execution')
@@ -3162,6 +3159,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             flowFingerprint: task.work.flow.fingerprint,
             sectionKeys: task.work.sectionKeys,
             interfaceFingerprints: [
+              flowPrerequisiteStateMaterial(task.work.flow, prerequisiteResolution.targets, recipe),
               realizationAssignmentFingerprint(task.plan),
               ...task.plan.interfaces.map((j) => j.fingerprint),
               ...(task.surface === 'web' ? [authorCatalog.fingerprint] : []),
@@ -3177,6 +3175,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                 : []
             const ctx: AuthorUserContext = {
               ...assembleAuthorCtx({
+                repoRoot,
                 task,
                 recipe,
                 probes,
@@ -4482,15 +4481,14 @@ function resolveProvidedExternals(repoRoot: string, recipe: Recipe): ResolvedExt
 }
 
 /**
- * The authoring hints: every DETECTED third party (the blockers worth naming), each
- * marked `provided` when the user supplied an account for it, plus any PROVIDED
- * service the detector never saw (appended, sorted, so the order stays stable). A
- * provided service's `baseUrlEnv` comes from the RECIPE — that declaration is what
- * the runner actually injects, so it beats the detector's guess.
+ * Detected services plus all recipe declarations. Recipe URL variables take
+ * precedence over detector guesses for both unprovided and provided accounts.
  */
 function buildExternalServiceHints(
   detected: readonly DetectedExternalService[],
   provided: readonly ResolvedExternal[],
+  recipe: Recipe,
+  targets: readonly import('@truecourse/shared').GuardPrerequisiteTarget[],
 ): ExternalServiceHint[] {
   const byService = new Map(provided.map((p) => [p.service, p]))
   const hints: ExternalServiceHint[] = detected.map((s) => {
@@ -4510,6 +4508,13 @@ function buildExternalServiceHints(
   const seen = new Set(detected.map((s) => s.service))
   for (const account of [...provided].sort((a, b) => a.service.localeCompare(b.service))) {
     if (!seen.has(account.service)) hints.push(providedHint(account))
+  }
+  for (const [name, declaration] of Object.entries(recipe.api?.externals ?? {})) {
+    let hint = hints.find(h => h.name === name)
+    if (!hint) { hint = { name }; hints.push(hint) }
+    hint.baseUrlEnv = declaration.baseUrlEnv
+    hint.baseUrlEnvs = [declaration.baseUrlEnv, ...Object.keys(declaration.endpoints ?? {})].sort()
+    hint.credentialEnv = targets.filter(t => t.providers?.some(p => p.service === name)).flatMap(t => [...t.credentialEnv]).sort()
   }
   return hints
 }
@@ -4812,6 +4817,7 @@ function compositionDefectOf(scenario: RawGeneratedScenario, recipe: Recipe): st
  * procedure-bearing interface (item 12, `buildSurfaceCatalogs`).
  */
 function assembleAuthorCtx(opts: {
+  repoRoot: string
   task: AuthorTask
   recipe: Recipe
   probes: ProbeTranscript[]
@@ -4833,6 +4839,7 @@ function assembleAuthorCtx(opts: {
     : opts.apiInterfaces
   const other = buildOtherOperationHints(reachableInterfaces, interfaceContracts)
   const ctx = buildAuthorCtx(
+    opts.repoRoot,
     task.work,
     task.surface,
     task.plan,
@@ -4978,6 +4985,7 @@ function workerFidelityBriefing(work: FlowWork, candidate: BirthCandidate, captu
 /** The authoring context for one (flow, surface): the claims + section texts
  *  (WHAT to assert) and the realization plan translated to driver verbs (HOW). */
 function buildAuthorCtx(
+  repoRoot: string,
   work: FlowWork,
   surface: GuardDriverId,
   plan: RealizationPlan,
@@ -5015,6 +5023,7 @@ function buildAuthorCtx(
     areaTags: [...new Set(sections.flatMap((s) => s.areaTags))],
     driver: surface,
     ...(externalServices.length ? { externalServices } : {}),
+    ...(surface === 'api' || surface === 'web' ? { outboundRequests: grounding.outboundRequests, outboundRequestsOverflow: grounding.outboundRequestsOverflow } : {}),
     ...(surface === 'api'
       ? {
           recipeServe: bound ? [...bound.serve] : defaultServerServe(recipe),
@@ -5057,7 +5066,7 @@ function buildAuthorCtx(
       : surface === 'web'
         ? webPreparationCtx(recipe)
         : { recipeEntry: recipe.entry }),
-    preparations: preparationCatalog(recipe),
+    preparations: preparationCatalog(recipe, repoRoot),
     recipeBuild: recipe.build,
     probes,
   }

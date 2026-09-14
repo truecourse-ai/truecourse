@@ -23,7 +23,9 @@
 import { createHash } from 'node:crypto'
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import {
+  GUARD_OBSERVATION_CAPABILITIES,
   verificationCapabilityGap,
+  type GuardPrerequisiteTarget,
   verificationCasePreparation,
   interfaceEntryLabel,
   flowDriversToMatch,
@@ -43,8 +45,18 @@ import {
 } from './prompts.js'
 import { flattenZodError, quoteInvalidOutput } from './validate.js'
 import type { MatchRunner } from './runners.js'
+import { PROVIDER_CONTROL_VERSION, resolveProviderControl, type Recipe, type ResolvedProviderControl } from '@truecourse/guard-runner'
 
 export const MATCH_CACHE_NAME = 'guard/match'
+
+/** Runner-owned fixtures, resolved without exposing account values or application code. */
+export function matchProviderControls(flow: GuardFlow, driver: GuardDriverId, targets: readonly GuardPrerequisiteTarget[], recipe: Recipe): ResolvedProviderControl[] {
+  const controls = flow.milestones.flatMap(m => m.verification?.cases?.flatMap(c => c.providerControls ?? []) ?? [])
+  return [...new Map(controls.map(c => {
+    const resolved = resolveProviderControl(c, driver, targets, recipe)
+    return [JSON.stringify(resolved), resolved] as const
+  })).entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, resolved]) => resolved)
+}
 
 // ---------------------------------------------------------------------------
 // Catalogs
@@ -187,12 +199,15 @@ function driverVerb(step: InterfaceStep, driver: GuardDriverId): string {
 export function matchCacheKey(
   flow: Pick<GuardFlow, 'fingerprint'>,
   catalog: Pick<SurfaceCatalog, 'surface' | 'fingerprint'>,
+  providerControls: readonly ResolvedProviderControl[] = [],
 ): string {
   return createHash('sha256')
     .update(
       [
         MATCH_PROMPT_FINGERPRINT,
-        'case-assignments-v1',
+        'case-assignments-v2',
+        JSON.stringify(GUARD_OBSERVATION_CAPABILITIES[catalog.surface] ?? []),
+        JSON.stringify(providerControls.length ? [PROVIDER_CONTROL_VERSION, providerControls.map(c => JSON.stringify(c)).sort()] : []),
         catalog.surface,
         catalog.fingerprint,
         flow.fingerprint,
@@ -212,8 +227,10 @@ export async function readCachedMatch(
   repoRoot: string,
   flow: GuardFlow,
   catalog: SurfaceCatalog,
-  cacheKey = matchCacheKey(flow, catalog),
+  cacheKey: string | undefined = undefined,
+  providerControls: readonly ResolvedProviderControl[] = [],
 ): Promise<{ plan: RealizationPlan | null } | null> {
+  cacheKey ??= matchCacheKey(flow, catalog, providerControls)
   if (!capabilityPartition(flow, catalog.surface).flow.milestones.length) return { plan: null }
   const cached = await getCacheEntry(repoRoot, MATCH_CACHE_NAME, cacheKey)
   if (!cached) return null
@@ -250,17 +267,19 @@ export async function planFlowMatching(
   repoRoot: string,
   flows: readonly GuardFlow[],
   catalogs: readonly SurfaceCatalog[],
+  providerContext: (flow: GuardFlow, catalog: SurfaceCatalog) => readonly ResolvedProviderControl[] = () => [],
 ): Promise<MatchPlan> {
   const pairs: MatchPairPlan[] = []
   for (const flow of flows) {
     for (const catalog of catalogs) {
       if (catalog.interfaces.length === 0 || !flowDriversToMatch(flow).includes(catalog.surface)) continue
-      const cacheKey = matchCacheKey(flow, catalog)
+      const controls = providerContext(flow, catalog)
+      const cacheKey = matchCacheKey(flow, catalog, controls)
       pairs.push({
         flowId: flow.id,
         surface: catalog.surface,
         cacheKey,
-        cached: (await readCachedMatch(repoRoot, flow, catalog, cacheKey)) !== null,
+        cached: (await readCachedMatch(repoRoot, flow, catalog, cacheKey, controls)) !== null,
       })
     }
   }
@@ -348,7 +367,7 @@ function uncoveredReason(flow: GuardFlow, orders: readonly number[]): string {
   return `no interface realizes ${orders.length === 1 ? 'milestone' : 'milestones'} ${orders.join(', ')} — ${titles.join('; ')}`
 }
 
-function buildContext(flow: GuardFlow, catalog: SurfaceCatalog): MatchUserContext {
+function buildContext(flow: GuardFlow, catalog: SurfaceCatalog, providerControls: readonly ResolvedProviderControl[]): MatchUserContext {
   return {
     flow: { id: flow.id, title: flow.title, goal: flow.goal },
     milestones: flow.milestones
@@ -356,6 +375,8 @@ function buildContext(flow: GuardFlow, catalog: SurfaceCatalog): MatchUserContex
       .sort((a, b) => a.order - b.order)
       .map((m) => ({ order: m.order, claim: m.claimTitle, ...(m.verification ? { verification: m.verification } : {}), ...(m.note ? { note: m.note } : {}) })),
     surface: catalog.surface,
+    capabilities: GUARD_OBSERVATION_CAPABILITIES[catalog.surface] ?? [],
+    providerControls,
     interfaces: catalog.interfaces.map(interfaceDigest),
   }
 }
@@ -403,6 +424,14 @@ function matchReferenceIssues(flow: GuardFlow, catalog: SurfaceCatalog, data: Re
         if (kind === 'plan') {
           const reason = verificationCapabilityGap(m.verification, catalog.surface, entry.checks)
           if (reason) gapErrors.push(`milestone ${entry.milestone} cannot be planned: ${reason}`)
+        }
+        if (kind === 'gap' && (entry as RealizationGap).kind === 'capability' && m.verification) {
+          const checks = entry.checks ?? [undefined]
+          for (const check of checks) {
+            if (!verificationCapabilityGap(m.verification, catalog.surface, check ? [check] : undefined)) {
+              gapErrors.push(`milestone ${m.order}${check ? ` check ${check}` : ''}: capability gap contradicts the runner registry; all declared observations are supported. Provider fixtures are runner-owned and need no catalog interface. Ground the app action, or name a genuinely missing app action as a mapping gap.`)
+            }
+          }
         }
       }
       if (kind === 'gap') for (const key of obligationKeys(entry.milestone, entry.checks)) {
@@ -502,11 +531,13 @@ export async function matchFlow(
   flow: GuardFlow,
   catalog: SurfaceCatalog,
   runner: MatchRunner,
-  cacheKey = matchCacheKey(flow, catalog),
+  cacheKey: string | undefined = undefined,
+  providerControls: readonly ResolvedProviderControl[] = [],
 ): Promise<MatchOutcome> {
+  cacheKey ??= matchCacheKey(flow, catalog, providerControls)
   const { flow: matchableFlow, gaps: capabilityGaps } = capabilityPartition(flow, catalog.surface)
   if (matchableFlow.milestones.length === 0) return { kind: 'gap', gaps: capabilityGaps, calls: 0 }
-  const base = buildContext(matchableFlow, catalog)
+  const base = buildContext(matchableFlow, catalog, providerControls)
   const settle = (data: RealizationMatch, calls: number, repairMissing = false): MatchOutcome | null => {
     const rawGaps: RealizationGap[] = data.unrealizable
       ? matchableFlow.milestones.map(m => ({ milestone: m.order,

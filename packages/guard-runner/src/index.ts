@@ -467,3 +467,12 @@ export { preparationOwnedEnvKeys, bindPreparationPostgres } from './preparation-
 export { computePreparationFingerprint } from './recipe.js'
 
 export { preparationDependencyBriefing, resolvePreparationDependencies } from './preparation-dependencies.js'
+
+export { PREPARATION_RUNTIME_GUIDANCE, PREPARATION_RUNTIME_SOURCE, stagePreparationRuntime, cleanupPreparationRuntime } from './preparation-runtime.js';
+export type { SeedDiagnostic } from './api/seed-diagnostic.js';
+
+export { PreparationQualificationSchema, observationBinding, observationConfiguration, observationSource, observationHash, assertObservationQualification } from './preparation-observation.js';
+export type { PreparationQualification } from './preparation-observation.js';
+
+export { RecipePreparationBaselineCheckSchema } from './recipe.js';
+export { type ResolvedProviderControl, resolveProviderControl, providerControlStateMaterial, scenarioProviderControlProblems, PROVIDER_CONTROL_VERSION } from './provider-control.js'

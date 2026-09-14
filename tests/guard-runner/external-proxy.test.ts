@@ -408,3 +408,17 @@ describe('setup.externals — the schema', () => {
     expect(accept({ v: { calls: -1 } })).toBe(false)
   })
 })
+
+it('never forwards a delayed request after the client times out, and closes pending delays promptly', async () => {
+  const up = await upstream()
+  const h = await proxies([{ envVar: 'BASE', url: up.origin }], { vendor: { faults: [{ delayMs: 200 }] } })
+  const abort = new AbortController()
+  const request = fetch(h.env.BASE, { signal: abort.signal })
+  const rejected = expect(request).rejects.toThrow()
+  await expect.poll(() => h.records().length).toBe(1)
+  abort.abort()
+  await rejected
+  await new Promise(r => setTimeout(r, 250))
+  expect(up.hits).toHaveLength(0)
+  await h.stop()
+})

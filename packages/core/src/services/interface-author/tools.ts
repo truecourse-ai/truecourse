@@ -32,8 +32,11 @@
 import { z } from 'zod'
 import { defineSessionTool, type SessionTool } from '@truecourse/agent-loop'
 import type { InterfacesFile } from '@truecourse/shared'
-import { readFileTool, searchTool } from '../agent/repo-tools.js'
+import { readFileTool, readFilesTool, searchTool } from '../agent/repo-tools.js'
+import { liveAuthorCatalog } from './catalog-context.js'
 import { AuthoredFragmentSchema, validateFragment } from './draft.js'
+import { checkedDraftEvidence } from './checked-draft.js'
+import { scopeFragmentIds } from './identity.js'
 
 /** How many catalog entries one `list_interfaces` call hands back — a tool
  *  result is context, and context is the budget. */
@@ -52,7 +55,34 @@ export interface AuthorToolsInput {
 }
 
 export function buildAuthorTools(input: AuthorToolsInput): SessionTool[] {
-  return [readFileTool(input.repoRoot), searchTool(input.repoRoot), interfacesTool(input), checkDraftTool(input)]
+  return [readFileTool(input.repoRoot), readFilesTool(input.repoRoot), searchTool(input.repoRoot), interfacesTool(input), ...catalogTools(input), checkDraftTool(input)]
+}
+
+function catalogTools(input: AuthorToolsInput): SessionTool[] {
+  const catalog = liveAuthorCatalog(input)
+  return [
+    defineSessionTool({
+      name: 'search_interfaces', kind: 'read-interface-catalog',
+      description: 'Search current web catalog metadata, including tasks owned by or navigating to a resource. Page with nextCursor. Fetch exact steps with get_interfaces. Unrelated catalog changes do not invalidate pages; restart only if the requested results change.',
+      readOnly: true, destructive: false,
+      inputSchema: z.object({ query: z.string().max(500), purpose: z.enum(['task', 'control']).optional(), resource: z.string().min(1).max(200).optional(), limit: z.number().int().min(1).max(20).optional(), cursor: z.string().max(1000).optional() }).strict(),
+      async execute(args) { return catalog().search(args) },
+    }),
+    defineSessionTool({
+      name: 'get_interfaces', kind: 'read-interface-catalog',
+      description: 'Read 1–5 exact web action definitions as compact objects. Resources/readables are optional: includeResources:true. Items carry ID, path and value; oversized objects use exact field continuations. Keep IDs and projection unchanged when paging with nextCursor. Never treat incomplete definitions as complete.',
+      readOnly: true, destructive: false,
+      inputSchema: z.object({ ids: z.array(z.string().min(1).max(200)).min(1).max(5), cursor: z.string().max(1000).optional(), includeResources: z.boolean().optional() }).strict(),
+      async execute(args) { return catalog().get({ ...args, includeResources: args.includeResources ?? false }) },
+    }),
+    ...(['resources', 'states'] as const).map(kind => defineSessionTool({
+      name: `get_${kind}`, kind: 'read-interface-catalog',
+      description: `Read 1–5 exact catalog ${kind} by ID. Use this for registry definitions, never source search on hidden catalog files. Continue incomplete results with the same IDs and nextCursor.`,
+      readOnly: true, destructive: false,
+      inputSchema: z.object({ ids: z.array(z.string().min(1).max(200)).min(1).max(5), cursor: z.string().max(1000).optional() }).strict(),
+      async execute(args) { return kind === 'resources' ? catalog().getResources(args) : catalog().getStates(args) },
+    })),
+  ]
 }
 
 // ---------------------------------------------------------------------------
@@ -103,7 +133,7 @@ function interfacesTool(input: AuthorToolsInput): SessionTool {
         ? `Nothing matches \`${args.contains}\`. The whole \`${args.surface}\` surface is ${all.length} entries, so here it is:\n`
         : ''
       const tail = matched.length > shown.length ? `\n… ${matched.length - shown.length} more — narrow with \`contains\`.` : ''
-      return { content: head + rows.join('\n') + tail }
+      return { content: head + rows.join('\n') + tail + (args.surface === 'web' ? '\nUse search_interfaces for paged web lookup and get_interfaces for exact steps.' : '') }
     },
   })
 }
@@ -118,18 +148,21 @@ function checkDraftTool(input: AuthorToolsInput): SessionTool {
     destructive: false,
     inputSchema: AuthoredFragmentSchema,
     async execute(args) {
+      const fragment = scopeFragmentIds(args, input)
       const result = validateFragment({
         derived: input.derived,
         authored: input.authored,
-        fragment: args,
+        fragment,
         replaceable: input.replaceable,
         ...(input.scope ? { scope: input.scope } : {}),
       })
       if (result.ok) {
+        const artifact = checkedDraftEvidence(fragment)
         return {
           content: `The draft is valid: ${args.interfaces.length} task(s), ${args.states?.length ?? 0} state(s), ${
             args.resources?.length ?? 0
-          } place(s). Produce it as the outcome.`,
+          } place(s). To finish, call outcome with ${JSON.stringify({ draftId: artifact.draftId })}. Do not repeat the draft. Final acceptance checks the current catalog again.`,
+          artifact,
         }
       }
       return { content: `${result.errors.length} problem(s):\n- ${result.errors.join('\n- ')}`, isError: true }

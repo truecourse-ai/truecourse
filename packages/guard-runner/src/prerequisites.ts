@@ -110,6 +110,13 @@ export function resolvePrerequisites(
     const target = targets.find((t) => t.name === dependency.name)
     if (target) dependency.state = target.state
   }
+  for (const [service, declaration] of Object.entries(declared ?? {})) {
+    for (const target of targets.filter(t => t.name === service || t.aliases.includes(service))) {
+      target.providers = [...(target.providers ?? []), {
+        service, baseUrlEnvs: [declaration.baseUrlEnv, ...Object.keys(declaration.endpoints ?? {})].sort(),
+      }]
+    }
+  }
   return {
     targets,
     externals: resolvedExternals.map((external) => {

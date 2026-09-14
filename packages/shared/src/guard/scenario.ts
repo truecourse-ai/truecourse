@@ -267,6 +267,10 @@ export const GuardHttpStubRouteSchema = z
     json: z.unknown().optional(),
     /** Assertions on the request that hit this route. See {@link GuardHttpStubExpectSchema}. */
     expect: GuardHttpStubExpectSchema.optional(),
+    delayMs: z.number().int().positive().max(600_000).optional(),
+    bodyDelayMs: z.number().int().positive().max(600_000).optional(),
+    refuse: z.literal(true).optional(),
+    once: z.boolean().optional(),
     /**
      * Exact number of times this route must be hit over the scenario, checked at
      * scenario end. `0` asserts the app NEVER calls it. Omitted ⇒ any count.
@@ -276,6 +280,9 @@ export const GuardHttpStubRouteSchema = z
   .strict()
   .refine((r) => r.body === undefined || r.json === undefined, {
     message: 'a stub route carries `body` or `json`, not both',
+  })
+  .refine(r => !r.refuse || [r.status, r.headers, r.body, r.json, r.bodyDelayMs].every(v => v === undefined), {
+    message: 'a refused stub route cannot carry a response or body delay',
   })
 
 /**
@@ -318,13 +325,15 @@ export const GuardHttpStubsSchema = z.record(
  */
 export const GuardExternalFaultMatchSchema = z
   .object({
+    /** A declared base URL variable; omission matches all service endpoints. */
+    endpoint: z.string().min(1).optional(),
     method: z.enum(GUARD_HTTP_METHODS).optional(),
     /** Request PATH to match (pathname only). Must start with `/`. */
     path: z.string().regex(/^\//, 'path must start with /').optional(),
   })
   .strict()
-  .refine((m) => m.method !== undefined || m.path !== undefined, {
-    message: 'a fault match needs `method` or `path` (omit `match` entirely to match every call)',
+  .refine((m) => m.method !== undefined || m.path !== undefined || m.endpoint !== undefined, {
+    message: 'a fault match needs `method`, `path` or `endpoint` (omit `match` entirely to match every call)',
   })
 
 /**
@@ -367,6 +376,9 @@ export const GuardExternalFaultSchema = z
     respond: GuardExternalFaultResponseSchema.optional(),
     /** Wait this long before responding/forwarding — the upstream-timeout script. */
     delayMs: z.number().int().positive().max(600_000).optional(),
+    /** Flush scripted response headers, then delay body completion. */
+    bodyDelayMs: z.number().int().positive().max(600_000).optional(),
+    expect: GuardHttpStubExpectSchema.optional(),
     /** Destroy the connection without answering (a refused/reset upstream). */
     refuse: z.literal(true).optional(),
     /** Fire at most once, then advance to the next rule — per-call sequencing. */
@@ -375,6 +387,9 @@ export const GuardExternalFaultSchema = z
   .strict()
   .refine((f) => !(f.respond !== undefined && f.refuse !== undefined), {
     message: 'a fault rule carries `respond` or `refuse`, not both',
+  })
+  .refine(f => f.bodyDelayMs === undefined || f.respond !== undefined, {
+    message: 'bodyDelayMs requires a scripted respond body',
   })
   .refine(
     (f) =>
@@ -398,6 +413,8 @@ export const GuardExternalSchema = z
   .object({
     /** Fault rules, consulted in declaration order. See {@link GuardExternalFaultSchema}. */
     faults: z.array(GuardExternalFaultSchema).min(1).optional(),
+    /** Live scripts forward unmatched requests; controlled scripts must reject them. */
+    unmatched: z.enum(['passthrough', 'error']).optional(),
     /**
      * Exact number of calls this service must receive over the scenario (across
      * ALL of its endpoints), checked at scenario end. `0` asserts the app never
@@ -406,7 +423,7 @@ export const GuardExternalSchema = z
     calls: z.number().int().nonnegative().optional(),
   })
   .strict()
-  .refine((e) => e.faults !== undefined || e.calls !== undefined, {
+  .refine((e) => e.faults !== undefined || e.calls !== undefined || e.unmatched !== undefined, {
     message: 'an externals entry needs `faults` or `calls`',
   })
 

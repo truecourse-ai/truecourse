@@ -298,7 +298,7 @@ async function runClaudeAgentSession(
     allowedTools: def.tools.map((t) => mcpToolName(t.name)),
     outputFormat: {
       type: 'json_schema',
-      schema: zodToJsonSchema(def.outcomeSchema as unknown as z.ZodTypeAny, {
+      schema: zodToJsonSchema((def.outcomeInputSchema ?? def.outcomeSchema) as unknown as z.ZodTypeAny, {
         $refStrategy: 'none',
       }),
     },
@@ -658,6 +658,7 @@ function buildMcpTool(
         toolName: tool.name,
         content: result.content,
         ...(result.isError !== undefined ? { isError: result.isError } : {}),
+        ...(result.artifact !== undefined ? { artifact: result.artifact } : {}),
       });
       return toMcpResult(result.content, result.isError === true);
     } catch (err) {

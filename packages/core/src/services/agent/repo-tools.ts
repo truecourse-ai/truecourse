@@ -10,25 +10,16 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
+import { Minimatch } from 'minimatch'
 import { defineSessionTool, type SessionTool } from '@truecourse/agent-loop'
 import { DOC_DISCOVERY_SKIP_DIRS } from '@truecourse/shared'
+import { MAX_SOURCE_FILE_BYTES, MAX_SOURCE_RESULT_BYTES, readHint, readSource, resolveSourcePath, sourceLines, sourceView } from './source-view.js'
 
 const MAX_READ_LINES = 400
 const MAX_SEARCH_HITS = 60
-const MAX_FILE_BYTES = 2_000_000
-/** How wide one shown line may be — a minified bundle must not eat a turn. */
+const MAX_FILE_BYTES = MAX_SOURCE_FILE_BYTES
+/** Maximum code points in a search excerpt; source reads use byte-bounded pages. */
 export const MAX_LINE_CHARS = 400
-
-/** Resolve a repo-relative path INSIDE the repo, or throw. */
-function resolveInside(repoRoot: string, candidate: string): string {
-  const root = path.resolve(repoRoot)
-  const target = path.resolve(root, candidate)
-  const rel = path.relative(root, target)
-  if (rel.startsWith('..') || path.isAbsolute(rel)) {
-    throw new Error(`\`${candidate}\` is outside the repository — paths are repo-relative`)
-  }
-  return target
-}
 
 export interface FileViewInput {
   /** Repo-relative path, as the session names it. */
@@ -43,21 +34,17 @@ export interface FileViewInput {
 
 /** `path (N lines)`, numbered lines, and what was left out. */
 export function renderFileView({ path, lines, start, total }: FileViewInput): string {
-  const body = lines.map((line, index) => `${start + index}\t${clipLine(line)}`).join('\n')
+  const body = lines.map((line, index) => `${start + index}\t${line}`).join('\n')
   const shown = start - 1 + lines.length
   const tail = shown < total ? `\n… ${total - shown} more lines` : ''
   return `${path} (${total} lines)\n${body}${tail}`
-}
-
-export function clipLine(line: string): string {
-  return line.length > MAX_LINE_CHARS ? `${line.slice(0, MAX_LINE_CHARS)}…` : line
 }
 
 export function readFileTool(repoRoot: string): SessionTool {
   return defineSessionTool({
     name: 'read_file',
     description:
-      'Read a repo-relative source file. Returns numbered lines. Use `start` and `lines` to page through a long file; at most 400 lines come back per call.',
+      'Read source in pages of at most 400 lines and 24,000 UTF-8 bytes. Follow the returned start/startColumn continuation to recover omitted text, including long lines. Columns count Unicode code points from 1.',
     kind: 'read-file',
     readOnly: true,
     destructive: false,
@@ -65,13 +52,14 @@ export function readFileTool(repoRoot: string): SessionTool {
       .object({
         path: z.string().min(1).describe('Repo-relative path, e.g. `apps/dashboard/client/src/pages/Repo.tsx`'),
         start: z.number().int().positive().optional().describe('First line (1-based). Defaults to 1.'),
+        startColumn: z.number().int().positive().optional().describe('One-based Unicode code-point column on the first requested line.'),
         lines: z.number().int().positive().optional().describe(`How many lines (max ${MAX_READ_LINES}).`),
       })
       .strict(),
     async execute(args) {
       let target: string
       try {
-        target = resolveInside(repoRoot, args.path)
+        target = resolveSourcePath(repoRoot, args.path)
       } catch (error) {
         return { content: message(error), isError: true }
       }
@@ -82,26 +70,67 @@ export function readFileTool(repoRoot: string): SessionTool {
         return { content: `\`${args.path}\` does not exist.`, isError: true }
       }
       if (stat.isDirectory()) {
+        if (args.startColumn !== undefined) return { content: 'startColumn applies to source files, not directories.', isError: true }
         const entries = fs
           .readdirSync(target, { withFileTypes: true })
           .filter((e) => !DOC_DISCOVERY_SKIP_DIRS.has(e.name))
           .map((e) => (e.isDirectory() ? `${e.name}/` : e.name))
           .sort()
-        return { content: `\`${args.path}\` is a directory:\n${entries.join('\n')}` }
+        const head = `\`${args.path}\` is a directory:\n`
+        const shown: string[] = []
+        let bytes = Buffer.byteLength(head) + 100
+        for (const entry of entries) {
+          if (bytes + Buffer.byteLength(entry) + 1 > MAX_SOURCE_RESULT_BYTES) break
+          shown.push(entry)
+          bytes += Buffer.byteLength(entry) + 1
+        }
+        return { content: head + shown.join('\n') + (shown.length < entries.length ? `\n… ${entries.length - shown.length} entries omitted by the byte limit; read a subdirectory.` : '') }
       }
       if (stat.size > MAX_FILE_BYTES) {
         return { content: `\`${args.path}\` is ${stat.size} bytes — too large to read.`, isError: true }
       }
-      const all = fs.readFileSync(target, 'utf-8').split('\n')
-      const start = args.start ?? 1
-      const count = Math.min(args.lines ?? MAX_READ_LINES, MAX_READ_LINES)
-      const slice = all.slice(start - 1, start - 1 + count)
-      if (slice.length === 0) {
-        return { content: `\`${args.path}\` has ${all.length} lines — line ${start} is past the end.`, isError: true }
+      try {
+        return { content: sourceView({
+          path: args.path, lines: sourceLines(readSource(repoRoot, args.path)),
+          start: args.start, startColumn: args.startColumn, maxLines: Math.min(args.lines ?? MAX_READ_LINES, MAX_READ_LINES),
+        }).content }
+      } catch (error) {
+        return { content: message(error), isError: true }
       }
-      return {
-        content: renderFileView({ path: args.path, lines: slice, start, total: all.length }),
-      }
+    },
+  })
+}
+
+/** Read independent source ranges together without multiplying the context budget. */
+export function readFilesTool(repoRoot: string): SessionTool {
+  return defineSessionTool({
+    name: 'read_files',
+    description: 'Read up to 8 independent source files/ranges in one call, sharing a 24,000-byte result budget equally. Each result has an exact read_file continuation when partial. Use this for dependencies or several omitted source ranges. Directories use read_file.',
+    kind: 'read-file', readOnly: true, destructive: false,
+    inputSchema: z.object({ files: z.array(z.object({
+      path: z.string().min(1).max(1_024),
+      start: z.number().int().positive().optional(),
+      startColumn: z.number().int().positive().optional(),
+      lines: z.number().int().positive().max(MAX_READ_LINES).optional(),
+    }).strict()).min(1).max(8) }).strict(),
+    async execute(args) {
+      // Each slot includes its separators and errors. Long paths cannot consume another slot.
+      const perFile = Math.floor(MAX_SOURCE_RESULT_BYTES / args.files.length) - 2
+      const blocks = args.files.map(file => {
+        try {
+          return sourceView({ ...file, lines: sourceLines(readSource(repoRoot, file.path)),
+            maxLines: file.lines ?? MAX_READ_LINES, maxBytes: perFile }).content
+        } catch (error) {
+          const detail = `${JSON.stringify(file.path)}: ${message(error)}`
+          let bounded = ''
+          for (const point of detail) {
+            if (Buffer.byteLength(bounded) + Buffer.byteLength(point) > perFile - 80) break
+            bounded += point
+          }
+          return `Source read error: ${bounded}${bounded.length < detail.length ? '…' : ''}`
+        }
+      })
+      return { content: blocks.join('\n\n') }
     },
   })
 }
@@ -110,7 +139,7 @@ export function searchTool(repoRoot: string): SessionTool {
   return defineSessionTool({
     name: 'search_repo',
     description:
-      'Search the working tree for a regular expression. Returns `path:line: text`, at most 60 hits. Narrow with `glob` (a suffix or a path fragment) when a term is common.',
+      'Search source with a regular expression. Returns up to 60 match-centered excerpts within 24,000 UTF-8 bytes, with one-based line/Unicode column and read_file hints. glob matches repo-relative paths; pathContains is a literal substring filter. Hidden catalog files are not searched; use catalog tools for catalog entries.',
     kind: 'search-repo',
     readOnly: true,
     destructive: false,
@@ -121,7 +150,8 @@ export function searchTool(repoRoot: string): SessionTool {
           .string()
           .min(1)
           .optional()
-          .describe('Keep only paths containing this fragment or ending in this suffix, e.g. `.tsx`.'),
+          .describe('Repo-relative glob: **/*.tsx, packages/ui/**/*.tsx, or **/*.{ts,tsx}. A glob without / matches basenames anywhere. Use pathContains for literal fragments.'),
+        pathContains: z.string().min(1).optional().describe('Literal substring of the repo-relative path, e.g. packages/ui/ or .tsx. Combined with glob when both are supplied.'),
       })
       .strict(),
     async execute(args) {
@@ -132,10 +162,16 @@ export function searchTool(repoRoot: string): SessionTool {
         return { content: `\`${args.query}\` is not a valid regular expression: ${message(error)}`, isError: true }
       }
       const hits: string[] = []
+      const glob = args.glob ? new Minimatch(args.glob.replace(/^\.\//, ''), { matchBase: true, nonegate: true, nocomment: true }) : undefined
+      let matchedFiles = 0
+      let searchedFiles = 0
       let truncated = false
+      let bytes = 0
       for (const file of walk(repoRoot)) {
-        const rel = path.relative(repoRoot, file)
-        if (args.glob && !rel.includes(args.glob) && !rel.endsWith(args.glob)) continue
+        const rel = path.relative(repoRoot, file).split(path.sep).join('/')
+        if (glob && !glob.match(rel)) continue
+        if (args.pathContains && !rel.includes(args.pathContains)) continue
+        matchedFiles++
         let text: string
         try {
           if (fs.statSync(file).size > MAX_FILE_BYTES) continue
@@ -145,20 +181,31 @@ export function searchTool(repoRoot: string): SessionTool {
         }
         // A NUL byte means binary — searching it produces noise, never a locator.
         if (text.includes('\0')) continue
-        const lines = text.split('\n')
+        searchedFiles++
+        const lines = sourceLines(text)
         for (let i = 0; i < lines.length; i++) {
-          if (!pattern.test(lines[i])) continue
-          if (hits.length >= MAX_SEARCH_HITS) {
+          const match = pattern.exec(lines[i])
+          if (!match) continue
+          const column = Array.from(lines[i].slice(0, match.index)).length
+          const points = Array.from(lines[i])
+          const from = Math.max(0, column - 80)
+          const excerpt = points.slice(from, from + MAX_LINE_CHARS).join('')
+          const partialMatch = Array.from(match[0]).length > from + MAX_LINE_CHARS - column
+          const row = `${rel}:${i + 1}:${column + 1}: ${from ? '…' : ''}${excerpt}${from + MAX_LINE_CHARS < points.length ? '…' : ''}${partialMatch ? ' [match continues]' : ''}\n  ${readHint(rel, { start: i + 1, startColumn: from + 1 })}`
+          if (hits.length >= MAX_SEARCH_HITS || bytes + Buffer.byteLength(row) + 100 > MAX_SOURCE_RESULT_BYTES) {
             truncated = true
             break
           }
-          hits.push(`${rel}:${i + 1}: ${clipLine(lines[i].trim())}`)
+          hits.push(row)
+          bytes += Buffer.byteLength(row) + 1
         }
         if (truncated) break
       }
-      if (hits.length === 0) return { content: `No match for \`${args.query}\`.` }
+      if (!matchedFiles) return { content: 'No files matched the path filters in the searchable repository tree. glob uses wildcard syntax; use pathContains for literal fragments. Hidden, vendor and build directories are excluded.' }
+      if (!searchedFiles) return { content: `${matchedFiles} files matched the path filters, but none were searchable text files within the 2,000,000-byte limit.` }
+      if (hits.length === 0 && !truncated) return { content: (Buffer.byteLength(args.query) < MAX_SOURCE_RESULT_BYTES - 200 ? `No match for \`${args.query}\`.` : 'No match. The query is omitted from this result because of its size.') + ` Searched ${searchedFiles} text files.` }
       return {
-        content: hits.join('\n') + (truncated ? `\n… stopped at ${MAX_SEARCH_HITS} hits — narrow the search.` : ''),
+        content: hits.join('\n') + (truncated ? `\n… additional matches omitted by the hit or byte limit — narrow the search.` : ''),
       }
     },
   })

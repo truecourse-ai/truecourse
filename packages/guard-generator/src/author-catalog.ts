@@ -1,20 +1,23 @@
 /** Deterministic, invocation-local author lookup. No source or execution access. */
 import { createHash } from 'node:crypto'
-import type { Interface, InterfaceResource } from '@truecourse/shared'
+import type { Interface, InterfaceResource, InterfaceState } from '@truecourse/shared'
 import { buildResourceHints } from './grounding.js'
 
-export const AUTHOR_CATALOG_VERSION = 'web-author-catalog-v3'
+export const AUTHOR_CATALOG_VERSION = 'web-author-catalog-v4'
 export const AUTHOR_TOOL_RESULT_CHARS = 12_000
 export const AUTHOR_INITIAL_BYTES = 120_000
 export const AUTHOR_SUMMARY_CHARS = 1_500
 export interface CatalogSearch { query: string; purpose?: 'task' | 'control'; resource?: string; limit?: number; cursor?: string }
-export interface CatalogGet { ids: string[]; cursor?: string }
+export interface CatalogIds { ids: string[]; cursor?: string }
+export interface CatalogGet extends CatalogIds { includeResources?: boolean }
 export interface CatalogReport { content: string; isError?: boolean }
 export interface AuthorCatalogSummary { id?: string; title?: string; entry?: Interface['entry']; purpose?: string; at?: string; to?: string; startingState?: string; endState?: string; omittedFields: string[]; error?: string; identityHash?: string; instruction?: string }
 export interface AuthorCatalog {
   fingerprint: string
   search(input: CatalogSearch): CatalogReport
   get(input: CatalogGet): CatalogReport
+  getResources(input: CatalogIds): CatalogReport
+  getStates(input: CatalogIds): CatalogReport
   candidates(own: readonly Interface[], terms: string): AuthorCatalogSummary[]
 }
 function stable(value: unknown): string {
@@ -44,21 +47,33 @@ function boundedSummary(full: ReturnType<typeof summary>): AuthorCatalogSummary 
   }
   return structuredClone(result)
 }
-/** Page at complete field boundaries. Indexed paths preserve array order and permit lossless reconstruction. */
-function fields(value: unknown, path: (string | number)[] = []): { path: (string | number)[]; value: unknown }[] {
-  if (value && typeof value === 'object' && Object.keys(value).length) return Object.entries(value).flatMap(([key, v]) => fields(v, [...path, Array.isArray(value) ? Number(key) : key]))
-  return [{ path, value }]
+interface CatalogItem { id: string; path: (string | number)[]; value: unknown }
+// Leave room for five maximal action IDs, the continuation and page metadata.
+const COMPACT_ITEM_CHARS = AUTHOR_TOOL_RESULT_CHARS - 2_000
+/** Ordinary definitions stay whole. Split oversized objects only, never clip a scalar. */
+function fields(id: string, value: unknown, path: (string | number)[]): CatalogItem[] {
+  const item = { id, path, value }
+  if (JSON.stringify(item).length <= COMPACT_ITEM_CHARS) return [item]
+  if (value && typeof value === 'object' && Object.keys(value).length) {
+    return Object.entries(value).flatMap(([key, v]) => fields(id, v, [...path, Array.isArray(value) ? Number(key) : key]))
+  }
+  return [item]
 }
-export function createAuthorCatalog(interfaces: readonly Interface[], resources?: Record<string, InterfaceResource[]>): AuthorCatalog {
+export function createAuthorCatalog(interfaces: readonly Interface[], resources?: Record<string, InterfaceResource[]>, states: readonly InterfaceState[] = []): AuthorCatalog {
   // Clone once: callers cannot mutate a running snapshot or its continuation keys.
   const entries = structuredClone(interfaces.filter(i => i.type === 'web')).sort((a, b) => a.id.localeCompare(b.id))
   const registry = structuredClone(resources ?? {})
+  const stateRegistry = structuredClone([...states]).sort((a, b) => a.id.localeCompare(b.id))
+  const resourceById = new Map((registry.web ?? []).map(resource => [resource.id, resource]))
+  const stateById = new Map(stateRegistry.map(state => [state.id, state]))
   const payloads = new Map(entries.map(i => [i.id, { interface: i, resources: buildResourceHints([i], registry) }]))
   const reachableResources = [...new Map([...payloads.values()].flatMap(p => p.resources).map(r => [r.id, r])).values()].sort((a, b) => a.id.localeCompare(b.id))
-  const fingerprint = hash([AUTHOR_CATALOG_VERSION, entries, reachableResources])
+  const fingerprint = hash([AUTHOR_CATALOG_VERSION, entries, reachableResources, stateRegistry])
   const summaries = entries.map(summary)
   function page(items: unknown[], binding: unknown, limit: number, cursor?: string, metadata?: (end: number) => object): CatalogReport {
-    const key = hash([fingerprint, binding])
+    // Bind to exactly the requested data and projection. Unrelated peer writes
+    // must not make the caller re-read unchanged definitions from page one.
+    const key = hash([AUTHOR_CATALOG_VERSION, binding, items])
     let start = 0
     if (cursor) {
       try {
@@ -67,7 +82,7 @@ export function createAuthorCatalog(interfaces: readonly Interface[], resources?
         start = parsed.offset
       } catch { return error('invalid-or-stale-cursor') }
     }
-    const render = (selected: unknown[], end: number): string => JSON.stringify({ snapshot: fingerprint, total: items.length, offset: start, items: selected, ...metadata?.(end), complete: end === items.length, omittedFields: end === items.length ? [] : ['remaining items; continue with nextCursor'], ...(end < items.length ? { nextCursor: Buffer.from(JSON.stringify({ key, offset: end })).toString('base64url') } : {}) })
+    const render = (selected: unknown[], end: number): string => JSON.stringify({ snapshot: key, total: items.length, offset: start, items: selected, ...metadata?.(end), complete: end === items.length, omittedFields: end === items.length ? [] : ['remaining items; continue with nextCursor'], ...(end < items.length ? { nextCursor: Buffer.from(JSON.stringify({ key, offset: end })).toString('base64url') } : {}) })
     const selected: unknown[] = []
     for (let n = start; n < items.length && selected.length < limit; n++) {
       if (render([...selected, items[n]], n + 1).length > AUTHOR_TOOL_RESULT_CHARS) {
@@ -87,6 +102,13 @@ export function createAuthorCatalog(interfaces: readonly Interface[], resources?
       return { s, score: exact ? 10000 : terms.reduce((n, t) => n + Number(text.includes(t)), 0) }
     }).filter(r => !q || r.score > 0).sort((a, b) => b.score - a.score || a.s.id.localeCompare(b.s.id)).map(r => r.s)
   }
+  const validIds = (ids: string[], available: ReadonlyMap<string, unknown>) => ids.length >= 1 && ids.length <= 5
+    && new Set(ids).size === ids.length && ids.every(id => id.length >= 1 && id.length <= 200 && available.has(id))
+  function definitions(input: CatalogIds, kind: 'resources' | 'states', available: ReadonlyMap<string, unknown>): CatalogReport {
+    if (!validIds(input.ids, available)) return error(`unknown-or-invalid-${kind === 'resources' ? 'resource' : 'state'}-ids`)
+    if ((input.cursor?.length ?? 0) > 1000) return error('invalid-or-stale-cursor')
+    return page(input.ids.flatMap(id => fields(id, available.get(id), [kind, id])), { kind, ids: input.ids }, Infinity, input.cursor)
+  }
   return {
     fingerprint,
     search(input) {
@@ -95,20 +117,29 @@ export function createAuthorCatalog(interfaces: readonly Interface[], resources?
       return page(results.map(boundedSummary), { kind: 'search', query: input.query, purpose: input.purpose, resource: input.resource, limit: input.limit ?? 8 }, input.limit ?? 8, input.cursor)
     },
     get(input) {
-      if (input.ids.length < 1 || input.ids.length > 5 || new Set(input.ids).size !== input.ids.length || input.ids.some(id => !payloads.has(id))) return error('unknown-or-invalid-interface-ids')
+      if (!validIds(input.ids, payloads)) return error('unknown-or-invalid-interface-ids')
+      if (input.includeResources !== undefined && typeof input.includeResources !== 'boolean') return error('invalid-get-input')
       if ((input.cursor?.length ?? 0) > 1000) return error('invalid-or-stale-cursor')
       // Every requested action precedes optional resource pages, so a large
       // resource on the first action cannot hide the second action's steps.
       const actionEnds: { id: string; end: number }[] = []
-      const items: { id: string; path: (string | number)[]; value: unknown }[] = []
+      const items: CatalogItem[] = []
       for (const id of input.ids) {
-        items.push(...fields(payloads.get(id)!.interface, ['interface']).map(f => ({ id, ...f })))
+        items.push(...fields(id, payloads.get(id)!.interface, ['interface']))
         actionEnds.push({ id, end: items.length })
       }
-      for (const id of input.ids) items.push(...fields(payloads.get(id)!.resources, ['resources']).map(f => ({ id, ...f })))
-      return page(items, { kind: 'get', ids: input.ids }, Infinity, input.cursor,
+      const includeResources = input.includeResources ?? true
+      if (includeResources) {
+        const requestedResources = new Map(input.ids.flatMap(id => payloads.get(id)!.resources).map(resource => [resource.id, resource]))
+        for (const resource of [...requestedResources.values()].sort((a, b) => a.id.localeCompare(b.id))) {
+          items.push(...fields(resource.id, resource, ['resources', resource.id]))
+        }
+      }
+      return page(items, { kind: 'get', ids: input.ids, includeResources }, Infinity, input.cursor,
         end => ({ actionCompleteIds: actionEnds.filter(action => action.end <= end).map(action => action.id) }))
     },
+    getResources(input) { return definitions(input, 'resources', resourceById) },
+    getStates(input) { return definitions(input, 'states', stateById) },
     candidates(own, terms) {
       const ids = new Set(own.map(i => i.id))
       return ranked(`${terms} ${own.map(i => [i.title, i.at, i.to, i.startingState, i.endState].filter(Boolean).join(' ')).join(' ')}`).filter(s => !ids.has(s.id)).slice(0, 6).map(boundedSummary)

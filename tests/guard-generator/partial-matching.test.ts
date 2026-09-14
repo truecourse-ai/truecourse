@@ -268,3 +268,72 @@ it('retains independent work when the corrective matcher call throws', async () 
   expect(await matchFlow(repo(), flow(), catalog, runner)).toMatchObject({ kind: 'plan', calls: 2,
     plan: { steps: [{ milestone: 1 }] }, gaps: [{ reason: expect.stringContaining('transport unavailable') }] })
 })
+
+// Regression from the expense-tracker generation on 2026-09-14: fixtures were
+// mistaken for missing application interfaces before an author could use them.
+describe('runner-owned provider matching', () => {
+  function providerFlow(): GuardFlow {
+    const f = flow()
+    f.milestones = [{ ...f.milestones[0], verification: {
+      scope: 'web', method: 'behavior', observable: 'Loading and conversion result', cases: [
+        { id: 'pending', claim: 'Show loading until the provider replies', method: 'behavior', requires: ['browser', 'provider-control'], conditions: ['request-pending'], providerControls: [{ service: 'CurrencyBeacon', operations: ['response', 'header-delay'] }] },
+      ],
+    } }]
+    f.fingerprint = flowFingerprint(f.milestones)
+    return f
+  }
+  it.each(['stub', 'proxy'] as const)('briefs %s wiring and corrects a false capability refusal', async realization => {
+    const root = repo(); const f = providerFlow()
+    const providerControls = [{ service: 'currencybeacon', realization, baseUrlEnvs: ['CURRENCYBEACON_BASE_URL'], credentialEnv: ['CURRENCYBEACON_API_KEY'], operations: ['header-delay', 'response'] }]
+    const runner = vi.fn().mockImplementationOnce(async ctx => {
+      expect(ctx.capabilities).toContain('provider-control')
+      expect(ctx.providerControls).toEqual(providerControls)
+      expect(buildMatchUserPrompt(ctx)).toContain('CURRENCYBEACON_BASE_URL')
+      return { gaps: [{ milestone: 1, checks: ['pending'], kind: 'capability', reason: 'The web browser driver has no request interception or provider-control capability to delay that response' }] }
+    }).mockImplementationOnce(async ctx => {
+      expect(ctx.issues.gapErrors.join()).toContain('contradicts the runner registry')
+      return { plan: [{ interfaceId: control.id, milestone: 1, checks: ['pending'] }] }
+    })
+    expect(await matchFlow(root, f, catalog, runner, undefined, providerControls)).toMatchObject({ kind: 'plan', calls: 2, gaps: [] })
+    expect(await readCachedMatch(root, f, catalog, undefined, providerControls)).not.toBeNull()
+    expect(await planFlowMatching(root, [f], [catalog], () => providerControls)).toMatchObject({ calls: 0 })
+    expect(await readCachedMatch(root, f, catalog)).toBeNull()
+    expect(await readCachedMatch(root, f, catalog, undefined, [{ ...providerControls[0], realization: realization === 'stub' ? 'proxy' : 'stub' }])).toBeNull()
+    expect(await readCachedMatch(root, f, catalog, undefined, [{ ...providerControls[0], baseUrlEnvs: ['NEW_BASE'] }])).toBeNull()
+  })
+  it('refuses repeated false capability gaps without caching an unsupported verdict', async () => {
+    const root = repo(); const f = providerFlow()
+    const runner = vi.fn(async () => ({ gaps: [{ milestone: 1, checks: ['pending'], kind: 'capability', reason: 'No provider control interface' }] }))
+    expect(await matchFlow(root, f, catalog, runner)).toMatchObject({ kind: 'error', calls: 2, reason: expect.stringContaining('contradicts the runner registry') })
+    expect(await readCachedMatch(root, f, catalog)).toBeNull()
+  })
+  it('rejects cached false capability gaps in both the estimate and execution paths', async () => {
+    const { setCacheEntry } = await import('@truecourse/llm')
+    const { matchCacheKey } = await import('../../packages/guard-generator/src/match.js')
+    const root = repo(); const f = providerFlow()
+    await setCacheEntry(root, 'guard/match', matchCacheKey(f, catalog), { gaps: [{ milestone: 1, checks: ['pending'], kind: 'capability', reason: 'No provider interface' }] })
+    expect(await readCachedMatch(root, f, catalog)).toBeNull()
+    expect(await matchFlow(root, f, catalog, async () => ({ plan: [{ interfaceId: control.id, milestone: 1, checks: ['pending'] }] }))).toMatchObject({ kind: 'plan', calls: 1 })
+  })
+  it('does not discard a supported sibling when correction of a false gap fails', async () => {
+    const f = providerFlow()
+    f.milestones.push({ ...flow().milestones[1] })
+    const runner = vi.fn(async () => ({ plan: [{ interfaceId: control.id, milestone: 2 }], gaps: [{ milestone: 1, checks: ['pending'], kind: 'capability', reason: 'No provider control' }] }))
+    const result = await matchFlow(repo(), f, catalog, runner)
+    expect(result).toMatchObject({ kind: 'plan', calls: 2, plan: { steps: [{ milestone: 2 }] }, gaps: [{ checks: ['pending'], kind: 'mapping', reason: expect.stringContaining('Matcher correction failed') }] })
+  })
+})
+
+it('resolves canonical provider contracts without confusing account names with service names', async () => {
+  const { matchProviderControls, matchCacheKey } = await import('../../packages/guard-generator/src/match.js')
+  const { RecipeSchema } = await import('@truecourse/guard-runner')
+  const f = caseFlow()
+  f.milestones[0].verification!.cases = ['first', 'second'].map(id => ({ id, claim: 'A chosen rate', method: 'behavior', requires: ['browser', 'provider-control'], conditions: [], providerControls: [{ service: 'CurrencyBeacon', operations: ['response'] }] }))
+  const recipe = RecipeSchema.parse({ build: 'true', api: { serve: ['node', 'server.js'], healthPath: '/health', externals: { currencybeacon: { baseUrlEnv: 'BEACON_BASE', env: { BEACON_KEY: {} } } } } })
+  const targets = [{ name: 'provider-account', aliases: ['CurrencyBeacon'], credentialEnv: ['BEACON_KEY'], state: 'unprovided' as const, registerIn: 'private.json', providers: [{ service: 'currencybeacon', baseUrlEnvs: ['BEACON_BASE'] }] }]
+  const controls = matchProviderControls(f, 'web', targets, recipe)
+  expect(controls).toEqual([{ service: 'currencybeacon', realization: 'stub', baseUrlEnvs: ['BEACON_BASE'], credentialEnv: ['BEACON_KEY'], operations: ['response'] }])
+  const provided = matchProviderControls(f, 'web', [{ ...targets[0], state: 'provided' }], recipe)
+  expect(provided).toMatchObject([{ realization: 'proxy' }])
+  expect(matchCacheKey(f, catalog, controls)).not.toBe(matchCacheKey(f, catalog, provided))
+})

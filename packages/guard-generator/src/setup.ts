@@ -1007,13 +1007,13 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
     const preparationRecipe = reloadRecipe(repoRoot) ?? current
     if (replayed('preparations')) {
       fact('preparations', 'replayed: the existing private preparation profiles stand as they are')
-      for (const line of preparationFacts(preparationRecipe)) fact('preparations', line)
+      for (const line of preparationFacts(preparationRecipe, repoRoot)) fact('preparations', line)
       opts.onStepDone?.('preparations', 'existing private preparation profiles preserved')
     } else if (settled('preparations') === preparationFp &&
-      preparationCatalog(preparationRecipe).length === Object.keys(preparationRecipe.preparations ?? {}).length) {
+      preparationCatalog(preparationRecipe, repoRoot).length === Object.keys(preparationRecipe.preparations ?? {}).length) {
       steps.push({ key: 'preparations', status: 'skipped', reason: 'unchanged', inputFingerprint: preparationFp })
       fact('preparations', 'every private preparation profile is unchanged since the last setup, from cache')
-      for (const line of preparationFacts(preparationRecipe)) fact('preparations', line)
+      for (const line of preparationFacts(preparationRecipe, repoRoot)) fact('preparations', line)
       opts.onStepDone?.('preparations', 'unchanged')
     } else {
       const result = opts.preparationSession
@@ -1033,7 +1033,7 @@ export async function runGuardSetup(opts: GuardSetupOptions): Promise<GuardSetup
             ? `no private starting state was authored, ${findings.length} finding${findings.length === 1 ? '' : 's'}`
             : `no private starting state was authored: ${firstReasonLine(result.reason ?? result.status)}`
       fact('preparations', summary)
-      for (const line of preparationFacts(reloadRecipe(repoRoot) ?? preparationRecipe)) fact('preparations', line)
+      for (const line of preparationFacts(reloadRecipe(repoRoot) ?? preparationRecipe, repoRoot)) fact('preparations', line)
       if (result.status === 'failed') preparationFailure = result.reason || 'Private preparation failed'
       else opts.onStepDone?.('preparations', findings.length > 0 ? summary : (result.reason ?? result.status))
     }
@@ -1416,8 +1416,8 @@ function seedProvidesFacts(step: GuardSetupSeedStep): string[] {
 }
 
 /** The private starting states the recipe carries, one line per usable profile. */
-function preparationFacts(recipe: Recipe): string[] {
-  const usable = preparationCatalog(recipe)
+function preparationFacts(recipe: Recipe, repoRoot: string): string[] {
+  const usable = preparationCatalog(recipe, repoRoot)
   const declared = Object.keys(recipe.preparations ?? {})
   const out = usable.map((profile) => {
     const provides = [

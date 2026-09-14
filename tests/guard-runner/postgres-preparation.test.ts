@@ -5,7 +5,7 @@ import { scenario } from './helpers.js';
 const profile = {
   baseline: 'seeded' as const, scope: 'instance' as const, env: {},
   postgres: { isolation: 'database' as const, urlEnvs: ['DATABASE_URL', 'DIRECT_URL'] },
-  baselineChecks: [{ path: '/rpc/count', query: { input: '{}' }, counts: { count: 2 } }],
+  baselineChecks: [{ path: '/rpc/count', query: { input: '{}' }, counts: { count: 2 }, qualification: {version: 1 as const, scope: 'instance' as const, binding: 'a'.repeat(64), configuration: 'b'.repeat(64), reason: 'Catalog fixture, never executed', sources: ['handler','query','authorization'].map(role=>({role: role as 'handler'|'query'|'authorization',path:'server.ts',start:1,end:1,sha256:'c'.repeat(64)}))} }],
   seed: { script: 'seed.mjs', provides: {} }, verify: { script: 'verify.mjs' }, cleanup: { script: 'cleanup.mjs' },
 };
 const namespace = `guard_${'a'.repeat(32)}`;

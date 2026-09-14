@@ -22,10 +22,11 @@
  * pack carries looks exactly like a module the session read for itself.
  */
 
-import fs from 'node:fs'
-import path from 'node:path'
 import type { PlaceCluster } from './cluster.js'
 import { renderFileView } from '../agent/repo-tools.js'
+import { readPackSource } from './place-pack.js'
+import { sourceLines } from '../agent/source-view.js'
+import { sourceEvidence } from './source-evidence.js'
 
 /**
  * How many bytes of module content one pack carries. Sized at the measured
@@ -56,57 +57,38 @@ export function clusterPack(repoRoot: string, cluster: PlaceCluster): ClusterPac
   const blocks: string[] = []
   const modules: string[] = []
   const omitted: string[] = []
+  const head = 'Shared source, provided in full. Do NOT `read_file` any of them again. Read their dependencies when needed.'
+  // Leave room for a bounded omission manifest, including pathological path lists.
+  const sourceBudget = MAX_PACK_BYTES - Buffer.byteLength(head) - 4_100
   let bytes = 0
   for (const module of cluster.shared) {
-    const source = read(repoRoot, module)
+    const source = readPackSource(repoRoot, module)
     if (source === undefined) continue
-    const lines = source.split('\n')
-    const block = renderFileView({ path: module, lines, start: 1, total: lines.length })
-    // Whole file or nothing — and the budget is checked per module rather than
-    // broken out of, so one oversized module does not cost the small ones after it.
-    if (bytes + block.length > MAX_PACK_BYTES) {
+    const lines = sourceLines(source)
+    const evidence = sourceEvidence(module, source)
+    const block = `Source SHA-256: ${evidence.hash}\n` + renderFileView({ path: module, lines, start: 1, total: lines.length })
+    const size = Buffer.byteLength(block) + 2
+    if (bytes + size > sourceBudget) {
       omitted.push(module)
       continue
     }
-    bytes += block.length
+    bytes += size
     blocks.push(block)
     modules.push(module)
   }
   if (modules.length === 0) return undefined
-
-  const text = [
-    `Before the place you author: the modules below are rendered by EVERY place in`,
-    `this group, so they are provided here in full rather than read one by one.`,
-    ``,
-    `They are already in your context. Do NOT \`read_file\` any of them again —`,
-    `read what they lead to, and the module that is your own place.`,
-    ...(omitted.length > 0
-      ? [
-          ``,
-          `These are shared too but did not fit; read them yourself if you need them:`,
-          ...omitted.map((module) => `  ${module}`),
-        ]
-      : []),
-    ``,
-    ...blocks.flatMap((block) => [block, ``]),
-  ]
-    .join('\n')
-    .trimEnd()
-
-  return { text, modules, omitted, bytes }
-}
-
-/** The module's source, or `undefined` for anything that is not a readable file. */
-function read(repoRoot: string, module: string): string | undefined {
-  const target = path.resolve(repoRoot, module)
-  // The paths come from the analyzer pass, not from a model — but they are
-  // still paths, and the pack has no business leaving the repository.
-  const rel = path.relative(path.resolve(repoRoot), target)
-  if (rel.startsWith('..') || path.isAbsolute(rel)) return undefined
-  try {
-    if (!fs.statSync(target).isFile()) return undefined
-    return fs.readFileSync(target, 'utf-8')
-  } catch {
-    return undefined
+  const omissionRows: string[] = []
+  let manifestBytes = 0
+  for (const module of omitted) {
+    const row = `  ${module}`
+    if (manifestBytes + Buffer.byteLength(row) + 1 > 3_800) break
+    omissionRows.push(row)
+    manifestBytes += Buffer.byteLength(row) + 1
   }
+  const manifest = omitted.length
+    ? `Shared modules that did not fit: ${omitted.length}. Read when needed.\n${omissionRows.join('\n')}` +
+      (omissionRows.length < omitted.length ? `\nManifest incomplete: ${omitted.length - omissionRows.length} additional paths omitted.` : '')
+    : ''
+  const text = [head, manifest, ...blocks].filter(Boolean).join('\n\n')
+  return { text, modules, omitted, bytes: Buffer.byteLength(text) }
 }

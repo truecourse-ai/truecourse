@@ -24,7 +24,7 @@ describe('offline authoring structural benchmark — no model or application exe
     expect(page.items.map((x: { id: string }) => x.id)).toContain(f.late.id)
     const fetched = JSON.parse(c.get({ ids: [f.late.id] }).content)
     expect(fetched.complete).toBe(true)
-    expect(fetched.items.some((x: { value: unknown }) => x.value === '/teams/members')).toBe(true)
+    expect(fetched.items.some((x: { path: string[]; value: { entry?: { path: string } } }) => x.path[0] === 'interface' && x.value.entry?.path === '/teams/members')).toBe(true)
   })
   it('plan-limit: only the runner-owned origin may change during confirmation', () => {
     const a = canonicalWebObservationUrl('http://localhost:31001/plans?limit=5', 'http://localhost:31001', 'web')

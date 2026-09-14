@@ -387,15 +387,21 @@ describe('estimateGuardSetupCost', () => {
   it('includes private preparation authoring and its hard budget in a targeted estimate', async () => {
     const r = fixtureRepo();
     const estimate = await estimateGuardSetupCost(r, { only: 'preparations' });
-    expect(estimate.stages?.map(s => s.stage)).toEqual(['guard-setup.preparations']);
-    const stage = estimate.stages![0];
+    expect(estimate.stages?.map(s => s.stage)).toEqual(['guard-setup.preparation-observations', 'guard-setup.preparations']);
+    const review = estimate.stages![0];
+    expect(review.label).toBe('Reviewing baseline observation scope');
+    expect(review.calls).toBeGreaterThan(0);
+    expect(review.estimatedTokens).toBeGreaterThan(0);
+    expect(review.callsRange?.high).toBe(20 + WRAP_UP_TURNS);
+    const stage = estimate.stages![1];
     expect(stage.calls).toBeGreaterThan(0);
     expect(stage.estimatedTokens).toBeGreaterThan(0);
     expect(stage.label).toBe('Preparing private test data');
     expect(stage.callsRange?.high).toBe(PREPARATION_SESSION_BUDGET.turns * (PREPARATION_SESSION_BUDGET.maxResumes + 1) + WRAP_UP_TURNS);
     const settled = settledRepo();
     expect((await estimateGuardSetupCost(settled, { only: 'preparations' })).stages).toEqual([]);
-    expect((await estimateGuardSetupCost(settled, { only: 'preparations', refresh: true })).stages?.[0].stage).toBe('guard-setup.preparations');
+    expect((await estimateGuardSetupCost(settled, { only: 'preparations', refresh: true })).stages?.map(s => s.stage))
+      .toEqual(['guard-setup.preparation-observations', 'guard-setup.preparations']);
   });
 
   it('prices every session again under --refresh', async () => {
@@ -939,7 +945,7 @@ describe('guardSetupInProcess — hosted injection', () => {
       ['catalog', ['guard-setup.dependency-catalog']],
       ['interfaces', ['guard-setup.reconcile-interfaces', 'guard-interfaces.web-tasks']],
       ['seed', ['guard-setup.seed']],
-      ['preparations', ['guard-setup.preparations']],
+      ['preparations', ['guard-setup.preparation-observations', 'guard-setup.preparations']],
       ['auth', ['guard-setup.auth-proof']],
     ]);
   }, 60_000);

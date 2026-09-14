@@ -816,12 +816,18 @@ importers:
       p-limit:
         specifier: ^7.3.0
         version: 7.3.0
+      minimatch:
+        specifier: ^10.0.3
+        version: 10.2.4
       posthog-node:
         specifier: ^4.0.0
         version: 4.18.0
       simple-git:
         specifier: ^3.27.0
         version: 3.33.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
       zod:
         specifier: ^3.23.8
         version: 3.25.76
@@ -844,9 +850,6 @@ importers:
       tsx:
         specifier: ^4.19.0
         version: 4.21.0
-      typescript:
-        specifier: ^5.7.0
-        version: 5.9.3
 
   packages/data-store:
     dependencies:

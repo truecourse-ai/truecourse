@@ -461,9 +461,9 @@ describe('guard-generator prompts', () => {
     // `weak` on the same two-sided criterion the authoring prompts teach — a claim
     // stating a positive AND a negative half is verified only when the exclusion
     // half is asserted observably too.
-    // Re-pinned for prerequisite eligibility and setup-aware expected-red review.
-    expect(FIDELITY_PROMPT_FINGERPRINT).toBe('758e3b00be5da7ee')
-    expect(fingerprint(FIDELITY_SYSTEM_PROMPT)).toBe('758e3b00be5da7ee')
+    // Re-pinned for explicit request-boundary review and setup-aware expected-red review.
+    expect(FIDELITY_PROMPT_FINGERPRINT).toBe('138c88a43c2cb131')
+    expect(fingerprint(FIDELITY_SYSTEM_PROMPT)).toBe('138c88a43c2cb131')
   })
 
   it('buildFidelityUserPrompt carries the flow, every milestone with its section text, and the YAML', () => {
@@ -660,9 +660,9 @@ describe('guard-generator prompts', () => {
     // about a CHANGE could previously only be written as an absolute number, which
     // tests the fixture rather than the promise.
     // Re-pinned for case prerequisites, proof grounding, and setup-aware fidelity review.
-    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('d5822b3680a3c3cb')
+    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('dbd51b305804446f')
     // Moved once with the blast-radius cut: the canonical schema gained `world`.
-    expect(GENERATE_PROMPT_FINGERPRINT).toBe('d5822b3680a3c3cb')
+    expect(GENERATE_PROMPT_FINGERPRINT).toBe('dbd51b305804446f')
   })
 
   it('the authored cli step vocabulary is the `run` step — a runner-only kind never leaks in', () => {
@@ -903,10 +903,10 @@ describe('guard-generator prompts', () => {
     // comparand, which is what makes "one fewer seat than before" a verdict instead
     // of an absolute number that only tests the fixture.
     // Re-pinned for case prerequisites, proof grounding, and setup-aware fidelity review.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('e8bf9c06710955c6')
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('19bc81600d20c80e')
     // Moved once with the blast-radius cut: `world` in the schema + the
     // shared-world/self-mint doctrine block.
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('e8bf9c06710955c6')
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('19bc81600d20c80e')
   })
 
   it('the api authoring prompt teaches the cookie jar and captureHeaders', () => {
@@ -1195,9 +1195,9 @@ describe('guard-generator prompts', () => {
     // Re-pinned 2026-09-09: browser navigation covers full-page refresh,
     // and plans/gaps must use mutually exclusive case references within milestones.
     // Preparation profiles and typed selected-case obligations intentionally replan existing tests.
-    // Re-pinned for independent case preservation and bounded schema correction.
-    expect(MATCH_PROMPT_FINGERPRINT).toBe('e7eccb281ba2644c')
-    expect(fingerprint(MATCH_SYSTEM_PROMPT)).toBe('e7eccb281ba2644c')
+    // Re-pinned for runner-owned provider context and bounded schema correction.
+    expect(MATCH_PROMPT_FINGERPRINT).toBe('7d11763dc27a1073')
+    expect(fingerprint(MATCH_SYSTEM_PROMPT)).toBe('7d11763dc27a1073')
   })
 
   it('buildMatchUserPrompt renders the milestones and the catalog digest (ids, entries, steps)', () => {
@@ -1321,7 +1321,7 @@ describe('GENERATE_WEB_SYSTEM_PROMPT — the third authoring arm', () => {
     // (the login form is for flows ABOUT signing in).
     // Native selection and named-container scopes change the authored vocabulary.
     // Verified preparation profiles also change the browser authoring schema.
-    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('21b978d4d87444c0')
+    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('6774e7b1b310fa4b')
   })
 
   it('a web batch advertises the world credentials as the sign-in channel, and the fixture block defers to it', () => {
@@ -1395,4 +1395,19 @@ describe('GENERATE_WEB_SYSTEM_PROMPT — the third authoring arm', () => {
     )
     expect(p).not.toContain('Program entrypoint')
   })
+})
+
+for (const driver of ['api', 'web'] as const) it(`${driver} briefs both provider realizations and every recipe variable without account values`, () => {
+  const prompt = buildAuthorUserPrompt(authorCtx({ driver, externalServices: [
+    { name: 'vendor', provided: true, baseUrlEnvs: ['BASE', 'AUTH'], credentialEnv: ['API_KEY'] },
+    { name: 'other', baseUrlEnvs: ['OTHER_BASE'] },
+  ] }))
+  expect(prompt).toContain('vendor: proxy (setup.externals)')
+  expect(prompt).toContain('other: stub (setup.http)')
+  expect(prompt).toContain('BASE, AUTH')
+  expect(prompt).toContain('API_KEY')
+  expect(prompt).toContain('bodyDelayMs')
+  expect(prompt).toContain('unmatched: error')
+  expect(prompt).toContain('own-request-control remains unsupported')
+  expect(prompt).not.toContain('specific SUCCESS payload the real service does not return still needs')
 })

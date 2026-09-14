@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { resolveApiServers, resolveWebSurface, type Recipe } from '@truecourse/guard-runner'
+import { resolveApiServers, resolveWebSurface, resolveProviderControl, providerControlStateMaterial, scenarioProviderControlProblems, type Recipe } from '@truecourse/guard-runner'
 import { invocationProofGap } from './proof-grounding.js'
 import {
   resolveGuardPrerequisite,
@@ -18,6 +18,7 @@ import {
   type GuardScenario,
   type ClaimNeed,
   type GuardVerification,
+  guardProviderTargets,
 } from '@truecourse/shared'
 
 /** Resolve case requirements; claim-wide needs supply identifiers, never case scope. */
@@ -48,6 +49,11 @@ export function bindClaimPrerequisites(
     ...verification,
     cases: verification.cases.map((c) => ({
       ...c,
+      ...(c.providerControls ? { providerControls: c.providerControls.map(p => {
+        const resolved = resolveGuardPrerequisiteNormalized(p.service, guardProviderTargets(targets))
+        return resolved.kind === 'resolved' && resolved.target.name !== p.service
+          ? { ...p, service: resolved.target.name, originalNames: [...new Set([...(p.originalNames ?? []), p.service])] } : p
+      }) } : {}),
       prerequisites: (c.prerequisites ?? []).map((p) => {
         const resolved = resolveGuardPrerequisiteNormalized(p.dependency, targets)
         const evidenced = targets.filter((t) =>
@@ -104,8 +110,19 @@ export function scenarioCasePrerequisiteProblems(
   scenario: Pick<GuardScenario, 'steps' | 'setup'>,
   targets: readonly GuardPrerequisiteTarget[],
   preparationEnv: Record<string, string> = {},
+  recipe?: Recipe,
 ) {
-  return scenarioPrerequisiteProblems(scenarioCasePrerequisites(flow, scenario), targets, scenario, preparationEnv)
+  const problems = scenarioPrerequisiteProblems(scenarioCasePrerequisites(flow, scenario), targets, scenario, preparationEnv)
+  for (const proof of scenarioMilestoneProof(scenario.steps)) {
+    const verification = flow.milestones.find(m => m.order === proof.milestone)?.verification
+    const capability = verificationCapabilityGap(verification, proof.driver, proof.checks)
+    if (capability) problems.push({ dependency: 'verification', reason: capability })
+    if (!recipe) continue
+    const controls = verification?.cases
+      ?.filter(c => !proof.checks || proof.checks.includes(c.id)).flatMap(c => c.providerControls ?? []) ?? []
+    problems.push(...scenarioProviderControlProblems(controls, proof.driver, targets, recipe, scenario).map(reason => ({ dependency: 'provider-control', reason })))
+  }
+  return problems
 }
 
 /** Shared runtime/estimate partition: eligibility changes the matcher input and key. */
@@ -135,6 +152,16 @@ export function partitionFlowPrerequisites(
             capabilities: verificationRequirements(m.verification, [c.id]).filter((r) => !supported.includes(r)),
           },
         })
+      }
+      const controlProblems = (c.providerControls ?? []).flatMap(control => {
+        const resolved = resolveProviderControl(control, surface, targets, recipe)
+        return 'problem' in resolved ? [resolved.problem] : []
+      })
+      if (c.requires.includes('provider-control') && !c.providerControls?.length) controlProblems.push('provider-control requires a named providerControls declaration.')
+      if (controlProblems.length) {
+        gaps.push({ surface, kind: 'blocked-on', milestones: [m.order], obligations: [{ milestone: m.order, caseId: c.id }],
+          reason: controlProblems.join(' '), blocker: { kind: 'generation', action: 'Declare the provider and its controllable base URL variables, then regenerate.' } })
+        return false
       }
       const unresolved = (c.prerequisites ?? [])
         .map((p) => ({ prerequisite: p, resolution: resolveGuardPrerequisite(p.dependency, targets) }))
@@ -214,9 +241,9 @@ export function flowInvocationGaps(
 }
 
 /** Account availability affects work selection; secret rotation never affects its hash. */
-export function flowPrerequisiteStateMaterial(flow: GuardFlow, targets: readonly GuardPrerequisiteTarget[]): string {
-  return JSON.stringify(
-    flow.milestones.flatMap(
+export function flowPrerequisiteStateMaterial(flow: GuardFlow, targets: readonly GuardPrerequisiteTarget[], recipe?: Recipe): string {
+  const controls = flow.milestones.flatMap(m => m.verification?.cases?.flatMap(c => c.providerControls ?? []) ?? [])
+  const accounts = flow.milestones.flatMap(
       (m) =>
         m.verification?.cases?.flatMap((c) =>
           (c.prerequisites ?? [])
@@ -226,6 +253,6 @@ export function flowPrerequisiteStateMaterial(flow: GuardFlow, targets: readonly
               return [p.dependency, resolved.kind === 'resolved' ? resolved.target.state : 'unknown']
             }),
         ) ?? [],
-    ),
-  )
+    )
+  return JSON.stringify(recipe && controls.length ? [providerControlStateMaterial(controls, 'api', targets, recipe), accounts] : accounts)
 }

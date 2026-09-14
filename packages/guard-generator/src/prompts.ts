@@ -1,5 +1,5 @@
 import type { AuthorCatalogSummary } from './author-catalog.js'
-import type { preparationCatalog } from '@truecourse/guard-runner'
+import type { ResolvedProviderControl, preparationCatalog } from '@truecourse/guard-runner'
 import type { GuardVerification } from '@truecourse/shared'
 /**
  * The guard-generator prompt doctrine — scenario authoring (reused verbatim as
@@ -462,9 +462,9 @@ service:
   scenario (\`1\` proves no retry; \`0\` proves it was never called).
 - so a claim about UPSTREAM FAILURE behavior — a 5xx from the third party, a
   timeout, a refused connection, "it does not retry" — is authorable against a
-  provided service and must NOT be left \`blockedOn\`. What a provided service still
-  cannot give you is a specific SUCCESS payload it does not really return: for that
-  use \`setup.http\`, or leave the flow \`blockedOn\`.
+  provided service and must NOT be left \`blockedOn\`. A specific success payload is
+  also scriptable with \`respond\`. Controlled cases must script every reply, set
+  \`unmatched: "error"\`, and assert exact calls; do not forward to the live provider.
 A service NOT marked available in the user prompt is unchanged: stub it when it has
 a base-URL env var, otherwise name it in \`blockedOn\`.
 
@@ -904,6 +904,7 @@ export interface ExternalServiceHint {
    * alone, which keeps a single-variable repo's prompt as it was.
    */
   baseUrlEnvs?: string[]
+  credentialEnv?: string[]
   /**
    * The user PROVIDED an account for this service: the runner points the app at it
    * before the scenario runs, so it is a live capability rather than a blocker.
@@ -1385,7 +1386,7 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
   // with, so a blocked flow names the SERVICE and the gap can be triaged per service.
   // Gated on a non-empty detection, so a repo with no third-party SDK renders exactly
   // as before.
-  if (ctx.driver === 'api' && ctx.externalServices && ctx.externalServices.length > 0) {
+  if ((ctx.driver === 'api' || ctx.driver === 'web') && ctx.externalServices && ctx.externalServices.length > 0) {
     const unprovided = ctx.externalServices.filter((s) => !s.provided)
     const provided = ctx.externalServices.filter((s) => s.provided)
     if (unprovided.length > 0) {
@@ -1429,10 +1430,25 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
         '`setup.externals: { "<service>": { "faults": [...], "calls": <n> } }` can force a',
         'status, delay past a timeout, refuse the connection, or fail once and then recover —',
         'and count the calls. A flow about UPSTREAM FAILURE behavior is therefore authorable',
-        'against these services, not `blockedOn`. A flow needing a specific SUCCESS payload',
-        'the real service does not return still needs `setup.http`, or stays `blockedOn`.',
+        'against these services, not `blockedOn`. A specific SUCCESS payload also uses',
+        '`respond`; set `unmatched: error` and script every reply for a controlled case.',
       )
     }
+  }
+  if ((ctx.driver === 'api' || ctx.driver === 'web') && ctx.externalServices?.length) {
+    lines.push('', 'PROVIDER CONTROL — use the realization selected by account availability.',
+      'For each providerControls requirement on a verification case, use these declared recipe bindings:')
+    for (const service of ctx.externalServices) {
+      lines.push(`- ${service.name}: ${service.provided ? 'proxy (setup.externals)' : 'stub (setup.http)'}; base URL variables: ${(service.baseUrlEnvs ?? (service.baseUrlEnv ? [service.baseUrlEnv] : [])).join(', ') || 'NONE — wiring gap'}; credential variable names: ${(service.credentialEnv ?? []).join(', ') || 'none'}.`)
+    }
+    lines.push(
+      'Provided: setup.externals.<service> must have unmatched: error and an exact calls assertion. Script every reply with faults[].respond (status, headers, json or body) or refuse: true. Never override its base URL variables.',
+      'Unprovided: wire EVERY declared base URL variable in setup.env to ${HTTP_STUB:<name>}; use setup.http.<name>.routes with exact calls on every route and strict unmatched handling (the default). Use only synthetic credential values if required; keep an absent credential absent.',
+      'Both realizations support delayMs before headers, bodyDelayMs after headers (proxy requires respond), refuse: true for socket reset, and once: true for a one-use rule followed by a later rule for the same path. Redirects use status and Location; malformed payloads use body. A refusal cannot include a response.',
+      'Assert outgoing method/path, query, headers and JSON through expect; proxies use match.method/path/endpoint, where endpoint is the declared base URL variable name. Proxy calls counts all endpoints together.',
+      'Response, delay, reset and request-assertion operations require at least one observed provider call; sequencing requires at least two. Only an explicit call-count-only contract may assert zero.',
+      'These controls arrange app-to-provider behavior on API and web drivers. They cannot delay, fail, or count browser-to-app requests. own-request-control remains unsupported. Preparation baseline checks run before scenario scripts.',
+    )
   }
   // How the app itself builds the requests it SENDS upstream, and which response
   // fields it reads back. A stub scripted against the vendor's documented payload
@@ -1440,7 +1456,7 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
   // upstream failure and fails the scenario for a reason unrelated to the claim.
   // api-only and gated on non-empty, so a repo whose source yields none is
   // byte-identical to before this block existed.
-  if (ctx.driver === 'api' && ctx.outboundRequests && ctx.outboundRequests.length > 0) {
+  if ((ctx.driver === 'api' || ctx.driver === 'web') && ctx.outboundRequests && ctx.outboundRequests.length > 0) {
     lines.push(
       '',
       "OUTBOUND REQUESTS THIS APP MAKES — harvested from the app's OWN source. Query",
@@ -2441,6 +2457,19 @@ For an expected failure, review whether the assertions faithfully encode the sel
 claims; the failure is evidence of disagreement, not permission to weaken assertions.
 Assertions after the first failure are authored coverage, never passing execution.
 
+# Request evidence must use the claimed boundary
+Read requestBoundary against the original claim and section text. If they disagree,
+flag the case as miscast. browser-to-app means the browser's calls to the application;
+app-to-provider means the application's outbound calls to its provider. setup.http
+route counts and setup.externals proxy counts prove only app-to-provider traffic.
+For "Clicking Convert calls the conversion endpoint once", three provider calls for
+three clicks do not prove one browser-to-app request per click. The app might issue
+duplicate requests and satisfy them from a cache, or deduplicate them before calling
+the provider. Flag that proof as weak, even if metadata mistakenly says provider-control.
+UI result assertions cannot prove request cardinality. Preserve independently proven
+UI behavior, but do not mark the request-count case faithful without evidence at its
+specified boundary. Never weaken the claim to fit an available provider counter.
+
 # Two-sided claims — both halves must be asserted
 When a claim asserts BOTH what the program DOES and what it does NOT do — a set of
 inputs accepted/matched/included AND a set rejected/excluded/left out ("accepts A
@@ -2694,6 +2723,23 @@ this native navigation in the note. Do not require a Refresh button or a separat
 reload interface. This does not add request interception, database inspection or
 server lifecycle controls to the browser driver.
 
+# API and web own controlled upstream providers
+The runner capabilities and resolved provider fixtures are authoritative. Provider
+control is built into API and web execution; it needs no application interface.
+An unprovided account uses an isolated setup.http stub wired through the listed
+base URL environment variables. A provided account uses setup.externals proxy
+faults. Both can script responses, redirects, invalid data, header and body delays,
+connection resets, ordered replies, outbound request assertions and exact call counts.
+A strict script answers every call and refuses unexpected calls; it needs no live
+provider response. Match loading, retry and stale-response UI behavior against the
+mapped app actions and describe the provider fixture in the plan note. Match provider
+request inspection against the app endpoint that triggers it. Never require a
+mock/timeout/call-count interface in the catalog for these runner-owned operations.
+Capabilities and wiring have already been checked before matching. Do not invent a
+capability gap for supported case requirements. A mapping gap must identify a missing
+APP action, never a missing provider-fixture interface. Browser-to-app request control
+and counting remain unsupported; upstream provider counts cannot prove app request counts.
+
 # The api surface also owns the SERVER PROCESS
 The api surface does not only send requests: a test on it starts the service (with
 any environment it likes), signals it, reads what it writes to stdout/stderr, and
@@ -2785,6 +2831,9 @@ export interface MatchUserContext {
   milestones: MatchMilestoneLine[]
   /** The surface being matched (a driver-registry id, e.g. `cli`). */
   surface: string
+  /** Runner capabilities and resolved fixtures, separate from app interfaces. */
+  capabilities?: readonly string[]
+  providerControls?: readonly ResolvedProviderControl[]
   /** The surface's whole interface catalog, as digests. */
   interfaces: InterfaceDigest[]
   /** On a re-ask after engine validation, exactly what was wrong. */
@@ -2796,6 +2845,8 @@ export interface MatchUserContext {
 export function buildMatchUserPrompt(ctx: MatchUserContext): string {
   const lines: string[] = [
     `Surface: ${ctx.surface}`,
+    `Runner observation capabilities: ${JSON.stringify(ctx.capabilities ?? [])}`,
+    `Resolved provider fixtures: ${JSON.stringify(ctx.providerControls ?? [])}`,
     '',
     `FLOW: ${ctx.flow.title}`,
     `goal: ${ctx.flow.goal}`,

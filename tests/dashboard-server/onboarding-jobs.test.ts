@@ -12,8 +12,8 @@
  * guard decisions, the baseline scenario set and setup's bundle go into the
  * clone; the scenario tree, the baseline report and the birth evidence come
  * out — and stores nothing from a run that authored nothing. The run job closes
- * the chain: the baseline set and setup's bundle go into the clone, the run
- * snapshot and every scenario's evidence bundle — screenshots as bytes — come
+ * the chain: the baseline set, workspace documents and setup's bundle go into
+ * the clone; the run snapshot and every scenario's evidence bundle — screenshots as bytes — come
  * out as the repo's baseline run. And a disconnect mid-run cancels quietly: no
  * error, no notification, clone gone.
  *
@@ -71,6 +71,7 @@ import { guardSetupInProcess } from '@truecourse/core/commands/guard-setup';
 import { OpenConflictsError } from '@truecourse/core/commands/guard-in-process';
 import {
   buildDocSectionIndex,
+  runGuard,
   guardDecisionsPath,
   indexRepoDocs,
   manifestPath,
@@ -1297,6 +1298,56 @@ describe('the guard run job', () => {
 
     expect(resolved.missing).toEqual([]);
     expect(resolved.kind).toBe('match');
+  });
+
+  it.each([
+    { document: 'unchanged', expected: 'pass' },
+    { document: 'changed', expected: 'stale' },
+    { document: 'missing', expected: 'orphaned' },
+  ] as const)('checks $document workspace documents with the real runner ($expected)', async ({ document, expected }) => {
+    const docPath = 'docs/orgs.md';
+    const docRef = contextRef(docPath);
+    const original = '# Widgets\n\n## Help\nThe command prints help.\n';
+    const section = buildDocSectionIndex(docRef, original).sections.find((s) => s.headingText === 'Help')!;
+    await storeGeneratedSet({ doc: docRef, section: section.anchor, fingerprint: section.fingerprint });
+    await seedWorkspaceSpec(document === 'missing' ? [] : [docPath]);
+    if (document !== 'missing') {
+      await writeContextDocuments(ORG, SOURCE_ID, {
+        documents: [{
+          docId: docPath, docPath, title: 'Widgets', url: null,
+          contentHash: `sha-${document}`, updatedAt: '2026-01-02T00:00:00.000Z',
+          body: document === 'changed' ? original.replace('prints help', 'prints usage examples') : original,
+        }],
+        removed: [],
+      });
+    }
+    await saveGuardSetupBundle({ repoKey: REPO, commitSha: 'setup-commit' }, {
+      '.truecourse/scenarios/recipe.json': JSON.stringify({ build: 'true', entry: [process.execPath] }),
+    });
+    // Keep the production queue/materialization/persistence and execute the real
+    // binding checks and CLI driver. No application server or model is involved.
+    runImpl = (repoRoot) => runGuard({ repoRoot, skipBuild: true });
+
+    await jobs.enqueueGuardRun(request);
+    await Promise.all(running);
+
+    const [job] = await jobsOfType('repo.guard-run');
+    expect(job?.error).toBeNull();
+    expect(job?.status).toBe('succeeded');
+    const latest = await readGuardLatest(REPO);
+    expect(latest?.scenarios).toHaveLength(1);
+    expect(latest?.scenarios[0]).toMatchObject({
+      id: 'a1', outcome: expected,
+      binds: { doc: docRef, section: section.anchor, fingerprint: section.fingerprint },
+    });
+    if (expected === 'pass') {
+      expect(latest?.scenarios[0].evidencePath).toBeTruthy();
+      expect(latest?.summary).toMatchObject({ pass: 1, stale: 0, orphaned: 0 });
+    } else {
+      expect(latest?.scenarios[0].durationMs).toBe(0);
+      expect(latest?.scenarios[0].evidencePath).toBeUndefined();
+      expect(latest?.summary[expected]).toBe(1);
+    }
   });
 });
 
