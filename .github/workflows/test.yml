@@ -13,6 +13,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  vm-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check VM release safety locally
+        run: bash tests/infra/azure/check-vm.sh
+      - name: Compile VM templates locally
+        run: |
+          az bicep build --file infra/azure/vm.bicep --outfile "$RUNNER_TEMP/vm.json"
+          az bicep build --file infra/azure/vm-monitoring.bicep --outfile "$RUNNER_TEMP/vm-monitoring.json"
+
   shard:
     runs-on: ubuntu-latest
     strategy:
@@ -40,15 +51,16 @@ jobs:
   # repository setting has to move in step with this workflow.
   test:
     if: always()
-    needs: shard
+    needs: [shard, vm-scripts]
     runs-on: ubuntu-latest
     steps:
-      - name: Verify every shard succeeded
+      - name: Verify application and VM checks succeeded
         env:
           RESULT: ${{ needs.shard.result }}
+          VM_RESULT: ${{ needs.vm-scripts.result }}
         run: |
-          echo "Shards: $RESULT"
-          if [ "$RESULT" != "success" ]; then
-            echo "::error::The test matrix did not succeed ($RESULT)."
+          echo "Shards: $RESULT; VM scripts: $VM_RESULT"
+          if [ "$RESULT" != "success" ] || [ "$VM_RESULT" != "success" ]; then
+            echo "::error::Checks did not succeed (shards: $RESULT; VM: $VM_RESULT)."
             exit 1
           fi

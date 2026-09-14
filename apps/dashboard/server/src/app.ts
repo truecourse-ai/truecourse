@@ -100,8 +100,16 @@ export function createApp(opts: CreateAppOptions): express.Express {
   // Capabilities + health stay public so the client can discover the
   // feature gates and liveness before authenticating.
   app.use('/api/capabilities', capabilitiesRouter);
+  // Liveness only: no database or worker probe. `release` is the deployed
+  // image digest a VM release sets, so a deploy can tell the new process from
+  // the one it replaced.
   app.get('/api/health', (_req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      status: 'ok',
+      release: process.env.TRUECOURSE_RELEASE ?? null,
+      timestamp: new Date().toISOString(),
+    });
   });
 
   // GitHub posts webhooks with no session — the HMAC signature over the raw
