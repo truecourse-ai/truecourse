@@ -35,35 +35,8 @@ install -d -m 0755 -o truecourse -g truecourse /var/log/truecourse
 # without granting the agent access to the application's secret files.
 setfacl -m u:syslog:rx,d:u:syslog:r-x,d:g::---,d:o::--- /var/log/truecourse
 
-cat >/etc/systemd/system/truecourse.service <<'EOF'
-[Unit]
-Description=TrueCourse dashboard and Docker job worker
-After=network-online.target docker.service
-Wants=network-online.target
-Requires=docker.service
-ConditionPathExists=/opt/truecourse/current/app/apps/dashboard/server/dist/index.js
-
-[Service]
-Type=simple
-User=truecourse
-Group=truecourse
-SupplementaryGroups=docker
-WorkingDirectory=/var/lib/truecourse/home
-Environment=HOME=/var/lib/truecourse/home
-ExecStart=/usr/local/sbin/truecourse-vm launch
-Restart=on-failure
-RestartSec=5
-TimeoutStartSec=180
-# A release restarts the unit. The server stops its worker on SIGTERM; a job
-# still running is reaped as interrupted when the new process boots.
-TimeoutStopSec=30
-KillMode=mixed
-UMask=0027
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
+# The truecourse.service unit is written by `truecourse-vm initialize` and
+# rewritten by every deploy, so unit changes reach an existing VM.
 cat >/etc/systemd/system/truecourse-health.service <<'EOF'
 [Unit]
 Description=Write TrueCourse health telemetry for Azure Monitor

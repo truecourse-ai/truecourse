@@ -31,6 +31,7 @@ class ReleaseTests(unittest.TestCase):
         for name, path in [('ROOT', root / 'opt'), ('ETC', root / 'etc'), ('STATE', root / 'state')]:
             path.mkdir()
             self.stack.enter_context(patch.object(vm, name, path))
+        self.stack.enter_context(patch.object(vm, 'UNIT_FILE', root / 'truecourse.service'))
         (vm.ROOT / 'releases').mkdir()
         # Avoid host ownership changes. Keep real atomic files/symlinks for tests.
         self.stack.enter_context(patch.object(vm.os, 'chown'))
@@ -82,7 +83,9 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn('TRUECOURSE_RELEASE_OK ' + DIGEST, output.getvalue())
         self.assertEqual(vm.current_release(), target)
         self.assertEqual(vm.read_json(vm.ETC / 'app.json'), {'release': 'a'})
-        mocks['run'].assert_called_once_with(['systemctl', 'restart', 'truecourse'])
+        self.assertEqual([c.args[0] for c in mocks['run'].call_args_list],
+                         [['systemctl', 'daemon-reload'], ['systemctl', 'restart', 'truecourse']])
+        self.assertEqual(vm.UNIT_FILE.read_text(), vm.UNIT)
 
     def test_env_failure_leaves_running_release_untouched(self):
         old = self.existing()
@@ -102,7 +105,7 @@ class ReleaseTests(unittest.TestCase):
             vm.deploy(CONFIG, IMAGE)
         self.assertEqual(vm.current_release(), old)
         self.assertEqual(vm.read_json(vm.ETC / 'app.json'), {'release': 'b'})
-        self.assertEqual(mocks['run'].call_count, 2)
+        self.assertEqual([c.args[0] for c in mocks['run'].call_args_list].count(['systemctl', 'restart', 'truecourse']), 2)
 
     def test_failed_first_release_stays_active(self):
         target = self.artifact(IMAGE)
@@ -111,7 +114,33 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'still active'):
             vm.deploy(CONFIG, IMAGE)
         self.assertEqual(vm.current_release(), target)
-        mocks['run'].assert_called_once()
+        mocks['run'].assert_any_call(['systemctl', 'restart', 'truecourse'])
+
+    def test_failed_restart_restores_previous(self):
+        old = self.existing()
+        mocks = self.fake_deployment(self.artifact(IMAGE))
+        restarts = []
+        def run(args, **kwargs):
+            if args[1] == 'restart':
+                restarts.append(vm.current_release())
+                if len(restarts) == 1:
+                    raise vm.subprocess.CalledProcessError(1, args)
+        mocks['run'].side_effect = run
+        with self.assertRaisesRegex(RuntimeError, 'previous application release restarted'):
+            vm.deploy(CONFIG, IMAGE)
+        self.assertEqual(restarts[-1], old)
+        self.assertEqual(vm.current_release(), old)
+        mocks['wait_ready'].assert_not_called()
+
+    def test_stale_unit_is_rewritten_once(self):
+        self.existing()
+        mocks = self.fake_deployment(self.artifact(IMAGE))
+        vm.UNIT_FILE.write_text('[Service]\nExecStartPost=/usr/local/sbin/truecourse-vm boot-ready\n')
+        with contextlib.redirect_stdout(io.StringIO()):
+            vm.deploy(CONFIG, IMAGE)
+            vm.deploy(CONFIG, IMAGE)
+        self.assertEqual(vm.UNIT_FILE.read_text(), vm.UNIT)
+        self.assertEqual([c.args[0] for c in mocks['run'].call_args_list].count(['systemctl', 'daemon-reload']), 1)
 
     def test_telemetry_records_public_health(self):
         health_log = vm.STATE / 'health.log'
