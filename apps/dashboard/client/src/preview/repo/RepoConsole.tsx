@@ -43,14 +43,12 @@ import { DependencyPage } from './DependencyPage';
 import { InterfacePage } from './InterfacePage';
 import { InterfacesTab } from './InterfacesTab';
 import { PipelineTab } from './PipelineTab';
-import { PullsTab } from './PullsTab';
 import { RunPage } from './RunPage';
 import { RunsTab } from './RunsTab';
 import { SettingsTab } from './SettingsTab';
 
 const TABS = [
   { id: 'runs', label: 'Runs', group: 'work' },
-  { id: 'pulls', label: 'Pull requests', group: 'work' },
   { id: 'pipeline', label: 'Pipeline', group: 'work' },
   { id: 'context', label: 'Context', group: 'setup' },
   { id: 'interfaces', label: 'Interfaces', group: 'setup' },
@@ -148,11 +146,6 @@ export default function RepoConsole() {
             // The three pieces of work this repository runs, each with what it
             // last did and a way to run it again.
             <PipelineTab repo={repo} />
-          ) : active === 'pulls' ? (
-            // Every pull request the gate checked, over
-            // '/api/ee/github/repos/<owner>/<repo>/runs', one row per pull
-            // request wearing the check its newest head got.
-            <PullsTab repo={repo} />
           ) : active === 'settings' ? (
             <SettingsTab repo={repo} />
           ) : active === 'context' ? (
