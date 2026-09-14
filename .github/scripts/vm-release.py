@@ -66,7 +66,10 @@ APP_HEALTH_URL = 'http://127.0.0.1:3001/api/health'
 SECRET_NAMES = ('DATABASE_URL', 'TRUECOURSE_SECRET_KEY', 'WORKOS_API_KEY',
                 'WORKOS_CLIENT_ID', 'WORKOS_COOKIE_PASSWORD', 'GITHUB_APP_ID',
                 'GITHUB_APP_PRIVATE_KEY', 'GITHUB_APP_WEBHOOK_SECRET', 'GITHUB_APP_SLUG',
-                'SENTRY_DSN')
+                'SENTRY_DSN', 'TRUECOURSE_MAX_CONCURRENCY', 'TRUECOURSE_MAX_API_CONCURRENCY')
+# Absent in Key Vault means "use the app's default"; access failures still fail the release.
+OPTIONAL_SECRETS = ('SENTRY_DSN', 'TRUECOURSE_MAX_CONCURRENCY', 'TRUECOURSE_MAX_API_CONCURRENCY')
+INTEGER_SECRETS = ('TRUECOURSE_MAX_CONCURRENCY', 'TRUECOURSE_MAX_API_CONCURRENCY')
 
 
 def run(args, **kwargs):
@@ -211,9 +214,12 @@ def application_env(config, image):
         try:
             env[name] = fetch_json(url, headers={'Authorization': 'Bearer ' + token})['value']
         except urllib.error.HTTPError as error:
-            if name == 'SENTRY_DSN' and error.code == 404:
-                continue  # Error reporting is optional; access failures still fail the release.
+            if name in OPTIONAL_SECRETS and error.code == 404:
+                continue
             raise
+    for name in INTEGER_SECRETS:
+        if name in env and not re.fullmatch(r'[1-9][0-9]*', env[name]):
+            raise RuntimeError(name + ' in Key Vault must be a positive integer')
     db = urllib.parse.urlsplit(env['DATABASE_URL'])
     expected = config['databaseServerName'] + '.postgres.database.azure.com'
     ssl_mode = urllib.parse.parse_qs(db.query).get('sslmode', [''])[0]
@@ -228,8 +234,7 @@ def application_env(config, image):
                 'NODE_ENV': 'production', 'PORT': '3001',
                 'TRUECOURSE_LOG_DIR': '/var/log/truecourse',
                 'SENTRY_ENVIRONMENT': 'production' if config['environment'] == 'prod' else 'staging',
-                'TRUECOURSE_RELEASE': validate_image(config, image),
-                'TRUECOURSE_MAX_CONCURRENCY': '1', 'TRUECOURSE_MAX_API_CONCURRENCY': '1'})
+                'TRUECOURSE_RELEASE': validate_image(config, image)})
     return env
 
 

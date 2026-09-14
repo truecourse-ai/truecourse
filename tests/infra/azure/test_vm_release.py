@@ -161,10 +161,11 @@ class ReleaseTests(unittest.TestCase):
     def test_environment_validates_database_and_keeps_existing_key(self):
         values = {name: 'configured' for name in vm.SECRET_NAMES}
         values.update(DATABASE_URL='postgresql://user:password@managed-dev.postgres.database.azure.com/app?sslmode=require',
-                      TRUECOURSE_SECRET_KEY='original-key-' * 4)
+                      TRUECOURSE_SECRET_KEY='original-key-' * 4, TRUECOURSE_MAX_CONCURRENCY='8')
+        absent = {'SENTRY_DSN', 'TRUECOURSE_MAX_API_CONCURRENCY'}
         def secret(url, **kwargs):
             name = url.split('/secrets/')[1].split('?')[0].upper().replace('-', '_')
-            if name == 'SENTRY_DSN':
+            if name in absent:
                 raise urllib.error.HTTPError(url, 404, 'absent', {}, None)
             return {'value': values[name]}
         with patch.object(vm, 'azure_token', return_value='never-print-token'), patch.object(vm, 'fetch_json', side_effect=secret):
@@ -172,7 +173,13 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(env['TRUECOURSE_SECRET_KEY'], values['TRUECOURSE_SECRET_KEY'])
             self.assertEqual(env['WORKOS_REDIRECT_URI'], 'https://example.test/api/auth/callback')
             self.assertEqual(env['TRUECOURSE_RELEASE'], DIGEST)
+            self.assertEqual(env['TRUECOURSE_MAX_CONCURRENCY'], '8')
             self.assertNotIn('SENTRY_DSN', env)
+            self.assertNotIn('TRUECOURSE_MAX_API_CONCURRENCY', env)
+            values['TRUECOURSE_MAX_CONCURRENCY'] = 'eight'
+            with self.assertRaisesRegex(RuntimeError, 'positive integer'):
+                vm.application_env(CONFIG, IMAGE)
+            values['TRUECOURSE_MAX_CONCURRENCY'] = '8'
             values['DATABASE_URL'] = values['DATABASE_URL'].replace('managed-dev', 'managed-prod')
             with self.assertRaisesRegex(RuntimeError, 'managed server'):
                 vm.application_env(CONFIG, IMAGE)
