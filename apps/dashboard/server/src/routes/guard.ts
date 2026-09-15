@@ -35,6 +35,7 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import path from 'node:path';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
+import { orgOf } from '../services/workspace-llm.service.js';
 import { readRepoDoc } from '@truecourse/core/lib/repo-doc-reader';
 import { composeGuardStatus, GUARD_VISUAL_CONTENT_TYPE } from '@truecourse/shared';
 import {
@@ -85,7 +86,7 @@ const router: Router = Router();
 // has run), so the tab renders empty-state CTAs rather than erroring.
 router.get('/:id/guard/status', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     const ref = refOf(req);
     // PR view: the RUN comes from the PR head alone (never the baseline); the
     // generate-side inputs (manifest / result) fall back to the baseline set —
@@ -113,7 +114,7 @@ router.get('/:id/guard/status', async (req: Request, res: Response, next: NextFu
 // second fetch (a read-time join; the stored run object itself is untouched).
 router.get('/:id/guard/latest', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     const ref = refOf(req);
     const latest = await readGuardRunForView(repo.path, ref);
     if (!ref) {
@@ -136,7 +137,7 @@ router.get('/:id/guard/latest', async (req: Request, res: Response, next: NextFu
 
 router.get('/:id/guard/history', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     // `?all=1`: every run the store holds, not just the baseline trend — the Runs
     // list of a connected repository.
     res.json(await readGuardHistory(repo.path, { all: req.query.all === '1' }));
@@ -149,7 +150,7 @@ router.get('/:id/guard/history', async (req: Request, res: Response, next: NextF
 // selected from the history paints its flow instances too.
 router.get('/:id/guard/runs/:runId', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     const run = await readGuardRun(repo.path, req.params.runId as string);
     if (!run) {
       res.status(404).json({ error: 'Guard run not found.' });
@@ -163,7 +164,7 @@ router.get('/:id/guard/runs/:runId', async (req: Request, res: Response, next: N
 
 router.get('/:id/guard/report', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     const report = await readGuardReport(repo.path, refOf(req));
     if (!report) {
       res.status(404).json({ error: 'No guard generate report yet.' });
@@ -179,7 +180,7 @@ router.get('/:id/guard/report', async (req: Request, res: Response, next: NextFu
 // `?ref=` (EE) pins the revision the doc is read at (OSS ignores it).
 router.get('/:id/guard/coverage', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     const doc = String(req.query.doc ?? '');
     if (!doc) {
       res.status(400).json({ error: 'Missing ?doc=<doc path>.' });
@@ -226,7 +227,7 @@ router.get('/:id/guard/coverage', async (req: Request, res: Response, next: Next
 // empty states rather than erroring.
 router.get('/:id/guard/flows', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     res.json(await listGuardFlows(repo.path, refOf(req)));
   } catch (e) {
     next(e);
@@ -237,7 +238,7 @@ router.get('/:id/guard/flows', async (req: Request, res: Response, next: NextFun
 // the id — the client re-lists rather than rendering a hollow panel.
 router.get('/:id/guard/flows/:flowId', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     const flowId = req.params.flowId as string;
     const detail = await readGuardFlowDetail(repo.path, flowId, refOf(req));
     if (!detail) {
@@ -256,7 +257,7 @@ router.get('/:id/guard/flows/:flowId', async (req: Request, res: Response, next:
 // stored setup bundle reports `unavailable: 'no-working-tree'`.
 router.get('/:id/guard/interfaces', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     res.json(await readGuardInterfaces(repo.path, refOf(req)));
   } catch (e) {
     next(e);
@@ -284,7 +285,7 @@ const rawArtifactRoute = (
 ) =>
   async function handle(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const repo = await resolveProjectForRequest(req.params.id as string);
+      const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
       const id = String(req.query.id ?? '');
       if (!id && !singleton) {
         res.status(400).json({ error: `Missing ?id=<${what} id>.` });
@@ -324,7 +325,7 @@ router.get(
 // client's own empty state.
 router.get('/:id/guard/claims', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     res.json(await readGuardClaims(repo.path, refOf(req)));
   } catch (e) {
     next(e);
@@ -336,7 +337,7 @@ router.get('/:id/guard/claims', async (req: Request, res: Response, next: NextFu
 // empty states rather than erroring.
 router.get('/:id/guard/scenarios', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     res.json(await listGuardScenarios(repo.path, refOf(req)));
   } catch (e) {
     next(e);
@@ -345,7 +346,7 @@ router.get('/:id/guard/scenarios', async (req: Request, res: Response, next: Nex
 
 router.get('/:id/guard/scenario', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     const id = String(req.query.id ?? '');
     if (!id) {
       res.status(400).json({ error: 'Missing ?id=<scenario id>.' });
@@ -376,7 +377,7 @@ router.get('/:id/guard/scenario', async (req: Request, res: Response, next: Next
 // run ids / filenames and confines the read to the run's evidence dir.
 router.get('/:id/guard/evidence', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     const runId = String(req.query.runId ?? '');
     const scenarioId = String(req.query.scenarioId ?? '');
     if (!runId || !scenarioId) {
@@ -414,7 +415,7 @@ function evidenceLocatorOf(req: Request): GuardEvidenceLocator | null {
 // an empty list is the honest answer for it.
 router.get('/:id/guard/evidence/visuals', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     const scenarioId = String(req.query.scenarioId ?? '');
     const from = evidenceLocatorOf(req);
     if (!from || ('runId' in from && !scenarioId)) {
@@ -440,7 +441,7 @@ router.get('/:id/guard/evidence/visuals', async (req: Request, res: Response, ne
 // a subarray, not a second read; screenshots get partial reads for free.
 router.get('/:id/guard/evidence/visual', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     const scenarioId = String(req.query.scenarioId ?? '');
     const file = String(req.query.file ?? '');
     const from = evidenceLocatorOf(req);
@@ -482,7 +483,7 @@ router.get('/:id/guard/evidence/visual', async (req: Request, res: Response, nex
 // confines the read to the guard evidence root and rejects unsafe filenames.
 router.get('/:id/guard/finding-evidence', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     const evidencePath = String(req.query.path ?? '');
     if (!evidencePath) {
       res.status(400).json({ error: 'Missing ?path=<evidence dir>.' });
@@ -505,7 +506,7 @@ router.get('/:id/guard/finding-evidence', async (req: Request, res: Response, ne
 // dismissed state without a 404 branch.
 router.get('/:id/guard/decisions', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     res.json(await readGuardDecisions(repo.path));
   } catch (e) {
     next(e);
@@ -514,7 +515,7 @@ router.get('/:id/guard/decisions', async (req: Request, res: Response, next: Nex
 
 router.get('/:id/guard/staleness', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     res.json(await computeGuardStaleness(repo.path, refOf(req)));
   } catch (e) {
     next(e);
@@ -529,7 +530,7 @@ router.get('/:id/guard/staleness', async (req: Request, res: Response, next: Nex
 // setup has never run.
 router.get('/:id/guard/setup', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     const commit = req.query.commit ? String(req.query.commit) : undefined;
     const bundle = await loadGuardSetupBundle(repo.path, commit);
     const report = bundle ? readBundleGuardSetup(bundle) : null;
@@ -552,7 +553,7 @@ router.get('/:id/guard/setup', async (req: Request, res: Response, next: NextFun
 // server's own variables never read as a registered account.
 router.get('/:id/guard/dependencies', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     res.json(
       await withGuardReadTree(repo.path, refOf(req), (tree) =>
         hostedDependenciesView(tree, readGuardDependenciesView(tree, { env: {}, hostless: true })),

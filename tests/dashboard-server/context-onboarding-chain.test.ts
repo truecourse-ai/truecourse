@@ -306,8 +306,8 @@ beforeEach(async () => {
   const entry = { slug: `acme-widgets-${orgCounter}`, name: REPO, path: REPO };
   const registry: RegistryStore = {
     readRegistry: async () => [entry],
-    getProjectBySlug: async (slug) => (slug === entry.slug ? entry : null),
-    getProjectByPath: async (repoPath) => (repoPath === REPO ? entry : null),
+    getProjectBySlug: async (_org, slug) => (slug === entry.slug ? entry : null),
+    getProjectByPath: async (_org, repoPath) => (repoPath === REPO ? entry : null),
   };
   setRegistryStore(registry);
 });

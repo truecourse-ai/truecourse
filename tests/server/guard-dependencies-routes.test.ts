@@ -26,7 +26,7 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
   };
 });
 
-import { createTestApp } from '../helpers/test-app';
+import { createTestApp, TEST_ORG } from '../helpers/test-app';
 import { emitSpecComplete } from '../../apps/dashboard/server/src/socket/handlers';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
 import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
@@ -206,7 +206,7 @@ describe('Guard dependencies routes', () => {
     expect((await overlays()).dependencies).toEqual({ anthropic: { env: { ANTHROPIC_API_KEY: 'sk-secret' } } });
     // The committed catalog is untouched: the declaration already said all of this.
     expect(readJson(CATALOG).dependencies).toEqual([ACCOUNT]);
-    expect(vi.mocked(emitSpecComplete)).toHaveBeenCalledWith(fixture.project.slug, 'guard-externals');
+    expect(vi.mocked(emitSpecComplete)).toHaveBeenCalledWith(TEST_ORG, fixture.project.slug, 'guard-externals');
   });
 
   /**

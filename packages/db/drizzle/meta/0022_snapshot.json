@@ -1898,6 +1898,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "slug": {
+          "name": "slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "default_branch": {
           "name": "default_branch",
           "type": "text",
@@ -1990,7 +1996,16 @@
       },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "repositories_workspace_slug_unique": {
+          "name": "repositories_workspace_slug_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "workspace_org_id",
+            "slug"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

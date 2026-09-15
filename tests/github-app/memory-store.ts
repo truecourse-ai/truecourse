@@ -7,10 +7,12 @@
  */
 
 import type {
+  RepositoryLink,
   RepositoryProviderId,
   RepositoryRecord,
   RepositoryStore,
 } from '@truecourse/shared';
+import { slugify } from '@truecourse/core/config/registry';
 import type {
   InstallationStore,
   InstallationRecord,
@@ -48,8 +50,15 @@ export class MemoryInstallationStore implements InstallationStore, RepositorySto
     );
   }
 
-  async linkRepo(rec: RepositoryRecord): Promise<void> {
-    this.repos.set(rec.repoFullName, { ...rec });
+  /** Mints the slug the way the Postgres store does: against the workspace's own slugs. */
+  async linkRepo(rec: RepositoryLink): Promise<RepositoryRecord> {
+    const existing = this.repos.get(rec.repoFullName);
+    const taken = [...this.repos.values()]
+      .filter((r) => r.workspaceOrgId === rec.workspaceOrgId)
+      .map((r) => r.slug);
+    const stored: RepositoryRecord = { ...rec, slug: existing?.slug ?? slugify(rec.repoFullName, taken) };
+    this.repos.set(rec.repoFullName, stored);
+    return stored;
   }
 
   async unlinkRepo(repoFullName: string): Promise<void> {

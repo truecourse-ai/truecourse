@@ -58,9 +58,9 @@ export function testRepoLinks(orgId: string = TEST_ORG): RepoLinkStore {
   return {
     getRepo: async () => ({ workspaceOrgId: orgId }),
     listReposForWorkspace: async () =>
-      (await readRegistry()).map((e) => ({ repoFullName: e.name })),
+      (await readRegistry(orgId)).map((e) => ({ repoFullName: e.name })),
     unlinkRepo: async (repoFullName: string) => {
-      const entry = (await readRegistry()).find((e) => e.name === repoFullName);
+      const entry = (await readRegistry(orgId)).find((e) => e.name === repoFullName);
       if (entry) unregisterTestRepo(entry.slug);
     },
   };

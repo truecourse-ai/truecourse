@@ -177,7 +177,7 @@ describe('POST /api/repos/connect', () => {
       .send({ url: 'https://github.com/acme/widgets' })
       .expect(404);
 
-    expect(await readRegistry()).toHaveLength(0);
+    expect(await readRegistry(TEST_ORG)).toHaveLength(0);
   });
 });
 
@@ -211,7 +211,7 @@ describe('DELETE /api/repos/:id', () => {
     expect((await new JobStore(db).get(queued.jobId))?.status).toBe('cancelled');
     // The source tree is not the server's to delete.
     expect(fs.existsSync(local)).toBe(true);
-    expect(await readRegistry()).toHaveLength(0);
+    expect(await readRegistry(TEST_ORG)).toHaveLength(0);
   });
 
   it('cancels a job that is still queued, so its body never runs', async () => {
@@ -248,7 +248,7 @@ describe('DELETE /api/repos/:id', () => {
 
     const refused = await request(app).delete(`/api/repos/${entry.slug}`).expect(409);
     expect(refused.body.error).toMatch(/another process/i);
-    expect((await readRegistry()).map((e) => e.slug)).toEqual([entry.slug]);
+    expect((await readRegistry(TEST_ORG)).map((e) => e.slug)).toEqual([entry.slug]);
     expect((await store.get(row.id))?.status).toBe('running');
   });
 });

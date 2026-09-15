@@ -45,7 +45,7 @@ export function pipelineTracker<P extends OnboardingJobPayload>(
       started = true;
       void ctx.phase(stepKey);
     }
-    safely(() => emitSpecProgress(ctx.payload.repoId, payload));
+    safely(() => emitSpecProgress(ctx.payload.workspaceOrgId, ctx.payload.repoId, payload));
   });
   return tracker;
 }
@@ -70,7 +70,7 @@ export function mirrorTracker<P extends OnboardingJobPayload>(
         void ctx.phase(step.key, step.detail);
       }
     }
-    safely(() => emitSpecProgress(ctx.payload.repoId, payload));
+    safely(() => emitSpecProgress(ctx.payload.workspaceOrgId, ctx.payload.repoId, payload));
   }, stepDefs.map((s) => ({ ...s })));
 }
 

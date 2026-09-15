@@ -282,7 +282,7 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
    */
   async function linkableRepos(req: Request): Promise<Map<string, RegistryEntry>> {
     const byName = new Map<string, RegistryEntry>();
-    for (const entry of await readRegistry()) {
+    for (const entry of await readRegistry(orgOf(req))) {
       if (!(await isVisibleTo(deps.repoLinks, req, entry))) continue;
       byName.set(entry.slug, entry);
       byName.set(entry.name, entry);
@@ -1097,7 +1097,7 @@ export function createContextBindingsRouter(): Router {
   router.get('/:id/context/bindings', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);
-      const entry = await getProjectBySlug(req.params.id as string);
+      const entry = await getProjectBySlug(org, req.params.id as string);
       if (!entry) throw createAppError('Project not found', 404);
       res.json({ repoFullName: entry.name, sourceIds: await contextBindings(org, entry.name) });
     } catch (e) {
@@ -1110,7 +1110,7 @@ export function createContextBindingsRouter(): Router {
   router.put('/:id/context/bindings', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);
-      const entry = await getProjectBySlug(req.params.id as string);
+      const entry = await getProjectBySlug(org, req.params.id as string);
       if (!entry) throw createAppError('Project not found', 404);
       const body = (req.body ?? {}) as { sourceIds?: unknown };
       if (!Array.isArray(body.sourceIds)) {

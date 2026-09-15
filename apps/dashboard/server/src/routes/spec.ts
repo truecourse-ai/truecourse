@@ -47,7 +47,7 @@ router.get(
   '/:id/spec/corpus',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const repo = await resolveProjectForRequest(req.params.id as string);
+      const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
       // The repository's corpus IS the workspace corpus cut down to the sources
       // it reads, which is what it runs against and so what it shows; a
       // workspace that has never scanned answers like a never-scanned
@@ -75,7 +75,7 @@ router.get(
   '/:id/spec/doc',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const repo = await resolveProjectForRequest(req.params.id as string);
+      const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
       const ref = String(req.query.ref ?? '');
       if (!ref) {
         res.status(400).json({ error: 'Missing ?ref=<doc path>.' });
@@ -117,7 +117,7 @@ router.get(
   '/:id/spec/staleness',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      await resolveProjectForRequest(req.params.id as string);
+      await resolveProjectForRequest(orgOf(req), req.params.id as string);
       const org = orgOf(req);
       const [corpus, decisions, changedAt] = await Promise.all([
         loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId: org }, 'corpus'),

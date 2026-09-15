@@ -160,7 +160,7 @@ export function createRepoGuardRunTask(
     async onSettled(ctx) {
       // Clears the in-page progress popup and refreshes the guard surfaces,
       // however the run ended. Nothing chains after the baseline run.
-      await emitRepoLifecycle(ctx.payload.repoFullName, 'guard-run');
+      await emitRepoLifecycle(ctx.payload.workspaceOrgId, ctx.payload.repoFullName, 'guard-run');
     },
   };
 }

@@ -1,7 +1,13 @@
 /**
  * The repository registry — how a `:id` slug in a route resolves to a
- * repository. It is a DERIVED VIEW of the connected repositories, not a table
- * of its own, so it can neither drift nor orphan.
+ * repository. It is a VIEW of the connected repositories, not a table of its
+ * own, so it can neither drift nor orphan: the slug is a column of the
+ * repository's row, minted once when it was connected.
+ *
+ * Every read is scoped to a workspace. A slug is unique within its workspace
+ * and nowhere else, so a lookup takes the workspace it runs in and another
+ * workspace's repository is unreachable through it rather than fetched and
+ * then rejected.
  *
  * The seam exists because `@truecourse/core` cannot depend on
  * `@truecourse/data-store` (the dependency runs the other way): boot installs
@@ -11,7 +17,7 @@
  */
 
 export interface RegistryEntry {
-  /** Stable URL-safe identifier derived from the repository's full name. */
+  /** The URL-safe identifier the routes address it by; unique within its workspace. */
   slug: string;
   /** Display name. */
   name: string;
@@ -25,11 +31,11 @@ export interface RegistryEntry {
   remoteUrl?: string;
 }
 
-/** The connected repositories, as the routes read them. */
+/** The connected repositories of one workspace, as the routes read them. */
 export interface RegistryStore {
-  readRegistry(): Promise<RegistryEntry[]>;
-  getProjectBySlug(slug: string): Promise<RegistryEntry | null>;
-  getProjectByPath(repoPath: string): Promise<RegistryEntry | null>;
+  readRegistry(workspaceOrgId: string): Promise<RegistryEntry[]>;
+  getProjectBySlug(workspaceOrgId: string, slug: string): Promise<RegistryEntry | null>;
+  getProjectByPath(workspaceOrgId: string, repoPath: string): Promise<RegistryEntry | null>;
 }
 
 let active: RegistryStore | null = null;
@@ -54,13 +60,14 @@ export function getRegistryStore(): RegistryStore {
   return store();
 }
 
-export const readRegistry = (): Promise<RegistryEntry[]> => store().readRegistry();
+export const readRegistry = (workspaceOrgId: string): Promise<RegistryEntry[]> =>
+  store().readRegistry(workspaceOrgId);
 
-export const getProjectBySlug = (slug: string): Promise<RegistryEntry | null> =>
-  store().getProjectBySlug(slug);
+export const getProjectBySlug = (workspaceOrgId: string, slug: string): Promise<RegistryEntry | null> =>
+  store().getProjectBySlug(workspaceOrgId, slug);
 
-export const getProjectByPath = (repoPath: string): Promise<RegistryEntry | null> =>
-  store().getProjectByPath(repoPath);
+export const getProjectByPath = (workspaceOrgId: string, repoPath: string): Promise<RegistryEntry | null> =>
+  store().getProjectByPath(workspaceOrgId, repoPath);
 
 /** Derive a unique URL-safe slug from a display name, avoiding `taken`. */
 export function slugify(name: string, taken: string[]): string {

@@ -176,7 +176,7 @@ export function PreviewStateProvider({ children }: { children: ReactNode }) {
   );
 
   // The repositories' runs, followed live. Inert without a server.
-  const realRuns = useRealRunStream(repos, reposLoaded);
+  const realRuns = useRealRunStream(repos, reposLoaded, orgId ?? undefined);
   // The workspace's jobs, where work that has not started yet is visible.
   const queue = useActiveJobs();
   // The workspace's notification feed, read from the store and followed live.

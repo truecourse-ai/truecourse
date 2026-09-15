@@ -89,7 +89,7 @@ export function createHomeRouter(deps: HomeRouterDeps = {}): Router {
   /** The repositories this caller can see, by the `owner/repo` every store keys by. */
   async function visibleRepos(req: Request): Promise<Map<string, RegistryEntry>> {
     const visible = new Map<string, RegistryEntry>();
-    for (const entry of await readRegistry()) {
+    for (const entry of await readRegistry(orgOf(req))) {
       if (!(await isVisibleTo(deps.repoLinks, req, entry))) continue;
       visible.set(entry.name, entry);
     }

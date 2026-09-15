@@ -9,7 +9,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
-import type { RepositoryRecord } from '@truecourse/shared';
+import type { RepositoryLink } from '@truecourse/shared';
 import { schema, MIGRATIONS_DIR, type Db } from '@truecourse/db';
 import { PgRepositoryStore, RepositoriesRegistryStore } from '@truecourse/data-store';
 
@@ -28,7 +28,7 @@ afterEach(async () => {
   await client.close();
 });
 
-function githubRepo(name: string, over: Partial<RepositoryRecord> = {}): RepositoryRecord {
+function githubRepo(name: string, over: Partial<RepositoryLink> = {}): RepositoryLink {
   return {
     repoFullName: name,
     provider: 'github',
@@ -44,7 +44,7 @@ function githubRepo(name: string, over: Partial<RepositoryRecord> = {}): Reposit
   };
 }
 
-function folder(name: string, path: string, over: Partial<RepositoryRecord> = {}): RepositoryRecord {
+function folder(name: string, path: string, over: Partial<RepositoryLink> = {}): RepositoryLink {
   return {
     repoFullName: name,
     provider: 'local',
@@ -107,6 +107,28 @@ describe('PgRepositoryStore', () => {
     await store.unlinkRepo('acme/api');
     expect(await store.getRepo('acme/api')).toBeNull();
   });
+
+  it('mints the slug against the workspace alone, so two workspaces share a plain slug', async () => {
+    const a = await store.linkRepo(githubRepo('acme/data-pipeline'));
+    const b = await store.linkRepo(githubRepo('acme/data_pipeline', { workspaceOrgId: 'org_B', accountId: '2' }));
+    expect(a.slug).toBe('acme-data-pipeline');
+    expect(b.slug).toBe('acme-data-pipeline');
+  });
+
+  it('suffixes a collision inside one workspace and keeps that slug when the first is disconnected', async () => {
+    await store.linkRepo(githubRepo('acme/data-pipeline'));
+    const second = await store.linkRepo(githubRepo('acme/data_pipeline'));
+    expect(second.slug).toBe('acme-data-pipeline-2');
+
+    await store.unlinkRepo('acme/data-pipeline');
+    expect((await store.getRepo('acme/data_pipeline'))?.slug).toBe('acme-data-pipeline-2');
+  });
+
+  it('keeps the slug on a re-link at the same name', async () => {
+    const first = await store.linkRepo(githubRepo('acme/api'));
+    const again = await store.linkRepo(githubRepo('acme/api', { blocking: false }));
+    expect(again.slug).toBe(first.slug);
+  });
 });
 
 describe('the registry derived from them', () => {
@@ -115,7 +137,7 @@ describe('the registry derived from them', () => {
     await store.linkRepo(folder('local/orders', '/Users/dev/code/orders'));
     const registry = new RepositoriesRegistryStore(db);
 
-    const entries = await registry.readRegistry();
+    const entries = await registry.readRegistry('org_A');
     expect(entries.map((e) => e.slug)).toEqual(['acme-api', 'local-orders']);
     expect(entries[0]).toMatchObject({
       name: 'acme/api',
@@ -131,7 +153,16 @@ describe('the registry derived from them', () => {
     });
     expect(entries[1]?.defaultBranch).toBeUndefined();
 
-    expect((await registry.getProjectBySlug('local-orders'))?.path).toBe('local/orders');
-    expect((await registry.getProjectByPath('acme/api'))?.slug).toBe('acme-api');
+    expect((await registry.getProjectBySlug('org_A', 'local-orders'))?.path).toBe('local/orders');
+    expect((await registry.getProjectByPath('org_A', 'acme/api'))?.slug).toBe('acme-api');
+  });
+
+  it("cannot reach another workspace's repository by slug or by name", async () => {
+    await store.linkRepo(githubRepo('acme/api'));
+    const registry = new RepositoriesRegistryStore(db);
+
+    expect(await registry.readRegistry('org_B')).toEqual([]);
+    expect(await registry.getProjectBySlug('org_B', 'acme-api')).toBeNull();
+    expect(await registry.getProjectByPath('org_B', 'acme/api')).toBeNull();
   });
 });

@@ -184,7 +184,7 @@ async function refusedWithoutLlm(req: Request, res: Response): Promise<boolean> 
 // directly. Read-only: never mutates, never spends.
 router.get('/:id/guard/estimate', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     const estimate = await estimateGuard(repo.path);
     res.json({ estimate });
   } catch (e) {
@@ -200,7 +200,7 @@ router.get('/:id/guard/estimate', async (req: Request, res: Response, next: Next
 // estimate gate: an unchanged corpus is the engine's own deterministic no-op.
 router.post('/:id/guard/generate', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     const resumeRunId: unknown = req.body?.resumeRunId;
     const resume = resumeRunId === undefined ? undefined : await readGuardGenerateResume(repo.path, resumeRunId);
     // Extracting both sides of an unresolved overlap births a paid finding that
@@ -240,7 +240,7 @@ router.post('/:id/guard/generate', async (req: Request, res: Response, next: Nex
 // is no estimate gate and a re-trigger over unchanged inputs costs nothing.
 router.post('/:id/guard/setup', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     const body = (req.body ?? {}) as { only?: string; refresh?: boolean };
     const only = GUARD_SETUP_ONLY_STEPS.find((step) => step === body.only);
     if (body.only !== undefined && !only) {
@@ -276,7 +276,7 @@ router.post('/:id/guard/setup', async (req: Request, res: Response, next: NextFu
 // completes with `spec:complete` (`kind: guard-run`).
 router.post('/:id/guard/run', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     const outcome = await requireJobs().enqueueGuardRun({
       repoId: req.params.id as string,
       repoFullName: repo.path,
@@ -301,7 +301,7 @@ router.post('/:id/guard/run', async (req: Request, res: Response, next: NextFunc
 // `dismissed` gap — this write does NOT touch the current report snapshot.
 router.post('/:id/guard/dismiss', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     const body = (req.body ?? {}) as { doc?: string; anchor?: string; title?: string; note?: string };
     const { doc, anchor, title, note } = body;
     if (!doc || !anchor || !title) {
@@ -329,7 +329,7 @@ router.post('/:id/guard/dismiss', async (req: Request, res: Response, next: Next
 // absent; returns the updated decisions file.
 router.post('/:id/guard/undismiss', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     const body = (req.body ?? {}) as { doc?: string; anchor?: string; title?: string };
     const { doc, anchor, title } = body;
     if (!doc || !anchor || !title) {
@@ -355,7 +355,7 @@ router.post('/:id/guard/undismiss', async (req: Request, res: Response, next: Ne
 // would silently stop matching the moment the flow is re-authored.
 router.post('/:id/guard/flows/dismiss', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     const body = (req.body ?? {}) as { flowId?: string; title?: string; note?: string };
     const { flowId, title, note } = body;
     if (!flowId || !title) {
@@ -379,7 +379,7 @@ router.post('/:id/guard/flows/dismiss', async (req: Request, res: Response, next
 // the updated decisions file.
 router.post('/:id/guard/flows/undismiss', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     const { flowId } = (req.body ?? {}) as { flowId?: string };
     if (!flowId) {
       res.status(400).json({ error: 'flow undismiss requires { flowId }.' });
@@ -412,7 +412,7 @@ router.post('/:id/guard/flows/undismiss', async (req: Request, res: Response, ne
 router.put('/:id/guard/dependencies', async (req: Request, res: Response, next: NextFunction) => {
   const repoId = req.params.id as string;
   try {
-    const repo = await resolveProjectForRequest(repoId);
+    const repo = await resolveProjectForRequest(orgOf(req), repoId);
     const body = (req.body ?? {}) as { name?: unknown } & GuardDependencyPatch;
     if (typeof body.name !== 'string' || body.name.trim() === '') {
       res.status(400).json({ error: 'dependency write requires { name, … }.' });
@@ -427,7 +427,7 @@ router.put('/:id/guard/dependencies', async (req: Request, res: Response, next: 
       await writeGuardOverlays(repo.path, readGuardOverlaysFromTree(tree));
       return hostedDependenciesView(tree, written);
     });
-    emitSpecComplete(repoId, 'guard-externals');
+    emitSpecComplete(orgOf(req), repoId, 'guard-externals');
     res.json(view);
   } catch (e) {
     // A refused registration is the user's problem to fix (an undeclared variable,

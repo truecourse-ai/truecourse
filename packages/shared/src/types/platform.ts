@@ -92,8 +92,8 @@ export interface GithubRepoSummary {
   notifyEmails: string[]
   /** Per-type email notification toggles (defaults applied). */
   notifications: GithubNotificationPrefs
-  /** Project slug for the repo's dashboard detail route (`/repos/:slug`); null until registered. */
-  slug: string | null
+  /** The repo's dashboard route (`/repos/:slug`), minted when it was connected. */
+  slug: string
 }
 
 /**

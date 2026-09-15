@@ -33,16 +33,21 @@ export function disconnectSocket(): void {
   }
 }
 
-export function joinRepoRoom(repoId: string): void {
+/**
+ * Follow one repository's events. A room is the workspace's as well as the
+ * repo's — a slug is unique only within its workspace — so the join names the
+ * workspace this session is signed into.
+ */
+export function joinRepoRoom(workspaceOrgId: string, repoId: string): void {
   const s = getSocket();
   if (s.connected) {
-    s.emit('joinRepo', repoId);
+    s.emit('joinRepo', { workspaceOrgId, repoId });
   }
 }
 
-export function leaveRepoRoom(repoId: string): void {
+export function leaveRepoRoom(workspaceOrgId: string, repoId: string): void {
   const s = getSocket();
   if (s.connected) {
-    s.emit('leaveRepo', repoId);
+    s.emit('leaveRepo', { workspaceOrgId, repoId });
   }
 }

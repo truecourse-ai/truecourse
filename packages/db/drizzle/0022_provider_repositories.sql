@@ -21,3 +21,19 @@ ALTER TABLE "repositories" DROP COLUMN "code_quality_blocking";--> statement-bre
 ALTER TABLE "repositories" DROP COLUMN "code_quality_min_severity";--> statement-breakpoint
 CREATE INDEX "repositories_workspace_idx" ON "repositories" USING btree ("workspace_org_id");--> statement-breakpoint
 CREATE INDEX "repositories_account_idx" ON "repositories" USING btree ("provider","account_id");
+--> statement-breakpoint
+ALTER TABLE "repositories" ADD COLUMN "slug" text;--> statement-breakpoint
+UPDATE "repositories" AS r SET "slug" = minted."slug" FROM (
+	SELECT "repo_full_name", "base" || CASE WHEN "n" = 1 THEN '' ELSE '-' || "n" END AS "slug"
+	FROM (
+		SELECT "repo_full_name", "base",
+			row_number() OVER (PARTITION BY "workspace_org_id", "base" ORDER BY "created_at", "repo_full_name") AS "n"
+		FROM (
+			SELECT "repo_full_name", "workspace_org_id", "created_at",
+				coalesce(nullif(trim(both '-' from regexp_replace(lower("repo_full_name"), '[^a-z0-9]+', '-', 'g')), ''), 'project') AS "base"
+			FROM "repositories"
+		) AS named
+	) AS numbered
+) AS minted WHERE r."repo_full_name" = minted."repo_full_name";--> statement-breakpoint
+ALTER TABLE "repositories" ALTER COLUMN "slug" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "repositories" ADD CONSTRAINT "repositories_workspace_slug_unique" UNIQUE("workspace_org_id","slug");

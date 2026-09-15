@@ -25,6 +25,7 @@ import { log } from '@truecourse/core/lib/logger';
 import type {
   LocalRepositoriesResponse,
   LocalRepositorySummary,
+  RepositoryLink,
   RepositoryRecord,
   RepositoryStore,
 } from '@truecourse/shared';
@@ -189,7 +190,7 @@ export function createLocalConnection(deps: LocalConnectionDeps): LocalMount {
     }
 
     const now = new Date().toISOString();
-    const link: RepositoryRecord = {
+    const link: RepositoryLink = {
       repoFullName: uniqueRepoName(
         repoNameFor(folder),
         new Set(connected.map((r) => r.repoFullName)),
@@ -207,11 +208,11 @@ export function createLocalConnection(deps: LocalConnectionDeps): LocalMount {
       createdAt: now,
       updatedAt: now,
     };
-    await deps.repos.linkRepo(link);
-    watch(org, link);
+    const stored = await deps.repos.linkRepo(link);
+    watch(org, stored);
 
     try {
-      const outcome = await startSetup(link);
+      const outcome = await startSetup(stored);
       if (outcome !== 'queued') {
         log.info(`[local] ${folder} connected — setup ${outcome}`);
       }

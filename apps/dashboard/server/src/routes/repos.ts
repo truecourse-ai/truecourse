@@ -27,15 +27,17 @@ export interface ReposRouterDeps {
 }
 
 /**
- * The entry this slug names, if this caller may act on it. A slug another
- * workspace's repository owns reads as "not found" — see `isVisibleTo`.
+ * The entry this slug names in the caller's workspace, if this caller may act
+ * on it. Another workspace's slug is not found there; `isVisibleTo` then
+ * asserts the row's own workspace agrees.
  */
 async function requireVisibleEntry(
   deps: ReposRouterDeps,
   req: Request,
   slug: string,
 ): Promise<RegistryEntry> {
-  const entry = await getProjectBySlug(slug);
+  const org = req.user?.organizationId;
+  const entry = org ? await getProjectBySlug(org, slug) : null;
   if (!entry || !(await isVisibleTo(deps.repoLinks, req, entry))) {
     throw createAppError('Project not found', 404);
   }
@@ -43,18 +45,15 @@ async function requireVisibleEntry(
 }
 
 /**
- * The registry rows this caller may see: exactly the repos their workspace
- * connected, from one query. No store means no connected repos and an empty
- * home — never everyone's rows.
+ * The registry rows this caller may see: their workspace's, read from its own
+ * registry and asserted against the rows the store holds for it. No store
+ * means no connected repos and an empty home — never everyone's rows.
  */
-async function visibleTo(
-  deps: ReposRouterDeps,
-  req: Request,
-  entries: RegistryEntry[],
-): Promise<RegistryEntry[]> {
+async function visibleTo(deps: ReposRouterDeps, req: Request): Promise<RegistryEntry[]> {
   const links = deps.repoLinks;
   const org = req.user?.organizationId;
   if (!links || !org) return [];
+  const entries = await readRegistry(org);
   const mine = new Set((await links.listReposForWorkspace(org)).map((r) => r.repoFullName));
   return entries.filter((e) => mine.has(e.name));
 }
@@ -70,7 +69,7 @@ export function createReposRouter(deps: ReposRouterDeps = {}): Router {
   // tolerant of missing or unreadable state (`resolveLatestEvent` never throws).
   router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const entries = await visibleTo(deps, req, await readRegistry());
+      const entries = await visibleTo(deps, req);
       const repos = await Promise.all(
         entries.map(async (e) => ({
           id: e.slug,

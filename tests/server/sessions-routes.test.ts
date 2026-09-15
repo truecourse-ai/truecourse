@@ -437,14 +437,13 @@ describe('Workspace sessions routes', () => {
       .expect(404);
   });
 
-  it('refuses a session with no workspace, and reads the whole registry when nothing scopes it', async () => {
-    const { setup, generate, scan } = await seedWorkspace();
+  it('refuses a session with no workspace — the registry is read as one, so there is nothing to list', async () => {
+    const { scan } = await seedWorkspace();
     const noWorkspace = createTestApp({ authVerifier: async () => ({ user: { id: 'u', email: 'u@example.com' } }) });
     await request(noWorkspace).get('/api/sessions/runs').expect(401);
     await request(noWorkspace).get(`/api/sessions/runs/${scan.runId}`).expect(401);
 
     const unscoped = createTestApp({ authVerifier: null, repoLinks: null, github: null });
-    const res = await request(unscoped).get('/api/sessions/runs');
-    expect(res.body.runs.map((r: { runId: string }) => r.runId)).toEqual([scan.runId, generate.runId, setup.runId]);
+    await request(unscoped).get('/api/sessions/runs').expect(401);
   });
 });
