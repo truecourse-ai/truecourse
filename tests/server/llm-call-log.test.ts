@@ -128,6 +128,16 @@ describe('createLlmCallLogger', () => {
     expect(line.outcome).toBe('timeout');
   });
 
+  it('installs no process signal handler — the server owns shutdown', () => {
+    const before = { SIGINT: process.listenerCount('SIGINT'), SIGTERM: process.listenerCount('SIGTERM') };
+    const logger = createLlmCallLogger(dir, 'guard-setup');
+    expect(logger).not.toBeNull();
+    expect(process.listenerCount('SIGINT')).toBe(before.SIGINT);
+    expect(process.listenerCount('SIGTERM')).toBe(before.SIGTERM);
+    logger!.finish(10);
+    expect(process.listenerCount('SIGTERM')).toBe(before.SIGTERM);
+  });
+
   it('returns null (no overhead) when logging is explicitly disabled', () => {
     process.env.TRUECOURSE_LLM_LOG = '0';
     expect(createLlmCallLogger(dir, 'scan')).toBeNull();
