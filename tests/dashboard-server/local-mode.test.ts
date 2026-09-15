@@ -15,7 +15,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
 import type { AuthVerifier } from '@truecourse/shared';
-import { resetRegistryStore, setRegistryStore } from '@truecourse/core/config/registry';
+import { resetRegistryStore, setRegistryStore, type RegistryStore } from '@truecourse/core/config/registry';
 import { createApp } from '../../apps/dashboard/server/src/app';
 import { createAuth, LOCAL_ORG_ID } from '../../apps/dashboard/server/src/auth/index';
 import { serverMode, isLocalMode } from '../../apps/dashboard/server/src/mode';
@@ -31,7 +31,7 @@ const WORKOS_ENV = [
 let saved: Record<string, string | undefined>;
 
 /** No repository is connected: the routes still need a registry to read. */
-const emptyRegistry = {
+const emptyRegistry: RegistryStore = {
   readRegistry: async () => [],
   getProjectBySlug: async () => null,
   getProjectByPath: async () => null,

@@ -12,7 +12,6 @@
 
 import { Router, type Request, type Response } from 'express';
 import { log } from '@truecourse/core/lib/logger';
-import { getProjectByPath } from '@truecourse/core/config/registry';
 import {
   GITHUB_INSTALL_ORIGINS,
   type GithubInstallOrigin,
@@ -24,6 +23,7 @@ import type {
   GithubInstallationReposResponse,
   GithubInstallationSummary,
   GithubRepoSummary,
+  RepositoryLink,
   RepositoryRecord,
   RepositoryStore,
 } from '@truecourse/shared';
@@ -47,7 +47,7 @@ function toInstallationSummary(
   };
 }
 
-function toRepoSummary(r: RepositoryRecord, slug: string | null): GithubRepoSummary {
+function toRepoSummary(r: RepositoryRecord): GithubRepoSummary {
   return {
     repoFullName: r.repoFullName,
     installationId: installationOf(r) ?? 0,
@@ -56,7 +56,7 @@ function toRepoSummary(r: RepositoryRecord, slug: string | null): GithubRepoSumm
     enabled: r.enabled,
     notifyEmails: r.notifyEmails ?? [],
     notifications: resolveNotificationPrefs(r),
-    slug,
+    slug: r.slug,
   };
 }
 
@@ -206,31 +206,11 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     // Self-heal the rows no `installation` webhook ever named: one lookup each,
     // persisted, so the repair happens once and not on every dialog open.
     const installations = await Promise.all(listed.map(withAccount));
-    // `?slim=1` — the store rows bare, for callers that only need which repos
-    // are connected (the connect dialog, on every open), skipping the registry
-    // read the slug below costs per repo.
-    if (req.query.slim === '1') {
-      const slim: GithubConnectStatusResponse = {
-        configured: true,
-        installUrl: buildInstallUrl(orgId, originOf(req.query.from)),
-        installations: installations.map(toInstallationSummary),
-        repos: repos.map((r) => toRepoSummary(r, null)),
-      };
-      res.json(slim);
-      return;
-    }
-    // Resolve each repo's dashboard slug (registered on link) so the UI can
-    // deep-link to `/repos/:slug`.
-    const repoSummaries = await Promise.all(
-      repos.map(async (r) =>
-        toRepoSummary(r, (await getProjectByPath(r.repoFullName))?.slug ?? null),
-      ),
-    );
     const body: GithubConnectStatusResponse = {
       configured: true,
       installUrl: buildInstallUrl(orgId, originOf(req.query.from)),
       installations: installations.map(toInstallationSummary),
-      repos: repoSummaries,
+      repos: repos.map(toRepoSummary),
     };
     res.json(body);
   });
@@ -367,7 +347,7 @@ export function createConnectRouter(deps: ConnectDeps): Router {
     }
     // A first connection, so every setting starts at its default: the notify
     // addresses are authored later, through the settings PATCH.
-    const link: RepositoryRecord = {
+    const link: RepositoryLink = {
       repoFullName,
       provider: GITHUB_PROVIDER,
       accountId: String(installationId),
@@ -379,15 +359,15 @@ export function createConnectRouter(deps: ConnectDeps): Router {
       createdAt: now,
       updatedAt: now,
     };
-    await deps.repos.linkRepo(link);
+    const stored = await deps.repos.linkRepo(link);
 
-    // Hand the connected repo to the host (clone, project registration, initial
-    // scan). The hook is part of the link: if it fails there is nothing behind
-    // the row, so drop it again and tell the caller why — a repo the UI shows as
-    // connected but that nothing can act on has no retry path.
+    // Hand the connected repo to the host (its setup). The hook is part of the
+    // link: if it fails there is nothing behind the row, so drop it again and
+    // tell the caller why — a repo the UI shows as connected but that nothing
+    // can act on has no retry path.
     if (deps.onRepoLinked) {
       try {
-        await deps.onRepoLinked(link, deps.octokitFor(installationId));
+        await deps.onRepoLinked(stored, deps.octokitFor(installationId));
       } catch (err) {
         await deps.repos.unlinkRepo(repoFullName).catch((cleanupErr: unknown) => {
           log.error(

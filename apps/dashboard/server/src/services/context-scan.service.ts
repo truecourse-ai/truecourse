@@ -45,7 +45,7 @@ export async function workspaceRepositories(org: string): Promise<RippleRepo[]> 
   // a repository Code does not know, and that repository is nobody's to set up.
   const repos: RippleRepo[] = [];
   for (const [repoFullName, sourceIds] of [...byRepo.entries()].sort()) {
-    const entry = await connectedEntry(repoFullName);
+    const entry = await connectedEntry(org, repoFullName);
     if (!entry) continue;
     repos.push({ repoId: entry.slug, repoFullName, sourceIds: [...sourceIds].sort() });
   }
@@ -65,14 +65,14 @@ export async function repositoryOfSource(
   if (!source || source.kind !== 'repository') return null;
   const repoFullName = (source.config as RepositorySourceConfig).repoFullName;
   if (!repoFullName) return null;
-  const entry = await connectedEntry(repoFullName);
+  const entry = await connectedEntry(org, repoFullName);
   return entry ? { repoId: entry.slug, repoFullName } : null;
 }
 
-/** The registry entry of a repository Code has connected, or null. */
-async function connectedEntry(repoFullName: string): Promise<{ slug: string } | null> {
+/** The registry entry of a repository Code has connected in this workspace, or null. */
+async function connectedEntry(org: string, repoFullName: string): Promise<{ slug: string } | null> {
   try {
-    return await getProjectByPath(repoFullName);
+    return await getProjectByPath(org, repoFullName);
   } catch {
     // A registry that will not answer must not stop the ripple; it just
     // ripples to nobody.

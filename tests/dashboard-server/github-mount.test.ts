@@ -86,6 +86,7 @@ import {
   type RegistryEntry,
   type RegistryStore,
 } from '@truecourse/core/config/registry';
+import type { RepositoryRecord } from '@truecourse/shared';
 import { createStoredSessionRun, sessionsDir } from '@truecourse/core/lib/sessions-store';
 import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
 import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
@@ -147,23 +148,23 @@ const verify: AuthVerifier = async (cookieHeader) => {
 
 /**
  * The registry as production runs it: a live view of the repositories, exactly
- * what RepositoriesRegistryStore derives from them. Mutations are no-ops.
+ * what RepositoriesRegistryStore reads off them, scoped to one workspace.
  */
 function derivedRegistry(gate: MemoryInstallationStore): RegistryStore {
-  const toEntry = (repoFullName: string, defaultBranch: string | null): RegistryEntry => ({
-    slug: slugify(repoFullName, []),
-    name: repoFullName,
-    path: repoFullName,
+  const toEntry = (r: RepositoryRecord): RegistryEntry => ({
+    slug: r.slug,
+    name: r.repoFullName,
+    path: r.repoFullName,
     provider: 'github',
-    ...(defaultBranch ? { defaultBranch } : {}),
-    remoteUrl: `https://github.com/${repoFullName}`,
+    ...(r.defaultBranch ? { defaultBranch: r.defaultBranch } : {}),
+    remoteUrl: `https://github.com/${r.repoFullName}`,
   });
-  const all = async (): Promise<RegistryEntry[]> =>
-    (await gate.listRepos()).map((r) => toEntry(r.repoFullName, r.defaultBranch));
+  const mine = async (org: string): Promise<RegistryEntry[]> =>
+    (await gate.listReposForWorkspace(org)).map(toEntry);
   return {
-    readRegistry: all,
-    getProjectBySlug: async (slug) => (await all()).find((e) => e.slug === slug) ?? null,
-    getProjectByPath: async (p) => (await all()).find((e) => e.path === p) ?? null,
+    readRegistry: mine,
+    getProjectBySlug: async (org, slug) => (await mine(org)).find((e) => e.slug === slug) ?? null,
+    getProjectByPath: async (org, p) => (await mine(org)).find((e) => e.path === p) ?? null,
   };
 }
 

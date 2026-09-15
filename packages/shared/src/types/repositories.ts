@@ -28,6 +28,13 @@ export interface RepositoryRecord {
   accountId: string | null
   /** Owning workspace (its WorkOS organization, or the local one). */
   workspaceOrgId: string
+  /**
+   * The `:id` the routes and the client address it by. The store mints it
+   * when the repository is connected, from its name against the slugs the
+   * workspace already holds, and it never changes afterwards. Unique within
+   * the workspace only: two workspaces may both hold `acme-api`.
+   */
+  slug: string
   /** The branch the provider tracks. Null for a local folder: it has whatever is checked out. */
   defaultBranch: string | null
   /** Where the provider finds it when the name is not enough: a local folder's absolute path. */
@@ -43,10 +50,17 @@ export interface RepositoryRecord {
   updatedAt: string
 }
 
+/** What a provider writes to connect a repository: the record minus the slug the store mints. */
+export type RepositoryLink = Omit<RepositoryRecord, 'slug'>
+
 /** Reading and writing the connected repositories. */
 export interface RepositoryStore {
-  /** Connect a repository, or update the one already at this name. */
-  linkRepo(rec: RepositoryRecord): Promise<void>
+  /**
+   * Connect a repository, or update the one already at this name. Answers the
+   * stored row: a new connection carries the slug minted for it, a re-link the
+   * slug it already had.
+   */
+  linkRepo(rec: RepositoryLink): Promise<RepositoryRecord>
   /** Disconnect it. */
   unlinkRepo(repoFullName: string): Promise<void>
   getRepo(repoFullName: string): Promise<RepositoryRecord | null>

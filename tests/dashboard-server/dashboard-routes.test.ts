@@ -4,7 +4,7 @@ import path from 'node:path';
 import request from 'supertest';
 import type { Express } from 'express';
 
-import { createTestApp } from '../helpers/test-app';
+import { createTestApp, TEST_ORG } from '../helpers/test-app';
 import {
   setupTestFixture,
   teardownTestFixture,
@@ -79,7 +79,7 @@ describe('repository routes', () => {
 
     // The link (and with it the derived registry entry) is gone; the repo's
     // own tree is not the server's to delete — durable state lives in the DB.
-    expect(await getProjectBySlug(fixture.project.slug)).toBeNull();
+    expect(await getProjectBySlug(TEST_ORG, fixture.project.slug)).toBeNull();
     expect(fs.existsSync(tcDir)).toBe(true);
   });
 });

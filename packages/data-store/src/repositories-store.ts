@@ -7,11 +7,13 @@
 
 import { and, eq } from 'drizzle-orm';
 import type {
+  RepositoryLink,
   RepositoryProviderId,
   RepositoryRecord,
   RepositoryStore,
 } from '@truecourse/shared';
 import { repositories, type Db } from '@truecourse/db';
+import { slugify } from '@truecourse/core/config/registry';
 
 type Row = typeof repositories.$inferSelect;
 
@@ -23,6 +25,7 @@ function toRecord(r: Row): RepositoryRecord {
     provider: r.provider as RepositoryProviderId,
     accountId: r.accountId,
     workspaceOrgId: r.workspaceOrgId,
+    slug: r.slug,
     defaultBranch: r.defaultBranch,
     location: r.location,
     blocking: r.blocking,
@@ -37,14 +40,26 @@ function toRecord(r: Row): RepositoryRecord {
 export class PgRepositoryStore implements RepositoryStore {
   constructor(private readonly db: Db) {}
 
-  async linkRepo(rec: RepositoryRecord): Promise<void> {
-    await this.db
+  /**
+   * A new connection is given its slug here, from its name against the slugs
+   * its workspace already holds (a collision inside the workspace takes a `-2`
+   * suffix; another workspace's slugs do not count). A re-link at a name the
+   * workspace already connected keeps the slug it has: the row is updated, the
+   * URL never moves.
+   */
+  async linkRepo(rec: RepositoryLink): Promise<RepositoryRecord> {
+    const taken = await this.db
+      .select({ slug: repositories.slug })
+      .from(repositories)
+      .where(eq(repositories.workspaceOrgId, rec.workspaceOrgId));
+    const [row] = await this.db
       .insert(repositories)
       .values({
         repoFullName: rec.repoFullName,
         provider: rec.provider,
         accountId: rec.accountId,
         workspaceOrgId: rec.workspaceOrgId,
+        slug: slugify(rec.repoFullName, taken.map((r) => r.slug)),
         defaultBranch: rec.defaultBranch,
         location: rec.location ?? null,
         blocking: rec.blocking,
@@ -68,7 +83,10 @@ export class PgRepositoryStore implements RepositoryStore {
           notifications: (rec.notifications ?? null) as Record<string, boolean> | null,
           updatedAt: rec.updatedAt,
         },
-      });
+      })
+      .returning();
+    if (!row) throw new Error(`linking ${rec.repoFullName} wrote no row`);
+    return toRecord(row);
   }
 
   async unlinkRepo(repoFullName: string): Promise<void> {

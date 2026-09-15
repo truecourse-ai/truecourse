@@ -25,7 +25,7 @@ import { setSpecStore, resetSpecStore } from '@truecourse/core/lib/spec-store';
 import { setGuardOverlayStore, resetGuardOverlayStore } from '@truecourse/core/lib/guard-overlays';
 import { setRepoDocReader } from '@truecourse/core/lib/repo-doc-reader';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
-import { createTestApp } from '../helpers/test-app';
+import { createTestApp, TEST_ORG } from '../helpers/test-app';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
 import type { GuardLatest } from '../../packages/shared/src/index';
 
@@ -98,7 +98,7 @@ beforeEach(async () => {
   app = createTestApp();
   // The hosted store keys by the SAME canonical path the route resolves (the Pg
   // store matches keys by exact string, unlike the FS store's symlink-following).
-  repoKey = (await resolveProjectForRequest(fixture.project.slug)).path;
+  repoKey = (await resolveProjectForRequest(TEST_ORG, fixture.project.slug)).path;
   client = new PGlite();
   db = drizzle(client, { schema }) as unknown as Db;
   await migrate(db, { migrationsFolder: MIGRATIONS_DIR });

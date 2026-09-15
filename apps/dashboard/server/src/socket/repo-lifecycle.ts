@@ -1,10 +1,10 @@
 /**
  * The socket-side impl of the core `repo-lifecycle` seam: turn a background
- * job's "repo X finished a scan / guard generate / guard run" announcement into
- * the SAME `spec:complete` event the OSS routes emit into the `repo:<slug>`
- * room — so a client sitting on the Spec/Scenarios/Runs tab refreshes live when
- * a hosted job (auto-regen, chained baseline run) lands, not just on a manual
- * trigger. Installed by `setupSocket`; deps are injected for tests.
+ * job's "repo X finished a setup / generate / run" announcement into the SAME
+ * `spec:complete` event the routes emit into the repository's room — so a
+ * client sitting on the Pipeline or Runs tab refreshes live when a chained job
+ * lands, not just on a manual trigger. Installed by `setupSocket`; deps are
+ * injected for tests.
  */
 
 import { getProjectByPath } from '@truecourse/core/config/registry';
@@ -12,18 +12,18 @@ import type { RepoLifecycleEmitter, RepoLifecycleKind } from '@truecourse/core/l
 import { emitSpecComplete } from './handlers.js';
 
 export interface RepoLifecycleSocketDeps {
-  /** Registry lookup: repoKey (path in OSS, `owner/repo` hosted) → entry. */
-  getProjectByPath: (repoKey: string) => Promise<{ slug: string } | null>;
+  /** Registry lookup within the workspace: `owner/repo` → entry. */
+  getProjectByPath: (workspaceOrgId: string, repoKey: string) => Promise<{ slug: string } | null>;
   /** Emit `spec:complete` into the repo's room (production: emitSpecComplete). */
-  emit: (repoId: string, kind: RepoLifecycleKind) => void;
+  emit: (workspaceOrgId: string, repoId: string, kind: RepoLifecycleKind) => void;
 }
 
-/** Build the emitter: resolve the repo's slug, emit into its room. A repoKey the
- *  registry doesn't know emits nothing (an unlinked/unknown repo has no room). */
+/** Build the emitter: resolve the repo's slug in its workspace, emit into its room. A
+ *  repoKey the workspace's registry doesn't know emits nothing (an unlinked/unknown repo has no room). */
 export function createRepoLifecycleSocketEmitter(deps: RepoLifecycleSocketDeps): RepoLifecycleEmitter {
-  return async (repoKey, kind) => {
-    const entry = await deps.getProjectByPath(repoKey);
-    if (entry) deps.emit(entry.slug, kind);
+  return async (workspaceOrgId, repoKey, kind) => {
+    const entry = await deps.getProjectByPath(workspaceOrgId, repoKey);
+    if (entry) deps.emit(workspaceOrgId, entry.slug, kind);
   };
 }
 

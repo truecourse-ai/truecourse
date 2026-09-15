@@ -189,7 +189,7 @@ export function createRepoGuardSetupTask(
       runIds.delete(ctx.jobId);
       // Clears the in-page progress popup and refreshes the guard surfaces,
       // however setup ended.
-      await emitRepoLifecycle(ctx.payload.repoFullName, 'guard-setup');
+      await emitRepoLifecycle(ctx.payload.workspaceOrgId, ctx.payload.repoFullName, 'guard-setup');
       // Only a setup whose recipe gate held has anything to generate against: a
       // refused setup ends the chain here, and its notification already says why.
       if (outcome !== 'succeeded') return;

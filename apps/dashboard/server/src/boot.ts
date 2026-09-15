@@ -38,7 +38,6 @@ import { stopAllRunsWatches } from './services/run-watch.service.js';
 import { getLogDir } from '@truecourse/core/config/runtime-dir';
 import { initSentry, flushSentry } from './observability/sentry.js';
 import { ServerLogTransport } from './observability/log-transport.js';
-import { getProjectByPath, slugify } from '@truecourse/core/config/registry';
 import { LOCAL_ORG_ID } from './auth/local.js';
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { closeLogger, FileLogTransport, setLogTransport, log } from '@truecourse/core/lib/logger';
@@ -145,9 +144,8 @@ export async function startServer(): Promise<void> {
     },
     // Connecting a repository starts its Flow setup. Its context is Context's.
     startSetup: async (link) => {
-      const entry = await getProjectByPath(link.repoFullName);
       const outcome = await jobs.enqueueGuardSetup({
-        repoId: entry?.slug ?? slugify(link.repoFullName, []),
+        repoId: link.slug,
         repoFullName: link.repoFullName,
         workspaceOrgId: link.workspaceOrgId,
         source: 'chain',
@@ -164,13 +162,13 @@ export async function startServer(): Promise<void> {
   // A decision that clears the last block on a generate (the final conflict
   // resolved, the last active finding dismissed) re-generates on its own. The
   // seam is keyed by repo identity alone, so the workspace and the slug are
-  // looked up from the link and the registry; a repo nobody connected is
-  // silently left alone — the seam is best-effort by contract.
+  // read off the link; a repo nobody connected is silently left alone — the
+  // seam is best-effort by contract.
   setGuardGenerateEnqueue(async (repoKey) => {
-    const [link, entry] = await Promise.all([repoLinks.getRepo(repoKey), getProjectByPath(repoKey)]);
-    if (!link?.workspaceOrgId || !entry) return;
+    const link = await repoLinks.getRepo(repoKey);
+    if (!link) return;
     await jobs.enqueueGuardGenerate({
-      repoId: entry.slug,
+      repoId: link.slug,
       repoFullName: repoKey,
       workspaceOrgId: link.workspaceOrgId,
       source: 'chain',
@@ -188,9 +186,8 @@ export async function startServer(): Promise<void> {
         return outcome.status;
       },
       startSetup: async (link) => {
-        const entry = await getProjectByPath(link.repoFullName);
         const outcome = await jobs.enqueueGuardSetup({
-          repoId: entry?.slug ?? slugify(link.repoFullName, []),
+          repoId: link.slug,
           repoFullName: link.repoFullName,
           workspaceOrgId: link.workspaceOrgId,
           source: 'chain',

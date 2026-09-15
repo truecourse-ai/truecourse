@@ -8,7 +8,7 @@
  * repository's account is nullable.
  */
 
-import { pgTable, text, boolean, timestamp, jsonb, index, primaryKey } from 'drizzle-orm/pg-core';
+import { pgTable, text, boolean, timestamp, jsonb, index, primaryKey, unique } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'string' });
@@ -41,6 +41,13 @@ export const repositories = pgTable(
     /** `provider_accounts.account_id`; null for a provider with no accounts. */
     accountId: text('account_id'),
     workspaceOrgId: text('workspace_org_id').notNull(),
+    /**
+     * The `:id` the routes and the client address it by. Minted once, when the
+     * repository is connected, from its name against the slugs its workspace
+     * already holds; unique within the workspace, not across them, so two
+     * workspaces connecting the same-named repository both get the plain slug.
+     */
+    slug: text('slug').notNull(),
     /** The branch the provider tracks; null for a local folder, which has whatever is checked out. */
     defaultBranch: text('default_branch'),
     /** Where the provider finds it, when the name is not enough: a local folder's absolute path. */
@@ -61,5 +68,6 @@ export const repositories = pgTable(
   (t) => [
     index('repositories_workspace_idx').on(t.workspaceOrgId),
     index('repositories_account_idx').on(t.provider, t.accountId),
+    unique('repositories_workspace_slug_unique').on(t.workspaceOrgId, t.slug),
   ],
 );

@@ -14,9 +14,10 @@ import { setRegistryStore as setRegistryStoreBySource } from '../../packages/cor
  * working directory to put files in.
  *
  * Production resolves a `:id` slug through the registry the Postgres store
- * derives from the connected repositories. A route test has no database, so it
+ * reads off the connected repositories. A route test has no database, so it
  * installs an IN-MEMORY registry of exactly the repositories it created — the
- * same seam, the same slugs.
+ * same seam, the same slugs. Every fixture belongs to the one test workspace,
+ * so the workspace a read is scoped to is not consulted here.
  */
 
 const entries: RegistryEntry[] = [];
@@ -25,10 +26,10 @@ const memoryRegistry: RegistryStore = {
   async readRegistry() {
     return [...entries];
   },
-  async getProjectBySlug(slug) {
+  async getProjectBySlug(_workspaceOrgId, slug) {
     return entries.find((e) => e.slug === slug) ?? null;
   },
-  async getProjectByPath(repoPath) {
+  async getProjectByPath(_workspaceOrgId, repoPath) {
     return entries.find((e) => e.path === repoPath) ?? null;
   },
 };

@@ -45,10 +45,10 @@ const RESOLVED = Symbol('projectResolved');
  * time this middleware runs Express hasn't parsed route params yet — we pull
  * the slug from the first path segment directly.
  *
- * Resolves the slug against the registry and rejects with 404 if unknown, or if
- * it names a repository another workspace connected. 404 rather than 403 on
- * purpose: a 403 would confirm the repository exists to someone who may not
- * know it does.
+ * Resolves the slug against the caller's workspace's registry and rejects with
+ * 404 if unknown there: a repository another workspace connected is not found,
+ * not fetched and refused. 404 rather than 403 on purpose: a 403 would confirm
+ * the repository exists to someone who may not know it does.
  *
  * All per-project data reads happen in the route handlers via the stores.
  */
@@ -68,7 +68,8 @@ export function createProjectResolver(links: RepoOwnershipLookup | null): Reques
         res.status(400).json({ error: 'Missing project slug' });
         return;
       }
-      const project = await getProjectBySlug(slug);
+      const org = req.user?.organizationId;
+      const project = org ? await getProjectBySlug(org, slug) : null;
       if (!project || !(await isVisibleTo(links, req, project))) {
         res.status(404).json({ error: `Project "${slug}" not found` });
         return;

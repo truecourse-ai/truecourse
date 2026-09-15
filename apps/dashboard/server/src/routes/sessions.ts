@@ -37,6 +37,7 @@ import { createActivityStream } from '../services/activity-stream.service.js';
 import { RunStatusSchema, SessionCommandSchema } from '@truecourse/agent-loop';
 import { createAppError } from '@truecourse/core/lib/errors';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
+import { orgOf } from '../services/workspace-llm.service.js';
 import { readRegistry, type RegistryEntry } from '@truecourse/core/config/registry';
 import {
   SessionRunNotFoundError,
@@ -73,7 +74,7 @@ router.get('/:id/sessions/runs/:command/:runId/stream', async (req, res, next) =
   const detach = () => controller.abort();
   res.once('close', detach);
   try {
-    const repo = await resolveProjectForRequest(req.params.id);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id);
     let run;
     try { run = await openStoredSessionRun(repo.path, command, req.params.runId); }
     catch (error) {
@@ -172,7 +173,7 @@ router.get('/:id/sessions/runs/:command/:runId/activity', async (req: Request, r
     if (req.query.compact !== undefined && req.query.compact !== '1') {
       res.status(400).json({ error: 'compact must be 1 when supplied' }); return;
     }
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     let run;
     try { run = await openStoredSessionRun(repo.path, command, req.params.runId as string); }
     catch (error) {
@@ -197,7 +198,7 @@ router.get('/:id/sessions/runs/:command/:runId/activity', async (req: Request, r
 
 router.get('/:id/sessions/runs', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const repo = await resolveProjectForRequest(req.params.id as string);
+    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     // listSessionRuns sweeps as a side effect: a run left `running` by a dead
     // pid reads `interrupted` here without any separate boot reconciliation.
     res.json({ runs: (await listStoredSessionRuns(repo.path)).map(toPublicRunRecord) });
@@ -210,7 +211,7 @@ router.get(
   '/:id/sessions/runs/:command/:runId',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const repo = await resolveProjectForRequest(req.params.id as string);
+      const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
       const command = parseCommand(req.params.command as string);
       if (!command) {
         res.status(400).json({ error: `Unknown session command: ${req.params.command}` });
@@ -233,7 +234,7 @@ router.get(
   '/:id/sessions/runs/:command/:runId/transcript/:sessionId',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const repo = await resolveProjectForRequest(req.params.id as string);
+      const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
       const command = parseCommand(req.params.command as string);
       if (!command) {
         res.status(400).json({ error: `Unknown session command: ${req.params.command}` });
@@ -286,15 +287,15 @@ export type WorkspaceRun = PublicRunRecord & { repo: { id: string; fullName: str
 /**
  * The repositories this caller's runs may come from: exactly what their
  * workspace connected, so a session with no workspace has nothing to read
- * (401). A test app that installs no store at all is the only case with
- * nothing to scope by, and there the registry IS the workspace.
+ * (401). A test app that installs no store at all has nothing to assert the
+ * registry against, and there the registry IS the workspace.
  */
 async function workspaceRepos(deps: WorkspaceSessionsDeps, req: Request): Promise<RegistryEntry[]> {
-  const entries = await readRegistry();
-  const links = deps.repoLinks;
-  if (!links) return entries;
   const org = req.user?.organizationId;
   if (!org) throw createAppError('This session has no workspace.', 401);
+  const entries = await readRegistry(org);
+  const links = deps.repoLinks;
+  if (!links) return entries;
   const mine = new Set((await links.listReposForWorkspace(org)).map((r) => r.repoFullName));
   return entries.filter((e) => mine.has(e.name));
 }

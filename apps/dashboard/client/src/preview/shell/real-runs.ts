@@ -187,8 +187,16 @@ export interface RealRunStream {
  * `reposLoaded` says the CALLER's repo fetch has settled — `repos` being empty
  * is ambiguous on its own (not fetched yet vs. genuinely none), and `ready`
  * must not report an empty world as a loaded one.
+ *
+ * `workspaceOrgId` is the workspace the session is signed into: a repository's
+ * room is the workspace's as well as the repo's, so until it is known the runs
+ * are read once and no room is joined.
  */
-export function useRealRunStream(repos: Repo[], reposLoaded = true): RealRunStream {
+export function useRealRunStream(
+  repos: Repo[],
+  reposLoaded = true,
+  workspaceOrgId?: string,
+): RealRunStream {
   const [runsByRepo, setRunsByRepo] = useState<ReadonlyMap<string, PublicSessionRun[]>>(
     () => new Map(),
   );
@@ -249,7 +257,8 @@ export function useRealRunStream(repos: Repo[], reposLoaded = true): RealRunStre
     };
 
     const join = (): void => {
-      for (const repoId of repoIds) joinRepoRoom(repoId);
+      if (!workspaceOrgId) return;
+      for (const repoId of repoIds) joinRepoRoom(workspaceOrgId, repoId);
     };
     const onChanged = (payload: { repoId: string }): void => {
       if (repoIds.includes(payload.repoId)) void read(payload.repoId);
@@ -278,13 +287,13 @@ export function useRealRunStream(repos: Repo[], reposLoaded = true): RealRunStre
 
     return () => {
       stopped = true;
-      for (const repoId of repoIds) leaveRepoRoom(repoId);
+      if (workspaceOrgId) for (const repoId of repoIds) leaveRepoRoom(workspaceOrgId, repoId);
       socket?.off('session:runs-changed', onChanged);
       socket?.off('spec:progress', onChanged);
       socket?.off('spec:complete', onChanged);
       socket?.off('connect', join);
     };
-  }, [repoRefs]);
+  }, [repoRefs, workspaceOrgId]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30_000);

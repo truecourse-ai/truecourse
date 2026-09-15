@@ -22,6 +22,7 @@ import { Toaster } from 'sonner';
 // subscribed, which is the only thing these cases need it to do.
 const listeners = new Map<string, Set<(payload: unknown) => void>>();
 const socketMock = vi.hoisted(() => ({ joins: [] as string[], leaves: [] as string[] }));
+const ORG = 'org_test';
 
 vi.mock('@/lib/socket', () => {
   const socket = {
@@ -43,12 +44,13 @@ vi.mock('@/lib/socket', () => {
     connectSocket: () => socket,
     getSocket: () => socket,
     disconnectSocket: vi.fn(),
-    joinRepoRoom: (id: string) => socketMock.joins.push(id),
-    leaveRepoRoom: (id: string) => socketMock.leaves.push(id),
+    joinRepoRoom: (org: string, id: string) => socketMock.joins.push(`${org}/${id}`),
+    leaveRepoRoom: (org: string, id: string) => socketMock.leaves.push(`${org}/${id}`),
   };
 });
 
 import PreviewApp from '@/preview/PreviewApp';
+import { AuthProvider } from '@/auth/AuthContext';
 import { relativeTime, repoRunState, toJobChain } from '@/preview/shell/real-runs';
 import type { PublicSessionRun } from '@/lib/api';
 
@@ -102,6 +104,9 @@ function serve(runs: PublicSessionRun[]) {
   window.fetch = vi.fn(async (input: RequestInfo | URL) => {
     const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const { pathname } = new URL(href, window.location.origin);
+    if (pathname === '/api/auth/me') {
+      return json({ user: { id: 'u1', email: 'u@acme.test', organizationId: ORG, organizationName: 'Acme' } });
+    }
     if (pathname === '/api/repos') return json([REAL]);
     if (pathname === `/api/repos/${REAL.id}/sessions/runs`) return json({ runs: state.runs });
     return json({ error: 'not found' }, 404);
@@ -117,9 +122,12 @@ function renderAt(path: string) {
   window.history.replaceState({}, '', path);
   render(
     <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/*" element={<PreviewApp />} />
-      </Routes>
+      {/* The shell joins a room as the workspace it is signed into, which the session probe answers. */}
+      <AuthProvider>
+        <Routes>
+          <Route path="/*" element={<PreviewApp />} />
+        </Routes>
+      </AuthProvider>
       {/* The real app mounts the Toaster; the preview routes are a descendant of it. */}
       <Toaster />
     </MemoryRouter>,
@@ -215,9 +223,9 @@ describe('a run in the shell', () => {
     // would do here. This one is also the address that shows the marker.
     renderAt('/code');
 
-    // The room is joined for the real repository — that is what makes the
-    // server watch its store at all.
-    await waitFor(() => expect(socketMock.joins).toContain('linkwarden'));
+    // The room is joined for the real repository, as this workspace — that is
+    // what makes the server watch its store at all.
+    await waitFor(() => expect(socketMock.joins).toContain(`${ORG}/linkwarden`));
     // The world is loaded and idle; NOW the scan starts.
     const row = (await screen.findByText('linkwarden/linkwarden')).closest('tr')!;
     state.runs = [runningScan()];

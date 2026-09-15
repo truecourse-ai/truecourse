@@ -92,6 +92,27 @@ describe('0022_provider_repositories', () => {
       { repo_full_name: 'acme/ui', provider: 'github', account_id: '111', workspace_org_id: 'org_A', default_branch: 'master', location: null },
     ]);
   });
+
+  it('mints each repository its slug within its workspace, oldest connection first on a collision', async () => {
+    const { sql, finish } = await databaseBefore('0022_provider_repositories');
+    await sql.query(
+      `INSERT INTO gh_repos (repo_full_name, installation_id, workspace_org_id, default_branch, created_at, updated_at)
+       VALUES ('acme/data-pipeline', 1, 'org_A', 'main', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+              ('acme/data_pipeline', 1, 'org_A', 'main', '2026-01-02T00:00:00Z', '2026-01-02T00:00:00Z'),
+              ('acme/data-pipeline-2', 2, 'org_B', 'main', '2026-01-03T00:00:00Z', '2026-01-03T00:00:00Z')`,
+    );
+
+    await finish();
+
+    const rows = await sql.query<{ repo_full_name: string; slug: string }>(
+      'SELECT repo_full_name, slug FROM repositories ORDER BY workspace_org_id, created_at',
+    );
+    expect(rows.rows).toEqual([
+      { repo_full_name: 'acme/data-pipeline', slug: 'acme-data-pipeline' },
+      { repo_full_name: 'acme/data_pipeline', slug: 'acme-data-pipeline-2' },
+      { repo_full_name: 'acme/data-pipeline-2', slug: 'acme-data-pipeline-2' },
+    ]);
+  });
 });
 
 describe('0021_drop_ee_era', () => {
