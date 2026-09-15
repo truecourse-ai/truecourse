@@ -70,15 +70,15 @@ describe('readGuardCoverageHistory', () => {
     expect(await storedFlows()).toEqual({ r1: {} });
   });
 
-  it('derives at most five runs per read, newest first', async () => {
+  it('derives every null run in one read, and none of them twice', async () => {
     for (let day = 1; day <= 6; day++) await storeRun(`r${day}`, day);
+    const readRun = vi.spyOn(store, 'readGuardRun');
 
     await readGuardCoverageHistory(repo);
-    const after = await storedFlows();
-    expect(after.r1).toBeNull();
-    expect([after.r2, after.r3, after.r4, after.r5, after.r6]).toEqual([{}, {}, {}, {}, {}]);
+    expect(Object.values(await storedFlows())).toEqual([{}, {}, {}, {}, {}, {}]);
+    expect(readRun).toHaveBeenCalledTimes(6);
 
     await readGuardCoverageHistory(repo);
-    expect((await storedFlows()).r1).toEqual({});
+    expect(readRun).toHaveBeenCalledTimes(6);
   });
 });

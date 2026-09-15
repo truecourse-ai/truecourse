@@ -522,9 +522,6 @@ export async function readGuardRunFlowSummary(
   return Object.keys(summary).length > 0 ? summary : null
 }
 
-/** How many runs one Home read will derive flows for; the rest wait for the next read. */
-const FLOW_BACKFILL_PER_READ = 5
-
 const hasFlows = (flows: GuardRunFlowSummary): boolean => Object.keys(flows).length > 0
 
 /**
@@ -540,28 +537,16 @@ const hasFlows = (flows: GuardRunFlowSummary): boolean => Object.keys(flows).len
  * corpus), so the run stays out of the flow trend and is never asked again;
  * null says it was never derived or the attempt failed, so it is tried again.
  * A failure is logged and leaves null, never the page: one unreadable run must
- * not take Home down. At most {@link FLOW_BACKFILL_PER_READ} runs are derived
- * per read, newest first, so a long history fills over a few loads instead of
- * stalling the first one.
+ * not take Home down. Every null run is derived on the read it is seen, so a
+ * history fills in one load and each run is derived exactly once.
  */
 export async function readGuardCoverageHistory(repoKey: string): Promise<GuardRunCoverage[]> {
   const store = getGuardStore()
   const history = await store.readGuardRunCoverage(repoKey)
-  const derive = new Set(
-    history
-      .filter((run) => run.flows === null)
-      .sort((a, b) => b.ranAt.localeCompare(a.ranAt))
-      .slice(0, FLOW_BACKFILL_PER_READ)
-      .map((run) => run.runId),
-  )
   const filled: GuardRunCoverage[] = []
   for (const run of history) {
     if (run.flows) {
       filled.push(hasFlows(run.flows) ? run : { ...run, flows: null })
-      continue
-    }
-    if (!derive.has(run.runId)) {
-      filled.push(run)
       continue
     }
     try {
