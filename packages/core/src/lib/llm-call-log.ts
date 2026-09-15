@@ -99,7 +99,6 @@ export function createLlmCallLogger(repoRoot: string, label = 'scan'): LlmCallLo
     }
   }
 
-  const createdAt = Date.now();
   const records: LlmCallMetrics[] = [];
   let seq = 0;
   let finished = false;
@@ -156,14 +155,14 @@ export function createLlmCallLogger(repoRoot: string, label = 'scan'): LlmCallLo
     }
   };
 
-  const signalHandlers: Array<[NodeJS.Signals, () => void]> = [];
-
-  // Idempotent finalize: close the file, write + print the summary. Safe to call
-  // from both the normal `finally` and a signal handler — runs exactly once.
+  // Idempotent finalize: close the file, write + print the summary. Runs
+  // exactly once, from the run's own settle path. The logger installs no
+  // process signal handler: it lives inside the dashboard server, whose
+  // shutdown aborts the in-flight run and settles it, which is what flushes
+  // the summary of whatever completed.
   const finishOnce = (elapsedMs: number): void => {
     if (finished) return;
     finished = true;
-    for (const [sig, h] of signalHandlers) process.removeListener(sig, h);
     if (fd !== null) {
       try {
         fs.closeSync(fd);
@@ -179,19 +178,6 @@ export function createLlmCallLogger(repoRoot: string, label = 'scan'): LlmCallLo
     }
     if (announce) printSummary(summary, callsPath, ioDir);
   };
-
-  // Ctrl-C / kill mid-run should still flush the summary of whatever completed
-  // — this logger only exists when the operator opted in (env-gated), so adding
-  // a signal handler here never affects normal runs. Default SIGINT behavior is
-  // to exit; once we attach a listener we must re-exit ourselves.
-  for (const sig of ['SIGINT', 'SIGTERM'] as NodeJS.Signals[]) {
-    const h = (): void => {
-      finishOnce(Date.now() - createdAt);
-      process.exit(sig === 'SIGINT' ? 130 : 143);
-    };
-    signalHandlers.push([sig, h]);
-    process.on(sig, h);
-  }
 
   return { sink, finish: finishOnce, callsPath };
 }
