@@ -4,16 +4,13 @@
  * replaces; double-click pins; the tab bar and close buttons render like the
  * other viewers). Parameterised by the URL it mirrors so each Guard surface gets
  * its OWN addressable tab set from ONE reducer, never a second implementation:
- * the Runs tab passes `'result'`, the Flows tab a `?gflow` codec, and Coverage
- * passes a {@link GuardTabsParam} codec that binds TWO params (`?guard` docs +
- * `?gconf` conflicts) to one heterogeneous tab set.
+ * the Runs tab passes `'result'`, the Flows page a `?flow` codec, and the
+ * coverage view passes a {@link GuardTabsParam} codec that binds TWO params
+ * (`?doc` docs + `?conflict` conflicts) to one heterogeneous tab set.
  *
  * `deselect` clears the selection while the open tabs stay, what the strip's
- * pinned home tab calls.
- * Owned by Guard so no state is
- * shared with BL Drift's DriftViewContext (the no-bleed rule). Writes merge into
- * the existing query so sibling params (`?gsec` and the other tab set's param)
- * are preserved.
+ * pinned home tab calls. Writes merge into the existing query so sibling params
+ * (`?section` and the other tab set's param) are preserved.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -26,8 +23,8 @@ export interface GuardTab {
 
 /**
  * How a tab set that spans MORE than one URL param reads/writes its active id.
- * A plain `param: string` covers the single-param case; a codec covers Coverage,
- * whose active tab is a doc (`?guard`) OR a conflict (`?gconf`).
+ * A plain `param: string` covers the single-param case; a codec covers the
+ * coverage view, whose active tab is a doc (`?doc`) OR a conflict (`?conflict`).
  */
 export interface GuardTabsParam {
   /** The active id from the current query, or null when nothing is selected. */
@@ -36,7 +33,7 @@ export interface GuardTabsParam {
    *  sibling param(s) it owns while leaving unrelated params untouched. */
   write: (next: URLSearchParams, id: string | null) => void;
   /** Ids besides the active one a deep link should also materialize as pinned
-   *  tabs (e.g. the `?guard` doc alongside an active `?gconf` conflict). */
+   *  tabs (e.g. the `?doc` doc alongside an active `?conflict` conflict). */
   deepLinkTabs?: (params: URLSearchParams) => string[];
 }
 

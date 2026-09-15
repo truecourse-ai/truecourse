@@ -1,13 +1,13 @@
 /**
- * The Coverage tab's main-pane tab set, Guard's heterogeneous doc/conflict tabs.
+ * The coverage view's main-pane tab set, Guard's heterogeneous doc/conflict tabs.
  * A binding over the shared {@link useGuardTabs} reducer (one tab model, not a
- * second implementation) that keeps Coverage's existing params working: a doc tab
- * mirrors `?guard`, a conflict tab `?gconf`. Only one is active at a time, so a
+ * second implementation) that keeps the coverage params working: a doc tab
+ * mirrors `?doc`, a conflict tab `?conflict`. Only one is active at a time, so a
  * link carrying both lands on the conflict (its resolution surface) with the doc
  * opened alongside as a pinned tab.
  *
  * Two WITHIN-doc selections ride alongside the tabs rather than being tabs: the
- * section detail (`?gsec`) and, inside it, the claim being read (`?gclaim`).
+ * section detail (`?section`) and, inside it, the claim being read (`?claim`).
  * Both are dropped when the active tab changes and preserved when the
  * already-active tab is reselected; picking another section drops the claim,
  * because a claim is only ever read inside the section that states it.
@@ -41,10 +41,10 @@ const COVERAGE_TABS: GuardTabsParam = {
 };
 
 export interface GuardCoverageTabsState extends GuardTabsState {
-  /** The open within-doc section detail (`?gsec`), a detail, not a tab. */
+  /** The open within-doc section detail (`?section`), a detail, not a tab. */
   section: string | null;
   selectSection: (anchor: string | null) => void;
-  /** The claim being read inside that section (`?gclaim`). */
+  /** The claim being read inside that section (`?claim`). */
   claim: string | null;
   selectClaim: (claimId: string | null) => void;
   /**
