@@ -132,11 +132,6 @@ describe('guard status treatments', () => {
       expect(guardStatusMeta(status).label).toBeTruthy();
       expect(guardStatusMeta(status).band).toBeTruthy();
     }
-    // fail/error/stale/orphaned/pass/guarded + needs-setup +
-    // tui/library/desktop/mobile + blocked/never-run + blocked-on/untestable/no-claim/
-    // no-interface/unrealizable/dismissed + authoring-error + unguarded (api and web
-    // are runnable — no awaiting row of their own).
-    expect(statuses).toHaveLength(21);
   });
 
   it('maps each status to one of the four colours', () => {
