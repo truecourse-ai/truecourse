@@ -2,11 +2,12 @@
  * The open/enterprise line, pinned.
  *
  * The product is open except three things — the document Connections, the
- * repository providers beyond GitHub and GitLab, and more than one workspace —
- * which live in `ee/` and REGISTER into the open shell's registries. The
- * dependency runs one way: `ee/` imports the open tree, never the reverse. So
- * open code may not name an `ee/` path or an `@truecourse/ee-*` package at all,
- * and there is no loader making it conditional.
+ * repository providers beyond the open edition's (Azure DevOps today, listed as
+ * coming soon), and more than one workspace — which live in `ee/` and REGISTER
+ * into the open shell's registries. The dependency runs one way: `ee/` imports
+ * the open tree, never the reverse. So open code may not name an `ee/` path or
+ * an `@truecourse/ee-*` package at all, and there is no loader making it
+ * conditional.
  *
  * The one seam that crosses is `@edition`, the module `main.tsx` imports before
  * rendering: the build points it at the enterprise bundle when the checkout has

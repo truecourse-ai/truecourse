@@ -3,12 +3,13 @@
  * edition does not have.
  *
  * The open edition is the whole product minus three things — the document
- * Connections, repository providers beyond GitHub and GitLab, and more than one
- * workspace — and those live in `ee/`. Rather than the open server reaching for
- * them, the ENTERPRISE BUNDLE IS THE OUTER LAYER: its process entry registers
- * its features here and then calls {@link startServer}. So nothing in this
- * directory ever imports `ee/`, there is no module loader to rot, and the open
- * edition is simply the one nobody registered into.
+ * Connections, repository providers beyond the open edition's (Azure DevOps
+ * today, listed as coming soon), and more than one workspace — and those live
+ * in `ee/`. Rather than the open server reaching for them, the ENTERPRISE
+ * BUNDLE IS THE OUTER LAYER: its process entry registers its features here and
+ * then calls {@link startServer}. So nothing in this directory ever imports
+ * `ee/`, there is no module loader to rot, and the open edition is simply the
+ * one nobody registered into.
  *
  * A feature is built at boot, once, out of what the server already has: its
  * database, the key secrets are encrypted under, and the session tools a route

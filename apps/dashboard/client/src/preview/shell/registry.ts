@@ -3,11 +3,12 @@
  * bundle add to itself.
  *
  * The open edition is the whole product minus three things — the document
- * Connections, repository providers beyond GitHub and GitLab, and more than one
- * workspace — and those live in `ee/`. Nothing here imports them: the edition
- * module (`@edition`, aliased to the enterprise bundle when the checkout has
- * one) registers into these lists before the app renders, and the open edition
- * is simply the one nobody registered into.
+ * Connections, repository providers beyond the open edition's (Azure DevOps
+ * today, listed as coming soon), and more than one workspace — and those live
+ * in `ee/`. Nothing here imports them: the edition module (`@edition`, aliased
+ * to the enterprise bundle when the checkout has one) registers into these
+ * lists before the app renders, and the open edition is simply the one nobody
+ * registered into.
  *
  * Registration happens once, at module load, so the readers are plain functions
  * rather than state: a list cannot change while the app is running.

@@ -3,8 +3,7 @@
  *
  * Top to bottom: the workspace the session is in, then Home, Context, Code,
  * Flows, Agent, Notifications (with the unread badge) and Settings, then the
- * user menu. Pull requests is NOT here: it lives inside a repository, and the
- * cross-repo feed it used to be is the home page's gate activity.
+ * user menu.
  *
  * There is ONE workspace, so the block at the top names it and offers no way
  * out of it. An edition with more than one registers a switcher that replaces

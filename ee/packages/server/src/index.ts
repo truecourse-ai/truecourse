@@ -7,8 +7,9 @@
  * for `ee/`.
  *
  * The other two enterprise features are the client's — the document Connections
- * tab and the repository providers beyond GitHub and GitLab add no routes, so
- * they register in `ee/packages/client` and nothing here mounts for them.
+ * tab and the repository providers beyond the open edition's (Azure DevOps
+ * today, listed as coming soon) add no routes, so they register in
+ * `ee/packages/client` and nothing here mounts for them.
  */
 
 import { registerServerFeature } from '@truecourse/dashboard-server';

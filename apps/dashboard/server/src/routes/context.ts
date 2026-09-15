@@ -1128,7 +1128,7 @@ export function createContextBindingsRouter(): Router {
         if (!wanted.includes(sourceId)) wanted.push(sourceId);
       }
       // Only a set that actually DIFFERS is a change: saving the toggles
-      // untouched must not re-scan the workspace.
+      // untouched must start nothing.
       const before = await contextBindings(org, entry.name);
       const differs =
         before.length !== wanted.length || wanted.some((id) => !before.includes(id));
