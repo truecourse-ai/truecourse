@@ -23,10 +23,6 @@
  * which of them this repository reads. The agent's own work is not a tab
  * either: it lives on the Agent page, narrowed to this repository.
  *
- * PULL REQUESTS are a tab beside Runs: the gate's list of this repository's
- * pull requests with the check each one got. A run of a pull request head is
- * still a row of Runs; this tab is the list a reviewer reads.
- *
  * The tab is in the URL, so a tab is a place: it can be linked, and a run can
  * hand a flow to the Flows page without either of them owning the other's pane.
  */

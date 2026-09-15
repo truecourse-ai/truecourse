@@ -9,9 +9,9 @@
  *                the flow's TITLE and its GOAL
  *   milestones   the claim sentences in order, each linking to the section that
  *                states it, a plain list, carrying no state of its own. It renders
- *                ONLY for a flow with no test: where there IS one, its step list
- *                already groups the steps under those same claims and links those
- *                same sections, and two renderings of one chain is one too many
+ *                whenever the flow has milestones, test or no test: a step names
+ *                its milestone only once opened, so the step list below is not a
+ *                second reading of the chain
  *   ----- and then the test's own WORKSPACE ({@link GuardScenarioBody}), which
  *   claims every pixel the header leaves: verdict · filmstrip · steps | inspector ·
  *   drawers (transcript · interfaces · RULINGS) · footer facts. The flow-level
@@ -156,10 +156,9 @@ function MilestoneCases({
 
 /**
  * The flow's milestones, the claim sentences in order, each linking to the
- * section that states it — the flow's CHAIN, and the page shows it whether or
- * not a test exists. It used to be hidden once a test did, on the theory that
- * the step list was the same chain; it is not, because a step names its
- * milestone only once opened, so a proved flow showed no chain at all.
+ * section that states it: the flow's CHAIN, shown whether or not a test exists.
+ * A step names its milestone only once opened, so the step list does not stand
+ * in for this.
  *
  * Below each claim ride its CASES, when it has more than one, each marked with
  * whether a passing test discharged it. That mark is the only state here: the
@@ -732,9 +731,8 @@ export function GuardFlowDetail({
         ) : (
           <>
             {/* The chain, as a list, ALWAYS. A step names its milestone only
-                once opened, so hiding this behind "the steps are the chain"
-                left a proved flow showing no chain at all. The step rows carry
-                an `M2` chip that points back at these. */}
+                once opened, so the step rows do not stand in for this list;
+                they carry an `M2` chip that points back at it. */}
             {detail.milestones.length > 0 && (
               <div>
                 <div className={LABEL}>Milestones</div>
