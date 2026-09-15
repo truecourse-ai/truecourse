@@ -141,7 +141,7 @@ export function InvitePage() {
   const busy = preview.kind === 'loading' || status === 'loading';
 
   return (
-    <div className="min-h-screen w-screen bg-background px-6 py-14 text-foreground">
+    <div className="flex min-h-screen w-screen items-center bg-background px-6 py-14 text-foreground">
       <div className="mx-auto w-full max-w-[520px]">
         <div className="flex items-center gap-2">
           <Brand size={6} />

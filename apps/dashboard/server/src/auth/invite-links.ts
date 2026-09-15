@@ -95,7 +95,9 @@ export function createInviteLinkRouter({
       };
       res.json(body);
     } catch (err) {
-      res.status(500).json({ error: `Could not read the invite link: ${(err as Error).message}` });
+      // The page is public: the failure is logged here, not shown to whoever holds the link.
+      log.error(`[Auth] could not read invite link: ${(err as Error).message}`);
+      res.status(500).json({ error: 'Could not read the invite link. Try again in a moment.' });
     }
   });
 
@@ -143,7 +145,8 @@ export function createInviteLinkRouter({
       }
       link = consumed;
     } catch (err) {
-      res.status(500).json({ error: `Could not redeem the invite link: ${(err as Error).message}` });
+      log.error(`[Auth] could not redeem invite link for ${result.user.id}: ${(err as Error).message}`);
+      res.status(500).json({ error: 'Could not redeem the invite link. Try again in a moment.' });
       return;
     }
 
