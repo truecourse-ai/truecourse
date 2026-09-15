@@ -21,10 +21,8 @@ export interface LlmApiConfig {
   model: string;
   /** Optional secondary model, tried once if the primary call errors. */
   fallbackModel?: string;
-  /** The key itself. Omit to resolve it from the environment. */
+  /** The key itself; the Models page refuses to save a config without one. Bedrock omits it for the AWS chain. */
   apiKey?: string;
-  /** NAME of an env var holding the key (resolved per run, nothing stored). */
-  apiKeyEnv?: string;
   /** Gateway / self-hosted endpoint speaking the provider's protocol. */
   baseURL?: string;
   headers?: Record<string, string>;

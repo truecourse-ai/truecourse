@@ -13,7 +13,7 @@ import { createApiTransport, type ProviderConfig } from '@truecourse/llm-api';
 import { createClaudeAgentTransport } from '@truecourse/llm-claude-agent';
 import { resolveClaudeBinary } from '@truecourse/shared';
 import type { LlmTransport } from '@truecourse/shared/llm';
-import { LLM_PROVIDER_KINDS, type LlmProviderKind } from '@truecourse/shared';
+import { LLM_PROVIDER_KINDS } from '@truecourse/shared';
 import type { LlmApiConfig } from './provider-config.js';
 import { getModelPrices, priceForModel, type PriceTable } from './model-prices.js';
 
@@ -25,47 +25,6 @@ export class LlmApiConfigError extends Error {
     super(`${problem} ${SETUP_HINT}`);
     this.name = 'LlmApiConfigError';
   }
-}
-
-/** Standard env var holding each provider's key (bedrock uses the AWS chain). */
-const PROVIDER_KEY_ENV: Record<LlmProviderKind, string | null> = {
-  anthropic: 'ANTHROPIC_API_KEY',
-  openai: 'OPENAI_API_KEY',
-  copilot: 'COPILOT_API_KEY',
-  bedrock: null,
-};
-
-/**
- * The env var TrueCourse reads this provider's key from when none is stored and
- * none is named. Null for bedrock — it uses the ambient AWS credential chain.
- */
-export function providerKeyEnvVar(provider: LlmProviderKind): string | null {
-  return PROVIDER_KEY_ENV[provider] ?? null;
-}
-
-/**
- * The API key for a saved config: the stored key, else the env var the user
- * named, else the provider's standard env var. Bedrock has none — it uses the
- * ambient AWS credential chain.
- */
-export function resolveApiKey(api: LlmApiConfig): string | undefined {
-  const stored = api.apiKey?.trim();
-  if (stored) return stored;
-  const named = api.apiKeyEnv?.trim();
-  if (named) {
-    const fromNamed = process.env[named]?.trim();
-    if (fromNamed) return fromNamed;
-    return undefined;
-  }
-  const standard = PROVIDER_KEY_ENV[api.provider];
-  return standard ? process.env[standard]?.trim() || undefined : undefined;
-}
-
-function describeKeySources(api: LlmApiConfig): string {
-  const named = api.apiKeyEnv?.trim();
-  if (named) return `\`${named}\` is unset`;
-  const standard = PROVIDER_KEY_ENV[api.provider];
-  return standard ? `no key is stored and \`${standard}\` is unset` : 'no key is stored';
 }
 
 /** Validate a stored provider block and turn it into a provider config. */
@@ -94,11 +53,11 @@ export function buildProviderConfig(api: LlmApiConfig | undefined): ProviderConf
     cfg.sessionToken = api.sessionToken?.trim() || undefined;
     return cfg;
   }
-  const apiKey = resolveApiKey(api);
+  // The key travels with the stored config and nowhere else: there is no env
+  // fallback, so a block saved without one is refused here as it is on save.
+  const apiKey = api.apiKey?.trim();
   if (!apiKey) {
-    throw new LlmApiConfigError(
-      `No API key for provider \`${api.provider}\` — ${describeKeySources(api)}.`,
-    );
+    throw new LlmApiConfigError(`No API key for provider \`${api.provider}\` — no key is stored.`);
   }
   cfg.apiKey = apiKey;
   return cfg;
