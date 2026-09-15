@@ -54,6 +54,21 @@ const STEP_STATE: Record<string, JobStep['state']> = {
 };
 
 /** "4 minutes ago" from an ISO stamp — the preview's time idiom, no library. */
+/**
+ * When a dated thing lapses, in words: "in 3 days", "tomorrow", "today", or
+ * "expired". Counted in calendar days, so a link with twenty hours left that
+ * lapses tomorrow morning says so.
+ */
+export function expiresIn(iso: string, now: number = Date.now()): string {
+  const then = Date.parse(iso);
+  if (Number.isNaN(then) || then <= now) return 'expired';
+  const startOfDay = (t: number) => new Date(t).setHours(0, 0, 0, 0);
+  const days = Math.round((startOfDay(then) - startOfDay(now)) / (24 * 60 * 60 * 1000));
+  if (days <= 0) return 'today';
+  if (days === 1) return 'tomorrow';
+  return `in ${days} days`;
+}
+
 export function relativeTime(iso: string | undefined, now: number = Date.now()): string {
   if (!iso) return 'just now';
   const then = Date.parse(iso);

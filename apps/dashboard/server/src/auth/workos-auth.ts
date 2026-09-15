@@ -210,7 +210,7 @@ export function createSessionVerifier(
  * has to chain onto the rotated cookie rather than the dead one the request
  * arrived with.
  */
-function sealedFromSetCookie(header: string | undefined): string | null {
+export function sealedFromSetCookie(header: string | undefined): string | null {
   if (!header) return null;
   const first = header.split(';', 1)[0] ?? '';
   const eq = first.indexOf('=');
@@ -396,7 +396,7 @@ export function createWorkspaceSessionTools(
  * it must start with a single `/`. `//evil.test` (protocol-relative) and any
  * absolute URL are rejected, so `?next=` can't be turned into an open redirect.
  */
-function safeNext(value: unknown): string | null {
+export function safeNext(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   if (!value.startsWith('/') || value.startsWith('//')) return null;
   return value;
@@ -408,6 +408,8 @@ function safeNext(value: unknown): string | null {
  * Takes the ONE session verifier the gate also uses — it must not build its
  * own. WorkOS rotates refresh tokens, so two verifiers means two single-flight
  * maps, and a `/me` refresh racing a gate refresh invalidates one of them.
+ *
+ * The invite-link routes are public too but live in `invite-links.ts`.
  */
 export function createAuthRouter(
   workos: WorkOS,
@@ -419,7 +421,8 @@ export function createAuthRouter(
 
   // Kick off login — redirect to the WorkOS AuthKit hosted UI. `?next=/path`
   // rides the OAuth `state` param so the callback can land the user where they
-  // were headed before the redirect to login.
+  // were headed before the redirect to login. `?screen=sign-up` opens AuthKit
+  // on its sign-up screen, which is where an invite link sends a newcomer.
   router.get('/login', (req, res) => {
     const next = safeNext(req.query.next);
     const url = workos.userManagement.getAuthorizationUrl({
@@ -427,6 +430,7 @@ export function createAuthRouter(
       clientId: cfg.clientId,
       redirectUri: cfg.redirectUri,
       ...(next ? { state: next } : {}),
+      ...(req.query.screen === 'sign-up' ? { screenHint: 'sign-up' as const } : {}),
     });
     res.redirect(url);
   });
@@ -589,9 +593,14 @@ export function createAuthRouter(
     }
   });
 
-  // Logout — clear the cookie and hand back the WorkOS logout URL.
+  // Logout — clear the cookie and hand back the WorkOS logout URL. A body
+  // `returnTo` (a path on this app, checked like `?next=`) is where the
+  // browser lands afterwards; the app root otherwise. The invite page uses it
+  // so switching accounts comes back to the invite.
   router.post('/logout', async (req, res) => {
     const sealed = parseCookies(req.headers.cookie)[SESSION_COOKIE];
+    const next = safeNext((req.body as { returnTo?: unknown } | undefined)?.returnTo);
+    const returnTo = next ? `${cfg.appUrl}${next}` : cfg.appUrl;
     res.setHeader(
       'Set-Cookie',
       serializeCookie(SESSION_COOKIE, '', { maxAgeSeconds: 0, secure }),
@@ -602,14 +611,14 @@ export function createAuthRouter(
           sessionData: sealed,
           cookiePassword: cfg.cookiePassword,
         });
-        const logoutUrl = await session.getLogoutUrl({ returnTo: cfg.appUrl });
+        const logoutUrl = await session.getLogoutUrl({ returnTo });
         res.json({ logoutUrl });
         return;
       } catch {
         // fall through to the app url
       }
     }
-    res.json({ logoutUrl: cfg.appUrl });
+    res.json({ logoutUrl: returnTo });
   });
 
   return router;

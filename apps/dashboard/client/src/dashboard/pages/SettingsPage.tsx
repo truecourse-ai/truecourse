@@ -29,7 +29,7 @@ import { offeredRepositoryProviders } from '@/dashboard/data/providers';
 import { fetchGithubStatus } from '@/dashboard/data/real-repos';
 import { fetchLocalRepos } from '@/dashboard/providers/local-folder';
 import { useServerMode } from '@/contexts/CapabilityContext';
-import { MembersTab } from '@/dashboard/pages/MembersTab';
+import { MembersTab, type InviteKind } from '@/dashboard/pages/MembersTab';
 import { useDashboardState } from '@/dashboard/shell/dashboard-state';
 import { registeredSettingsTabs, type SettingsTab } from '@/dashboard/shell/registry';
 
@@ -447,14 +447,14 @@ function ModelsTab() {
  * edition registered. A bare `/settings` lands on the first.
  */
 function settingsTabs(
-  inviteOpen: boolean,
-  onInviteOpenChange: (open: boolean) => void,
+  invite: InviteKind | null,
+  onInviteChange: (invite: InviteKind | null) => void,
 ): SettingsTab[] {
   const base: SettingsTab[] = [
     {
       id: 'members',
       label: 'Members',
-      render: () => <MembersTab inviteOpen={inviteOpen} onInviteOpenChange={onInviteOpenChange} />,
+      render: () => <MembersTab invite={invite} onInviteChange={onInviteChange} />,
     },
     { id: 'repositories', label: 'Repositories', render: () => <RepositoriesTab /> },
     { id: 'models', label: 'Models', render: () => <ModelsTab /> },
@@ -467,11 +467,9 @@ export default function SettingsPage() {
   // A local workspace is one person on one machine: there is no identity
   // provider to send an invitation through, so none is offered.
   const invitable = useServerMode() !== 'local';
-  const [inviteOpen, setInviteOpen] = useState(false);
-  const tabs = useMemo(
-    () => settingsTabs(inviteOpen, setInviteOpen),
-    [inviteOpen],
-  );
+  /** Which invite dialog is open, if any: by email, or by link. */
+  const [invite, setInvite] = useState<InviteKind | null>(null);
+  const tabs = useMemo(() => settingsTabs(invite, setInvite), [invite]);
   const active = tabs.find((t) => t.id === tab) ?? tabs[0]!;
 
   return (
@@ -480,13 +478,22 @@ export default function SettingsPage() {
         title="Settings"
         right={
           active.id === 'members' && invitable && (
-            <button
-              type="button"
-              onClick={() => setInviteOpen(true)}
-              className="rounded bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
-            >
-              Invite member
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setInvite('link')}
+                className="rounded border border-border px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted/60"
+              >
+                Invite by link
+              </button>
+              <button
+                type="button"
+                onClick={() => setInvite('email')}
+                className="rounded bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
+              >
+                Invite member
+              </button>
+            </div>
           )
         }
       />

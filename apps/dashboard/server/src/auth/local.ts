@@ -85,6 +85,7 @@ export function createLocalWorkspaceMembersRouter(): Router {
         },
       ],
       invitations: [],
+      inviteLinks: [],
     };
     res.json(body);
   });

@@ -35,15 +35,13 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useAuth } from '@/auth/AuthContext';
+import { Brand } from '@/components/brand';
 import { useServerMode } from '@/contexts/CapabilityContext';
 import { useThemeToggle } from '@/hooks/useThemeToggle';
 import { useDashboardState } from './dashboard-state';
 import { useDashboardUser } from './use-dashboard-user';
 import { useOnboarding } from './use-onboarding';
 import { registeredWorkspaceSwitcher } from './registry';
-
-/** The brand wordmark face, the one place the UI uses the logo's font (`.brand-wordmark`). */
-const WORDMARK = { fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace", letterSpacing: '0.01em' } as const;
 
 // A `disabled` entry is shown but not a link: the page is parked, and hiding
 // it would make the menu lie about what the product has.
@@ -331,9 +329,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
         <div className={`flex items-center py-3 ${collapsed ? 'justify-center px-0' : 'justify-between px-3'}`}>
           {!collapsed && (
             <Link to='/' className="flex items-center gap-2">
-              <img src="/logo.svg" alt="" className="h-7 w-7 shrink-0 dark:hidden" />
-              <img src="/logo-dark.svg" alt="" className="hidden h-7 w-7 shrink-0 dark:block" />
-              <span className="text-sm font-bold" style={WORDMARK}>TrueCourse</span>
+              <Brand />
             </Link>
           )}
           <button

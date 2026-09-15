@@ -109,6 +109,43 @@ describe('createSessionVerifier: malformed cookies', () => {
   });
 });
 
+describe('POST /api/auth/logout', () => {
+  it('returns the browser to a path on this app when asked, and to the root otherwise', async () => {
+    const returnTos: string[] = [];
+    const workos = {
+      userManagement: {
+        getUser: vi.fn(),
+        loadSealedSession: vi.fn(() => ({
+          getLogoutUrl: async ({ returnTo }: { returnTo: string }) => {
+            returnTos.push(returnTo);
+            return `http://workos/logout?return_to=${encodeURIComponent(returnTo)}`;
+          },
+        })),
+      },
+    };
+    const app = appFor(workos, verifierFor(workos));
+
+    const invite = await request(app)
+      .post('/api/auth/logout')
+      .set('Cookie', 'tc_session=sealed')
+      .send({ returnTo: '/invite/tok_1' })
+      .expect(200);
+    expect(invite.body.logoutUrl).toContain(encodeURIComponent('http://localhost:3000/invite/tok_1'));
+    // Anywhere off this app is not a destination: the root stands in.
+    await request(app)
+      .post('/api/auth/logout')
+      .set('Cookie', 'tc_session=sealed')
+      .send({ returnTo: 'https://evil.test/' })
+      .expect(200);
+    await request(app).post('/api/auth/logout').set('Cookie', 'tc_session=sealed').expect(200);
+    expect(returnTos).toEqual([
+      'http://localhost:3000/invite/tok_1',
+      'http://localhost:3000',
+      'http://localhost:3000',
+    ]);
+  });
+});
+
 /**
  * A WorkOS whose sealed session is expired: `authenticate()` says
  * unauthenticated and `refresh()` succeeds EXACTLY once — the rotated refresh

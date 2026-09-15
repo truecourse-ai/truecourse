@@ -183,6 +183,13 @@
       "when": 1789656896572,
       "tag": "0025_guard_run_flows",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1789756896572,
+      "tag": "0026_workspace_invite_links",
+      "breakpoints": true
     }
   ]
 }

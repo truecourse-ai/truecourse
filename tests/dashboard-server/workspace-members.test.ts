@@ -16,6 +16,7 @@ import request from 'supertest';
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { AuthUser } from '@truecourse/shared';
 import { createWorkspaceMembersRouter } from '../../apps/dashboard/server/src/auth/workspace-members';
+import { MemoryInviteLinkStore } from '../helpers/memory-invite-links';
 
 const ORG = 'org_acme';
 const DAY = 24 * 60 * 60 * 1000;
@@ -130,7 +131,11 @@ function makeWorkos(
   return { workos, calls };
 }
 
+const cfg = { appUrl: 'http://localhost:3000' };
+let links: MemoryInviteLinkStore;
+
 function makeApp(workos: unknown, user: AuthUser | null): Express {
+  links = new MemoryInviteLinkStore();
   const app = express();
   app.use(express.json());
   // What the auth gate puts on the request, without the gate: these routes read
@@ -140,11 +145,17 @@ function makeApp(workos: unknown, user: AuthUser | null): Express {
     next();
   });
   /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
-  app.use('/api/workspace', createWorkspaceMembersRouter(workos as any));
+  app.use('/api/workspace', createWorkspaceMembersRouter(workos as any, cfg, links));
   return app;
 }
 
-const CALLER: AuthUser = { id: ME.id, email: ME.email, organizationId: ORG };
+const CALLER: AuthUser = {
+  id: ME.id,
+  email: ME.email,
+  firstName: ME.firstName,
+  lastName: ME.lastName,
+  organizationId: ORG,
+};
 
 describe('GET /api/workspace/members', () => {
   it('composes the memberships with their users, oldest member first', async () => {
@@ -393,4 +404,72 @@ describe('a session with no workspace', () => {
       expect(anon.calls.deleted).toEqual([]);
     });
   }
+});
+
+describe('invite links', () => {
+  it('mints a link for the chosen days, addressed to the invite page', async () => {
+    const m = makeWorkos();
+    const app = makeApp(m.workos, CALLER);
+    const before = Date.now();
+
+    const res = await request(app)
+      .post('/api/workspace/invite-links')
+      .send({ expiresInDays: 3 })
+      .expect(201);
+
+    const stored = [...links.rows.values()];
+    expect(stored).toHaveLength(1);
+    // The sender's name rides the row: the invite page shows it without asking WorkOS.
+    expect(stored[0]).toMatchObject({ workspaceOrgId: ORG, inviterUserId: ME.id, inviterName: 'Dana Rees' });
+    expect(res.body.link).toMatchObject({
+      id: stored[0]!.id,
+      url: `http://localhost:3000/invite/${stored[0]!.token}`,
+      state: 'pending',
+    });
+    const life = Date.parse(res.body.link.expiresAt) - before;
+    expect(life).toBeGreaterThan(3 * DAY - 5000);
+    expect(life).toBeLessThanOrEqual(3 * DAY + 5000);
+  });
+
+  it.each([undefined, 0, 2, 31, 2.5, '7'])('refuses %j as a lifetime', async (expiresInDays) => {
+    const m = makeWorkos();
+    const app = makeApp(m.workos, CALLER);
+    await request(app).post('/api/workspace/invite-links').send({ expiresInDays }).expect(400);
+    expect(links.rows.size).toBe(0);
+  });
+
+  it('lists the standing links after the invitations, newest first, an old one marked expired', async () => {
+    const m = makeWorkos({ invitations: [invitation({ id: 'inv_1', email: 'kim@acme.test' })] });
+    const app = makeApp(m.workos, CALLER);
+    links.seed({ workspaceOrgId: ORG, token: 'old', expiresAt: past, createdAt: '2026-01-01T00:00:00.000Z' });
+    links.seed({ workspaceOrgId: ORG, token: 'new', createdAt: '2026-02-01T00:00:00.000Z' });
+    links.seed({ workspaceOrgId: ORG, token: 'used', consumedAt: soon, consumedByUserId: 'user_x' });
+    links.seed({ workspaceOrgId: 'org_other', token: 'theirs' });
+
+    const res = await request(app).get('/api/workspace/members').expect(200);
+
+    expect(res.body.invitations).toHaveLength(1);
+    expect(res.body.inviteLinks.map((l: { url: string; state: string }) => [l.url, l.state])).toEqual([
+      ['http://localhost:3000/invite/new', 'pending'],
+      ['http://localhost:3000/invite/old', 'expired'],
+    ]);
+  });
+
+  it('revokes one of this workspace’s links, and knows nothing of another’s', async () => {
+    const m = makeWorkos();
+    const app = makeApp(m.workos, CALLER);
+    const mine = links.seed({ workspaceOrgId: ORG });
+    const theirs = links.seed({ workspaceOrgId: 'org_other' });
+
+    await request(app).delete(`/api/workspace/invite-links/${theirs.id}`).expect(404);
+    await request(app).delete(`/api/workspace/invite-links/${mine.id}`).expect(204);
+
+    expect([...links.rows.keys()]).toEqual([theirs.id]);
+  });
+
+  it('refuses a session with no workspace', async () => {
+    const m = makeWorkos();
+    const app = makeApp(m.workos, { id: ME.id, email: ME.email, organizationId: null });
+    await request(app).post('/api/workspace/invite-links').send({ expiresInDays: 7 }).expect(401);
+  });
 });

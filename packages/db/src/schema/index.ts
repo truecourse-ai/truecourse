@@ -15,6 +15,7 @@ export * from './cache.js';
 export * from './jobs.js';
 export * from './guard.js';
 export * from './context.js';
+export * from './workspace-invite-links.js';
 
 import { providerAccounts, repositories } from './repositories.js';
 import { llmProviderConfig } from './llm.js';
@@ -37,6 +38,7 @@ import {
   contextBindings,
   contextWorkspaces,
 } from './context.js';
+import { workspaceInviteLinks } from './workspace-invite-links.js';
 
 export const schema = {
   activityRuns,
@@ -60,4 +62,5 @@ export const schema = {
   contextDocuments,
   contextBindings,
   contextWorkspaces,
+  workspaceInviteLinks,
 };
