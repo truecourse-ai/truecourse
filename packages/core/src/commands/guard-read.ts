@@ -1,4 +1,5 @@
 import { withGuardReadTree } from '../lib/guard-read-tree.js'
+import { log } from '../lib/logger.js'
 import { GUARD_REVIEW_POLICY_VERSION, scenarioFullFlowDefect, type GuardFlowProgress } from '@truecourse/shared'
 import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
 /**
@@ -522,31 +523,57 @@ export async function readGuardRunFlowSummary(
   return Object.keys(summary).length > 0 ? summary : null
 }
 
+/** How many runs one Home read will derive flows for; the rest wait for the next read. */
+const FLOW_BACKFILL_PER_READ = 5
+
+const hasFlows = (flows: GuardRunFlowSummary): boolean => Object.keys(flows).length > 0
+
 /**
  * A repository's baseline runs as Home reads them, with the FLOW SUMMARY of any
- * run that predates flows being recorded DERIVED AND WRITTEN BACK.
+ * run that has none DERIVED AND WRITTEN BACK.
  *
  * A run stores its own snapshot, so its flows can be recomputed exactly as the
  * run itself would have: its own outcomes, against the corpus the store holds.
- * Refusing to would cost every existing workspace the trend it already had, for
- * a number that was recoverable all along. It is derived once — the fill is
- * stored, so the next read is a plain read — and a run whose snapshot is gone,
- * or that has nothing to call a flow, is left as it is and simply stays out of
- * the flow trend.
+ * The write at run time is best-effort and nothing retries it, so this read is
+ * the one repair path a lost or failed write has. The stored `flows` has three
+ * states, and the two that are not a summary are told apart here: an EMPTY
+ * summary says the derivation ran and found nothing (no snapshot, no flow
+ * corpus), so the run stays out of the flow trend and is never asked again;
+ * null says it was never derived or the attempt failed, so it is tried again.
+ * A failure is logged and leaves null, never the page: one unreadable run must
+ * not take Home down. At most {@link FLOW_BACKFILL_PER_READ} runs are derived
+ * per read, newest first, so a long history fills over a few loads instead of
+ * stalling the first one.
  */
 export async function readGuardCoverageHistory(repoKey: string): Promise<GuardRunCoverage[]> {
   const store = getGuardStore()
   const history = await store.readGuardRunCoverage(repoKey)
+  const derive = new Set(
+    history
+      .filter((run) => run.flows === null)
+      .sort((a, b) => b.ranAt.localeCompare(a.ranAt))
+      .slice(0, FLOW_BACKFILL_PER_READ)
+      .map((run) => run.runId),
+  )
   const filled: GuardRunCoverage[] = []
   for (const run of history) {
     if (run.flows) {
+      filled.push(hasFlows(run.flows) ? run : { ...run, flows: null })
+      continue
+    }
+    if (!derive.has(run.runId)) {
       filled.push(run)
       continue
     }
-    const snapshot = await store.readGuardRun(repoKey, run.runId)
-    const flows = snapshot ? await readGuardRunFlowSummary(repoKey, snapshot) : null
-    if (flows) await store.writeGuardRunCoverage(repoKey, { ...run, flows })
-    filled.push({ ...run, flows })
+    try {
+      const snapshot = await store.readGuardRun(repoKey, run.runId)
+      const flows = snapshot ? await readGuardRunFlowSummary(repoKey, snapshot) : null
+      await store.writeGuardRunCoverage(repoKey, { ...run, flows: flows ?? {} })
+      filled.push({ ...run, flows })
+    } catch (err) {
+      log.warn(`[guard] flow backfill for ${repoKey} run ${run.runId} failed: ${(err as Error).message}`)
+      filled.push({ ...run, flows: null })
+    }
   }
   return filled
 }

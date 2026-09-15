@@ -55,9 +55,12 @@ export interface GuardRunCoverage {
   commit: string | null;
   sections: GuardRunSectionSummary;
   /**
-   * The run's flows, which is what Home's trend counts. Null on a run stored
-   * before flows were recorded, and on one whose manifest could not be read:
-   * such a run is simply not a point of the flow trend.
+   * The run's flows, which is what Home's trend counts. Three states: a
+   * summary, which the trend draws; an EMPTY summary, meaning the derivation
+   * ran and found nothing to record (no flow corpus, no snapshot), so the run
+   * stays out of the flow trend and is never asked again; and null, meaning it
+   * was never derived or the last attempt failed, which the next Home read
+   * repairs.
    */
   flows: GuardRunFlowSummary | null;
 }
