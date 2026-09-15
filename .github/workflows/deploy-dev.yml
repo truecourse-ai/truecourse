@@ -1,6 +1,6 @@
 name: Deploy (dev)
 
-# Two opt-in ways to deploy the shared staging VM — nothing auto-deploys:
+# Two opt-in ways to deploy the shared dev VM — nothing auto-deploys:
 #   1. Label a same-repository PR `deploy-dev` → builds that PR's branch (pushes
 #      while labeled re-deploy; remove the label to stop).
 #   2. Actions → Deploy (dev) → Run workflow → pick a branch (usually main).

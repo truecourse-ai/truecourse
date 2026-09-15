@@ -14,7 +14,7 @@ spec.loader.exec_module(vm)
 DIGEST = 'sha256:' + 'a' * 64
 OUTPUTS = {
     'releaseConfig': {'value': {'environment': 'dev', 'resourceGroup': 'rg-truecourse-dev',
-        'vmName': 'truecourse-staging', 'registryLoginServer': 'registry.azurecr.io',
+        'vmName': 'truecourse-dev', 'registryLoginServer': 'registry.azurecr.io',
         'url': 'https://example.test'}},
     'monitoringParameters': {'value': {'enabled': {'value': True}}},
 }
