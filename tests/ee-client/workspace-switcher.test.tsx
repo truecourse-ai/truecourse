@@ -17,8 +17,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import type { WorkspaceSummary } from '@truecourse/shared';
+import type { ServerMode, WorkspaceSummary } from '@truecourse/shared';
 import { AuthProvider } from '@/auth/AuthContext';
+import { AppProvider } from '@/contexts/CapabilityContext';
 import PreviewApp from '@/preview/PreviewApp';
 import { registerEditionFeatures } from '../../ee/packages/client/src/edition';
 
@@ -142,6 +143,21 @@ function renderShell() {
   );
 }
 
+/** The same shell, told how the server runs, the way `/api/capabilities` tells it. */
+function renderShellIn(mode: ServerMode) {
+  render(
+    <MemoryRouter initialEntries={['/']}>
+      <AppProvider initial={{ edition: 'enterprise', mode, capabilities: [] }}>
+        <AuthProvider>
+          <Routes>
+            <Route path="/*" element={<PreviewApp />} />
+          </Routes>
+        </AuthProvider>
+      </AppProvider>
+    </MemoryRouter>,
+  );
+}
+
 /** The switcher's own button, once the session probe has named the workspace. */
 const switcher = (): Promise<HTMLElement> =>
   screen.findByRole('button', { name: 'Switch workspace' });
@@ -248,5 +264,30 @@ describe('the workspace switcher', () => {
       (call) => String(call[0]).includes('/api/auth/workspaces'),
     );
     expect(reads).toEqual([]);
+  });
+});
+
+/**
+ * LOCAL MODE has one implicit workspace and no identity provider, and the
+ * server mounts no `/api/auth/workspaces` routes there. The shell keeps its own
+ * one-workspace block rather than the registered switcher, whose Switch and
+ * Create workspace would have nothing to call.
+ */
+describe('the workspace switcher and the server mode', () => {
+  it('leaves the one-workspace block in place in local mode', async () => {
+    renderShellIn('local');
+
+    expect((await screen.findAllByText('Acme')).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Switch workspace' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Create workspace' })).toBeNull();
+    const reads = (window.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.filter(
+      (call) => String(call[0]).includes('/api/auth/workspaces'),
+    );
+    expect(reads).toEqual([]);
+  });
+
+  it('still draws the switcher in hosted mode', async () => {
+    renderShellIn('hosted');
+    expect(await switcher()).toHaveTextContent('Acme');
   });
 });

@@ -137,11 +137,17 @@ function useClickOutside(open: boolean, close: () => void) {
  * The workspace the session is in: its initial and its name. There is one, so
  * there is nothing to choose between — an edition with more than one registers
  * a switcher that replaces this block.
+ *
+ * Local mode is always this block: there is one implicit workspace and no
+ * identity provider to move a session through, so the server mounts no
+ * `/api/auth/workspaces` routes for a switcher to call. The mode is checked
+ * here, once, rather than inside whatever was registered.
  */
 function WorkspaceBlock({ collapsed }: { collapsed: boolean }) {
   const Switcher = registeredWorkspaceSwitcher();
   const { workspace } = usePreviewState();
-  if (Switcher) return <Switcher collapsed={collapsed} />;
+  const local = useServerMode() === 'local';
+  if (Switcher && !local) return <Switcher collapsed={collapsed} />;
 
   // Nobody is signed in: there is no workspace to name.
   if (!workspace) return null;
