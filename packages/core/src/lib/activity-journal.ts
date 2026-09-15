@@ -7,7 +7,9 @@ import path from 'node:path';
 import { ActivityEventSchema, type ActivityEvent, type ActivityEventBody } from '@truecourse/shared/activity-stream';
 import type { SessionProgress } from '@truecourse/agent-loop';
 
-const FILE = 'activity.jsonl';
+/** The journal's file name inside a run's sessions directory. */
+export const ACTIVITY_JOURNAL_FILE = 'activity.jsonl';
+const FILE = ACTIVITY_JOURNAL_FILE;
 const listeners = new Map<string, Set<(event?: ActivityEvent) => void>>();
 const progress = new Map<string, Map<string, SessionProgress>>();
 
@@ -39,20 +41,6 @@ function completeSize(file: string): number {
     }
     return 0;
   } finally { fs.closeSync(fd); }
-}
-
-export function appendActivityEvent(dir: string, body: ActivityEventBody): ActivityEvent {
-  const file = path.join(dir, FILE);
-  const cursor = completeSize(file);
-  if (fs.existsSync(file) && fs.statSync(file).size !== cursor) fs.truncateSync(file, cursor);
-  const serialized = JSON.stringify({ ...body, cursor });
-  fs.appendFileSync(file, serialized + '\n');
-  // A run's session index is mutable. Live delivery must carry the same detached
-  // snapshot as replay, not a reference that a later index update can change.
-  const event = JSON.parse(serialized) as ActivityEvent;
-  retireActivityProgress(dir, body);
-  publishCommittedActivity(dir, event);
-  return event;
 }
 
 /**

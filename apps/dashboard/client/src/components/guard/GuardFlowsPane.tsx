@@ -36,10 +36,8 @@ export function GuardFlowsPane({
   error,
   tabs,
   interfaces = null,
-  claimTitles,
   binds,
   reloadKey = 0,
-  prRef,
   decisions,
   onOpenSpec,
   onOpenInterface,
@@ -52,12 +50,9 @@ export function GuardFlowsPane({
   tabs: GuardTabsState;
   /** The mapped interface catalog, for the diagrams a test drives; null = unmapped. */
   interfaces?: GuardInterfaceRow[] | null;
-  /** Claim id → its sentence, for a step group named by claim identity. */
-  claimTitles?: Readonly<Record<string, string>>;
   /** scenarioId → the spec section it binds to (the inventory join). */
   binds?: ReadonlyMap<string, GuardTestBinds>;
   reloadKey?: number;
-  prRef?: string;
   /**
    * The stored dismissals, the flow detail's "don't test this flow" ruling
    * and its undo, plus the read-only note on a claim already dismissed. Omitted
@@ -77,7 +72,7 @@ export function GuardFlowsPane({
   const flows = view?.flows ?? [];
 
   const activeFlowId = tabFlowId(activeId);
-  const { detail, loading: detailLoading } = useGuardFlowDetail(repoId, activeFlowId, reloadKey, prRef);
+  const { detail, loading: detailLoading } = useGuardFlowDetail(repoId, activeFlowId, reloadKey);
 
   const content = (() => {
     if (activeFlowId) {
@@ -88,10 +83,8 @@ export function GuardFlowsPane({
             repoId={repoId}
             detail={detail}
             interfaces={interfaces}
-            {...(claimTitles ? { claimTitles } : {})}
             {...(binds ? { binds } : {})}
             {...(decisions ? { decisions } : {})}
-            {...(prRef ? { prRef } : {})}
             onOpenSpec={onOpenSpec}
             onOpenInterface={onOpenInterface}
             {...(onOpenExternals ? { onOpenExternals } : {})}

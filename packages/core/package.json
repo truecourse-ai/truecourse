@@ -24,11 +24,6 @@
       "types": "./dist/commands/guard-setup.d.ts",
       "import": "./dist/commands/guard-setup.js"
     },
-    "./commands/guard-seed": {
-      "truecourse-source": "./src/commands/guard-seed.ts",
-      "types": "./dist/commands/guard-seed.d.ts",
-      "import": "./dist/commands/guard-seed.js"
-    },
     "./commands/guard-interfaces": {
       "truecourse-source": "./src/commands/guard-interfaces.ts",
       "types": "./dist/commands/guard-interfaces.d.ts",
@@ -158,11 +153,6 @@
       "truecourse-source": "./src/lib/repo-lifecycle.ts",
       "types": "./dist/lib/repo-lifecycle.d.ts",
       "import": "./dist/lib/repo-lifecycle.js"
-    },
-    "./lib/spec-inheritance-hook": {
-      "truecourse-source": "./src/lib/spec-inheritance-hook.ts",
-      "types": "./dist/lib/spec-inheritance-hook.d.ts",
-      "import": "./dist/lib/spec-inheritance-hook.js"
     },
     "./lib/artifact-diff": {
       "truecourse-source": "./src/lib/artifact-diff.ts",

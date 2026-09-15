@@ -51,7 +51,6 @@ export function GuardCoveragePage({
   corpus,
   staleness,
   staleLoaded,
-  prRef,
   reloadKey = 0,
   tabs,
   claims = null,
@@ -66,8 +65,6 @@ export function GuardCoveragePage({
   claims?: GuardClaimsView | null;
   /** The refused statements with the ids `?claim` addresses them by. */
   untestable?: GuardUntestableEntry[];
-  /** Read the guard state pinned at this commit. Undefined reads the baseline. */
-  prRef?: string;
   /** Bumped on a guard generate/run completion → refetch the per-doc coverage. */
   reloadKey?: number;
   /** The doc/conflict tab set (shared with the sidebar) + the within-doc section. */
@@ -120,7 +117,6 @@ export function GuardCoveragePage({
     doc,
     hasGenerated,
     reloadKey,
-    prRef,
   );
 
   // The open conflict (if any) as its overlap parts, the spec curation surface
@@ -267,7 +263,6 @@ export function GuardCoveragePage({
           claims={claims}
           staleness={staleness}
           reloadKey={reloadKey}
-          {...(prRef ? { prRef } : {})}
         />
       );
     }
@@ -290,7 +285,6 @@ export function GuardCoveragePage({
         claims={claims?.claims ?? []}
         untestable={untestable}
         activeClaimId={claim}
-        {...(prRef ? { prRef } : {})}
         onSelectClaim={selectClaim}
         onOpenFlow={openGuardFlow}
         onOpenSpec={openSpecSection}

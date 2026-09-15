@@ -53,13 +53,8 @@ import {
   readGuardInterfaces,
   readGuardResultForView,
 } from '@truecourse/core/commands/guard-read';
-import { mapInterfaces } from '@truecourse/core/services/interface';
 import { getGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
-import {
-  writeGuardExternals,
-  GuardExternalsWriteError,
-  type GuardExternalsWrite,
-} from '@truecourse/core/commands/guard-externals';
+import { GuardExternalsWriteError } from '@truecourse/core/commands/guard-externals';
 import {
   writeGuardDependency,
   GuardDependencyWriteError,
@@ -139,10 +134,6 @@ function allFindingsDismissed(
   );
 }
 
-// A guard run/map is in flight for this repo id. Both actions share the set:
-// they mutate the same store, so they must never overlap (and the client disables
-// the buttons while either runs). A trigger while the id is present → 409.
-const guardJobs = new Set<string>();
 
 /**
  * The provider check every spending entry answers with: unconfigured is a

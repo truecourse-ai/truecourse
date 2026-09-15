@@ -167,26 +167,6 @@ export interface GuardTestViewModel {
   failedMilestone?: number;
   /** The claim behind the failing milestone, when the flow named one. */
   failedMilestoneClaim?: string;
-  /**
-   * The flow's milestones. A step row names the one it proves with an `M<n>`
-   * chip and the flow's own list states the claim, so nothing in the step list
-   * renders a claim sentence of its own.
-   */
-  milestones?: readonly {
-    order: number;
-    claimTitle: string;
-    doc?: string;
-    anchor?: string;
-    /** The live section's heading text; absent ⇒ the anchor stands in for it. */
-    headingText?: string;
-  }[];
-  /**
-   * Claim id → its sentence, for the steps that name their milestone by IDENTITY
-   * rather than by position. Carried on the model for the flow header's milestone
-   * list; this screen reads neither it nor `milestones`, a step row points back at
-   * the chain with its `M<n>` chip alone.
-   */
-  claimTitles?: Readonly<Record<string, string>>;
   interfaceDrifted?: boolean;
   /**
    * True when the failing step was an UNMILESTONED preparation step, a prerequisite

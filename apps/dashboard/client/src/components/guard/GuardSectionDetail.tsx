@@ -128,7 +128,6 @@ export function GuardSectionDetail({
   claims = [],
   untestable = [],
   activeClaimId = null,
-  prRef,
   onSelectClaim,
   onOpenFlow,
   onOpenSpec,
@@ -138,8 +137,6 @@ export function GuardSectionDetail({
   /** Whose store the claim drill-in reads its raw entry out of. */
   repoId: string;
   section: GuardSectionCoverage;
-  /** The commit the claim's raw read is pinned at. */
-  prRef?: string;
   /** The doc this section belongs to, claims are keyed doc + anchor. */
   doc?: string | null;
   /** The whole claim corpus; the section keeps the ones it states. */
@@ -192,7 +189,6 @@ export function GuardSectionDetail({
             <GuardClaimDetail
               repoId={repoId}
               claim={readable.claim}
-              {...(prRef ? { prRef } : {})}
               onOpenSpec={onOpenSpec ?? (() => {})}
               onOpenFlow={onOpenFlow}
             />

@@ -84,22 +84,19 @@ function SourceLine({
 export function GuardClaimDetail({
   repoId,
   claim,
-  prRef,
   onOpenSpec,
   onOpenFlow,
 }: {
   /** Whose store the raw mode reads the claim's entry out of. */
   repoId: string;
   claim: GuardClaimRow;
-  /** The commit the raw read is pinned at; absent = the repo baseline. */
-  prRef?: string;
   /** Jump to the doc section this claim states (`?doc=`+`?section=`). */
   onOpenSpec: (doc: string, anchor: string) => void;
   /** Open one flow's own page (`?flow=`). */
   onOpenFlow: (flowId: string) => void;
 }) {
   const { mode, setMode, raw } = useArtifactMode('JSON');
-  const rawSource = useGuardArtifactRaw(repoId, 'claim', claim.id, raw, prRef);
+  const rawSource = useGuardArtifactRaw(repoId, 'claim', claim.id, raw);
 
   return (
     <div className="flex h-full min-w-0 flex-col bg-background">

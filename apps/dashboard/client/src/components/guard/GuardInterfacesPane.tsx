@@ -355,7 +355,6 @@ export function GuardInterfacesPane({
   recipe = null,
   recipeSurface = null,
   onCloseRecipe,
-  prRef,
   onOpenFlow,
 }: {
   /** Whose store the raw mode reads the open member's entry out of. */
@@ -374,8 +373,6 @@ export function GuardInterfacesPane({
   recipeSurface?: GuardDriverId | null;
   /** Drop the recipe — a row selection takes the body back. */
   onCloseRecipe?: () => void;
-  /** The commit a raw read would pin at; nothing supplies it today. */
-  prRef?: string;
   onOpenFlow: (flowId: string) => void;
 }) {
   const { activeId, open } = tabs;

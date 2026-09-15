@@ -536,10 +536,6 @@ function scenarioModel(
     ...(row.failedMilestone != null
       ? { failedMilestone: row.failedMilestone }
       : {}),
-    // The flow's chain, which a step row points back at with its `M<n>` chip,
-    // addressed by position (`milestones`) or by claim id (`claimTitles`, the
-    // claim corpus). A test may use either.
-    milestones: detail.milestones,
     ...(row.interfaceDrifted ? { interfaceDrifted: true } : {}),
     ...(row.blockedPrecondition ? { blockedPrecondition: true } : {}),
     // NO `goal`: the flow's goal is already the header, one screen above. What the
@@ -554,10 +550,8 @@ export function GuardFlowDetail({
   repoId,
   detail,
   interfaces = null,
-  claimTitles,
   binds,
   decisions,
-  prRef,
   onOpenSpec,
   onOpenInterface,
   onOpenExternals,
@@ -567,14 +561,10 @@ export function GuardFlowDetail({
   detail: GuardFlowDetailData;
   /** The mapped interface catalog, for the diagrams the test drives; null = unmapped. */
   interfaces?: GuardInterfaceRow[] | null;
-  /** Claim id → its sentence, what a claim-identity step group is headed with. */
-  claimTitles?: Readonly<Record<string, string>>;
   /** scenarioId → the spec section it binds to (the inventory join). */
   binds?: ReadonlyMap<string, GuardTestBinds>;
   /** The dismissals state; omitted (guard reads off) = no ruling. */
   decisions?: GuardDecisionsState;
-  /** The commit the raw read is pinned at; absent = the repo baseline. */
-  prRef?: string;
   onOpenSpec: (doc: string, section: string) => void;
   onOpenInterface: (interfaceId: string) => void;
   /** Jump to the Dependencies tab, on the named service's card. */
@@ -618,7 +608,6 @@ export function GuardFlowDetail({
     "flow",
     detail.flowId,
     raw && !test,
-    prRef,
   );
 
   // Every stored test on the flow as its scenario model, by id. Keyed rather
@@ -775,10 +764,7 @@ export function GuardFlowDetail({
                   {model ? (
                     <GuardScenarioBody
                       repoId={repoId}
-                      test={{
-                        ...model,
-                        ...(claimTitles ? { claimTitles } : {}),
-                      }}
+                      test={model}
                       interfaces={interfaces}
                       showGoal={rows.length > 1 || !detail.goal}
                       onOpenInterface={onOpenInterface}

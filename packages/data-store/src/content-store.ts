@@ -18,8 +18,6 @@ import { sha256 } from './pack.js';
 /** Scope builders — keep the namespacing in one place. */
 export const contentScope = {
   workspaceSpec: (org: string): string => `spec:ws:${org}`,
-  /** Synced source-doc bodies for workspace Knowledge (sha = the ledger's contentHash). */
-  knowledge: (org: string): string => `knowledge:ws:${org}`,
   /** Document bodies of the workspace's Context sources (sha = `sha256-<ledger contentHash>`). */
   context: (org: string): string => `context:ws:${org}`,
   trace: (org: string): string => `trace:${org}`,
