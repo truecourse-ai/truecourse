@@ -1,6 +1,11 @@
 <p align="center">
-  <img src="assets/logo.svg" alt="TrueCourse" width="300" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg" />
+    <img src="assets/logo.svg" alt="TrueCourse" width="88" />
+  </picture>
 </p>
+
+<h1 align="center">TrueCourse</h1>
 
 <p align="center">
   <strong>Tests that prove your product does what your documentation promises.</strong>
